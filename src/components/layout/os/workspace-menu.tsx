@@ -14,6 +14,11 @@
 // exists); it is the last row, destructive, and opens the typed-confirmation
 // dialog. Delete this row and the dialog in the same PR as that card.
 //
+// Invite people follows the PERMISSION MATRIX, not the org role: the API
+// (POST /api/invitations) admits whoever holds people.create, so a Member or
+// Manager the matrix lets invite gets the same row. For them it opens the
+// InviteModal right here, since the members settings page is admin-only.
+//
 // Upgrade renders for Owners and Admins (the boot payload carries no admin
 // scopes yet; every Admin can open Plan & billing through Workspace
 // settings today, so the row matches the door rather than narrowing it).
@@ -31,6 +36,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { usePrompt } from "@/components/ui/dialog-provider";
+import { usePermission } from "@/hooks/use-permission";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { apiFetch } from "@/lib/api-fetch";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
@@ -39,6 +45,7 @@ import { ChromePopover } from "./chrome-popover";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useLayer } from "./shell-context";
 import { useOsToast } from "./toast";
+import { InviteModal } from "./invite-modal";
 
 interface OrgLite { id: string; name: string; slug: string | null; logo: string | null }
 interface Membership { id: string; role: string; isPrimary: boolean; isCurrent: boolean; organization: OrgLite }
@@ -74,6 +81,8 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const canInvite = usePermission("people", "create") === true;
 
   const load = useCallback(async () => {
     const [orgs, settings] = await Promise.all([
@@ -161,8 +170,12 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
         {!isGuest ? (
           <div className="py-1">
             {isAdmin ? (
+              <MenuItem icon={UserPlus} label="Invite people" onClick={() => { setOpen(false); openSettings("/settings/members?invite=1"); }} />
+            ) : canInvite ? (
+              <MenuItem icon={UserPlus} label="Invite people" onClick={() => { setOpen(false); setInviteOpen(true); }} />
+            ) : null}
+            {isAdmin ? (
               <>
-                <MenuItem icon={UserPlus} label="Invite people" onClick={() => { setOpen(false); openSettings("/settings/members?invite=1"); }} />
                 <MenuItem icon={Users} label="Manage members" onClick={() => { setOpen(false); openSettings("/settings/members"); }} />
                 <MenuItem icon={Settings} label={SHELL_LABELS.workspaceSettings} onClick={() => { setOpen(false); openSettings("/settings"); }} />
               </>
@@ -170,7 +183,7 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
             {showUpgrade ? (
               <MenuItem icon={ArrowUpCircle} label="Upgrade" onClick={() => { setOpen(false); openSettings("/settings/billing"); }} />
             ) : null}
-            {(isAdmin || showUpgrade) ? <MenuSeparator /> : null}
+            {(isAdmin || canInvite || showUpgrade) ? <MenuSeparator /> : null}
             {memberships === null && !membersError ? (
               <ul className="px-2 py-1" aria-hidden>
                 {["60%", "40%", "80%"].map((w, i) => (
@@ -209,6 +222,7 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
           </div>
         ) : null}
       </ChromePopover>
+      {inviteOpen ? <InviteModal open onOpenChange={(v) => { if (!v) setInviteOpen(false); }} /> : null}
       {deleteOpen ? (
         <DeleteWorkspaceDialog
           org={boot.org}

@@ -109,9 +109,43 @@
 .workwrk-os .os-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .workwrk-os ::selection { background: var(--os-brand-soft); color: var(--os-brand-deep); }
 
-/* The per-accent `:root[data-accent]` overrides were deleted with the
-   accent picker: there is one brand blue, and the frame is chosen with
-   html[data-chrome] (see tokens.css). */
+/* ─── Accent colours (Customize > Accent, theme.accent) ───
+   The swatch variables are what the picker paints its circles with (one per
+   key in src/lib/accents.ts); they never change with the active accent. */
+:root {
+  --os-accent-swatch-workwrk: #0073EA;
+  --os-accent-swatch-black: #1F2024;
+  --os-accent-swatch-blue: #3B82F6;
+  --os-accent-swatch-pink: #EC4899;
+  --os-accent-swatch-orange: #F59E0B;
+  --os-accent-swatch-teal: #14B8A6;
+  --os-accent-swatch-bronze: #A78B6C;
+  --os-accent-swatch-mint: #3AB39E;
+}
+:root.dark { --os-accent-swatch-black: #E6E7EA; }
+/* ─── Accent overrides ───
+   The brand default ("workwrk") carries no override: the base --os-brand
+   tokens in tokens.css apply. Every other key rebinds the five brand
+   aliases the components read, in light and in dark (the `.dark` selector
+   outranks tokens.css's `:root.dark` rebinding of soft and deep). The frame
+   is still chosen with html[data-chrome]; the accent never paints the rail. */
+:root[data-accent="black"], :root[data-accent="black"] .workwrk-os, :root.dark[data-accent="black"], :root.dark[data-accent="black"] .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-pressed: #000000; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; }
+:root[data-accent="blue"], :root[data-accent="blue"] .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-pressed: #1D4ED8; --os-brand-soft: #E6F0FE; --os-brand-deep: #1D4ED8; }
+:root[data-accent="pink"], :root[data-accent="pink"] .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-pressed: #BE185D; --os-brand-soft: #FCE2EF; --os-brand-deep: #BE185D; }
+:root[data-accent="orange"], :root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-pressed: #B45309; --os-brand-soft: #FCEFCE; --os-brand-deep: #B45309; }
+:root[data-accent="teal"], :root[data-accent="teal"] .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-pressed: #0F766E; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F766E; }
+:root[data-accent="bronze"], :root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8C7256; --os-brand-pressed: #6F5A44; --os-brand-soft: #F1EBE4; --os-brand-deep: #6F5A44; }
+:root[data-accent="mint"], :root[data-accent="mint"] .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-pressed: #256F63; --os-brand-soft: #E0F2EE; --os-brand-deep: #256F63; }
+/* Dark: the soft tint goes translucent and the deep (accent-as-text) lifts
+   so it clears the near-black canvas, the same move tokens.css makes for
+   the brand blue. */
+:root.dark[data-accent="blue"], :root.dark[data-accent="blue"] .workwrk-os { --os-brand-soft: rgba(59, 130, 246, 0.18); --os-brand-deep: #7AB8FF; }
+:root.dark[data-accent="pink"], :root.dark[data-accent="pink"] .workwrk-os { --os-brand-soft: rgba(236, 72, 153, 0.18); --os-brand-deep: #F9A8D4; }
+:root.dark[data-accent="orange"], :root.dark[data-accent="orange"] .workwrk-os { --os-brand-soft: rgba(245, 158, 11, 0.18); --os-brand-deep: #FCD34D; }
+:root.dark[data-accent="teal"], :root.dark[data-accent="teal"] .workwrk-os { --os-brand-soft: rgba(20, 184, 166, 0.18); --os-brand-deep: #5EEAD4; }
+:root.dark[data-accent="bronze"], :root.dark[data-accent="bronze"] .workwrk-os { --os-brand-soft: rgba(167, 139, 108, 0.18); --os-brand-deep: #D6C3AE; }
+:root.dark[data-accent="mint"], :root.dark[data-accent="mint"] .workwrk-os { --os-brand-soft: rgba(58, 179, 158, 0.18); --os-brand-deep: #7FD9C7; }
+:root.dark[data-accent="black"], :root.dark[data-accent="black"] .workwrk-os { --os-brand: #E6E7EA; --os-brand-hover: #FFFFFF; --os-brand-pressed: #C9CCD2; --os-brand-soft: rgba(230, 231, 234, 0.14); --os-brand-deep: #E6E7EA; }
 
 /* ─── Icons-only sidebar mode (toggled in CustomizePanel → Navigation) ─── */
 .os-side__scroll[data-icons-only="1"] .os-side__item-text,
@@ -6737,6 +6771,16 @@ table.os-tbl {
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .ntk__recents-count { font-size: 12px; color: var(--os-ink-3); font-weight: 500; background: var(--os-surface-1); padding: 2px 8px; border-radius: 10px; }
+/* All / Mine on the Recent card, as text-tab pills. The active one is the URL
+   the page is on, so the view is linkable. */
+.ntk__recents-views { display: inline-flex; gap: 2px; margin-inline-start: auto; }
+.ntk__recents-views a {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
+  border-radius: 6px; font-size: 13px; font-weight: 500;
+  color: var(--os-ink-2); text-decoration: none;
+}
+.ntk__recents-views a:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.ntk__recents-views a.is-on { background: var(--os-surface-1); color: var(--os-ink); }
 .ntk__recents-empty {
   padding: 28px 18px; text-align: center;
   color: var(--os-ink-3); font-size: 13.5px;
@@ -15118,6 +15162,9 @@ table.os-tbl {
 .ftile__check { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; cursor: pointer; }
 .ftile:hover .ftile__check, .ftile__check:checked { opacity: 1; }
 .ftile--selected { outline: 2px solid var(--os-c-blue); outline-offset: -2px; }
+/* The file a /files?file=<id> link named: called out where it sits, in its
+   own folder, rather than selected for a bulk action. */
+.ftile--called-out { outline: 2px solid var(--os-brand); outline-offset: -2px; }
 
 /* ─── Tables · public toggle ─── */
 .dtbl__head-btn.is-on { background: var(--os-c-green); color: white; border-color: var(--os-c-green); }

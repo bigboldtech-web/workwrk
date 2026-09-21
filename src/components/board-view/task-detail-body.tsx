@@ -47,7 +47,7 @@ export function TaskDetailBody({
   onRequestAccess,
   missingView,
 }: TaskDetailBodyProps) {
-  const { item, board, decision, breadcrumb, watcherIds, listOwner, loading, error, missing, patch, reload, refreshToken } = task;
+  const { item, board, decision, breadcrumb, watcherIds, listOwner, loading, error, errorDetail, missing, patch, reload, refreshToken } = task;
 
   // The three dirty fields, lifted here so one flush covers all of them.
   const [drafts, setDrafts] = useState<{ title?: string; description?: string; comment?: string }>({});
@@ -154,12 +154,21 @@ export function TaskDetailBody({
 
   if (loading && !item) return <TaskSkeleton host={host} />;
 
+  // The failure names itself. `error` is the sentence (the session lapsed,
+  // the server failed with its status, the request never arrived) and
+  // `errorDetail` is what the server said, when it said anything: the database
+  // line behind a 500 is exactly what the next report needs to carry.
   if (error && !item) {
     return (
-      <div className="py-8 text-center">
+      <div className="py-8 text-center" role="alert">
         <QuietDots />
-        <p className="mt-3 text-row text-ink-2">Couldn&apos;t load this task</p>
-        <button type="button" onClick={() => void reload()} className="mt-1 text-base font-medium text-brand-deep hover:underline">
+        <p className="mt-3 text-row text-ink-2">{error}</p>
+        {errorDetail ? (
+          <p className="mx-auto mt-1 max-w-[520px] break-words font-mono text-xs text-ink-3" data-task-error-detail>
+            {errorDetail}
+          </p>
+        ) : null}
+        <button type="button" onClick={() => void reload()} className="mt-2 text-base font-medium text-brand-deep hover:underline">
           Retry
         </button>
       </div>

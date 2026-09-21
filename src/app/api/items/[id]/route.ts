@@ -25,7 +25,7 @@ import { unknownUserIds } from "@/lib/assignable";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
-import { boardContext, gateItem, itemBreadcrumb, itemCtx, listIsReadable } from "@/lib/item-gate";
+import { boardContext, gateItem, itemBreadcrumb, itemCtx, itemServerError, listIsReadable } from "@/lib/item-gate";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +38,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const c = await itemCtx();
   if ("error" in c) return c.error;
   const { id } = await params;
+  // Every throw inside the read becomes a 500 THAT NAMES ITSELF. Without
+  // this, a database that is behind the code (a prisma/sql file not applied)
+  // makes `prisma.item.findUnique` throw on the first task anyone opens, the
+  // App Router answers an empty 500, and the whole product's task surface
+  // reads "Couldn't load" with no clue in it. Now the body carries the line.
+  try {
+    return await readItem(id, c);
+  } catch (err) {
+    return itemServerError(err, `GET /api/items/${id}`);
+  }
+}
+
+async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>) {
   const gate = await gateItem(id, c, "view");
   if ("error" in gate) return gate.error;
   const item = gate.item;

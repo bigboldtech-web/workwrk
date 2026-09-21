@@ -35,6 +35,12 @@ export interface SidebarPref {
   expanded?: string[];
   /** Spaces this viewer hid from their own tree; still reachable from /spaces. */
   hiddenSpaceIds?: string[];
+  /** Expanded rows of the Docs hub's DOCS tree (was localStorage). */
+  docsTreeOpen?: string[];
+  /** Expanded drive folders under the Docs hub's Files row. */
+  docsFoldersOpen?: string[];
+  /** Whether the Docs hub's Files row itself is expanded. Default: closed. */
+  docsFilesOpen?: boolean;
   // 2026-08-22 ACCESS system — the org rail config (which apps the rail
   // shows, in what order, with what tier floors). Meaningful on the ORG
   // row (OrgPreference.sidebarDefault) ONLY; a copy on a user row is
@@ -108,7 +114,23 @@ export interface HomePref {
   /** The key My Tasks writes (settings spec 9.3 widening; same shape as taskCardLayout). */
   taskCardLayoutV3?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
   locale?: { language?: string; timezone?: string; weekStart?: number; dateFormat?: string; timeFormat?: "12h" | "24h" };
-  ui?: { reducedMotion?: boolean; showUpcoming?: boolean; dismissed?: string[]; contrast?: "normal" | "high" };
+  ui?: {
+    reducedMotion?: boolean;
+    showUpcoming?: boolean;
+    dismissed?: string[];
+    contrast?: "normal" | "high";
+    /** The SOP page's Details strip, collapsed or not (spec-process section 2). */
+    sopDetailsCollapsed?: boolean;
+  };
+  // Docs hub per-surface display options (spec-docs-knowledge section 4,
+  // change request G22a). READ PER FIELD, never by spreading the namespace:
+  // getEffectivePreferences merges `home` with a deep merge, but a reader that
+  // assumes a whole object is present will still break on an old row that has
+  // only one of its keys. DOCS_SURFACE_DEFAULTS below is the one reader.
+  docs?: { columns?: Record<string, boolean>; outline?: boolean };
+  canvas?: { viewType?: "grid" | "list"; columns?: Record<string, boolean> };
+  files?: { viewType?: "grid" | "list"; columns?: Record<string, boolean> };
+  notetaker?: { lastListId?: string | null };
   work?: {
     savedFilters?: unknown[];
     pinnedViews?: string[];
@@ -353,6 +375,28 @@ export async function setUserPreference(userId: string, patch: UpdateUserPrefere
       density: density ?? null,
     },
   });
+}
+
+/**
+ * Write ONE key of the user's `home` JSON atomically.
+ *
+ * `setUserPreference` is a read-modify-write of the whole row (findUnique,
+ * merge, upsert) with no version check, so two concurrent writers to `home`
+ * (a top pin and a favorite toggle, a recent-doc marker on every doc open,
+ * the sidebar's collapsed sections) each wrote their own snapshot and one
+ * lost the other's change (reproduced 5/5 in the review). This is a single
+ * `jsonb_set` statement: Postgres serialises it against any other write to
+ * the same row, and only the named key moves. The insert branch covers a
+ * person with no preference row yet.
+ */
+export async function setUserHomeKey<K extends keyof HomePref & string>(userId: string, key: K, value: HomePref[K]) {
+  const json = JSON.stringify(value ?? null);
+  await prisma.$executeRaw`
+    INSERT INTO "UserPreference" ("userId", "home", "updatedAt")
+    VALUES (${userId}, jsonb_build_object(${key}::text, ${json}::jsonb), now())
+    ON CONFLICT ("userId") DO UPDATE
+      SET "home" = jsonb_set(coalesce("UserPreference"."home", '{}'::jsonb), ARRAY[${key}::text], ${json}::jsonb, true),
+          "updatedAt" = now()`;
 }
 
 export interface UpdateOrgPreferenceInput {

@@ -1,12 +1,12 @@
 "use client";
 
-// My work: the list, the board and the calendar, over one cursor-paginated
-// call to `GET /api/me/work`.
+// My work: list, board, calendar, Gantt, timeline and sprint, over one
+// cursor-paginated call to `GET /api/me/work`.
 //
 // Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/my-work).
 //
-// THE URL IS THE STATE. `?view=`, `?group=`, `?sort=`, `?done=` and `?filter=`
-// are the whole of it, which is what makes a view sendable and what makes Back
+// THE URL IS THE STATE. `?view=`, `?group=`, `?sort=`, `?done=`, `?scope=`
+// and `?filter=` are the whole of it, which is what makes a view sendable and what makes Back
 // work. The page it replaces kept all of this in component state and lost it
 // on every navigation.
 //
@@ -23,7 +23,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Calendar as CalendarIcon, Flag, Kanban, List as ListIcon, SlidersHorizontal, X } from "lucide-react";
+import {
+  Calendar as CalendarIcon, CalendarRange, Flag, GanttChart, GripVertical, IterationCw, Kanban, List as ListIcon,
+  SlidersHorizontal, X,
+} from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ViewTab } from "@/components/ui/view-tabs";
@@ -47,6 +50,8 @@ import {
   WORK_VIEWS,
   boardColumns,
   listGroups,
+  parseWorkScope,
+  parseWorkView,
   type MyWorkFacets,
   type MyWorkResponse,
   type MyWorkRow,
@@ -55,25 +60,42 @@ import {
   type WorkViewKey,
 } from "@/lib/my-work";
 import { dueChipLabel, type LocaleContext } from "@/lib/work-buckets";
+import { relativeTime } from "@/lib/item-date";
 import { MyWorkCalendar } from "./my-work-calendar";
+import { MyWorkGantt, MyWorkTimeline } from "./my-work-gantt";
+import { MyWorkSprint } from "./my-work-sprint";
 import { SaveViewModal } from "./save-view-modal";
 
 const ITEM_CREATED = "workwrk:item-created";
 const PAGE_SIZE = 50;
 
-/** The optional columns, in the order Display lists them. */
-const FIELDS: ReadonlyArray<{ key: string; label: string; fixed?: boolean }> = [
-  { key: "title", label: "Title", fixed: true },
-  { key: "status", label: "Status" },
-  { key: "assignees", label: "Assignees" },
-  { key: "due", label: "Due date" },
-  { key: "priority", label: "Priority" },
-  { key: "list", label: "List" },
-  { key: "space", label: "Space" },
-  { key: "updated", label: "Updated" },
+/** The optional columns, in the order Display lists them, with their default widths. */
+const FIELDS: ReadonlyArray<{ key: string; label: string; fixed?: boolean; width: number }> = [
+  { key: "title", label: "Title", fixed: true, width: 0 },
+  { key: "status", label: "Status", width: 112 },
+  { key: "assignees", label: "Assignees", width: 80 },
+  { key: "due", label: "Due date", width: 96 },
+  { key: "priority", label: "Priority", width: 72 },
+  { key: "list", label: "List", width: 160 },
+  { key: "space", label: "Space", width: 140 },
+  { key: "updated", label: "Updated", width: 110 },
 ];
 /** The spec's four defaults: Status, Assignees, Due date, Priority. */
 const DEFAULT_FIELDS = ["title", "status", "assignees", "due", "priority", "list"];
+const MIN_COL_W = 48;
+
+/**
+ * The stored `fields` list IS the column order, so a reorder is a write of
+ * the same key the show / hide switches write; a stored list from before
+ * reordering existed reads back in its own order, which was Display's order.
+ */
+function orderedColumns(fields: readonly string[], widths: Readonly<Record<string, number>>) {
+  return fields
+    .filter((k) => k !== "title")
+    .map((k) => FIELDS.find((f) => f.key === k))
+    .filter((f): f is (typeof FIELDS)[number] => Boolean(f))
+    .map((f) => ({ key: f.key, label: f.label, width: Math.max(MIN_COL_W, widths[f.key] ?? f.width) }));
+}
 
 /** The bulk bar's "Set due date" presets, resolved in the viewer's own clock. */
 const DUE_PRESETS: ReadonlyArray<{ value: string; label: string; at: () => string }> = [
@@ -156,10 +178,13 @@ function filtersFrom(stored: Record<string, unknown> | undefined): WorkFilters {
 export function MyWorkClient({
   savedFilters,
   initialFields,
+  initialColWidths,
   initialShowDone,
 }: {
   savedFilters: SavedWorkFilter[];
   initialFields: string[] | null;
+  /** Per-column widths in px, keyed by field (`viewOptions.colWidths`). */
+  initialColWidths: Record<string, number> | null;
   initialShowDone: boolean;
 }) {
   const router = useRouter();
@@ -170,7 +195,10 @@ export function MyWorkClient({
   const prompt = usePrompt();
   const confirm = useConfirm();
 
-  const view = (WORK_VIEWS.find((v) => v.key === params.get("view"))?.key ?? "list") as WorkViewKey;
+  const view: WorkViewKey = parseWorkView(params.get("view"));
+  // `?scope=delegated`: the tasks the viewer handed to other people, the
+  // retired Today / Overdue page's Delegated tab. Same rows, same views.
+  const scope = parseWorkScope(params.get("scope"));
   const group = (WORK_GROUPS.find((g) => g.key === params.get("group"))?.key ?? "due") as WorkGroupKey;
   const sort = (WORK_SORTS.find((s) => s.key === params.get("sort"))?.key ?? "due") as WorkSortKey;
   const activeFilterId = params.get("filter");
@@ -194,6 +222,7 @@ export function MyWorkClient({
   const [displayOpen, setDisplayOpen] = useState(false);
   const [bulkPicker, setBulkPicker] = useState<null | "status" | "priority" | "due">(null);
   const [fields, setFields] = useState<string[]>(initialFields ?? DEFAULT_FIELDS);
+  const [colWidths, setColWidths] = useState<Record<string, number>>(initialColWidths ?? {});
   const [filters, setFilters] = useState<WorkFilters>(() => {
     const seeded = BUCKET_PARAM[params.get("bucket") ?? ""];
     return seeded ? { ...NO_FILTERS, due: [seeded] } : NO_FILTERS;
@@ -229,6 +258,7 @@ export function MyWorkClient({
         limit: String(PAGE_SIZE),
         done: showDone ? "1" : "0",
       });
+      if (scope === "delegated") qs.set("scope", "delegated");
       if (cursor) qs.set("cursor", cursor);
       // Every row the Filter panel draws is a real query parameter. It used to
       // send `priority` and nothing else, because that was the only filter the
@@ -256,7 +286,7 @@ export function MyWorkClient({
     } catch {
       setFailed("Couldn't load your tasks");
     }
-  }, [group, sort, showDone, cursor, filters]);
+  }, [group, sort, showDone, scope, cursor, filters]);
 
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === "visible") void load(); };
@@ -278,17 +308,42 @@ export function MyWorkClient({
   }, [load]);
 
   const persistFields = useCallback(
-    async (next: string[]) => {
+    async (next: string[], widths: Record<string, number> = colWidths) => {
       setFields(next);
       const ok = await patchPrefs({
-        home: { work: { surface: { "my-work": { viewOptions: { fields: next, done: showDone } } } } },
+        home: { work: { surface: { "my-work": { viewOptions: { fields: next, done: showDone, colWidths: widths } } } } },
       });
       if (!ok) toast("Couldn't save which columns show");
     },
-    [patchPrefs, showDone, toast],
+    [patchPrefs, showDone, toast, colWidths],
   );
 
-  const shows = useCallback((key: string) => fields.includes(key), [fields]);
+  /** A resized column: the width lands in the same viewOptions key. */
+  const persistWidth = useCallback(
+    (key: string, width: number) => {
+      const next = { ...colWidths, [key]: Math.max(MIN_COL_W, Math.round(width)) };
+      setColWidths(next);
+      void patchPrefs({
+        home: { work: { surface: { "my-work": { viewOptions: { fields, done: showDone, colWidths: next } } } } },
+      }).then((ok) => { if (!ok) toast("Couldn't save the column width"); });
+    },
+    [colWidths, fields, showDone, patchPrefs, toast],
+  );
+
+  /** A dragged header: the column moves within the stored order. */
+  const reorderColumn = useCallback(
+    (from: string, to: string) => {
+      if (from === to) return;
+      const next = fields.filter((k) => k !== from);
+      const at = next.indexOf(to);
+      if (at < 0) return;
+      next.splice(at, 0, from);
+      void persistFields(next);
+    },
+    [fields, persistFields],
+  );
+
+  const columns = useMemo(() => orderedColumns(fields, colWidths), [fields, colWidths]);
 
   // ── saved views ──────────────────────────────────────────────────
   //
@@ -485,6 +540,9 @@ export function MyWorkClient({
   useShortcut({ id: "my-work-list", keys: "1", label: "List view", scope: "page", run: () => setParam({ view: null }) });
   useShortcut({ id: "my-work-board", keys: "2", label: "Board view", scope: "page", run: () => setParam({ view: "board" }) });
   useShortcut({ id: "my-work-calendar", keys: "3", label: "Calendar view", scope: "page", run: () => setParam({ view: "calendar" }) });
+  useShortcut({ id: "my-work-gantt", keys: "4", label: "Gantt view", scope: "page", run: () => setParam({ view: "gantt" }) });
+  useShortcut({ id: "my-work-timeline", keys: "5", label: "Timeline view", scope: "page", run: () => setParam({ view: "timeline" }) });
+  useShortcut({ id: "my-work-sprint", keys: "6", label: "Sprint view", scope: "page", run: () => setParam({ view: "sprint" }) });
   useShortcut({
     id: "my-work-clear-selection",
     keys: "escape",
@@ -495,7 +553,7 @@ export function MyWorkClient({
   }, selected.size > 0 && layerCount === 0);
 
   const grouped = useMemo(() => listGroups(rows ?? [], group), [rows, group]);
-  const columns = useMemo(() => boardColumns(rows ?? [], group), [rows, group]);
+  const boardCols = useMemo(() => boardColumns(rows ?? [], group), [rows, group]);
   const loading = rows === null && failed === null;
   const page = cursors.length + 1;
   const firstRow = (page - 1) * PAGE_SIZE + 1;
@@ -504,7 +562,7 @@ export function MyWorkClient({
   return (
     <>
       <OsPageHeader
-        title="My work"
+        title={scope === "delegated" ? "My work · Assigned by me" : "My work"}
         askAi
         views={
           <>
@@ -524,7 +582,7 @@ export function MyWorkClient({
           </>
         }
         toolbar={{
-          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: countActive(filters) },
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: countActive(filters) + (scope === "delegated" ? 1 : 0) },
           // The control's own NAME at the default, the value once it differs.
           // Two chips side by side both reading "Due date" tells you nothing
           // about which one you are looking at.
@@ -563,6 +621,9 @@ export function MyWorkClient({
               { key: "list", label: "List", icon: ListIcon },
               { key: "board", label: "Board", icon: Kanban },
               { key: "calendar", label: "Calendar", icon: CalendarIcon },
+              { key: "gantt", label: "Gantt", icon: GanttChart },
+              { key: "timeline", label: "Timeline", icon: CalendarRange },
+              { key: "sprint", label: "Sprint", icon: IterationCw },
             ],
             onChange: (key) => setParam({ view: key === "list" ? null : key }),
           },
@@ -661,10 +722,23 @@ export function MyWorkClient({
             onClose={() => setFilterOpen(false)}
             objects="tasks"
             activeCount={countActive(filters)}
-            onClearAll={() => editFilters(NO_FILTERS)}
+            onClearAll={() => { editFilters(NO_FILTERS); if (scope === "delegated") setParam({ scope: null }); }}
             onSaveView={() => setSaveOpen(true)}
             search={{ value: fieldQuery, onChange: setFieldQuery, placeholder: "Search fields" }}
           >
+            {/* Whose tasks. "Assigned by me" is the Delegated tab the old
+                Today / Overdue page had: the tasks you created or assigned
+                that sit with somebody else. */}
+            {matchesField("Assigned by me") ? (
+              <li className="flex h-9 items-center gap-3 rounded-md px-2">
+                <span className="min-w-0 flex-1 truncate text-row text-ink">Assigned by me</span>
+                <Switch
+                  checked={scope === "delegated"}
+                  onChange={(on) => setParam({ scope: on ? "delegated" : null })}
+                  aria-label="Assigned by me"
+                />
+              </li>
+            ) : null}
             {/* Every row offers exactly the values the viewer's OWN tasks
                 carry, counted over the whole assigned set rather than the page
                 on screen, so a row can never promise a narrowing that returns
@@ -799,18 +873,26 @@ export function MyWorkClient({
               // empty state is not allowed to carry.
               <OsEmptyView
                 context="list"
-                title="Nothing assigned to you yet"
+                title={scope === "delegated" ? "You haven't assigned anything to anyone yet" : "Nothing assigned to you yet"}
                 action={{ label: "Create a task", onClick: () => openCreateTask() }}
               />
             )
           ) : view === "board" ? (
-            <BoardView columns={columns} now={now} locale={locale} onAdd={() => openCreateTask()} />
+            <BoardView columns={boardCols} now={now} locale={locale} onAdd={() => openCreateTask()} />
           ) : view === "calendar" ? (
             <MyWorkCalendar rows={rows ?? []} locale={locale} onCreate={() => openCreateTask()} mode={calMode} />
+          ) : view === "gantt" ? (
+            <MyWorkGantt rows={rows ?? []} onChanged={() => void load()} />
+          ) : view === "timeline" ? (
+            <MyWorkTimeline rows={rows ?? []} onChanged={() => void load()} />
+          ) : view === "sprint" ? (
+            <MyWorkSprint rows={rows ?? []} now={now} locale={locale} onChanged={() => void load()} />
           ) : (
             <ListView
               groups={grouped}
-              shows={shows}
+              columns={columns}
+              onResize={persistWidth}
+              onReorder={reorderColumn}
               now={now}
               locale={locale}
               selected={selected}
@@ -1039,9 +1121,20 @@ function FilterGroupRow({
 
 /* ───────────────────────────── list view ───────────────────────────── */
 
+type Column = { key: string; label: string; width: number };
+
+/**
+ * The columns are a MODEL, not a row of `w-28` spans: their order is the
+ * stored `fields` list, their widths are stored per key, and the header cells
+ * are the controls that change both. Drag a header onto another to reorder;
+ * drag the handle at a header's right edge to resize. Show and hide stay in
+ * the Display popover the column-settings glyph opens.
+ */
 function ListView({
   groups,
-  shows,
+  columns,
+  onResize,
+  onReorder,
   now,
   locale,
   selected,
@@ -1050,7 +1143,9 @@ function ListView({
   onColumns,
 }: {
   groups: ReturnType<typeof listGroups>;
-  shows: (key: string) => boolean;
+  columns: Column[];
+  onResize: (key: string, width: number) => void;
+  onReorder: (from: string, to: string) => void;
   now: Date;
   locale: LocaleContext;
   selected: Set<string>;
@@ -1059,18 +1154,168 @@ function ListView({
   onColumns: () => void;
 }) {
   const router = useRouter();
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+  // Live width while a handle is being dragged, so the column follows the
+  // pointer; the write happens once, on release.
+  const [live, setLive] = useState<{ key: string; width: number } | null>(null);
+
+  const widthOf = (c: Column) => (live?.key === c.key ? live.width : c.width);
+
+  const startResize = (e: React.PointerEvent, c: Column) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = c.width;
+    let latest = startW;
+    const onMove = (ev: PointerEvent) => {
+      latest = Math.max(MIN_COL_W, startW + (ev.clientX - startX));
+      setLive({ key: c.key, width: latest });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setLive(null);
+      if (latest !== startW) onResize(c.key, latest);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const cell = (c: Column, r: MyWorkRow) => {
+    const style = { width: widthOf(c) };
+    switch (c.key) {
+      case "status":
+        return (
+          <span key={c.key} className="shrink-0 truncate" style={style}>
+            {r.status ? (
+              <span
+                className="inline-flex h-[22px] max-w-full items-center gap-1.5 rounded-md px-1.5 text-xs font-medium"
+                style={
+                  r.statusColor
+                    ? { backgroundColor: `${r.statusColor}1F`, color: r.statusColor }
+                    : { backgroundColor: "var(--os-surface-2)", color: "var(--os-ink-2)" }
+                }
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: r.statusColor ?? "var(--os-ink-3)" }} />
+                <span className="truncate">{r.statusLabel ?? r.status}</span>
+              </span>
+            ) : null}
+          </span>
+        );
+      case "assignees":
+        return (
+          <span key={c.key} className="shrink-0" style={style}>
+            <AvatarStack people={r.assignees} size={24} max={3} />
+          </span>
+        );
+      case "due":
+        return (
+          <span
+            key={c.key}
+            className={r.dueBucket === "overdue" ? "shrink-0 truncate text-xs font-medium text-danger-text" : "shrink-0 truncate text-xs text-ink-2"}
+            style={style}
+          >
+            {dueChipLabel(r.dueAt ?? r.startAt, now, locale) ?? ""}
+          </span>
+        );
+      case "priority":
+        return (
+          <span key={c.key} className="shrink-0" style={style}>
+            {r.priority ? (
+              // design-system 0.3 fixes the vocabulary: urgent danger, high
+              // filled ink, normal and low outline ink.
+              <Flag
+                className={
+                  r.priority === "URGENT"
+                    ? "h-4 w-4 text-danger-text"
+                    : r.priority === "HIGH"
+                      ? "h-4 w-4 fill-current text-ink"
+                      : r.priority === "NORMAL"
+                        ? "h-4 w-4 text-ink-2"
+                        : "h-4 w-4 text-ink-3"
+                }
+                strokeWidth={1.5}
+                aria-label={`Priority ${PRIORITY_LABEL[r.priority] ?? r.priority}`}
+              />
+            ) : null}
+          </span>
+        );
+      case "list":
+        return (
+          <span key={c.key} className="shrink-0 truncate text-sm text-ink-2" style={style}>
+            {r.board ? (
+              r.listReadable ? (
+                <Link href={`/boards/${r.board.slug}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                  {r.board.name}
+                </Link>
+              ) : (
+                // Not a link: the viewer holds the task, not the List.
+                r.board.name
+              )
+            ) : null}
+          </span>
+        );
+      case "space":
+        return (
+          <span key={c.key} className="shrink-0 truncate text-sm text-ink-2" style={style}>
+            {r.space ? (
+              r.listReadable ? (
+                <Link href={`/spaces/${r.space.slug}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                  {r.space.name}
+                </Link>
+              ) : (
+                r.space.name
+              )
+            ) : null}
+          </span>
+        );
+      case "updated":
+        return (
+          <span key={c.key} className="shrink-0 truncate text-xs text-ink-2" style={style}>
+            {relativeTime(r.updatedAt, null, now)}
+          </span>
+        );
+      default:
+        return <span key={c.key} className="shrink-0" style={style} />;
+    }
+  };
+
   return (
     <div className="os-row overflow-hidden rounded-lg border border-line bg-raised">
       <div className="flex h-9 items-center gap-3 border-b border-line bg-subtle px-4 text-xs font-medium uppercase tracking-wide text-ink-2">
         <span className="w-[18px] shrink-0" />
         <span className="min-w-0 flex-1">Title</span>
-        {shows("status") ? <span className="w-28 shrink-0">Status</span> : null}
-        {shows("assignees") ? <span className="w-20 shrink-0">Assignees</span> : null}
-        {shows("due") ? <span className="w-24 shrink-0">Due</span> : null}
-        {/* The Priority column's header carried no word at all, so the flags
-            below it sat under a blank cell. */}
-        {shows("priority") ? <span className="w-8 shrink-0">Pri</span> : null}
-        {shows("list") ? <span className="w-40 shrink-0">List</span> : null}
+        {columns.map((c) => (
+          <span
+            key={c.key}
+            draggable
+            onDragStart={(e) => { setDragKey(c.key); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.key); }}
+            onDragOver={(e) => { if (dragKey && dragKey !== c.key) { e.preventDefault(); setOverKey(c.key); } }}
+            onDragLeave={() => setOverKey((k) => (k === c.key ? null : k))}
+            onDrop={(e) => { e.preventDefault(); if (dragKey) onReorder(dragKey, c.key); setDragKey(null); setOverKey(null); }}
+            onDragEnd={() => { setDragKey(null); setOverKey(null); }}
+            title="Drag to reorder"
+            className={
+              "group/col relative flex shrink-0 cursor-grab select-none items-center gap-1 truncate rounded-sm " +
+              (overKey === c.key ? "bg-brand-soft text-brand-deep" : dragKey === c.key ? "opacity-50" : "")
+            }
+            style={{ width: widthOf(c) }}
+          >
+            <GripVertical className="h-3 w-3 shrink-0 opacity-0 group-hover/col:opacity-100" strokeWidth={1.5} aria-hidden />
+            <span className="truncate">{c.label}</span>
+            {/* The resize handle: the last 6px of the cell. */}
+            <span
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={`Resize ${c.label}`}
+              onPointerDown={(e) => startResize(e, c)}
+              onDragStart={(e) => e.preventDefault()}
+              draggable={false}
+              className="absolute -end-1.5 top-0 h-full w-3 cursor-col-resize after:absolute after:inset-y-1 after:start-1 after:w-px after:bg-line-strong after:opacity-0 hover:after:opacity-100"
+            />
+          </span>
+        ))}
         {/* Column settings, pinned as the last header cell (design-system
             5.1). It opens the same Display popover the toolbar "..." does, so
             there is one place that decides which columns show. */}
@@ -1118,78 +1363,8 @@ function ListView({
               >
                 {r.title}
               </button>
-              {shows("status") ? (
-                <span className="w-28 shrink-0 truncate">
-                  {r.status ? (
-                    <span
-                      className="inline-flex h-[22px] items-center gap-1.5 rounded-md px-1.5 text-xs font-medium"
-                      style={
-                        r.statusColor
-                          ? { backgroundColor: `${r.statusColor}1F`, color: r.statusColor }
-                          : { backgroundColor: "var(--os-surface-2)", color: "var(--os-ink-2)" }
-                      }
-                    >
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: r.statusColor ?? "var(--os-ink-3)" }}
-                      />
-                      {r.statusLabel ?? r.status}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-              {shows("assignees") ? (
-                <span className="w-20 shrink-0">
-                  <AvatarStack people={r.assignees} size={24} max={3} />
-                </span>
-              ) : null}
-              {shows("due") ? (
-                <span
-                  className={
-                    r.dueBucket === "overdue"
-                      ? "w-24 shrink-0 text-xs font-medium text-danger-text"
-                      : "w-24 shrink-0 text-xs text-ink-2"
-                  }
-                >
-                  {dueChipLabel(r.dueAt ?? r.startAt, now, locale) ?? ""}
-                </span>
-              ) : null}
-              {shows("priority") ? (
-                <span className="w-8 shrink-0">
-                  {r.priority ? (
-                    // design-system 0.3 fixes the vocabulary: urgent danger,
-                    // high filled ink, normal and low outline ink. Amber is a
-                    // warning colour and a priority is not a warning.
-                    <Flag
-                      className={
-                        r.priority === "URGENT"
-                          ? "h-4 w-4 text-danger-text"
-                          : r.priority === "HIGH"
-                            ? "h-4 w-4 fill-current text-ink"
-                            : r.priority === "NORMAL"
-                              ? "h-4 w-4 text-ink-2"
-                              : "h-4 w-4 text-ink-3"
-                      }
-                      strokeWidth={1.5}
-                      aria-label={`Priority ${PRIORITY_LABEL[r.priority] ?? r.priority}`}
-                    />
-                  ) : null}
-                </span>
-              ) : null}
-              {shows("list") ? (
-                <span className="w-40 shrink-0 truncate text-sm text-ink-2">
-                  {r.board ? (
-                    r.listReadable ? (
-                      <Link href={`/boards/${r.board.slug}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
-                        {r.board.name}
-                      </Link>
-                    ) : (
-                      // Not a link: the viewer holds the task, not the List.
-                      r.board.name
-                    )
-                  ) : null}
-                </span>
-              ) : null}
+              {columns.map((c) => cell(c, r))}
+              <span className="w-6 shrink-0" />
             </div>
           ))}
           {/* An empty group really is one line: its header, and nothing else.

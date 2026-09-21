@@ -7,7 +7,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -174,6 +174,22 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [router, pathname, searchParams]);
+
+  // A refusal has to be readable (the founder's "I cannot add custom
+  // fields"): a Can view member who follows a ?panel=fields|statuses link
+  // used to land on a page where nothing opened. Say what it needs, then
+  // drop the param so the sentence does not repeat on every render.
+  const refusedPanelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (mayManage || (panelParam !== "fields" && panelParam !== "statuses")) return;
+    // Once per param value: dev StrictMode runs effects twice and the
+    // router.replace below re-renders before the param clears.
+    if (refusedPanelRef.current === panelParam) return;
+    refusedPanelRef.current = panelParam;
+    toast(`${panelParam === "fields" ? "Custom fields" : "Task statuses"} need Can edit on this List. Ask a List or Space admin to change your access.`);
+    stripPanel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelParam, mayManage]);
 
   // Local mirrors so drawer/shelf edits sync into the active renderer
   // without a full router.refresh().

@@ -37,6 +37,14 @@ export interface BootCounts {
   inboxUnread: number;
   remindersDue: number;
   talkUnread: number;
+  /**
+   * The viewer's OPEN SOP assignments (to do plus overdue). Drives the Docs
+   * sidebar's My SOPs badge (spec-process section 4: "the badge must not add
+   * a sixth poller; it rides the existing one").
+   */
+  mySops: number;
+  /** Policies awaiting the viewer's acknowledgement. Drives the Policies badge. */
+  policiesToAck: number;
 }
 
 export interface BootPayload {
@@ -83,9 +91,9 @@ export interface BootPayload {
 
 const SPLASH_VALUES: ReadonlySet<string> = new Set(["every-open", "first-open-daily", "off"]);
 
-async function counts(userId: string): Promise<BootCounts> {
+async function counts(userId: string, orgId: string): Promise<BootCounts> {
   const now = new Date();
-  const [inboxUnread, remindersDue, talkRows] = await Promise.all([
+  const [inboxUnread, remindersDue, talkRows, mySops, policiesToAck] = await Promise.all([
     // The SAME clause as /api/inbox/count and as the Inbox's Primary + Other
     // tabs, from src/lib/inbox-query.ts. Three files used to run this query
     // by hand, which is how the sidebar badge and the Inbox tabs came to
@@ -104,8 +112,48 @@ async function counts(userId: string): Promise<BootCounts> {
         AND m."parentId" IS NULL
         AND cm."hidden" = false
         AND cm."notifyLevel" <> 'mute'`,
+    // The two PROCESS badges (spec-process section 1 rows 10 and 13). Both
+    // are the viewer's OWN rows, so neither needs the access engine: an
+    // assignment is addressed to one person by id.
+    //
+    // AND BOTH ARE SCOPED TO THIS ORG. Neither assignment table carries an
+    // organizationId of its own; the org lives on the SOP and on the Policy.
+    // Counting on userId alone therefore added up a person's assignments
+    // across every organisation they belong to, so the badge in one workspace
+    // could count another workspace's work. The relation filter is the org.
+    //
+    // TOLERATING THE TABLE BEING ABSENT. Both counts fall back to 0 rather
+    // than taking the whole boot payload down with them: a badge is chrome,
+    // and a shell that will not mount because a count query threw is a far
+    // worse failure than a missing number. The failure is logged, so a badge
+    // that is permanently zero because a query broke leaves a trace instead
+    // of looking like an empty list.
+    prisma.sOPAssignment
+      .count({
+        where: {
+          userId,
+          status: { in: ["ASSIGNED", "IN_PROGRESS", "OVERDUE"] },
+          sop: { organizationId: orgId },
+        },
+      })
+      .catch((e: unknown) => { console.error("boot counts: mySops", e); return 0; }),
+    prisma.policyAssignment
+      .count({
+        where: {
+          userId,
+          status: { not: "COMPLETED" },
+          policy: { organizationId: orgId },
+        },
+      })
+      .catch((e: unknown) => { console.error("boot counts: policiesToAck", e); return 0; }),
   ]);
-  return { inboxUnread, remindersDue, talkUnread: Number(talkRows[0]?.n ?? 0) };
+  return {
+    inboxUnread,
+    remindersDue,
+    talkUnread: Number(talkRows[0]?.n ?? 0),
+    mySops,
+    policiesToAck,
+  };
 }
 
 async function activeTimer(userId: string, orgId: string): Promise<ActiveTimer | null> {
@@ -179,7 +227,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (req.nextUrl.searchParams.get("counts") === "1") {
-      return NextResponse.json({ counts: await counts(userId) }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ counts: await counts(userId, orgId) }, { headers: { "Cache-Control": "no-store" } });
     }
 
     const [org, user, prefs, reportCount, c, timer, idle] = await Promise.all([
@@ -193,7 +241,7 @@ export async function GET(req: NextRequest) {
       }),
       getEffectivePreferences(userId, orgId),
       prisma.user.count({ where: { managerId: userId, deletedAt: null } }),
-      counts(userId),
+      counts(userId, orgId),
       activeTimer(userId, orgId),
       idleUntil(req),
     ]);

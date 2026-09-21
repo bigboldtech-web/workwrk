@@ -5,9 +5,8 @@ import { resolveEverythingView } from "./everything-view";
  * The /everything URL contract (spec-work-home section 2).
  *
  * spec-spaces-lists section 0 sends five Space-wide and Folder-wide views here
- * with a 308, and two of them name a view that has no cross-List form. If this
- * table is wrong those two redirects land on nothing, which is the exact thing
- * the "nothing disappears" rule forbids.
+ * with a 308. If this table is wrong those redirects land on nothing, which is
+ * the exact thing the "nothing disappears" rule forbids.
  */
 describe("resolveEverythingView", () => {
   it("passes the three real views through", () => {
@@ -16,8 +15,9 @@ describe("resolveEverythingView", () => {
     expect(resolveEverythingView("calendar")).toEqual({ view: "calendar", group: null });
   });
 
-  it("resolves gantt to list: a Gantt is a List view, never a cross-List one", () => {
-    expect(resolveEverythingView("gantt")).toEqual({ view: "list", group: null });
+  it("passes gantt and timeline through: the cross-List Gantt is a real view again", () => {
+    expect(resolveEverythingView("gantt")).toEqual({ view: "gantt", group: null });
+    expect(resolveEverythingView("timeline")).toEqual({ view: "timeline", group: null });
   });
 
   it("resolves team to a list grouped by assignee, which is what the old Space team view showed", () => {

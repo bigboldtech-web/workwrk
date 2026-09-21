@@ -13,6 +13,7 @@
 import Link from "next/link";
 import { ChatSidebar } from "./chat-sidebar";
 import { canAccessTier, MANAGER_LEVELS, type AccessTier } from "./access-tiers";
+import type { PermissionModule } from "@/lib/permissions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Re-exported so existing consumers (rail-apps.ts) keep importing the access
 // ladder from the catalog while the definitions live in ./access-tiers.
@@ -20,7 +21,7 @@ export { canAccessTier };
 export type { AccessTier };
 import {
   Home, House, Lock, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
-  Video, Trophy, Clock, CircleUser,
+  Video, Trophy, Clock, CircleUser, Frame, Mic,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
@@ -28,7 +29,7 @@ import {
   HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
-  ListChecks, ListOrdered, MousePointerClick,
+  ListChecks, ListOrdered,
   Activity, LayoutTemplate, Plug, LineChart,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
@@ -83,6 +84,12 @@ export interface CreateActionContext {
  * One row of an app's "+" offering. Exactly one of `onSelect` (wins),
  * `href`, or `event` (dispatches `workwrk:os:new:<event>`) should be set.
  * `requiredAccess` hides the row below that tier: hide, never 403.
+ *
+ * `requiredPermission` is the finer gate, for a create whose API asks the
+ * PERMISSION MATRIX rather than a tier. A tier is a guess at that matrix; the
+ * matrix is what the route enforces, and an org can move a right onto a level
+ * the tier ladder does not describe. A row that names its permission renders
+ * exactly when the create behind it would succeed.
  */
 export interface CreateAction {
   label: string;
@@ -94,6 +101,16 @@ export interface CreateAction {
   event?: string;
   onSelect?: (ctx: CreateActionContext) => void | Promise<void>;
   requiredAccess?: AccessTier;
+  /** `{ module, action }` from src/lib/permissions.ts. Hide, never 403. */
+  requiredPermission?: { module: PermissionModule; action: string };
+  /**
+   * Draw a 1px rule ABOVE this row. Used where a menu carries two kinds of
+   * thing: the Docs "+" separates the hub's own content creates from the
+   * PROCESS creates (sidebar-map section 6). The rule is dropped when the row
+   * it sits above is the first one rendered, so a gated row disappearing can
+   * never leave a rule hanging at the top of the menu.
+   */
+  separatorBefore?: boolean;
 }
 
 export interface AppEntry {
@@ -180,41 +197,13 @@ export const NEW_EVENT_PREFIX = "workwrk:os:new:";
 /* ── "+" onSelect helpers: mirror the create flows the pages themselves
  *    run, so the sidebar "+" is never a dead link. ─────────────────── */
 
-/** Library → New note. Same POST the Library Notes tab's button makes. */
-async function createLibraryNote(ctx: CreateActionContext) {
-  try {
-    const res = await fetch("/api/docs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "New doc" }),
-    });
-    const data = await res.json().catch(() => null);
-    const id: string | undefined = data?.doc?.id;
-    if (!res.ok || !id) throw new Error();
-    ctx.push(`/docs/${id}`);
-  } catch {
-    ctx.toast("Couldn't create note");
-  }
-}
-
-/** Library → New canvas. Same prompt + POST as the Whiteboards tab. */
-async function createLibraryWhiteboard(ctx: CreateActionContext) {
-  const name = (await ctx.prompt({ title: "Canvas name?", defaultValue: "Untitled canvas" }))?.trim();
-  if (!name) return;
-  try {
-    const res = await fetch("/api/whiteboards", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const data = await res.json().catch(() => null);
-    const id: string | undefined = data?.whiteboard?.id;
-    if (!res.ok || !id) throw new Error();
-    ctx.push(`/canvas/${id}`);
-  } catch {
-    ctx.toast("Couldn't create whiteboard");
-  }
-}
+/* `createLibraryNote` and `createLibraryWhiteboard` are DELETED with the
+ * Library "+" rows. Both were second copies of a create that already had a
+ * door: "New doc" on the Docs "+" runs the SAME createChildPage flow the
+ * Docs sidebar's tree uses, and "New canvas" lands on /canvas?new=1, which is
+ * the canvas list page's own armed create latch. Two POSTs for one object is
+ * how "New note" came to mint a doc titled "New doc" while every other door
+ * minted "Untitled doc". */
 
 /** Timesheets → Start this week. POST /api/timesheets is an idempotent
  *  upsert for the current week (same call as the page's own button). */
@@ -1369,29 +1358,17 @@ function TeamsSidebar() {
 }
 
 
-/* ───────────────────────── Library sidebar (Notes + Whiteboards + Files) ───────────────────────── */
-
-const LIBRARY_ROWS = [
-  { href: "/library", label: "All", Icon: LibraryIcon },
-  { href: "/library?tab=notes", label: "Notes", Icon: FileText },
-  { href: "/library?tab=whiteboards", label: "Canvases", Icon: Brush },
-  { href: "/library?tab=files", label: "Files", Icon: Folder },
-];
-
-function LibrarySidebar() {
-  const activeHref = useActiveRowHref(LIBRARY_ROWS);
-  return (
-    <>
-      <ul>
-        {LIBRARY_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star an item to see it here" />
-    </>
-  );
-}
+/* ───────────────────────── Library sidebar: DELETED ─────────────────────────
+ *
+ * `LibrarySidebar` and its four rows ("All", "Notes", "Canvases", "Files")
+ * are gone with the /library page (spec-docs-knowledge section 0). Every
+ * destination survives: Notes IS /docs, Canvases IS /canvas, Files IS /files
+ * and Tables IS the Tables hub, each a row in the Docs hub sidebar or its own
+ * rail hub, and /library 308s onto them per ?tab=.
+ *
+ * The `library` KEY below is deliberately kept: access-model-spec section
+ * 5.2.1 gates /files on it, so deleting the entry would delete the gate.
+ * ─────────────────────────────────────────────────────────────────────── */
 
 /* ───────────────────────── Forms sidebar ───────────────────────── */
 
@@ -1415,27 +1392,16 @@ function FormsSidebar() {
   );
 }
 
-/* ───────────────────────── Clips sidebar ───────────────────────── */
-
-const CLIPS_ROWS = [
-  { href: "/notetaker", label: "All Clips", Icon: Video },
-  { href: "/notetaker?mine=1", label: "My Clips", Icon: Video },
-];
-
-function ClipsSidebar() {
-  const activeHref = useActiveRowHref(CLIPS_ROWS);
-  return (
-    <>
-      <ul>
-        {CLIPS_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Clip to see it here" />
-    </>
-  );
-}
+/* ───────────────────────── Clips sidebar: DELETED ───────────────────────────
+ *
+ * `ClipsSidebar` and its two rows are gone. "All Clips" and "My Clips" were
+ * two doors to one page, and the second one linked /notetaker?mine=1 at a
+ * page that never read the parameter (comms #14). There is one row now,
+ * Notetaker, in the Docs hub's CONTENT section, and ?mine=1 normalises to
+ * ?view=my (src/lib/nav/retired-views.ts) so stored links still land.
+ *
+ * The `clips` KEY below is kept: access gates /notetaker on it.
+ * ─────────────────────────────────────────────────────────────────────── */
 
 /* ───────────────────────── Goals sidebar ───────────────────────── */
 
@@ -1533,15 +1499,46 @@ export const APPS: AppEntry[] = [
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
-    // sidebar-map section 6: the Docs "+" offers the three content creates.
-    // DocsSidebar listens for the event and runs its "New page" flow; the
-    // canvas list page opens its name prompt on ?new=1; Files has the upload
-    // zone. The PROCESS creates (SOP, policy, contract) stay on their pages'
-    // own primaries until the Docs phase gates them here by role.
+    // sidebar-map section 6, the Docs "+", in its order. The first four are
+    // the hub's own content; "Browse templates" is how doc templates are
+    // reached now that the CONTENT Templates row is dropped (the Template
+    // Center lives in the Work hub and this row leaves this hub on purpose);
+    // then the three PROCESS creates, each gated so that a row which renders
+    // always works.
+    //
+    // "New SOP" opens the kind chooser rather than picking a kind for you:
+    // there are four, and a "+" row that silently mints a Written SOP is how
+    // the abandoned "Untitled written SOP" rows happened.
+    //
+    // AND IT IS GATED ON THE RIGHT THE API ASKS FOR. sidebar-map section 6
+    // writes this row as "every Member, Agents included", but POST /api/sops
+    // is gated `requirePermission(session, "sops", "create")`, which the
+    // default EMPLOYEE matrix denies (src/lib/permissions.ts). Rendered
+    // ungated, all three kind cards behind it dead-ended on a locked page for
+    // exactly the audience the spec names. The row asks the same question the
+    // route does, so an org that grants Members `sops.create` gets the row and
+    // an org that does not never sees a door that will not open. Opening the
+    // create right to every Member is a permission change, not a menu change,
+    // and it belongs with the create-on-first-change work in spec-process
+    // step 3.
     createActions: [
       { label: "New doc", icon: FileText, event: "docs-new-page" },
-      { label: "New canvas", icon: Brush, href: "/canvas?new=1" },
-      { label: "Upload file", icon: Upload, href: "/files" },
+      { label: "New canvas", icon: Frame, href: "/canvas?new=1" },
+      { label: "Upload file", icon: Upload, href: "/files?upload=1" },
+      { label: "Paste a transcript", icon: Mic, href: "/notetaker" },
+      { label: "Browse templates", icon: LayoutTemplate, href: "/templates?kind=doc" },
+      { label: "New SOP", icon: ScrollText, event: "sop-kind-chooser", separatorBefore: true, requiredPermission: { module: "sops", action: "create" } },
+      // /policies, not /policies?new=1, and that is deliberate. The policies
+      // page has no ?new= latch, and its own "New policy" primary is broken
+      // end to end today: it POSTs `content: ""` while the API requires a
+      // non-empty trimmed content (api/policies/route.ts), so the create
+      // 400s, and even on success GET /api/policies returns PUBLISHED rows
+      // only, so the draft would be invisible. Both are the list-pages
+      // step's to fix (spec-process step 4); promising a create here that
+      // cannot happen would be a dead control. The row lands on the page,
+      // beside the primary it will become.
+      { label: "New policy", icon: ShieldCheck, href: "/policies", requiredAccess: "hr-admin" },
+      { label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" },
     ] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables", category: "Core", defaultPinned: true,
     // TablesSidebar lists every worksheet (like Docs lists docs); the old
@@ -1557,20 +1554,16 @@ export const APPS: AppEntry[] = [
     ] },
   // "Library" is retired as a word (naming-canon 2.8); the key survives as
   // the gate for Files, and that is the label and door the palette prints.
-  { key: "library", label: "Files", Icon: LibraryIcon, defaultHref: "/files", Sidebar: LibrarySidebar,
-    category: "Core", defaultPinned: true,
-    createActions: [
-      { label: "New note", icon: FileText, description: "A standalone note in the Library", onSelect: createLibraryNote },
-      { label: "New canvas", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
-      // One label, one door (naming-canon 2.5): Files is /files everywhere
-      // in the chrome (the Docs sidebar row, the palette and the Docs "+").
-      { label: "Upload file", icon: Upload, description: "Drop a file into Files", href: "/files" },
-    ] },
+  // The key survives as the gate for Files (access 5.2.1) and as the palette's
+  // Files entry. Its own sidebar and create rows are gone: /files is a row in
+  // the Docs hub and the Docs "+" carries the one "Upload file".
+  { key: "library", label: "Files", Icon: LibraryIcon, defaultHref: "/files", Sidebar: DocsSidebar,
+    category: "Core", defaultPinned: true },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms", Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
   // Clips has no separate creatable object: /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
-  { key: "clips", label: "Notetaker", Icon: Video, defaultHref: "/notetaker", Sidebar: ClipsSidebar,
+  { key: "clips", label: "Notetaker", Icon: Video, defaultHref: "/notetaker", Sidebar: DocsSidebar,
     category: "Core", defaultPinned: true },
   { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs", Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
@@ -1620,33 +1613,34 @@ export const APPS: AppEntry[] = [
     Sidebar: linksSidebar([{ href: "/assets", label: "Assets & equipment", Icon: Boxes }]) },
 
   // ── Knowledge ───────────────────────────────────────────────
-  { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops", category: "Knowledge", defaultPinned: true,
-    // One action per SOP kind: /sops/new?type=STEPS pre-creates a
-    // step-list SOP and drops straight into inline editing.
-    createActions: [
-      { label: "New written SOP",       icon: FileText,          href: "/sops/new/text" },
-      { label: "New step-by-step SOP",  icon: ListOrdered,       href: "/sops/new?type=STEPS" },
-      { label: "New checklist SOP",     icon: ListChecks,        href: "/sops/new/checklist" },
-      { label: "New click-capture SOP", icon: MousePointerClick, href: "/sops/new/record" },
-    ],
-    Sidebar: linksSidebar([
-      { href: "/sops",               label: "All SOPs",             Icon: ScrollText },
-      { href: "/sops/my-sops",       label: "My SOPs",              Icon: ScrollText },
-      { href: "/process-runs",       label: "Run history",          Icon: Workflow },
-      { href: "/sops/compliance",    label: "Compliance",           Icon: ShieldCheck },
-    ]) },
-  { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies", category: "Knowledge", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([
-      { href: "/policies",            label: "All policies", Icon: ShieldCheck },
-      { href: "/policies/compliance", label: "Compliance",   Icon: BarChart3 },
-    ]) },
-  { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements", category: "Knowledge", requiredAccess: "hr-admin",
-    createActions: [{ label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" }],
-    Sidebar: linksSidebar([
-      { href: "/agreements", label: "All contracts", Icon: FileSignature },
-      { href: "/agreements?view=templates", label: "Templates", Icon: Folder },
-      { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
-    ]) },
+  //
+  // THE THREE FOLDED SIDEBARS AND THEIR createActions ARE GONE
+  // (spec-process section 0 and section 4 step 1). They were unreachable
+  // code: every one of these routes resolves to the Docs hub
+  // (src/lib/nav/route-hub.ts), so the shell rendered DocsSidebar and these
+  // `linksSidebar` bodies never painted for anybody (critic #1).
+  //
+  // Every destination they listed is now a PROCESS row in the Docs hub
+  // sidebar, in the spec's order and under the spec's labels:
+  //   All SOPs        -> SOPs (/sops)
+  //   My SOPs         -> My SOPs (/sops/my-sops), with an open-assignment badge
+  //   Run history     -> Run history (/process-runs), now for every Member
+  //   Compliance      -> SOP compliance (/sops/compliance)
+  //   All policies    -> Policies (/policies), now for every Member
+  //   Compliance      -> Policy compliance (/policies/compliance)
+  //   All contracts   -> Contracts (/agreements)
+  //   Templates       -> Contract templates (/agreements?view=templates)
+  //   Trash           -> the one /trash, via ?type=contract on its Type filter
+  // The four SOP create rows are the Docs "+" menu's "New SOP" kind chooser.
+  //
+  // The KEYS stay: they are the access gates for these routes, and the
+  // palette's Apps group prints them (sidebar-map section 10).
+  { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
+    Sidebar: DocsSidebar, category: "Knowledge", defaultPinned: true },
+  { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
+    Sidebar: DocsSidebar, category: "Knowledge", requiredAccess: "hr-admin" },
+  { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements",
+    Sidebar: DocsSidebar, category: "Knowledge", requiredAccess: "hr-admin" },
   // ── Build & Extend ──────────────────────────────────────────
   { key: "build", label: "Build apps", Icon: Hammer, defaultHref: "/build", category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },

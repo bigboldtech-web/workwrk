@@ -1,5 +1,6 @@
-// /tasks/sprint: the legacy Sprint window, hard-coded to a fortnight. Sprints are
-// List-level now (spec-spaces-lists, CreateSprintModal).
+// /tasks/sprint: the legacy personal sprint room (KPI tiles, burndown, verdict,
+// at-risk list) over a fortnight window. My work carries it as a view now
+// (?view=sprint), so the bookmark lands on the room and not on a plain list.
 //
 // Phase 2 W4 (docs/plans/ui-refresh/spec-work-home.md section 0, the redirect
 // table). The page that lived here ran on the legacy `Task` table; those rows
@@ -28,9 +29,10 @@
 // so this file is only ever reached when the table has not been loaded.
 
 import { permanentRedirect } from "next/navigation";
+import { LEGACY_TASK_ROUTES } from "@/lib/legacy-task-routes";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  permanentRedirect("/my-work");
+  permanentRedirect(LEGACY_TASK_ROUTES["/tasks/sprint"]);
 }

@@ -37,6 +37,7 @@ import {
   Building2,
   CalendarDays,
   CheckSquare,
+  ChevronDown,
   FileText,
   House,
   Inbox,
@@ -54,6 +55,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
+import { MenuItem, MenuList } from "@/components/ui/menu";
 import { apiFetch } from "@/lib/api-fetch";
 import { shortcutHint } from "@/lib/shortcuts";
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
@@ -81,6 +83,20 @@ const CHIPS: Array<{ key: ChipKey; label: string }> = [
   { key: "space", label: "Spaces & Lists" },
   { key: "app", label: "Apps" },
   { key: "settings", label: "Settings" },
+];
+
+/** The scope and sort controls the palette footer offers over live results. */
+type ScopeKey = "any" | "tasks" | "docs";
+type SortKey = "relevance" | "name" | "name-desc";
+const SCOPES: Array<{ key: ScopeKey; label: string }> = [
+  { key: "any", label: "Any" },
+  { key: "tasks", label: "Tasks only" },
+  { key: "docs", label: "Documents" },
+];
+const SORTS: Array<{ key: SortKey; label: string }> = [
+  { key: "relevance", label: "Most relevant" },
+  { key: "name", label: "Name A to Z" },
+  { key: "name-desc", label: "Name Z to A" },
 ];
 
 type Row = {
@@ -222,6 +238,11 @@ function PaletteBody() {
 
   const [query, setQueryState] = useState("");
   const [chip, setChipState] = useState<ChipKey>("all");
+  // Scope and sort over live results (the footer's two selects). Scope
+  // narrows the hit TYPES; sort re-orders by name or keeps the server's
+  // relevance order. Both were footer chips before the refresh.
+  const [scope, setScope] = useState<ScopeKey>("any");
+  const [sortBy, setSortBy] = useState<SortKey>("relevance");
   const [active, setActive] = useState(0);
   const [search, setSearch] = useState<SearchState | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -472,7 +493,17 @@ function PaletteBody() {
     const lq = q.toLowerCase();
     const groups: Record<"task" | "doc" | "person" | "space" | "more", Row[]> =
       { task: [], doc: [], person: [], space: [], more: [] };
-    for (const h of live) {
+    const scoped = live.filter((h) => {
+      const kind = SEARCH_TYPES[h.type];
+      if (scope === "tasks") return kind === "task";
+      if (scope === "docs") return kind === "doc";
+      return true;
+    });
+    const sortedLive =
+      sortBy === "relevance"
+        ? scoped
+        : [...scoped].sort((a, b) => (sortBy === "name" ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title)));
+    for (const h of sortedLive) {
       const kind = SEARCH_TYPES[h.type];
       if (!kind || !h.href) continue;
       const row: Row = {
@@ -572,6 +603,8 @@ function PaletteBody() {
   }, [
     q,
     chip,
+    scope,
+    sortBy,
     live,
     recentRows,
     jumpRows,
@@ -814,17 +847,88 @@ function PaletteBody() {
         ) : null}
       </div>
 
-      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-line px-4 text-xs font-medium text-ink-3">
+      <div className="flex h-9 shrink-0 items-center gap-2 whitespace-nowrap border-t border-line px-4 text-xs font-medium text-ink-3">
         <span>↑↓ move</span>
         <span aria-hidden>·</span>
         <span>↵ open</span>
-        <span aria-hidden>·</span>
-        <span>⌘↵ open in new tab</span>
+        <span aria-hidden className={hint ? "max-md:hidden" : undefined}>·</span>
+        <span className={hint ? "max-md:hidden" : undefined}>⌘↵ open in new tab</span>
         <span aria-hidden>·</span>
         <span>esc close</span>
         <span className="flex-1" />
-        <span className="truncate">{boot.org.name}</span>
+        {/* With results on screen the scope and sort controls take the
+            footer's right end and the workspace name yields to them. */}
+        {hint ? (
+          <>
+            <FooterPick label="Scope" value={scope} options={SCOPES} onChange={(v) => { setScope(v); setActive(0); }} />
+            <FooterPick label="Sort" value={sortBy} options={SORTS} onChange={(v) => { setSortBy(v); setActive(0); }} />
+          </>
+        ) : (
+          <span className="truncate">{boot.org.name}</span>
+        )}
       </div>
     </DialogPrimitive.Content>
+  );
+}
+
+/**
+ * The footer's Scope and Sort pickers: a 24px text button that opens a
+ * MenuList above it (the footer is the dialog's last row), on the tokens,
+ * instead of a native <select> painting an OS dropdown inside the palette.
+ * Enter or Space opens, arrow keys move, Escape closes the menu only.
+ */
+function FooterPick<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ key: T; label: string }>;
+  onChange: (v: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const current = options.find((o) => o.key === value) ?? options[0];
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!hostRef.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+  return (
+    <div ref={hostRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${label}: ${current.label}`}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); } }}
+        className={cn(
+          "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium hover:bg-hover hover:text-ink",
+          open ? "bg-active text-ink" : "text-ink-2",
+        )}
+      >
+        <span className="text-ink-3">{label}</span>
+        {current.label}
+        <ChevronDown className="h-3 w-3" strokeWidth={1.5} aria-hidden />
+      </button>
+      {open ? (
+        <div className="absolute bottom-full end-0 z-20 mb-1" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
+          <MenuList style={{ minWidth: 168 }} aria-label={label}>
+            {options.map((o) => (
+              <MenuItem
+                key={o.key}
+                label={o.label}
+                selected={o.key === value}
+                onClick={() => { onChange(o.key); setOpen(false); }}
+              />
+            ))}
+          </MenuList>
+        </div>
+      ) : null}
+    </div>
   );
 }

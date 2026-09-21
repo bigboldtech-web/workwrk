@@ -104,7 +104,11 @@ export async function GET(req: Request) {
     stored.favoriteDocIds.length
       ? prisma.doc.findMany({
           where: { organizationId, id: { in: stored.favoriteDocIds } },
-          select: { id: true, title: true, entityType: true, entityId: true, archivedAt: true },
+          // `content` for the icon only: a doc's emoji lives at
+          // content.meta.icon (there is no column), and without it the
+          // FAVORITES row drew a generic FileText for a doc whose own emoji
+          // was on screen twelve rows below in the DOCS tree.
+          select: { id: true, title: true, entityType: true, entityId: true, archivedAt: true, content: true },
         })
       : Promise.resolve([]),
     stored.favoriteTableIds.length
@@ -204,12 +208,13 @@ export async function GET(req: Request) {
   for (const d of docs) {
     if (d.archivedAt) continue;
     if (!(await docAccessible(d, userId, accessLevel))) continue;
+    const docMeta = (d.content as { meta?: { icon?: unknown } } | null)?.meta;
     rows.push({
       kind: "doc",
       id: d.id,
       name: d.title,
       href: `/docs/${d.id}`,
-      icon: null,
+      icon: typeof docMeta?.icon === "string" && docMeta.icon ? docMeta.icon : null,
       color: null,
       spaceId: null,
       order: orderOf("favoriteDocIds", d.id),

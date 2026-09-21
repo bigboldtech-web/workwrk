@@ -389,7 +389,7 @@ export function BoardGanttView({
     if (last && last.label === label) last.span += 1;
     else monthBands.push({ label, span: 1 });
   }
-  const rangeLabel = `${anchor.toLocaleString("default", { month: "short", day: "numeric" })} — ${
+  const rangeLabel = `${anchor.toLocaleString("default", { month: "short", day: "numeric" })} to ${
     new Date(windowEnd.getTime() - MS_PER_DAY).toLocaleString("default", { month: "short", day: "numeric", year: "numeric" })
   }`;
   const isCurrentWindow = anchor.getTime() === defaultAnchor.getTime();
@@ -401,9 +401,9 @@ export function BoardGanttView({
   return (
     <section>
       {error ? (
-        <div className="mb-2 px-4 py-2 text-xs text-red-500 bg-red-500/10 rounded-md flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between rounded-md bg-danger-bg px-4 py-2 text-xs text-danger-text">
           {error}
-          <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900"><X className="w-3 h-3" /></button>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="text-ink-2 hover:text-ink"><X className="h-3 w-3" strokeWidth={1.5} /></button>
         </div>
       ) : null}
 
@@ -415,35 +415,35 @@ export function BoardGanttView({
           type="button"
           disabled={isCurrentWindow}
           onClick={() => setAnchor(defaultAnchor)}
-          className="h-7 px-3 rounded-md border border-zinc-200 bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-white dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5 dark:disabled:text-zinc-600 dark:disabled:hover:bg-transparent inline-flex items-center"
+          className="inline-flex h-7 items-center rounded-md border border-line bg-raised px-3 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:text-ink-4 disabled:hover:bg-raised"
         >
           Today
         </button>
         <button
           type="button"
           onClick={() => shift(-4)}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
           aria-label="Earlier"
         >
-          <ChevronLeft className="w-3.5 h-3.5" />
+          <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180" strokeWidth={1.5} />
         </button>
         <button
           type="button"
           onClick={() => shift(4)}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
           aria-label="Later"
         >
-          <ChevronRight className="w-3.5 h-3.5" />
+          <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" strokeWidth={1.5} />
         </button>
-        <h2 className="text-sm font-medium text-zinc-500">{rangeLabel}</h2>
+        <h2 className="text-sm font-medium text-ink-2">{rangeLabel}</h2>
         <div className="flex-1" />
         {dateFields.length > 0 ? (
-          <label className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
+          <label className="inline-flex items-center gap-1.5 text-xs text-ink-2">
             <span className="hidden sm:inline">Date field</span>
             <select
               value={dateSourceLocal}
               onChange={(e) => persistDateSource(e.target.value)}
-              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+              className="h-7 rounded-md border border-line bg-raised px-2 text-xs text-ink focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
             >
               <option value="__auto">Auto (Start/Due + date fields)</option>
               <option value="__due">Start / Due only</option>
@@ -458,15 +458,15 @@ export function BoardGanttView({
         <button
           type="button"
           onClick={toggleBacklog}
-          className={`h-7 rounded-md border px-3 text-xs font-medium inline-flex items-center gap-1.5 transition-colors ${
+          className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors ${
             backlogOpen
-              ? "border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-600 dark:bg-white/10 dark:text-zinc-100"
-              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5"
+              ? "border-line-strong bg-active text-ink"
+              : "border-line bg-raised text-ink-2 hover:bg-hover hover:text-ink"
           }`}
         >
           Backlog
           {unscheduled.length + overdueRows.length > 0 ? (
-            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-100 px-1 text-xs font-semibold tabular-nums text-zinc-500">
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-2 px-1 text-xs font-semibold tabular-nums text-ink-2">
               {unscheduled.length + overdueRows.length}
             </span>
           ) : null}
@@ -474,23 +474,23 @@ export function BoardGanttView({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-          <div className="text-xs font-medium text-zinc-900 mb-1">No tasks yet</div>
-          <p className="text-xs text-zinc-500">Add a task below and it shows up here, ready to schedule.</p>
+        <div className="rounded-xl border border-line bg-raised p-10 text-center">
+          <div className="mb-1 text-xs font-medium text-ink">No tasks yet</div>
+          <p className="text-xs text-ink-2">Add a task below and it shows up here, ready to schedule.</p>
         </div>
       ) : (
-        <div className="flex items-stretch overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="flex items-stretch overflow-hidden rounded-xl border border-line bg-raised">
           {/* Chart scroll container — sticky Name column + zoom stack pin to
               THIS box, so the open backlog panel sits outside the scroll. */}
           <div className="relative min-w-0 flex-1 overflow-x-auto">
           {/* ClickUp's floating zoom stack (fewer weeks = zoom in). */}
-          <div className="absolute right-2 z-30 flex flex-col rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden dark:border-zinc-700 dark:bg-zinc-900" style={{ top: HEAD_H + 8 }}>
+          <div className="absolute right-2 z-30 flex flex-col rounded-md border border-line bg-raised shadow-sm overflow-hidden" style={{ top: HEAD_H + 8 }}>
             <button
               type="button"
               aria-label="Zoom in"
               disabled={weekCount === WEEK_STEPS[0]}
               onClick={() => setZoom(WEEK_STEPS[Math.max(0, WEEK_STEPS.indexOf(weekCount as typeof WEEK_STEPS[number]) - 1)])}
-              className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300"
+              className="h-6 w-6 inline-flex items-center justify-center text-ink-2 hover:bg-hover disabled:text-ink-4"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -499,15 +499,15 @@ export function BoardGanttView({
               aria-label="Zoom out"
               disabled={weekCount === WEEK_STEPS[WEEK_STEPS.length - 1]}
               onClick={() => setZoom(WEEK_STEPS[Math.min(WEEK_STEPS.length - 1, WEEK_STEPS.indexOf(weekCount as typeof WEEK_STEPS[number]) + 1)])}
-              className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300 border-t border-zinc-100"
+              className="h-6 w-6 inline-flex items-center justify-center text-ink-2 hover:bg-hover disabled:text-ink-4 border-t border-line-soft"
             >
               <Minus className="w-3 h-3" />
             </button>
           </div>
           <div className="flex" style={{ minWidth: NAME_W + 720 }}>
             {/* Left Name column (sticky) */}
-            <div className="shrink-0 sticky left-0 z-20 bg-white border-r border-zinc-200" style={{ width: NAME_W }}>
-              <div className="flex items-center px-3 border-b border-zinc-200 bg-white text-micro font-semibold uppercase tracking-wide text-zinc-500" style={{ height: HEAD_H }}>
+            <div className="shrink-0 sticky left-0 z-20 bg-raised border-r border-line" style={{ width: NAME_W }}>
+              <div className="flex items-center px-3 border-b border-line bg-raised text-micro font-semibold uppercase tracking-wide text-ink-2" style={{ height: HEAD_H }}>
                 Name
               </div>
               {rows.map(({ item, start, end }) => {
@@ -515,7 +515,7 @@ export function BoardGanttView({
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center gap-2 px-3 border-b border-zinc-100 hover:bg-zinc-50"
+                    className="flex items-center gap-2 px-3 border-b border-line-soft hover:bg-hover"
                     style={{ height: ROW_H }}
                     onContextMenu={(e) => menu.openItemMenu(e, item)}
                   >
@@ -523,13 +523,13 @@ export function BoardGanttView({
                     <button
                       type="button"
                       onClick={() => onOpenItem?.(item.id)}
-                      className="flex-1 min-w-0 text-left text-base font-medium text-zinc-800 truncate hover:text-[var(--os-brand)]"
+                      className="flex-1 min-w-0 text-left text-base font-medium text-ink truncate hover:text-ink"
                       title={item.title}
                     >
                       {item.title}
                     </button>
                     {!start && !end && canEdit ? (
-                      <label className="relative inline-flex items-center justify-center w-5 h-5 rounded text-zinc-300 hover:text-[var(--os-brand)] hover:bg-zinc-100 cursor-pointer shrink-0" title="Set due date">
+                      <label className="relative inline-flex items-center justify-center w-5 h-5 rounded text-ink-4 hover:text-ink hover:bg-hover cursor-pointer shrink-0" title="Set due date">
                         <CalendarPlus className="w-3.5 h-3.5" />
                         <input
                           type="date"
@@ -546,7 +546,7 @@ export function BoardGanttView({
             {/* Right timeline */}
             <div className="flex-1 min-w-[720px]">
               {/* Two-tier header: month band over per-week day numbers. */}
-              <div className="border-b border-zinc-200 bg-white" style={{ height: HEAD_H }}>
+              <div className="border-b border-line bg-raised" style={{ height: HEAD_H }}>
                 <div
                   className="grid h-[18px]"
                   style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(60px, 1fr))` }}
@@ -554,7 +554,7 @@ export function BoardGanttView({
                   {monthBands.map((band, i) => (
                     <div
                       key={`${band.label}-${i}`}
-                      className="px-2 flex items-center text-xs font-medium text-zinc-500 truncate"
+                      className="px-2 flex items-center text-xs font-medium text-ink-2 truncate"
                       style={{ gridColumn: `span ${band.span}` }}
                     >
                       {band.label}
@@ -574,17 +574,17 @@ export function BoardGanttView({
                       return (
                         <div
                           key={i}
-                          className={`border-l first:border-l-0 border-zinc-100 flex items-center justify-center gap-0.5 text-xs ${
-                            isWeekend ? "bg-zinc-50 dark:bg-white/[0.03]" : ""
+                          className={`border-l first:border-l-0 border-line-soft flex items-center justify-center gap-0.5 text-xs ${
+                            isWeekend ? "bg-subtle" : ""
                           }`}
                         >
-                          <span className="text-zinc-400">{"SMTWTFS"[d.getDay()]}</span>
+                          <span className="text-ink-3">{"SMTWTFS"[d.getDay()]}</span>
                           {i === todayCol ? (
-                            <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-[#E2445C] text-white text-micro font-semibold">
+                            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand-soft px-1 text-micro font-semibold text-brand-deep" aria-label="Today">
                               {d.getDate()}
                             </span>
                           ) : (
-                            <span className="text-zinc-500 tabular-nums">{d.getDate()}</span>
+                            <span className="text-ink-2 tabular-nums">{d.getDate()}</span>
                           )}
                         </div>
                       );
@@ -598,13 +598,13 @@ export function BoardGanttView({
                     {weeks.map((w, i) => {
                       const isThisWeek = startOfWeek(today).getTime() === w.getTime();
                       return (
-                        <div key={i} className="border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-xs">
+                        <div key={i} className="border-l first:border-l-0 border-line-soft px-2 flex items-center text-xs">
                           {isThisWeek ? (
-                            <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#E2445C] text-white text-xs font-semibold">
+                            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand-soft px-1 text-xs font-semibold text-brand-deep" aria-label="This week">
                               {w.getDate()}
                             </span>
                           ) : (
-                            <span className="text-zinc-400">{w.getDate()}</span>
+                            <span className="text-ink-3">{w.getDate()}</span>
                           )}
                         </div>
                       );
@@ -657,11 +657,11 @@ export function BoardGanttView({
                 {Array.from({ length: weekCount }, (_, i) => (
                   <span key={`wknd-${i}`} aria-hidden>
                     <span
-                      className="absolute top-0 bottom-0 bg-zinc-50 dark:bg-white/[0.03] pointer-events-none"
+                      className="absolute top-0 bottom-0 bg-subtle pointer-events-none"
                       style={{ left: `${((i * 7) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
                     />
                     <span
-                      className="absolute top-0 bottom-0 bg-zinc-50 dark:bg-white/[0.03] pointer-events-none"
+                      className="absolute top-0 bottom-0 bg-subtle pointer-events-none"
                       style={{ left: `${((i * 7 + 6) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
                     />
                   </span>
@@ -671,24 +671,24 @@ export function BoardGanttView({
                   <span
                     key={i}
                     aria-hidden
-                    className="absolute top-0 bottom-0 w-px bg-zinc-100"
+                    className="absolute top-0 bottom-0 w-px bg-surface-2"
                     style={{ left: `${((i + 1) / weekCount) * 100}%` }}
                   />
                 ))}
                 {/* Row separators */}
                 {rows.map((_, i) => (
-                  <span key={`sep-${i}`} aria-hidden className="absolute left-0 right-0 h-px bg-zinc-100" style={{ top: (i + 1) * ROW_H }} />
+                  <span key={`sep-${i}`} aria-hidden className="absolute left-0 right-0 h-px bg-surface-2" style={{ top: (i + 1) * ROW_H }} />
                 ))}
-                {/* Today line — brand red, centered in the day column, dot on top. */}
+                {/* Today line: quiet ink, centred in the day column, dot on top (the header's Today chip carries the meaning). */}
                 {todayInWindow ? (
                   <>
-                    <span aria-hidden className="absolute top-0 bottom-0 w-px bg-[#E2445C]" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />
-                    <span aria-hidden className="absolute w-[5px] h-[5px] rounded-full bg-[#E2445C] -translate-x-1/2" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%`, top: -2 }} />
+                    <span aria-hidden className="absolute top-0 bottom-0 w-px bg-ink-3" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />
+                    <span aria-hidden className="absolute w-[5px] h-[5px] rounded-full bg-ink-3 -translate-x-1/2" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%`, top: -2 }} />
                   </>
                 ) : null}
 
                 {rows.map(({ item, start, end }, rowIndex) => {
-                  const color = (item.status ? statusLookup[item.status]?.color : null) ?? "#94a3b8";
+                  const color = (item.status ? statusLookup[item.status]?.color : null) ?? "var(--os-ink-3)";
                   const top = rowIndex * ROW_H + (ROW_H - 24) / 2;
 
                   // Undated → a schedule marker parked on today (draggable / clickable).
@@ -706,8 +706,8 @@ export function BoardGanttView({
                           onOpenItem?.(item.id);
                         }}
                         onContextMenu={(e) => menu.openItemMenu(e, item)}
-                        title={`${item.title} — unscheduled${canEdit ? " · drag to schedule" : ""}`}
-                        className={`absolute rounded-full border border-dashed border-zinc-400 bg-white ${
+                        title={`${item.title} · unscheduled${canEdit ? " · drag to schedule" : ""}`}
+                        className={`absolute rounded-full border border-dashed border-line-strong bg-raised ${
                           canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                         } ${d ? "ring-2 ring-[var(--os-brand)]" : ""}`}
                         style={{
@@ -715,12 +715,12 @@ export function BoardGanttView({
                           top: top + 4,
                           width: 14,
                           height: 14,
-                          backgroundColor: `${color}33`,
+                          backgroundColor: `color-mix(in srgb, ${color} 20%, transparent)`,
                         }}
                       >
                         {/* Live target-day tooltip while dragging to schedule. */}
                         {d ? (
-                          <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-zinc-900 px-1.5 py-0.5 text-xs font-medium text-white pointer-events-none dark:bg-zinc-100 dark:text-zinc-900">
+                          <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-inverse px-1.5 py-0.5 text-xs font-medium text-inverse-fg pointer-events-none">
                             {fmtDay(addDays(startOfTodayD, d.dayDelta))}
                           </span>
                         ) : null}
@@ -739,14 +739,14 @@ export function BoardGanttView({
                       <button
                         key={item.id}
                         type="button"
-                        title={`${item.title} — jump to bar`}
+                        title={`${item.title} · jump to bar`}
                         onClick={() => {
                           const w = startOfWeek(s);
                           w.setDate(w.getDate() - 7);
                           setAnchor(w);
                         }}
                         onContextMenu={(e) => menu.openItemMenu(e, item)}
-                        className={`absolute z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-white/10 ${
+                        className={`absolute z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-line bg-raised text-ink-3 shadow-sm hover:bg-hover hover:text-ink ${
                           isLeft ? "left-1" : "right-1"
                         }`}
                         style={{ top: rowIndex * ROW_H + (ROW_H - 20) / 2 }}
@@ -799,7 +799,7 @@ export function BoardGanttView({
                       onContextMenu={(e) => menu.openItemMenu(e, item)}
                     >
                       {tipStart && tipEnd ? (
-                        <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-zinc-900 px-1.5 py-0.5 text-xs font-medium text-white pointer-events-none dark:bg-zinc-100 dark:text-zinc-900">
+                        <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-inverse px-1.5 py-0.5 text-xs font-medium text-inverse-fg pointer-events-none">
                           {fmtDay(tipStart)}
                           {tipEnd.getTime() !== tipStart.getTime() ? ` → ${fmtDay(tipEnd)}` : ""}
                         </span>
@@ -818,7 +818,7 @@ export function BoardGanttView({
                           if (justDraggedRef.current) { justDraggedRef.current = false; return; }
                           onOpenItem?.(item.id);
                         }}
-                        title={`${item.title} — ${s.toLocaleDateString()}${
+                        title={`${item.title} · ${s.toLocaleDateString()}${
                           s.getTime() !== e.getTime() ? ` → ${e.toLocaleDateString()}` : ""
                         }`}
                         className={`w-full h-full px-2 rounded-[6px] text-xs font-medium text-white truncate hover:brightness-95 leading-[24px] text-left ${
@@ -829,7 +829,7 @@ export function BoardGanttView({
                         {spillLabel ? null : item.title}
                       </button>
                       {spillLabel ? (
-                        <span className="absolute left-full top-0 ml-1.5 text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap leading-[24px] pointer-events-none">
+                        <span className="absolute left-full top-0 ml-1.5 text-xs text-ink-2 whitespace-nowrap leading-[24px] pointer-events-none">
                           {item.title}
                         </span>
                       ) : null}
@@ -849,8 +849,8 @@ export function BoardGanttView({
 
           {/* Bottom add-task row */}
           {canEdit && boardId ? (
-            <div className="flex items-center gap-2 h-[34px] px-3 border-t border-zinc-200" style={{ width: NAME_W }}>
-              <Plus className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <div className="flex items-center gap-2 h-[34px] px-3 border-t border-line" style={{ width: NAME_W }}>
+              <Plus className="w-3.5 h-3.5 text-ink-3 shrink-0" />
               <input
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
@@ -858,7 +858,7 @@ export function BoardGanttView({
                 onBlur={() => { if (newTitle.trim()) void addTask(); }}
                 disabled={adding}
                 placeholder="Add Task"
-                className="flex-1 min-w-0 bg-transparent text-base text-zinc-800 placeholder:text-zinc-400 focus:outline-none"
+                className="flex-1 min-w-0 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
               />
             </div>
           ) : null}

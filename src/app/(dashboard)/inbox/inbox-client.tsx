@@ -39,7 +39,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, X } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { Switch } from "@/components/ui/switch";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -78,6 +78,12 @@ export interface InboxOptions {
    * default anybody wants, and the preference schema refuses them too.
    */
   defaultTab: "primary" | "other" | "mentions";
+  /**
+   * Inline: the list at 360 beside the target pane. Fullscreen: the list
+   * takes the whole width and the target opens as a drawer over it, which
+   * is the mode for a morning of triage where the rows are the point.
+   */
+  mode: "inline" | "fullscreen";
 }
 
 interface InboxResponse {
@@ -379,6 +385,8 @@ export function InboxClient({
     void load();
   }, [tab, toast, load, markRead]);
 
+  const fullscreen = options.mode === "fullscreen";
+
   const saveOption = useCallback(
     async (patch: Partial<InboxOptions>) => {
       const next = { ...options, ...patch };
@@ -594,6 +602,7 @@ export function InboxClient({
                 ...(options.groupByDate ? ["groupByDate"] : []),
                 ...(options.showAll ? ["showAll"] : []),
                 `tab:${options.defaultTab}`,
+                `mode:${options.mode ?? "inline"}`,
                 `clear:${options.autoClearDays ?? 0}`,
               ]}
               sections={[
@@ -602,6 +611,13 @@ export function InboxClient({
                   options: [
                     { value: "groupByDate", label: "Group by date" },
                     { value: "showAll", label: "Show everything in Other" },
+                  ],
+                },
+                {
+                  label: "Display mode",
+                  options: [
+                    { value: "mode:inline", label: "Inline (list beside the pane)" },
+                    { value: "mode:fullscreen", label: "Fullscreen (pane opens over the list)" },
                   ],
                 },
                 {
@@ -630,6 +646,10 @@ export function InboxClient({
               onSelect={(value) => {
                 if (value === "groupByDate") { void saveOption({ groupByDate: !options.groupByDate }); return; }
                 if (value === "showAll") { void saveOption({ showAll: !options.showAll }); return; }
+                if (value === "mode:inline" || value === "mode:fullscreen") {
+                  void saveOption({ mode: value === "mode:fullscreen" ? "fullscreen" : "inline" });
+                  return;
+                }
                 if (value.startsWith("tab:")) {
                   const picked = parseTab(value.slice(4));
                   if (picked === "primary" || picked === "other" || picked === "mentions") {
@@ -693,8 +713,15 @@ export function InboxClient({
           </FilterPanel>
         ) : null}
 
-        {/* The list, 360, on the subtle ground. */}
-        <div ref={listRef} className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-e border-line bg-subtle">
+        {/* The list: 360 beside the pane inline, the whole width fullscreen. */}
+        <div
+          ref={listRef}
+          className={
+            fullscreen
+              ? "flex min-w-0 flex-1 flex-col overflow-y-auto bg-subtle"
+              : "flex w-[360px] shrink-0 flex-col overflow-y-auto border-e border-line bg-subtle"
+          }
+        >
           {failed ? (
             <div className="flex flex-col items-start gap-1 p-6">
               <p className="text-base text-ink">Couldn&rsquo;t load your Inbox</p>
@@ -763,8 +790,26 @@ export function InboxClient({
           )}
         </div>
 
-        {/* The target, fluid. */}
-        <div className="min-w-0 flex-1 overflow-hidden">
+        {/* The target: fluid beside the list, or a drawer over it in
+            fullscreen once a row is selected (deselecting closes it). */}
+        {fullscreen && !selected && !failed ? null : (
+        <div
+          className={
+            fullscreen
+              ? "fixed bottom-0 end-0 top-[var(--os-top-h)] z-40 w-[min(720px,92vw)] overflow-hidden border-s border-line bg-raised shadow-[var(--os-shadow-modal)]"
+              : "min-w-0 flex-1 overflow-hidden"
+          }
+        >
+          {fullscreen && selected ? (
+            <button
+              type="button"
+              onClick={() => setParam({ n: null })}
+              aria-label="Close"
+              className="absolute end-3 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <X className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+            </button>
+          ) : null}
           {failed ? (
             <OsEmptyView
               variant="error"
@@ -787,6 +832,7 @@ export function InboxClient({
             />
           )}
         </div>
+        )}
       </div>
 
       {/* Snooze, one popover for the row action, the pane action and `s`. */}

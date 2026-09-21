@@ -7,7 +7,9 @@
 //     matchMedia listener for AUTO and paints the right palette before
 //     hydration from its own localStorage key.
 //   - data-chrome "navy" | "light": the frame variant (design-system 1.2.1),
-//     from theme.chrome. The rail, the bar and the splash read only the
+//     from theme.chrome.
+//   - data-accent "<key>": the accent colour from theme.accent (Customize >
+//     Accent); absent for the brand default. The rail, the bar and the splash read only the
 //     chrome tokens, so the flip is one attribute.
 //   - data-density "comfortable" | "cozy" | "compact": the data-row height.
 //
@@ -30,9 +32,13 @@ export function ThemeApplier() {
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute("data-chrome", prefs.theme.chrome === "light" ? "light" : "navy");
-    root.removeAttribute("data-accent");
+    // The accent: "workwrk" is the base brand blue and carries no override;
+    // any other key rebinds the --os-brand tokens (os.css, the accent block).
+    const accent = prefs.theme.accent && prefs.theme.accent !== "workwrk" ? prefs.theme.accent : null;
+    if (accent) root.setAttribute("data-accent", accent);
+    else root.removeAttribute("data-accent");
     root.setAttribute("data-density", prefs.density || "comfortable");
-  }, [prefs.theme.chrome, prefs.density]);
+  }, [prefs.theme.chrome, prefs.theme.accent, prefs.density]);
 
   return null;
 }

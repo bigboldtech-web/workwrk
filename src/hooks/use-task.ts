@@ -30,6 +30,12 @@ import type { ItemDecision } from "@/lib/item-role";
 import type { ItemBreadcrumb } from "@/lib/item-gate";
 import type { DetailPatch, ItemModuleGating } from "@/components/board-view/board-item-detail";
 import { WINDOW_EVENTS, emitItemChanged, type RealtimeEvent } from "@/lib/realtime-events";
+import {
+  describeTaskLoadFailure,
+  missingReasonFrom,
+  type ItemFailureBody,
+  type TaskMissingReason,
+} from "@/lib/task-load-failure";
 
 export interface TaskBoardCtx {
   id: string;
@@ -68,10 +74,23 @@ export interface UseTask {
   /** The Space's module toggles. Undefined on a server that predates them. */
   moduleGating: ItemModuleGating | undefined;
   loading: boolean;
-  /** A load failure that is not a 404. */
+  /**
+   * A load failure that is neither 404 nor 403, as one sentence that names
+   * the cause (src/lib/task-load-failure.ts): the session lapsed, the server
+   * failed with a status, the request never arrived. Never "could not load".
+   */
   error: string | null;
+  /** The HTTP status behind `error` (0 when the fetch itself threw). */
+  errorStatus: number | null;
+  /** What the server said, when it said anything a person can act on. */
+  errorDetail: string | null;
   /** Deleted, or no role: one state on purpose, so a 404 confirms nothing. */
   missing: boolean;
+  /**
+   * The one 404 the server names: the id is a row on the legacy task list
+   * that has not been migrated onto the Item model in this workspace.
+   */
+  missingReason: TaskMissingReason | null;
   /**
    * The task exists and the viewer may not open it.
    *
@@ -109,7 +128,10 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
   const [data, setData] = useState<TaskResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
+  const [missingReason, setMissingReason] = useState<TaskMissingReason | null>(null);
   const [denied, setDenied] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -123,17 +145,34 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     try {
       const res = await fetch(`/api/items/${itemId}`, { cache: "no-store" });
       if (!res.ok) {
-        if (res.status === 404) setMissing(true);
-        else if (res.status === 403) setDenied(true);
-        else setError("Couldn't load this task");
+        // The body is read on EVERY failure: a 404 may name itself (the
+        // legacy-task case) and a 500 now carries the line that explains it.
+        const body = (await res.json().catch(() => null)) as ItemFailureBody | null;
+        if (res.status === 404) {
+          setMissing(true);
+          setMissingReason(missingReasonFrom(body));
+        } else if (res.status === 403) {
+          setDenied(true);
+        } else {
+          const failure = describeTaskLoadFailure(res.status, body);
+          setError(failure.message);
+          setErrorStatus(failure.status);
+          setErrorDetail(failure.detail);
+        }
         return;
       }
       setMissing(false);
+      setMissingReason(null);
       setDenied(false);
       setError(null);
+      setErrorStatus(null);
+      setErrorDetail(null);
       setData((await res.json()) as TaskResponse);
     } catch {
-      setError("Couldn't load this task");
+      const failure = describeTaskLoadFailure(0, null);
+      setError(failure.message);
+      setErrorStatus(0);
+      setErrorDetail(null);
     } finally {
       setLoading(false);
     }
@@ -143,7 +182,10 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     if (!itemId) return;
     setLoading(true);
     setError(null);
+    setErrorStatus(null);
+    setErrorDetail(null);
     setMissing(false);
+    setMissingReason(null);
     setDenied(false);
     void reload();
   }, [itemId, reload]);
@@ -261,7 +303,10 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     moduleGating: data?.moduleGating,
     loading,
     error,
+    errorStatus,
+    errorDetail,
     missing,
+    missingReason,
     denied,
     patch,
     saveStatus,

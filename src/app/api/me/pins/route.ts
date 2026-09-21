@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
+import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 
 type Pin = { kind: string; id: string };
@@ -63,6 +63,8 @@ export async function POST(req: Request) {
   const current: Pin[] = Array.isArray(effective?.home?.topPins) ? (effective.home!.topPins as Pin[]) : [];
   const filtered = current.filter((p) => !(p.kind === parsed.data.kind && p.id === parsed.data.id));
   const next = parsed.data.on ? [...filtered, { kind: parsed.data.kind, id: parsed.data.id }] : filtered;
-  await setUserPreference(u.id, { home: { ...(effective?.home ?? {}), topPins: next } });
+  // One key, one atomic statement: a favorite toggle or a recent-doc marker
+  // landing at the same moment no longer erases the pin (or vice versa).
+  await setUserHomeKey(u.id, "topPins", next);
   return NextResponse.json({ topPins: next });
 }

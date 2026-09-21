@@ -40,7 +40,8 @@ import { getBoardStatuses, isDoneStatusName, makeStatusLookup } from "@/lib/boar
 import { bucketFor, endOfWeekInstant, startOfTodayInstant, type LocaleContext } from "@/lib/work-buckets";
 import { getOrCreatePersonalBoard } from "@/lib/board";
 import { createBoardItem } from "@/lib/board-items";
-import type { MyWorkRow, WorkGroupKey, WorkSortKey } from "@/lib/my-work";
+import { parseWorkScope, type MyWorkRow, type WorkGroupKey, type WorkSortKey } from "@/lib/my-work";
+import { delegatedWhere } from "@/lib/delegated-items";
 import type { Prisma } from "@/generated/prisma";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +103,9 @@ export async function GET(req: Request) {
   // done=1 shows everything, done=only shows just the finished ones.
   const doneParam = sp.get("done") ?? "0";
   const includeSubtasks = sp.get("subtasks") !== "0";
+  // `scope=delegated`: the tasks the viewer handed to other people (the
+  // retired Today / Overdue page's Delegated tab). See lib/delegated-items.ts.
+  const scope = parseWorkScope(sp.get("scope"));
 
   const prefs = await getEffectivePreferences(u.id, u.organizationId).catch(() => null);
   const locale: LocaleContext = {
@@ -109,11 +113,14 @@ export async function GET(req: Request) {
     weekStart: prefs?.home?.locale?.weekStart ?? null,
   };
 
-  const where: Prisma.ItemWhereInput = {
-    organizationId: u.organizationId,
-    OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
-    archivedAt: null,
-  };
+  const where: Prisma.ItemWhereInput =
+    scope === "delegated"
+      ? await delegatedWhere(u.organizationId, u.id)
+      : {
+          organizationId: u.organizationId,
+          OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
+          archivedAt: null,
+        };
   if (!includeSubtasks) where.parentItemId = null;
 
   // ── filters ──────────────────────────────────────────────────────
@@ -324,7 +331,10 @@ export async function GET(req: Request) {
   // on the page makes a filter that cannot narrow anything it cannot already
   // see, and offering the org's whole vocabulary makes rows that always come
   // back "No results".
-  const facets = await workFacets(u.id, u.organizationId);
+  // The facets count the SET the page is showing: the delegated set when that
+  // is the scope, so a Filter row never offers a List none of the shown rows
+  // sit in.
+  const facets = await workFacets(u.id, u.organizationId, scope === "delegated" ? where : null);
 
   return NextResponse.json(
     {
@@ -427,12 +437,16 @@ export interface WorkFacets {
  * then one name lookup each. Exact counts, so a Filter row can print "3" and
  * mean it.
  */
-async function workFacets(userId: string, organizationId: string): Promise<WorkFacets> {
-  const base: Prisma.ItemWhereInput = {
-    organizationId,
-    OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
-    archivedAt: null,
-  };
+async function workFacets(userId: string, organizationId: string, scopeWhere: Prisma.ItemWhereInput | null): Promise<WorkFacets> {
+  // The scope predicate without the page's own filters: the facets describe
+  // what the viewer COULD narrow to, not what the current narrowing left.
+  const base: Prisma.ItemWhereInput = scopeWhere
+    ? { organizationId: scopeWhere.organizationId, id: scopeWhere.id, archivedAt: null, NOT: scopeWhere.NOT, OR: scopeWhere.OR }
+    : {
+        organizationId,
+        OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
+        archivedAt: null,
+      };
 
   const [byStatus, byBoard, byType, ownIds] = await Promise.all([
     prisma.item.groupBy({ by: ["status"], where: base, _count: { _all: true } }),

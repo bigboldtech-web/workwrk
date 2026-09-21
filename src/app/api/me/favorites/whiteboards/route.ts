@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
+import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { getSpaceForReader } from "@/lib/space";
 
@@ -65,8 +65,6 @@ export async function POST(req: Request) {
   const set = new Set(current);
   if (parsed.data.on) set.add(parsed.data.whiteboardId);
   else set.delete(parsed.data.whiteboardId);
-  await setUserPreference(u.id, {
-    home: { ...(effective?.home ?? {}), favoriteWhiteboardIds: Array.from(set) },
-  });
+  await setUserHomeKey(u.id, "favoriteWhiteboardIds", Array.from(set));
   return NextResponse.json({ favoriteWhiteboardIds: Array.from(set) });
 }

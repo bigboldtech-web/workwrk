@@ -73,7 +73,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/settings/modules/page.tsx",
   "src/app/(dashboard)/settings/permissions/page.tsx",
   "src/app/(dashboard)/settings/structure/page.tsx",
-  "src/app/(dashboard)/sops/\\[id\\]/share/route.ts",
   "src/app/(dashboard)/spaces/\\[slug\\]/page.tsx",
   "src/app/(dashboard)/spaces/page.tsx",
   "src/app/(dashboard)/surveys/\\[id\\]/page.tsx",
@@ -293,7 +292,17 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/sop-folders/\\[id\\]/route.ts",
   "src/app/api/sop-folders/route.ts",
   "src/app/api/sop-tags/route.ts",
+  // Phase 3 Stage A MOVED this file, it did not add it. It was
+  // "src/app/(dashboard)/sops/\\[id\\]/share/route.ts" on this list until the
+  // SOP public-link handler moved from the page segment to /api, which is
+  // where API handlers live and, more to the point, the path the SOP page has
+  // always called (the handler at the old path meant minting and revoking a
+  // public link were both dead). The code inside is unchanged: the same
+  // requirePermission + canWriteToFolder gate its sibling
+  // api/sops/\\[id\\]/route.ts uses, so it leaves this list in the same batch
+  // that one does, at access step 6. Net change to this array: zero.
   "src/app/api/sops/\\[id\\]/route.ts",
+  "src/app/api/sops/\\[id\\]/share/route.ts",
   "src/app/api/sops/\\[id\\]/versions/route.ts",
   "src/app/api/sops/record/route.ts",
   "src/app/api/sops/route.ts",

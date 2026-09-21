@@ -2,8 +2,8 @@
 
 /* Docs — ClickUp-style "All Docs" home.
  *
- * In-page tabs (All / Recent / Favorites / Created by me) plus the left panel
- * (DocsSidebar, in apps-catalog) both set ?view=; this page reads it and
+ * In-page tabs (All docs / Recent / Mine / Shared with me / Favorites) plus
+ * the Docs sidebar both set ?view=; this page reads it and
  * renders the matching set as a rich table (Name / Location / Date updated /
  * Date viewed / Contributors) above a row of starter Templates.
  *
@@ -33,11 +33,13 @@ import {
   Pencil,
   Clock,
   User,
+  Users,
   Rocket,
   NotebookPen,
   BookOpen,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useRetiredView } from "@/components/layout/os/use-retired-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { renderNoteIcon } from "@/components/docs/note-icon";
@@ -71,25 +73,37 @@ const SORT_OPTIONS: Array<{ col: SortCol; label: string }> = [
 ];
 
 type ViewKey = "all" | "recent" | "favorites" | "my" | "shared" | "private" | "meeting" | "archived";
+
+// ONE LABEL PER DESTINATION (naming-canon; spec-docs-knowledge section 1
+// "Views on /docs: All docs, Recent, Mine, Shared with me, Favorites").
+//
+// /docs?view=my used to read "Mine" in the sidebar, "My Docs" in the
+// breadcrumb and the H1, and "Created by me" in the tab row: four names for
+// one URL, on one screen. The canon retires "Created by me" and "My Docs".
+// This table is now the only place any of these five views is named, and the
+// tab row below reads from it, so a label cannot drift again.
 const VIEW_LABEL: Record<ViewKey, string> = {
-  all: "All Docs",
+  all: "All docs",
   recent: "Recent",
   favorites: "Favorites",
-  my: "My Docs",
+  my: "Mine",
   shared: "Shared with me",
   private: "Private",
   meeting: "Meeting Notes",
   archived: "Archived",
 };
 
-// The in-page tab strip (ClickUp hub). Sidebar-only views (shared/private/
-// meeting/archived) render the strip with no active tab — DocsSidebar still
-// highlights them.
+// The in-page views row: the same five the spec lists, in its order. Four of
+// them are sidebar rows too (Favorites is the section above them), which is
+// the specified arrangement and not a duplicate surface: the sidebar is the
+// hub's index and this row is the page's own view switcher. They agree
+// because both read VIEW_LABEL.
 const HUB_TABS: Array<{ key: ViewKey; label: string; Icon: typeof FileText }> = [
-  { key: "all", label: "All", Icon: FileText },
-  { key: "recent", label: "Recent", Icon: Clock },
-  { key: "favorites", label: "Favorites", Icon: Star },
-  { key: "my", label: "Created by me", Icon: User },
+  { key: "all", label: VIEW_LABEL.all, Icon: FileText },
+  { key: "recent", label: VIEW_LABEL.recent, Icon: Clock },
+  { key: "my", label: VIEW_LABEL.my, Icon: User },
+  { key: "shared", label: VIEW_LABEL.shared, Icon: Users },
+  { key: "favorites", label: VIEW_LABEL.favorites, Icon: Star },
 ];
 
 // "Just now" / "Jun 29" / "Aug 24, 2024" — ClickUp's date column style.
@@ -120,6 +134,12 @@ const TEMPLATES: Array<{ key: string; title: string; hint: string; Icon: typeof 
 export default function DocsPage() {
   const router = useRouter();
   const params = useSearchParams();
+  // Two retired views land here with their old query on: ?view=meeting (a
+  // title regex, never a real view) and ?view=private (which meant "mine and
+  // unanchored", i.e. Mine plus a Location filter). Both are normalised in the
+  // URL rather than in next.config.ts, because the path does not change and a
+  // config row would ride its own query along and loop. See retired-views.ts.
+  useRetiredView();
   const { data: session } = useSession();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const view = (params.get("view") as ViewKey) || "all";
@@ -194,7 +214,16 @@ export default function DocsPage() {
     else if (view === "recent") base = base.filter((d) => recentViews.has(d.id));
     else if (view === "meeting") base = base.filter((d) => /meeting|minutes|stand.?up|1:1/i.test(d.title));
     else if (view === "private") base = base.filter((d) => d.createdById === meId && !d.entityType);
-    else if (view === "shared") base = base.filter((d) => !!d.entityType);
+    else if (view === "shared") {
+      // "Shared with me" must not list what the viewer owns (spec-docs section
+      // 1 row 4: "access via a direct or group share, never ownership or
+      // Everyone"). Anchored-to-a-container is the closest thing the current
+      // /api/docs payload can answer, so the view narrows it by dropping the
+      // viewer's own docs; the full `via` rule needs the list API the /docs
+      // rebuild adds (section 2), and it is flagged there rather than faked
+      // here.
+      base = base.filter((d) => !!d.entityType && d.createdById !== meId);
+    }
     const q = search.trim().toLowerCase();
     if (!q) return base;
     return base.filter((d) => d.title.toLowerCase().includes(q) || (d.excerpt ?? "").toLowerCase().includes(q));
@@ -313,7 +342,8 @@ export default function DocsPage() {
         </div>
       </div>
 
-      {/* Tabs — All / Recent / Favorites / Created by me */}
+      {/* The views row, named once in VIEW_LABEL so the tab, the H1 and the
+          sidebar row for one URL cannot drift apart again. */}
       <ViewTabStrip className="px-5">
         {HUB_TABS.map((t) => (
           <ViewTab

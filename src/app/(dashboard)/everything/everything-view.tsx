@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Calendar as CalendarIcon, ChevronDown, ChevronRight, ExternalLink, Flag, Kanban, Link2,
+  Calendar as CalendarIcon, CalendarRange, ChevronDown, ChevronRight, ExternalLink, Flag, GanttChart, Kanban, Link2,
   List as ListIcon, ListChecks, Lock, MoreHorizontal, X,
 } from "lucide-react";
 import { MenuList, MenuItem } from "@/components/ui/menu";
@@ -57,10 +57,11 @@ import { dueChipLabel, type LocaleContext } from "@/lib/work-buckets";
 import type { SavedWorkFilter } from "@/lib/home-prefs";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { SaveViewModal } from "../my-work/save-view-modal";
-import { resolveEverythingView } from "@/lib/everything-view";
+import { resolveEverythingView, type EverythingViewKey } from "@/lib/everything-view";
 import { MyWorkCalendar } from "../my-work/my-work-calendar";
+import { MyWorkGantt, MyWorkTimeline } from "../my-work/my-work-gantt";
 
-type ViewKey = "list" | "board" | "calendar";
+type ViewKey = EverythingViewKey;
 
 interface EverythingRow extends MyWorkRow {
   role: "NONE" | "VIEW" | "COMMENT" | "EDIT" | "FULL";
@@ -95,6 +96,8 @@ const VIEWS: ReadonlyArray<{ key: ViewKey; label: string; icon: typeof ListIcon 
   { key: "list", label: "List", icon: ListIcon },
   { key: "board", label: "Board", icon: Kanban },
   { key: "calendar", label: "Calendar", icon: CalendarIcon },
+  { key: "gantt", label: "Gantt", icon: GanttChart },
+  { key: "timeline", label: "Timeline", icon: CalendarRange },
 ];
 
 const FIELDS: ReadonlyArray<{ key: string; label: string }> = [
@@ -187,6 +190,9 @@ export function EverythingClient({
   const [includeSubtasks, setIncludeSubtasks] = useState(
     openingView ? openingFilters.includeSubtasks !== false : initialSubtasks,
   );
+  // "Assigned by me": the tasks the viewer created or assigned to somebody
+  // else (the retired Delegated tab), narrowed to what they may read here.
+  const [assignedByMe, setAssignedByMe] = useState(openingFilters.assignedByMe === true || params.get("assignedBy") === "me");
 
   const [data, setData] = useState<Payload | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -223,8 +229,9 @@ export function EverythingClient({
     if (priorities.length) qs.set("priority", priorities.join(","));
     if (assigneeIds.length) qs.set("assignee", assigneeIds.join(","));
     if (!includeSubtasks) qs.set("subtasks", "0");
+    if (assignedByMe) qs.set("assignedBy", "me");
     return qs.toString();
-  }, [group, sort, showDone, space, folder, cursor, spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, pageSize]);
+  }, [group, sort, showDone, space, folder, cursor, spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, assignedByMe, pageSize]);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/me/everything?${queryString}`, { cache: "no-store" });
@@ -309,15 +316,15 @@ export function EverythingClient({
 
   /** What a saved view remembers: every filter, plus sort, group and view. */
   const currentFilters = useMemo(
-    () => ({ spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, showDone }),
-    [spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, showDone],
+    () => ({ spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, showDone, assignedByMe }),
+    [spaceIds, listIds, statuses, priorities, assigneeIds, includeSubtasks, showDone, assignedByMe],
   );
 
   const applyView = (v: SavedWorkFilter | null) => {
       resetPaging();
       if (!v) {
         setSpaceIds([]); setListIds([]); setStatuses([]); setPriorities([]); setAssigneeIds([]);
-        setIncludeSubtasks(true); setShowDone(false);
+        setIncludeSubtasks(true); setShowDone(false); setAssignedByMe(false);
         setActiveViewId(null);
         writeUrl({ filter: null });
         return;
@@ -330,6 +337,7 @@ export function EverythingClient({
       setAssigneeIds(idList(f.assigneeIds));
       setIncludeSubtasks(f.includeSubtasks !== false);
       setShowDone(f.showDone === true);
+      setAssignedByMe(f.assignedByMe === true);
       if (v.sort) setSort(v.sort as WorkSortKey);
       if (v.group) setGroup(v.group as WorkGroupKey);
       if (v.view) setView(v.view as ViewKey);
@@ -446,7 +454,7 @@ export function EverythingClient({
   const now = useMemo(() => new Date(), []);
   const activeFilters =
     spaceIds.length + listIds.length + statuses.length + priorities.length + assigneeIds.length
-    + (includeSubtasks ? 0 : 1) + (space || folder ? 1 : 0);
+    + (includeSubtasks ? 0 : 1) + (space || folder ? 1 : 0) + (assignedByMe ? 1 : 0);
 
   useShortcut({ id: "everything-filter", keys: "f", label: "Filter", scope: "page", run: () => setFilterOpen((v) => !v) });
 
@@ -640,7 +648,7 @@ export function EverythingClient({
             onSaveView={() => setSaveOpen(true)}
             onClearAll={() => {
               setSpaceIds([]); setListIds([]); setStatuses([]); setPriorities([]); setAssigneeIds([]);
-              setIncludeSubtasks(true);
+              setIncludeSubtasks(true); setAssignedByMe(false);
               resetPaging();
               // Clearing everything clears the SCOPE too, which is why the
               // scope is shown here as a row: a `?space=` that cannot be seen
@@ -737,6 +745,16 @@ export function EverythingClient({
                 ))}
               </FilterGroup>
             ) : null}
+            {matchesField("Assigned by me", filterSearch) ? (
+              <li className="flex h-9 items-center gap-3 rounded-md px-2">
+                <span className="min-w-0 flex-1 truncate text-row text-ink">Assigned by me</span>
+                <Switch
+                  checked={assignedByMe}
+                  onChange={(on) => { setAssignedByMe(on); resetPaging(); }}
+                  aria-label="Assigned by me"
+                />
+              </li>
+            ) : null}
             {matchesField("Includes subtasks", filterSearch) ? (
               <li className="flex h-9 items-center gap-3 rounded-md px-2">
                 <span className="min-w-0 flex-1 truncate text-row text-ink">Includes subtasks</span>
@@ -793,6 +811,13 @@ export function EverythingClient({
             )
           ) : view === "calendar" ? (
             <MyWorkCalendar rows={rows} locale={locale} onCreate={() => openCreateTask()} />
+          ) : view === "gantt" ? (
+            // Drag-to-reschedule is on only when every row on the page is
+            // editable: the renderer takes one answer and a Can view row must
+            // not move under a drag the API would refuse.
+            <MyWorkGantt rows={rows} canEdit={rows.every((r) => r.canEdit)} onChanged={() => void load()} />
+          ) : view === "timeline" ? (
+            <MyWorkTimeline rows={rows} canEdit={rows.every((r) => r.canEdit)} onChanged={() => void load()} />
           ) : view === "board" ? (
             <BoardView columns={boardColumns(rows, group)} onOpen={(id) => openTask(router, id)} />
           ) : (

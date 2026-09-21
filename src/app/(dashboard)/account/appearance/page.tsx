@@ -7,6 +7,7 @@
 // we router.refresh() to re-pull the effective prefs into the shell.
 // USER-level (no admin gate). Save-on-change with a toast.
 
+import { ACCENT_KEYS, ACCENT_LABELS } from "@/lib/accents";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Palette, Loader2, Check, Sun, Moon, Monitor } from "lucide-react";
@@ -17,20 +18,15 @@ type Density = "compact" | "cozy" | "comfortable";
 
 type ThemeState = { appearance: Appearance; accent: string };
 
-// Mirror of ACCENT_OPTIONS in components/layout/os/customize-panel.tsx —
-// keep keys + swatch hex in sync with that source of truth.
-const ACCENT_OPTIONS: Array<{ key: string; label: string; swatch: string }> = [
-  { key: "black", label: "Black", swatch: "#1f2024" },
-  { key: "purple", label: "Purple", swatch: "#7c3aed" },
-  { key: "blue", label: "Blue", swatch: "#3b82f6" },
-  { key: "pink", label: "Pink", swatch: "#ec4899" },
-  { key: "violet", label: "Violet", swatch: "#a855f7" },
-  { key: "indigo", label: "Indigo", swatch: "#6366f1" },
-  { key: "orange", label: "Orange", swatch: "#f59e0b" },
-  { key: "teal", label: "Teal", swatch: "#14b8a6" },
-  { key: "bronze", label: "Bronze", swatch: "#a78b6c" },
-  { key: "mint", label: "Mint", swatch: "#3ab39e" },
-];
+// The same list the Customize panel offers (src/lib/accents.ts is the one
+// source of truth for keys and labels).
+const ACCENT_OPTIONS: Array<{ key: string; label: string; swatch: string }> = ACCENT_KEYS.map((key) => ({
+  key,
+  label: ACCENT_LABELS[key],
+  // The swatch paints from its os.css variable, so no hex lives here and the
+  // circle shows the key's colour whatever accent is active.
+  swatch: `var(--os-accent-swatch-${key})`,
+}));
 
 const APPEARANCE_CARDS: Array<{ value: Appearance; label: string; Icon: React.ComponentType<{ className?: string }> }> = [
   { value: "LIGHT", label: "Light", Icon: Sun },
@@ -99,7 +95,7 @@ export default function AppearancePage() {
         window.dispatchEvent(new CustomEvent("workwrk:prefs-changed"));
         router.refresh();
       } catch {
-        toast("Couldn't save — try again");
+        toast("Couldn't save. Try again");
         void load(); // resync truth from server on failure
       } finally {
         setSaving(false);

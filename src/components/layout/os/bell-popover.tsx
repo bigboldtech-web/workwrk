@@ -10,12 +10,18 @@
 //
 // The three bells and the inbox glyph this replaces polled on their own; the
 // desktop alert on a new item survives, because it is the one thing a
-// backgrounded tab cannot learn any other way.
+// backgrounded tab cannot learn any other way. Its DOOR survives too: the
+// header carries the "Enable desktop alerts" control (ask the browser, then
+// on / off), because a permission nobody can request is a dead code path.
+//
+// Reminders keep the old bell's structure: Fired / Overdue / Today / Upcoming
+// groups and a read-only "Recently done" history (dismissed in the last 14
+// days), so a reminder you marked Done still has a door back.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Bell, Check, CheckSquare, Clock, Settings2 } from "lucide-react";
+import { AlarmClock, Bell, BellOff, BellRing, Check, CheckSquare, Clock, Settings2 } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { SETTINGS_PAGES, settingsHrefToday } from "@/lib/settings-registry";
 import { SHELL_LABELS } from "@/lib/nav/labels";
@@ -49,6 +55,7 @@ type Reminder = {
   title: string;
   remindAt: string;
   firedAt?: string | null;
+  updatedAt?: string | null;
   entityType: string | null;
   entityId: string | null;
 };
@@ -91,8 +98,11 @@ export function BellPopover() {
   const { openSettings } = useSettingsNav();
   const dot = counts.inboxUnread > 0 || counts.remindersDue > 0;
   const notificationsHref = settingsHrefToday(SETTINGS_PAGES["account/notifications"]) ?? "/settings/notifications";
+  // One hook instance for the door and the alert path, so enabling here is
+  // what the alert reads (two instances would each keep their own state).
+  const desktop = useDesktopNotifications();
 
-  useNewItemAlerts(mutedNotifications);
+  useNewItemAlerts(mutedNotifications, desktop);
 
   return (
     <ChromePopover
@@ -112,6 +122,7 @@ export function BellPopover() {
         <div className="flex h-11 shrink-0 items-center gap-2 px-4">
           <span className="text-lg font-semibold text-ink">{SHELL_LABELS.notifications}</span>
           <span className="flex-1" />
+          <DesktopAlertsDoor desktop={desktop} />
           <button
             type="button"
             onClick={() => { setOpen(false); openSettings(notificationsHref); }}
@@ -190,6 +201,56 @@ function RowAction({ label, icon: Icon, onClick, className }: { label: string; i
       className={cn("inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink", className)}
     >
       <Icon className="h-4 w-4" strokeWidth={1.5} />
+    </button>
+  );
+}
+
+/**
+ * The desktop-alerts door. Three states, one 32px control: the browser has
+ * not been asked (Enable), it granted and alerts are on (turn off) or off
+ * (turn on), or it refused (a quiet disabled glyph that says so). Absent
+ * where the Notification API does not exist.
+ */
+function DesktopAlertsDoor({ desktop }: { desktop: ReturnType<typeof useDesktopNotifications> }) {
+  const { toast } = useOsToast();
+  if (desktop.permission === "unsupported") return null;
+  const base = "inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent";
+  if (desktop.permission === "denied") {
+    return (
+      <button type="button" disabled aria-label="Desktop alerts are blocked in your browser settings" title="Desktop alerts are blocked in your browser settings" className={base}>
+        <BellOff className="h-4 w-4" strokeWidth={1.5} />
+      </button>
+    );
+  }
+  if (desktop.permission !== "granted") {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          void desktop.requestPermission().then((r) => {
+            if (r === "granted") toast("Desktop alerts on");
+            else if (r === "denied") toast("Your browser blocked desktop alerts");
+          });
+        }}
+        aria-label="Enable desktop alerts"
+        title="Enable desktop alerts"
+        className={base}
+      >
+        <BellRing className="h-4 w-4" strokeWidth={1.5} />
+      </button>
+    );
+  }
+  const on = desktop.enabled;
+  return (
+    <button
+      type="button"
+      onClick={() => { if (on) desktop.disable(); else desktop.enable(); toast(on ? "Desktop alerts off" : "Desktop alerts on"); }}
+      aria-pressed={on}
+      aria-label={on ? "Desktop alerts on. Turn off" : "Desktop alerts off. Turn on"}
+      title={on ? "Desktop alerts on" : "Desktop alerts off"}
+      className={cn(base, on && "bg-active text-ink")}
+    >
+      {on ? <BellRing className="h-4 w-4" strokeWidth={1.5} /> : <BellOff className="h-4 w-4" strokeWidth={1.5} />}
     </button>
   );
 }
@@ -290,20 +351,37 @@ function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => 
   );
 }
 
+function startOfTomorrow(fromMs: number): number {
+  const d = new Date(fromMs); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return <li className="px-2 pb-0.5 pt-2 text-micro uppercase tracking-[0.06em] text-ink-2" aria-hidden>{children}</li>;
+}
+
 function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: () => void; onMutated: () => void }) {
   const [pending, setPending] = useState<Reminder[] | null>(null);
   const [fired, setFired] = useState<Reminder[]>([]);
+  const [history, setHistory] = useState<Reminder[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The clock the groups are cut against: stamped when the list loads, so
+  // render stays pure (no Date.now() during render) and the cut moves with
+  // every refresh.
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const load = useCallback(async () => {
-    const [p, f] = await Promise.all([
+    setLoadedAt(Date.now());
+    const [p, f, h] = await Promise.all([
       apiFetch<{ reminders: Reminder[] }>("/api/reminders", { cache: "no-store" }),
       apiFetch<{ reminders: Reminder[] }>("/api/reminders?status=FIRED", { cache: "no-store" }),
+      apiFetch<{ reminders: Reminder[] }>("/api/reminders?status=DISMISSED", { cache: "no-store" }),
     ]);
     if (!p.ok) { if (p.status !== 401) setError(p.error); return; }
     setError(null);
     setPending(Array.isArray(p.data?.reminders) ? p.data.reminders : []);
     setFired(f.ok && Array.isArray(f.data?.reminders) ? f.data.reminders : []);
+    setHistory(h.ok && Array.isArray(h.data?.reminders) ? h.data.reminders.slice(0, 10) : []);
   }, []);
   useEffect(() => {
     if (!open) return;
@@ -318,14 +396,60 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
   }, [open, load]);
 
   const act = async (id: string, body: Record<string, unknown>) => {
+    const row = pending?.find((r) => r.id === id) ?? fired.find((r) => r.id === id) ?? null;
     setPending((prev) => (prev ? prev.filter((r) => r.id !== id) : prev));
     setFired((prev) => prev.filter((r) => r.id !== id));
+    // Done: the row moves to the history at once (the server answers the
+    // same on the next read); a snooze goes back to Upcoming on reload.
+    if (row && !("snoozeMinutes" in body)) setHistory((prev) => [{ ...row, updatedAt: new Date().toISOString() }, ...prev].slice(0, 10));
     await apiFetch(`/api/reminders/${id}`, { method: "PATCH", json: body });
     window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.remindersChanged));
     onMutated();
   };
 
-  const rows = [...fired, ...(pending ?? [])].slice(0, 20);
+  // The old bell's grouping: Fired (went off, not acted on), then PENDING by
+  // remindAt as Overdue / Today / Upcoming.
+  const nowMs = loadedAt;
+  const tomorrowMs = startOfTomorrow(loadedAt);
+  const overdue = (pending ?? []).filter((r) => new Date(r.remindAt).getTime() < nowMs);
+  const today = (pending ?? []).filter((r) => { const t = new Date(r.remindAt).getTime(); return t >= nowMs && t < tomorrowMs; });
+  const upcoming = (pending ?? []).filter((r) => new Date(r.remindAt).getTime() >= tomorrowMs);
+  const groups: Array<{ label: string; rows: Reminder[] }> = [
+    { label: "Fired", rows: fired },
+    { label: "Overdue", rows: overdue },
+    { label: "Today", rows: today },
+    { label: "Upcoming", rows: upcoming },
+  ].filter((g) => g.rows.length > 0);
+  const empty = groups.length === 0 && history.length === 0;
+
+  const renderRow = (r: Reminder) => {
+    const isTask = r.entityType === "BOARD_ITEM" && r.entityId;
+    const Icon = isTask ? CheckSquare : AlarmClock;
+    const body = (
+      <>
+        <Icon className="h-5 w-5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-base text-ink">{r.title}</span>
+          <span className="block truncate text-xs text-ink-2">{fmtDue(r.remindAt)}</span>
+        </span>
+      </>
+    );
+    return (
+      <li key={r.id} className="group/r relative">
+        {isTask ? (
+          <Link href={`/item/${r.entityId}`} onClick={onClose} className="flex h-11 items-center gap-3 rounded-lg px-2 hover:bg-hover">{body}</Link>
+        ) : (
+          <div className="flex h-11 items-center gap-3 rounded-lg px-2 hover:bg-hover">{body}</div>
+        )}
+        <span className="absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 group-hover/r:opacity-100 focus-within:opacity-100">
+          <RowAction label="Snooze 1 hour" icon={Clock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: 60 }); }} />
+          <RowAction label="Snooze until tomorrow 9am" icon={AlarmClock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: tomorrow9amMinutes() }); }} />
+          <RowAction label="Done" icon={Check} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, {}); }} />
+        </span>
+      </li>
+    );
+  };
+
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -333,37 +457,46 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
           <ErrorLine what="reminders" onRetry={() => { void load(); }} />
         ) : pending === null ? (
           <SkeletonRows />
-        ) : rows.length === 0 ? (
+        ) : empty ? (
           <StateLine>You&apos;re all caught up</StateLine>
         ) : (
           <ul className="px-2 py-1">
-            {rows.map((r) => {
-              const isTask = r.entityType === "BOARD_ITEM" && r.entityId;
-              const Icon = isTask ? CheckSquare : AlarmClock;
-              const body = (
-                <>
-                  <Icon className="h-5 w-5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-base text-ink">{r.title}</span>
-                    <span className="block truncate text-xs text-ink-2">{fmtDue(r.remindAt)}</span>
-                  </span>
-                </>
-              );
-              return (
-                <li key={r.id} className="group/r relative">
-                  {isTask ? (
-                    <Link href={`/item/${r.entityId}`} onClick={onClose} className="flex h-11 items-center gap-3 rounded-lg px-2 hover:bg-hover">{body}</Link>
-                  ) : (
-                    <div className="flex h-11 items-center gap-3 rounded-lg px-2 hover:bg-hover">{body}</div>
-                  )}
-                  <span className="absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 group-hover/r:opacity-100 focus-within:opacity-100">
-                    <RowAction label="Snooze 1 hour" icon={Clock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: 60 }); }} />
-                    <RowAction label="Snooze until tomorrow 9am" icon={AlarmClock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: tomorrow9amMinutes() }); }} />
-                    <RowAction label="Done" icon={Check} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, {}); }} />
-                  </span>
-                </li>
-              );
-            })}
+            {groups.map((g) => (
+              <li key={g.label}>
+                <ul aria-label={g.label}>
+                  <GroupLabel>{g.label} <span className="normal-case tracking-normal text-ink-3">{g.rows.length}</span></GroupLabel>
+                  {g.rows.map(renderRow)}
+                </ul>
+              </li>
+            ))}
+            {history.length > 0 ? (
+              <li className={groups.length > 0 ? "mt-1 border-t border-line-soft" : undefined}>
+                <ul aria-label="Recently done">
+                  <GroupLabel>Recently done</GroupLabel>
+                  {history.map((r) => {
+                    const isTask = r.entityType === "BOARD_ITEM" && r.entityId;
+                    const inner = (
+                      <>
+                        <Check className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-base text-ink-2 line-through">{r.title}</span>
+                          <span className="block truncate text-xs text-ink-3">{fmtRelative(r.updatedAt || r.firedAt || r.remindAt)}</span>
+                        </span>
+                      </>
+                    );
+                    return (
+                      <li key={r.id}>
+                        {isTask ? (
+                          <Link href={`/item/${r.entityId}`} onClick={onClose} className="flex h-10 items-center gap-3 rounded-lg px-2 hover:bg-hover">{inner}</Link>
+                        ) : (
+                          <div className="flex h-10 items-center gap-3 rounded-lg px-2">{inner}</div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ) : null}
           </ul>
         )}
       </div>
@@ -385,9 +518,8 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
  * boot count climbing (SSE or the fallback poll). Muted (home.notifications
  * .mutedUntil) silences the alert and the toast; the dot is unaffected.
  */
-function useNewItemAlerts(muted: boolean) {
+function useNewItemAlerts(muted: boolean, desktop: ReturnType<typeof useDesktopNotifications>) {
   const { counts } = useBoot();
-  const desktop = useDesktopNotifications();
   const { toast } = useOsToast();
   const router = useRouter();
   const prev = useRef<number | null>(null);

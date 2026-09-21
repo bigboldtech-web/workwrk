@@ -158,6 +158,10 @@ export interface ShortcutCanonEntry {
 export const SHORTCUTS: readonly ShortcutCanonEntry[] = [
   { id: "search", keys: "mod+k", label: "Search", group: "General", inInputs: true },
   { id: "create-task", keys: "mod+shift+k", label: "Create task", group: "Create" },
+  // Quick capture: a fresh blank note from anywhere, straight into the
+  // editor. It used to be mod+shift+n, which Chrome takes for a new incognito
+  // window before the page ever sees it, so the chord is mod+shift+e here.
+  { id: "quick-note", keys: "mod+shift+e", label: "New note", group: "Create" },
   { id: "ask-ai", keys: "mod+j", label: "Ask AI", group: "General" },
   { id: "toggle-sidebar", keys: "mod+\\", label: "Collapse or expand the sidebar", group: "View" },
   { id: "shortcuts-overlay", keys: "?", label: "Keyboard shortcuts", group: "General" },

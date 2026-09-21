@@ -12,10 +12,19 @@ import {
 import { canWriteToFolder } from "@/lib/sop-access";
 
 /**
- * /api/? no — this is a colocated route handler under the (dashboard)
- * `/sops/[id]/share` segment. It mints (POST) or revokes (DELETE) the
- * public share token for a SOP so the read-only viewer at
- * `/(public)/share/sop/[token]` can resolve it.
+ * POST / DELETE /api/sops/[id]/share — mint or revoke the public share token
+ * for a SOP, so the read-only viewer at `/(public)/share/sop/[token]` can
+ * resolve it.
+ *
+ * WHERE IT LIVES, AND WHEN IT GOT HERE. This path is what the SOP page calls
+ * (`/api/sops/${id}/share`), and the handler answers it. It was moved to /api
+ * in Phase 2 (commit 8c44aa14, `R100` from `(dashboard)/sops/[id]/share`,
+ * which served the PAGE path and so answered nothing the client asked for).
+ * Phase 3 changed no handler code here: this header is the only edit, and it
+ * exists because the earlier version of it claimed the move as Phase 3 work
+ * and claimed a bug fix that had already shipped. Nothing about minting or
+ * revoking a link changed in Phase 3, and nobody should read a release note
+ * saying it did.
  *
  * Guard rails (mirror the SOP edit permission):
  *   · authenticated + org-scoped

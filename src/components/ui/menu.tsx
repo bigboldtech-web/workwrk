@@ -13,7 +13,7 @@
 // (`.workwrk-os`) a global reset strips button border/padding/bg, so always
 // render menus through a portal (MorePortal / Radix) as every call site does.
 
-import { createElement, useState, type ReactNode } from "react";
+import { createElement, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Check, ChevronRight, type LucideIcon } from "lucide-react";
@@ -39,15 +39,26 @@ export function MenuSubmenu({
   width?: number;
 }) {
   const [open, setOpen] = useState(false);
+  // Opens to the right unless there is no room there (a menu hanging off the
+  // bar's right edge, like the avatar menu), in which case it opens to the
+  // left. Measured on open, so it follows the menu wherever it is anchored.
+  const [flip, setFlip] = useState(false);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const show = () => {
+    const rect = hostRef.current?.getBoundingClientRect();
+    if (rect && typeof window !== "undefined") setFlip(rect.right + width + 8 > window.innerWidth);
+    setOpen(true);
+  };
   return (
     <div
+      ref={hostRef}
       className="relative"
-      onMouseEnter={() => setOpen(true)}
+      onMouseEnter={show}
       onMouseLeave={() => setOpen(false)}
     >
-      <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => setOpen((v) => !v)} aria-expanded={open} />
+      <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => (open ? setOpen(false) : show())} aria-expanded={open} />
       {open ? (
-        <div className="absolute start-full top-[-6px] z-[120] ps-1">
+        <div className={cn("absolute top-[-6px] z-[120]", flip ? "end-full pe-1" : "start-full ps-1")}>
           <MenuList style={{ minWidth: width }}>{children}</MenuList>
         </div>
       ) : null}
@@ -205,7 +216,7 @@ export function MenuItem({
                   : destructive
                     ? "text-danger-text"
                     : iconFilled
-                      ? "text-warning-solid"
+                      ? "text-ink"
                       : "text-ink-2"),
             ),
             strokeWidth: 1.5,

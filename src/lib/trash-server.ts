@@ -45,6 +45,13 @@ import {
 export interface TrashRow {
   id: string;
   type: TrashTypeKey | null;
+  /**
+   * The id of the OBJECT, which is not the row id: on the Deleted tab `id` is
+   * the TrashItem's. It is what `trashHref` (src/lib/trash.ts) turns into the
+   * restored row's own URL, so "Restored X" can offer Open instead of leaving
+   * the person to hunt for what just came back.
+   */
+  entityId: string | null;
   /** The raw stored word, when no type claims it. */
   typeLabel: string;
   name: string;
@@ -372,6 +379,7 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
     return {
       id: r.id,
       type: r.type,
+      entityId: r.ownId,
       typeLabel: r.type ? TRASH_TYPE_BY_KEY[r.type].label : r.typeLabel,
       name: r.name,
       location: locationOf(names, r.anchor),

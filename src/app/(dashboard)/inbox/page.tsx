@@ -18,6 +18,7 @@ const DEFAULTS: InboxOptions = {
   sortNewest: true,
   autoClearDays: null,
   defaultTab: "primary",
+  mode: "inline",
 };
 
 export default async function InboxPage() {
@@ -38,6 +39,7 @@ export default async function InboxPage() {
         sortNewest: stored.sortNewest ?? DEFAULTS.sortNewest,
         autoClearDays: stored.autoClearDays ?? DEFAULTS.autoClearDays,
         defaultTab: stored.defaultTab ?? DEFAULTS.defaultTab,
+        mode: stored.mode === "fullscreen" ? "fullscreen" : DEFAULTS.mode,
       }}
       locale={{
         timeZone: prefs?.home?.locale?.timezone ?? null,

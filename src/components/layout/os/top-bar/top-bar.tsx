@@ -3,9 +3,16 @@
 // TopBar (design-system 4.3, spec-shell 2.1): one 48px navy row to the right
 // of the rail. Left: back and forward, then the hierarchy breadcrumb. Centre:
 // the Search field (a button styled as a field; typing happens in the
-// palette). Right: the timer pill while a timer runs, "+" Create, the one
-// bell, Help and the avatar. No solid blue button, no icon row, no calendar,
-// no Ask AI glyph, no workspace switcher (that lives in the sidebar header).
+// palette). Right: the pinned personal-tool strip (Avatar > Personal tools
+// decides which), the calendar peek, the timer pill while a timer runs, "+"
+// Create, Ask AI, the one bell, Help and the avatar. All of them 32px chrome
+// icon buttons: the one blue button on a page stays the page's own primary.
+// No workspace switcher (that lives in the sidebar header).
+//
+// Ask AI and the calendar peek are back on the bar by name: ClickUp keeps a
+// global AI door top-right and a calendar glance one click away, and both
+// were on this bar before the refresh (the founder's loss list). They render
+// on the chrome tokens, never in their old skin.
 //
 // Inside the settings takeover the search field opens the door filter rather
 // than the palette and its placeholder says so.
@@ -13,7 +20,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronLeft, ChevronRight, Menu, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Menu, Plus, Search, Sparkles } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { resolveCrumbTrail, resolveHub } from "@/lib/nav/route-hub";
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
@@ -26,6 +33,8 @@ import { BellPopover } from "../bell-popover";
 import { HelpMenu, usePrivacyDialog } from "../help-menu";
 import { AvatarMenu } from "../avatar-menu";
 import { TimerPill } from "../timer-pill";
+import { CalendarPeek } from "../calendar-peek";
+import { usePersonalTools } from "../use-personal-tools";
 import { useOsShell } from "../shell-context";
 import { useDeclaredBreadcrumb, type BreadcrumbItem } from "./breadcrumb";
 import { useNavHistory } from "./nav-history";
@@ -99,7 +108,9 @@ function Crumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: boolean }) {
   const pathname = usePathname() || "";
-  const { openPalette, hubHref } = useOsShell();
+  const { openPalette, hubHref, toggleSidekick, sidekickOpen, railApps } = useOsShell();
+  const tools = usePersonalTools();
+  const aiVisible = railApps.some((a) => a.key === "ai");
   const { canBack, canForward, back, forward } = useNavHistory();
   const declared = useDeclaredBreadcrumb();
   const [createOpen, setCreateOpen] = useState(false);
@@ -180,6 +191,23 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
       </ChromeIconButton>
 
       <div className="flex flex-1 items-center justify-end gap-1">
+        {/* The pinned tools: one click each, the person's own pick. Hidden
+            under lg so the bar never wraps; the tools stay in "+" there. */}
+        {!inSettings && tools.pinned.length > 0 ? (
+          <div className="flex items-center gap-1 max-lg:hidden" aria-label="Pinned tools">
+            {tools.pinned.map((t) => (
+              <ChromeIconButton
+                key={t.key}
+                label={t.shortcutId ? `${t.label} (${shortcutHint(t.shortcutId)})` : t.label}
+                onClick={() => { void tools.run(t); }}
+              >
+                <t.Icon className="h-5 w-5" strokeWidth={1.5} aria-hidden />
+              </ChromeIconButton>
+            ))}
+            <span aria-hidden className="mx-0.5 h-4 w-px bg-chrome-line" />
+          </div>
+        ) : null}
+        {!inSettings ? <CalendarPeek /> : null}
         <TimerPill />
         <CreateMenu
           open={createOpen}
@@ -190,6 +218,16 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
             </ChromeIconButton>
           }
         />
+        {aiVisible && !inSettings ? (
+          <ChromeIconButton
+            label={`${SHELL_LABELS.askAi} (${shortcutHint("ask-ai")})`}
+            onClick={toggleSidekick}
+            active={sidekickOpen}
+            aria-pressed={sidekickOpen}
+          >
+            <Sparkles className="h-5 w-5" strokeWidth={1.5} aria-hidden />
+          </ChromeIconButton>
+        ) : null}
         <BellPopover />
         <HelpMenu onPrivacy={privacy.open} />
         <AvatarMenu onPrivacy={privacy.open} />

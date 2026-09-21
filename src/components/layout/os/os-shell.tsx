@@ -13,8 +13,10 @@
 // content in place of the hub sidebar and main.
 //
 // Every overlay the frame mounts is listed in spec-shell 2.1 "Side panel /
-// drawer / modal used here"; the More launcher, the pins strip, the legacy
-// item drawer, the My Work panel and the quick-capture chord are gone.
+// drawer / modal used here"; the More launcher and the legacy item drawer are
+// gone. The My Work peek (the "My Work" personal tool), the Top pins strip
+// (Favorite > Top) and the quick-capture chord in ShellShortcuts are back:
+// all three were on the founder's loss list.
 
 import { Children, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -30,11 +32,13 @@ import { TopBar } from "./top-bar/top-bar";
 import { BreadcrumbProvider, useDeclaredBreadcrumb } from "./top-bar/breadcrumb";
 import { useNavHistoryRecorder } from "./top-bar/nav-history";
 import { OfflineStrip } from "./offline-strip";
+import { TopPinsStrip } from "./top-pins-strip";
 import { SkipLinks, MAIN_ID, SIDEBAR_ID } from "./skip-links";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
 import { CreateTaskModal } from "./create-task-modal";
 import { NotepadPanel } from "./notepad-panel";
+import { MyWorkPeek } from "./my-work-peek";
 import { ReminderPopover } from "./reminder-popover";
 import { ReminderTicker } from "./reminder-ticker";
 import { VoiceCapturePopover } from "./voice-capture-popover";
@@ -228,6 +232,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       </div>
       <div className="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-col">
         <OfflineStrip />
+        {!settingsMode ? <TopPinsStrip /> : null}
       </div>
       {settingsMode ? (
         <div className="col-span-3 col-start-2 row-start-3 flex min-h-0 min-w-0">
@@ -294,6 +299,7 @@ export function OsShell({ children, drawer }: { children: React.ReactNode; drawe
           <CreateListModal />
           <CreateSprintModal />
           <NotepadPanel />
+          <MyWorkPeek />
           <ReminderPopover />
           <VoiceCapturePopover />
           <TemplateCenterMount />

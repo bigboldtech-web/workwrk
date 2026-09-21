@@ -52,6 +52,7 @@ if (!url) {
 const SQL_MANIFEST = [
   "2026-09-18-task-detail-phase2.sql",
   "2026-09-18-notification-cleared-at.sql",
+  "2026-09-19-archived-by.sql",
   "2026-09-19-canvas-folder.sql",
   "2026-09-19-template-key.sql",
 ];

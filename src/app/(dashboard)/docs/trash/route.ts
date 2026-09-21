@@ -15,11 +15,15 @@
 //
 // In production the config row still answers first (it runs before routing),
 // so this file is only ever reached when the table has not been loaded.
+//
+// PHASE 3: the target lost its `&tab=archived`. `resolveTrashTab` on the
+// Trash page now reads `?type=doc` and picks the Archived tab itself,
+// because a Doc is archived in place and has no TrashItem row.
 
 import { permanentRedirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  permanentRedirect("/trash?tab=archived&type=doc");
+  permanentRedirect("/trash?type=doc");
 }

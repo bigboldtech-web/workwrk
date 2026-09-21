@@ -17,7 +17,7 @@
 // Only chords with a working destination today are registered; the overlay
 // lists `shortcuts.visible()` so it can never advertise a dead one.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useOsShell } from "./shell-context";
 import { shortcuts, useShortcut, SHORTCUTS } from "@/lib/shortcuts";
@@ -25,6 +25,8 @@ import { isSessionExpired } from "@/lib/session-expiry";
 import { isSettingsRoute } from "@/lib/settings-nav";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
+import { apiFetch } from "@/lib/api-fetch";
+import { useOsToast } from "./toast";
 
 export const SHORTCUTS_OVERLAY_EVENT = "workwrk:shortcuts-overlay";
 
@@ -98,6 +100,32 @@ export function ShellShortcuts() {
     ...canon["create-task"],
     scope: "global",
     run: () => openCreateTask(),
+  });
+  // Cmd+Shift+N: quick capture. Creates a blank note and lands in its editor;
+  // one in flight at a time so a held chord makes one note, not six.
+  const { toast } = useOsToast();
+  const noteInFlight = useRef(false);
+  useShortcut({
+    ...canon["quick-note"],
+    scope: "global",
+    when: () => !inSettings,
+    run: () => {
+      if (noteInFlight.current) return;
+      noteInFlight.current = true;
+      void (async () => {
+        try {
+          const r = await apiFetch<{ doc?: { id?: string } }>("/api/docs", {
+            method: "POST",
+            json: { title: "Untitled note", content: { type: "doc", content: [{ type: "paragraph" }] } },
+          });
+          const id = r.ok ? r.data?.doc?.id : undefined;
+          if (!id) { toast("Couldn't create note. Try again"); return; }
+          router.push(`/docs/${id}`);
+        } finally {
+          noteInFlight.current = false;
+        }
+      })();
+    },
   });
   // Spec 1.8 makes this Members-only. The Guest gate waits for the access
   // step's useViewer().orgRole; today it matches the rail: whoever can open

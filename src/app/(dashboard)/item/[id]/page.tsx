@@ -27,6 +27,7 @@
 // with no Space and the personal board is exactly that.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Eye, EyeOff, Link2, Sparkles } from "lucide-react";
@@ -151,19 +152,41 @@ export default function ItemDetailPage() {
   // So one sentence, true in every one of those states, and the reader is
   // told where to look rather than what happened.
   const missingSentence = "We couldn't find that task";
+  // A link that came through /tasks/<oldId> with no forwarding address is the
+  // one case the reader CAN act on: the row is on the old task list, waiting
+  // for the workspace's migration, and everything already moved is on My
+  // work. Say which system the link is from and point at the page that has
+  // the rest, rather than a bare not-found the founder read as "could not
+  // load".
+  // Two ways to know it is a legacy task: the forwarder's trail on the URL,
+  // and, since the gate learned to look, the server's own answer. The second
+  // is the one that holds for a bare /item/<oldId> pasted with no trail, and
+  // it is the server's word rather than a guess from how the reader arrived.
+  const fromLegacy = searchParams?.get("from") === "legacy-task" || task.missingReason === "legacy_task_not_migrated";
 
-  const gone = (sentence: string) => (
+  const gone = (sentence: string, legacy = false) => (
     <div className="mx-auto w-full max-w-[760px] py-16 text-center">
       <QuietDots />
       <p className="mt-3 text-row text-ink-2">{sentence}</p>
+      {legacy ? (
+        <p className="mx-auto mt-2 max-w-[520px] text-sm text-ink-3">
+          It has not been moved across yet; nothing was deleted. Your workspace admin finishes the move, and every task
+          already moved is on{" "}
+          <Link href="/my-work" className="font-medium text-brand-deep hover:underline">My work</Link>.
+        </p>
+      ) : null}
       <div className="mt-3 flex justify-center">
-        <BackButton fallbackHref={WORK_HOME_HREF} label="Home" />
+        <BackButton fallbackHref={legacy ? "/my-work" : WORK_HOME_HREF} label={legacy ? "My work" : "Home"} />
       </div>
     </div>
   );
 
   if (missing) {
-    return <div className="os-chrome h-full overflow-y-auto bg-app px-6">{gone(missingSentence)}</div>;
+    return (
+      <div className="os-chrome h-full overflow-y-auto bg-app px-6">
+        {fromLegacy ? gone("This link is from the old task system", true) : gone(missingSentence)}
+      </div>
+    );
   }
   if (denied) {
     return <div className="os-chrome h-full overflow-y-auto bg-app px-6">{gone("You no longer have access to this")}</div>;

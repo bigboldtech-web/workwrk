@@ -4,10 +4,11 @@
 // a header with the real presence dot, then Set status…, Mute notifications
 // (a submenu of durations, or "Muted until … · Unmute"), My profile, My
 // settings, Workspace settings (Owner and Admin), the Theme segmented control
-// (and Chrome once CHROME_CONTROL_EXPOSED), Keyboard shortcuts, Help (the
-// Help rows inline) and Log out. No Personal Tools, no pins, no Trash (a Work
-// sidebar row), no Preferences row (My settings › Preferences is one click
-// inside the door, and the Customize panel links there too).
+// (and Chrome once CHROME_CONTROL_EXPOSED), Personal tools (each row runs the
+// tool; its check pins or unpins it on the bar's strip), Keyboard shortcuts,
+// Help (the Help rows inline) and Log out. No Trash (a Work sidebar row), no
+// Preferences row (My settings › Preferences is one click inside the door,
+// and the Customize panel links there too).
 //
 // A Guest never sees the Teams hub, so their My profile row points at
 // /account/profile and the My settings row is absent (one destination, one
@@ -18,7 +19,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
-  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, Settings, SmilePlus,
+  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, Pin, PinOff, Settings, SmilePlus, Wrench,
 } from "lucide-react";
 import { MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -31,6 +32,7 @@ import { openShortcutsOverlay } from "./shell-shortcuts";
 import { useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
+import { usePersonalTools } from "./use-personal-tools";
 
 type Appearance = "LIGHT" | "DARK" | "AUTO";
 type Chrome = "navy" | "light";
@@ -84,6 +86,7 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
   const {
     presenceStatus, openStatusModal, mutedNotifications, mutedUntil, setMutedUntil, prefs, patchPrefs,
   } = useOsShell();
+  const tools = usePersonalTools();
 
   const v = boot.viewer;
   const displayName = v.name || session?.user?.email || "My account";
@@ -188,6 +191,40 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
           </div>
         ) : null}
         <MenuSeparator />
+        {/* Each row runs its tool; the pin at its end decides whether it
+            also sits on the bar. Two controls, two things. */}
+        <MenuSubmenu icon={Wrench} label="Personal tools" width={260}>
+          {tools.tools.map((t) => {
+            const on = tools.pins.includes(t.key);
+            return (
+              <MenuItem
+                key={t.key}
+                icon={t.Icon}
+                label={t.label}
+                onClick={() => { close(); void tools.run(t); }}
+                trailing={
+                  // A span with the button role, not a <button>: the row itself
+                  // is a button and HTML forbids nesting them (it hydrates as
+                  // an error). Enter and Space run it like a button would.
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); void tools.toggle(t.key); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); void tools.toggle(t.key); }
+                    }}
+                    aria-label={on ? `Unpin ${t.label} from the bar` : `Pin ${t.label} to the bar`}
+                    title={on ? "Unpin from the bar" : "Pin to the bar"}
+                    aria-pressed={on}
+                    className={cn("inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-hover", on ? "text-ink" : "text-ink-3")}
+                  >
+                    {on ? <Pin className="h-3.5 w-3.5 fill-current" strokeWidth={1.5} aria-hidden /> : <PinOff className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />}
+                  </span>
+                }
+              />
+            );
+          })}
+        </MenuSubmenu>
         <MenuItem icon={Keyboard} label="Keyboard shortcuts" shortcut="?" onClick={() => { close(); openShortcutsOverlay(); }} />
         <MenuSubmenu icon={CircleHelp} label={SHELL_LABELS.help} width={240}>
           <HelpMenuRows onDone={close} onPrivacy={onPrivacy} />

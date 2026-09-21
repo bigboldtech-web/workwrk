@@ -4,18 +4,20 @@
 //
 // Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/home).
 //
-// FIXED ORDER, TOGGLES ONLY. The page it replaces used react-grid-layout, so
-// every widget was draggable and resizable and the geometry lived in
-// `home.taskCardLayoutV3`. The spec's open question 1 settles it: fixed order,
-// visibility toggles, "simplest to explain and nothing to lose". The two
-// layout keys are retired and read by nothing.
+// TWO COLUMNS, THE ORDER IS YOURS. The page it replaces used
+// react-grid-layout, so every widget was draggable and resizable and the
+// geometry lived in `home.taskCardLayoutV3`. The refresh fixed the order and
+// the founder named the layout control as a loss, so the middle ground: the
+// stored `widgets` list IS the order (Display > Move up / Move down), each
+// widget keeps its column (reading widgets left, glanceable widgets right),
+// and the greeting line has its own switch. The two grid keys stay retired.
 //
 // ONE CALL, ONE REFRESH. Every widget comes from `GET /api/me/home`, so focus,
 // visibility and the item-changed events re-fetch once rather than six times,
 // and a widget whose server-side load failed arrives as `null` and says so
 // with its own Retry. The page itself is never empty.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Bell,
@@ -28,9 +30,11 @@ import {
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { Picker } from "@/components/ui/picker";
 import { apiFetch } from "@/lib/api-fetch";
 import { HOME_WIDGET_KEYS, HOME_WIDGET_LABEL, visibleHomeWidgets, type HomeWidgetKey } from "@/lib/home-prefs";
+import { ArrowDown, ArrowUp } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { reviewStatusChip, type HomePayload, type HomeTaskRow } from "@/lib/home-payload";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { clockIn, inboxRowTime, type LocaleContext } from "@/lib/work-buckets";
@@ -41,12 +45,24 @@ import { WorkTaskRow } from "@/components/home/work-task-row";
 /** Dispatched by the create-task modal when a task is created. */
 const ITEM_CREATED = "workwrk:item-created";
 
+/** Which column each widget lives in. */
+const LEFT_WIDGETS: ReadonlySet<HomeWidgetKey> = new Set(["my-work", "weekly-review", "recent-docs"]);
+
+function greetingFor(now: Date, firstName: string | null | undefined): string {
+  const h = now.getHours();
+  const word = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  return firstName ? `${word}, ${firstName}` : word;
+}
+
 export function HomeClient({
   initialWidgets,
+  initialGreeting = true,
   isGuest,
   widgetsUnknown = false,
 }: {
   initialWidgets: HomeWidgetKey[];
+  /** The greeting line above the widgets (`viewOptions.greeting`, default on). */
+  initialGreeting?: boolean;
   isGuest: boolean;
   /**
    * The server could not read the stored widget choice. `initialWidgets` is
@@ -58,8 +74,10 @@ export function HomeClient({
 }) {
   const { openCreateTask, patchPrefs } = useOsShell();
   const { toast } = useOsToast();
+  const { boot } = useBoot();
 
   const [widgets, setWidgets] = useState<HomeWidgetKey[]>(initialWidgets);
+  const [greeting, setGreeting] = useState(initialGreeting);
   const [data, setData] = useState<HomePayload | null>(null);
   const [failed, setFailed] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
@@ -145,19 +163,52 @@ export function HomeClient({
   const visible = useMemo(() => visibleHomeWidgets(widgets, isGuest), [widgets, isGuest]);
   const shows = useCallback((key: HomeWidgetKey) => visible.includes(key), [visible]);
 
-  const setWidgetVisible = useCallback(
-    async (key: HomeWidgetKey, on: boolean) => {
-      const next = on
-        ? [...HOME_WIDGET_KEYS].filter((k) => k === key || widgets.includes(k))
-        : widgets.filter((k) => k !== key);
+  /** One write for the list: it is both which widgets show and in what order. */
+  const persistWidgets = useCallback(
+    async (next: HomeWidgetKey[], failure: string) => {
+      const previous = widgets;
       setWidgets(next);
       const ok = await patchPrefs({ home: { work: { surface: { home: { viewOptions: { widgets: next } } } } } });
       if (!ok) {
-        setWidgets(widgets);
-        toast("Couldn't save which widgets show");
+        setWidgets(previous);
+        toast(failure);
       }
     },
     [widgets, patchPrefs, toast],
+  );
+
+  const setWidgetVisible = useCallback(
+    (key: HomeWidgetKey, on: boolean) => {
+      // Switched on, a widget lands at the end of its list rather than back
+      // in the product order: the order is the person's now.
+      const next = on ? [...widgets.filter((k) => k !== key), key] : widgets.filter((k) => k !== key);
+      void persistWidgets(next, "Couldn't save which widgets show");
+    },
+    [widgets, persistWidgets],
+  );
+
+  const moveWidget = useCallback(
+    (key: HomeWidgetKey, dir: -1 | 1) => {
+      const idx = widgets.indexOf(key);
+      const to = idx + dir;
+      if (idx < 0 || to < 0 || to >= widgets.length) return;
+      const next = [...widgets];
+      [next[idx], next[to]] = [next[to], next[idx]];
+      void persistWidgets(next, "Couldn't save the order");
+    },
+    [widgets, persistWidgets],
+  );
+
+  const setGreetingOn = useCallback(
+    async (on: boolean) => {
+      setGreeting(on);
+      const ok = await patchPrefs({ home: { work: { surface: { home: { viewOptions: { greeting: on } } } } } });
+      if (!ok) {
+        setGreeting(!on);
+        toast("Couldn't save the greeting setting");
+      }
+    },
+    [patchPrefs, toast],
   );
 
   const resetLayout = useCallback(async () => {
@@ -166,7 +217,8 @@ export function HomeClient({
     // the role is the workspace's, and they are two different questions.
     const all = [...HOME_WIDGET_KEYS];
     setWidgets(all);
-    const ok = await patchPrefs({ home: { work: { surface: { home: { viewOptions: { widgets: all } } } } } });
+    setGreeting(true);
+    const ok = await patchPrefs({ home: { work: { surface: { home: { viewOptions: { widgets: all, greeting: true } } } } } });
     if (!ok) toast("Couldn't reset the layout");
   }, [patchPrefs, toast]);
 
@@ -225,38 +277,55 @@ export function HomeClient({
       {displayOpen ? (
         <div className="relative">
           <div className="absolute end-6 top-1 z-40">
-            <Picker
-              open
+            {/* Right-anchored: the wrapper sits at the right edge with zero
+                width, so a start-aligned panel would grow off-screen and give
+                the page a horizontal scrollbar. */}
+            <DisplayPanel
               onClose={() => setDisplayOpen(false)}
-              ariaLabel="Which widgets show"
-              // Right-anchored: the wrapper sits at the right edge with zero
-              // width, so a start-aligned popover would grow 280px off-screen
-              // and give the page a horizontal scrollbar.
-              align="end"
-              width={280}
-              multi
-              selected={widgets}
-              sections={[
-                {
-                  label: "Widgets",
-                  options: HOME_WIDGET_KEYS
-                    // A Guest is offered the two widgets their access grants,
-                    // never six switches four of which do nothing.
-                    .filter((k) => !isGuest || initialWidgets.includes(k) || k === "my-work" || k === "inbox")
-                    .map((k) => ({ value: k, label: HOME_WIDGET_LABEL[k] })),
-                },
-              ]}
-              onSelect={(value) => void setWidgetVisible(value as HomeWidgetKey, !widgets.includes(value as HomeWidgetKey))}
+              greeting={greeting}
+              onGreeting={(on) => void setGreetingOn(on)}
+              // A Guest is offered the two widgets their access grants, never
+              // six switches four of which do nothing.
+              keys={HOME_WIDGET_KEYS.filter((k) => !isGuest || initialWidgets.includes(k) || k === "my-work" || k === "inbox")}
+              order={widgets}
+              onToggle={setWidgetVisible}
+              onMove={moveWidget}
             />
           </div>
         </div>
       ) : null}
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
+        {/* Body weight on purpose: the page already has its one title
+            ("Home"); a second 22px line under it read as two headings. */}
+        {greeting ? (
+          <p className="mx-auto mb-5 max-w-[1400px] text-base text-ink-2">
+            {greetingFor(now, boot.viewer.firstName)}
+          </p>
+        ) : null}
         <div className="mx-auto grid max-w-[1400px] grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(560px,1fr)_360px]">
-          {/* Left column */}
+          {/* Left column: the reading widgets, in the person's order. */}
           <div className="flex min-w-0 flex-col gap-6">
-            {shows("my-work") ? (
+            {visible.filter((k) => LEFT_WIDGETS.has(k)).map((k) => (
+              <div key={k} className="contents">{renderWidget(k)}</div>
+            ))}
+          </div>
+          {/* Right column: the glanceable widgets, in the person's order. */}
+          <div className="flex min-w-0 flex-col gap-6">
+            {visible.filter((k) => !LEFT_WIDGETS.has(k)).map((k) => (
+              <div key={k} className="contents">{renderWidget(k)}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  /** One widget by key. Order and visibility are decided by the caller. */
+  function renderWidget(key: HomeWidgetKey) {
+    switch (key) {
+      case "my-work":
+        return (
               <MyWorkWidget
                 data={data?.work ?? null}
                 loading={loading}
@@ -268,13 +337,13 @@ export function HomeClient({
                 onComplete={completeTask}
                 onAdd={() => openCreateTask()}
               />
-            ) : null}
-
-            {shows("weekly-review") && (loading || data?.weeklyReview) ? (
+        );
+      case "weekly-review":
+        return loading || data?.weeklyReview ? (
               <WeeklyReviewWidget data={data?.weeklyReview ?? null} loading={loading} />
-            ) : null}
-
-            {shows("recent-docs") ? (
+        ) : null;
+      case "recent-docs":
+        return (
               <HomeWidget
                 title="Recent docs"
                 icon={FileText}
@@ -300,12 +369,9 @@ export function HomeClient({
                   ))}
                 </ul>
               </HomeWidget>
-            ) : null}
-          </div>
-
-          {/* Right column */}
-          <div className="flex min-w-0 flex-col gap-6">
-            {shows("inbox") ? (
+        );
+      case "inbox":
+        return (
               <HomeWidget
                 title="Inbox"
                 icon={InboxIcon}
@@ -334,9 +400,9 @@ export function HomeClient({
                   ))}
                 </ul>
               </HomeWidget>
-            ) : null}
-
-            {shows("reminders") && !isGuest ? (
+        );
+      case "reminders":
+        return isGuest ? null : (
               <HomeWidget
                 title="Reminders"
                 icon={Bell}
@@ -373,9 +439,9 @@ export function HomeClient({
                   ))}
                 </ul>
               </HomeWidget>
-            ) : null}
-
-            {shows("goals") && !isGuest ? (
+        );
+      case "goals":
+        return isGuest ? null : (
               <HomeWidget
                 title="My goals"
                 icon={Trophy}
@@ -404,11 +470,93 @@ export function HomeClient({
                   ))}
                 </ul>
               </HomeWidget>
-            ) : null}
-          </div>
-        </div>
+        );
+      default:
+        return null;
+    }
+  }
+}
+
+/* ─────────────────────────── the Display panel ─────────────────────────── */
+
+/**
+ * Which widgets show, in what order, and whether the greeting line shows.
+ * A switch and Move up / Move down per widget: the same controls the
+ * Customize panel uses for sidebar sections, so one pattern means "order".
+ */
+function DisplayPanel({
+  onClose,
+  greeting,
+  onGreeting,
+  keys,
+  order,
+  onToggle,
+  onMove,
+}: {
+  onClose: () => void;
+  greeting: boolean;
+  onGreeting: (on: boolean) => void;
+  keys: readonly HomeWidgetKey[];
+  order: readonly HomeWidgetKey[];
+  onToggle: (key: HomeWidgetKey, on: boolean) => void;
+  onMove: (key: HomeWidgetKey, dir: -1 | 1) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+  // Shown widgets in their stored order first, then the hidden ones.
+  const rows = [...order.filter((k) => keys.includes(k)), ...keys.filter((k) => !order.includes(k))];
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Display options"
+      className="os-chrome w-[300px] rounded-lg border border-line bg-raised py-1 text-ink shadow-[var(--os-shadow-pop)]"
+    >
+      <div className="px-3 pb-1 pt-2 text-micro uppercase tracking-[0.06em] text-ink-2">Widgets</div>
+      <ul>
+        {rows.map((k) => {
+          const on = order.includes(k);
+          const idx = order.indexOf(k);
+          return (
+            <li key={k} className="flex h-9 items-center gap-1 px-2">
+              <span className="min-w-0 flex-1 truncate ps-1 text-base text-ink">{HOME_WIDGET_LABEL[k]}</span>
+              <button
+                type="button"
+                onClick={() => onMove(k, -1)}
+                disabled={!on || idx <= 0}
+                aria-label={`Move ${HOME_WIDGET_LABEL[k]} up`}
+                title="Move up"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ArrowUp className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onMove(k, 1)}
+                disabled={!on || idx < 0 || idx >= order.length - 1}
+                aria-label={`Move ${HOME_WIDGET_LABEL[k]} down`}
+                title="Move down"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ArrowDown className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+              <Switch checked={on} onChange={(v) => onToggle(k, v)} aria-label={`Show ${HOME_WIDGET_LABEL[k]}`} />
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mx-3 my-1 h-px bg-line" />
+      <div className="flex h-9 items-center gap-3 px-3">
+        <span className="min-w-0 flex-1 truncate text-base text-ink">Greeting</span>
+        <Switch checked={greeting} onChange={onGreeting} aria-label="Show the greeting" />
       </div>
-    </>
+    </div>
   );
 }
 

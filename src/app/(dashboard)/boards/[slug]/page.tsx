@@ -194,7 +194,7 @@ export default async function BoardPage(props: {
         {!canContribute ? (
           <span
             className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-ink-3"
-            title={`You have view access to ${board.name}. Ask a List or Space admin for Can edit to add or change tasks.`}
+            title={`You have view access to ${board.name}: you can switch views and read tasks, but adding views, custom fields, statuses or tasks needs Can edit. Ask a List or Space admin to change your access.`}
           >
             View only
           </span>

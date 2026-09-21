@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
+import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { getSpaceForReader } from "@/lib/space";
 
@@ -66,8 +66,6 @@ export async function POST(req: Request) {
   const set = new Set(current);
   if (parsed.data.on) set.add(parsed.data.tableId);
   else set.delete(parsed.data.tableId);
-  await setUserPreference(u.id, {
-    home: { ...(effective?.home ?? {}), favoriteTableIds: Array.from(set) },
-  });
+  await setUserHomeKey(u.id, "favoriteTableIds", Array.from(set));
   return NextResponse.json({ favoriteTableIds: Array.from(set) });
 }

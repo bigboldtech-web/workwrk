@@ -7,6 +7,10 @@
 //   /docs/trash             308 -> /trash?type=doc      (next.config.ts)
 //   /docs?view=archived     308 -> /trash?type=doc      (next.config.ts)
 //   /agreements?view=trash  308 -> /trash?type=contract (next.config.ts)
+// Those three land with NO ?tab=, and resolveTrashTab picks Archived for
+// them: a Doc, a Canvas and a Contract are archived in place and have no
+// TrashItem row, so the Deleted tab is empty for them by construction and a
+// clean ?type= link would otherwise look like the row was lost.
 // The Tables toolbar's deleted tables and forms land here with ?type=table and
 // ?type=form. Deleted ROWS inside a table are not app Trash and stay in that
 // table's own Data > Trash dialog: a row has no name, no page and no location
@@ -19,7 +23,7 @@
 // see inside is decided per row by the route.
 
 import { gatePage } from "@/lib/access/gate";
-import { tabFromParam, typeFromParam } from "@/lib/trash-view";
+import { resolveTrashTab, typeFromParam } from "@/lib/trash-view";
 import { TrashClient } from "./trash-client";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +38,7 @@ export default async function TrashPage({
 
   return (
     <TrashClient
-      initialTab={tabFromParam(sp.tab)}
+      initialTab={resolveTrashTab(sp.tab, sp.type)}
       initialType={typeFromParam(sp.type)}
       initialQuery={sp.q ?? ""}
       canPurge={viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN"}

@@ -20,6 +20,7 @@
 // Server-only: prisma and the access engine.
 
 import { prisma } from "./prisma";
+import { delegatedWhere } from "./delegated-items";
 import { accessibleIds } from "./access/ids";
 import type { ObjectRole, Viewer } from "./access/types";
 import { atLeast } from "./access/id-sets";
@@ -54,6 +55,8 @@ export interface EverythingQuery extends EverythingScope {
   listIds: string[];
   spaceIds: string[];
   assigneeIds: string[];
+  /** "Assigned by me": only the tasks the viewer created or assigned to somebody else. */
+  assignedByMe?: boolean;
   includeSubtasks: boolean;
   cursor: string | null;
   limit: number;
@@ -241,6 +244,12 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     and.push({ OR: [{ ownerId: { in: query.assigneeIds } }, { assigneeIds: { hasSome: query.assigneeIds } }] });
   }
   if (query.q?.trim()) and.push({ title: { contains: query.q.trim(), mode: "insensitive" } });
+  if (query.assignedByMe) {
+    // The same set /my-work?scope=delegated shows, narrowed further by what
+    // the viewer may read here (allowedBoardIds above).
+    const delegated = await delegatedWhere(orgId, viewer.userId);
+    and.push({ id: delegated.id, NOT: delegated.NOT, OR: delegated.OR });
+  }
   if (and.length) where.AND = and;
 
   const select = {

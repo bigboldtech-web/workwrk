@@ -263,8 +263,15 @@ export default function SopsPage() {
             <OsEmptyView
               context="docs"
               title="No SOPs yet"
-              hint="Document a process once and assign it to teammates."
-              action={{ label: "New SOP", onClick: () => router.push("/sops/new") }}
+              // The same gate the header primary carries, and the same
+              // question POST /api/sops answers. Ungated, this was the one
+              // "New SOP" a viewer who cannot create still saw, and it led to
+              // the chooser's locked page. An empty list a person cannot fill
+              // says so instead of offering a door.
+              hint={canManageSOPs
+                ? "Document a process once and assign it to teammates."
+                : "Procedures your team documents show up here."}
+              action={canManageSOPs ? { label: "New SOP", onClick: () => router.push("/sops/new") } : undefined}
             />
           ) : grouped.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs text-zinc-400">

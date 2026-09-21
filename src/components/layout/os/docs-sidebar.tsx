@@ -1,28 +1,88 @@
 "use client";
 
-// DocsSidebar — the ClickUp-style left panel for the Docs section.
+// DocsSidebar — the Docs hub's secondary sidebar.
 //
-// Header ("Docs" + create button) is rendered by ClickSidebarBody; this is the
-// scrolling body: a fixed nav (All Docs / My Docs / Shared with me / Private /
-// Meeting Notes) that drives the main list via ?view=, then Favorites, Recent
-// Pages and Popular Wikis sections, and one Trash row at the foot.
+// Spec: docs/plans/ui-refresh/sidebar-map.md section 6 (the row table),
+// spec-docs-knowledge.md section 1 (hub sidebar contents) and spec-process.md
+// section 1 (the eight PROCESS rows this file renders by reference).
+//
+// The order is sidebar-map's, top to bottom, and it is the rule every hub
+// obeys: the unlabelled personal block first, then FAVORITES when non-empty,
+// then the labelled sections.
+//
+//   (personal) All docs · Recent · Mine · Shared with me
+//   FAVORITES  starred Docs, Canvases and Files, newest star first
+//   CONTENT    Canvases · Files (+ the drive folder tree) · Notetaker
+//   PROCESS    SOPs · My SOPs · Run history · SOP compliance · Policies ·
+//              Policy compliance · Contracts · Contract templates
+//   DOCS       the doc tree, root docs expandable to sub-docs
+//   [rule]     Trash -> /trash?type=doc
+//
+// WHAT LEFT, and where each destination lives now (nothing is stranded):
+//   "Library" and "Notes" rows  -> /library is retired; its four tabs are
+//                                  All docs, Canvases, Files and the Tables
+//                                  hub. The row hrefs 308 there.
+//   "Private"                   -> Mine, plus the Location filter. The view
+//                                  meant "mine and unanchored".
+//   "Meeting Notes"             -> All docs. It was a title regex, never a
+//                                  view; a meeting note is a template.
+//   "Popular Wikis" stub card   -> deleted. It rendered a promise with no
+//                                  query behind it.
+//   "Star a Doc to see it here" -> deleted. The section simply does not
+//                                  render when it is empty (1.2 rule 2).
+//   the hover "+" on tree rows  -> "New doc inside", inside the row's one
+//                                  "..." menu, where a keyboard and a touch
+//                                  user can also reach it.
+//
+// TWO BADGES, NO NEW POLLER. My SOPs and Policies read `counts.mySops` and
+// `counts.policiesToAck` from the boot payload, which the shell already
+// refreshes over SSE with a 60s fallback (spec-process section 4: "the badge
+// must not add a sixth poller; it rides the existing one").
+//
+// EVERY REMEMBERED PIECE OF THIS SIDEBAR IS A PREFERENCE, not localStorage
+// and not React state that a reload throws away (sidebar-map section 0,
+// "Persistence"). Four keys, all through PATCH /api/preferences:
+//
+//   sidebar.docsTreeOpen      expanded rows of the DOCS tree
+//   sidebar.docsFoldersOpen   expanded drive folders under the Files row
+//   sidebar.docsFilesOpen     whether the Files row itself is open
+//   sidebar.collapsedSections the DOCS section's own collapse, keyed
+//                             "docs.docs" like every other hub's sections
+//
+// The last two were useState, which is why the Files row shut on every load
+// and took the folder ids that WERE persisted down with it. The old
+// localStorage key "workwrk:docs:pages-open" is read ONCE on mount and
+// migrated, so nobody loses the tree they had open.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  FileText, User, Users, Lock, NotebookPen, Star, BookOpen,
-  MoreHorizontal, ChevronRight, Plus, Brush, Folder, Video, ScrollText,
-  ShieldCheck, FileSignature, Workflow, BarChart3, Trash2, type LucideIcon,
+  FileText, User, Users, Clock, Star, Frame, Folder, Mic,
+  MoreHorizontal, ChevronRight, Plus, ScrollText, ListChecks,
+  ShieldCheck, BookOpenCheck, FileSignature, Workflow, BarChart3,
+  LayoutTemplate, Trash2, Link2, type LucideIcon,
 } from "lucide-react";
 import { canAccessTier } from "./access-tiers";
 import { useActiveRowHref } from "./use-active-row";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh } from "./sidebar-refresh";
+import { useOsShell } from "./shell-context";
+import { useBoot } from "./boot-context";
+import {
+  SidebarRow, SidebarGhostRow, SidebarSectionLabel, SidebarEmptyLine,
+  SidebarErrorLine, SidebarSkeletonRows,
+} from "./sidebar-primitives";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { createChildPage } from "@/components/docs/doc-pages-panel";
 import { renderNoteIcon } from "@/components/docs/note-icon";
+import { SopKindChooserHost } from "@/components/sops/sop-kind-chooser";
+import {
+  readDocsTreeOpen, readDocsFoldersOpen, readDocsFilesOpen,
+  isSectionCollapsed, toggleSectionCollapsed, toggleExpanded,
+} from "@/lib/docs-prefs";
+import { useOsToast } from "./toast";
 
 type DocRow = {
   id: string;
@@ -34,227 +94,387 @@ type DocRow = {
   updatedAt: string;
 };
 
-type ViewKey = "all" | "my" | "shared" | "private" | "meeting" | "archived";
+type FolderRow = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  _count?: { files?: number; children?: number };
+};
 
-// The folded apps' rows, in one list per section but resolved as one set, so
-// exactly one lights (spec-shell §1.1). The query rows (?tab=, ?view=) used to
-// pass no active prop at all, which is why /library stayed lit under all four
-// Library tabs. `/clips` is gone from the Clips row: there is no such route.
-//
-// One label, one door (naming-canon 2.5, 2.14; sidebar-map 6): Canvases is
-// /canvas and Files is /files, the same hrefs the palette and the Docs "+"
-// use, and Notetaker is one row (the page never read ?mine=1, so "My Clips"
-// was a second row to the same destination). The Library and Notes rows
-// stay until the Docs unit re-parents /library (Phase 2).
-const CONTENT_ROWS = [
-  { href: "/library", label: "Library", Icon: BookOpen, match: "exact" as const },
-  { href: "/library?tab=notes", label: "Notes", Icon: FileText },
-  { href: "/canvas", label: "Canvases", Icon: Brush },
-  { href: "/files", label: "Files", Icon: Folder },
-  { href: "/notetaker", label: "Notetaker", Icon: Video },
+type FavoriteRow = { kind: string; id: string; name: string; href: string; icon: string | null };
+
+/** The personal block: four views of the same table, all reachable by URL. */
+const VIEW_ROWS: Array<{
+  href: string; label: string; Icon: LucideIcon;
+  match?: "exact" | "prefix";
+  /** Rows 3 and 4 carry a count (sidebar-map section 6). */
+  count?: "mine" | "shared";
+}> = [
+  { href: "/docs", label: "All docs", Icon: FileText, match: "exact" },
+  { href: "/docs?view=recent", label: "Recent", Icon: Clock },
+  { href: "/docs?view=my", label: "Mine", Icon: User, count: "mine" },
+  { href: "/docs?view=shared", label: "Shared with me", Icon: Users, count: "shared" },
 ];
 
-// `managerOnly`: the page behind the row answers 404 (/process-runs) or 403
-// (/sops/compliance) below the manager tier, and a row that lands on a
-// denial is worse than no row (sidebar-map 0, 6 rows 11 and 12).
+/**
+ * CONTENT. "Library" and "Notes" are gone: the page is retired and both rows
+ * pointed at lists the other three rows already carry.
+ */
+const CONTENT_ROWS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
+  { href: "/canvas", label: "Canvases", Icon: Frame },
+  { href: "/files", label: "Files", Icon: Folder },
+  { href: "/notetaker", label: "Notetaker", Icon: Mic },
+];
+
+/**
+ * PROCESS, contributed by the process unit (spec-process section 1), in its
+ * order, with its gates.
+ *
+ * `managerOnly` / `hrAdminOnly` are the legacy tier helper, which is what the
+ * shell still gates on; the access engine stays inert until its own step.
+ * What DID change is who passes:
+ *
+ *   Policies and Policy compliance were both `hrAdminOnly`, so the people who
+ *   have to ACKNOWLEDGE a policy had no route to one at all (knowledge High
+ *   #6). Policies is a Member row, which is also what APP_RULES already says
+ *   (src/lib/access/settings.ts: `policies` audience "member").
+ *
+ *   Run history was `managerOnly` for the same reason its layout 404'd every
+ *   Member: both hid a person's OWN runs from them. The layout gate is gone
+ *   and so is this one; the API scopes the rows per role.
+ */
+//
+// NO `match: "exact"` ON THE THREE ROOT ROWS, and that is the spec, not an
+// omission. spec-process section 1 ("Active row resolution") puts
+// `/sops/[id]`, `/sops/new/*` and `/sops/manage` on SOPs, `/policies/[id]`
+// and `/policies/[id]/compliance` on Policies, and `/agreements/[id]` on
+// Contracts. With "exact" every one of those detail routes lit no row at all.
+// Prefix matching cannot steal a sibling: `resolveActiveRow` takes the
+// LONGEST path, so `/sops/my-sops`, `/sops/compliance` and
+// `/policies/compliance` still win their own rows, and `/agreements` with
+// `?view=templates` still resolves to Contract templates because that row's
+// query is the tie-break on an equal path.
 const PROCESS_ROWS: Array<{
   href: string; label: string; Icon: LucideIcon;
   match?: "exact" | "prefix"; hrAdminOnly?: boolean; managerOnly?: boolean;
+  badge?: "mySops" | "policiesToAck";
 }> = [
-  { href: "/sops", label: "All SOPs", Icon: ScrollText, match: "exact" },
-  { href: "/sops/my-sops", label: "My SOPs", Icon: ScrollText },
-  { href: "/process-runs", label: "Run history", Icon: Workflow, managerOnly: true },
+  { href: "/sops", label: "SOPs", Icon: ScrollText },
+  { href: "/sops/my-sops", label: "My SOPs", Icon: ListChecks, badge: "mySops" },
+  { href: "/process-runs", label: "Run history", Icon: Workflow },
   { href: "/sops/compliance", label: "SOP compliance", Icon: ShieldCheck, managerOnly: true },
-  { href: "/policies", label: "All policies", Icon: ShieldCheck, match: "exact", hrAdminOnly: true },
-  { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, hrAdminOnly: true },
-  { href: "/agreements", label: "All contracts", Icon: FileSignature, match: "exact", hrAdminOnly: true },
-  { href: "/agreements?view=templates", label: "Contract templates", Icon: Folder, hrAdminOnly: true },
-  // ONE Trash row, for every hub, with ONE label (naming-canon 2.12: "there
-  // is no second Trash row in any other hub sidebar"; sidebar-map section 6
-  // row 18 gives the Docs hub exactly `Trash` -> /trash?type=doc).
-  //
-  // This row used to read "Contract trash" and point at the contracts cut,
-  // which left a Docs person reaching for their own deleted docs looking at a
-  // row named after contracts, and left the docs cut with no row at all. The
-  // contracts cut is not lost: /agreements?view=trash still 308s to
-  // /trash?type=contract, and the Trash page's own type filter carries every
-  // type including Contracts. It is not hrAdminOnly either, because Trash is
-  // a Member's page and each row inside it is gated on its own.
-  { href: "/trash?type=doc", label: "Trash", Icon: Trash2 },
+  { href: "/policies", label: "Policies", Icon: BookOpenCheck, badge: "policiesToAck" },
+  { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, managerOnly: true },
+  { href: "/agreements", label: "Contracts", Icon: FileSignature, hrAdminOnly: true },
+  { href: "/agreements?view=templates", label: "Contract templates", Icon: LayoutTemplate, hrAdminOnly: true },
 ];
 
-const DOCS_HUB_ROWS = [...CONTENT_ROWS, ...PROCESS_ROWS];
+// ONE Trash row, for every hub, with ONE label (naming-canon 2.12; sidebar-map
+// section 6 row 18). It is a jump OUT of this hub to the Work hub's one
+// /trash, pre-filtered to Doc; the Type filter there reaches Canvas, File and
+// every other kind. Ungated beyond the app key, because Trash is a Member's
+// page and each row inside it is gated on its own.
+const TRASH_ROW = { href: "/trash?type=doc", label: "Trash", Icon: Trash2 };
+
+const ALL_ROWS = [...VIEW_ROWS, ...CONTENT_ROWS, ...PROCESS_ROWS, TRASH_ROW];
+
+/** The localStorage key the doc tree used before it became a preference. */
+const LEGACY_TREE_LS = "workwrk:docs:pages-open";
+
+/** `sidebar.collapsedSections` is keyed `{hub}.{section}` for every hub. */
+const DOCS_SECTION_KEY = "docs.docs";
 
 export function DocsSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
-  const params = useSearchParams();
   const { query } = useSidebarSearch();
   const { data: session } = useSession();
-  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const isHrAdmin = canAccessTier("hr-admin", accessLevel);
   const isManager = canAccessTier("manager", accessLevel);
-  const activeHubHref = useActiveRowHref(DOCS_HUB_ROWS);
+  const activeHref = useActiveRowHref(ALL_ROWS);
   const noteMenu = useNoteMenu();
+  const { prefs, patchPrefs } = useOsShell();
+  const { counts } = useBoot();
 
   const [docs, setDocs] = useState<DocRow[] | null>(null);
-  const [favIds, setFavIds] = useState<Set<string>>(new Set());
+  const [docsError, setDocsError] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteRow[] | null>(null);
+  const [favError, setFavError] = useState(false);
 
-  const load = useCallback(async () => {
+  // No setState before the first await: an effect that calls this must not
+  // set state synchronously in its body (react-hooks/set-state-in-effect).
+  // The error flag is cleared on the success path instead.
+  const loadDocs = useCallback(async () => {
     try {
-      const [docsRes, prefRes] = await Promise.all([
-        fetch("/api/docs", { cache: "no-store" }),
-        fetch("/api/preferences", { cache: "no-store" }).catch(() => null),
-      ]);
-      if (docsRes.ok) {
-        const d = await docsRes.json();
-        setDocs((d.docs ?? d.data ?? []) as DocRow[]);
-      } else setDocs([]);
-      if (prefRes?.ok) {
-        const p = await prefRes.json();
-        setFavIds(new Set<string>(p.effective?.home?.favoriteDocIds ?? []));
-      }
-    } catch { setDocs([]); }
+      const res = await fetch("/api/docs", { cache: "no-store" });
+      if (!res.ok) { setDocs(null); setDocsError(true); return; }
+      const d = await res.json();
+      setDocs((d.docs ?? d.data ?? []) as DocRow[]);
+      setDocsError(false);
+    } catch { setDocs(null); setDocsError(true); }
   }, []);
+
+  // FAVORITES comes from the ONE aggregate (/api/me/favorites), not from the
+  // doc list plus a preference: the section shows starred Canvases and Files
+  // too, and neither is in /api/docs. The route also prunes ids whose object
+  // is gone and hides ones the viewer can no longer read, which is exactly
+  // "a starred object the viewer lost access to is dropped, not locked".
+  const loadFavorites = useCallback(async () => {
+    try {
+      const res = await fetch("/api/me/favorites", { cache: "no-store" });
+      if (!res.ok) { setFavorites(null); setFavError(true); return; }
+      const d = await res.json();
+      setFavorites((d.favorites ?? []) as FavoriteRow[]);
+      setFavError(false);
+    } catch { setFavorites(null); setFavError(true); }
+  }, []);
+
   useEffect(() => {
-    const run = async () => { await load(); };
+    const run = async () => { await Promise.all([loadDocs(), loadFavorites()]); };
     void run();
-  }, [load]);
+  }, [loadDocs, loadFavorites]);
+
   useEffect(() => {
-    const onChange = () => { void load(); };
-    window.addEventListener("workwrk:docs-changed", onChange);
-    window.addEventListener("workwrk:favs-changed", onChange);
-    // Title renames from the doc editor fire the generic sidebar-refresh
-    // event (sidebar-refresh.ts) — without this the Pages tree kept the old
-    // title until a manual reload.
-    const offRefresh = onSidebarRefresh(onChange);
+    const onDocs = () => { void loadDocs(); };
+    const onFavs = () => { void loadFavorites(); };
+    window.addEventListener("workwrk:docs-changed", onDocs);
+    window.addEventListener("workwrk:favs-changed", onFavs);
+    // Title renames from the doc editor fire the generic sidebar-refresh bus;
+    // without this the tree kept the old title until a manual reload.
+    const offRefresh = onSidebarRefresh(onDocs);
     return () => {
-      window.removeEventListener("workwrk:docs-changed", onChange);
-      window.removeEventListener("workwrk:favs-changed", onChange);
+      window.removeEventListener("workwrk:docs-changed", onDocs);
+      window.removeEventListener("workwrk:favs-changed", onFavs);
       offRefresh();
     };
-  }, [load]);
+  }, [loadDocs, loadFavorites]);
 
-  // The Docs app's sidebar-header "+" dispatches this event — create a
-  // fresh top-level page and jump into it, exactly like the Pages tree's
-  // own "New page" row (?new=1 focuses the title in the editor).
+  // The hub header "+" row "New doc" dispatches this; the DOCS section's own
+  // "+ New doc" ghost row calls the same function, so there is one create.
+  const newDoc = useCallback(async (parentId: string | null) => {
+    const id = await createChildPage(parentId);
+    if (id) router.push(`/docs/${id}?new=1`);
+    void loadDocs();
+  }, [router, loadDocs]);
+
   useEffect(() => {
-    const onNew = () => {
-      void (async () => {
-        const id = await createChildPage(null);
-        if (id) router.push(`/docs/${id}?new=1`);
-        void load();
-      })();
-    };
+    const onNew = () => { void newDoc(null); };
     window.addEventListener("workwrk:os:new:docs-new-page", onNew);
     return () => window.removeEventListener("workwrk:os:new:docs-new-page", onNew);
-  }, [router, load]);
-
-  const activeView: ViewKey | null = pathname === "/docs" ? ((params.get("view") as ViewKey) || "all") : null;
-
-  const { myCount, sharedCount } = useMemo(() => {
-    let mine = 0, shared = 0;
-    for (const d of docs ?? []) {
-      if (d.createdById && d.createdById === meId) mine++;
-      else if (d.createdById && d.createdById !== meId) shared++;
-    }
-    return { myCount: mine, sharedCount: shared };
-  }, [docs, meId]);
+  }, [newDoc]);
 
   const q = query.trim().toLowerCase();
-  const favorites = useMemo(
-    () => (docs ?? []).filter((d) => favIds.has(d.id) && (!q || d.title.toLowerCase().includes(q))),
-    [docs, favIds, q],
+  const matches = useCallback((s: string) => !q || s.toLowerCase().includes(q), [q]);
+
+  // The hub search filters the personal block, FAVORITES, CONTENT and the
+  // DOCS tree, and NEVER the PROCESS rows (spec-process section 1).
+  const viewRows = VIEW_ROWS.filter((r) => matches(r.label));
+  const contentRows = CONTENT_ROWS.filter((r) => matches(r.label));
+  const favRows = useMemo(
+    () => (favorites ?? []).filter((f) => ["doc", "canvas", "file"].includes(f.kind) && matches(f.name)),
+    [favorites, matches],
+  );
+  const processRows = PROCESS_ROWS.filter(
+    (r) => (isHrAdmin || !r.hrAdminOnly) && (isManager || !r.managerOnly),
   );
 
-  const NAV: Array<{ key: ViewKey; label: string; Icon: LucideIcon; badge?: number }> = [
-    { key: "all", label: "All Docs", Icon: FileText },
-    { key: "my", label: "My Docs", Icon: User, badge: myCount },
-    { key: "shared", label: "Shared with me", Icon: Users, badge: sharedCount },
-    { key: "private", label: "Private", Icon: Lock },
-    { key: "meeting", label: "Meeting Notes", Icon: NotebookPen },
-    // No "Archived" row. /docs?view=archived now 308s to the one Trash, so
-    // this row ejected the reader out of the Docs hub into Work: the rail
-    // pill flipped, this sidebar was replaced, and the row could never go
-    // active because its URL no longer resolved to itself. Archived docs are
-    // reached from the Trash row at the foot of this sidebar, on its
-    // Archived tab.
-  ];
+  const badgeFor = (key?: "mySops" | "policiesToAck") =>
+    key === "mySops" ? counts.mySops : key === "policiesToAck" ? counts.policiesToAck : null;
+
+  const favIds = useMemo(
+    () => new Set((favorites ?? []).filter((f) => f.kind === "doc").map((f) => f.id)),
+    [favorites],
+  );
+
+  // Rows 3 and 4 carry a number. Both come from the doc list this sidebar has
+  // already loaded, so neither adds a request: Mine is what the viewer owns,
+  // and Shared with me is the same set /docs?view=shared lists.
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const viewCounts = useMemo(() => {
+    const all = docs ?? [];
+    return {
+      mine: meId ? all.filter((d) => d.createdById === meId).length : 0,
+      shared: all.filter((d) => !!d.entityType && d.createdById !== meId).length,
+    };
+  }, [docs, meId]);
+
+  // Section and row collapse, as preferences rather than as state that a
+  // reload discards (sidebar-map section 0).
+  const docsCollapsed = isSectionCollapsed(prefs.sidebar, DOCS_SECTION_KEY);
+  const toggleDocsSection = useCallback(() => {
+    void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, DOCS_SECTION_KEY) } });
+  }, [prefs.sidebar, patchPrefs]);
+
+  const filesOpenPref = readDocsFilesOpen(prefs.sidebar);
+  const toggleFilesRow = useCallback(() => {
+    void patchPrefs({ sidebar: { docsFilesOpen: !filesOpenPref } });
+  }, [filesOpenPref, patchPrefs]);
+
+  const [favMenu, setFavMenu] = useState<{ row: FavoriteRow; x: number; y: number } | null>(null);
 
   return (
     <div className="flex flex-col">
-      {/* Primary nav */}
-      <ul className="flex flex-col gap-0.5">
-        {NAV.map((n) => {
-          const active = activeView === n.key;
-          return (
-            <li key={n.key}>
-              <Link
-                href={n.key === "all" ? "/docs" : `/docs?view=${n.key}`}
-                className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
-                  active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                }`}
-              >
-                <n.Icon className="w-5 h-5 text-ink-2 shrink-0" strokeWidth={1.5} />
-                <span className="flex-1 truncate">{n.label}</span>
-                {n.badge && n.badge > 0 ? (
-                  <span className="text-xs font-medium text-ink-2 tabular-nums">{n.badge}</span>
-                ) : null}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-
-      {/* Content — Library (all/notes/canvases/files) + Clips, folded into Docs.
-          Every link the Library and Clips sidebars had is kept. */}
-      <SectionLabel>Content</SectionLabel>
-      <ul className="flex flex-col gap-0.5">
-        {CONTENT_ROWS.map((r) => (
-          <HubLink key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHubHref} />
-        ))}
-      </ul>
-
-      {/* Process — SOPs / Policies / Contracts. Every link their sidebars had is kept. */}
-      <SectionLabel>Process</SectionLabel>
-      <ul className="flex flex-col gap-0.5">
-        {PROCESS_ROWS.filter((r) => (isHrAdmin || !r.hrAdminOnly) && (isManager || !r.managerOnly)).map((r) => (
-          <HubLink key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHubHref} />
-        ))}
-      </ul>
-
-      {/* Favorites */}
-      <SectionLabel>Favorites</SectionLabel>
-      {favorites.length === 0 ? (
-        <EmptyCard Icon={Star} text="Star a Doc to see it here" />
-      ) : (
+      {/* Personal block: no section label, per 1.2 rule 2. The list itself
+          does not render when the hub search matches none of its rows: an
+          empty <ul> is 8px of nothing above the next section. */}
+      {viewRows.length > 0 ? (
         <ul className="flex flex-col gap-0.5">
-          {favorites.map((d) => (
-            <DocLink key={`fav-${d.id}`} doc={d} onMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: true })} onOpen={() => router.push(`/docs/${d.id}`)} active={pathname === `/docs/${d.id}`} />
+          {viewRows.map((r) => (
+            <SidebarRow
+              key={r.href}
+              href={r.href}
+              label={r.label}
+              icon={r.Icon}
+              active={r.href === activeHref}
+              count={r.count ? viewCounts[r.count] : null}
+            />
           ))}
         </ul>
-      )}
+      ) : null}
 
-      {/* Pages — the Notion-style nested tree. Sub-pages live under their
-          parent with chevrons; hover a row for "+" (add sub-page) and "…". */}
-      <SectionLabel>Pages</SectionLabel>
-      {docs === null ? (
-        <ul aria-hidden>{["60%","40%","80%"].map((w, i) => (<li key={i} className="flex h-9 items-center gap-3 px-3"><span className="h-5 w-5 shrink-0 rounded-md bg-skeleton os-skeleton-pulse" /><span className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} /></li>))}</ul>
-      ) : (
-        <PagesTree
-          docs={docs}
-          query={q}
-          activePath={pathname}
-          onOpen={(id) => router.push(`/docs/${id}`)}
-          onMenu={(e, d) => noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) })}
-          onChanged={() => void load()}
+      {/* FAVORITES renders only when it has rows. No empty card: an empty
+          section is not a place to advertise a feature. */}
+      {favError ? (
+        <>
+          <SidebarSectionLabel>Favorites</SidebarSectionLabel>
+          <ul><SidebarErrorLine what="favorites" onRetry={() => void loadFavorites()} /></ul>
+        </>
+      ) : favRows.length > 0 ? (
+        <>
+          <SidebarSectionLabel>Favorites</SidebarSectionLabel>
+          <ul className="flex flex-col gap-0.5">
+            {favRows.map((f) => (
+              <SidebarRow
+                key={`${f.kind}-${f.id}`}
+                href={f.href}
+                label={
+                  <span className="inline-flex min-w-0 items-center gap-3">
+                    {f.icon ? (
+                      <span className="grid h-5 w-5 shrink-0 place-items-center text-base [&_svg]:h-4 [&_svg]:w-4 [&_img]:h-5 [&_img]:w-5 [&_img]:rounded-sm [&_img]:object-cover">
+                        {renderNoteIcon(f.icon)}
+                      </span>
+                    ) : null}
+                    <span className="truncate">{f.name || "Untitled"}</span>
+                  </span>
+                }
+                // The object's own emoji takes the glyph slot when it has one,
+                // so a doc does not read as FileText here and as its emoji in
+                // the DOCS tree ten rows below.
+                icon={f.icon ? undefined : f.kind === "canvas" ? Frame : f.kind === "file" ? Folder : FileText}
+                // FAVORITES never takes the active pill. The canonical row for
+                // the object does (the DOCS tree row for a doc, Canvases for a
+                // canvas, Files for a file), and sidebar-map section 0 allows
+                // exactly one active row: a starred doc used to light up twice
+                // and set aria-current="page" on both.
+                trailing={
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFavMenu({ row: f, x: e.clientX, y: e.clientY }); }}
+                    aria-label={`Actions for ${f.name || "Untitled"}`}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                }
+              />
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {/* A section renders only when at least one row inside it does
+          (sidebar-map section 0). A hub search that matches no CONTENT row
+          used to leave the label and its rule sitting over empty space. */}
+      {contentRows.length > 0 ? (
+        <>
+          <SidebarSectionLabel>Content</SidebarSectionLabel>
+          <ul className="flex flex-col gap-0.5">
+            {contentRows.map((r) =>
+              r.href === "/files" ? (
+                <FilesRow
+                  key={r.href}
+                  active={activeHref === "/files"}
+                  open={filesOpenPref}
+                  onToggle={toggleFilesRow}
+                  prefs={prefs}
+                  patchPrefs={patchPrefs}
+                />
+              ) : (
+                <SidebarRow key={r.href} href={r.href} label={r.label} icon={r.Icon} active={r.href === activeHref} />
+              ),
+            )}
+          </ul>
+        </>
+      ) : null}
+
+      {/* PROCESS renders only the rows the viewer passes, and not at all when
+          that is none (a Guest with no assignment sees no label). */}
+      {processRows.length > 0 ? (
+        <>
+          <SidebarSectionLabel>Process</SidebarSectionLabel>
+          <ul className="flex flex-col gap-0.5">
+            {processRows.map((r) => (
+              <SidebarRow
+                key={r.href}
+                href={r.href}
+                label={r.label}
+                icon={r.Icon}
+                active={r.href === activeHref}
+                count={badgeFor(r.badge)}
+              />
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      <SidebarSectionLabel collapsed={docsCollapsed} onToggle={toggleDocsSection}>Docs</SidebarSectionLabel>
+      {!docsCollapsed ? (
+        docsError ? (
+          <ul><SidebarErrorLine what="docs" onRetry={() => void loadDocs()} /></ul>
+        ) : docs === null ? (
+          <ul><SidebarSkeletonRows /></ul>
+        ) : (
+          <DocsTree
+            docs={docs}
+            query={q}
+            activePath={pathname}
+            favIds={favIds}
+            prefs={prefs}
+            patchPrefs={patchPrefs}
+            onOpen={(id) => router.push(`/docs/${id}`)}
+            onMenu={(e, d) => noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) })}
+            onNewDoc={() => void newDoc(null)}
+          />
+        )
+      ) : null}
+
+      {/* The 1px rule above Trash is the section label's own rule; this row
+          sits below every section with its own hairline. */}
+      <div className="mt-6 h-px bg-line" aria-hidden />
+      <ul className="mt-2 flex flex-col gap-0.5">
+        <SidebarRow
+          href={TRASH_ROW.href}
+          label={TRASH_ROW.label}
+          icon={TRASH_ROW.Icon}
+          active={TRASH_ROW.href === activeHref}
         />
-      )}
+      </ul>
 
-      {/* Popular Wikis */}
-      <SectionLabel>Popular Wikis</SectionLabel>
-      <EmptyCard Icon={BookOpen} text="Most viewed and active Wikis appear here" />
+      {/* The Docs "+" row "New SOP" opens this; it lives in the sidebar
+          because the sidebar is what is mounted under every Docs-hub route,
+          so the row works from /docs, /files, /sops and every other one. */}
+      <SopKindChooserHost />
+
+      {favMenu ? (
+        <FavoriteRowMenu
+          row={favMenu.row}
+          x={favMenu.x}
+          y={favMenu.y}
+          onClose={() => setFavMenu(null)}
+          onChanged={() => { void loadFavorites(); }}
+        />
+      ) : null}
 
       {noteMenu.menu && (
         <NoteActionMenu
@@ -262,73 +482,315 @@ export function DocsSidebar() {
           x={noteMenu.menu.x}
           y={noteMenu.menu.y}
           onClose={noteMenu.close}
-          onChanged={() => void load()}
+          onChanged={() => { void loadDocs(); void loadFavorites(); }}
         />
       )}
     </div>
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mb-2 mt-6 flex h-5 items-center gap-2 ps-3 pe-1 first:mt-2">
-      <span className="text-micro uppercase tracking-[0.06em] text-ink-2">{children}</span>
-      <span className="h-px flex-1 bg-line" aria-hidden />
-    </div>
-  );
-}
-
-// A plain nav row for a folded app's link — matches the primary nav styling.
-function HubLink({ href, label, Icon, active }: { href: string; label: string; Icon: LucideIcon; active?: boolean }) {
-  return (
-    <li>
-      <Link
-        href={href}
-        className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
-          active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-        }`}
-      >
-        <Icon className="w-5 h-5 text-ink-2 shrink-0" strokeWidth={1.5} />
-        <span className="flex-1 truncate">{label}</span>
-      </Link>
-    </li>
-  );
-}
-
-function EmptyCard({ text }: { Icon?: LucideIcon; text: string }) {
-  // One quiet 36px line (spec-shell 1.2 rule 6); no card, no illustration.
-  return (
-    <div className="flex h-9 items-center px-3 text-sm text-ink-2">
-      <p className="m-0 truncate">{text}</p>
-    </div>
-  );
-}
-
-const EXPANDED_LS = "workwrk:docs:pages-open";
+/* ─────────────────────────── FAVORITES row menu ────────────────────────── */
 
 /**
- * PagesTree — Notion-style nested page list for the docs sidebar.
- * Rows are h-7, children indent under their parent behind a chevron, and
- * hovering a row reveals "+" (add a sub-page) and "…" (actions). While the
- * sidebar search has a query, matches render as a flat list instead.
+ * The hover "…" on a FAVORITES row: Remove from favorites, Copy link.
+ *
+ * sidebar-map section 6 row 5 names exactly these two. Without them the only
+ * way to unstar from the sidebar was to open the object and find its own star,
+ * which is a trip out of the sidebar to undo something the sidebar shows.
+ *
+ * Portalled at the cursor, like the doc row menu, so an overflow-hidden
+ * sidebar cannot clip it. It writes through the same per-kind favorite routes
+ * the object pages use, so there is one toggle per kind and not two.
  */
-function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
+const FAVORITE_TOGGLE: Record<string, { url: string; idKey: string } | undefined> = {
+  doc: { url: "/api/me/favorites/docs", idKey: "docId" },
+  canvas: { url: "/api/me/favorites/whiteboards", idKey: "whiteboardId" },
+  file: { url: "/api/me/favorites/files", idKey: "fileId" },
+};
+
+function FavoriteRowMenu({
+  row, x, y, onClose, onChanged,
+}: {
+  row: FavoriteRow;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { toast } = useOsToast();
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({
+      x: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)),
+    });
+  }, [x, y]);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) { if (!ref.current?.contains(e.target as Node)) onClose(); }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  async function unstar() {
+    const target = FAVORITE_TOGGLE[row.kind];
+    if (!target) { onClose(); return; }
+    try {
+      const res = await fetch(target.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [target.idKey]: row.id, on: false }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+      onChanged();
+      toast("Removed from favorites");
+    } catch {
+      // A failed write says so; the row stays where it is.
+      toast("Couldn't update favorites");
+    }
+    onClose();
+  }
+
+  function copyLink() {
+    navigator.clipboard?.writeText(`${window.location.origin}${row.href}`).catch(() => {});
+    toast("Link copied");
+    onClose();
+  }
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div ref={ref} className="noteacts" style={{ top: pos.y, left: pos.x }} onClick={(e) => e.stopPropagation()} role="menu">
+      <div className="noteacts__title">{row.name || "Untitled"}</div>
+      <button type="button" className="noteacts__item" onClick={() => void unstar()}>
+        <Star /> Remove from favorites
+      </button>
+      <button type="button" className="noteacts__item" onClick={copyLink}>
+        <Link2 /> Copy link
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+/* ───────────────────────── Files row + drive folder tree ───────────────── */
+
+/**
+ * The Files row with the drive folder tree behind its chevron.
+ *
+ * The tree is the FileFolder hierarchy from GET /api/files/folders, which is
+ * the same tree /files renders in its own left rail. Two things persist, and
+ * both are preferences (sidebar-map section 0), so they survive a reload and
+ * a second device the way a localStorage key never did: whether this row is
+ * open (`sidebar.docsFilesOpen`) and which folders inside it are
+ * (`sidebar.docsFoldersOpen`).
+ *
+ * THE URL OPENS THE ROW TOO. Arriving on /files?folder=<id> expands the row
+ * and the folder's whole ancestor chain, so the active folder is on screen
+ * rather than hidden behind a chevron nobody clicked. That is the same rule
+ * the DOCS tree follows for the open doc, and without it the spec's "active
+ * row = the folder in ?folder=" could never render.
+ *
+ * Folders load ONLY once the row is expanded: a person who never opens it
+ * never pays for the request.
+ */
+function FilesRow({
+  active, open, onToggle, prefs, patchPrefs,
+}: {
+  active: boolean;
+  open: boolean;
+  onToggle: () => void;
+  prefs: ReturnType<typeof useOsShell>["prefs"];
+  patchPrefs: ReturnType<typeof useOsShell>["patchPrefs"];
+}) {
+  const params = useSearchParams();
+  const activeFolder = params?.get("folder") ?? null;
+  const [folders, setFolders] = useState<FolderRow[] | null>(null);
+  const [error, setError] = useState(false);
+  // A folder in the URL opens the row, whatever the stored preference says.
+  const expanded = open || !!activeFolder;
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/files/folders", { cache: "no-store" });
+      if (!res.ok) { setFolders(null); setError(true); return; }
+      // GET /api/files/folders answers with a BARE ARRAY today, while most
+      // routes answer { data }. /files already reads both shapes; so does
+      // this, or the tree renders empty against a route that is working.
+      const d = await res.json();
+      const rows = Array.isArray(d) ? d : (d.data ?? d.folders ?? []);
+      setFolders(rows as FolderRow[]);
+      setError(false);
+    } catch { setFolders(null); setError(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!expanded || folders !== null || error) return;
+    const run = async () => { await load(); };
+    void run();
+  }, [expanded, folders, error, load]);
+  useEffect(() => {
+    const onChange = () => { if (expanded) void load(); };
+    window.addEventListener("workwrk:files-changed", onChange);
+    return () => window.removeEventListener("workwrk:files-changed", onChange);
+  }, [expanded, load]);
+
+  const openIds = readDocsFoldersOpen(prefs.sidebar);
+  const toggleFolder = (id: string) => {
+    void patchPrefs({ sidebar: { docsFoldersOpen: toggleExpanded(openIds, id) } });
+  };
+
+  const childrenOf = useMemo(() => {
+    const map = new Map<string | null, FolderRow[]>();
+    for (const f of folders ?? []) {
+      const arr = map.get(f.parentId) ?? [];
+      arr.push(f);
+      map.set(f.parentId, arr);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    return map;
+  }, [folders]);
+
+  // The ancestors of the folder in `?folder=`, expanded on top of the stored
+  // list so the active row is reachable without a click. Computed, never
+  // written: nobody's stored preference changes because they followed a link.
+  const autoOpen = useMemo(() => {
+    const set = new Set<string>();
+    if (!activeFolder) return set;
+    const byId = new Map((folders ?? []).map((f) => [f.id, f]));
+    let cur = byId.get(activeFolder)?.parentId ?? null;
+    while (cur && !set.has(cur)) {
+      set.add(cur);
+      cur = byId.get(cur)?.parentId ?? null;
+    }
+    return set;
+  }, [activeFolder, folders]);
+
+  const renderLevel = (parentId: string | null, depth: number, seen: Set<string>): React.ReactNode[] =>
+    (childrenOf.get(parentId) ?? []).flatMap((f) => {
+      if (seen.has(f.id) || depth > 6) return [];
+      const next = new Set(seen).add(f.id);
+      const kids = childrenOf.get(f.id) ?? [];
+      const isOpen = openIds.includes(f.id) || autoOpen.has(f.id);
+      const row = (
+        <SidebarRow
+          key={f.id}
+          href={`/files?folder=${encodeURIComponent(f.id)}`}
+          label={f.name}
+          icon={Folder}
+          depth={depth}
+          active={activeFolder === f.id}
+          count={f._count?.files ?? null}
+          trailing={kids.length > 0 ? (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFolder(f.id); }}
+              aria-label={isOpen ? `Collapse ${f.name}` : `Expand ${f.name}`}
+              aria-expanded={isOpen}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <ChevronRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : "rtl:rotate-180"}`} />
+            </button>
+          ) : undefined}
+        />
+      );
+      return isOpen && kids.length > 0 ? [row, ...renderLevel(f.id, depth + 1, next)] : [row];
+    });
+
+  return (
+    <>
+      <SidebarRow
+        href="/files"
+        label="Files"
+        icon={Folder}
+        // With a folder in the URL the FOLDER row is the active one
+        // (sidebar-map section 6 row 7), so the parent steps aside: one pill
+        // per sidebar, never two.
+        active={active && !activeFolder}
+        trailing={
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+            aria-label={expanded ? "Collapse folders" : "Expand folders"}
+            aria-expanded={expanded}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          >
+            <ChevronRight className={`h-4 w-4 transition-transform ${expanded ? "rotate-90" : "rtl:rotate-180"}`} />
+          </button>
+        }
+      />
+      {expanded ? (
+        error ? <SidebarErrorLine what="folders" onRetry={() => void load()} />
+        : folders === null ? <SidebarSkeletonRows rows={2} />
+        : folders.length === 0 ? <SidebarEmptyLine>No folders yet</SidebarEmptyLine>
+        : renderLevel(null, 1, new Set())
+      ) : null}
+    </>
+  );
+}
+
+/* ───────────────────────────── DOCS tree ───────────────────────────────── */
+
+/**
+ * The DOCS section: root docs the viewer can read, expandable to sub-docs.
+ *
+ * ONE hover control, not two. The row used to carry a "+" and a "...", which
+ * sidebar-map section 0 forbids ("there are no three-icon hover clusters") and
+ * which put "add a sub-page" somewhere no keyboard user could reach. It is
+ * "New doc inside" inside the one menu now.
+ *
+ * NO STAR GLYPH ON THE ROW EITHER. A 12px filled star in the count slot read
+ * as a numeral beside the real counts two sections above, and it repeated
+ * what the FAVORITES section directly overhead already says. The menu still
+ * knows: it is what opens on "Remove from favorites".
+ *
+ * Expansion is `sidebar.docsTreeOpen`, with the ancestor chain of the open doc
+ * auto-expanded on top of it, so the current doc is always visible without a
+ * setState in an effect. The old localStorage key is migrated once on mount.
+ */
+function DocsTree({
+  docs, query, activePath, favIds, prefs, patchPrefs, onOpen, onMenu, onNewDoc,
+}: {
   docs: DocRow[];
   query: string;
   activePath: string;
+  favIds: Set<string>;
+  prefs: ReturnType<typeof useOsShell>["prefs"];
+  patchPrefs: ReturnType<typeof useOsShell>["patchPrefs"];
   onOpen: (id: string) => void;
   onMenu: (e: React.MouseEvent, doc: DocRow) => void;
-  onChanged: () => void;
+  onNewDoc: () => void;
 }) {
-  // Explicit user toggles (persisted); anything not overridden falls back to
-  // "auto-open" — the active doc's ancestor chain stays expanded so the
-  // current page is always visible without setState-in-effect.
-  const [overrides, setOverrides] = useState<Map<string, boolean>>(() => {
+  const stored = readDocsTreeOpen(prefs.sidebar);
+  const migrated = useRef(false);
+
+  // One-time migration off localStorage. It runs only when the preference is
+  // still empty, so it can never overwrite a choice made on another device,
+  // and it removes the old key so it cannot fight the preference later.
+  useEffect(() => {
+    if (migrated.current) return;
+    migrated.current = true;
+    if (stored.length > 0) return;
     try {
-      const raw = JSON.parse(localStorage.getItem(EXPANDED_LS) || "{}") as Record<string, boolean>;
-      return new Map(Object.entries(raw));
-    } catch { return new Map(); }
-  });
+      const raw = localStorage.getItem(LEGACY_TREE_LS);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, boolean>;
+      const ids = Object.entries(parsed).filter(([, v]) => v === true).map(([k]) => k);
+      localStorage.removeItem(LEGACY_TREE_LS);
+      if (ids.length > 0) void patchPrefs({ sidebar: { docsTreeOpen: ids } });
+    } catch { /* a malformed key is not worth a broken sidebar */ }
+  }, [stored.length, patchPrefs]);
 
   const { roots, childrenOf, byId } = useMemo(() => {
     const map = new Map<string, DocRow>();
@@ -350,8 +812,6 @@ function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
     return { roots: rootRows, childrenOf: kids, byId: map };
   }, [docs]);
 
-  // Derived: the active doc's ancestor chain (auto-open unless the user
-  // explicitly collapsed a node).
   const activeId = activePath.startsWith("/docs/") ? activePath.slice("/docs/".length) : null;
   const autoOpen = useMemo(() => {
     const set = new Set<string>();
@@ -363,37 +823,27 @@ function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
     return set;
   }, [activeId, byId]);
 
-  const isOpen = useCallback(
-    (id: string) => overrides.get(id) ?? autoOpen.has(id),
-    [overrides, autoOpen],
-  );
-  const toggle = useCallback((id: string) => {
-    setOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(id, !(prev.get(id) ?? autoOpen.has(id)));
-      try { localStorage.setItem(EXPANDED_LS, JSON.stringify(Object.fromEntries(next))); } catch { /* ignore */ }
-      return next;
-    });
-  }, [autoOpen]);
+  const isOpen = (id: string) => stored.includes(id) || autoOpen.has(id);
+  const toggle = (id: string) => {
+    // An auto-open ancestor is not in the stored list, so collapsing it has to
+    // put it there first and then take it out, or the click would look dead.
+    const base = stored.includes(id) || !autoOpen.has(id) ? stored : [...stored, id];
+    void patchPrefs({ sidebar: { docsTreeOpen: toggleExpanded(base, id) } });
+  };
 
-  const addPage = useCallback(async (parentId: string | null) => {
-    const id = await createChildPage(parentId);
-    // ?new=1 -> destination editor focuses the title (see block-doc-editor).
-    if (id) onOpen(`${id}?new=1`);
-    onChanged();
-  }, [onOpen, onChanged]);
-
-  // Search mode: flat matches, no nesting.
+  // Search mode: flat matches, no nesting, so a deep doc is one click away.
   if (query) {
-    const matches = docs.filter((d) => (d.title || "Untitled").toLowerCase().includes(query));
-    return matches.length === 0 ? (
-      <EmptyCard Icon={FileText} text="No pages match" />
+    const found = docs.filter((d) => (d.title || "Untitled").toLowerCase().includes(query));
+    return found.length === 0 ? (
+      <ul><SidebarEmptyLine>No docs match</SidebarEmptyLine></ul>
     ) : (
       <ul className="flex flex-col gap-0.5">
-        {matches.map((d) => (
-          <PageRow key={d.id} doc={d} depth={0} hasChildren={false} open={false}
-            active={activePath === `/docs/${d.id}`} onToggle={() => {}} onOpen={() => onOpen(d.id)}
-            onAdd={() => void addPage(d.id)} onMenu={(e) => onMenu(e, d)} />
+        {found.map((d) => (
+          <DocTreeRow
+            key={d.id} doc={d} depth={0} hasChildren={false} open={false}
+            active={activePath === `/docs/${d.id}`}
+            onToggle={() => {}} onOpen={() => onOpen(d.id)} onMenu={(e) => onMenu(e, d)}
+          />
         ))}
       </ul>
     );
@@ -401,38 +851,31 @@ function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
 
   const renderRows = (rows: DocRow[], depth: number, seen: Set<string>): React.ReactNode[] =>
     rows.flatMap((d) => {
-      if (seen.has(d.id)) return [];
-      const nextSeen = new Set(seen).add(d.id);
+      if (seen.has(d.id) || depth > 6) return [];
+      const next = new Set(seen).add(d.id);
       const kids = childrenOf.get(d.id) ?? [];
       const open = isOpen(d.id);
       const row = (
-        <PageRow key={d.id} doc={d} depth={depth} hasChildren={kids.length > 0} open={open}
-          active={activePath === `/docs/${d.id}`} onToggle={() => toggle(d.id)} onOpen={() => onOpen(d.id)}
-          onAdd={() => void addPage(d.id)} onMenu={(e) => onMenu(e, d)} />
+        <DocTreeRow
+          key={d.id} doc={d} depth={depth} hasChildren={kids.length > 0} open={open}
+          active={activePath === `/docs/${d.id}`}
+          onToggle={() => toggle(d.id)} onOpen={() => onOpen(d.id)} onMenu={(e) => onMenu(e, d)}
+        />
       );
-      return open && kids.length > 0 ? [row, ...renderRows(kids, depth + 1, nextSeen)] : [row];
+      return open && kids.length > 0 ? [row, ...renderRows(kids, depth + 1, next)] : [row];
     });
 
   return (
-    <>
-      {roots.length === 0 ? (
-        <EmptyCard Icon={FileText} text="Create your first page" />
-      ) : (
-        <ul className="flex flex-col gap-0.5">{renderRows(roots, 0, new Set())}</ul>
-      )}
-      <button
-        type="button"
-        onClick={() => void addPage(null)}
-        className="mt-0.5 flex w-full items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
-      >
-        <Plus className="w-3.5 h-3.5 shrink-0" />
-        <span>New page</span>
-      </button>
-    </>
+    <ul className="flex flex-col gap-0.5">
+      {roots.length === 0 ? <SidebarEmptyLine>No docs yet</SidebarEmptyLine> : renderRows(roots, 0, new Set())}
+      <SidebarGhostRow label="New doc" icon={Plus} onClick={onNewDoc} />
+    </ul>
   );
 }
 
-function PageRow({ doc, depth, hasChildren, open, active, onToggle, onOpen, onAdd, onMenu }: {
+function DocTreeRow({
+  doc, depth, hasChildren, open, active, onToggle, onOpen, onMenu,
+}: {
   doc: DocRow;
   depth: number;
   hasChildren: boolean;
@@ -440,82 +883,53 @@ function PageRow({ doc, depth, hasChildren, open, active, onToggle, onOpen, onAd
   active: boolean;
   onToggle: () => void;
   onOpen: () => void;
-  onAdd: () => void;
   onMenu: (e: React.MouseEvent) => void;
 }) {
+  const title = doc.title || "Untitled doc";
   return (
-    <li
-      className={`group/page flex items-center gap-1 h-9 pe-1 rounded-lg cursor-pointer ${
-        active ? "bg-zinc-100 text-zinc-900" : "text-ink hover:bg-hover"
-      }`}
-      style={{ paddingLeft: 4 + depth * 14 }}
-      onClick={onOpen}
-      onContextMenu={onMenu}
-    >
-      <button
-        type="button"
-        aria-label={hasChildren ? (open ? "Collapse" : "Expand") : undefined}
-        tabIndex={hasChildren ? 0 : -1}
-        className={`w-4 h-4 grid place-items-center rounded shrink-0 text-zinc-400 ${
-          hasChildren ? "hover:bg-zinc-200 hover:text-zinc-700" : "pointer-events-none opacity-0"
-        }`}
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      >
-        <ChevronRight className={`w-3 h-3 transition-transform ${open ? "rotate-90" : "rtl:rotate-180"}`} />
-      </button>
-      <span className="w-4 shrink-0 grid place-items-center text-base [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
-        {doc.emoji ? renderNoteIcon(doc.emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
-      </span>
-      <span className="truncate flex-1">{doc.title || "Untitled"}</span>
-      <span className="hidden group-hover/page:flex items-center gap-0.5 shrink-0">
-        <button
-          type="button"
-          className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
-          aria-label="Add page inside"
-          title="Add page inside"
-          onClick={(e) => { e.stopPropagation(); onAdd(); }}
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
-          aria-label="Page actions"
-          onClick={(e) => { e.stopPropagation(); onMenu(e); }}
-        >
-          <MoreHorizontal className="w-3.5 h-3.5" />
-        </button>
-      </span>
-    </li>
-  );
-}
-
-function DocLink({ doc, active, onOpen, onMenu }: {
-  doc: DocRow;
-  active: boolean;
-  onOpen: () => void;
-  onMenu: (e: React.MouseEvent) => void;
-}) {
-  return (
-    <li
-      className={`group/doc flex items-center gap-3 h-9 px-3 rounded-lg cursor-pointer ${
-        active ? "bg-zinc-100 text-zinc-900" : "text-ink hover:bg-hover"
-      }`}
-      onClick={onOpen}
-      onContextMenu={onMenu}
-    >
-      <span className="w-4 shrink-0 grid place-items-center text-base [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
-        {doc.emoji ? renderNoteIcon(doc.emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
-      </span>
-      <span className="truncate flex-1">{doc.title || "Untitled"}</span>
-      <button
-        type="button"
-        className="opacity-0 group-hover/doc:opacity-100 w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 shrink-0"
-        aria-label="Doc actions"
-        onClick={(e) => { e.stopPropagation(); onMenu(e); }}
-      >
-        <MoreHorizontal className="w-3.5 h-3.5" />
-      </button>
-    </li>
+    <SidebarRow
+      href={`/docs/${doc.id}`}
+      // The doc's own emoji takes the 20px glyph slot when it has one, and
+      // FileText stands in when it does not, so every row's label starts on
+      // the same x. It rides in the label rather than in `icon`, which is
+      // typed to a Lucide component.
+      icon={doc.emoji ? undefined : FileText}
+      label={
+        <span className="inline-flex min-w-0 items-center gap-3">
+          {doc.emoji ? (
+            <span className="grid h-5 w-5 shrink-0 place-items-center text-base [&_svg]:h-4 [&_svg]:w-4 [&_img]:h-5 [&_img]:w-5 [&_img]:rounded-sm [&_img]:object-cover">
+              {renderNoteIcon(doc.emoji)}
+            </span>
+          ) : null}
+          <span className="truncate">{title}</span>
+        </span>
+      }
+      depth={depth}
+      active={active}
+      onClick={(e) => { if (!e.defaultPrevented) onOpen(); }}
+      trailing={
+        <span className="flex items-center">
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+              aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
+              aria-expanded={open}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <ChevronRight className={`h-4 w-4 transition-transform ${open ? "rotate-90" : "rtl:rotate-180"}`} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(e); }}
+            aria-label={`Actions for ${title}`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </span>
+      }
+    />
   );
 }

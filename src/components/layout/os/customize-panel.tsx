@@ -4,12 +4,14 @@
 // 560 Radix dialog, header 56 with a title, a one-line description and a
 // close; no footer, because every control writes immediately through
 // PATCH /api/preferences and shows an inline "Saved" tick that fades. Body:
-// three settings rows (Theme, Chrome, Density as segmented controls, each
-// greyed with a lock when the workspace locked the key) and a SIDEBAR
-// SECTIONS card listing the Work hub's sections with a switch and Move up /
-// Move down. No accents, no icons-only, no Home cards tab, no coming-soon
-// "Create section" row. The founder's "Customize Sidebar" footer button is
-// the door.
+// the settings rows (Theme, Accent as eight swatches, Chrome, Density,
+// Sidebar expanded or collapsed, each greyed with a lock when the workspace
+// locked the key), a SIDEBAR SECTIONS card listing the Work hub's sections
+// with a switch and Move up / Move down, and a SIDEBAR ROWS card for the
+// optional Work rows (Activity, Goals, Templates, Trash: `home.cards`, the
+// key the sidebar already reads). Accent, the collapsed sidebar and the row
+// switches were on the founder's loss list; no coming-soon "Create section"
+// row. The founder's "Customize Sidebar" footer button is the door.
 
 import { useEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -19,6 +21,9 @@ import { Switch } from "@/components/ui/switch";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { SETTINGS_PAGES, settingsHrefToday } from "@/lib/settings-registry";
 import { CHROME_CONTROL_EXPOSED } from "@/lib/nav/labels";
+import { readSidebarCards, type SidebarOptionalKey } from "@/lib/home-prefs";
+import { ACCENT_KEYS, ACCENT_LABELS, isAccentKey } from "@/lib/accents";
+import { cn } from "@/lib/utils";
 import type { DensityPref } from "@/lib/preferences";
 import { useLayer, useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
@@ -31,6 +36,22 @@ const SECTIONS: Array<{ key: string; label: string }> = [
   { key: "favorites", label: "Favorites" },
   { key: "spaces", label: "Spaces" },
 ];
+
+/** The optional Work rows `home.cards` switches (Home, My work and Inbox are fixed). */
+const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
+  { key: "activity", label: "Activity" },
+  { key: "goals", label: "Goals" },
+  { key: "templates", label: "Templates" },
+  { key: "trash", label: "Trash" },
+];
+
+/**
+ * The accents (src/lib/accents.ts). Each swatch paints from its own CSS
+ * variable in os.css (`--os-accent-swatch-<key>`), so the panel shows the
+ * colour a key would give regardless of which accent is active, and no hex
+ * lives in this file.
+ */
+const ACCENTS = ACCENT_KEYS.map((key) => ({ key, label: ACCENT_LABELS[key] }));
 
 function SavedTick({ at }: { at: number }) {
   // Shown from the moment of the save until 2s later.
@@ -65,7 +86,7 @@ function Row({ label, hint, children, savedAt }: { label: string; hint?: string;
 }
 
 export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { prefs, patchPrefs, closeTopLayer } = useOsShell();
+  const { prefs, patchPrefs, closeTopLayer, sidebarCollapsed, setSidebarCollapsed } = useOsShell();
   const { toast } = useOsToast();
   const { openSettings } = useSettingsNav();
   const [saved, setSaved] = useState<Record<string, number>>({});
@@ -77,6 +98,8 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
   const appearance: Appearance = prefs.theme.appearance ?? "LIGHT";
   const chrome: Chrome = prefs.theme.chrome ?? "navy";
   const density: DensityPref = prefs.density ?? "comfortable";
+  const accent = isAccentKey(prefs.theme.accent) ? prefs.theme.accent : "workwrk";
+  const cards = readSidebarCards(prefs.home?.cards);
   const order = prefs.sidebar.sectionsOrder?.length ? prefs.sidebar.sectionsOrder : SECTIONS.map((s) => s.key);
   const hidden = new Set(prefs.sidebar.hiddenSections ?? []);
   const visibleOrder = [...order.filter((k) => SECTIONS.some((s) => s.key === k)), ...SECTIONS.map((s) => s.key).filter((k) => !order.includes(k))];
@@ -98,6 +121,11 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
   const toggle = (key: string, on: boolean) => {
     const nextHidden = on ? [...hidden].filter((k) => k !== key) : [...new Set([...hidden, key])];
     void write("sections", { sidebar: { hiddenSections: nextHidden } });
+  };
+
+  const toggleRow = (key: SidebarOptionalKey, on: boolean) => {
+    const next = on ? [...new Set([...cards, key])] : cards.filter((k) => k !== key);
+    void write("rows", { home: { cards: next } });
   };
 
   const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/appearance";
@@ -138,6 +166,34 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   onChange={(v) => { void write("theme", { theme: { appearance: v } }); }}
                 />
               </Row>
+              <Row label="Accent" hint="Buttons, links and selection" savedAt={saved.accent ?? 0}>
+                <div role="radiogroup" aria-label="Accent" className="flex flex-wrap items-center justify-end gap-1.5">
+                  {ACCENTS.map((a) => {
+                    const on = a.key === accent;
+                    const lockedAccent = locked.has("theme.accent");
+                    return (
+                      <button
+                        key={a.key}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        aria-label={a.label}
+                        title={a.label}
+                        disabled={lockedAccent}
+                        onClick={() => { void write("accent", { theme: { accent: a.key } }); }}
+                        className={cn(
+                          "relative inline-flex h-6 w-6 items-center justify-center rounded-full border-2 disabled:opacity-40",
+                          on ? "border-ink" : "border-transparent hover:border-line-strong",
+                        )}
+                      >
+                        {/* A 1px line ring keeps the black swatch visible on the dark dialog. */}
+                        <span className="h-4 w-4 rounded-full ring-1 ring-line-strong" style={{ backgroundColor: `var(--os-accent-swatch-${a.key})` }} aria-hidden />
+                        {on ? <Check className="absolute h-3 w-3 text-ink-inv" strokeWidth={2.5} aria-hidden /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Row>
               {CHROME_CONTROL_EXPOSED ? (
                 <Row label="Chrome" hint="The rail and the bar" savedAt={saved.chrome ?? 0}>
                   <SegmentedControl<Chrome>
@@ -156,6 +212,14 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   locked={locked.has("density")}
                   options={[{ value: "comfortable", label: "Comfortable" }, { value: "cozy", label: "Cozy" }, { value: "compact", label: "Compact" }]}
                   onChange={(v) => { void write("density", { density: v }); }}
+                />
+              </Row>
+              <Row label="Sidebar" hint="Collapsed leaves the rail's icons only" savedAt={saved.sidebar ?? 0}>
+                <SegmentedControl<"expanded" | "collapsed">
+                  label="Sidebar"
+                  value={sidebarCollapsed ? "collapsed" : "expanded"}
+                  options={[{ value: "expanded", label: "Expanded" }, { value: "collapsed", label: "Icons only" }]}
+                  onChange={(v) => { setSidebarCollapsed(v === "collapsed"); setSaved((s) => ({ ...s, sidebar: Date.now() })); }}
                 />
               </Row>
             </div>
@@ -200,6 +264,28 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                 })}
               </ul>
               <p className="mt-2 text-sm text-ink-2">The personal rows at the top are always on.</p>
+            </div>
+
+            <div className="mt-6">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-micro uppercase tracking-[0.06em] text-ink-2">Sidebar rows</span>
+                <span className="h-px flex-1 bg-line" aria-hidden />
+                <SavedTick at={saved.rows ?? 0} />
+              </div>
+              <ul className="rounded-lg border border-line">
+                {ROWS.map((row) => (
+                  <li key={row.key} className="flex h-12 items-center gap-3 border-b border-line-soft px-4 last:border-b-0">
+                    <span className="flex-1 text-base text-ink">{row.label}</span>
+                    <Switch
+                      checked={cards.includes(row.key)}
+                      disabled={locked.has("home.cards")}
+                      onChange={(v) => toggleRow(row.key, v)}
+                      aria-label={`Show ${row.label}`}
+                    />
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-sm text-ink-2">Home, My work and Inbox always show.</p>
             </div>
 
             <div className="mt-6 text-sm">

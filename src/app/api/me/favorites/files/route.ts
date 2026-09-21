@@ -8,7 +8,7 @@ import { withFreshFileUrls } from "@/lib/file-urls";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
+import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { getSpaceForReader } from "@/lib/space";
 
@@ -66,8 +66,6 @@ export async function POST(req: Request) {
   const set = new Set(current);
   if (parsed.data.on) set.add(parsed.data.fileId);
   else set.delete(parsed.data.fileId);
-  await setUserPreference(u.id, {
-    home: { ...(effective?.home ?? {}), favoriteFileIds: Array.from(set) },
-  });
+  await setUserHomeKey(u.id, "favoriteFileIds", Array.from(set));
   return NextResponse.json({ favoriteFileIds: Array.from(set) });
 }

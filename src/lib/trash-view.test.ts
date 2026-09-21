@@ -12,6 +12,8 @@ import {
   retentionDays,
   sortFromParam,
   tabFromParam,
+  resolveTrashTab,
+  ARCHIVE_ONLY_TYPES,
   trashCsv,
   typeFromParam,
   typesFromParam,
@@ -228,5 +230,49 @@ describe("idsFromParam", () => {
     expect(idsFromParam(null)).toEqual([]);
     expect(idsFromParam("")).toEqual([]);
     expect(idsFromParam(undefined)).toEqual([]);
+  });
+});
+
+describe("resolveTrashTab: a clean ?type= link lands on the tab its rows are on", () => {
+  it("honours an explicit ?tab= over everything", () => {
+    expect(resolveTrashTab("deleted", "doc")).toBe("deleted");
+    expect(resolveTrashTab("archived", "sop")).toBe("archived");
+  });
+
+  it("defaults to Deleted with no type, exactly as the page always did", () => {
+    expect(resolveTrashTab(null, null)).toBe("deleted");
+    expect(resolveTrashTab(undefined, "")).toBe("deleted");
+    expect(resolveTrashTab("junk", null)).toBe("deleted");
+  });
+
+  it("sends the archive-only types to the Archived tab", () => {
+    // Doc, Canvas and Contract have no moveToTrash caller: they are archived
+    // in place, so ?type=doc on the Deleted tab is empty by construction.
+    for (const t of ARCHIVE_ONLY_TYPES) expect(resolveTrashTab(null, t)).toBe("archived");
+  });
+
+  it("keeps the types that DO have a deleted source on the Deleted tab", () => {
+    for (const t of ["sop", "policy", "file", "table", "space", "folder", "list", "task"]) {
+      expect(resolveTrashTab(null, t)).toBe("deleted");
+    }
+  });
+
+  it("leaves forms and templates on the Deleted tab, where their future rows will land", () => {
+    // Neither has a delete path yet, but the Tables toolbar's ?type=form link
+    // is specified to send TrashItem rows, which live on Deleted.
+    expect(resolveTrashTab(null, "form")).toBe("deleted");
+    expect(resolveTrashTab(null, "template")).toBe("deleted");
+    expect(ARCHIVE_ONLY_TYPES).not.toContain("form");
+    expect(ARCHIVE_ONLY_TYPES).not.toContain("template");
+  });
+
+  it("falls back to Deleted on a mixed list, so a multi-type link is never narrowed", () => {
+    expect(resolveTrashTab(null, "doc,sop")).toBe("deleted");
+    expect(resolveTrashTab(null, "doc,canvas")).toBe("archived");
+  });
+
+  it("accepts the stored entity word as well as the key, like typeFromParam", () => {
+    expect(resolveTrashTab(null, "whiteboard")).toBe("archived");
+    expect(resolveTrashTab(null, "note")).toBe("archived");
   });
 });

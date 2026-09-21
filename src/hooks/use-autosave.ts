@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shouldFlush } from "@/lib/autosave-guard";
 
 export type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
@@ -69,9 +70,23 @@ export function useAutosave<T>({
 
   const serialized = safeSerialize(snapshot);
 
+  // `flush` is called from the unmount cleanup too, and that cleanup also runs
+  // whenever this callback's identity changes (it is keyed on `localKey`,
+  // which becomes a real key the moment the edited row loads). So flush reads
+  // `enabled` from a ref rather than closing over it: the guard below has to
+  // see the value at flush time, not the value at the time the closure was
+  // built.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
   const flush = useCallback(async () => {
     const currentSerialized = safeSerialize(snapshotRef.current);
-    if (currentSerialized === baselineRef.current) return;
+    // One rule, stated in src/lib/autosave-guard.ts and unit-tested there:
+    // never write while autosave is off, never write before a baseline exists
+    // (the snapshot is then the component's blank initial state, which is how
+    // an empty title could reach the server on a slow first load), and never
+    // write when nothing changed.
+    if (!shouldFlush({ enabled: enabledRef.current, baseline: baselineRef.current, current: currentSerialized })) return;
     if (inFlightRef.current) {
       // Another flush is in flight; mark that we need to redo it
       // afterwards with whatever is current at that time.

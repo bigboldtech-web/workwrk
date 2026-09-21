@@ -37,6 +37,7 @@ export type ContainerAction =
   | "rename"
   | "copy-link"
   | "color"
+  | "pin-top"
   | "share"
   | "features"
   | "statuses"
@@ -74,6 +75,8 @@ export interface ContainerMenuInput {
   role?: ContainerRole;
   /** Already a favorite, so the row reads "Remove from favorites". */
   isFavorite?: boolean;
+  /** Already pinned to the bar's Top strip, so the row reads "Unpin from top". */
+  isTopPinned?: boolean;
   /**
    * Org toggle 8 ("people below Admin may delete"). When false the Delete row
    * is absent and Archive is the destructive floor.
@@ -116,6 +119,7 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
     kind,
     role = "view",
     isFavorite = false,
+    isTopPinned = false,
     canDelete = true,
     isAgent = false,
     editorsCanShare = false,
@@ -127,6 +131,8 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
   const out: ContainerMenuEntry[] = [];
 
   out.push(row("favorite", isFavorite ? "Remove from favorites" : "Add to favorites"));
+  // ClickUp's Favorite > Top: a chip row under the bar (top-pins-strip.tsx).
+  out.push(row("pin-top", isTopPinned ? "Unpin from top" : "Pin to top"));
 
   // A List has no children to create, so its New submenu does not exist.
   if (kind !== "list" && canEdit) out.push(row("new", "New", { submenu: true }));

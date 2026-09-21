@@ -49,7 +49,16 @@ export function CustomFieldsPanel({ entityType, entityId, onSaved, showEmptyStat
     try {
       const res = await fetch(`/api/custom-fields/values?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`);
       if (!res.ok) return;
-      const data = await res.json();
+      // AN UNBUILT ROUTE ANSWERS 200 WITH HTML, so `res.ok` is not enough.
+      // /api/custom-fields/values does not exist: the app's catch-all renders
+      // its not-found PAGE at HTTP 200, and `res.json()` on "<!DOCTYPE html>"
+      // threw an uncaught promise rejection on every surface that mounts this
+      // panel, which includes /sops/[id]?edit=1 and so every SOP create. The
+      // panel's own contract is "no definitions, render nothing", and that is
+      // exactly the right answer for a route that is not there.
+      if (!res.headers.get("content-type")?.includes("application/json")) return;
+      const data = await res.json().catch(() => null);
+      if (!data) return;
       setFields(data.fields ?? []);
     } finally {
       setLoading(false);

@@ -92,3 +92,94 @@ export function sprintDayLabel(
   }
   return { label: "Ended", phase: "ended" };
 }
+
+// ── Burndown and pace verdict over Sprint Points ───────────────────
+//
+// The header strip used to show an "honest Burndown stub". The points are
+// already there (computeSprintPoints), the dates are on the board, and a
+// done task's `updatedAt` is the last write it took (the status write), so
+// a day-by-day burndown needs no new column: work left at the end of day D
+// is the total minus the points of tasks that were done by then. Pure, so
+// the strip can draw it from the live items it already holds.
+
+export interface SprintBurndownPoint {
+  at: Date;
+  ideal: number;
+  actual: number | null;
+}
+
+export type SprintVerdict =
+  | { tone: "neutral"; label: "Planning" }
+  | { tone: "good"; label: "Ahead of pace" }
+  | { tone: "ok"; label: "On track" }
+  | { tone: "bad"; label: "Behind pace" };
+
+function localMidnight(iso: string): Date {
+  const d = parseISO(iso);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function pointsOf(item: Pick<BoardItemRow, "metadata">): number {
+  const raw = item.metadata?.[SPRINT_POINTS_FIELD_KEY];
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** The sprint's calendar days, inclusive of both ends. */
+export function sprintDays(startDate: string, endDate: string): number {
+  const s = localMidnight(startDate).getTime();
+  const e = localMidnight(endDate).getTime();
+  return Math.max(1, Math.round((e - s) / DAY_MS) + 1);
+}
+
+export function sprintBurndown(
+  items: readonly Pick<BoardItemRow, "status" | "metadata" | "updatedAt">[],
+  statuses: readonly StatusOption[],
+  startDate: string,
+  endDate: string,
+  now: Date = new Date(),
+): { points: SprintBurndownPoint[]; total: number; dayOf: number; days: number } {
+  const start = localMidnight(startDate);
+  const days = sprintDays(startDate, endDate);
+  const { total } = computeSprintPoints(items, statuses);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayOf = Math.max(0, Math.min(days, Math.floor((today.getTime() - start.getTime()) / DAY_MS) + 1));
+  const done = items.filter((it) => isDoneStatus(statuses, it.status));
+  const points: SprintBurndownPoint[] = [];
+  for (let i = 0; i < days; i++) {
+    const at = new Date(start.getTime() + i * DAY_MS);
+    const ideal = days === 1 ? 0 : total * (1 - i / (days - 1));
+    let actual: number | null = null;
+    if (i <= dayOf - 1) {
+      const endOfDay = at.getTime() + DAY_MS - 1;
+      const burned = done
+        .filter((it) => new Date(it.updatedAt).getTime() <= endOfDay)
+        .reduce((acc, it) => acc + pointsOf(it), 0);
+      actual = total - burned;
+    }
+    points.push({ at, ideal, actual });
+  }
+  return { points, total, dayOf, days };
+}
+
+/** Where the sprint stands against an even burn, within a 5 percent band. */
+export function sprintVerdict(
+  items: readonly Pick<BoardItemRow, "status" | "metadata">[],
+  statuses: readonly StatusOption[],
+  startDate: string,
+  endDate: string,
+  now: Date = new Date(),
+): SprintVerdict {
+  const { total, done } = computeSprintPoints(items, statuses);
+  const days = sprintDays(startDate, endDate);
+  const start = localMidnight(startDate);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayOf = Math.max(0, Math.min(days, Math.floor((today.getTime() - start.getTime()) / DAY_MS) + 1));
+  if (total === 0 || dayOf === 0) return { tone: "neutral", label: "Planning" };
+  const expected = days === 1 ? 0 : total * (1 - (dayOf - 1) / (days - 1));
+  const delta = expected - (total - done);
+  if (delta > total * 0.05) return { tone: "good", label: "Ahead of pace" };
+  if (delta < -total * 0.05) return { tone: "bad", label: "Behind pace" };
+  return { tone: "ok", label: "On track" };
+}

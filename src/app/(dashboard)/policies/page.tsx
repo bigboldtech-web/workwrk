@@ -27,6 +27,7 @@ import {
   Users,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { useRole } from "@/hooks/use-role";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -93,6 +94,10 @@ export default function PoliciesPage() {
   const v = rowVersion("policies");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
+  // `policies`/`create` is the right POST /api/policies asks for, and
+  // `isManager` is the tier the compliance ledger's own route now enforces.
+  const { isManager, canManagePolicies: canCreatePolicy } = useRole();
+
   async function quickAdd() {
     try {
       const res = await fetch("/api/policies", {
@@ -150,15 +155,24 @@ export default function PoliciesPage() {
 
   return (
     <>
+      {/* Phase 3 opened this page to every Member (the sidebar row and the
+          layout gate both did), but its controls were left ungated, so a
+          Member saw a blue "New policy" whose POST answers 403 and a
+          "Compliance" link to a page that is a manager's. Both now ask the
+          same rights their destinations enforce: spec-process section 1
+          ("/policies | every Member ... no New policy") and section 2's
+          "'New policy' renders only for people who can create". */}
       <OsPageHeader
         title="Policies"
         actions={
           <div className="flex items-center gap-1">
             <Link href="/sops" className="os-head__link"><FileText /> SOPs</Link>
-            <Link href="/policies/compliance" className="os-head__link"><Activity /> Compliance</Link>
+            {isManager ? (
+              <Link href="/policies/compliance" className="os-head__link"><Activity /> Compliance</Link>
+            ) : null}
           </div>
         }
-        primary={{ label: "New policy", onClick: quickAdd }}
+        primary={canCreatePolicy ? { label: "New policy", onClick: quickAdd } : undefined}
       />
 
       <div className="px-6 py-5">
@@ -236,11 +250,27 @@ export default function PoliciesPage() {
           ) : rows === null ? (
             <SkeletonRows />
           ) : stats.total === 0 ? (
+            /* THE EMPTY STATE ASKS THE SAME QUESTION THE HEADER DOES.
+               The header primary is gated on `canCreatePolicy`, but this
+               action was not, so the one viewer guaranteed to see it (a
+               Member, who sees no policies at all because GET /api/policies
+               returns PUBLISHED rows only) got a blue "New policy" whose POST
+               answers 403. An empty list is where a dead create hurts most:
+               it is the only control on the screen.
+
+               The hint changes with it. "Policies ask for acknowledgement..."
+               is advice for the person who will write one; a Member needs to
+               know the list is empty because nothing is published yet, not
+               that they should go and create something they may not. */
             <OsEmptyView
               context="docs"
               title="No policies yet"
-              hint="Policies ask for acknowledgement and version automatically as you edit."
-              action={{ label: "New policy", onClick: quickAdd }}
+              hint={
+                canCreatePolicy
+                  ? "Policies ask for acknowledgement and version automatically as you edit."
+                  : "Published policies show up here, and anything you need to acknowledge comes with a reminder."
+              }
+              action={canCreatePolicy ? { label: "New policy", onClick: quickAdd } : undefined}
             />
           ) : grouped.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs text-zinc-400">

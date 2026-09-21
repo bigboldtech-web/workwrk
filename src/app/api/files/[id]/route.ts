@@ -1,4 +1,5 @@
-// PATCH /api/files/[id]   rename / move / star
+// GET    /api/files/[id]  one file row (the ?file= deep link needs its folder)
+// PATCH  /api/files/[id]  rename / move / star
 // DELETE /api/files/[id]  remove the record (does not delete the blob)
 
 import { NextRequest } from "next/server";
@@ -9,6 +10,39 @@ import {
 } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { getSpaceForReader } from "@/lib/space";
+
+/**
+ * One file row.
+ *
+ * Added for `/files?file=<id>`, which is where a starred file in the Docs
+ * sidebar and a restored file in Trash both point (`TRASH_HREF.file`). The
+ * page needs the file's folder to open the right folder around it, and there
+ * was no way to ask for one file: every other reader took a list. Same
+ * org scope and same Space-visibility rule as PATCH below, so a file the
+ * viewer may not see answers 404 rather than confirming it exists.
+ */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  const orgId = getOrgId(session);
+  const { id } = await params;
+
+  const file = await prisma.fileEntry.findFirst({
+    where: { id, organizationId: orgId },
+  });
+  if (!file) return jsonError("not found", 404);
+
+  if (file.spaceId) {
+    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const space = await getSpaceForReader(file.spaceId, getUserId(session), accessLevel);
+    if (!space) return jsonError("not found", 404);
+  }
+
+  return jsonSuccess(await withFreshFileUrl(file));
+}
 
 export async function PATCH(
   req: NextRequest,

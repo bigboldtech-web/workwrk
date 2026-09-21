@@ -1,10 +1,17 @@
 "use client";
 
 /*
- * NoteActionMenu — a shared right-click / "…" context menu for notes,
- * used by the Notes sidebar and the /docs list. Notion-style actions:
- *   Open · Open in new tab · Rename (inline) · Copy link ·
+ * NoteActionMenu — the shared "…" / right-click menu for a doc row, used by
+ * the Docs sidebar tree, the /docs list, the doc pages panel and the Spaces
+ * tree. Actions:
+ *   Open · Open in new tab · New doc inside · Rename (inline) · Copy link ·
  *   Add/Remove favorite · Duplicate · Move to Trash
+ *
+ * "New doc inside" lives HERE, in the one menu, and not as a second hover
+ * icon on the tree row: sidebar-map section 0 gives every row exactly one
+ * 32px "…" and says "there are no three-icon hover clusters". It is also the
+ * only place a keyboard or touch user could ever reach the action, because a
+ * hover-only "+" is not in the tab order at rest.
  *
  * Rendered into a body portal at fixed cursor coords (clamped to the
  * viewport) so it's never clipped by an overflow-hidden sidebar. All API
@@ -17,10 +24,11 @@
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Copy, Link2, Star, Trash2, ExternalLink, FileText } from "lucide-react";
+import { Pencil, Copy, Link2, Star, Trash2, ExternalLink, FileText, Plus } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
+import { createChildPage } from "@/components/docs/doc-pages-panel";
 
 export type NoteTarget = { id: string; title: string; favorite?: boolean };
 
@@ -55,7 +63,7 @@ export function NoteActionMenu({
   x: number;
   y: number;
   onClose: () => void;
-  onChanged?: (kind: "renamed" | "trashed" | "duplicated" | "favorited") => void;
+  onChanged?: (kind: "renamed" | "trashed" | "duplicated" | "favorited" | "child-created") => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -89,7 +97,7 @@ export function NoteActionMenu({
   }, [onClose]);
 
   async function rename() {
-    const t = name.trim() || "Untitled note";
+    const t = name.trim() || "Untitled doc";
     const res = await fetch(`/api/docs/${target.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -97,6 +105,20 @@ export function NoteActionMenu({
     });
     if (res.ok) { toast("Renamed"); onChanged?.("renamed"); dispatchDocsChanged(); }
     else toast("Couldn't rename");
+    onClose();
+  }
+
+  async function newInside() {
+    const id = await createChildPage(target.id);
+    if (id) {
+      // ?new=1 focuses the title in the editor, the same contract the tree's
+      // old hover "+" used, so nothing about the destination changed.
+      onChanged?.("child-created");
+      dispatchDocsChanged();
+      router.push(`/docs/${id}?new=1`);
+    } else {
+      toast("Couldn't create the doc");
+    }
     onClose();
   }
 
@@ -134,7 +156,7 @@ export function NoteActionMenu({
   }
 
   async function trash() {
-    if (!(await confirm({ title: "Move to Trash", description: `Move "${target.title || "Untitled note"}" to Trash?`, destructive: true, confirmLabel: "Move to Trash" }))) return;
+    if (!(await confirm({ title: "Move to Trash", description: `Move "${target.title || "Untitled doc"}" to Trash?`, destructive: true, confirmLabel: "Move to Trash" }))) return;
     const res = await fetch(`/api/docs/${target.id}`, { method: "DELETE" });
     if (res.ok) { toast("Moved to Trash"); onChanged?.("trashed"); dispatchDocsChanged(); }
     else toast("Couldn't move to Trash");
@@ -153,17 +175,20 @@ export function NoteActionMenu({
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
             onFocus={(e) => e.target.select()}
-            placeholder="Note name…"
+            placeholder="Doc name…"
           />
         </form>
       ) : (
         <>
-          <div className="noteacts__title">{target.title || "Untitled note"}</div>
+          <div className="noteacts__title">{target.title || "Untitled doc"}</div>
           <button type="button" className="noteacts__item" onClick={() => { router.push(`/docs/${target.id}`); onClose(); }}>
             <FileText /> Open
           </button>
           <button type="button" className="noteacts__item" onClick={() => { window.open(`/docs/${target.id}`, "_blank"); onClose(); }}>
             <ExternalLink /> Open in new tab
+          </button>
+          <button type="button" className="noteacts__item" onClick={() => void newInside()}>
+            <Plus /> New doc inside
           </button>
           <button type="button" className="noteacts__item" onClick={() => { setName(target.title); setRenaming(true); }}>
             <Pencil /> Rename

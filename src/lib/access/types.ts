@@ -107,7 +107,16 @@ export type OrgAction =
   | "invite_guest"
   | "create_automation"
   | "archive_channel"
-  | "export_people";
+  | "export_people"
+  /**
+   * The three org-wide process taxonomies and their defaults (spec-process
+   * section 1): creating a TOP-LEVEL SOP folder, writing the policy-category
+   * and contract-folder lists, and writing the acknowledgement defaults
+   * (`PATCH /api/settings { section: "process" }`). Owner, Admin and the
+   * People team; never a Guest, never an Agent. It is an OrgAction, not an
+   * Action: there is no object and no role ladder behind it.
+   */
+  | "manage_process";
 
 export const ORG_ACTIONS: readonly OrgAction[] = [
   "create_space",
@@ -117,6 +126,7 @@ export const ORG_ACTIONS: readonly OrgAction[] = [
   "create_automation",
   "archive_channel",
   "export_people",
+  "manage_process",
 ];
 
 // ── Object references (spec 5.1) ──────────────────────────────────

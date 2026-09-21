@@ -349,3 +349,81 @@ describe("Phase 2 preference keys", () => {
     expect(preferencesPatchSchema.safeParse({}).success).toBe(true);
   });
 });
+
+// ── Phase 3 (Docs hub + Process), change request G22a ─────────────
+//
+// Every key below has a control behind it on a Docs-hub or Process surface.
+// The schema is strict, so a surface whose key is missing here 400s on its
+// first write and the option silently never persists: these rows and the
+// surface that writes them land in the same commit, which is what the spec's
+// "a surface whose key is not in the schema does not ship" means.
+
+describe("Phase 3 preference keys (spec-docs-knowledge G22a)", () => {
+  it("home.docs.columns and home.docs.outline persist the /docs display options", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { docs: { columns: { location: true, viewed: false }, outline: true } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.canvas.viewType is grid or list and nothing else", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { canvas: { viewType: "grid" } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { canvas: { viewType: "list" } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { canvas: { viewType: "board" } } }).success).toBe(false);
+  });
+
+  it("home.files.viewType and home.files.columns persist the /files display options", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { files: { viewType: "list", columns: { size: false, owner: true } } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.notetaker.lastListId takes an id and takes null to clear it", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { notetaker: { lastListId: "list_1" } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { notetaker: { lastListId: null } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { notetaker: { lastListId: 7 } } }).success).toBe(false);
+  });
+
+  it("home.favoriteFileIds was already accepted and stays accepted", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { favoriteFileIds: ["file_1"] } }).success).toBe(true);
+  });
+
+  it("sidebar.docsTreeOpen and sidebar.docsFoldersOpen persist the two Docs trees", () => {
+    const r = preferencesPatchSchema.safeParse({
+      sidebar: { docsTreeOpen: ["doc_1", "doc_2"], docsFoldersOpen: ["ff_1"] },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("sidebar.docsFilesOpen persists the Files row's own expansion", () => {
+    expect(preferencesPatchSchema.safeParse({ sidebar: { docsFilesOpen: true } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ sidebar: { docsFilesOpen: false } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ sidebar: { docsFilesOpen: "open" } }).success).toBe(false);
+  });
+
+  it("sidebar.collapsedSections carries the Docs hub's section keys", () => {
+    expect(preferencesPatchSchema.safeParse({ sidebar: { collapsedSections: ["docs.docs"] } }).success).toBe(true);
+  });
+
+  it("home.ui.sopDetailsCollapsed persists the SOP Details strip (spec-process)", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { ui: { sopDetailsCollapsed: true } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { ui: { sopDetailsCollapsed: "yes" } } }).success).toBe(false);
+  });
+
+  it("a typo inside a new Docs namespace is a 400 that names the key", () => {
+    const r = preferencesPatchSchema.safeParse({ home: { docs: { column: {} } } });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(describeIssues(r.error.issues).map((i) => i.path)).toContain("home.docs.column");
+    }
+  });
+
+  it("every Phase 3 addition is optional, so nothing that was valid became a 400", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { docs: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { canvas: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { files: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { notetaker: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { ui: {} } }).success).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ import { unlink } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { isS3Configured, deleteObject } from "@/lib/s3";
+import { TRASH_ROW_HREF, trashRowHref, type TrashTypeKey } from "@/lib/trash-view";
 
 export type TrashType =
   | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
@@ -42,12 +43,47 @@ export const TRASH_LABEL: Record<TrashType, string> = {
   space: "Space", folder: "Folder", board: "List", item: "Task",
 };
 
-export const TRASH_HREF: Record<TrashType, string> = {
-  note: "/library", sop: "/sops", whiteboard: "/library", table: "/library",
-  file: "/library", policy: "/policies", contract: "/agreements",
-  // Hierarchy rows live in the home sidebar tree; a bare href is informational.
-  space: "/", folder: "/", board: "/", item: "/",
+/**
+ * Where a restored row lives.
+ *
+ * ONE TABLE, read from `src/lib/trash-view.ts`. That module is pure and the
+ * Trash page can import it; this one reaches prisma and it cannot. The two
+ * name the same kinds differently (the restore registry stores "note",
+ * "whiteboard", "board", "item"), so the mapping below is the whole of the
+ * difference and there is no second list of URLs to drift.
+ *
+ * IT TAKES THE ID NOW, AND THAT IS THE POINT. Four of these rows used to be
+ * the bare string "/library": restore a doc, a canvas, a table or a file and
+ * the Trash page offered you a page that listed all of them and did not know
+ * which one you had just brought back. /library is retired in Phase 3
+ * (spec-docs-knowledge section 0). The Trash page wires it: restoring one row
+ * toasts "Restored X" with an Open action that goes straight to it.
+ */
+const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
+  note: "doc",
+  sop: "sop",
+  whiteboard: "canvas",
+  table: "table",
+  file: "file",
+  policy: "policy",
+  contract: "contract",
+  // Hierarchy rows live in the Work sidebar tree; a bare href is
+  // informational, because a Space and a Folder are reached by slug, not id.
+  space: "space",
+  folder: "folder",
+  board: "list",
+  item: "task",
 };
+
+export const TRASH_HREF: Record<TrashType, string> = Object.fromEntries(
+  (Object.entries(REGISTRY_TO_KEY) as Array<[TrashType, TrashTypeKey]>)
+    .map(([t, k]) => [t, TRASH_ROW_HREF[k]]),
+) as Record<TrashType, string>;
+
+/** The href for one restored row. Falls back to the list page when there is no id. */
+export function trashHref(entityType: TrashType, id: string | null | undefined): string {
+  return trashRowHref(REGISTRY_TO_KEY[entityType], id);
+}
 
 type Row = Record<string, unknown>;
 type Snapshot = { row: Row; children?: Record<string, Row[]> };

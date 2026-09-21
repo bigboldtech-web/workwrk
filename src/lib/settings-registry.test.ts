@@ -3,6 +3,8 @@ import { SETTINGS_PAGE_GATES, SETTINGS_PAGE_KEYS } from "./access/settings";
 import {
   SETTINGS_PAGES,
   SETTINGS_PAGE_LIST,
+  SETTINGS_ENTRY_LIST,
+  filterSettingsEntries,
   filterSettingsPages,
   resolveSettingsPage,
   settingsAliasRedirects,
@@ -124,5 +126,62 @@ describe("closeSettings origin rule", () => {
     expect(isSettingsRoute("/settingsx")).toBe(false);
     expect(isSettingsRoute("/accounting")).toBe(false);
     expect(isSettingsRoute("/importsx")).toBe(false);
+  });
+});
+
+// ── Per-setting entries (spec-process section 4) ──────────────────
+
+describe("SETTINGS_ENTRY_LIST", () => {
+  it("registers the three acknowledgement defaults in the workspace door", () => {
+    const ids = SETTINGS_ENTRY_LIST.map((e) => e.id);
+    expect(ids).toContain("process.ack.statement");
+    expect(ids).toContain("process.ack.dueDays");
+    expect(ids).toContain("process.ack.remindDays");
+    for (const e of SETTINGS_ENTRY_LIST) expect(e.door).toBe("workspace");
+  });
+
+  it("points each one at the Organize page's defaults tab, anchored on its own id", () => {
+    for (const e of SETTINGS_ENTRY_LIST) {
+      if (!e.id.startsWith("process.ack.")) continue;
+      expect(e.href).toBe(`/sops/manage?tab=defaults#${e.id}`);
+    }
+  });
+
+  it("carries manage_process as the external gate, because the control is outside the door", () => {
+    for (const e of SETTINGS_ENTRY_LIST) {
+      if (!e.id.startsWith("process.ack.")) continue;
+      expect(e.externalGate).toBe("manage_process");
+    }
+  });
+
+  it("has unique ids", () => {
+    const ids = SETTINGS_ENTRY_LIST.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("filterSettingsEntries", () => {
+  it("lists nothing externally gated until the caller says the viewer holds the verb", () => {
+    expect(filterSettingsEntries("acknowledge")).toEqual([]);
+    expect(filterSettingsEntries("acknowledge", { allowedExternalGates: ["manage_process"] }).length).toBe(3);
+  });
+
+  it("matches on label, description, id and keyword", () => {
+    const opts = { allowedExternalGates: ["manage_process"] as const };
+    expect(filterSettingsEntries("statement", opts).map((e) => e.id)).toEqual(["process.ack.statement"]);
+    expect(filterSettingsEntries("due date", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+    expect(filterSettingsEntries("process.ack.dueDays", opts).map((e) => e.id)).toEqual(["process.ack.dueDays"]);
+    expect(filterSettingsEntries("nudge", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+  });
+
+  it("is case-insensitive and ignores surrounding space", () => {
+    const opts = { allowedExternalGates: ["manage_process"] as const };
+    expect(filterSettingsEntries("  REMINDER ", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+  });
+
+  it("filters by door", () => {
+    const opts = { allowedExternalGates: ["manage_process"] as const };
+    expect(filterSettingsEntries("", { ...opts, door: "me" })).toEqual([]);
+    expect(filterSettingsEntries("", { ...opts, door: "workspace" }).length).toBe(3);
   });
 });

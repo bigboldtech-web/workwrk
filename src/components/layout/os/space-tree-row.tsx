@@ -40,6 +40,7 @@ import {
 import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { ContainerMenuTrigger } from "./container-menu";
+import { CreateInsideTrigger } from "./space-create-popover";
 import type { ContainerRole } from "@/lib/work/container-menu";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { TableMoreTrigger } from "./table-more-menu";
@@ -440,6 +441,7 @@ export function SpaceTreeRow({
           ) : null}
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
+          <CreateInsideTrigger kind="space" spaceId={space.id} role={space.role} onCreated={() => { setExpanded(true); refresh(); }} />
           <ContainerMenuTrigger
             ref={moreRef}
             compact
@@ -639,6 +641,7 @@ function FolderTreeRow({
           ) : null}
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
+          <CreateInsideTrigger kind="folder" spaceId={spaceId} folderId={folder.id} role={folder.role} onCreated={() => { setExpanded(true); onChanged(); }} />
           <ContainerMenuTrigger
             ref={moreRef}
             compact

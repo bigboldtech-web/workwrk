@@ -39,6 +39,7 @@ import {
   TRASH_SORTS,
   TRASH_TYPES,
   isExpiringSoon,
+  trashRowHref,
   type TrashSort,
   type TrashTab,
   type TrashTypeKey,
@@ -57,6 +58,8 @@ interface TrashRow {
   restorable: boolean;
   blockedReason: string | null;
   needsTarget: boolean;
+  /** The object's own id (not the row id), for the restored row's URL. */
+  entityId: string | null;
 }
 
 interface TrashPayload {
@@ -210,6 +213,20 @@ export function TrashClient({
     });
   }, [retarget, lists]);
 
+  // Restoring ONE row offers Open, which is the whole point of TRASH_HREF:
+  // before it took the row's id, a restored doc sent you to a page that listed
+  // every doc and did not know which one had just come back. A bulk restore
+  // gets no Open, because there is no single thing to open.
+  const openAfterRestore = useCallback(
+    (row: TrashRow | undefined) => {
+      if (!row?.type || !row.entityId) return undefined;
+      const href = trashRowHref(row.type, row.entityId);
+      if (href === "/") return undefined;
+      return { label: "Open", onClick: () => router.push(href) };
+    },
+    [router],
+  );
+
   const restoreInto = useCallback(
     async (row: TrashRow, targetBoardId: string) => {
       setRetarget(null);
@@ -223,10 +240,10 @@ export function TrashClient({
         toast("Couldn't restore", { tone: "danger", description: res.ok ? res.data.failed[0].message : res.error });
         return;
       }
-      toast(`Restored ${row.name}`);
+      toast(`Restored ${row.name}`, { action: openAfterRestore(row) });
       void load();
     },
-    [toast, load],
+    [toast, load, openAfterRestore],
   );
 
   const act = useCallback(
@@ -242,13 +259,19 @@ export function TrashClient({
         return;
       }
       const { done, failed: bad } = res.data;
-      if (done > 0) toast(op === "restore" ? `Restored ${label}` : `Deleted ${label} permanently`);
+      const single = ids.length === 1 ? rows.find((r) => r.id === ids[0]) : undefined;
+      if (done > 0) {
+        toast(
+          op === "restore" ? `Restored ${label}` : `Deleted ${label} permanently`,
+          op === "restore" ? { action: openAfterRestore(single) } : undefined,
+        );
+      }
       // A partial batch says what did not land instead of claiming success.
       if (bad.length > 0) toast(`${bad.length} couldn't be ${op === "restore" ? "restored" : "deleted"}`, { tone: "danger", description: bad[0].message });
       setSelected(new Set());
       void load();
     },
-    [toast, load],
+    [toast, load, rows, openAfterRestore],
   );
 
   const emptyTrash = useCallback(async () => {

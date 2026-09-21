@@ -57,6 +57,38 @@ export interface ItemCtx {
   userName: string | null;
 }
 
+/** The named not-found. Mirrored by src/lib/task-load-failure.ts on the client. */
+export type ItemMissingReason = "legacy_task_not_migrated";
+
+/**
+ * A 500 that says WHY, for every item route.
+ *
+ * Before this, a thrown Prisma error left the App Router to answer its own
+ * 500 with an empty body, and the client collapsed that into "Couldn't load
+ * this task". The founder's report of production was those four words and
+ * nothing else. The first line of the error is the thing a person on the box
+ * needs (it is what `pm2 logs` would show), and the two database shapes this
+ * release is known to be able to meet, a column or a table the SQL manifest
+ * did not add, get a hint that names the fix. Nothing secret is in a Prisma
+ * message: it names columns and tables, never data or credentials.
+ */
+export function itemServerError(err: unknown, where: string): NextResponse {
+  const raw = err instanceof Error ? err.message : String(err);
+  // Prisma prefixes a multi-line "Invalid `prisma.x()` invocation" block; the
+  // line that names the problem is the last non-empty one.
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  const detail = (lines[lines.length - 1] ?? raw).slice(0, 300);
+  const schemaBehind = /column .* does not exist|relation .* does not exist|Unknown (argument|field)|does not exist in the current database/i.test(raw);
+  const hint = schemaBehind
+    ? "The database is behind the code: a file in prisma/sql has not been applied to this environment. See prisma/sql/README.md."
+    : null;
+  console.error(`[items] ${where} failed: ${raw}`);
+  return NextResponse.json(
+    { error: "server_error", where, detail, ...(hint ? { hint } : {}) },
+    { status: 500, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 /** Session unwrap, shared by every item route so the 401 body is one body. */
 export async function itemCtx(): Promise<{ error: NextResponse } | ItemCtx> {
   const session = await getServerSession(authOptions);
@@ -186,6 +218,38 @@ export async function gateItem(
 
   // Org scope first, and a cross-org id answers exactly like a missing one.
   if (!item || item.organizationId !== c.organizationId) {
+    // THE ONE NOT-FOUND A READER CAN ACT ON, named. When the id is a row on
+    // the legacy `Task` table in THIS org, with no forwarding address, the
+    // task is real and unreached: scripts/migrate-legacy-tasks.ts has not
+    // run (or failed) on this workspace. Saying "not found" to that reader
+    // sent the founder looking for a deleted task that was sitting in the old
+    // table the whole time. The answer is still 404, still org-scoped, and
+    // only given to the people the old page showed that row to (its assignee,
+    // its creator, an org admin), so nothing becomes discoverable that was
+    // not already. A missing `Task` table degrades to the plain 404.
+    if (!item) {
+      const legacy = await prisma.task
+        .findFirst({
+          where: { id: itemId, organizationId: c.organizationId },
+          select: { assigneeId: true, createdById: true },
+        })
+        .catch(() => null);
+      const mine = legacy && (legacy.assigneeId === c.userId || legacy.createdById === c.userId);
+      if (legacy && (mine || isOrgAdminAccessLevel(c.accessLevel))) {
+        return {
+          error: NextResponse.json(
+            {
+              error: "Not found",
+              reason: "legacy_task_not_migrated" satisfies ItemMissingReason,
+              detail:
+                "This id is a task on the old task list. It has not been moved onto the new task model yet: " +
+                "scripts/migrate-legacy-tasks.ts has not run, or did not finish, for this workspace.",
+            },
+            { status: 404 },
+          ),
+        };
+      }
+    }
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
 

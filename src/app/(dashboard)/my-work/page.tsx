@@ -32,12 +32,18 @@ export default async function MyWorkPage() {
 
   const prefs = await getEffectivePreferences(viewer.userId, viewer.organizationId).catch(() => null);
   const work = (prefs?.home?.work ?? {}) as { savedFilters?: unknown; surface?: Record<string, unknown> };
-  const surface = (work.surface?.["my-work"] ?? {}) as { viewOptions?: { fields?: unknown; done?: unknown } };
+  const surface = (work.surface?.["my-work"] ?? {}) as { viewOptions?: { fields?: unknown; done?: unknown; colWidths?: unknown } };
+  const rawWidths = surface.viewOptions?.colWidths;
+  const colWidths =
+    rawWidths && typeof rawWidths === "object" && !Array.isArray(rawWidths)
+      ? Object.fromEntries(Object.entries(rawWidths as Record<string, unknown>).filter(([, v]) => typeof v === "number" && Number.isFinite(v))) as Record<string, number>
+      : null;
 
   return (
     <MyWorkClient
       savedFilters={readSavedFilters(work.savedFilters)}
       initialFields={Array.isArray(surface.viewOptions?.fields) ? (surface.viewOptions!.fields as string[]) : null}
+      initialColWidths={colWidths}
       initialShowDone={surface.viewOptions?.done === true}
     />
   );

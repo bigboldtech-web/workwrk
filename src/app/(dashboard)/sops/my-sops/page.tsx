@@ -26,6 +26,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useRole } from "@/hooks/use-role";
 
 type Status = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
 type SopType = "WRITTEN" | "RECORDED" | "CHECKLIST";
@@ -66,6 +67,7 @@ export default function MySopsPage() {
   const [ackingId, setAckingId] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const { isManager } = useRole();
 
   const load = useCallback(async () => {
     try {
@@ -122,7 +124,12 @@ export default function MySopsPage() {
         actions={
           <div className="flex items-center gap-1">
             <Link href="/sops" className="os-head__link"><Hash /> SOPs</Link>
-            <Link href="/sops/compliance" className="os-head__link"><Activity /> Compliance</Link>
+            {/* The compliance ledger is a manager's page (spec-process
+                section 1), and its route 404s everyone else now. A Member was
+                being offered the link the sidebar deliberately hides. */}
+            {isManager ? (
+              <Link href="/sops/compliance" className="os-head__link"><Activity /> Compliance</Link>
+            ) : null}
           </div>
         }
       />

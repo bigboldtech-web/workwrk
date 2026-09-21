@@ -54,7 +54,7 @@ export default async function HomePage() {
   const prefs = await readPreferencesTwice(viewer.userId, viewer.organizationId);
   const prefsFailed = prefs === null;
   const surface = (prefs?.home?.work as { surface?: Record<string, unknown> } | undefined)?.surface;
-  const homeSurface = (surface?.home as { viewOptions?: { widgets?: unknown } } | undefined)?.viewOptions;
+  const homeSurface = (surface?.home as { viewOptions?: { widgets?: unknown; greeting?: unknown } } | undefined)?.viewOptions;
 
   // The one-time read of the retired key. `home.taskCardsHidden` was a HIDDEN
   // list over the old grid; three of its names map onto a widget that still
@@ -67,5 +67,12 @@ export default async function HomePage() {
   const isGuest = viewer.orgRole === "GUEST";
   const widgets = visibleHomeWidgets(chosen, isGuest);
 
-  return <HomeClient initialWidgets={widgets} isGuest={isGuest} widgetsUnknown={prefsFailed} />;
+  return (
+    <HomeClient
+      initialWidgets={widgets}
+      initialGreeting={homeSurface?.greeting !== false}
+      isGuest={isGuest}
+      widgetsUnknown={prefsFailed}
+    />
+  );
 }

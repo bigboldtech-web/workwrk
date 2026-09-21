@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MoveFileDialog } from "@/components/files/move-file-dialog";
 import Link from "next/link";
 import {
@@ -73,16 +74,104 @@ type View = { kind: "folder"; id: string | null } | { kind: "starred" } | { kind
 export default function FilesPage() {
   const [folders, setFolders] = useState<ApiFolder[] | null>(null);
   const [files, setFiles] = useState<ApiFile[] | null>(null);
-  const [view, setView] = useState<View>({ kind: "folder", id: null });
   const [searchInput, setSearchInput] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const uploadArmed = useRef(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const promptDialog = usePrompt();
+
+  // WHICH FOLDER IS OPEN IS THE URL, not React state.
+  //
+  // The Docs sidebar's drive tree links every folder to /files?folder=<id> and
+  // highlights the row in `?folder=`, and the restored-file href is
+  // /files?file=<id>. All three were written against a page that kept its
+  // folder in `useState`, so the links navigated here and landed on "All
+  // files" while the sidebar went on claiming the folder was open. The view is
+  // derived from the URL now, so the two halves of the chrome cannot disagree,
+  // and every view on this page is a link somebody can send.
+  //
+  //   /files                 the drive root
+  //   /files?folder=<id>     one folder
+  //   /files?starred=1       the Starred pseudo-folder
+  //   /files?q=<text>        a search across the drive
+  //   /files?file=<id>       the file's own folder, with the file called out
+  const folderParam = searchParams?.get("folder") ?? null;
+  const fileParam = searchParams?.get("file") ?? null;
+  const queryParam = searchParams?.get("q") ?? "";
+  const starredParam = searchParams?.get("starred") === "1";
+
+  /** Navigate to one of the views above, keeping `?file=` out of the way. */
+  const go = useCallback((next: View) => {
+    const qs = new URLSearchParams();
+    if (next.kind === "starred") qs.set("starred", "1");
+    else if (next.kind === "search") qs.set("q", next.q);
+    else if (next.id) qs.set("folder", next.id);
+    const q = qs.toString();
+    router.push(q ? `/files?${q}` : "/files");
+  }, [router]);
+
+  // ?upload=1: the Docs "+" row "Upload file" lands here and opens the file
+  // picker, so the row does what it says rather than dropping a person on a
+  // page to hunt for the button. An ARMED LATCH, like /canvas?new=1: it fires
+  // once and strips the parameter, so a reload or a Back does not reopen the
+  // picker over work in progress. It strips ITS OWN parameter only: a link
+  // like /files?folder=X&upload=1 has to keep the folder it named.
+  useEffect(() => {
+    if (uploadArmed.current) return;
+    if (searchParams?.get("upload") !== "1") return;
+    uploadArmed.current = true;
+    inputRef.current?.click();
+    const rest = new URLSearchParams(searchParams?.toString() ?? "");
+    rest.delete("upload");
+    const q = rest.toString();
+    router.replace(q ? `/files?${q}` : "/files");
+  }, [searchParams, router]);
+
+  // A ?file= link knows the file, not its folder. Resolve one to the other so
+  // the page opens the folder the file is actually in; the row itself is
+  // called out below. The preview drawer the spec asks for is the /files
+  // rebuild's (spec-docs-knowledge section 2); this is the part that makes the
+  // link land on the right place rather than on the drive root.
+  const [fileTarget, setFileTarget] = useState<{ id: string; folderId: string | null } | null>(null);
+  useEffect(() => {
+    if (!fileParam) { return; }
+    if (fileTarget?.id === fileParam) return;
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/files/${encodeURIComponent(fileParam)}`);
+        if (!res.ok) return;
+        const body = await res.json();
+        const row = body.data ?? body;
+        if (live && row?.id) setFileTarget({ id: row.id, folderId: row.folderId ?? null });
+      } catch { /* a file that cannot be read simply is not called out */ }
+    })();
+    return () => { live = false; };
+  }, [fileParam, fileTarget?.id]);
+
+  // `?folder=` wins; with only `?file=` the view is that file's own folder,
+  // which is what makes a starred or restored file land beside its neighbours
+  // instead of at the drive root.
+  const fileFolderId = fileParam && fileTarget?.id === fileParam ? fileTarget.folderId : null;
+  // MEMOISED, and it has to be: `view` is a dependency of the loader, and an
+  // object rebuilt on every render would make the loader a new function every
+  // render, which would make its effect run every render, which would set
+  // state and render again. The identity follows the URL, which is the only
+  // thing that can actually change the view.
+  const view = useMemo<View>(() => (
+    queryParam
+      ? { kind: "search", q: queryParam }
+      : starredParam
+        ? { kind: "starred" }
+        : { kind: "folder", id: folderParam ?? fileFolderId }
+  ), [queryParam, starredParam, folderParam, fileFolderId]);
 
   const loadFolders = useCallback(async () => {
     try {
@@ -274,8 +363,7 @@ export default function FilesPage() {
 
   function submitSearch() {
     const q = searchInput.trim();
-    if (q) setView({ kind: "search", q });
-    else setView({ kind: "folder", id: null });
+    go(q ? { kind: "search", q } : { kind: "folder", id: null });
   }
 
   function renderTree(nodes: Node[], depth: number): React.ReactNode {
@@ -287,7 +375,7 @@ export default function FilesPage() {
             type="button"
             className={`files-tree__row ${isActive ? "is-active" : ""}`}
             style={{ paddingLeft: 12 + depth * 14 }}
-            onClick={() => { setView({ kind: "folder", id: n.id }); setSearchInput(""); }}
+            onClick={() => { go({ kind: "folder", id: n.id }); setSearchInput(""); }}
           >
             <Folder /> <span>{n.name}</span>
             <em>{n._count?.files ?? 0}</em>
@@ -334,10 +422,10 @@ export default function FilesPage() {
 
       <div className="filesp__grid">
         <aside className="filesp__rail">
-          <button type="button" className={`files-tree__row ${view.kind === "folder" && view.id === null ? "is-active" : ""}`} onClick={() => setView({ kind: "folder", id: null })}>
+          <button type="button" className={`files-tree__row ${view.kind === "folder" && view.id === null ? "is-active" : ""}`} onClick={() => go({ kind: "folder", id: null })}>
             <HardDrive /> <span>All files</span>
           </button>
-          <button type="button" className={`files-tree__row ${view.kind === "starred" ? "is-active" : ""}`} onClick={() => setView({ kind: "starred" })}>
+          <button type="button" className={`files-tree__row ${view.kind === "starred" ? "is-active" : ""}`} onClick={() => go({ kind: "starred" })}>
             <Star /> <span>Starred</span>
           </button>
           <div className="files-tree__sep">Folders</div>
@@ -356,11 +444,11 @@ export default function FilesPage() {
         >
           <header className="filesp__pane-head">
             <div className="filesp__crumbs">
-              <button type="button" onClick={() => setView({ kind: "folder", id: null })}>All files</button>
+              <button type="button" onClick={() => go({ kind: "folder", id: null })}>All files</button>
               {breadcrumbs.map((b) => (
                 <span key={b.id}>
                   <ChevronRight />
-                  <button type="button" onClick={() => setView({ kind: "folder", id: b.id })}>{b.name}</button>
+                  <button type="button" onClick={() => go({ kind: "folder", id: b.id })}>{b.name}</button>
                 </span>
               ))}
               {(view.kind === "starred" || view.kind === "search") && (
@@ -384,7 +472,7 @@ export default function FilesPage() {
               <Upload />
               <div>
                 <h3>Nothing here yet</h3>
-                <p>Drag files here, or click Upload. Files live in folders you create — and can be embedded into any doc / page later.</p>
+                <p>Drag files here, or click Upload. Files live in folders you create, and can be embedded into any doc or page later.</p>
               </div>
             </div>
           ) : (
@@ -405,7 +493,11 @@ export default function FilesPage() {
                 const isSumming = summarizing.has(f.id);
                 const isSelected = selected.has(f.id);
                 return (
-                  <article key={f.id} className={`ftile ${f.summary ? "ftile--has-summary" : ""} ${isSelected ? "ftile--selected" : ""}`}>
+                  <article
+                    key={f.id}
+                    id={`file-${f.id}`}
+                    className={`ftile ${f.summary ? "ftile--has-summary" : ""} ${isSelected ? "ftile--selected" : ""} ${f.id === fileParam ? "ftile--called-out" : ""}`}
+                  >
                     <input type="checkbox" className="ftile__check" checked={isSelected} onChange={() => toggleSelected(f.id)} aria-label="Select file" />
                     <a href={f.url} target="_blank" rel="noopener" className="ftile__preview" style={{ background: fileHue(f.mimeType) }}>
                       {isImg ? <img src={f.url} alt={f.name} /> : <Icon />}

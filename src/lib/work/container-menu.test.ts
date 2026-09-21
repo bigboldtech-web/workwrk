@@ -16,19 +16,19 @@ describe("containerMenuRows", () => {
   it("gives a Full access holder every row on each kind", () => {
     const space = actions(containerMenuRows({ kind: "space", role: "full" }));
     expect(space).toEqual([
-      "favorite", "new", "rename", "copy-link", "color", "share", "features",
+      "favorite", "pin-top", "new", "rename", "copy-link", "color", "share", "features",
       "templates", "automations", "mute", "hide", "move", "duplicate", "archive", "delete",
     ]);
 
     const folder = actions(containerMenuRows({ kind: "folder", role: "full" }));
     expect(folder).toEqual([
-      "favorite", "new", "rename", "copy-link", "color", "share", "about",
+      "favorite", "pin-top", "new", "rename", "copy-link", "color", "share", "about",
       "templates", "automations", "move", "duplicate", "archive", "delete",
     ]);
 
     const list = actions(containerMenuRows({ kind: "list", role: "full" }));
     expect(list).toEqual([
-      "favorite", "rename", "copy-link", "color", "share", "statuses", "fields",
+      "favorite", "pin-top", "rename", "copy-link", "color", "share", "statuses", "fields",
       "default-type", "about", "templates", "automations", "mute",
       "move", "duplicate", "archive", "delete",
     ]);
@@ -70,9 +70,9 @@ describe("containerMenuRows", () => {
     expect(share && share.kind === "row" && share.label).toBe("Share");
   });
 
-  it("leaves a Can view holder Copy link, Who has access and Favorite only", () => {
+  it("leaves a Can view holder Copy link, Who has access, Favorite and Pin to top only", () => {
     const a = actions(containerMenuRows({ kind: "folder", role: "view" }));
-    expect(a).toEqual(["favorite", "copy-link", "share", "about"]);
+    expect(a).toEqual(["favorite", "pin-top", "copy-link", "share", "about"]);
   });
 
   it("drops Delete when the org toggle is off and for Agents", () => {
@@ -155,5 +155,14 @@ describe("roleAtLeast / containerNoun", () => {
     expect(containerNoun("list")).toBe("List");
     expect(containerNoun("space")).toBe("Space");
     expect(containerNoun("folder")).toBe("Folder");
+  });
+});
+
+describe("Pin to top", () => {
+  it("reads Pin to top until pinned, then Unpin from top", () => {
+    const rows = (isTopPinned: boolean) =>
+      containerMenuRows({ kind: "list", role: "view", isTopPinned }).find((e) => e.kind === "row" && e.action === "pin-top");
+    expect((rows(false) as { label: string }).label).toBe("Pin to top");
+    expect((rows(true) as { label: string }).label).toBe("Unpin from top");
   });
 });

@@ -2510,6 +2510,23 @@ describe("spec 5.2.1: the app rule table", () => {
     expect(decide(facts({ viewer: owner, app: "chat", activeModules: ["chat"] }), "view").allowed).toBe(true);
   });
 
+  it("keeps Contracts to the People team and admins, which is what the /agreements page gate leans on", () => {
+    // (dashboard)/agreements/page.tsx calls gatePage("view", { type: "app",
+    // key: "agreements" }) and gatePage 404s a decision that is not
+    // discoverable. That is the whole of the route's denial, so the decision
+    // is pinned here: a plain Member and a manager with reports are out, the
+    // People team and an Owner are in.
+    expect(APP_RULES.agreements.audience).toBe("people-team-admin");
+    const memberDecision = decide(facts({ viewer: member, app: "agreements" }), "view");
+    expect(memberDecision.allowed).toBe(false);
+    expect(memberDecision.discoverable).toBe(false);
+    expect(decide(facts({ viewer: managerMember, app: "agreements" }), "view").allowed).toBe(false);
+    expect(
+      decide(facts({ viewer: peopleTeamMember, app: "agreements", peopleTeamIds: ["u_pt"] }), "view").allowed,
+    ).toBe(true);
+    expect(decide(facts({ viewer: owner, app: "agreements" }), "view").allowed).toBe(true);
+  });
+
   it("404s an app key with no row", () => {
     const d = decide(facts({ app: "nonexistent" as AppKey }), "view");
     expect(d).toMatchObject({ allowed: false, discoverable: false });
@@ -2633,6 +2650,42 @@ describe("org actions", () => {
     expect(
       decide(facts({ viewer: viewer({ isAgent: true }), orgAction: "create_automation" }), "view").allowed,
     ).toBe(true);
+  });
+
+  // manage_process: the one vocabulary the process unit adds (spec-process
+  // section 1). It gates the three org-wide process taxonomies and their
+  // defaults, and it is added here rather than invented in a page.
+  describe("manage_process (spec-process section 1)", () => {
+    it("is Owner, Admin and the People team, and nobody else", () => {
+      expect(decide(facts({ viewer: viewer({ orgRole: "OWNER" }), orgAction: "manage_process" }), "view").allowed).toBe(true);
+      expect(decide(facts({ viewer: viewer({ orgRole: "ADMIN" }), orgAction: "manage_process" }), "view").allowed).toBe(true);
+      expect(decide(facts({ orgAction: "manage_process" }), "view").allowed).toBe(false);
+    });
+
+    it("lets a People-team Member through, and says that is why", () => {
+      const d = decide(
+        facts({ viewer: viewer({ userId: "u_hr" }), peopleTeamIds: ["u_hr"], orgAction: "manage_process" }),
+        "view",
+      );
+      expect(d.allowed).toBe(true);
+      expect(d.via).toBe("people-team");
+    });
+
+    it("never lets a Guest or an Agent through, People-team seat or not", () => {
+      expect(decide(facts({ viewer: viewer({ orgRole: "GUEST" }), orgAction: "manage_process" }), "view").allowed).toBe(false);
+      expect(
+        decide(
+          facts({ viewer: viewer({ userId: "u_bot", isAgent: true }), peopleTeamIds: ["u_bot"], orgAction: "manage_process" }),
+          "view",
+        ).allowed,
+      ).toBe(false);
+    });
+
+    it("names its enforcement point, so the verb is not decorative", () => {
+      const d = decide(facts({ viewer: viewer({ orgRole: "OWNER" }), orgAction: "manage_process" }), "view");
+      expect(d.enforcedAt).toContain("/api/sop-folders");
+      expect(d.enforcedAt).toContain("/api/settings");
+    });
   });
 });
 

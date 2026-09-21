@@ -65,6 +65,10 @@ export default function ProcessRunsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | PrStatus>("ALL");
+  // "Now" is taken when the rows are, not on every render: a due label is a
+  // fact about the list as loaded, and reading the clock inside a row's
+  // render is the impure-render pattern the compiler lint refuses.
+  const [now, setNow] = useState(() => Date.now());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -74,6 +78,7 @@ export default function ProcessRunsPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.data ?? (Array.isArray(data) ? data : []));
+      setNow(Date.now());
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
@@ -128,8 +133,16 @@ export default function ProcessRunsPage() {
 
   return (
     <>
+      {/* "Run history", in all three places. The sidebar row and the
+          breadcrumb (ROUTE_TITLES["/process-runs"]) already read it; the H1
+          read "Process runs", which spec-process section 1 lists as a RETIRED
+          form of this destination's name, beside "Process run" and
+          "execution". Section 1 also states the rule plainly: the sidebar row
+          label, the page title and the last breadcrumb crumb are the same
+          string on every route in this unit. Three names for one URL is the
+          drift the naming canon exists to end. */}
       <OsPageHeader
-        title="Process runs"
+        title="Run history"
         actions={
           <div className="flex items-center gap-1">
             <Link href="/sops" className="os-head__link"><BookCopy /> SOPs</Link>
@@ -177,7 +190,7 @@ export default function ProcessRunsPage() {
         ) : stats.total === 0 ? (
           <OsEmptyView
             context="docs"
-            title="No process runs yet"
+            title="No runs yet"
             hint="Start a run from any checklist SOP to see it here."
           />
         ) : grouped.length === 0 && cancelled.length === 0 ? (
@@ -194,7 +207,7 @@ export default function ProcessRunsPage() {
                     <span className="prun__group-line" />
                   </header>
                   <div className="prun__list">
-                    {g.items.map((r) => <RunRow key={r.id} r={r} onCancel={cancel} />)}
+                    {g.items.map((r) => <RunRow key={r.id} r={r} now={now} onCancel={cancel} />)}
                   </div>
                 </section>
               );
@@ -220,9 +233,9 @@ export default function ProcessRunsPage() {
   );
 }
 
-function RunRow({ r, onCancel }: { r: ApiProcessRun; onCancel: (id: string) => void }) {
+function RunRow({ r, now, onCancel }: { r: ApiProcessRun; now: number; onCancel: (id: string) => void }) {
   const pct = typeof r.progress === "number" ? r.progress : 0;
-  const days = r.dueDate ? Math.ceil((new Date(r.dueDate).getTime() - Date.now()) / MS_DAY) : null;
+  const days = r.dueDate ? Math.ceil((new Date(r.dueDate).getTime() - now) / MS_DAY) : null;
   const dueLabel = !r.dueDate ? null :
     r.status === "COMPLETED" ? new Date(r.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) :
     days !== null && days < 0 ? `${-days}d late` :

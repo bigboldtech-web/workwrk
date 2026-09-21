@@ -96,8 +96,8 @@ const nextConfig: NextConfig = {
       { source: "/tasks/today-overdue", destination: "/my-work?group=due", permanent: true },
       { source: "/tasks/backlog", destination: "/my-work?group=due&bucket=nodate", permanent: true },
       { source: "/tasks/board", destination: "/my-work?view=board", permanent: true },
-      { source: "/tasks/gantt", destination: "/my-work", permanent: true },
-      { source: "/tasks/sprint", destination: "/my-work", permanent: true },
+      { source: "/tasks/gantt", destination: "/my-work?view=gantt", permanent: true },
+      { source: "/tasks/sprint", destination: "/my-work?view=sprint", permanent: true },
       // One calendar for the whole app; the Planner hub owns it.
       { source: "/tasks/calendar", destination: "/planner", permanent: true },
       //
@@ -158,6 +158,12 @@ const nextConfig: NextConfig = {
       // clean `?type=doc` and `?type=contract`, and now they are.
       { source: "/docs/trash", destination: "/trash?type=doc", permanent: true },
       {
+        // Next appends the matched query to the destination, so this lands on
+        // /trash?view=archived&type=doc. `view` is inert there (resolveTrashTab
+        // reads `tab` and `type` only) and there is no config-level way to drop
+        // it: the ride-along is documented Next behaviour. The alternative, a
+        // page-level normalisation, would render /docs and its whole doc list
+        // before bouncing, which is worse than an extra parameter.
         source: "/docs",
         has: [{ type: "query", key: "view", value: "archived" }],
         destination: "/trash?type=doc",
@@ -172,42 +178,33 @@ const nextConfig: NextConfig = {
       //
       // Phase 3 Stage A, docs-knowledge section 0 and section 4 step 1.
       //
-      // /library was a four-tab page listing the same rows as four other
-      // pages: its Notes tab IS /docs, its Whiteboards tab IS /canvas, its
-      // Files tab IS /files, and its Tables tab was the one copy of the
-      // Tables list that never checked the spreadsheets module. Each tab
-      // keeps its destination; the Tables one gains the module gate it never
-      // had, because /tables has it at its own hub layout.
+      // /library is NOT redirected here, and that is deliberate.
       //
-      // ORDER MATTERS. The four `has` rows are matched in order and the bare
-      // /library row is last, so an unknown ?tab= value lands on /docs rather
-      // than 404ing on a tab that no longer exists.
-      {
-        source: "/library",
-        has: [{ type: "query", key: "tab", value: "whiteboards" }],
-        destination: "/canvas",
-        permanent: true,
-      },
-      {
-        source: "/library",
-        has: [{ type: "query", key: "tab", value: "files" }],
-        destination: "/files",
-        permanent: true,
-      },
-      {
-        source: "/library",
-        has: [{ type: "query", key: "tab", value: "tables" }],
-        destination: "/tables",
-        permanent: true,
-      },
-      // Notes and every other value, including none.
-      { source: "/library", destination: "/docs", permanent: true },
+      // It was, with four `has` rows plus a bare one. Next appends the source
+      // query to the destination on every config redirect (its own docs say
+      // so), so /library?tab=notes landed on /docs?tab=notes: a retired
+      // parameter riding along into a page that does not read it, in the URL
+      // the person then keeps and shares. The route handler at
+      // (dashboard)/library/route.ts maps the same four tabs and emits the
+      // clean destination, and being in the module graph it answers under hot
+      // reload, which a config row read once at server start does not. The
+      // config rows shadowed it, so they went and the handler is the one
+      // door. Every destination the Library had is preserved there: Notes ->
+      // /docs, Whiteboards -> /canvas, Files -> /files, Tables -> /tables,
+      // anything else -> /docs.
       //
-      // One URL per SOP kind (spec-process section 0). /sops/new?type=X used
-      // to POST a row on click and then route, which is where the abandoned
-      // "Untitled written SOP" rows came from. The kind routes create on the
-      // first real change instead, and these four rows keep every stored
-      // ?type= link, sidebar action and bookmark landing on the right editor.
+      // One URL per SOP kind (spec-process section 0). /sops/new?type=X was a
+      // picker page that POSTed a row on the click and then routed; these four
+      // rows keep every stored ?type= link, sidebar action and bookmark
+      // landing on the right editor, and /sops/new is now a chooser that
+      // creates nothing.
+      //
+      // TO BE PRECISE ABOUT WHAT IS AND IS NOT FIXED: the four kind ROUTES
+      // still mint their row on arrival, so a refresh of one of them still
+      // leaves an "Untitled" behind. Create-on-first-change is spec-process
+      // step 3 and lands for all four kinds together with the SopEditorPage
+      // rebuild; doing it for one kind here would leave two create models
+      // behind one chooser.
       {
         source: "/sops/new",
         has: [{ type: "query", key: "type", value: "[Ss][Tt][Ee][Pp][Ss]" }],

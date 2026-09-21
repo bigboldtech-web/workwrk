@@ -23,7 +23,7 @@ const ADMIN_ROLES = [
 
 export function useRole() {
   const { data: session } = useSession();
-  const accessLevel = (session?.user as any)?.accessLevel || "EMPLOYEE";
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel || "EMPLOYEE";
   const { can, loading } = usePermissions();
 
   const isExecutive = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL"].includes(accessLevel);
@@ -43,6 +43,9 @@ export function useRole() {
     isExecutive,
     canManagePeople: loading ? isMgr : can("people", "edit"),
     canManageSOPs: loading ? isMgr : can("sops", "create"),
+    // POST /api/policies asks for exactly this, so the "New policy" primary
+    // can ask the same question the route answers instead of guessing a tier.
+    canManagePolicies: loading ? isMgr : can("policies", "create"),
     canPublishSOPs: loading ? isMgr : can("sops", "publish"),
     canManageReviews: loading ? isMgr : can("reviews", "create"),
     canManageKRAs: loading ? isMgr : can("kras", "create"),

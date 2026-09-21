@@ -51,5 +51,12 @@ jobs:
       - name: Proxy route allowlist is in step with the route folders
         run: node scripts/check-app-prefixes.mjs
 
+      # Every column in schema.prisma is selected on every read of its model.
+      # A column no migration creates throws in production on every read of
+      # that model, with no error anywhere but "could not load". That shipped
+      # as archivedById on 2026-09-19 and took every task down.
+      - name: Every schema column has a migration that creates it
+        run: node scripts/check-schema-sql.mjs
+
       - name: Unit tests
         run: npx vitest run

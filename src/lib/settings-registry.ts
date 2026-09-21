@@ -260,3 +260,123 @@ export function settingsAliasRedirects(): { source: string; destination: string 
   }
   return out;
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Per-SETTING entries (settings-architecture section 8.2, the door's
+// "Find a setting" field; spec-process section 4 registers the first three).
+//
+// The table above answers "which PAGE is this URL". This one answers "where
+// does one named setting live", which is a different question the moment a
+// setting stops living on a settings page. `externalGate` is the field that
+// makes that honest: a setting rendered on a product page carries the org
+// verb that page checks, so the door can hide a row the viewer could not act
+// on rather than sending them to a 404.
+//
+// Every row is FINDABLE FROM THE DOOR and NOT DUPLICATED IN IT. The three
+// acknowledgement defaults belong on /sops/manage, the Organize page the
+// People team already uses for SOP folders and tags; putting a second editor
+// for them inside /settings would be two writers for one value, which is the
+// drift this registry exists to end. The hrefs are the ones spec-process
+// section 4 registers verbatim.
+//
+// THESE THREE HREFS ARE AHEAD OF THEIR PAGE, and that is deliberate rather
+// than an oversight. /sops/manage exists and answers, but it has no `?tab=`
+// switcher and no `#process.ack.*` cards yet: both arrive with the Organize
+// rebuild (spec-process section 2 `/sops/manage`, step 6), which also adds
+// the `defaults` tab and the hash-scroll. Until then a row that followed one
+// of these would land on the Organize page with an inert parameter, not on a
+// 404. NOTHING RENDERS THEM TODAY: `filterSettingsEntries` has no caller, and
+// the settings door that will list them is the settings unit's own step. The
+// order matters: the tab ships before the door starts listing these rows, or
+// the door would offer three destinations that do not scroll anywhere.
+
+import type { OrgAction } from "./access/types";
+
+export interface SettingEntry {
+  /** Stable id, also the fragment the href anchors on. */
+  id: string;
+  door: SettingsDoor;
+  /** The one label for this setting, in the door and on the page. */
+  label: string;
+  /** One line for the search result row. */
+  description: string;
+  /** Where the control actually is. May be outside /settings and /account. */
+  href: string;
+  /** The settings page this belongs to, when it is on one. */
+  page?: SettingsPageKey;
+  /** Search terms beyond the label. */
+  keywords: string[];
+  /**
+   * For a setting that lives OUTSIDE the settings door: the org verb the
+   * hosting page checks. Declared, not enforced here (the same contract as
+   * `gate` above); the door reads it to decide whether to list the row.
+   */
+  externalGate?: OrgAction;
+}
+
+function entry(e: SettingEntry): SettingEntry {
+  return e;
+}
+
+/** Every individually-addressable setting the door can find. */
+export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
+  // spec-process section 2 (/sops/manage) and section 4: the acknowledgement
+  // defaults a new SOP or policy assignment inherits.
+  entry({
+    id: "process.ack.statement",
+    door: "workspace",
+    label: "Acknowledgement statement",
+    description: "The sentence a person confirms when they acknowledge a SOP or a policy.",
+    href: "/sops/manage?tab=defaults#process.ack.statement",
+    keywords: ["acknowledge", "attestation", "sop", "policy", "statement", "confirm", "process"],
+    externalGate: "manage_process",
+  }),
+  entry({
+    id: "process.ack.dueDays",
+    door: "workspace",
+    label: "Acknowledgement due after",
+    description: "How many days a person gets to acknowledge, counted from the day it is assigned.",
+    href: "/sops/manage?tab=defaults#process.ack.dueDays",
+    keywords: ["acknowledge", "due", "deadline", "days", "sop", "policy", "process"],
+    externalGate: "manage_process",
+  }),
+  entry({
+    id: "process.ack.remindDays",
+    door: "workspace",
+    label: "Acknowledgement reminder",
+    description: "How many days before the due date the reminder goes out.",
+    href: "/sops/manage?tab=defaults#process.ack.remindDays",
+    keywords: ["acknowledge", "reminder", "nudge", "days", "sop", "policy", "process"],
+    externalGate: "manage_process",
+  }),
+];
+
+export const SETTINGS_ENTRIES: Readonly<Record<string, SettingEntry>> = Object.fromEntries(
+  SETTINGS_ENTRY_LIST.map((e) => [e.id, e]),
+);
+
+/**
+ * The door's "Find a setting" rows for one query.
+ *
+ * `allowedExternalGates` is what the CALLER already decided with `can()`: an
+ * entry whose `externalGate` is not in that set is left out, because a row
+ * that lands on a page the viewer gets a 404 from is worse than no row. An
+ * entry with no `externalGate` is on a settings page and is gated by that
+ * page, so it is always listed here.
+ */
+export function filterSettingsEntries(
+  query: string,
+  opts: { door?: SettingsDoor; allowedExternalGates?: readonly OrgAction[] } = {},
+): SettingEntry[] {
+  const q = query.trim().toLowerCase();
+  const allowed = opts.allowedExternalGates ?? [];
+  return SETTINGS_ENTRY_LIST.filter((e) => {
+    if (opts.door && e.door !== opts.door) return false;
+    if (e.externalGate && !allowed.includes(e.externalGate)) return false;
+    if (!q) return true;
+    if (e.label.toLowerCase().includes(q)) return true;
+    if (e.description.toLowerCase().includes(q)) return true;
+    if (e.id.toLowerCase().includes(q)) return true;
+    return e.keywords.some((k) => k.includes(q));
+  });
+}

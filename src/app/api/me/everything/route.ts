@@ -58,6 +58,7 @@ export async function GET(req: NextRequest) {
       listIds: listParam(sp.get("list")),
       spaceIds: listParam(sp.get("spaceId")),
       assigneeIds: listParam(sp.get("assignee")),
+      assignedByMe: sp.get("assignedBy") === "me",
       includeSubtasks: sp.get("subtasks") !== "0",
       cursor: sp.get("cursor"),
       limit: Number.isFinite(limitRaw) ? Math.min(MAX_LIMIT, Math.max(1, limitRaw)) : DEFAULT_LIMIT,

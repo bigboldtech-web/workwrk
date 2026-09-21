@@ -103,10 +103,85 @@ export function typesFromParam(raw: string | null | undefined): TrashTypeKey[] {
   return out;
 }
 
+/**
+ * Where a restored row lives, keyed by the UI's own type key.
+ *
+ * ONE TABLE, TWO VOCABULARIES. `src/lib/trash.ts` names types the way the
+ * restore registry stores them ("note", "whiteboard", "board", "item") and
+ * derives its `TRASH_HREF` from this; the client names them the way the
+ * filter pills do ("doc", "canvas", "list", "task") and reads this directly.
+ * The table lives here because this module is pure and client-safe, while
+ * trash.ts reaches prisma: a Trash row that wanted a link could not import
+ * the one that had it.
+ *
+ * `[id]` is where the row's own id goes. Hierarchy kinds (Space, Folder, List,
+ * Task) are reached by slug and stay informational: they resolve to "/", and
+ * the caller renders no link rather than a wrong one.
+ */
+export const TRASH_ROW_HREF: Record<TrashTypeKey, string> = {
+  doc: "/docs/[id]",
+  sop: "/sops/[id]",
+  canvas: "/canvas/[id]",
+  table: "/tables/[id]",
+  // A file has no page of its own: it opens in its folder on /files, which is
+  // what `?file=` does.
+  file: "/files?file=[id]",
+  policy: "/policies/[id]",
+  contract: "/agreements/[id]",
+  form: "/forms/[id]",
+  template: "/templates",
+  space: "/", folder: "/", list: "/", task: "/",
+};
+
+/** The href for one restored row, or "/" when the kind has no page. */
+export function trashRowHref(key: TrashTypeKey, id: string | null | undefined): string {
+  const template = TRASH_ROW_HREF[key] ?? "/";
+  if (!id) return template.replace("/[id]", "").replace("?file=[id]", "");
+  return template.replace("[id]", encodeURIComponent(id));
+}
+
 export type TrashTab = "deleted" | "archived";
 
 export function tabFromParam(raw: string | null | undefined): TrashTab {
   return raw === "archived" ? "archived" : "deleted";
+}
+
+/**
+ * The types that can only ever be ARCHIVED, never deleted.
+ *
+ * A "deleted" row is a `TrashItem` snapshot written by `moveToTrash`. Grep the
+ * callers and three of the thirteen types have none: a Doc, a Canvas and a
+ * Contract are archived in place (`archivedAt`). So `/trash?type=doc` with no
+ * `?tab=` would land on the Deleted tab, which is empty for docs by
+ * construction, and a person following the Docs sidebar's Trash row would
+ * conclude their doc was gone.
+ *
+ * FORMS AND TEMPLATES ARE DELIBERATELY NOT HERE, though neither has a delete
+ * path today either. They differ in where they are GOING: the Tables toolbar's
+ * deleted forms are specified to arrive as `?type=form` TrashItem rows (see
+ * the header of (dashboard)/trash/page.tsx), so listing them here would send
+ * that link, the day it is built, to an Archived tab that can never hold them.
+ * A type with no rows on either tab reads the same on both; a type whose rows
+ * land on the tab the URL does not open does not.
+ *
+ * Kept as data rather than as a query, because the right tab has to be decided
+ * on the server before the first row is read.
+ */
+export const ARCHIVE_ONLY_TYPES: readonly TrashTypeKey[] = ["doc", "canvas", "contract"];
+
+/**
+ * Which tab a URL means: an explicit `?tab=` always wins, and with none the
+ * tab follows the requested types. Mixed types fall back to Deleted, which is
+ * the page's own default, so a multi-type link is never silently narrowed.
+ */
+export function resolveTrashTab(
+  rawTab: string | null | undefined,
+  rawType: string | null | undefined,
+): TrashTab {
+  if (rawTab === "archived" || rawTab === "deleted") return rawTab;
+  const types = typesFromParam(rawType);
+  if (types.length === 0) return "deleted";
+  return types.every((t) => ARCHIVE_ONLY_TYPES.includes(t)) ? "archived" : "deleted";
 }
 
 export const TRASH_SORTS = [

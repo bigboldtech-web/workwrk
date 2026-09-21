@@ -33,6 +33,7 @@ import { SidebarCreateMenu, runCreateAction, useCreateActionContext } from "./si
 import { WorkspaceMenu } from "./workspace-menu";
 import { SIDEBAR_ROW_ATTR } from "./sidebar-primitives";
 import { SIDEBAR_DRAWER_ID } from "./skip-links";
+import { usePermissions } from "@/hooks/use-permission";
 
 const SEARCH_THRESHOLD = 12;
 
@@ -52,6 +53,10 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
   const pathname = usePathname() || "";
   const { query, setQuery } = useSidebarSearch();
   const [rowCount, setRowCount] = useState(0);
+  // The header's search glyph opens the filter for any tree size (the old
+  // sidebar always offered "Search sidebar"); past SEARCH_THRESHOLD rows the
+  // box is simply always there.
+  const [searchOpen, setSearchOpen] = useState(false);
   const [createOpenFor, setCreateOpenFor] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
   const navRef = useRef<HTMLElement>(null);
@@ -80,10 +85,20 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? null;
   const createCtx = useCreateActionContext();
+  // Two gates, and a row must pass both: the tier ladder, and (for a create
+  // whose route asks the permission matrix) the exact right that route
+  // enforces. While the matrix is still loading a permission-gated row is
+  // withheld, so a dead door is never on screen even for a moment.
+  const { can: canDo, loading: permsLoading } = usePermissions();
   const createActions = useMemo<CreateAction[]>(() => {
     if (!Array.isArray(app.createActions)) return [];
-    return app.createActions.filter((a) => canAccessTier(a.requiredAccess, accessLevel));
-  }, [app, accessLevel]);
+    return app.createActions.filter((a) => {
+      if (!canAccessTier(a.requiredAccess, accessLevel)) return false;
+      if (!a.requiredPermission) return true;
+      if (permsLoading) return false;
+      return canDo(a.requiredPermission.module, a.requiredPermission.action);
+    });
+  }, [app, accessLevel, canDo, permsLoading]);
   const createMode: "custom" | "global" | "menu" | "single" | "none" =
     app.CreateMenu ? "custom"
     : app.createActions === "global" ? "global"
@@ -107,7 +122,8 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
     mo.observe(nav, { childList: true, subtree: true });
     return () => mo.disconnect();
   }, [app.key]);
-  const searchable = rowCount > SEARCH_THRESHOLD || query.length > 0;
+  const autoSearch = rowCount > SEARCH_THRESHOLD;
+  const searchable = autoSearch || query.length > 0 || searchOpen;
 
   // Resize: pointer drag, arrow keys, double-click to reset. Under dir="rtl"
   // the sidebar is on the right edge, so the handle grows the column when it
@@ -150,6 +166,27 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
       window.removeEventListener("pointercancel", onUp);
     };
   }, [resizing, setSidebarWidth, rtlSign]);
+
+  const searchButton = !autoSearch ? (
+    <button
+      type="button"
+      onClick={() => {
+        if (searchOpen || query) { setSearchOpen(false); setQuery(""); return; }
+        setSearchOpen(true);
+        window.setTimeout(() => inputRef.current?.focus(), 0);
+      }}
+      aria-label={`Search ${hubLabel} sidebar`}
+      title={`Search ${hubLabel} sidebar`}
+      aria-pressed={searchable}
+      className={cn(
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink",
+        // Hover-revealed on a small tree (it is a convenience, not a fixture); always on while open.
+        searchable ? "bg-active text-ink" : "opacity-0 group-hover/sidebar:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+      )}
+    >
+      <Search className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+    </button>
+  ) : null;
 
   const plusButton = createMode !== "none" ? (
     <button
@@ -234,6 +271,7 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
             </button>
           }
         />
+        {searchButton}
         {createMode === "global" ? (
           <CreateMenu open={createOpen} onOpenChange={(v) => setCreateOpenFor(v ? app.key : null)} align="start" layerId="sidebar-create" trigger={plusButton} />
         ) : plusButton}
@@ -257,8 +295,8 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
               aria-label={`Search ${hubLabel}`}
               className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
             />
-            {query ? (
-              <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink">
+            {query || searchOpen ? (
+              <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} aria-label={query ? "Clear search" : "Close search"} className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink">
                 <X className="h-3.5 w-3.5" strokeWidth={1.5} />
               </button>
             ) : null}

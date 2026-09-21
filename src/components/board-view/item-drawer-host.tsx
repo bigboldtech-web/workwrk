@@ -325,10 +325,26 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
             onRequestAccess={board?.slug ? () => setShareOpen(true) : undefined}
             missingView={
               <div className="py-8 text-center">
-                {/* The drawer knows the same two answers the page does. */}
+                {/* The drawer says what the page says, for the same reasons
+                    the page's comment gives: a 404 is a row that is gone, an
+                    id that never existed, another org's id, OR a legacy task
+                    the migration has not moved yet. "This task was deleted"
+                    was a false statement to three of those four readers, and
+                    the fourth (the legacy case) is the one the server now
+                    names, so it is the one this says out loud. */}
                 <p className="text-row text-ink-2">
-                  {task.denied ? "You no longer have access to this" : "This task was deleted"}
+                  {task.denied
+                    ? "You no longer have access to this"
+                    : task.missingReason === "legacy_task_not_migrated"
+                      ? "This link is from the old task system"
+                      : "We couldn't find that task"}
                 </p>
+                {task.missingReason === "legacy_task_not_migrated" ? (
+                  <p className="mx-auto mt-2 max-w-[420px] text-sm text-ink-3">
+                    It has not been moved across yet; nothing was deleted. Your workspace admin finishes the move, and
+                    every task already moved is on My work.
+                  </p>
+                ) : null}
                 <button type="button" onClick={close} className="mt-1 text-base font-medium text-brand-deep hover:underline">
                   Close
                 </button>

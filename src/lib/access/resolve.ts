@@ -837,14 +837,21 @@ function decideOrg(facts: AccessFacts): Decision {
   const admin = isOrgAdmin(v);
   const guest = isGuest(v);
 
-  const ok = (reason: string): Decision => ({
-    allowed: true,
-    role: principalCaps(v, "FULL", admin ? "org-admin" : "everyone"),
-    via: admin ? "org-admin" : "everyone",
-    reason,
-    discoverable: true,
-    enforcedAt,
-  });
+  // `via` names WHY the answer is yes, and the answer's explain string is read
+  // by the access debugger. An org verb a People-team seat unlocks says so
+  // rather than saying "everyone", which would be a different (and wrong)
+  // reason with the same outcome.
+  const ok = (reason: string, via?: DecisionVia): Decision => {
+    const source: DecisionVia = via ?? (admin ? "org-admin" : "everyone");
+    return {
+      allowed: true,
+      role: principalCaps(v, "FULL", source),
+      via: source,
+      reason,
+      discoverable: true,
+      enforcedAt,
+    };
+  };
   const no = (reason: string): Decision => ({
     allowed: false,
     role: "none",
@@ -893,6 +900,18 @@ function decideOrg(facts: AccessFacts): Decision {
       if (v.actingAs) return no("Keys, agents and crons never export.");
       if (v.isAgent) return no("Agents never export.");
       return admin ? ok("You can export people data.") : no("Only owners and admins export people data.");
+    case "manage_process":
+      // spec-process section 1: Owner, Admin, People team. An Agent is none
+      // of those by definition (it holds no People-team seat), and it is
+      // refused here rather than relied upon, so an Agent that is somehow on
+      // the People-team list still cannot rewrite the org's taxonomies.
+      if (guest) return no("Guests never change process settings.");
+      if (v.isAgent) return no("Agents never change process settings.");
+      if (admin) return ok("You can manage SOP folders, policy categories and acknowledgement defaults.");
+      if (isPeopleTeam(facts)) {
+        return ok("You can manage SOP folders, policy categories and acknowledgement defaults.", "people-team");
+      }
+      return no("Only owners, admins and the People team change process settings.");
     default:
       return no("Not allowed.");
   }

@@ -18,9 +18,19 @@ import { MenuItem, MenuList } from "@/components/ui/menu";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
+import { Fragment } from "react";
 import { NEW_EVENT_PREFIX, type CreateAction, type CreateActionContext } from "./apps-catalog";
 
-const BRAND_BLUE = "#0073EA";
+/**
+ * The icon-tile tint when a row names none.
+ *
+ * `var(--os-brand)` and not a hex literal: the brand colour is a token that
+ * the theme picker rebinds and that dark mode re-points, so a hardcoded
+ * #0073EA is a colour that stops following the workspace. It is read as a
+ * custom property because the tint is composed at runtime
+ * (`color-mix` for the 10 percent wash behind the glyph).
+ */
+const BRAND_TINT = "var(--os-brand)";
 
 /** Shell helpers every CreateAction runs with (router push, quick-task modal, …). */
 export function useCreateActionContext(): CreateActionContext {
@@ -74,19 +84,26 @@ export function SidebarCreateMenu({
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} aria-hidden />
       <MorePortal anchorRef={anchorRef} panelRef={panelRef} width={264} open={open} placement="below">
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_14px_34px_rgba(0,0,0,0.14)] p-2">
+        {/* Tokens, not zinc and not white: this panel has to follow the theme
+            and dark mode like every other popover (design-system section 1). */}
+        <div className="overflow-hidden rounded-xl border border-line bg-raised p-2 shadow-[var(--os-shadow-pop)]">
           <MenuList>
-            {actions.map((action) => {
+            {actions.map((action, i) => {
               const Icon = action.icon ?? Plus;
-              const tint = action.iconColor ?? BRAND_BLUE;
+              const tint = action.iconColor ?? BRAND_TINT;
+              // A rule above the first rendered row would be a line under the
+              // menu's own top edge, so it is dropped at index 0. That happens
+              // whenever every row before the separator was gated away.
+              const rule = action.separatorBefore && i > 0;
               return (
+                <Fragment key={action.label}>
+                {rule ? <li className="my-1 h-px bg-line" role="separator" /> : null}
                 <MenuItem
-                  key={action.label}
                   variant="inset"
                   leading={
                     <span
                       className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
-                      style={{ background: `${tint}1a` }}
+                      style={{ background: `color-mix(in srgb, ${tint} 10%, transparent)` }}
                     >
                       <Icon className="h-3.5 w-3.5" style={{ color: tint }} />
                     </span>
@@ -98,6 +115,7 @@ export function SidebarCreateMenu({
                     runCreateAction(action, ctx);
                   }}
                 />
+                </Fragment>
               );
             })}
           </MenuList>

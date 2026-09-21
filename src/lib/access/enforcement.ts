@@ -87,6 +87,7 @@ const ORG_ENFORCEMENT: Record<`org.${OrgAction}`, string> = {
   "org.create_automation": "POST /api/automation/workflows",
   "org.archive_channel": "PATCH /api/conversations/[id] (archive)",
   "org.export_people": "GET /api/people/export, /api/users/export",
+  "org.manage_process": "POST /api/sop-folders (top level), PATCH /api/settings {section:\"process\"}",
 };
 
 const TOGGLE_ENFORCEMENT: Record<`toggle.${ToggleKey}`, string> = {

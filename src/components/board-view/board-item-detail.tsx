@@ -256,6 +256,17 @@ export function BoardItemDetail({
     gating,
   });
   const shownListFields = customFields.filter((f) => visibleListFields.includes(f.key));
+  // The section's own search box and "Hide / Show N empty" toggle (the old
+  // Custom Fields header had both). Search narrows by label; the toggle folds
+  // away the checked-but-empty fields, and the count says how many it hid.
+  const [fieldQuery, setFieldQuery] = useState("");
+  const [showEmptyFields, setShowEmptyFields] = useState(true);
+  const emptyListFieldCount = shownListFields.filter((f) => !listFieldHasValue(f.key)).length;
+  const listFieldRows = shownListFields.filter((f) => {
+    if (!showEmptyFields && !listFieldHasValue(f.key)) return false;
+    const q = fieldQuery.trim().toLowerCase();
+    return !q || f.label.toLowerCase().includes(q);
+  });
   const showSubtasks = revealed.has("subtasks") || (subtaskCount ?? 0) > 0;
   const showChecklist = revealed.has("checklist") || checklistItems.length > 0;
   const showRelated = revealed.has("related") || (attachCount ?? 0) > 0;
@@ -346,8 +357,36 @@ export function BoardItemDetail({
           that carry a value (a value is never hidden). */}
       {shownListFields.length > 0 ? (
         <section className="space-y-0.5">
-          <h3 className="mb-1.5 text-sm font-medium text-ink">List fields</h3>
-          {shownListFields.map((f) => (
+          <div className="mb-1.5 flex items-center gap-2">
+            <h3 className="text-sm font-medium text-ink">List fields</h3>
+            <span className="flex-1" />
+            {shownListFields.length >= 4 ? (
+              <label className="relative">
+                <Search className="pointer-events-none absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-3" strokeWidth={1.5} aria-hidden />
+                <input
+                  type="search"
+                  value={fieldQuery}
+                  onChange={(e) => setFieldQuery(e.target.value)}
+                  placeholder="Search fields…"
+                  aria-label="Search fields"
+                  className="h-7 w-[160px] rounded-md border border-line bg-raised pe-2 ps-7 text-xs text-ink placeholder:text-ink-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                />
+              </label>
+            ) : null}
+            {emptyListFieldCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowEmptyFields((v) => !v)}
+                className="text-xs font-medium text-ink-2 hover:text-ink"
+              >
+                {showEmptyFields ? `Hide ${emptyListFieldCount} empty` : `Show ${emptyListFieldCount} empty`}
+              </button>
+            ) : null}
+          </div>
+          {listFieldRows.length === 0 ? (
+            <p className="py-1 text-xs text-ink-3">No fields match</p>
+          ) : null}
+          {listFieldRows.map((f) => (
             <FieldRow key={f.key} label={f.label}>
               <FieldValue
                 field={f}

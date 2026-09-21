@@ -11,13 +11,13 @@ import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="mx-4 mt-3 mb-1 shrink-0 rounded-xl border border-[#0073EA]/20 bg-[#0073EA]/[0.06] dark:bg-[#0073EA]/10 px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="shrink-0 w-8 h-8 rounded-lg bg-[#0073EA]/10 flex items-center justify-center">
-        <CalendarClock className="w-4 h-4 text-[#0073EA]" />
+    <div className="mx-4 mt-3 mb-1 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-subtle px-3.5 py-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft">
+        <CalendarClock className="h-4 w-4 text-brand-deep" strokeWidth={1.5} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-base font-medium text-zinc-900 dark:text-zinc-100">Connect your calendar</div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-snug">
+        <div className="text-base font-medium text-ink">Connect your calendar</div>
+        <p className="text-sm leading-snug text-ink-2">
           Your tasks and work already show here. Connect Google Calendar to layer in your meetings.
         </p>
       </div>
@@ -26,7 +26,7 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/api/integrations/google-calendar/connect"
-        className="shrink-0 h-8 px-3 rounded-lg bg-[#0073EA] text-white text-base font-medium inline-flex items-center gap-1.5 hover:bg-[#0060B9]"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line bg-raised px-3 text-base font-medium text-ink hover:bg-hover"
       >
         <GoogleMark /> Connect Google Calendar
       </a>
@@ -36,7 +36,7 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
         onClick={onDismiss}
         aria-label="Dismiss"
         title="Dismiss"
-        className="shrink-0 w-7 h-7 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink"
       >
         <X className="w-4 h-4" />
       </button>

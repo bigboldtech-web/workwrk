@@ -46,7 +46,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 const CATEGORY_OPTIONS = ["SLA", "NDA", "Vendor", "Employment", "Partner", "Sales", "Service", "Other"];
 
-export default function AgreementsPage() {
+export function AgreementsClient() {
   const router = useRouter();
   const search = useSearchParams();
   const { toast } = useOsToast();

@@ -860,9 +860,11 @@ export default async function SpacePage(props: {
                       <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Full access on this space."}</p>
                     ) : (
                       <div className="rounded-lg border border-line overflow-hidden">
-                        <div className="grid grid-cols-[minmax(0,1fr)_210px_170px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
+                        <div className="grid grid-cols-[minmax(0,1fr)_64px_150px_88px_150px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
                           <span>Name</span>
+                          <span>Color</span>
                           <span>Tasks</span>
+                          <span>Progress</span>
                           <span>Owner</span>
                           <span className="sr-only">Actions</span>
                         </div>
@@ -875,19 +877,29 @@ export default async function SpacePage(props: {
                             return (
                             <li
                               key={b.id}
-                              className="group/board grid grid-cols-[minmax(0,1fr)_210px_170px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft last:border-b-0 hover:bg-hover transition-colors"
+                              className="group/board grid grid-cols-[minmax(0,1fr)_64px_150px_88px_150px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft last:border-b-0 hover:bg-hover transition-colors"
                             >
                               <Link href={`/boards/${b.slug}`} className="flex items-center gap-2 min-w-0">
                                 <EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} fallback="list" />
                                 <span className="text-base text-ink truncate">{b.name}</span>
                               </Link>
+                              {/* The List's colour, as a swatch: set from "..." > Color & icon. */}
+                              <span className="flex items-center">
+                                <span
+                                  className="h-3.5 w-3.5 rounded-sm border border-line"
+                                  style={{ backgroundColor: b.color ?? "var(--os-surface-2)" }}
+                                  title={b.color ?? "No color"}
+                                  aria-label={b.color ? `Color ${b.color}` : "No color"}
+                                />
+                              </span>
+                              <span className="text-xs text-ink-2 tabular-nums truncate">
+                                {total === 0 ? "No tasks" : `${done} of ${total} done`}
+                              </span>
                               <span className="flex items-center gap-2 min-w-0">
-                                <span className="h-1 w-16 shrink-0 rounded-full bg-subtle overflow-hidden">
+                                <span className="h-1 w-10 shrink-0 rounded-full bg-subtle overflow-hidden">
                                   <span className="block h-full bg-brand" style={{ width: `${pct}%` }} />
                                 </span>
-                                <span className="text-xs text-ink-2 tabular-nums truncate">
-                                  {total === 0 ? "No tasks" : `${done} of ${total} done`}
-                                </span>
+                                <span className="text-xs text-ink-2 tabular-nums">{pct}%</span>
                               </span>
                               <span className="text-xs text-ink-2 truncate">{owner ?? "No owner"}</span>
                               <span className="inline-flex items-center justify-end opacity-0 group-hover/board:opacity-100 transition-opacity">

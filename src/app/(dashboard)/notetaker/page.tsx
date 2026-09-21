@@ -13,8 +13,10 @@
 
 import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   Sparkles,
   Save,
@@ -28,6 +30,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { useRetiredView } from "@/components/layout/os/use-retired-view";
 
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -47,6 +50,8 @@ type ApiMeeting = {
   title: string;
   type: string;
   scheduledAt: string;
+  /** Who was in the room. "Mine" is the viewer's own row in here. */
+  attendees?: Array<{ userId?: string | null; user?: { id: string } | null }>;
   stats?: { decisionCount: number; actionItemsTotal: number; actionItemsDone: number; hasNotes: boolean };
 };
 
@@ -74,6 +79,17 @@ const EXAMPLE_TRANSCRIPT = `[10:02] Bigbold: Let's ship the new pricing page by 
                  lead with the new $19 starter price instead.`;
 
 export default function NotetakerPage() {
+  // ClipsSidebar's "My Clips" row linked /notetaker?mine=1 at a page that
+  // never read the parameter. The row is gone and the parameter is now
+  // ?view=my, which the Recent card below reads: the old link therefore lands
+  // on the list it always promised, rather than on the unfiltered one. Same
+  // path, so it is a page normalisation and not a next.config redirect (a
+  // config row would ride ?mine=1 along to itself and loop).
+  useRetiredView();
+  const params = useSearchParams();
+  const view = params?.get("view") === "my" ? "my" : "all";
+  const { data: session } = useSession();
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const [transcript, setTranscript] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState<Extracted | null>(null);
@@ -108,7 +124,7 @@ export default function NotetakerPage() {
       if (!res.ok) throw new Error();
       const data = await res.json();
       setExtracted(data.data ?? data);
-    } catch { toast("Couldn't extract — Claude may be busy. Try again."); }
+    } catch { toast("Couldn't structure this transcript. Try again."); }
     finally { setExtracting(false); }
   }
 
@@ -137,6 +153,15 @@ export default function NotetakerPage() {
     } catch { toast("Couldn't save"); }
     finally { setSaving(false); }
   }
+
+  // "Mine" = meetings the viewer attends. The Meeting model records no
+  // creator, so attendance is the whole of the rule the product can answer
+  // honestly today; a creator column would be the process unit's to add.
+  const shown = useMemo(() => {
+    if (recents === null) return null;
+    if (view !== "my" || !meId) return recents;
+    return recents.filter((m) => (m.attendees ?? []).some((a) => (a.userId ?? a.user?.id) === meId));
+  }, [recents, view, meId]);
 
   function loadExample() {
     setTranscript(EXAMPLE_TRANSCRIPT);
@@ -177,7 +202,7 @@ export default function NotetakerPage() {
               className="ntk-pane__textarea"
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              placeholder={`Paste your meeting transcript here.\n\nWorks with Zoom, Google Meet, Otter, raw notes — anything.\n\n${EXAMPLE_TRANSCRIPT.split("\n").slice(0, 3).join("\n")}`}
+              placeholder={`Paste your meeting transcript here.\n\nWorks with Zoom, Google Meet, Otter, raw notes, anything.\n\n${EXAMPLE_TRANSCRIPT.split("\n").slice(0, 3).join("\n")}`}
             />
             <footer className="ntk-pane__foot">
               <span className="ntk-pane__hint">
@@ -321,18 +346,26 @@ export default function NotetakerPage() {
         {/* ── Recent extractions ─────────────────────────── */}
         <section className="ntk__recents">
           <header>
-            <h2>Recent extractions</h2>
-            {recents && recents.length > 0 && (
-              <span className="ntk__recents-count">{recents.length}</span>
+            <h2>Recent meeting notes</h2>
+            {shown && shown.length > 0 && (
+              <span className="ntk__recents-count">{shown.length}</span>
             )}
+            {/* All / Mine, as the URL, so the view is a link (and so the
+                retired ?mine=1 link has a view to land on). */}
+            <span className="ntk__recents-views">
+              <Link href="/notetaker" aria-current={view === "all" ? "page" : undefined} className={view === "all" ? "is-on" : undefined}>All</Link>
+              <Link href="/notetaker?view=my" aria-current={view === "my" ? "page" : undefined} className={view === "my" ? "is-on" : undefined}>Mine</Link>
+            </span>
           </header>
-          {recents === null ? (
+          {shown === null ? (
             <SkeletonLines lines={3} />
-          ) : recents.length === 0 ? (
-            <div className="ntk__recents-empty">No processed meetings yet — your first one will appear here.</div>
+          ) : shown.length === 0 ? (
+            <div className="ntk__recents-empty">
+              {view === "my" ? "No meeting notes with you in them yet." : "No meeting notes yet. Your first one will appear here."}
+            </div>
           ) : (
             <div className="ntk__recents-grid">
-              {recents.map((m) => (
+              {shown.map((m) => (
                 <Link key={m.id} href={`/meetings/${m.id}`} className="ntk__recent">
                   <div className="ntk__recent-title">{m.title}</div>
                   <div className="ntk__recent-meta">

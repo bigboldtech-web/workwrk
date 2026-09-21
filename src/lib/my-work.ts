@@ -7,14 +7,23 @@
 // the grouping rules can be pinned without standing a server up.
 
 import { DUE_BUCKET_LABEL, DUE_BUCKET_ORDER, type DueBucket } from "./work-buckets";
+import { isDoneStatusName, type BoardItemRow, type StatusOption } from "./board-items-shared";
 
 // "assignee" is here because /everything accepts `?view=team`, which the
 // spec resolves to a list grouped by the person on the task: that is what the
 // Space "team" view showed, and the 308 has to land on something real.
 export type WorkGroupKey = "due" | "status" | "list" | "priority" | "assignee" | "none";
 export type WorkSortKey = "due" | "priority" | "title" | "list" | "created" | "updated";
-export type WorkViewKey = "list" | "board" | "calendar";
+// Six views. List, Board and Calendar are the page's own renderers; Gantt and
+// Timeline are the List page's renderers (board-gantt-view, board-timeline-view)
+// fed the same Item rows through `toBoardRows` below, so there is ONE Gantt in
+// the product and My work borrows it rather than owning a second. Sprint is
+// the personal sprint room the retired /tasks/sprint page was: KPI tiles, a
+// burndown, a verdict and the at-risk list, over the same rows.
+export type WorkViewKey = "list" | "board" | "calendar" | "gantt" | "timeline" | "sprint";
 export type DoneFilter = "0" | "1" | "only";
+/** `?scope=`: whose tasks the page shows. "mine" is assigned to me; "delegated" is assigned BY me to somebody else. */
+export type WorkScopeKey = "mine" | "delegated";
 
 export const WORK_GROUPS: ReadonlyArray<{ key: WorkGroupKey; label: string }> = [
   { key: "due", label: "Due date" },
@@ -38,7 +47,20 @@ export const WORK_VIEWS: ReadonlyArray<{ key: WorkViewKey; label: string }> = [
   { key: "list", label: "List" },
   { key: "board", label: "Board" },
   { key: "calendar", label: "Calendar" },
+  { key: "gantt", label: "Gantt" },
+  { key: "timeline", label: "Timeline" },
+  { key: "sprint", label: "Sprint" },
 ];
+
+/** A view key from the URL, or `list` for anything the switcher does not offer. */
+export function parseWorkView(raw: string | null | undefined): WorkViewKey {
+  const key = (raw ?? "").trim().toLowerCase();
+  return (WORK_VIEWS.find((v) => v.key === key)?.key ?? "list") as WorkViewKey;
+}
+
+export function parseWorkScope(raw: string | null | undefined): WorkScopeKey {
+  return (raw ?? "").trim().toLowerCase() === "delegated" ? "delegated" : "mine";
+}
 
 /** Urgent / High / Normal / Low. The legacy Critical / Medium words are gone. */
 export const PRIORITY_ORDER: readonly string[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
@@ -258,4 +280,69 @@ export function boardColumns(rows: readonly MyWorkRow[], group: WorkGroupKey): W
 /** The counts the sidebar badge and the Home widget footer print. */
 export function overdueAndTodayCount(rows: readonly MyWorkRow[]): number {
   return rows.filter((r) => r.dueBucket === "overdue" || r.dueBucket === "today").length;
+}
+
+/* ───────────── the bridge to the List page's renderers ───────────── */
+
+/**
+ * The status vocabulary a cross-List page can honestly offer a List renderer.
+ *
+ * A List renderer takes ONE status set (the List's own). My work spans every
+ * List, so the set is built from what the rows carry: each distinct status
+ * value with the word and colour its List resolved server-side. A value that
+ * is its own List's done status lands in the DONE group, so the Gantt's
+ * "overdue" backlog and the Timeline's done styling follow each List's own
+ * rule rather than a name heuristic. Two Lists that spell the same value with
+ * different colours draw the first one seen; that is the honest limit of a
+ * cross-List view, and the row's own List page keeps its own colour.
+ */
+export function statusOptionsFrom(rows: readonly MyWorkRow[]): StatusOption[] {
+  const seen = new Map<string, StatusOption>();
+  for (const row of rows) {
+    if (!row.status || seen.has(row.status)) continue;
+    const done = row.doneStatus ? row.status === row.doneStatus : isDoneStatusName(row.status);
+    seen.set(row.status, {
+      value: row.status,
+      label: row.statusLabel ?? row.status,
+      color: row.statusColor ?? "#98A2B3",
+      group: done ? "DONE" : "ACTIVE",
+    });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * My work rows as the List renderers' row shape.
+ *
+ * Both are projections of the same Item table, so nothing is invented: the
+ * fields the Gantt and Timeline read (dates, status, priority, title,
+ * assignees) are copied across and the List-only fields (position, groupKey,
+ * metadata) get the neutral values a row with no List context has. `position`
+ * follows the page order so the lanes read top to bottom as the list does.
+ */
+export function toBoardRows(rows: readonly MyWorkRow[]): BoardItemRow[] {
+  return rows.map((r, i) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    ownerId: r.ownerId,
+    assigneeIds: r.assigneeIds,
+    groupKey: null,
+    position: i,
+    metadata: {},
+    startAt: r.startAt,
+    dueAt: r.dueAt,
+    priority: r.priority,
+    parentItemId: r.parentItemId,
+    boardId: r.board?.id ?? null,
+    archivedAt: null,
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+    assignees: r.assignees.map((a) => ({
+      id: a.id,
+      firstName: a.firstName ?? "",
+      lastName: a.lastName ?? "",
+      avatar: a.avatar,
+    })),
+  }));
 }

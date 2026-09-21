@@ -10,7 +10,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
+import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -48,8 +48,6 @@ export async function POST(req: Request) {
     { id: parsed.data.docId, at: new Date().toISOString() },
     ...current.filter((v) => v.id !== parsed.data.docId),
   ].slice(0, 20);
-  await setUserPreference(u.id, {
-    home: { ...(effective?.home ?? {}), recentDocViews: next },
-  });
+  await setUserHomeKey(u.id, "recentDocViews", next);
   return NextResponse.json({ views: next });
 }

@@ -1,23 +1,28 @@
 "use client";
 
-// ViewCreatePopover + NewViewTrigger — the "+ View" affordance on a
-// Board detail page. Click → anchored panel:
-//   1. Search/describe input (AI placeholder — filters the catalog today)
+// ViewCreatePopover + NewViewTrigger: the "+ View" affordance on a
+// Board detail page. Click opens an anchored panel:
+//   1. Search/describe input (AI placeholder; filters the catalog today)
 //   2. Popular grid (List / Gantt Chart / Calendar / Doc / Board / Form / Dashboard)
 //   3. Full grid of supported ViewTypes
 //   4. Embed section (Any website / Google Sheets / Docs / Calendar / Maps / YouTube / Figma)
-//      — POSTs view with embed URL once supported; today stubbed via toast
+//      (POSTs view with embed URL once supported; today stubbed via toast)
 //   5. Private view + Pin view checkboxes
 //
 // Calls POST /api/boards/[id]/views { name, type, isShared? } and on success
 // router.refresh()es the board page so the new tab appears.
+//
+// The panel is PORTALLED (MorePortal, position: fixed) rather than rendered
+// absolutely inside the tab strip: ViewTabStrip is `overflow-x-auto`, which
+// forces overflow-y to auto as well, so an in-strip panel was clipped to the
+// strip's 36px and the whole catalogue rendered invisibly ("I cannot add
+// views"). The tab context menu already escapes the strip the same way.
 
 import { Dots } from "@/components/ui/dots";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
-  Search,
   Sparkles,
   List as ListIcon,
   GanttChart,
@@ -43,6 +48,7 @@ import {
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 interface ViewTile {
@@ -52,7 +58,7 @@ interface ViewTile {
   Icon: typeof ListIcon;
   swatch: string;
   /** Seed config saved on the view at creation (e.g. the Monday-style
-   *  grid flag that distinguishes Table from List — both TABLE type). */
+   *  grid flag that distinguishes Table from List, both TABLE type). */
   config?: Record<string, unknown>;
 }
 
@@ -66,7 +72,7 @@ const POPULAR: ViewTile[] = [
   { type: "DASHBOARD", label: "Dashboard", tag: "Report",     Icon: BarChart3,     swatch: "#EC4899" },
 ];
 
-// Every tile maps to its real ViewType now (Phase: views-catalog) —
+// Every tile maps to its real ViewType now (Phase: views-catalog):
 // the old placeholders (Activity→CHART, Team→DASHBOARD) are gone.
 // Team rides WORKLOAD with a config variant. There is ONE Canvas tile: the
 // "Mind Map" tile beside it created the very same WHITEBOARD view with the
@@ -128,28 +134,25 @@ export function NewViewTrigger({ boardId }: Props) {
   }, [open]);
 
   return (
-    <span className="relative inline-flex">
+    <>
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 px-2 py-2 text-xs transition-colors ${
-          open ? "text-zinc-900" : "text-zinc-500 hover:text-zinc-900"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={`os-chrome inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-row transition-colors ${
+          open ? "bg-active text-ink" : "text-ink-2 hover:bg-hover hover:text-ink"
         }`}
       >
-        <Plus className="w-3.5 h-3.5" />
+        <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
         View
       </button>
 
-      {open ? (
-        <div
-          ref={panelRef}
-          className="absolute left-0 top-10 z-[80] w-[560px] max-w-[92vw]"
-        >
-          <ViewCreatePanel boardId={boardId} onClose={() => setOpen(false)} />
-        </div>
-      ) : null}
-    </span>
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={560} open={open} placement="below">
+        <ViewCreatePanel boardId={boardId} onClose={() => setOpen(false)} />
+      </MorePortal>
+    </>
   );
 }
 
@@ -197,16 +200,17 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
 
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white shadow-2xl overflow-hidden">
-      <div className="p-3 border-b border-zinc-100">
+    <div role="dialog" aria-label="Add a view" className="max-w-[92vw] overflow-hidden rounded-xl border border-line bg-raised text-ink shadow-[var(--os-shadow-pop)]">
+      <div className="border-b border-line-soft p-3">
         <div className="relative">
-          <Sparkles className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+          <Sparkles className="absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-3" strokeWidth={1.5} aria-hidden />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search views"
-            className="w-full h-9 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
+            aria-label="Search views"
+            className="h-9 w-full rounded-md border border-line-strong bg-raised pe-3 ps-8 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
             autoFocus
           />
         </div>
@@ -244,22 +248,22 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
         </UpcomingOnly>
       </div>
 
-      <div className="px-3 py-2 border-t border-zinc-100 flex items-center gap-4 text-sm text-zinc-700">
-        <label className="inline-flex items-center gap-1.5 cursor-pointer">
+      <div className="flex items-center gap-4 border-t border-line-soft px-3 py-2 text-sm text-ink-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5">
           <input
             type="checkbox"
             checked={isPrivate}
             onChange={(e) => setIsPrivate(e.target.checked)}
-            className="h-3.5 w-3.5 accent-zinc-900"
+            className="h-3.5 w-3.5 accent-[var(--os-brand)]"
           />
           Private view
         </label>
-        <label className="inline-flex items-center gap-1.5 cursor-pointer">
+        <label className="inline-flex cursor-pointer items-center gap-1.5">
           <input
             type="checkbox"
             checked={pinView}
             onChange={(e) => setPinView(e.target.checked)}
-            className="h-3.5 w-3.5 accent-zinc-900"
+            className="h-3.5 w-3.5 accent-[var(--os-brand)]"
           />
           Pin view
         </label>
@@ -272,7 +276,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       {label ? (
-        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">
+        <div className="mb-1.5 text-micro uppercase tracking-[0.06em] text-ink-2">
           {label}
         </div>
       ) : null}
@@ -299,7 +303,7 @@ function ViewTileButton({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-100 text-left disabled:opacity-50"
+      className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start hover:bg-hover disabled:opacity-50"
     >
       <span
         className="h-7 w-7 rounded-[8px] flex items-center justify-center text-white shrink-0"
@@ -307,9 +311,9 @@ function ViewTileButton({
       >
         {busy ? <Dots variant="pending" /> : <tile.Icon className="h-3.5 w-3.5" />}
       </span>
-      <span className="text-base text-zinc-900 truncate">
+      <span className="truncate text-base text-ink">
         <span className="font-medium">{tile.label}</span>
-        {tile.tag ? <span className="ml-1 text-zinc-500 font-normal">{tile.tag}</span> : null}
+        {tile.tag ? <span className="ms-1 font-normal text-ink-2">{tile.tag}</span> : null}
       </span>
     </button>
   );

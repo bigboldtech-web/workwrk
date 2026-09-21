@@ -48,7 +48,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Star, Plus, Edit2, Link as LinkIcon, Palette, Share2,
+  MoreHorizontal, Star, Pin, Plus, Edit2, Link as LinkIcon, Palette, Share2,
   Settings, CircleDot, Tag, Shapes, Info, Files, Save, Zap, BellOff, Bell,
   EyeOff, ArrowRightLeft, ArrowUp, ArrowDown, Copy, Archive, Trash2,
   ListChecks, FolderPlus, FileText, Brush, IterationCw, Blocks, Table2,
@@ -137,8 +137,12 @@ const FAVORITES_BODY_KEY: Record<ContainerKind, string> = {
   list: "boardId",
 };
 
+/** The kind word /api/me/pins stores for each container. */
+const TOP_PIN_KIND: Record<ContainerKind, string> = { space: "space", folder: "folder", list: "board" };
+
 const ROW_ICON: Record<ContainerAction, LucideIcon> = {
   favorite: Star,
+  "pin-top": Pin,
   new: Plus,
   rename: Edit2,
   "copy-link": LinkIcon,
@@ -391,6 +395,7 @@ function ContainerMenuBody({
   const [iconName, setIconName] = useState(container.icon ?? null);
   const [color, setColor] = useState(container.color ?? "var(--os-ink-3)");
   const [starred, setStarred] = useState<boolean | null>(null);
+  const [topPinned, setTopPinned] = useState(false);
   const [muted, setMuted] = useState(false);
   // Spec row 10 is a submenu that WRITES Board.settings.defaultItemTypeId. The
   // row navigated to /settings/task-types instead, which is the org-wide list,
@@ -410,6 +415,8 @@ function ContainerMenuBody({
         if (!alive) return;
         const ids: string[] = d?.effective?.home?.[FAVORITES_PREF_KEY[container.kind]] ?? [];
         setStarred(ids.includes(container.id));
+        const pins: Array<{ kind: string; id: string }> = Array.isArray(d?.effective?.home?.topPins) ? d.effective.home.topPins : [];
+        setTopPinned(pins.some((p) => p.kind === TOP_PIN_KIND[container.kind] && p.id === container.id));
         const mutedList: string[] = d?.effective?.home?.notifications?.muted ?? [];
         setMuted(mutedList.includes(`${container.kind}:${container.id}`));
       })
@@ -514,6 +521,24 @@ function ContainerMenuBody({
       setStarred(starredNow);
     }
   }, [container.id, container.kind, starred]);
+
+  /** Favorite > Top: the chip strip under the bar. Optimistic, reverted on failure. */
+  const toggleTopPin = useCallback(async () => {
+    const next = !topPinned;
+    setTopPinned(next);
+    try {
+      const res = await fetch("/api/me/pins", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: TOP_PIN_KIND[container.kind], id: container.id, on: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.dispatchEvent(new CustomEvent("workwrk:pins-changed"));
+    } catch {
+      setTopPinned(!next);
+      toast("Couldn't update the top strip");
+    }
+  }, [container.id, container.kind, topPinned, toast]);
 
   // audit High #1 (List) and Medium #15 (Folder): both wrote a link that did
   // not resolve. The path now comes from one pure function with a test.
@@ -826,6 +851,7 @@ function ContainerMenuBody({
     kind: container.kind,
     role,
     isFavorite: Boolean(starred),
+    isTopPinned: topPinned,
     canDelete,
     isAgent,
     editorsCanShare,
@@ -840,6 +866,9 @@ function ContainerMenuBody({
         switch (row.action) {
           case "favorite":
             return <MenuItem key={row.action} icon={Icon} label={row.label} iconFilled={Boolean(starred)} onClick={toggleFavorite} />;
+
+          case "pin-top":
+            return <MenuItem key={row.action} icon={Icon} label={row.label} iconFilled={topPinned} onClick={toggleTopPin} />;
 
           case "new":
             return (

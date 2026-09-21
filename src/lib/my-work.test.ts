@@ -8,6 +8,10 @@ import {
   boardColumns,
   groupRows,
   overdueAndTodayCount,
+  parseWorkScope,
+  parseWorkView,
+  statusOptionsFrom,
+  toBoardRows,
   type MyWorkRow,
 } from "./my-work";
 import type { DueBucket } from "./work-buckets";
@@ -194,13 +198,52 @@ describe("the vocabularies", () => {
     expect(WORK_SORTS.map((s) => s.key)).toEqual(["due", "priority", "title", "list", "created", "updated"]);
   });
 
-  it("offers three views and no Gantt (Gantt is a List view)", () => {
-    expect(WORK_VIEWS.map((v) => v.key)).toEqual(["list", "board", "calendar"]);
+  it("offers the six views the personal pages had: list, board, calendar, gantt, timeline, sprint", () => {
+    expect(WORK_VIEWS.map((v) => v.key)).toEqual(["list", "board", "calendar", "gantt", "timeline", "sprint"]);
+  });
+
+  it("reads a view key from the URL and falls back to list", () => {
+    expect(parseWorkView("gantt")).toBe("gantt");
+    expect(parseWorkView("SPRINT")).toBe("sprint");
+    expect(parseWorkView("nonsense")).toBe("list");
+    expect(parseWorkView(null)).toBe("list");
+  });
+
+  it("reads the scope: delegated, else mine", () => {
+    expect(parseWorkScope("delegated")).toBe("delegated");
+    expect(parseWorkScope("mine")).toBe("mine");
+    expect(parseWorkScope(null)).toBe("mine");
   });
 
   it("uses the Urgent / High / Normal / Low words, not Critical / Medium", () => {
     expect(Object.values(PRIORITY_LABEL)).toEqual(["Urgent", "High", "Normal", "Low"]);
     expect(Object.values(PRIORITY_LABEL)).not.toContain("Critical");
     expect(Object.values(PRIORITY_LABEL)).not.toContain("Medium");
+  });
+});
+
+describe("the bridge to the List page's Gantt and Timeline", () => {
+  it("builds one status option per distinct value, grouped by each List's own done rule", () => {
+    const opts = statusOptionsFrom([
+      row({ id: "a", status: "TO_DO", statusLabel: "To do", statusColor: "#111111", doneStatus: "SHIPPED" }),
+      row({ id: "b", status: "SHIPPED", statusLabel: "Shipped", statusColor: "#222222", doneStatus: "SHIPPED" }),
+      row({ id: "c", status: "TO_DO", statusLabel: "Other word", statusColor: "#333333", doneStatus: null }),
+      row({ id: "d", status: null }),
+    ]);
+    expect(opts).toEqual([
+      { value: "TO_DO", label: "To do", color: "#111111", group: "ACTIVE" },
+      { value: "SHIPPED", label: "Shipped", color: "#222222", group: "DONE" },
+    ]);
+  });
+
+  it("projects rows onto the List renderers' shape with page order as position", () => {
+    const rows = toBoardRows([
+      row({ id: "a", dueAt: "2026-09-22T00:00:00.000Z", priority: "HIGH", board: { id: "b1", slug: "s", name: "L", icon: null, color: null, spaceId: null } }),
+      row({ id: "b" }),
+    ]);
+    expect(rows.map((r) => [r.id, r.position, r.boardId, r.priority])).toEqual([["a", 0, "b1", "HIGH"], ["b", 1, null, null]]);
+    expect(rows[0].dueAt).toBe("2026-09-22T00:00:00.000Z");
+    expect(rows[0].archivedAt).toBeNull();
+    expect(rows[0].createdAt).toBeInstanceOf(Date);
   });
 });

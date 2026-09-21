@@ -1,5 +1,6 @@
-// /tasks/gantt: the legacy task Gantt. Gantt is a List view; personal work has no
-// Gantt of its own, so this lands on My work.
+// /tasks/gantt: the legacy personal Gantt across every task assigned to you.
+// My work carries that Gantt as a view now (?view=gantt, the List page's own
+// renderer over the same Item rows), so the bookmark lands on the view.
 //
 // Phase 2 W4 (docs/plans/ui-refresh/spec-work-home.md section 0, the redirect
 // table). The page that lived here ran on the legacy `Task` table; those rows
@@ -28,9 +29,10 @@
 // so this file is only ever reached when the table has not been loaded.
 
 import { permanentRedirect } from "next/navigation";
+import { LEGACY_TASK_ROUTES } from "@/lib/legacy-task-routes";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  permanentRedirect("/my-work");
+  permanentRedirect(LEGACY_TASK_ROUTES["/tasks/gantt"]);
 }
