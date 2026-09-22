@@ -1,91 +1,80 @@
-// /api/planner/events — the signed-in user's scheduled things for the Planner
-// time-grid: Tasks (personal events + Google-synced meetings) and work Items
-// that have a date. Normalized to { start, end, allDay } so the grid can
-// position each block by time.
+// /api/planner/events: A THIN DELEGATE to GET /api/calendar/events.
+//
+// spec-planner.md section 0 row 13 folds three feeds into one:
+//
+//   "GET /api/planner/events, GET /api/calendar, GET /api/calendar/meetings
+//    folded into one GET /api/calendar/events; the three routes stay one
+//    release as thin delegates, then go"
+//
+// This is that release. Nothing in the product calls this any more: the
+// Calendar reads `/api/calendar/events` directly. It stays for one release
+// so a browser tab that was open across the deploy, and anything outside
+// this repo that learned the URL, keeps getting an answer instead of a 404.
+//
+// WHAT IT ANSWERS. The same `{ events: [...] }` shape it always did, with
+// `source` and `external` derived from the new endpoint's `kind`. It served
+// tasks only, so nothing that used to appear here has gone: meetings,
+// events and reminders are filtered OUT of the delegate's answer, because
+// adding them would change what an old caller renders, and a delegate's
+// job is to keep a promise rather than to improve on it.
+//
+// WHEN IT GOES. The next release. The removal note is in
+// scripts/MIGRATIONS.md.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { GET as calendarEvents } from "../../calendar/events/route";
 
 interface PlannerEvent {
   id: string;
   source: "task" | "item";
-  external: boolean;        // synced from Google
+  /** Synced from Google. */
+  external: boolean;
   title: string;
-  start: string;            // ISO
-  end: string;              // ISO
+  start: string;
+  end: string;
   allDay: boolean;
   status: string | null;
   url: string | null;
 }
 
-function parse(d: string | null): Date | null {
-  if (!d) return null;
-  const x = new Date(d);
-  return isNaN(x.getTime()) ? null : x;
-}
+type CalendarRow = {
+  id: string;
+  kind: string;
+  title: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  status: string | null;
+  url: string | null;
+};
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
-  const u = session?.user as { id?: string; organizationId?: string } | undefined;
-  if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const url = new URL(req.url);
-  const now = new Date();
-  const from = parse(url.searchParams.get("from")) ?? new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const to = parse(url.searchParams.get("to")) ?? new Date(from.getTime() + 7 * 86_400_000);
+  // The one calendar read, asked for exactly what this endpoint used to
+  // serve. The session, the scope and the range validation are all its.
+  const forward = new URL("/api/calendar/events", url.origin);
+  for (const [k, v] of url.searchParams) forward.searchParams.set(k, v);
+  forward.searchParams.set("kinds", "task,external");
 
-  const events: PlannerEvent[] = [];
+  const res = await calendarEvents(new Request(forward, { headers: req.headers }));
+  if (!res.ok) return res;
 
-  // ── Tasks with a date ───────────────────────────────────────────
-  //
-  // Phase 2 W4. This handler used to run TWO queries side by side, one over
-  // the legacy `Task` table and one over `Item`, and prefix their ids to keep
-  // them apart. That was the clearest evidence in the codebase that there were
-  // two task models: a task created in the planner went to one table and a
-  // task created on a board went to the other, and neither surface could see
-  // the other's rows. The legacy rows are Items now
-  // (scripts/migrate-legacy-tasks.ts), so there is one query.
-  //
-  // `source: "task"` is kept as the event kind, because that is what these
-  // events ARE to the planner and to every client reading this payload; only
-  // the table behind it changed.
-  //
-  // Two fixes ride along, both of which were bugs rather than model details:
-  //   - it matched `ownerId` alone, so a task assigned to you by somebody else
-  //     never appeared on your own planner. It now matches the assignee set.
-  //   - legacy events carried `url: null` and so were unclickable. Every row
-  //     has a task URL now.
-  const items = await prisma.item.findMany({
-    where: {
-      organizationId: u.organizationId,
-      archivedAt: null,
-      OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
-      AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
-    },
-    select: { id: true, title: true, status: true, startAt: true, dueAt: true, metadata: true },
-    take: 500,
-  });
-  for (const it of items) {
-    const start = it.startAt ?? it.dueAt!;
-    const end = it.dueAt && it.startAt ? it.dueAt : new Date(start.getTime() + 60 * 60 * 1000);
-    // A Google-synced legacy task keeps its provenance under the remainder the
-    // migration preserved, so the "external" pill on the planner still tells
-    // the truth about rows that came from a calendar.
-    const legacy = (it.metadata as { legacyTask?: { externalSource?: string } } | null)?.legacyTask;
-    events.push({
-      id: `item:${it.id}`,
-      source: "task",
-      external: legacy?.externalSource === "GCAL",
-      title: it.title,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      allDay: false,
-      status: it.status,
-      url: `/item/${it.id}`,
-    });
-  }
+  const body = (await res.json()) as { events?: CalendarRow[] };
+  const events: PlannerEvent[] = (body.events ?? [])
+    .filter((e) => e.kind === "task" || e.kind === "external")
+    .map((e) => ({
+      // The old ids were bare, the new ones are namespaced. Unwrap, so a
+      // caller that stored one still matches.
+      id: e.id.replace(/^item:/, ""),
+      source: "item",
+      external: e.kind === "external",
+      title: e.title,
+      start: e.start,
+      end: e.end,
+      allDay: e.allDay,
+      status: e.status,
+      url: e.url,
+    }));
 
-  return NextResponse.json({ events, range: { from: from.toISOString(), to: to.toISOString() } });
+  return NextResponse.json({ events });
 }

@@ -166,6 +166,64 @@ export function formatDate(
   return dayMonth(d, zone, locale, order, !sameYear);
 }
 
+/**
+ * A WALL CLOCK time, in the viewer's format, with NO instant behind it.
+ *
+ * WHY THIS EXISTS. `formatDate(value, prefs, "time")` projects an instant
+ * into `home.locale.timezone`, which is right for a stored moment and wrong
+ * for a set of digits a picker is offering. A time picker that built its
+ * labels with `formatDate(new Date(2000, 0, 1, h, m), prefs, "time")` made a
+ * Date in the BROWSER's zone and then re-read it in the viewer's, so every
+ * label moved by the difference between the two: the row a person read as
+ * "9:00 AM" carried the value "19:30", and the field contradicted the header
+ * three lines above it on the same screen.
+ *
+ * `hours` and `minutes` are printed exactly as given. The formatter is fed a
+ * UTC instant and told to read it in UTC, which is the only way to ask Intl
+ * for "these digits, in this locale's habit" and be sure no zone touches it.
+ */
+export function formatWallClockTime(hours: number, minutes: number, prefs?: DateFormatPrefs | null): string {
+  const h = Math.max(0, Math.min(23, Math.floor(Number(hours) || 0)));
+  const m = Math.max(0, Math.min(59, Math.floor(Number(minutes) || 0)));
+  const d = new Date(Date.UTC(2000, 0, 1, h, m));
+  return new Intl.DateTimeFormat(resolveLocale(prefs), { timeZone: "UTC", ...timeOptions(prefs) }).format(d);
+}
+
+/** The same rule for "HH:mm". Anything unreadable comes back as "". */
+export function formatWallClockHhmm(value: string | null | undefined, prefs?: DateFormatPrefs | null): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(value ?? "").trim());
+  if (!m) return "";
+  return formatWallClockTime(Number(m[1]), Number(m[2]), prefs);
+}
+
+/**
+ * A CALENDAR DAY ("YYYY-MM-DD"), in the viewer's date order, with no instant
+ * behind it. The companion of formatWallClockTime, and it exists for the same
+ * reason: a date picker's value is a day, not a moment, so re-reading it in a
+ * zone moves it (local midnight in Asia/Kolkata is the previous afternoon in
+ * America/New_York, which is how a field read "24 Sep" for a 25 Sep meeting).
+ *
+ * The year is printed only when the day is not in the viewer's current year,
+ * which is the same rule `formatDate(..., "date")` follows.
+ */
+export function formatWallClockDate(
+  key: string | null | undefined,
+  prefs?: DateFormatPrefs | null,
+  now: Date = new Date(),
+): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key ?? "").trim());
+  if (!m) return "";
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const at = new Date(Date.UTC(y, mo - 1, d, 12));
+  const sameYear = parts(now, resolveZone(prefs)).y === y;
+  return dayMonth(at, "UTC", resolveLocale(prefs), resolveDateOrder(prefs), !sameYear);
+}
+
+/** Today as "YYYY-MM-DD" in the viewer's zone: what a date picker rings. */
+export function wallClockToday(prefs?: DateFormatPrefs | null, now: Date = new Date()): string {
+  return dayKey(now, prefs);
+}
+
 /** The exact date and time in the viewer's zone: the `title` tooltip on every smart date. */
 export function formatDateTitle(value: Date | string | number | null | undefined, prefs?: DateFormatPrefs | null): string {
   const d = toDate(value);

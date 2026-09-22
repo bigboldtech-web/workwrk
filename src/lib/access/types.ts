@@ -216,6 +216,13 @@ export type AppKey =
   // folded catalog entries
   | "goals"
   | "timesheets"
+  // Phase 4 (spec-planner.md section 1 Access). /meetings and /clock were
+  // live, ungated routes with a ROUTE_HUB row and a ROUTE_TITLES label and
+  // no app key at all, which by section 5.2.1's closing rule ("a key with
+  // no row does not render and its route 404s") meant neither could ever be
+  // gated. Both fold into the Planner hub and carry the planner audience.
+  | "meetings"
+  | "clock"
   | "library"
   | "clips"
   | "sops"

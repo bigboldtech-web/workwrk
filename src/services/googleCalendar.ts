@@ -139,6 +139,12 @@ export interface GoogleEvent {
   end?: { dateTime?: string; date?: string; timeZone?: string };
   updated?: string;
   htmlLink?: string;
+  /**
+   * Who was invited and what they answered. Only the entry marked `self`
+   * matters to us: it is the viewer's own reply, and it is what the
+   * Calendar's "Show declined Google events" switch acts on.
+   */
+  attendees?: Array<{ self?: boolean; email?: string; responseStatus?: string }>;
 }
 
 export interface EventsPage {

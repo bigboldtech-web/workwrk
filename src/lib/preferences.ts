@@ -109,7 +109,13 @@ export interface HomePref {
     quietHours?: { start?: string; end?: string; days?: number[]; enabled?: boolean };
     muted?: string[];
     desktop?: boolean;
+    /** "Ring for incoming calls" (spec-talk section 4 step 10). A SIBLING
+     *  of `desktop`, not a child: `desktop` stays the plain boolean
+     *  settings-architecture 4.3 defines. */
+    desktopRingCalls?: boolean;
     reminderEmail?: boolean;
+    /** The reminder panel's "Also email me" switch, remembered. */
+    reminderEmailDefault?: boolean;
   };
   /** The key My Tasks writes (settings spec 9.3 widening; same shape as taskCardLayout). */
   taskCardLayoutV3?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
@@ -136,6 +142,20 @@ export interface HomePref {
   notetaker?: { lastListId?: string | null };
   /** The SOP library's Display options (spec-process section 2 `/sops`). */
   sops?: { columns?: Record<string, boolean> };
+  // Planner hub per-surface display options (spec-planner section 2, Phase 4).
+  // READ PER FIELD through src/lib/planner-prefs.ts, never by spreading:
+  // getEffectivePreferences merges `home` with a shallow spread, so a stored
+  // namespace carrying one key replaces the whole object.
+  planner?: {
+    view?: "week" | "month" | "people";
+    sources?: string[];
+    showWeekends?: boolean;
+    showDeclined?: boolean;
+    showReminders?: boolean;
+    highlightWorkHours?: boolean;
+    showUnscheduled?: boolean;
+  };
+  timesheets?: { showNotes?: boolean; showSource?: boolean };
   work?: {
     savedFilters?: unknown[];
     pinnedViews?: string[];

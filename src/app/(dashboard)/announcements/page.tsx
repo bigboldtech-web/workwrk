@@ -32,8 +32,8 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePermission } from "@/hooks/use-permission";
 import { AnnouncementComposer } from "./composer-dialog";
-import { AckStatusDialog } from "./ack-status-dialog";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useFormat } from "@/lib/format/use-date-prefs";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -73,23 +73,37 @@ const PRIO_HUE: Record<AnnPrio, string> = {
 };
 const PRIO_ORDER: AnnPrio[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
 
-function relativeDate(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
+// Past a week this falls back to a calendar date, and that date is the
+// VIEWER'S (home.locale), not the machine's and not en-US. The same bug is
+// why an announcement expiring on 31 December read "Expires Jan 1" to a
+// reader five and a half hours ahead of UTC.
+function relativeDate(iso: string, fmt: ReturnType<typeof useFormat>, nowMs: number | null): string {
+  if (nowMs === null) return fmt.date(iso, "date");
+  const ms = nowMs - new Date(iso).getTime();
   const day = 86_400_000;
   if (ms < 60_000) return "just now";
   if (ms < 60 * 60_000) return `${Math.floor(ms / 60_000)}m ago`;
   if (ms < 24 * 60 * 60_000) return `${Math.floor(ms / (60 * 60_000))}h ago`;
   if (ms < 7 * day) return `${Math.floor(ms / day)}d ago`;
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmt.date(iso, "date");
 }
 
 export default function AnnouncementsPage() {
+  const fmt = useFormat();
+  // The clock, sampled after mount so no component reads it during render
+  // and the server and the first client render agree.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNowMs(Date.now());
+    const first = setTimeout(tick, 0);
+    const every = setInterval(tick, 60_000);
+    return () => { clearTimeout(first); clearInterval(every); };
+  }, []);
   const [rows, setRows] = useState<ApiAnn[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | AnnType>("ALL");
   const [composerOpen, setComposerOpen] = useState(false);
-  const [ackStatusFor, setAckStatusFor] = useState<{ id: string; title: string } | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   // Mirrors the POST /api/announcements gate (requirePermission
@@ -157,11 +171,6 @@ export default function AnnouncementsPage() {
     <>
       <OsPageHeader
         title="Announcements"
-        actions={
-          <div className="ann__head-actions">
-            <Link href="/policies" className="os-head__link"><ShieldCheck /> Policies</Link>
-          </div>
-        }
         primary={canManage ? { label: "New announcement", onClick: () => setComposerOpen(true) } : undefined}
       />
 
@@ -176,7 +185,7 @@ export default function AnnouncementsPage() {
         {stats.ackPending > 0 && (
           <div className="ann__banner">
             <Bell />
-            <span><strong>{stats.ackPending} announcement{stats.ackPending === 1 ? "" : "s"}</strong> require your acknowledgment.</span>
+            <span><strong>{stats.ackPending} announcement{stats.ackPending === 1 ? "" : "s"}</strong> {stats.ackPending === 1 ? "requires" : "require"} your acknowledgment.</span>
           </div>
         )}
 
@@ -227,7 +236,7 @@ export default function AnnouncementsPage() {
                   <span className="ann__section-line" />
                 </header>
                 <div className="ann__list">
-                  {pinned.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} onViewAcks={() => setAckStatusFor({ id: a.id, title: a.title })} />)}
+                  {pinned.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} fmt={fmt} nowMs={nowMs} />)}
                 </div>
               </section>
             )}
@@ -240,7 +249,7 @@ export default function AnnouncementsPage() {
                   <span className="ann__section-line" />
                 </header>
                 <div className="ann__list">
-                  {g.items.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} onViewAcks={() => setAckStatusFor({ id: a.id, title: a.title })} />)}
+                  {g.items.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} fmt={fmt} nowMs={nowMs} />)}
                 </div>
               </section>
             ))}
@@ -255,18 +264,11 @@ export default function AnnouncementsPage() {
           onCreated={(msg) => { toast(msg); void load(); }}
         />
       )}
-      {canManage && ackStatusFor && (
-        <AckStatusDialog
-          announcementId={ackStatusFor.id}
-          title={ackStatusFor.title}
-          onClose={() => setAckStatusFor(null)}
-        />
-      )}
     </>
   );
 }
 
-function AnnCard({ a, onAck, canManage, onViewAcks }: { a: ApiAnn; onAck: () => void; canManage: boolean; onViewAcks: () => void }) {
+function AnnCard({ a, onAck, canManage, fmt, nowMs }: { a: ApiAnn; onAck: () => void; canManage: boolean; fmt: ReturnType<typeof useFormat>; nowMs: number | null }) {
   const TypeIcon = TYPE_ICON[a.type];
   return (
     <article className={`ann__card ann__card--${a.type.toLowerCase()}`} style={{ ["--c-c" as unknown as string]: TYPE_HUE[a.type], ["--p-c" as unknown as string]: PRIO_HUE[a.priority] }}>
@@ -274,22 +276,27 @@ function AnnCard({ a, onAck, canManage, onViewAcks }: { a: ApiAnn; onAck: () => 
         <span className="ann__card-type"><TypeIcon /> {TYPE_LABEL[a.type]}</span>
         <span className="ann__card-prio">{PRIO_LABEL[a.priority]}</span>
         {a.pinned && <span className="ann__card-pin"><Pin /> Pinned</span>}
-        <span className="ann__card-time"><Clock /> {relativeDate(a.publishedAt ?? a.createdAt)}</span>
+        <span className="ann__card-time"><Clock /> {relativeDate(a.publishedAt ?? a.createdAt, fmt, nowMs)}</span>
       </header>
-      <h3 className="ann__card-title">{a.title}</h3>
+      <h3 className="ann__card-title">
+        <Link href={`/announcements/${a.id}`} className="text-inherit no-underline hover:underline">{a.title}</Link>
+      </h3>
       <p className="ann__card-content">{a.content}</p>
       <footer className="ann__card-foot">
         {a.expiresAt && (
-          <span className="ann__card-expires">Expires {new Date(a.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+          <span className="ann__card-expires">Expires {fmt.date(a.expiresAt, "date")}</span>
         )}
+        {/* One roster, on the post's own page. This used to open a second
+            roster dialog for the same job (ack-status-dialog.tsx), which is
+            now gone: the Acknowledgments tab is the one place who-has-and-
+            who-has-not lives, and it has a URL. */}
         {a.mustAcknowledge && canManage && (
-          <button
-            type="button"
-            onClick={onViewAcks}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[var(--os-line)] text-sm text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+          <Link
+            href={`/announcements/${a.id}`}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line text-sm text-ink-2 hover:bg-hover hover:text-ink"
           >
             <Users2 className="w-3.5 h-3.5" /> Ack status
-          </button>
+          </Link>
         )}
         {a.mustAcknowledge && (
           a.ackedByMe ? (

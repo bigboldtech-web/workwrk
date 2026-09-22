@@ -12,6 +12,10 @@ import {
   formatDate,
   formatDateTitle,
   formatRelative,
+  formatWallClockDate,
+  formatWallClockHhmm,
+  formatWallClockTime,
+  wallClockToday,
   type DateFormatPrefs,
   type DateStyle,
 } from "./date";
@@ -37,5 +41,14 @@ export function useFormat() {
   const relative = useCallback((v: Date | string | number | null | undefined) => formatRelative(v, prefs), [prefs]);
   const bytes = useCallback((n: number | null | undefined) => formatBytes(n, prefs), [prefs]);
   const count = useCallback((n: number | null | undefined) => formatCount(n, prefs), [prefs]);
-  return useMemo(() => ({ date, title, relative, bytes, count, prefs }), [date, title, relative, bytes, count, prefs]);
+  // The two wall-clock renderers: a picker's option is a set of digits and a
+  // calendar day, never an instant, so nothing here re-reads it in a zone.
+  const wallTime = useCallback((h: number, m: number) => formatWallClockTime(h, m, prefs), [prefs]);
+  const wallHhmm = useCallback((v: string | null | undefined) => formatWallClockHhmm(v, prefs), [prefs]);
+  const wallDate = useCallback((key: string | null | undefined) => formatWallClockDate(key, prefs), [prefs]);
+  const today = useCallback(() => wallClockToday(prefs), [prefs]);
+  return useMemo(
+    () => ({ date, title, relative, bytes, count, wallTime, wallHhmm, wallDate, today, prefs }),
+    [date, title, relative, bytes, count, wallTime, wallHhmm, wallDate, today, prefs],
+  );
 }

@@ -85,7 +85,9 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     keywords: ["password", "two-factor", "2fa", "mfa", "sessions", "sign out"],
   }),
   page("me", "account/connections", "Calendar & connections", "/account/connections", {
-    todayHref: "/settings/calendar",
+    // Phase 4: the page exists now, so the canonical URL is its own href and
+    // /settings/calendar is a 308 alias rather than the place it actually
+    // lived. `todayHref` defaults to the href when it is not given.
     aliases: ["/settings/calendar"],
     keywords: ["google calendar", "ics", "feed", "sync", "integrations"],
   }),

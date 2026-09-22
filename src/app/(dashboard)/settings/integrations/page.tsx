@@ -7,7 +7,7 @@ import { Plug, Calendar, LayoutGrid, KeyRound, ChevronRight } from "lucide-react
 
 const CARDS = [
   {
-    href: "/settings/calendar",
+    href: "/account/connections",
     icon: Calendar,
     title: "Calendar feeds",
     desc: "Connect Google, Outlook, iCloud or ICS feeds",

@@ -144,9 +144,12 @@ export interface AppRule {
 }
 
 /**
- * One row per app key. The 8 hubs and the 19 keys of FOLDED_APP_HUB
+ * One row per app key. The 8 hubs and the 21 keys of FOLDED_APP_HUB
  * (src/lib/nav/route-hub.ts), plus `talent`, `analytics`, `rollup` and
- * `integrations`, which are routes rather than catalog entries. 31 rows.
+ * `integrations`, which are routes rather than catalog entries. 33 rows.
+ *
+ * Phase 4 added `meetings` and `clock`, the two Planner routes that had no
+ * key at all.
  *
  * NOTE on the spec's own count: section 5.2.1's preamble says "8 + 19 + 3 = 30"
  * while its table lists 31. The fourth route-only key is `integrations`; the
@@ -172,6 +175,13 @@ export const APP_RULES: Record<AppKey, AppRule> = {
   templates: { hub: "home", audience: "member", guest: "none" },
   // Planner
   timesheets: { hub: "planner", audience: "member", guest: "none" },
+  // Phase 4. Content scoping is the routes' own job and is stricter than the
+  // row: /meetings lists only meetings the viewer attends or created (Owners
+  // and Admins org-wide, rule 4), and /clock shows the viewer's own punches
+  // and nobody else's. Agents see both rows: frontline work is who the clock
+  // is for.
+  meetings: { hub: "planner", audience: "member", guest: "none" },
+  clock: { hub: "planner", audience: "member", guest: "none" },
   // Docs
   library: { hub: "docs", audience: "member", guest: "shared" },
   clips: { hub: "docs", audience: "member", guest: "none" },

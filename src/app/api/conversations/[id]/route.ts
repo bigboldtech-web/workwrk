@@ -46,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { callEpoch, ...rest } = conversation;
   const room = chatRoomName(id, callEpoch);
-  // Live huddle roster for the header chip (12h staleness cap, ghost-proof).
+  // Live call roster for the header chip (12h staleness cap, ghost-proof).
   let activeCall: { participants: { identity: string; name: string }[]; startedAt: Date } | null = null;
   try {
     // A conversation can briefly hold several open sessions (epoch
@@ -165,7 +165,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   // Leaving = removing my membership. Messages stay (data integrity).
   // The epoch bump rotates the derived call room so the departing
-  // member's captured room name can't rejoin future huddles.
+  // member's captured room name can't rejoin future calls.
   await prisma.$transaction([
     prisma.conversationMember.delete({ where: { id: membership.id } }),
     prisma.conversation.update({ where: { id }, data: { callEpoch: { increment: 1 } } }),

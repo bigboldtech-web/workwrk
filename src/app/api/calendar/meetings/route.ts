@@ -1,71 +1,57 @@
-import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { getTeamUserIds } from "@/lib/team";
+// /api/calendar/meetings: A THIN DELEGATE to GET /api/calendar/events.
+//
+// spec-planner.md section 0 row 13 folds three feeds into one, and keeps
+// the three old routes for one release as delegates.
+//
+// This one had NO CALLER in the product even before the fold: grep for the
+// literal "/api/calendar/meetings" and the only hit was the route file
+// itself. It kept answering, with its own scoping rules
+// (`isManager(session)` plus `getTeamUserIds`) that disagreed with every
+// other meeting read, which is exactly the kind of second opinion this
+// phase is here to remove.
+//
+// It answers the same `{ meetings: [...] }` shape from the one calendar
+// read, so anything outside this repo that learned the URL still works.
+// The scoping is now the calendar read's: `calendar=team` means the
+// viewer's report tree, and without the relationship it falls back to the
+// viewer's own meetings rather than to a 403.
+//
+// WHEN IT GOES. The next release. The removal note is in
+// scripts/MIGRATIONS.md.
 
-/**
- * Lightweight meetings feed for the Work Calendar views.
- *
- * Scope (matches the tasks route's rules so the two surfaces feel
- * consistent):
- *   - Employees: only meetings they're attending.
- *   - Managers: meetings their team is in (via `view=team`) or a
- *     specific subset (`userIds=` filter). An explicit `userIds=`
- *     means "show meetings these people are in."
- *
- * Returns only the fields the calendar renders — title, scheduledAt,
- * duration, type, attendee ids. Full detail lives on /meetings/:id.
- */
-export async function GET(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
+import { NextResponse } from "next/server";
+import { GET as calendarEvents } from "../events/route";
 
-  const orgId = getOrgId(session);
-  const currentUserId = getUserId(session);
+type CalendarRow = {
+  id: string;
+  kind: string;
+  title: string;
+  start: string;
+  end: string;
+  personId: string | null;
+};
+
+export async function GET(req: Request) {
   const url = new URL(req.url);
+  const forward = new URL("/api/calendar/events", url.origin);
+  for (const [k, v] of url.searchParams) forward.searchParams.set(k, v);
+  // The old route's `view=team` is the new one's `calendar=team`.
+  if (url.searchParams.get("view") === "team") forward.searchParams.set("calendar", "team");
+  forward.searchParams.set("kinds", "meeting");
 
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-  if (!from || !to) return jsonError("from and to dates are required");
+  const res = await calendarEvents(new Request(forward, { headers: req.headers }));
+  if (!res.ok) return res;
 
-  const fromDate = new Date(from);
-  const toDate = new Date(to);
-  if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) return jsonError("Invalid date format");
+  const body = (await res.json()) as { events?: CalendarRow[] };
+  const meetings = (body.events ?? [])
+    .filter((e) => e.kind === "meeting")
+    .map((e) => ({
+      id: e.id.replace(/^meeting:/, ""),
+      title: e.title,
+      scheduledAt: e.start,
+      duration: Math.max(1, Math.round((new Date(e.end).getTime() - new Date(e.start).getTime()) / 60_000)),
+      attendees: e.personId ? [{ userId: e.personId }] : [],
+    }));
 
-  const userIdsParam = url.searchParams.get("userIds");
-  const view = url.searchParams.get("view");
-  const managerLevel = isManager(session);
-
-  let attendeeFilter: string[] | null = null;
-  if (userIdsParam) {
-    attendeeFilter = userIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
-  } else if (view === "team" && managerLevel) {
-    attendeeFilter = await getTeamUserIds(orgId, currentUserId);
-  } else {
-    // Default to the caller's own meetings — same fix applied to
-    // /api/tasks. Managers used to get every meeting in the org by
-    // default; you have to opt in to a team view explicitly.
-    attendeeFilter = [currentUserId];
-  }
-
-  const where: any = {
-    organizationId: orgId,
-    scheduledAt: { gte: fromDate, lte: toDate },
-  };
-  if (attendeeFilter) {
-    where.attendees = { some: { userId: { in: attendeeFilter } } };
-  }
-
-  const meetings = await prisma.meeting.findMany({
-    where,
-    select: {
-      id: true, title: true, type: true,
-      scheduledAt: true, duration: true,
-      attendees: { select: { userId: true } },
-    },
-    orderBy: { scheduledAt: "asc" },
-    take: 500,
-  });
-
-  return jsonSuccess(meetings);
+  return NextResponse.json({ meetings });
 }

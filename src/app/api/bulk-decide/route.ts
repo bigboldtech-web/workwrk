@@ -19,6 +19,9 @@ import {
   isOrgAdmin,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { utcDayKey } from "@/lib/time-format";
+import { isOrgWideTimesheetReader } from "@/lib/timesheet-scope";
+import { getEffectiveReportTree } from "@/lib/reporting-line";
 
 const SUPPORTED = new Set([
   "purchase-order",
@@ -39,7 +42,10 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  // A missing or malformed body answers the contract, never a bare 500 with
+  // an empty response.
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object") return jsonError("entityType, decision and ids are required");
   const entityType = typeof body.entityType === "string" ? body.entityType : "";
   const decision = typeof body.decision === "string" ? body.decision.toUpperCase() : "";
   const note = typeof body.note === "string" ? body.note.trim() || null : null;
@@ -114,9 +120,22 @@ export async function POST(req: NextRequest) {
       if (!found.has(id)) result.skipped.push({ id, reason: "not found" });
     }
   } else if (entityType === "timesheet") {
+    // A rejection with no reason is what the per-row endpoint refuses
+    // (audit T-4): the owner sees "Rejected" and has nothing to act on.
+    // The same rule holds for a hundred rows at once.
+    if (decision === "REJECT" && !note) return jsonError("note_required", 400);
     const rows = await prisma.timesheet.findMany({
       where: { id: { in: ids }, organizationId: orgId },
     });
+    // WHOSE WEEKS MAY I DECIDE. isManager() resolves through
+    // LEGACY_MANAGER_LEVELS, so on its own it hands every Team Lead and
+    // every HR account a decision on every submitted week in the company.
+    // The same rule PATCH /api/timesheets/[id] asks: my own approvals, my
+    // report tree, or the org-wide read the People team, Owners and Admins
+    // hold. A row outside it is SKIPPED with a reason rather than silently
+    // applied or the whole batch refused.
+    const orgWide = isOrgWideTimesheetReader(session.user?.accessLevel);
+    const tree = orgWide ? null : new Set(await getEffectiveReportTree(userId));
     for (const r of rows) {
       if (r.status !== "SUBMITTED") {
         result.skipped.push({ id: r.id, reason: `status=${r.status}` });
@@ -124,6 +143,10 @@ export async function POST(req: NextRequest) {
       }
       if (r.userId === userId) {
         result.skipped.push({ id: r.id, reason: "self-decision blocked" });
+        continue;
+      }
+      if (tree && r.approverId !== userId && !tree.has(r.userId)) {
+        result.skipped.push({ id: r.id, reason: "not yours to decide" });
         continue;
       }
       await prisma.timesheet.update({
@@ -135,6 +158,18 @@ export async function POST(req: NextRequest) {
           decisionNote: note,
         },
       });
+      // The owner is told, exactly as the per-row decision tells them, and
+      // the link opens the week the decision is about (audit T-8).
+      const weekKey = utcDayKey(new Date(r.weekStartDate));
+      prisma.notification.create({
+        data: {
+          userId: r.userId,
+          type: `timesheet_${decision.toLowerCase()}`,
+          title: decision === "APPROVE" ? "Timesheet approved" : "Timesheet rejected",
+          message: `Your timesheet for the week of ${weekKey} was ${decision === "APPROVE" ? "approved" : "rejected"}${note ? `: "${note}"` : "."}`,
+          link: `/timesheets?week=${weekKey}`,
+        },
+      }).catch((err) => console.error("[BulkDecide] Notification failed:", err));
       result.applied++;
     }
     const found = new Set(rows.map((r) => r.id));

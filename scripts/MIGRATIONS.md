@@ -579,3 +579,277 @@ npx tsx prisma/seed-templates.ts --write    # upsert the 17 built-in rows
 Verification: `GET /api/template-center?kind=DOC` as any member lists the eight
 with `builtIn: true`, and applying one creates a Doc whose body carries the
 template's headings.
+
+## Phase 4 (Time and Talk): `scripts/backfill-meeting-created-by.mjs`
+
+`Meeting.createdById` arrived with `prisma/sql/2026-09-22-time-and-talk.sql`,
+so every meeting written before that file has no recorded creator. The API
+tolerates NULL (it falls back to "an attendee, or an Owner or Admin"), so this
+is a quality step and not a prerequisite for the release.
+
+The rule, in the order it is applied:
+
+1. **The activity log.** `POST /api/meetings` has always written an
+   `ActivityLog` row of type `meeting_created` carrying the `actorId`, so for
+   every meeting scheduled through the product the real creator is on record.
+   The earliest such row for the meeting wins, and only when its
+   `organizationId` matches the meeting's.
+2. **The sole attendee.** If the log has nothing and the meeting has exactly
+   one attendee, that person is the creator by elimination.
+3. **Otherwise left NULL and reported.**
+
+Two rules were deliberately dropped after review, because both invented an
+owner rather than recording one, and `createdById` is the only role that can
+delete a meeting:
+
+* *"the earliest attendee"* on a meeting with several. `MeetingAttendee` has
+  no `createdAt` and every attendee was written in one `createMany` at
+  creation, so the lowest cuid is the first name in the picker array, not the
+  scheduler.
+* *"else the first Owner of the organization"*. That handed delete rights over
+  somebody else's meeting to an admin who never scheduled it, and it bought
+  nothing: Owners and Admins already read and manage every meeting in the org.
+
+A row left NULL is not a row anyone loses. Dry run by default; only rows with
+`createdById = NULL` are ever touched, so a second run reports nothing to do.
+
+```
+node scripts/backfill-meeting-created-by.mjs                 # per-org report
+node scripts/backfill-meeting-created-by.mjs --write         # apply
+node scripts/backfill-meeting-created-by.mjs --org=<id>      # one org
+```
+
+Verification, against an independent query rather than the report's own sum:
+
+```
+SELECT COUNT(*) FILTER (WHERE "createdById" IS NULL) AS no_creator,
+       COUNT(*) AS total
+FROM "Meeting";
+```
+
+`no_creator` must equal the "left NULL" line of the report, and opening one
+backfilled meeting as its creator must show the full edit surface.
+
+## Phase 4 (Time and Talk): `scripts/backfill-channel-visibility.mjs`
+
+A READ ONLY report on `Conversation.restricted` and `Conversation.findable`.
+The SQL file's column defaults already leave `restricted = false` everywhere
+and `findable = true` on every channel, and its statement 8 sets
+`findable = false` on DMs and groups, so there is no backfill left to run.
+
+```
+node scripts/backfill-channel-visibility.mjs                 # per-org report
+```
+
+**There is no `--write`, and it must never come back.** The version of this
+script that shipped first carried three unconditional `updateMany` statements
+(`findable = true` on every channel, `restricted = false` on every
+conversation, `findable = false` on every DM and group). On the day the SQL
+lands those are no-ops. A week later they are a privacy downgrade: they undo
+every channel an admin has hidden from Browse and publish every channel an
+admin has made private. Run in production a few months after adoption, that
+statement publishes every private channel in every organization, and no
+`createdAt` guard can distinguish "still at the DDL default" from "set back to
+the default deliberately" because the values are identical. The write half is
+deleted; the report is what was worth keeping. Passing `--write` now prints
+that explanation and writes nothing.
+
+It exits non zero when the columns are absent, which is the honest answer to
+"was the SQL applied".
+
+## Future, NOT done in Phase 4: dropping `AnnouncementDismissal`
+
+`docs/plans/ui-refresh/spec-talk.md` section 0 removes
+`POST /api/announcements/[id]/dismiss` and the `AnnouncementDismissal` table.
+Neither happens in Phase 4 Stage A, on purpose:
+
+- The table's only writer is `src/components/dashboard/announcements-banner.tsx`
+  on `/dashboard`, which `spec-work-home.md` owns. Dropping the endpoint before
+  that unit removes the banner turns its Dismiss into a live 404.
+- A DROP is not an additive change, so it cannot ride
+  `2026-09-22-time-and-talk.sql`, which is additive only.
+
+When `spec-work-home.md` confirms the banner is gone, the follow-up is one
+file, `prisma/sql/<date>-drop-announcement-dismissal.sql`, carrying
+`DROP TABLE IF EXISTS "AnnouncementDismissal";`, applied after the release that
+removes the model and the endpoint (never before, or the deploy's Prisma
+client still knows a table the database no longer has). Nothing reads the rows
+today: `GET /api/announcements` has never filtered on them.
+
+## Phase 4 close: two dated behaviours the founder should know about
+
+Neither is a database change and neither needs a script. Both are dates baked
+into code, so they need to be true when the release actually ships.
+
+**1. Chat guest links now expire, and old ones have a 7-day grace.**
+`src/lib/meeting-room.ts` signs an expiry into every chat guest code
+(`c.<conversationId>.<epoch>.<exp>.<sig>`, 24 hours from the moment a member
+copied one). Before this, a copied link was a permanent HMAC: the only
+revocations were Reset guest link and a member leaving, so a link forwarded out
+of the company stayed live indefinitely.
+
+Codes minted before the release carry no `exp`. They keep working until
+`LEGACY_GUEST_CODE_GRACE_UNTIL` (`2026-09-29T00:00:00Z`), then stop resolving.
+**If this ships later than 2026-09-22, move that constant so the grace is still
+seven days from the deploy**, otherwise in-flight invitations die on deploy day.
+Past its own expiry a link answers 410 from `POST /api/calls/guest-token`, and
+`/meet/<code>` answers the in-shell 404 rather than naming the conversation.
+
+Meeting guest links are unchanged: they were already enforced against the row
+(`scheduledAt + 24h`, 410) in `src/app/api/calls/guest-token/route.ts`.
+
+**2. `GET /api/meetings` stopped returning meetings that record nobody.**
+A meeting with no `createdById` and no attendees (the pre Phase 4 POST wrote
+those whenever the caller supplied no `attendeeIds`) used to be listed for every
+Member while `src/lib/meeting-access.ts` denied the detail page, so a row could
+appear on `/meetings` and answer 404 when opened. The list now matches the gate.
+
+The fix for the rows themselves is the data script, which is unchanged and is
+still the founder's to run:
+
+```
+node scripts/backfill-meeting-created-by.mjs            # dry-run report
+node scripts/backfill-meeting-created-by.mjs --write    # apply
+```
+
+Until it runs, an Owner or Admin still sees every meeting in the organization
+(access rule 4) and can add the right people back to any orphan row.
+
+---
+
+## Phase 4 (Time and Talk), stage B: the Meetings List
+
+`prisma/sql/2026-09-22-meeting-item.sql` adds `Meeting."itemId"`, the link to a
+hidden per-organization "Meetings" List. It is in the deploy manifest, so the
+column arrives with the release. The rows it points at do not: they are a data
+script, and it is the founder's to run.
+
+```
+node scripts/backfill-meeting-items.mjs            # dry-run report, per organization
+node scripts/backfill-meeting-items.mjs --write    # apply
+node scripts/backfill-meeting-items.mjs --org=<id> # one organization
+```
+
+It creates one hidden Board per organization (`slug: "meetings"`, no Space, no
+Folder, `visibility: PRIVATE`, `settings.hidden = true`) and one Item per live
+meeting inside it, with `assigneeIds` = the meeting's attendees and `ownerId` =
+its recorded creator. It never deletes, never edits a Meeting field other than
+the new `itemId`, resumes if interrupted (an Item is found by
+`metadata->>'meetingId'` before one is created), and asserts at the end that
+every live meeting has an Item.
+
+**Nothing changes if it never runs.** `src/lib/meeting-access.ts` is what
+decides who may read, edit and delete a meeting, it is a pure function over
+`createdById` and the attendee list, and it answers identically whether the
+Item exists or not. These rows are the SHAPE the access engine will read when
+it stops being inert (spec-planner section 1 Access resolves a meeting to
+`{ type: "item", id }` so no `meeting` ObjectRef is ever added); writing them
+now means that switch is one line in one file rather than a migration under a
+deadline.
+
+**The one thing to know before running it in production.** Those Items are
+assigned to real people, so without a rule they would appear in My Work, in the
+Today list, in the personal ICS feed and in every task picker as if a standup
+were a task somebody had been given. `src/lib/system-items.ts` is that rule:
+one constant (`SYSTEM_ITEM_TYPES = ["meeting"]`) and one `where` fragment
+(`NOT_SYSTEM_ITEMS`) spread by the seven queries that answer "my assigned
+work". Run the script only on a release that carries that file, which every
+release from Phase 4 stage B does.
+
+### Documented, not done here: `AnnouncementDismissal`
+
+`docs/plans/ui-refresh/spec-talk.md` section 0 removes the
+`AnnouncementDismissal` table along with `POST /api/announcements/[id]/dismiss`.
+Phase 4 does **not** drop it. Dropping a table is not additive, and the schema
+rule for this phase is additive-only, so it is recorded here as a future file:
+
+* a migration dropping `AnnouncementDismissal` and the `dismissals` relation on
+  `Announcement`,
+* to be written only after a release in which nothing reads or writes either.
+
+## Phase 4 (Time and Talk), stage C: `scripts/backfill-calendar-events.mjs`
+
+**What it is for.** Two populations of rows that are calendar entries and
+have spent their lives in a table for to-do items:
+
+| Population | Where it lives now | How it got there |
+|---|---|---|
+| Google events | the legacy `Task` table, `externalSource = 'GCAL'` | the sync cron wrote there while the Planner read `Item`, so a connected Google Calendar produced rows that no surface in the product rendered. A person connected their calendar, granted access, and saw nothing. |
+| Personal events | an `Item` on the person's personal list with a `startAt` and no `dueAt` | the Calendar's old "New event" popover POSTed to `/api/me/work`, so a block of focus time became a to-do that showed up in My work, in the open-task counts and in every "still to do" list. |
+
+Both move into `CalendarEvent`
+(`prisma/sql/2026-09-22-calendar-event.sql`), which is the table
+`GET /api/calendar/events` reads.
+
+**It copies. It does not move.** Not one `Task` and not one `Item` is
+deleted or changed. Both populations keep rendering from their old homes
+until the work-home unit retires the legacy table, and the calendar read
+prefers the `CalendarEvent` row where both exist, so nothing appears twice.
+That means this script can be run, checked, and run again with no window in
+which anybody's calendar is missing anything.
+
+**The personal-event rule is deliberately narrow.** An `Item` is taken only
+when it is on a personal list, has a `startAt`, has no `dueAt`, has no
+parent, and has no assignee other than its owner. Anything else is somebody's
+actual work. The cost of being narrow is that a few blocks of focus time stay
+tasks, which is what they are today. The cost of being wide would be
+somebody's real task quietly becoming a calendar entry that no task list
+shows, and that is not a trade a data script is allowed to make.
+
+**Commands.**
+
+```
+node scripts/backfill-calendar-events.mjs                 # dry run, prints the report
+node scripts/backfill-calendar-events.mjs --org=<id>      # one organization
+node scripts/backfill-calendar-events.mjs --write         # apply
+```
+
+Dry run by default; a per-organization report either way; idempotent (GCAL
+rows match on the `(userId, externalSource, externalId)` unique index,
+personal rows on the `legacy-item:<id>` marker this script writes into
+`externalId`); it asserts its counts after a write and exits non-zero on a
+mismatch rather than reporting success over a half-done run; and it exits 0
+with an explanation if `CalendarEvent` is not in the database yet.
+
+**Production run: the founder's.** Apply
+`prisma/sql/2026-09-22-calendar-event.sql` first (it is in the deploy
+manifest, so a deploy does it), then run the dry run, read the report, then
+`--write`.
+
+## Phase 4, stage C: the three calendar feeds, and when the last two go
+
+`spec-planner.md` section 0 row 13 folds three read endpoints into one and
+keeps the old three for a release. As of this release:
+
+| Route | State now | Next release |
+|---|---|---|
+| `GET /api/calendar/events` | THE calendar read. Tasks, meetings, personal events, Google rows and reminders, in one range read. | stays |
+| `GET /api/planner/events` | a thin delegate: forwards to the one read, filters to `task` and `external`, and answers its old `{ events: [...] }` shape with the old bare ids | delete |
+| `GET /api/calendar/meetings` | a thin delegate: forwards, filters to `meeting`, answers its old `{ meetings: [...] }` shape | delete |
+| `GET /api/calendar` | NOT a delegate, kept whole | delete when its timer-session totals find a home |
+
+`/api/calendar` is the exception and the reason is written at the top of the
+file: it is the only place in the product that computes `taskTime` and
+`activeByUser` out of `TimerSession`, while the new endpoint reports logged
+minutes out of `TimeEntry` so the calendar footer agrees with the timesheet.
+Those are two different numbers and delegating would have quietly changed
+one of them. It has no caller in this repo.
+
+Neither delegate has a caller in this repo either. They exist for a browser
+tab that was open across the deploy and for anything outside this repo that
+learned the URL.
+
+## Phase 4, stage C: the Google sync now writes two rows, on purpose
+
+`src/services/googleCalendarSync.ts` writes a `CalendarEvent` row AND the
+legacy `Task` row it always wrote. That is deliberate and temporary:
+
+* `GET /api/calendar/events` still reads the GCAL-marked `Item` rows the
+  earlier legacy-task migration left behind, so the two sources agree in a
+  workspace where `backfill-calendar-events.mjs` has not been run;
+* `DELETE /api/integrations/google-calendar` (Disconnect) removes BOTH, so a
+  disconnected calendar stops showing Google events whichever table they are
+  in.
+
+The legacy write goes when the work-home unit retires `Task`. Until then,
+removing it early would leave rows in `Task` that nothing deletes.

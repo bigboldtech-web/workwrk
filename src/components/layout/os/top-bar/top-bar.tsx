@@ -33,7 +33,6 @@ import { BellPopover } from "../bell-popover";
 import { HelpMenu, usePrivacyDialog } from "../help-menu";
 import { AvatarMenu } from "../avatar-menu";
 import { TimerPill } from "../timer-pill";
-import { CalendarPeek } from "../calendar-peek";
 import { usePersonalTools } from "../use-personal-tools";
 import { useOsShell } from "../shell-context";
 import { useDeclaredBreadcrumb, type BreadcrumbItem } from "./breadcrumb";
@@ -207,7 +206,12 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
             <span aria-hidden className="mx-0.5 h-4 w-px bg-chrome-line" />
           </div>
         ) : null}
-        {!inSettings ? <CalendarPeek /> : null}
+        {/* CalendarPeek is gone (Phase 4, spec-planner section 0). The bar's
+            calendar glyph opened an 1100px overlay holding a second copy of
+            the week grid, which stayed open across navigation (audit P-9) and
+            duplicated the page. The design system's top bar has no calendar
+            peek: the Planner rail hub opens the Calendar in one click, which
+            is fewer clicks than the glyph was. */}
         <TimerPill />
         <CreateMenu
           open={createOpen}

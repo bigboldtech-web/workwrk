@@ -439,3 +439,82 @@ describe("Phase 3 preference keys (spec-docs-knowledge G22a)", () => {
     expect(preferencesPatchSchema.safeParse({ home: { ui: {} } }).success).toBe(true);
   });
 });
+
+describe("Phase 4 preference keys (spec-planner section 2, spec-talk step 10)", () => {
+  it("home.planner.* persists every Calendar Display switch", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: {
+        planner: {
+          view: "month",
+          sources: ["task", "meeting"],
+          showWeekends: false,
+          showDeclined: true,
+          showReminders: false,
+          highlightWorkHours: false,
+          showUnscheduled: true,
+        },
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.planner.view is one of the three views and nothing else", () => {
+    for (const view of ["week", "month", "people"]) {
+      expect(preferencesPatchSchema.safeParse({ home: { planner: { view } } }).success).toBe(true);
+    }
+    expect(preferencesPatchSchema.safeParse({ home: { planner: { view: "gantt" } } }).success).toBe(false);
+  });
+
+  it("home.planner refuses a key nobody declared, so a typo is a 400 and not a silent drop", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { planner: { showWeekend: true } } }).success).toBe(false);
+  });
+
+  it("home.timesheets.showNotes and showSource persist the Timesheets Display menu", () => {
+    expect(
+      preferencesPatchSchema.safeParse({ home: { timesheets: { showNotes: false, showSource: true } } }).success,
+    ).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { timesheets: { showTotals: true } } }).success).toBe(false);
+  });
+
+  it("an empty namespace parses, so a reset writes {} rather than a 400", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { planner: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { timesheets: {} } }).success).toBe(true);
+  });
+
+  it("home.notifications.desktopRingCalls is a SIBLING of desktop, not a child of it", () => {
+    expect(
+      preferencesPatchSchema.safeParse({ home: { notifications: { desktop: true, desktopRingCalls: false } } }).success,
+    ).toBe(true);
+    // `desktop` stays the plain boolean settings-architecture 4.3 defines:
+    // a child object under it would be a 400, which is why the new key is a
+    // sibling.
+    expect(
+      preferencesPatchSchema.safeParse({ home: { notifications: { desktop: { ringCalls: true } } } }).success,
+    ).toBe(false);
+  });
+
+  it("home.notifications.inbox carries the four Talk rows", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: {
+        notifications: {
+          inbox: { dm: true, channel: false, calls: true, announcements: true },
+        },
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.ui.dismissed carries the Calendar connect line's dismissal", () => {
+    expect(
+      preferencesPatchSchema.safeParse({ home: { ui: { dismissed: ["planner-connect"] } } }).success,
+    ).toBe(true);
+  });
+
+  it("home.locale.weekStart is a real day index", () => {
+    for (let d = 0; d <= 6; d++) {
+      expect(preferencesPatchSchema.safeParse({ home: { locale: { weekStart: d } } }).success).toBe(true);
+    }
+    expect(preferencesPatchSchema.safeParse({ home: { locale: { weekStart: 7 } } }).success).toBe(false);
+    expect(preferencesPatchSchema.safeParse({ home: { locale: { weekStart: -1 } } }).success).toBe(false);
+  });
+});

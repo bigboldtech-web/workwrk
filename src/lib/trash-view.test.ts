@@ -29,15 +29,15 @@ import {
 const WRITTEN_ENTITY_TYPES = [
   "note", "sop", "whiteboard", "table", "file", "policy", "contract",
   "space", "folder", "board", "item",
-  "file_folder",
+  "file_folder", "meeting",
 ] as const;
 
 describe("the trash type table", () => {
-  it("carries the thirteen types the Filter panel lists, including Form and Contract", () => {
+  it("carries the fourteen types the Filter panel lists, including Form, Contract and Meeting", () => {
     expect(TRASH_TYPES.map((t) => t.key)).toEqual([
       "space", "folder", "list", "task",
       "doc", "canvas", "table", "form", "file",
-      "sop", "policy", "contract", "template",
+      "sop", "policy", "contract", "template", "meeting",
     ]);
   });
 

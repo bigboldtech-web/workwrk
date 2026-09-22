@@ -15,7 +15,8 @@
 export type TrashTypeKey =
   | "space" | "folder" | "list" | "task"
   | "doc" | "canvas" | "table" | "form" | "file"
-  | "sop" | "policy" | "contract" | "template";
+  | "sop" | "policy" | "contract" | "template"
+  | "meeting";
 
 export interface TrashTypeDef {
   key: TrashTypeKey;
@@ -46,6 +47,10 @@ export const TRASH_TYPES: readonly TrashTypeDef[] = [
   { key: "policy", label: "Policy", entityTypes: ["policy"] },
   { key: "contract", label: "Contract", entityTypes: ["contract"] },
   { key: "template", label: "Template", entityTypes: ["template"] },
+  // Phase 4: deleting a meeting takes its notes, its decisions and its
+  // action items with it, so it goes through the one Trash like every other
+  // container rather than out of the database.
+  { key: "meeting", label: "Meeting", entityTypes: ["meeting"] },
 ] as const;
 
 export const TRASH_TYPE_BY_KEY: Readonly<Record<TrashTypeKey, TrashTypeDef>> =
@@ -132,6 +137,7 @@ export const TRASH_ROW_HREF: Record<TrashTypeKey, string> = {
   contract: "/agreements/[id]",
   form: "/forms/[id]",
   template: "/templates",
+  meeting: "/meetings/[id]",
   space: "/", folder: "/", list: "/", task: "/",
 };
 

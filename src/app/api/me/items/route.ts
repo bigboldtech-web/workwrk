@@ -13,6 +13,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isDoneStatusName } from "@/lib/board-items-shared";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
   const raw = await prisma.item.findMany({
     where: {
       organizationId: u.organizationId,
+      ...NOT_SYSTEM_ITEMS,
       // Any task I'm an assignee of — primary owner OR one of several assignees.
       OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
       archivedAt: null,

@@ -51,7 +51,16 @@ describe("realtime event contract", () => {
       [{ type: "reminder.due", id: "r1" }, [WINDOW_EVENTS.remindersChanged]],
       [{ type: "prefs.changed" }, [WINDOW_EVENTS.prefsChanged]],
       [{ type: "session.idle", idleUntil: null }, [WINDOW_EVENTS.sessionIdle]],
-      [{ type: "call.ended" }, []],
+      // Phase 4: call.ended used to fan out to nothing at all, so a call
+      // that ended left its live chip standing until the next poll. It and
+      // call.changed now share one window event, because both mean "the
+      // roster you are showing is stale".
+      [{ type: "call.ended" }, [WINDOW_EVENTS.callChanged]],
+      [{ type: "call.changed", conversationId: "c1" }, [WINDOW_EVENTS.callChanged]],
+      // calendar.changed has no legacy fan-out: its consumer is the one
+      // /api/calendar/events feed (spec-planner step 5) and it subscribes to
+      // workwrk:realtime, not to a second name.
+      [{ type: "calendar.changed" }, []],
       [{ type: "item", itemId: "i1", boardId: "b1" }, [WINDOW_EVENTS.itemChanged]],
     ];
     for (const [ev, expected] of cases) expect(legacyWindowEventsFor(ev)).toEqual(expected);

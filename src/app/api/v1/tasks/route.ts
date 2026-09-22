@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { createPersonalTask } from "@/lib/work/personal-task";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /**
  * GET /api/v1/tasks: list; POST, create (with optional SLA + source).
@@ -69,7 +70,9 @@ export async function GET(req: NextRequest) {
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
 
-  const where: Record<string, unknown> = { organizationId: ctx.organizationId, archivedAt: null };
+  // Meetings ride the Item ladder as hidden rows (src/lib/system-items.ts);
+  // they are not tasks and must not appear in the public task API.
+  const where: Record<string, unknown> = { organizationId: ctx.organizationId, archivedAt: null, ...NOT_SYSTEM_ITEMS };
   if (assigneeId) where.OR = [{ ownerId: assigneeId }, { assigneeIds: { has: assigneeId } }];
   if (status) where.status = { equals: status, mode: "insensitive" };
   if (from || to) {

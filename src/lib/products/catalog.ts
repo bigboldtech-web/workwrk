@@ -100,7 +100,7 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     name: "WorkwrK Talk",
     tagline: "Team chat + calls (Slack + Zoom grade)",
     description:
-      "Channels, direct messages, threads, reactions, mentions, formatting and search, plus huddles and calls on your own LiveKit. The team communication layer.",
+      "Channels, direct messages, threads, reactions, mentions, formatting and search, plus calls on your own LiveKit. The team communication layer.",
     iconKey: "MessageCircle",
     hue: "violet",
     suite: "CROSS",

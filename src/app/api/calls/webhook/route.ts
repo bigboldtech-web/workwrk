@@ -1,6 +1,6 @@
 // POST /api/calls/webhook — LiveKit event sink (native-calls Phase 2).
 // Maintains the live roster on CallSession rows so Room can show
-// Slack-style "who's in the huddle" chips. Signature-verified with the
+// the "who is on the call" chips. Signature-verified with the
 // same API key/secret the server trusts; anything unverifiable is
 // dropped with a 401 and no side effects.
 
@@ -37,9 +37,14 @@ export async function POST(req: NextRequest) {
   // erase each other's writes. Lookup caps on the same 12h deadness
   // rule the mint uses, so a ghost row never absorbs a live call's
   // events invisibly.
-  // Set when this join is the FIRST participant (roster 0→1) — the moment the
-  // call becomes ringable — so we can push a real-time "call started" after commit.
+  // Set when this join is the FIRST participant (roster 0 to 1), the moment
+  // the call becomes ringable, so we can push a real-time "call started"
+  // after commit.
   let callStartedConvo: string | null = null;
+  // Set on ANY roster change, so the live-call chip and the sidebar row
+  // update from an event instead of from a poll (spec-talk section 2.6).
+  // Published after the transaction commits, never inside it.
+  let rosterConvo: string | null = null;
   await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<{ id: string; participants: unknown; startedAt: Date; conversationId: string | null }[]>`
       SELECT "id", "participants", "startedAt", "conversationId" FROM "CallSession"
@@ -62,17 +67,20 @@ export async function POST(req: NextRequest) {
       };
       const next = [...roster.filter((x) => x.identity !== p.identity), p];
       if (roster.length === 0 && session.conversationId) callStartedConvo = session.conversationId;
+      rosterConvo = session.conversationId;
       await tx.callSession.update({
         where: { id: session.id },
         data: { participants: next as unknown as Prisma.InputJsonValue, lastSeenAt: new Date() },
       });
     } else if (event.event === "participant_left" && event.participant) {
       const next = roster.filter((x) => x.identity !== event.participant!.identity);
+      rosterConvo = session.conversationId;
       await tx.callSession.update({
         where: { id: session.id },
         data: { participants: next as unknown as Prisma.InputJsonValue, lastSeenAt: new Date() },
       });
     } else if (event.event === "room_finished") {
+      rosterConvo = session.conversationId;
       await tx.callSession.update({
         where: { id: session.id },
         data: { endedAt: new Date(), participants: [] as unknown as Prisma.InputJsonValue, lastSeenAt: new Date() },
@@ -82,16 +90,28 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  // Real-time: the first joiner made the call ringable — push it so members'
-  // incoming-call watchers ring within a second instead of on the 5s poll.
+  // Real-time: the first joiner made the call ringable, so push it and
+  // members' incoming-call watchers ring within a second instead of on the
+  // 15s poll.
   if (callStartedConvo) {
     publishToConversation(callStartedConvo, { type: "call", conversationId: callStartedConvo });
   }
 
-  // TalkTok card lifecycle (Slack's huddle cards): joins accumulate the
-  // participant roll on the conversation's latest open card; the finish
-  // stamps duration so the card renders "A TalkTok happened · You and X
-  // were in it for Nm". Best-effort — presence is already recorded.
+  // Phase 4 (spec-talk section 2.6 Data): every roster change publishes
+  // call.changed. Its consumer today is IncomingCallWatcher, which listens
+  // for workwrk:call-changed and re-reads the live-call list, so a call that
+  // ended or lost its last participant stops being advertised without
+  // waiting out the poll. The conversation page's own chip joins that
+  // listener in step 8. TRIGGER-ONLY: it carries no names, and every
+  // consumer refetches through a scoped read.
+  if (rosterConvo) {
+    publishToConversation(rosterConvo, { type: "call.changed", conversationId: rosterConvo });
+  }
+
+  // Call card lifecycle: joins accumulate the participant roll on the
+  // conversation's latest open card; the finish stamps duration so the card
+  // renders "A call happened, You and X were in it for Nm". Best effort:
+  // presence is already recorded.
   try {
     if (event.event === "participant_joined" || event.event === "room_finished") {
       const session = await prisma.callSession.findFirst({

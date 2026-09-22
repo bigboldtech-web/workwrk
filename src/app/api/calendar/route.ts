@@ -1,4 +1,26 @@
-// /api/calendar — unified work-schedule + time feed.
+// /api/calendar: SUPERSEDED by GET /api/calendar/events, kept whole for one
+// release rather than turned into a delegate.
+//
+// spec-planner.md section 0 row 13 folds three feeds into one and keeps the
+// old three for a release. The other two (`/api/planner/events`,
+// `/api/calendar/meetings`) are now thin delegates, because everything they
+// answered the new endpoint answers too. THIS ONE IS NOT, and the reason is
+// worth writing down rather than discovering later: it is the only place in
+// the product that computes `taskTime` and `activeByUser` out of
+// `TimerSession`, and the new endpoint reports logged minutes out of
+// `TimeEntry` instead (so the calendar footer agrees with the timesheet).
+// Those are two different numbers, and delegating would have quietly
+// changed one of them.
+//
+// It has no caller in this repo and has not had one for a long time: the
+// Calendar's People view now reads `/api/calendar/events?calendar=team`,
+// which absorbs the `events`, `people` and `timeByUserDay` half of this
+// answer. When the timer-session totals find their home, this file goes
+// with them; the note is in scripts/MIGRATIONS.md.
+//
+// ── what it does, unchanged ──────────────────────────────────────────
+//
+// unified work-schedule + time feed.
 //
 // GET ?from=ISO&to=ISO&calendar=my|team&userId=...&spaceId=...
 //

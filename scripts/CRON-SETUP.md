@@ -264,3 +264,24 @@ expected port; check PM2.
   script. Restart pm2 after env change.
 - If you want to disable any job temporarily, just disable the row in
   aaPanel Cron rather than deleting it — keeps the history.
+
+## Phase 4, stage C: the Google Calendar sync row is unchanged, and why that is worth saying
+
+The "Sync Google Calendar" row above (`*/5 * * * *`,
+`/api/cron/calendar-sync`) is **already installed** and needs no change.
+What changed is where it writes, not when it runs.
+
+Before Phase 4 it wrote Google events into the legacy `Task` table while the
+Planner read `Item`, so a connected Google Calendar produced rows nothing in
+the product rendered: a person connected their calendar, granted access, and
+saw nothing, forever. It now writes `CalendarEvent` rows, which is the table
+`GET /api/calendar/events` reads, and keeps writing the legacy row beside it
+for one release (see `scripts/MIGRATIONS.md`, "the Google sync now writes two
+rows, on purpose").
+
+So: **no crontab edit is needed for the calendar work, and nobody should add
+a second sync row.** If Google events are still missing after a deploy, the
+thing to check is whether `prisma/sql/2026-09-22-calendar-event.sql` has been
+applied, not whether the cron is running. The sync tolerates the table being
+absent and keeps behaving exactly as it did before, which is quiet on purpose
+but does mean a missing table looks like a missing cron.

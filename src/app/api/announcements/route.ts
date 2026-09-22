@@ -69,9 +69,9 @@ export async function GET() {
     return NextResponse.json(enriched, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Announcements GET error:", err);
-    return jsonError(err.message || "Failed to fetch announcements", 500);
+    return jsonError(err instanceof Error ? err.message : "Failed to fetch announcements", 500);
   }
 }
 
@@ -177,7 +177,8 @@ export async function POST(req: NextRequest) {
           type: "announcement",
           title: `${announcement.priority === "URGENT" ? "🚨 " : ""}New Announcement`,
           message: announcement.title,
-          link: "/announcements",
+          // The post, not the list (spec-talk section 2.4).
+          link: `/announcements/${announcement.id}`,
         })),
       });
 
@@ -195,7 +196,7 @@ export async function POST(req: NextRequest) {
           itemTitle: announcement.title,
           itemDetails: announcement.priority !== "NORMAL" ? `Priority: ${announcement.priority}` : undefined,
           actionLabel: "View Announcement",
-          actionLink: `${baseUrl}/announcements`,
+          actionLink: `${baseUrl}/announcements/${announcement.id}`,
           note: preview,
         });
         return {
@@ -218,8 +219,8 @@ export async function POST(req: NextRequest) {
   }
 
   return jsonSuccess(announcement, 201);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Announcements POST error:", err);
-    return jsonError(err.message || "Failed to create announcement", 500);
+    return jsonError(err instanceof Error ? err.message : "Failed to create announcement", 500);
   }
 }

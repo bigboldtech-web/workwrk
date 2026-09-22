@@ -229,6 +229,32 @@ The secondary sidebar is grey in BOTH variants; it belongs to the canvas side of
 | `--os-status-user-1..8` (+ `-dark`) | 1.7 | 1.7 | user-defined List status colours (data, not chrome) |
 | `--os-kbd-bg` | `#EEF0F3` | `#262A31` | kbd |
 | `--os-skeleton` | `#EEF0F3` | `#1F232A` | skeleton bars |
+| `--os-stage-{bg,surface,surface-2,line,fg,fg-2}` | fixed | **same** | the call stage set, added in Phase 4 at the request of `spec-talk.md` section 3 |
+
+**The stage set** (`.os-stage`), added Phase 4. Video tiles read badly on
+white, so a call stage is dark in both themes. Dark rebinds AT THE ROOT only
+(1.5), so `data-theme="dark"` on a `div` does nothing; these six values are
+therefore fixed and never rebind, exactly like the semantic solids and the
+brand dots. `--os-danger-solid` (Leave) and `--os-brand` (the one primary)
+are already fixed in both themes and are used inside `.os-stage` unchanged;
+nothing else in there reads a theme token, so the stage needs no dark-mode
+QA pass.
+
+| Token | Value (fixed) | Use |
+|---|---|---|
+| `--os-stage-bg` | `#101215` | the stage ground behind the tiles |
+| `--os-stage-surface` | `#181B20` | the control bar, name chips, the roster sheet |
+| `--os-stage-surface-2` | `#262A31` | a pressed or active control |
+| `--os-stage-line` | `#30353D` | tile and control-bar edges |
+| `--os-stage-fg` | `#E6E8EC` | names, labels, icons (15.1:1 on the ground) |
+| `--os-stage-fg-2` | `#9AA3B2` | secondary labels |
+
+The one definition lives in `src/app/globals.css`, not in
+`src/app/(dashboard)/tokens.css`: `.os-stage` is worn by the call stage
+inside the app AND by the public guest call page at `/meet/[code]`, which is
+in the `(public)` segment and loads neither `tokens.css` nor `os.css`.
+`globals.css` is loaded by the root layout on every route, so one
+definition reaches both.
 
 ### 1.4 Rules that make the palette hold
 

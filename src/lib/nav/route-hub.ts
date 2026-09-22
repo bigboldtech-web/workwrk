@@ -298,11 +298,15 @@ const ROUTE_TITLE_PREFIXES: readonly string[] = Object.keys(ROUTE_TITLES).sort(
  * This is the single source of truth for the fold; `apps-catalog.tsx` reads it
  * to stamp `AppEntry.hubKey`, and `rail-apps.ts` drops any app carrying one
  * from the rail. It lives here rather than in the catalog so the CI test that
- * asserts the 19 keys can import it without loading the component graph.
+ * asserts the 21 keys can import it without loading the component graph.
  */
 export const FOLDED_APP_HUB: Readonly<Record<string, HubKey>> = {
   goals: "home",
   timesheets: "planner",
+  // Phase 4: /meetings and /clock get rows in the Planner hub sidebar
+  // (sidebar-map.md section 2 rows 2 and 4) rather than rail pills.
+  meetings: "planner",
+  clock: "planner",
   library: "docs",
   clips: "docs",
   sops: "docs",

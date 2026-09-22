@@ -66,19 +66,45 @@ function sqlFiles(dir) {
   return out;
 }
 const deploy = readFileSync(DEPLOY, "utf8");
-const manifest = [...(/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(deploy)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+// COMMENTS ARE STRIPPED BEFORE THE FILENAMES ARE READ OUT.
+//
+// The manifest is half comment by line count, because every entry explains
+// why it is late-safe or is not. One of those comments names a column the
+// way SQL quotes it, `Meeting."itemId"`, and a bare `"([^"]+)"` sweep over
+// the block read that as a filename and failed with "manifest names
+// prisma/sql/itemId but it does not exist". The guard was rejecting a
+// correct manifest because somebody documented it precisely, which is the
+// opposite of what it is for.
+const manifestBlock = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(deploy)?.[1] ?? "")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/\/\/[^\n]*/g, "");
+const manifest = [...manifestBlock.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 const manifestSql = manifest.map((f) => {
   const p = join("prisma/sql", f);
   if (!existsSync(p)) { console.error(`check-schema-sql: manifest names ${p} but it does not exist`); process.exit(1); }
   return readFileSync(p, "utf8");
 });
-const all = [...sqlFiles(MIGRATIONS), ...manifestSql].join("\n");
+// COMMENTS COME OUT BEFORE THE SPLIT ON ";", NOT AFTER.
+//
+// This used to split first and strip each fragment afterwards, which meant
+// a SEMICOLON INSIDE A SQL COMMENT cut a statement in half. The Phase 4
+// calendar table hit it exactly: a column comment reading "'GCAL' on a row
+// the sync cron wrote; NULL on one a person created." chopped its own
+// CREATE TABLE between "description" and "externalSource", so the closing
+// paren landed in a different fragment, the CREATE TABLE regex matched
+// nothing, and the guard reported that the schema declared a CalendarEvent
+// table no file creates. The file creates it correctly.
+//
+// The failure direction was safe (a false alarm, not a false pass) but it
+// blocks a correct commit and the next person reads it as real drift, so
+// the order is fixed rather than the comment reworded.
+const all = [...sqlFiles(MIGRATIONS), ...manifestSql].join("\n").replace(/--[^\n]*/g, "");
 
 const created = new Set(); // "Table" and "Table.column"
 // Statement by statement, so a multi-column ALTER is read in full:
 //   ALTER TABLE "Agent" ADD COLUMN "a" ..., ADD COLUMN "b" ...;
 for (const stmt of all.split(";")) {
-  const s = stmt.replace(/--[^\n]*/g, "");
+  const s = stmt;
   let m;
   if ((m = /CREATE TABLE(?: IF NOT EXISTS)?\s+"(\w+)"\s*\(([\s\S]*)\)\s*$/.exec(s))) {
     created.add(m[1]);

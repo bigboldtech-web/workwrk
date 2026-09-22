@@ -1,0 +1,50 @@
+-- 2026-09-22 - Phase 4, Time and Talk - Meeting."itemId".
+--
+-- Spec: docs/plans/ui-refresh/spec-planner.md section 1 Access and section 4
+-- step 6, which resolve a meeting to { type: "item", id } rather than adding
+-- a "meeting" ObjectRef to the access model:
+--
+--   "A meeting therefore resolves to { type: "item", id } and needs no new
+--    ref: attendees are the item's assignees, the creator is createdById,
+--    Owner and Admin are rule 4 ... The Meetings List is one per org,
+--    created on first use, hidden from the Spaces tree, not shareable and
+--    carrying no views, so it is plumbing rather than a surface."
+--
+-- ONE nullable column and ONE index. Nothing is renamed, retyped, dropped
+-- or made required, and no row is moved. The Item rows themselves are
+-- written by scripts/backfill-meeting-items.mjs, which is dry-run by
+-- default and never touches a Meeting's own fields beyond this column.
+--
+-- DEPLOY ORDER. This one IS free, unlike 2026-09-22-time-and-talk.sql, and
+-- the difference is worth stating rather than assuming:
+--
+--   * Nothing in the running release selects Meeting."itemId", so applying
+--     the file early is a no-op for it.
+--   * Nothing in the NEW release requires it either. The meeting gate is
+--     src/lib/meeting-access.ts, a pure function over createdById and the
+--     attendee list, and it answers identically whether the column is there
+--     or not. A row whose itemId is NULL, and a database without the
+--     column, both fall through the same ladder.
+--
+-- The one caveat, so it is not a surprise: Prisma emits every scalar of a
+-- model on a `findMany` with no `select`, so once the generated client
+-- knows about this column a database WITHOUT it answers an error on
+-- GET /api/meetings, the same way the createdById column does. That is why
+-- this file is in the deploy manifest beside its sibling and why both say
+-- "apply before the code" in scripts/deploy-migrations.mjs. The paragraph
+-- above is about the ACCESS behaviour, which is what "free" means here.
+--
+-- Idempotent: every statement is IF NOT EXISTS, so running it twice is a
+-- no-op and running it against a database that already has the column is a
+-- no-op.
+
+-- 1. The column.
+ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "itemId" TEXT;
+
+-- 2. The index the gate reads it through. Not unique on purpose: a
+--    duplicated backfill run must never be able to fail the write half-way
+--    and leave one organization's meetings linked and another's not. The
+--    script's own idempotency (it looks the Item up by
+--    metadata->>'meetingId' before creating one) is what keeps it one to
+--    one, and a report line names any meeting that ends up sharing an Item.
+CREATE INDEX IF NOT EXISTS "Meeting_itemId_idx" ON "Meeting" ("itemId");

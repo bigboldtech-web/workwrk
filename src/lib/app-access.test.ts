@@ -65,9 +65,11 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
     expect(mirror).toEqual(fromSource);
   });
 
-  it("stamps hubKey on the 19 folded apps and on nothing else", () => {
+  it("stamps hubKey on the 21 folded apps and on nothing else", () => {
     const folded = APP_ACCESS.filter((a) => a.hubKey).map((a) => a.key).sort();
-    expect(folded).toHaveLength(19);
+    // 19 before Phase 4, plus `meetings` and `clock`, the two Planner routes
+    // that had no app key at all until then.
+    expect(folded).toHaveLength(21);
     const hubs = APP_ACCESS.filter((a) => !a.hubKey).map((a) => a.key);
     expect(hubs).toEqual(["home", "planner", "ai", "chat", "teams", "docs", "tables", "settings"]);
   });
@@ -75,6 +77,8 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
   it("resolves the same rail through visibleRailApps for the server", () => {
     const asEmployee = { config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS };
     const employee = visibleRailApps({ ...asEmployee, activeModules: new Set(["chat"]) });
+    // No Teams for a Member: the hub's default href /people is a manager
+    // page (requireManagerPage), so the pill would land on the in-shell 404.
     expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "settings"]);
     // Talk off: the hub stays on the rail for a Member because Announcements does.
     const employeeTalkOff = visibleRailApps({ ...asEmployee, activeModules: new Set() });

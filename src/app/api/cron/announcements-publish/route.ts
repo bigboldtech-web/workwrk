@@ -75,7 +75,10 @@ export async function POST(req: NextRequest) {
             type: "announcement",
             title: `${a.priority === "URGENT" ? "🚨 " : ""}New Announcement`,
             message: a.title,
-            link: "/announcements",
+            // The post, not the list. A notice about one announcement that
+            // lands you in a feed makes you find it again, and a post past
+            // its expiry is not in that feed at all (spec-talk section 2.4).
+            link: `/announcements/${a.id}`,
           })),
         });
 
@@ -89,7 +92,7 @@ export async function POST(req: NextRequest) {
             itemTitle: a.title,
             itemDetails: a.priority !== "NORMAL" ? `Priority: ${a.priority}` : undefined,
             actionLabel: "View Announcement",
-            actionLink: `${baseUrl}/announcements`,
+            actionLink: `${baseUrl}/announcements/${a.id}`,
             note: preview,
           });
           return {

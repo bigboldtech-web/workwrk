@@ -1,11 +1,11 @@
 "use client";
 
-// ConferenceSurface — the shared in-call chrome for members AND guests
+// ConferenceSurface, the shared in-call chrome for members AND guests
 // (native-calls Phase 4): LiveKit conference + WorkwrK's reaction layer.
 //
 // Reactions ride LiveKit data channels (topic "wk-react"): an emoji tap
 // broadcasts to every participant and floats up from the bottom of the
-// tiles; ✋ Raise hand is sticky — raised hands pin a chip listing names
+// tiles; ✋ Raise hand is sticky, raised hands pin a chip listing names
 // until their owner lowers them (or leaves, which drops their packets).
 // Pure client + data channel: zero server involvement, works for guests.
 
@@ -21,7 +21,7 @@ import { Hand } from "lucide-react";
 export type CallDockParticipant = { identity: string; name: string; isLocal: boolean };
 
 /** Live call state surfaced OUT of the LiveKit room so the persistent CallDock
- *  can drive its own header controls — mic, camera and roster — usable even
+ *  can drive its own header controls, mic, camera and roster, usable even
  *  while the call is minimized (the VideoConference control bar is hidden
  *  then). Bridged up because the dock lives OUTSIDE <LiveKitRoom>. */
 export type CallDockState = {
@@ -39,21 +39,30 @@ const FLOAT_MS = 2600;
 
 type ReactMsg = { kind: "emoji"; emoji: string } | { kind: "hand"; raised: boolean; name: string };
 
-export function ConferenceSurface({ url, token, video, onDisconnected, trailingControls, onState }: {
+/* `trailingControls` is GONE (Phase 4, spec-talk section 0). It was threaded
+   from here through ReactionLayer to a slot in the reaction bar and NO
+   CALLER ever passed it: call-panel.tsx and guest-call-client.tsx both omit
+   it. A prop with no caller is chrome that looks extensible and is not. The
+   controls it hinted at become the named CallControls row in step 8.
+
+   The `.os-stage` class on the root is the other half of this step: the
+   surface takes its dark ground from the six fixed stage tokens
+   (src/app/globals.css) rather than from a zinc utility, so it looks the
+   same in light and dark and needs no dark-mode pass. The rename to
+   CallStage rides step 8 with the reserved-region dock. */
+export function ConferenceSurface({ url, token, video, onDisconnected, onState }: {
   url: string;
   token: string;
   video: boolean;
   onDisconnected?: () => void;
-  /** Extra member-only controls (e.g. the record button) rendered in the reaction bar. */
-  trailingControls?: React.ReactNode;
   /** Reports live mic/camera/roster up to the dock (see CallDockState). */
   onState?: (state: CallDockState) => void;
 }) {
   return (
-    <div className="relative h-full w-full" data-lk-theme="default">
+    <div className="os-stage relative h-full w-full" data-lk-theme="default">
       <LiveKitRoom serverUrl={url} token={token} connect audio video={video} onDisconnected={onDisconnected} style={{ height: "100%" }}>
         <VideoConference />
-        <ReactionLayer trailingControls={trailingControls} />
+        <ReactionLayer />
         {onState ? <RoomBridge onState={onState} /> : null}
       </LiveKitRoom>
     </div>
@@ -91,7 +100,7 @@ function RoomBridge({ onState }: { onState: (state: CallDockState) => void }) {
   return null;
 }
 
-function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNode }) {
+function ReactionLayer() {
   const [floats, setFloats] = useState<{ id: number; emoji: string; left: number }[]>([]);
   const [hands, setHands] = useState<Map<string, string>>(new Map()); // identity → name
   const [myHand, setMyHand] = useState(false);
@@ -120,7 +129,7 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
     } catch { /* not ours */ }
   });
 
-  // send() is async — its rejections escape a sync try/catch entirely
+  // send() is async, its rejections escape a sync try/catch entirely
   // (fleet finding: unhandled rejection + silently lost hand state).
   const broadcast = useCallback(
     (payload: ReactMsg) => send(new TextEncoder().encode(JSON.stringify(payload)), { reliable: true }),
@@ -129,14 +138,14 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
 
   const connectionState = useConnectionState();
   const ready = connectionState === "connected";
-  // Pre-connect the local identity is "" — a hand keyed by it could never
+  // Pre-connect the local identity is "", a hand keyed by it could never
   // be lowered by anyone. The bar is disabled until connected.
   const myIdentity = localParticipant?.identity || null;
 
   const react = (emoji: string) => {
     if (!ready) return;
     showFloat(emoji); // your own reaction floats immediately
-    void broadcast({ kind: "emoji", emoji }).catch(() => { /* others miss one emoji — harmless */ });
+    void broadcast({ kind: "emoji", emoji }).catch(() => { /* others miss one emoji, harmless */ });
   };
 
   const myName = localParticipant?.name || localParticipant?.identity || "You";
@@ -153,7 +162,7 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
     };
     apply(raised);
     void broadcast({ kind: "hand", raised, name: myName }).catch(() => {
-      // Nobody heard it — showing yourself as raised would be a lie.
+      // Nobody heard it, showing yourself as raised would be a lie.
       apply(!raised);
     });
   };
@@ -175,20 +184,20 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
 
       {/* Raised hands chip */}
       {hands.size > 0 && (
-        <div className="absolute left-3 top-3 z-[4] flex items-center gap-1.5 rounded-full bg-amber-400/95 px-3 py-1.5 text-sm font-medium text-amber-950 shadow">
+        <div className="absolute left-3 top-3 z-[4] flex items-center gap-1.5 rounded-full bg-warning-solid/95 px-3 py-1.5 text-sm font-medium text-amber-950 shadow">
           <Hand className="h-4 w-4" />
           {[...hands.values()].slice(0, 3).join(", ")}{hands.size > 3 ? ` +${hands.size - 3}` : ""}
         </div>
       )}
 
       {/* Reaction bar */}
-      <div className={`absolute bottom-20 left-1/2 z-[4] flex -translate-x-1/2 items-center gap-1 rounded-full bg-zinc-900/85 px-2 py-1.5 shadow-lg backdrop-blur ${ready ? "" : "pointer-events-none opacity-50"}`}>
+      <div className={`os-stage__bar absolute bottom-20 left-1/2 z-[4] flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-1.5 backdrop-blur ${ready ? "" : "pointer-events-none opacity-50"}`}>
         {EMOJI.map((e) => (
           <button
             key={e}
             type="button"
             onClick={() => react(e)}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-lg hover:bg-white/15"
+            className="os-stage__bar-btn flex h-8 w-8 items-center justify-center rounded-full text-lg"
             aria-label={`React ${e}`}
           >
             {e}
@@ -197,11 +206,14 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
         <button
           type="button"
           onClick={toggleHand}
-          className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-sm font-medium ${myHand ? "bg-amber-400 text-amber-950" : "text-white hover:bg-white/15"}`}
+          className={
+            myHand
+              ? "flex h-8 items-center gap-1 rounded-full bg-warning-solid px-2.5 text-sm font-medium text-amber-950"
+              : "os-stage__bar-btn flex h-8 items-center gap-1 rounded-full px-2.5 text-sm font-medium"
+          }
         >
           <Hand className="h-4 w-4" /> {myHand ? "Lower" : "Raise"}
         </button>
-        {trailingControls}
       </div>
 
       <style>{`

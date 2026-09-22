@@ -2,7 +2,7 @@
 //
 // Stored bodies are plain text with light markers; this module is the
 // single source of truth for how they parse. Pure + tested: the React
-// renderer (components/chat/rich-body.tsx) walks the AST this emits,
+// renderer (components/talk/rich-body.tsx) walks the AST this emits,
 // and stripMarkup DERIVES from the same parse so previews can never
 // disagree with renders.
 //

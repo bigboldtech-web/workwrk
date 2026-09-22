@@ -6,10 +6,18 @@
 // and one month grid of 32px cells; today ringed 1px --os-brand, the selected
 // day --os-brand filled. Never a native <input type=date> on an app surface.
 //
-// Value contract: a calendar date as "YYYY-MM-DD" (local), or null. It owns
-// no network: the caller writes the value where it goes. Inside a dialog or
-// the Filter panel the popover is a position:absolute child (never portalled),
+// Value contract: a calendar date as "YYYY-MM-DD", or null. It owns no
+// network: the caller writes the value where it goes. Inside a dialog or the
+// Filter panel the popover is a position:absolute child (never portalled),
 // which is what keeps it inside Radix's focus trap.
+//
+// A DAY IS NOT AN INSTANT, so nothing in here reads a key back through a
+// zoned formatter. `fmt.date(new Date(y, m, d))` builds midnight in the
+// BROWSER's zone and then re-reads it in home.locale.timezone, which for any
+// westward viewer prints the day before: the trigger said "24 Sep" for a
+// value of "2026-09-25". Labels go through `fmt.wallDate` (the day exactly as
+// written, in the viewer's date order) and "today" is the viewer's own today
+// from `fmt.today()`, never the machine's.
 
 import { useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -58,7 +66,9 @@ export function DateField({
   const fmt = useFormat();
   const [open, setOpen] = useState(false);
   const selected = useMemo(() => fromDateKey(value), [value]);
-  const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+  // The viewer's today, read in their zone, as a plain calendar Date so the
+  // grid arithmetic below stays ordinary.
+  const today = useMemo(() => fromDateKey(fmt.today()) ?? new Date(), [fmt]);
   const [cursor, setCursor] = useState<Date>(() => { const base = selected ?? today; return new Date(base.getFullYear(), base.getMonth(), 1); });
   // Re-adopt the month of the selected value whenever the popover opens.
   const [seenOpen, setSeenOpen] = useState(open);
@@ -116,7 +126,7 @@ export function DateField({
             key={key}
             type="button"
             onClick={() => pick(d)}
-            aria-label={fmt.date(d, "date")}
+            aria-label={fmt.wallDate(key)}
             aria-pressed={isSel}
             className={cn(
               "inline-flex h-8 w-8 items-center justify-center rounded-md text-sm tabular-nums",
@@ -149,7 +159,7 @@ export function DateField({
           className={cn("inline-flex w-full min-w-0 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60", h)}
         >
           <CalendarDays className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-          <span className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-3")}>{selected ? fmt.date(selected, "date") : placeholder}</span>
+          <span className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-3")}>{selectedKey ? fmt.wallDate(selectedKey) : placeholder}</span>
         </button>
         {allowClear && selected && !disabled ? (
           <button type="button" onClick={() => onChange(null)} aria-label="Clear date" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">

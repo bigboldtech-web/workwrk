@@ -1,13 +1,13 @@
 "use client";
 
-/* Conversation view — Slack-style thread + composer, with Zoom-grade
+/* Conversation view, Slack-style thread + composer, with Zoom-grade
  * calls one click away (docs/plans/comms-hub.md Phases 3+5).
  *
  *  - ONE poll drives everything: every 4s (hidden tabs pause) it asks
  *    for messages whose updatedAt moved past the cursor, so new sends,
  *    reactions, edits, deletes and thread replies all arrive on the
  *    same cheap indexed query. Results merge by id.
- *  - Sends are optimistic with a visible Retry on failure — never
+ *  - Sends are optimistic with a visible Retry on failure, never
  *    silent loss. Reactions/edits/deletes are optimistic with revert.
  *  - Threads: replies live under a parent (parentId); the panel is a
  *    side sheet fed by the same poll.
@@ -17,20 +17,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  Bell, BellOff, Hash, Link2, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
+  Bell, BellOff, Hash, Link2, LogOut, MoreHorizontal, Pencil, Phone,
   RefreshCw, Star, UserPlus, Users, Video,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
+import { BackButton } from "@/components/ui/back-button";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { AddPeopleDialog } from "@/components/chat/add-people-dialog";
-import { conversationTitle, type ChatUserLite } from "@/components/chat/conversation-utils";
-import { MessageFeed, type FeedMessage } from "@/components/chat/message-feed";
-import { ChatComposer, type ComposerPayload } from "@/components/chat/chat-composer";
-import { ThreadPanel } from "@/components/chat/thread-panel";
+import { AddPeopleDialog } from "@/components/talk/add-people-dialog";
+import { conversationTitle, type ChatUserLite } from "@/components/talk/conversation-utils";
+import { MessageFeed, type FeedMessage } from "@/components/talk/message-feed";
+import { ChatComposer, type ComposerPayload } from "@/components/talk/chat-composer";
+import { ThreadPanel } from "@/components/talk/thread-panel";
+import { TALK_START_CALL_EVENT, readTalkLeft, talkLeftKey } from "@/components/talk/talk-keys";
 
-// Backstop interval — SSE (workwrk:convo:<id>) triggers an INSTANT refetch, so
+// Backstop interval, SSE (workwrk:convo:<id>) triggers an INSTANT refetch, so
 // the poll only needs to self-heal a dropped stream, not carry the experience.
 const POLL_MS = 20_000;
 
@@ -61,7 +65,7 @@ export default function ConversationPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // The call now lives in the shell-level CallDock so it survives navigation
-  // (a Slack-style floating huddle). This page just starts it and derives
+  // (the floating call dock). This page just starts it and derives
   // whether THIS conversation is the one currently on the call.
   const { activeCall, startCall: startGlobalCall } = useOsShell();
   const callOpen = activeCall?.conversationId === id;
@@ -72,7 +76,7 @@ export default function ConversationPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
-  // Keyset poll cursor (updatedAt, id) — advanced ONLY by the initial
+  // Keyset poll cursor (updatedAt, id), advanced ONLY by the initial
   // load and by poll responses, never by out-of-band fetches (a send or
   // thread-open bumping it could skip other people's concurrent edits).
   const cursor = useRef<{ ts: string; id: string } | null>(null);
@@ -107,10 +111,10 @@ export default function ConversationPage() {
       .catch(async (e) => {
         // Deep link into a channel I haven't joined? Channels are org-open,
         // so try a self-join once (only succeeds for channels) and reload.
-        // Only on a definite 404 — a transient 500 must not reload-loop —
+        // Only on a definite 404, a transient 500 must not reload-loop,
         // and never when the user just LEFT this channel (back button
         // would silently rejoin them otherwise).
-        const justLeft = sessionStorage.getItem(`workwrk:chat-left:${id}`) === "1";
+        const justLeft = readTalkLeft(id);
         if (e instanceof Error && e.message === "404" && !justLeft) {
           try {
             const j = await fetch(`/api/conversations/${id}/join`, { method: "POST" });
@@ -122,9 +126,9 @@ export default function ConversationPage() {
     return () => { active = false; };
   }, [id]);
 
-  // Huddle roster refresh: ALWAYS on while the page is visible — a user
+  // Call roster refresh: ALWAYS on while the page is visible, a user
   // already sitting in the conversation must see the chip appear when
-  // someone else starts a huddle (gating on activeCall was a chicken-and-
+  // someone else starts a call (gating on activeCall was a chicken-and-
   // egg: it could never turn on). 20s idle, 10s while in/near a call.
   // Stale guards: responses for another conversation (fast switch) or
   // from an unmounted tick never land.
@@ -226,7 +230,7 @@ export default function ConversationPage() {
       if (document.hidden || !cursor.current || polling.current) return;
       polling.current = true;
       try {
-        // A 200-row page means more changes are waiting — drain them now
+        // A 200-row page means more changes are waiting, drain them now
         // instead of one page per 4s tick.
         for (let round = 0; round < 5; round++) {
           const c: { ts: string; id: string } = cursor.current;
@@ -317,10 +321,10 @@ export default function ConversationPage() {
         // a failed reply.
         const parentId = threadRef.current?.parent.id;
         if (parentId) setMessages((prev) => prev.map((m) => (m.id === parentId ? { ...m, replyCount: Math.max(0, (m.replyCount ?? 1) - 1) } : m)));
-        toast("Reply didn't send — it stays in the thread with a Retry button");
+        toast("Reply didn't send, it stays in the thread with a Retry button");
       }
     };
-    // Swap the temp for the server row — and drop any copy of that row
+    // Swap the temp for the server row, and drop any copy of that row
     // the poll may have delivered first, so a slow POST response can't
     // leave a duplicate.
     const applyOk = (server: FeedMessage) => {
@@ -440,7 +444,7 @@ export default function ConversationPage() {
         patchEverywhere(m.id, (x) => ({ ...x, metadata: { ...x.metadata, reactions: d.reactions ?? {} } }));
       })
       .catch(() => {
-        // Revert ONLY my toggle — a wholesale snapshot restore would wipe
+        // Revert ONLY my toggle, a wholesale snapshot restore would wipe
         // reactions other people added while the request was in flight.
         patchEverywhere(m.id, (x) => {
           const cur = { ...(x.metadata?.reactions ?? {}) };
@@ -494,7 +498,7 @@ export default function ConversationPage() {
           const fetched: FeedMessage[] = d.messages ?? [];
           const seen = new Set(fetched.map((x) => x.id));
           // A reply sent while this fetch was in flight lives only in
-          // local state — keep it.
+          // local state, keep it.
           const inFlight = prev.replies.filter((x) => (x.pending || x.failed) && !seen.has(x.id));
           return { parent: { ...d.parent }, replies: [...fetched, ...inFlight] };
         });
@@ -507,7 +511,6 @@ export default function ConversationPage() {
     const alreadyOnThisCall = activeCall?.conversationId === id;
     startGlobalCall({
       conversationId: id,
-      room: meta?.call?.room ?? id,
       subject: title,
       displayName: myName,
       audioOnly,
@@ -517,8 +520,8 @@ export default function ConversationPage() {
     if (!alreadyOnThisCall) maybePostCard(audioOnly);
   };
 
-  /** Post the TalkTok card unless one is already standing: a LIVE huddle
-   *  needs no second card, and only an UN-ENDED recent card suppresses —
+  /** Post the call card unless one is already standing: a LIVE call
+   *  needs no second card, and only an UN-ENDED recent card suppresses,
    *  a call that finished five minutes ago must not swallow the next
    *  call's card (fleet finding). */
   const maybePostCard = (audioOnly: boolean) => {
@@ -530,33 +533,42 @@ export default function ConversationPage() {
     if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio call" : "Started a call");
   };
 
-  // ?call=1 entries (deep links, sidebar Start TalkTok on a fresh page)
-  // initialize callOpen WITHOUT running startCall — once the data is in,
+  // ?call=1 entries (deep links, the sidebar Start call on a fresh page)
+  // initialize callOpen WITHOUT running startCall, once the data is in,
   // latch the room and run the same card logic exactly once.
-  // ?call=1 deep links (and the sidebar "Start TalkTok" on a fresh page)
+  // ?call=1 deep links (and the sidebar "Start call" on a fresh page)
   // start the call in the shell dock once the conversation data is in.
+  //
+  // THE THREE SPELLINGS ARE ALL REAL. spec-talk section 0 lists
+  // /tlk/[id]?call=video and ?call=audio as routes and keeps ?call=1 as the
+  // legacy one; only ?call=1 was read, so the Talk home's own call card,
+  // which links ?call=video, landed on the conversation and started nothing.
+  // "audio" starts audio only, which is what the word means.
   const urlCallHandledRef = useRef(false);
   useEffect(() => {
-    const wantCall = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1";
+    const raw = typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("call")
+      : null;
+    const wantCall = raw === "1" || raw === "video" || raw === "audio";
     if (!wantCall || urlCallHandledRef.current || !meta || !loadedOnce) return;
     urlCallHandledRef.current = true;
-    startCall(false);
+    startCall(raw === "audio");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, loadedOnce]);
 
-  // Sidebar "Start TalkTok" on the ALREADY-OPEN conversation: a query-only
+  // Sidebar "Start call" on the ALREADY-OPEN conversation: a query-only
   // push never remounts this page, so it arrives as an event instead.
   useEffect(() => {
     const onStart = (e: Event) => {
       const detail = (e as CustomEvent<{ id?: string }>).detail;
       if (detail?.id === id) startCall(false);
     };
-    window.addEventListener("workwrk:room:start-talktok", onStart);
-    return () => window.removeEventListener("workwrk:room:start-talktok", onStart);
+    window.addEventListener(TALK_START_CALL_EVENT, onStart);
+    return () => window.removeEventListener(TALK_START_CALL_EVENT, onStart);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, callOpen, meta, messages]);
 
-  /** Revoke every previously shared guest link for this room's calls —
+  /** Revoke every previously shared guest link for this room's calls,
    *  the only revocation DMs and #general have (they can't be left, so
    *  the epoch never rotates on its own). */
   const resetGuestLink = async () => {
@@ -565,7 +577,7 @@ export default function ConversationPage() {
     if (res?.ok) {
       const d = await res.json().catch(() => null);
       if (d) setMeta((prev) => (prev ? { ...prev, call: d.call } : prev));
-      toast("Guest link reset — old links are dead");
+      toast("Guest link reset, old links are dead");
     } else toast("Couldn't reset the link");
   };
 
@@ -574,7 +586,7 @@ export default function ConversationPage() {
     const url = meta?.call?.guestUrl;
     if (!url) { toast("Guest link unavailable"); return; }
     void navigator.clipboard.writeText(url);
-    toast("Guest link copied — outsiders join this room's calls with it");
+    toast("Guest link copied, outsiders join this room's calls with it");
   };
 
   /* ── conversation actions ───────────────────────────────────── */
@@ -630,7 +642,7 @@ export default function ConversationPage() {
     const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" }).catch(() => null);
     setConfirmLeave(false);
     if (res?.ok) {
-      try { sessionStorage.setItem(`workwrk:chat-left:${id}`, "1"); } catch { /* private mode */ }
+      try { sessionStorage.setItem(talkLeftKey(id), "1"); } catch { /* private mode */ }
       window.dispatchEvent(new Event("workwrk:chat-changed"));
       router.push("/tlk");
     } else toast("Couldn't leave the conversation");
@@ -640,7 +652,7 @@ export default function ConversationPage() {
   if (metaError) {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        <p className="text-base text-zinc-500">This conversation isn&apos;t available. It may have been left or removed.</p>
+        <p className="text-base text-ink-2">This conversation isn&apos;t available. It may have been left or removed.</p>
       </div>
     );
   }
@@ -658,49 +670,62 @@ export default function ConversationPage() {
   const isGeneral = meta?.type === "CHANNEL" && (meta.name ?? "").toLowerCase() === "general";
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-white">
+    <div className="relative flex h-full min-h-0 flex-col bg-raised">
+      {/* The top bar names the object (spec-shell 2.1 rule 2): "Talk > #sales",
+          not "Talk" alone. The bar prepends the hub crumb itself, so this
+          declares only the conversation, and the last crumb carries no href
+          because it reads as where you are rather than a link back to here. */}
+      <Breadcrumb items={[{ label: title }]} />
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 h-14 border-b border-zinc-100 shrink-0">
+      <header className="flex items-center gap-3 px-4 h-14 border-b border-line-soft shrink-0">
+        {/* back-map.md section 3: the first thing in the conversation header.
+            Under 1024 the Talk sidebar collapses to zero, so without this
+            there is no way back to the list at all. */}
+        <BackButton fallbackHref="/tlk" label="Talk" />
         <div className="flex items-center -space-x-2 shrink-0">
           {meta?.type === "CHANNEL" ? (
-            <span className="w-7 h-7 rounded-md bg-zinc-100 inline-flex items-center justify-center"><Hash className="w-4 h-4 text-zinc-500" /></span>
+            <span className="w-7 h-7 rounded-md bg-hover inline-flex items-center justify-center"><Hash className="w-4 h-4 text-ink-2" /></span>
           ) : (
             <>
               {others.slice(0, 3).map((m) => (
                 <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={28} />
               ))}
-              {others.length === 0 && <span className="w-7 h-7 rounded-full bg-zinc-100 inline-flex items-center justify-center"><Users className="w-4 h-4 text-zinc-400" /></span>}
+              {others.length === 0 && <span className="w-7 h-7 rounded-full bg-hover inline-flex items-center justify-center"><Users className="w-4 h-4 text-ink-3" /></span>}
             </>
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold text-zinc-900">{title}</h1>
+          <h1 className="truncate text-base font-semibold text-ink-strong">{title}</h1>
         </div>
         {meta && meta.type !== "DM" && (
           <button
             type="button"
             onClick={() => setAddPeopleOpen(true)}
-            title={`${meta.members.length} members — add people`}
-            className="hidden sm:inline-flex items-center gap-1 h-8 rounded-md border border-zinc-200 pl-1.5 pr-2 hover:bg-zinc-50"
+            title={`${meta.members.length} members, add people`}
+            className="hidden sm:inline-flex items-center gap-1 h-8 rounded-md border border-line pl-1.5 pr-2 hover:bg-subtle"
           >
             <span className="flex -space-x-1.5">
               {meta.members.slice(0, 3).map((m) => (
                 <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={22} />
               ))}
             </span>
-            <span className="text-xs font-medium text-zinc-600 tabular-nums">{meta.members.length}</span>
+            <span className="text-xs font-medium text-ink-2 tabular-nums">{meta.members.length}</span>
           </button>
         )}
         {freshActiveCall && !callOpen && (
           <button
             type="button"
             onClick={() => startCall(false)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium hover:bg-emerald-100"
+            // The hover used to repeat the resting background, so the chip
+            // looked interactive and answered nothing on pointer-over. The
+            // border is what darkens instead: the fill is already the
+            // success tint and there is no second success ground to move to.
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-success-bg border border-success-text/30 text-success-text text-sm font-medium transition-colors hover:border-success-text"
             title={freshActiveCall.participants.map((p) => p.name).join(", ")}
           >
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-success-solid" />
             </span>
             {freshActiveCall.participants.length} in call · Join
           </button>
@@ -709,15 +734,20 @@ export default function ConversationPage() {
           type="button"
           onClick={() => startCall(true)}
           title="Start an audio call"
-          className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
+          className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-line text-ink-2 hover:bg-subtle hover:text-ink"
         >
           <Phone className="w-4 h-4" />
         </button>
+        {/* Secondary, not primary. spec-talk section 2.2: "The one blue thing
+            on this page is the Send button in the message box." Call was the
+            loudest control here and Send was grey, which inverted the page's
+            own emphasis: the thing you do a hundred times a day looked
+            optional and the thing you do twice looked mandatory. */}
         <button
           type="button"
           onClick={() => startCall(false)}
           title="Start a video call"
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-sm font-medium hover:bg-[var(--os-brand-hover)]"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-line-strong text-ink text-sm font-medium hover:bg-hover"
         >
           <Video className="w-4 h-4" /> {callOpen ? "In call" : "Call"}
         </button>
@@ -727,39 +757,39 @@ export default function ConversationPage() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-line text-ink-2 hover:bg-subtle hover:text-ink"
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-9 z-20 w-52 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
-                <button type="button" onClick={() => void toggleStar()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                  <Star className={`w-4 h-4 ${myStarred ? "fill-amber-400 text-amber-400" : "text-zinc-400"}`} />
+              <div className="absolute right-0 top-9 z-20 w-52 rounded-lg border border-line bg-raised shadow-lg py-1">
+                <button type="button" onClick={() => void toggleStar()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                  <Star className={`w-4 h-4 ${myStarred ? "fill-amber-400 text-amber-400" : "text-ink-3"}`} />
                   {myStarred ? "Remove from Starred" : "Star conversation"}
                 </button>
-                <button type="button" onClick={() => void toggleMute()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                  {myNotify === "mute" ? <Bell className="w-4 h-4 text-zinc-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
+                <button type="button" onClick={() => void toggleMute()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                  {myNotify === "mute" ? <Bell className="w-4 h-4 text-ink-3" /> : <BellOff className="w-4 h-4 text-ink-3" />}
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
-                <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy guest call link
+                <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                  <Link2 className="w-4 h-4 text-ink-3" /> Copy guest call link
                 </button>
-                <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset guest call link
+                <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                  <RefreshCw className="w-4 h-4 text-ink-3" /> Reset guest call link
                 </button>
                 {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
-                  <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                    <UserPlus className="w-4 h-4 text-zinc-400" /> Add people
+                  <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                    <UserPlus className="w-4 h-4 text-ink-3" /> Add people
                   </button>
                 )}
                 {(meta?.type === "GROUP" || (meta?.type === "CHANNEL" && !isGeneral)) && (
                   <>
-                    <button type="button" onClick={() => void rename()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
-                      <Pencil className="w-4 h-4 text-zinc-400" /> {meta.type === "CHANNEL" ? "Rename channel" : "Rename group"}
+                    <button type="button" onClick={() => void rename()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-ink hover:bg-subtle">
+                      <Pencil className="w-4 h-4 text-ink-3" /> {meta.type === "CHANNEL" ? "Rename channel" : "Rename group"}
                     </button>
-                    <button type="button" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-red-600 hover:bg-red-50">
+                    <button type="button" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-danger-text hover:bg-danger-bg">
                       <LogOut className="w-4 h-4" /> {meta.type === "CHANNEL" ? "Leave channel" : "Leave group"}
                     </button>
                   </>
@@ -771,19 +801,19 @@ export default function ConversationPage() {
       </header>
 
       {/* The call renders in the shell-level CallDock (persists across
-          navigation) — not inline here, so leaving this page keeps the call. */}
+          navigation), not inline here, so leaving this page keeps the call. */}
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
         {hasMore && (
           <div className="flex justify-center pb-2">
-            <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="text-sm text-zinc-500 hover:text-zinc-800 inline-flex items-center gap-1.5">
-              {loadingOlder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Show earlier messages
+            <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="text-sm text-ink-2 hover:text-ink inline-flex items-center gap-1.5">
+              {loadingOlder ? "Loading earlier messages" : "Show earlier messages"}
             </button>
           </div>
         )}
         {!loadedOnce ? (
-          <div className="flex justify-center py-10 text-zinc-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
+          <SkeletonRows rows={6} rowHeight="44px" />
         ) : (
           <>
             {!hasMore && meta && (
@@ -795,12 +825,12 @@ export default function ConversationPage() {
                     <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={44} />
                   ))}
                 </div>
-                <p className="text-base text-zinc-800">
+                <p className="text-base text-ink">
                   {meta.type === "CHANNEL" ? (
-                    <>This is the very beginning of <span className="font-semibold">{title}</span>.</>
+                    <>This is the start of <span className="font-semibold">{title}</span>.</>
                   ) : (
                     <>
-                      This is the very beginning of your direct message history with{" "}
+                      This is the start of your direct message history with{" "}
                       {others.map((m, i) => (
                         <span key={m.userId}>
                           <span className="rounded bg-[var(--os-brand)]/10 px-1 py-0.5 font-medium text-[var(--os-brand)]">@{m.user.firstName} {m.user.lastName}</span>
@@ -814,7 +844,7 @@ export default function ConversationPage() {
             )}
             {messages.length === 0 && !(!hasMore && meta) && (
               <div className="py-14 text-center">
-                <p className="text-base font-medium text-zinc-700">Say hello 👋</p>
+                <p className="text-base font-medium text-ink">Say hello 👋</p>
               </div>
             )}
             {messages.length > 0 && (

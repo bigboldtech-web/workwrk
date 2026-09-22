@@ -177,7 +177,7 @@ export function SettingsOverviewClient() {
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
-          href: "/settings/calendar",
+          href: "/account/connections",
           title: "Calendar feeds",
           description: "Subscribe external calendars; publish org feeds.",
           Icon: CalendarIcon,

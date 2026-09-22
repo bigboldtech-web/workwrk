@@ -1,8 +1,8 @@
 // POST /api/calls/guest-token — the public door's exchange (native-calls
 // Phase 3). NO auth: the signed code in the body IS the credential,
 // exactly like the /meet/[code] page it serves. Body: { code, name }.
-// Meeting codes ("<id>.<sig>") and Room-huddle codes ("c.<id>.<epoch>.
-// <sig>") both work; a rotated-away huddle epoch is a dead link.
+// Meeting codes ("<id>.<sig>") and chat call codes ("c.<id>.<epoch>.
+// <sig>") both work; a rotated-away call epoch is a dead link.
 // Guests can publish (talk, share) but hold no admin rights, and their
 // identity is a random guest id — never a WorkwrK user id.
 
@@ -11,7 +11,7 @@ import { randomBytes } from "crypto";
 import { AccessToken } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { chatRoomName, meetingRoomName, verifyChatGuestCode, verifyMeetingGuestCode } from "@/lib/meeting-room";
+import { chatRoomName, guestCodeExpired, meetingRoomName, verifyChatGuestCode, verifyMeetingGuestCode } from "@/lib/meeting-room";
 import { ensureCallSession } from "@/lib/call-session";
 
 export async function POST(req: NextRequest) {
@@ -38,14 +38,23 @@ export async function POST(req: NextRequest) {
     });
     // Epoch mismatch = the link was rotated away (a member left). Dead.
     if (!conversation || conversation.callEpoch !== chat.epoch) return jsonError("This link is no longer valid", 404);
+    // Past its own expiry is 410, not 404: the link was real and it is over,
+    // which is a different thing from a tampered or rotated code. Chat guest
+    // links live 24h from the moment a member copied one.
+    if (guestCodeExpired(chat.expiresAt)) {
+      return jsonError("This link has expired", 410);
+    }
     room = chatRoomName(conversation.id, conversation.callEpoch);
     organizationId = conversation.organizationId;
     conversationId = conversation.id;
   } else {
     const mid = verifyMeetingGuestCode(code);
     if (!mid) return jsonError("This link is no longer valid", 404);
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: mid },
+    // deletedAt is part of the revocation, not a display filter: deleting
+    // the meeting is the only way to kill a guest code, which is a
+    // permanent HMAC of the meeting id.
+    const meeting = await prisma.meeting.findFirst({
+      where: { id: mid, deletedAt: null },
       select: { id: true, organizationId: true, scheduledAt: true },
     });
     if (!meeting) return jsonError("This link is no longer valid", 404);

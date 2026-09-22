@@ -79,9 +79,9 @@ export async function GET() {
     }))
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 
-  // Live huddle presence (native-calls Phase 2): one indexed query for
+  // Live call presence (native-calls Phase 2): one indexed query for
   // every conversation with an open call session. 12h staleness cap so a
-  // missed room_finished webhook can't pin a ghost huddle forever.
+  // missed room_finished webhook can't pin a ghost call forever.
   let activeCalls = new Map<string, { participants: { identity: string; name: string }[]; startedAt: Date }>();
   try {
     const convIds = conversations.map((c) => c.id);

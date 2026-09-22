@@ -1,6 +1,6 @@
 // POST /api/conversations/[id]/rotate-call — revoke guest call links.
 // Bumping callEpoch rotates the derived room name, which kills every
-// previously shared guest link for this conversation's huddles. The
+// previously shared guest link for this conversation's calls. The
 // only revocation DMs and #general have (they can't be left, so the
 // epoch never rotates on its own), and an explicit kill switch for
 // groups/channels when a link leaks. Any member may pull it.

@@ -545,3 +545,13 @@ html[data-contrast="high"] .workwrk-os {
     --os-brand-deep: #7AB8FF;
   }
 }
+
+/* Stage tokens (--os-stage-*) are NOT here, deliberately.
+
+   .os-stage is worn by the call stage inside the app AND by the public
+   guest call page at /meet/[code], which is in the (public) segment and
+   loads neither this file nor os.css. A token the guest stage cannot
+   reach would render that page unstyled, so the one definition lives in
+   src/app/globals.css, which the root layout loads on every route.
+   See the block at the end of that file for the six values and why they
+   never rebind in dark. */

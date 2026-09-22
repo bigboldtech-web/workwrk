@@ -43,6 +43,7 @@ import { createBoardItem } from "@/lib/board-items";
 import { parseWorkScope, type MyWorkRow, type WorkGroupKey, type WorkSortKey } from "@/lib/my-work";
 import { delegatedWhere } from "@/lib/delegated-items";
 import type { Prisma } from "@/generated/prisma";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,7 @@ export async function GET(req: Request) {
       ? await delegatedWhere(u.organizationId, u.id)
       : {
           organizationId: u.organizationId,
+          ...NOT_SYSTEM_ITEMS,
           OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
           archivedAt: null,
         };

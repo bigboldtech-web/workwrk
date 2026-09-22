@@ -66,7 +66,22 @@ export type PrimaryAction = ActionHandler & {
 };
 
 export type HeaderMenuEntry =
-  | ({ label: string; icon?: LucideIcon; destructive?: boolean; disabled?: boolean; title?: string } & ActionHandler)
+  | ({
+      label: string;
+      icon?: LucideIcon;
+      destructive?: boolean;
+      disabled?: boolean;
+      title?: string;
+      /**
+       * A Display-menu switch rather than a command: the row keeps ONE name
+       * ("Notes", not "Show notes" flipping to "Hide notes") and carries the
+       * state as a check, so the menu says what is on instead of what the
+       * next click would do. Rendered as role="menuitemcheckbox".
+       */
+      checked?: boolean;
+      /** A checkable row stays open so several can be toggled in one visit. */
+      keepOpen?: boolean;
+    } & ActionHandler)
   | { separator: true };
 
 export interface ViewSwitcherOption {
@@ -367,8 +382,11 @@ function HeaderMenu({ entries, variant = "bordered", label = "More options" }: {
                 disabled={e.disabled}
                 title={e.title}
                 href={e.href}
+                role={e.checked === undefined ? undefined : "menuitemcheckbox"}
+                aria-checked={e.checked}
+                selected={e.checked}
                 onClick={() => {
-                  setOpen(false);
+                  if (!(e.keepOpen ?? e.checked !== undefined)) setOpen(false);
                   e.onClick?.();
                 }}
               />

@@ -1,22 +1,22 @@
 "use client";
 
-// CallDock — the persistent, draggable call window. Mounted ONCE at shell
+// CallDock, the persistent, draggable call window. Mounted ONCE at shell
 // level (os-shell), so navigating between pages never unmounts it and the
 // LiveKit connection stays live. This is the fix for "the call drops when I
-// open another page": the call is a floating Slack-style huddle, not an
+// open another page": the call is a floating dock, not an
 // inline panel that dies with its page.
 //
 // Exactly one CallPanel is rendered from shell `activeCall`. Minimizing only
-// RESIZES the container — the CallPanel is never unmounted (a hidden h-0 box),
+// RESIZES the container, the CallPanel is never unmounted (a hidden h-0 box),
 // so audio keeps flowing while collapsed. Leaving is the only thing that ends
 // the call. Position defaults to a bottom-right CSS anchor and only becomes an
 // absolute coordinate once the user drags (so nothing reads the window on
 // mount), then is clamped into view at render.
 //
 // The header carries its own mic/camera/roster/duration, bridged out of the
-// LiveKit room (see CallDockState), so a minimized huddle still tells you who
+// LiveKit room (see CallDockState), so a minimized call still tells you who
 // you're with, how long you've been on, and lets you mute or cut video without
-// re-opening — the in-video control bar is hidden while collapsed.
+// re-opening, the in-video control bar is hidden while collapsed.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -31,7 +31,7 @@ const MINI_H = 46;
 const MARGIN = 12;
 
 /** Initials for the avatar chip: first letters of the first two words, else
- *  the first two characters — the same rule the rest of the app reads names
+ *  the first two characters, the same rule the rest of the app reads names
  *  by, kept local so the dock has no cross-import. */
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -40,19 +40,23 @@ function initialsOf(name: string): string {
   return (one.slice(0, 2) || "?").toUpperCase();
 }
 
-/** Deterministic hue per identity so a given person keeps one colour. */
-function hueOf(identity: string): number {
-  let h = 0;
-  for (let i = 0; i < identity.length; i++) h = (h * 31 + identity.charCodeAt(i)) % 360;
-  return h;
-}
+/* The deterministic HSL hue per identity is GONE (Phase 4, spec-talk
+   section 2.6: "no HSL hue-keyed avatar circles"). A generated colour reads
+   as information about the person and carries none: two people on the same
+   call could be handed the same hue, and the hue meant nothing either way.
+   Initials on one neutral stage chip say exactly as much and say it
+   honestly. Real avatars arrive with the identity map in step 8. */
 
 function Avatar({ p, className = "" }: { p: CallDockParticipant; className?: string }) {
   return (
     <span
       title={p.name}
-      className={`flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold text-white ring-2 ring-zinc-800 ${className}`}
-      style={{ backgroundColor: `hsl(${hueOf(p.identity)} 52% 42%)` }}
+      className={`flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold ${className}`}
+      style={{
+        background: "var(--os-stage-surface-2)",
+        color: "var(--os-stage-fg)",
+        boxShadow: "0 0 0 2px var(--os-stage-surface)",
+      }}
     >
       {initialsOf(p.name)}
     </span>
@@ -67,7 +71,7 @@ function fmtElapsed(total: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** Isolated so its 1Hz tick re-renders ONLY the duration text — never the
+/** Isolated so its 1Hz tick re-renders ONLY the duration text, never the
  *  CallPanel/LiveKit subtree above it. Remounted via a `key={callKey}` so a new
  *  call resets to 0:00 with no in-effect setState. */
 function CallTimer() {
@@ -77,7 +81,7 @@ function CallTimer() {
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(iv);
   }, []);
-  return <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">{fmtElapsed(elapsed)}</span>;
+  return <span className="shrink-0 font-mono text-xs tabular-nums text-ink-3">{fmtElapsed(elapsed)}</span>;
 }
 
 export function CallDock() {
@@ -92,7 +96,7 @@ export function CallDock() {
   // header works even while minimized (the in-video control bar is hidden then).
   const [dock, setDock] = useState<CallDockState | null>(null);
   // Drop stale room state when the call switches (React's adjust-state-on-
-  // prop-change pattern — the bridge re-reports for the new call).
+  // prop-change pattern, the bridge re-reports for the new call).
   const callKey = `${activeCall?.conversationId ?? ""}:${activeCall?.meetingId ?? ""}`;
   const [prevCallKey, setPrevCallKey] = useState(callKey);
   if (callKey !== prevCallKey) {
@@ -146,8 +150,13 @@ export function CallDock() {
     ? { left: placed.x, top: placed.y, width: w, height: h }
     : { right: 20, bottom: 20, width: w, height: h };
 
-  const btn = "flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-300 hover:bg-zinc-700 hover:text-white";
-  const activeBtn = "flex h-6 w-6 shrink-0 items-center justify-center rounded bg-red-500/20 text-red-300 hover:bg-red-500/30";
+  // The dock keeps its dark chrome, because video tiles read badly on
+  // white, but it now takes that dark from the fixed .os-stage token set
+  // instead of a zinc ramp that light mode was quietly fighting
+  // (spec-talk section 4 step 1, "the dark dock chrome to --os-*"). The
+  // reserved-region redesign of this surface is step 8.
+  const btn = "flex h-6 w-6 shrink-0 items-center justify-center rounded os-stage__btn";
+  const activeBtn = "flex h-6 w-6 shrink-0 items-center justify-center rounded bg-danger-solid/20 os-stage__btn--danger";
 
   const people = dock?.participants ?? [];
   const others = people.filter((p) => !p.isLocal);
@@ -165,40 +174,44 @@ export function CallDock() {
       ref={boxRef}
       role="region"
       aria-label="Call"
-      className="fixed z-[45] flex flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
-      style={style}
+      className="os-stage fixed z-[45] flex flex-col overflow-hidden rounded-xl"
+      style={{ ...style, border: "1px solid var(--os-stage-line)", boxShadow: "var(--os-shadow-pop)" }}
     >
       <header
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className="flex shrink-0 cursor-grab touch-none select-none items-center gap-1.5 bg-zinc-800 px-2.5 py-2 active:cursor-grabbing"
+        className="flex shrink-0 cursor-grab touch-none select-none items-center gap-1.5 px-2.5 py-2 active:cursor-grabbing"
+        style={{ background: "var(--os-stage-surface)", borderBottom: "1px solid var(--os-stage-line)" }}
       >
         <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success-solid opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-success-solid" />
         </span>
 
-        {/* Roster faces — who you're on the call with, visible even minimized. */}
+        {/* Roster faces, who you're on the call with, visible even minimized. */}
         {faces.length > 0 ? (
           <span className="flex shrink-0 items-center">
             {faces.map((p, i) => (
               <Avatar key={p.identity} p={p} className={i > 0 ? "-ml-2" : ""} />
             ))}
             {people.length > 3 ? (
-              <span className="-ml-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-600 text-micro font-semibold text-zinc-100 ring-2 ring-zinc-800">
+              <span
+                className="-ml-2 flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold"
+                style={{ background: "var(--os-stage-surface-2)", color: "var(--os-stage-fg-2)", boxShadow: "0 0 0 2px var(--os-stage-surface)" }}
+              >
                 +{people.length - 3}
               </span>
             ) : null}
           </span>
         ) : null}
 
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: "var(--os-stage-fg)" }}>
           {minimized ? roster : activeCall.subject}
         </span>
 
-        {/* Duration — remounts per call, ticks in isolation. */}
+        {/* Duration, remounts per call, ticks in isolation. */}
         <CallTimer key={callKey} />
 
         {dock?.ready ? (
@@ -247,7 +260,7 @@ export function CallDock() {
         <button
           type="button"
           title="Leave call"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-red-400 hover:bg-red-500/20 hover:text-red-300"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-danger-solid/20 os-stage__btn--danger"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={endCall}
         >
@@ -255,13 +268,12 @@ export function CallDock() {
         </button>
       </header>
 
-      {/* CallPanel is ALWAYS mounted — hidden (not unmounted) when minimized so
+      {/* CallPanel is ALWAYS mounted, hidden (not unmounted) when minimized so
           the LiveKit connection and audio survive. */}
       <div className={minimized ? "h-0 w-0 overflow-hidden" : "min-h-0 flex-1"}>
         <CallPanel
           conversationId={activeCall.conversationId}
           meetingId={activeCall.meetingId}
-          room={activeCall.room}
           subject={activeCall.subject}
           displayName={activeCall.displayName}
           audioOnly={activeCall.audioOnly}

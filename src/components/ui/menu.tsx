@@ -172,6 +172,12 @@ export interface MenuItemProps extends VariantProps<typeof rowVariants> {
   className?: string;
   role?: string;
   "aria-expanded"?: boolean;
+  /**
+   * For a `role="menuitemcheckbox"` row: the on/off state assistive tech
+   * reads. The visible check comes from `selected`; this is what makes the
+   * row announce as a switch rather than as a command.
+   */
+  "aria-checked"?: boolean;
 }
 
 export function MenuItem({
@@ -197,6 +203,7 @@ export function MenuItem({
   className,
   role = "menuitem",
   "aria-expanded": ariaExpanded,
+  "aria-checked": ariaChecked,
 }: MenuItemProps) {
   const v = variant ?? "flush";
   const tone = disabled ? "disabled" : destructive ? "destructive" : "default";
@@ -263,7 +270,7 @@ export function MenuItem({
 
   if (href && !isDisabled) {
     return (
-      <Link href={href} role={role} onClick={onClick} title={title} className={rowClass}>
+      <Link href={href} role={role} aria-checked={ariaChecked} onClick={onClick} title={title} className={rowClass}>
         {inner}
       </Link>
     );
@@ -278,6 +285,7 @@ export function MenuItem({
       title={title}
       aria-disabled={isDisabled || undefined}
       aria-expanded={ariaExpanded}
+      aria-checked={ariaChecked}
       className={rowClass}
     >
       {inner}

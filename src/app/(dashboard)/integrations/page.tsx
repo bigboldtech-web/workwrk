@@ -88,7 +88,7 @@ export default function IntegrationsPage() {
         actions={
           <div className="ing__head-actions">
             <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-            <Link href="/settings/calendar" className="os-head__link"><Sparkles /> Calendar</Link>
+            <Link href="/account/connections" className="os-head__link"><Sparkles /> Calendar</Link>
           </div>
         }
       />

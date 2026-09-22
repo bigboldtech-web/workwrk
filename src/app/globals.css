@@ -93,6 +93,14 @@
   --color-danger-bg: var(--os-danger-bg);
   --color-danger-text: var(--os-danger-text);
   --color-danger-solid: var(--os-danger-solid);
+  /* `bg-danger-soft` is written on a dozen surfaces (the rejected-timesheet
+     banner, the clock's failure line, the urgent announcement chip) and,
+     with no entry here, Tailwind emitted nothing for every one of them: the
+     strips rendered as red text on white and read as unstyled rather than
+     as a warning. It is the same pale red as danger-bg, named the way the
+     call sites already ask for it, so the utility exists rather than twelve
+     files being rewritten to say a different word. */
+  --color-danger-soft: var(--os-danger-bg);
   --color-chrome: var(--os-chrome-bg);
   --color-chrome-hov: var(--os-chrome-hov);
   --color-chrome-fg: var(--os-chrome-fg);
@@ -829,3 +837,75 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ── Stage tokens (design-system 1.3 component tokens) ──────────────
+   Requested by docs/plans/ui-refresh/spec-talk.md section 2.5 and listed
+   in its section 3 as an addition to the design system, not a Talk-local
+   hack: any full-bleed media surface can wear .os-stage.
+
+   WHY THEY ARE FIXED. Video tiles read badly on white, so a call stage is
+   dark in both themes. The design system rebinds dark AT THE ROOT only
+   (:root.dark .workwrk-os and the prefers-color-scheme block), so putting
+   data-theme="dark" on a div does nothing at all. These six values never
+   rebind, exactly like the semantic solids and the brand dots, so the
+   stage looks the same in light and dark and needs no dark-mode pass.
+
+   --os-danger-solid (Leave) and --os-brand (the one primary) are already
+   fixed in both themes and are used inside .os-stage unchanged. Nothing
+   else in there reads a theme token.
+
+   WHY IT LIVES IN globals.css AND NOT IN tokens.css. .os-stage is worn by
+   the call stage inside the app AND by the public guest call page at
+   /meet/[code], which is in the (public) segment and loads neither
+   tokens.css nor os.css. This file is loaded by the root layout on every
+   route, so one definition reaches both. */
+.os-stage {
+  --os-stage-bg:        #101215;
+  --os-stage-surface:   #181B20;
+  --os-stage-surface-2: #262A31;
+  --os-stage-line:      #30353D;
+  --os-stage-fg:        #E6E8EC;   /* 15.1:1 on the ground */
+  --os-stage-fg-2:      #9AA3B2;
+  /* --os-stage-surface at 85 percent, for the one surface that floats ON
+     the video and has to let it through. Spelled out rather than composed
+     with color-mix so lightningcss has nothing to parse and the value is
+     readable in a screenshot diff. */
+  --os-stage-scrim:     rgba(24, 27, 32, 0.85);
+
+  background: var(--os-stage-bg);
+  color: var(--os-stage-fg);
+  color-scheme: dark;
+}
+
+/* The two control styles every .os-stage surface shares (the call dock
+   header, the stage control bar, the guest stage). Written as CSS rather
+   than Tailwind utilities because the values are stage tokens, and a
+   Tailwind arbitrary class would not follow a token that is scoped to the
+   .os-stage ancestor. */
+.os-stage__btn {
+  color: var(--os-stage-fg-2);
+  background: transparent;
+}
+.os-stage__btn:hover {
+  color: var(--os-stage-fg);
+  background: var(--os-stage-surface-2);
+}
+.os-stage__btn--danger { color: var(--os-danger-solid); }
+.os-stage__btn--danger:hover { color: #fff; background: var(--os-danger-solid); }
+
+/* The floating bar that sits ON the video (the reaction bar today).
+   WHY IT IS NOT bg-app AND hover:bg-raised. .os-stage rebinds only the six
+   --os-stage-* values above; it does NOT rebind --os-app or --os-raised,
+   which stay whatever the page's theme says. In light mode --os-app is a
+   near-white ground, so a bar painted with it became a white pill and the
+   white label on it disappeared. Everything inside a stage reads stage
+   tokens or a fixed semantic solid, never a theme ground. */
+.os-stage__bar {
+  background: var(--os-stage-scrim);
+  color: var(--os-stage-fg);
+}
+.os-stage__bar-btn {
+  color: var(--os-stage-fg);
+  background: transparent;
+}
+.os-stage__bar-btn:hover { background: var(--os-stage-surface-2); }

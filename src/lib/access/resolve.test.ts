@@ -2449,7 +2449,7 @@ describe("spec 5.2.1: the app rule table", () => {
   it("has a row for every app key, and the key list is the union of hubs, folded apps and the four route-only keys", () => {
     // 31 in the access spec's own table, plus `templates`, which
     // spec-spaces-lists section 1 adds as the one APP_RULES row that unit owns.
-    expect(APP_KEYS.length).toBe(32);
+    expect(APP_KEYS.length).toBe(34);
     for (const key of APP_KEYS) expect(APP_RULES[key]).toBeTruthy();
     expect(APP_RULES.templates).toEqual({ hub: "home", audience: "member", guest: "none" });
   });

@@ -1,9 +1,9 @@
-// Meeting call rooms — derived, never stored (zero migration).
+// Meeting call rooms: derived, never stored (zero migration).
 //
 // Every Meeting gets a deterministic Jitsi room name and a signed guest code,
 // both HMAC'd from the meeting id with the server secret so rooms are
 // unguessable without a link. The guest code powers the public /meet/[code]
-// page — external people and AI notetaker bots join with that URL, no
+// page, and external people and AI notetaker bots join with that URL, no
 // WorkwrK account involved.
 
 import { createHmac } from "crypto";
@@ -14,7 +14,7 @@ function hmac(input: string): string {
   return createHmac("sha256", SECRET()).update(input).digest("hex");
 }
 
-/** Jitsi room name — unguessable, stable per meeting. */
+/** Jitsi room name: unguessable, stable per meeting. */
 export function meetingRoomName(meetingId: string): string {
   return `WorkwrK-${meetingId.slice(-6)}-${hmac(`room:${meetingId}`).slice(0, 10)}`;
 }
@@ -33,32 +33,91 @@ export function verifyMeetingGuestCode(code: string): string | null {
   return sig === hmac(`guest:${meetingId}`).slice(0, 16) ? meetingId : null;
 }
 
-/** Direct Jitsi URL — what AI notetaker bots and link-only clients use. */
-export function meetingJitsiUrl(meetingId: string): string {
-  return `https://meet.jit.si/${meetingRoomName(meetingId)}`;
+// meetingJitsiUrl() is GONE (Phase 4, decision Q1). It built
+// https://meet.jit.si/<room> and was handed to clients as `call.jitsiUrl`,
+// which made a public third-party room an advertised part of the meeting's
+// API surface. A notetaker bot or a link-only client joins through the
+// signed guest door (`call.guestUrl`, /meet/<code>) like every other
+// outside participant, and that door answers honestly when this deployment
+// has no media server rather than routing anyone off the product.
+
+/**
+ * GUEST LINKS EXPIRE (spec-talk section 2.5 Data, comms #25).
+ *
+ * A chat guest link used to be a permanent HMAC: copied once into an email
+ * thread, it let a stranger into that conversation's calls for as long as
+ * the conversation existed, and the only revocation was Reset guest link
+ * (which bumps `callEpoch`) or a member leaving. Now the expiry is signed
+ * into the code itself, so a copied link goes dead on its own.
+ *
+ * Codes minted before this shipped have no `exp` segment. They stay valid
+ * for a 7-day grace so nobody's in-flight invitation breaks on deploy day,
+ * and stop resolving after it. The grace is a date, not a duration from
+ * first use, so it cannot be extended by holding on to a link.
+ */
+export const CHAT_GUEST_CODE_TTL_MS = 24 * 3600_000;
+
+/** Legacy (no-exp) codes stop resolving after this. Phase 4 + 7 days. */
+export const LEGACY_GUEST_CODE_GRACE_UNTIL = Date.parse("2026-09-29T00:00:00.000Z");
+
+export interface ChatGuestCode {
+  conversationId: string;
+  epoch: number;
+  /** Epoch millis, or null for a pre-expiry code inside its grace. */
+  expiresAt: number | null;
 }
 
-/** Signed guest code for a ROOM huddle: "c.<conversationId>.<epoch>.<sig>".
+/** Signed guest code for a chat call: "c.<conversationId>.<epoch>.<exp>.<sig>".
  *  Epoch is baked in, so a member leaving (which bumps callEpoch) kills
- *  every previously shared guest link for that conversation. */
-export function chatGuestCode(conversationId: string, epoch: number): string {
-  return `c.${conversationId}.${epoch}.${hmac(`chatguest:${conversationId}:${epoch}`).slice(0, 16)}`;
+ *  every previously shared guest link for that conversation; `exp` kills it
+ *  on its own 24 hours later even if nobody leaves. */
+export function chatGuestCode(conversationId: string, epoch: number, expiresAt = Date.now() + CHAT_GUEST_CODE_TTL_MS): string {
+  const exp = Math.floor(expiresAt);
+  return `c.${conversationId}.${epoch}.${exp}.${hmac(`chatguest:${conversationId}:${epoch}:${exp}`).slice(0, 16)}`;
 }
 
-/** Verify a chat guest code; returns { conversationId, epoch } or null.
- *  The caller must ALSO check epoch against the live conversation —
- *  a stale epoch means the link was rotated away. */
-export function verifyChatGuestCode(code: string): { conversationId: string; epoch: number } | null {
+/** Verify a chat guest code; returns its payload or null on a bad signature,
+ *  a bad shape, or a legacy code whose grace has run out.
+ *
+ *  The caller must ALSO check `epoch` against the live conversation (a stale
+ *  epoch means the link was rotated away) and `expiresAt` against the clock
+ *  (past it is a 410, not a 404: the link was real, it is over). */
+export function verifyChatGuestCode(code: string, now = Date.now()): ChatGuestCode | null {
   if (!code.startsWith("c.")) return null;
   const parts = code.slice(2).split(".");
-  if (parts.length !== 3) return null;
-  const [conversationId, epochRaw, sig] = parts;
-  const epoch = Number(epochRaw);
-  if (!conversationId || !Number.isInteger(epoch) || epoch < 0) return null;
-  return sig === hmac(`chatguest:${conversationId}:${epoch}`).slice(0, 16) ? { conversationId, epoch } : null;
+
+  if (parts.length === 4) {
+    const [conversationId, epochRaw, expRaw, sig] = parts;
+    const epoch = Number(epochRaw);
+    const exp = Number(expRaw);
+    if (!conversationId || !Number.isInteger(epoch) || epoch < 0) return null;
+    if (!Number.isInteger(exp) || exp <= 0) return null;
+    if (sig !== hmac(`chatguest:${conversationId}:${epoch}:${exp}`).slice(0, 16)) return null;
+    return { conversationId, epoch, expiresAt: exp };
+  }
+
+  // The pre-expiry shape, inside its grace only.
+  if (parts.length === 3) {
+    if (now > LEGACY_GUEST_CODE_GRACE_UNTIL) return null;
+    const [conversationId, epochRaw, sig] = parts;
+    const epoch = Number(epochRaw);
+    if (!conversationId || !Number.isInteger(epoch) || epoch < 0) return null;
+    if (sig !== hmac(`chatguest:${conversationId}:${epoch}`).slice(0, 16)) return null;
+    return { conversationId, epoch, expiresAt: null };
+  }
+
+  return null;
 }
 
-/** Jitsi room for a chat conversation's calls (huddles). Same derivation
+/** Is this code past its own expiry? A legacy code (null) never is: its
+ *  limit is the grace date, which `verifyChatGuestCode` already applied.
+ *  The clock is read here rather than at the call sites so a server page can
+ *  ask the question without reading the clock inside its own render. */
+export function guestCodeExpired(expiresAt: number | null, now = Date.now()): boolean {
+  return expiresAt !== null && now > expiresAt;
+}
+
+/** Jitsi room for a chat conversation's calls. Same derivation
  *  scheme as meetings, distinct namespace so the two never collide. The
  *  epoch (bumped when a member leaves) rotates the room so ex-members'
  *  captured room names stop working. */

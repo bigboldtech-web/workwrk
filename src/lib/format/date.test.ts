@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { dayKey, formatBytes, formatCount, formatDate, formatDateTitle, formatRelative, resolveDateOrder } from "./date";
+import {
+  dayKey, formatBytes, formatCount, formatDate, formatDateTitle, formatRelative, resolveDateOrder,
+  formatWallClockDate, formatWallClockHhmm, formatWallClockTime, wallClockToday,
+} from "./date";
 
 // Every case pins the zone so the runtime's own zone cannot move a bucket.
 const UTC = { timezone: "UTC", timeFormat: "24h" as const, dateFormat: "DMY", language: "en-GB" };
@@ -107,5 +110,72 @@ describe("formatCount", () => {
     expect(formatCount(1284, { language: "en-US" })).toBe("1,284");
     expect(formatCount(1284.6, { language: "en-US" })).toBe("1,285");
     expect(formatCount(undefined, { language: "en-US" })).toBe("0");
+  });
+});
+
+// The wall-clock pair. Their whole reason for existing is that the viewer's
+// zone must NOT touch them: a picker's option is a set of digits and a day,
+// not an instant. Every case below is one a picker actually rendered wrong
+// before they existed (the trigger read "24 Sep 7:30 PM" for a 25 Sep 6:00 AM
+// meeting, because a browser-local Date was re-read in America/New_York).
+describe("formatWallClockTime", () => {
+  const NY12 = { timezone: "America/New_York", timeFormat: "12h" as const, language: "en-US" };
+  const KOL24 = { timezone: "Asia/Kolkata", timeFormat: "24h" as const, language: "en-GB" };
+
+  it("prints exactly the digits it is given, whatever the zone says", () => {
+    expect(formatWallClockTime(9, 0, NY12)).toBe("9:00 AM");
+    expect(formatWallClockTime(0, 0, NY12)).toBe("12:00 AM");
+    expect(formatWallClockTime(13, 30, NY12)).toBe("1:30 PM");
+    expect(formatWallClockTime(23, 45, NY12)).toBe("11:45 PM");
+  });
+
+  it("honours timeFormat and never answers 24 for midnight", () => {
+    expect(formatWallClockTime(0, 0, KOL24)).toBe("00:00");
+    expect(formatWallClockTime(9, 5, KOL24)).toBe("09:05");
+    expect(formatWallClockTime(23, 59, KOL24)).toBe("23:59");
+  });
+
+  it("is the same answer for every zone, which is the point", () => {
+    for (const tz of ["UTC", "America/New_York", "Asia/Kolkata", "Pacific/Chatham"]) {
+      expect(formatWallClockTime(6, 0, { timezone: tz, timeFormat: "12h", language: "en-US" })).toBe("6:00 AM");
+    }
+  });
+
+  it("reads an HH:mm string the same way", () => {
+    expect(formatWallClockHhmm("06:00", NY12)).toBe("6:00 AM");
+    expect(formatWallClockHhmm("19:30", KOL24)).toBe("19:30");
+    expect(formatWallClockHhmm("", NY12)).toBe("");
+    expect(formatWallClockHhmm(null, NY12)).toBe("");
+  });
+});
+
+describe("formatWallClockDate", () => {
+  it("prints the day it was given, in the viewer's order", () => {
+    const ny = { timezone: "America/New_York", dateFormat: "MDY", language: "en-US" };
+    const kol = { timezone: "Asia/Kolkata", dateFormat: "DMY", language: "en-GB" };
+    expect(formatWallClockDate("2026-09-25", ny, NOW)).toBe("Sep 25");
+    expect(formatWallClockDate("2026-09-25", kol, NOW)).toBe("25 Sept");
+    // The defect this replaces: a westward zone printed the day before.
+    expect(formatWallClockDate("2026-09-25", ny, NOW)).not.toContain("24");
+  });
+
+  it("adds the year only outside the viewer's current year", () => {
+    const p = { timezone: "UTC", dateFormat: "DMY", language: "en-GB" };
+    expect(formatWallClockDate("2026-01-02", p, NOW)).toBe("2 Jan");
+    expect(formatWallClockDate("2025-01-02", p, NOW)).toBe("2 Jan 2025");
+  });
+
+  it("answers an empty string rather than Invalid Date", () => {
+    expect(formatWallClockDate("", UTC, NOW)).toBe("");
+    expect(formatWallClockDate(null, UTC, NOW)).toBe("");
+    expect(formatWallClockDate("not a date", UTC, NOW)).toBe("");
+  });
+});
+
+describe("wallClockToday", () => {
+  it("is the viewer's own day, not the runtime's", () => {
+    const at = new Date("2026-09-21T19:30:00Z");
+    expect(wallClockToday({ timezone: "America/New_York" }, at)).toBe("2026-09-21");
+    expect(wallClockToday({ timezone: "Asia/Kolkata" }, at)).toBe("2026-09-22");
   });
 });

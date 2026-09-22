@@ -1,33 +1,52 @@
 "use client";
 
-// ReminderTicker — fires the current user's due reminders AND surfaces each one
-// as a PERSISTENT in-app popup (bottom-right) that survives until the user acts
-// on it. This replaces the old 3.2s toast: a fired reminder no longer vanishes
-// the instant you look away.
+// ReminderTicker: the app's ONE reminder poller, and the cards a fired
+// reminder appears on (spec-planner.md section 2, Reminders).
 //
-// Two jobs in one always-mounted component (see os-shell — mounted ABOVE the
-// settings/non-settings fork so reminders fire everywhere, including the
-// full-screen Settings takeover):
+// Two jobs in one always-mounted component (os-shell mounts it ABOVE the
+// settings fork, so reminders fire everywhere including the full-screen
+// settings takeover):
 //
-//   1. Firing (app-open scheduler). Every 60s (and on mount) it GETs
-//      /api/reminders/tick, which atomically claims + fires each due reminder —
-//      creating the bell Notification and flipping PENDING → FIRED. This is the
-//      client-side scheduler for users who have the app open; the
-//      /api/cron/reminders job (registered in CRON-SETUP.md) covers closed-app
-//      users. The atomic claim means ticker + cron can never double-fire.
+//   1. FIRING. Every 60s, and on mount, it GETs /api/reminders/tick, which
+//      atomically claims and fires each due reminder. That is the
+//      client-side scheduler for people with the app open; the
+//      /api/cron/reminders row covers closed-app people, and the atomic
+//      claim means the two can never double-fire.
+//   2. SURFACING. After every tick, on mount, and whenever any surface
+//      broadcasts `workwrk:reminders-changed`, it loads the FIRED set and
+//      renders one card each. Loading FIRED on mount is what makes it
+//      durable: a reminder fired by the cron, or before a reload,
+//      re-surfaces instead of being silently lost.
 //
-//   2. Surfacing. After every tick — and on mount, and whenever any surface
-//      broadcasts `workwrk:reminders-changed` — it loads the FIRED-but-unacted
-//      set (/api/reminders?status=FIRED) and renders one card per reminder with
-//      Snooze (10m / 1h / tomorrow) · Dismiss · Open. Loading FIRED on mount is
-//      what makes it durable: cron-fired reminders and any fired before a reload
-//      re-surface instead of being silently lost.
+// WHAT PHASE 4 CHANGED, AND WHY EACH ONE WAS A DEFECT:
+//
+//   * IT IS IN THE TOAST POSITION NOW (bottom-LEFT, design-system 5.7),
+//     where the rest of the product puts transient cards. It used to open
+//     its own bottom-right portal, which is where the call dock lives, so
+//     an alarm during a call landed on top of the call.
+//   * A FAILED ACTION IS VISIBLE. Snooze and Done removed the card
+//     optimistically and then swallowed the response, so a reminder that
+//     failed to snooze looked snoozed and went off again later with no
+//     explanation. The card comes back now and says so, with Retry.
+//   * OPEN USES THE ONE TASK DOOR. It pushed `/item/<id>` by hand, which
+//     renders the full task page; `openTask` arms the drawer intent first,
+//     so the task opens as the drawer over whatever you were doing and
+//     closing brings you back.
+//   * TOKENS, NOT HEXES. The card was `bg-white dark:bg-[#181C22]` with
+//     `#0073EA` typed in four places.
+//
+// The snooze choices are the ones in src/components/planner/event-popover.tsx,
+// imported rather than re-listed, so the bell, the calendar popover and this
+// card cannot offer three different sets.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Clock, X, ArrowUpRight, ChevronDown, CheckSquare } from "lucide-react";
+import { AlarmClock, ArrowUpRight, Check, ChevronDown, Clock, X } from "lucide-react";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { openTask } from "@/lib/nav/open-task";
+import { apiFetch } from "@/lib/api-fetch";
+import { SNOOZE_CHOICES } from "@/components/planner/event-popover";
 
 type Fired = {
   id: string;
@@ -39,60 +58,43 @@ type Fired = {
   entityId: string | null;
 };
 
+/** At most three cards; the rest are one line that opens the bell. */
+const MAX_CARDS = 3;
+
 function agoLabel(iso: string | null): string {
   if (!iso) return "just now";
   const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "just now";
+  if (diff < 60_000) return "went off just now";
   const m = Math.floor(diff / 60_000);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return `went off ${m} min ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return `went off ${h}h ago`;
+  return `went off ${Math.floor(h / 24)}d ago`;
 }
-
-/** Minutes from now until tomorrow 9am — for the "Tomorrow" snooze, expressed
- *  as snoozeMinutes so it rides the same PATCH path as the shorter snoozes. */
-function tomorrow9amMinutes(): number {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return Math.max(1, Math.round((d.getTime() - Date.now()) / 60_000));
-}
-
-const SNOOZE: { label: string; minutes: () => number }[] = [
-  { label: "10 minutes", minutes: () => 10 },
-  { label: "1 hour", minutes: () => 60 },
-  { label: "Tomorrow 9am", minutes: tomorrow9amMinutes },
-];
 
 export function ReminderTicker() {
   const router = useRouter();
+  const stackRef = useRef<HTMLDivElement>(null);
   const [fired, setFired] = useState<Fired[]>([]);
   const [snoozeOpenId, setSnoozeOpenId] = useState<string | null>(null);
+  const [failedId, setFailedId] = useState<string | null>(null);
   const activeRef = useRef(true);
 
   const loadFired = useCallback(async () => {
-    try {
-      const res = await fetch("/api/reminders?status=FIRED", { cache: "no-store" });
-      if (!res.ok || !activeRef.current) return;
-      const d = (await res.json()) as { reminders: Fired[] };
-      setFired(Array.isArray(d.reminders) ? d.reminders : []);
-    } catch { /* ignore */ }
+    const r = await apiFetch<{ reminders: Fired[] }>("/api/reminders?status=FIRED");
+    if (!r.ok || !activeRef.current) return;
+    setFired(Array.isArray(r.data.reminders) ? r.data.reminders : []);
   }, []);
 
-  // Firing poller — claims + fires due reminders while the app is open, then
-  // refreshes the surfaced set. Also listens for cross-surface change
-  // broadcasts so acting from the bell instantly reconciles the popup.
   useEffect(() => {
     activeRef.current = true;
-    async function tick() {
-      try { await fetch("/api/reminders/tick", { cache: "no-store" }); }
-      catch { /* ignore */ }
+    const tick = async () => {
+      await apiFetch("/api/reminders/tick");
       await loadFired();
-    }
+    };
     void tick();
-    const iv = setInterval(tick, 60_000);
-    const onChanged = () => void loadFired();
+    const iv = setInterval(() => { void tick(); }, 60_000);
+    const onChanged = () => { void loadFired(); };
     window.addEventListener("workwrk:reminders-changed", onChanged);
     return () => {
       activeRef.current = false;
@@ -101,134 +103,110 @@ export function ReminderTicker() {
     };
   }, [loadFired]);
 
-  // Snooze / dismiss / reschedule. Optimistically drop the card, then PATCH and
-  // broadcast so the bell (and any other viewer) reconciles.
-  const act = useCallback(async (id: string, body: Record<string, unknown>) => {
-    setFired((prev) => prev.filter((r) => r.id !== id));
+  /**
+   * Snooze, done or move. Optimistic, and REVERSIBLE: a failure puts the
+   * card back with its error line rather than leaving the person believing
+   * they dealt with an alarm that is still pending.
+   */
+  const act = useCallback(async (r: Fired, body: Record<string, unknown>) => {
+    setFired((prev) => prev.filter((x) => x.id !== r.id));
     setSnoozeOpenId(null);
-    try {
-      await fetch(`/api/reminders/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } finally {
-      window.dispatchEvent(new CustomEvent("workwrk:reminders-changed"));
+    setFailedId(null);
+    const res = await apiFetch(`/api/reminders/${r.id}`, { method: "PATCH", json: body, keepalive: true });
+    if (!res.ok) {
+      setFired((prev) => (prev.some((x) => x.id === r.id) ? prev : [...prev, r]));
+      setFailedId(r.id);
+      return;
     }
+    window.dispatchEvent(new CustomEvent("workwrk:reminders-changed"));
   }, []);
 
-  // Open the linked task (or /today for a personal reminder) and mark the
-  // reminder acted-on — opening it is acting on it.
+  // THE TOAST STACK SHARES THIS CORNER. A toast is transient and these
+  // cards are not, so the cards keep the corner and the toasts are lifted
+  // clear of them by exactly their height. The variable is cleared on
+  // unmount and whenever the last card goes, so a workspace with no alarm
+  // ringing has the toast stack exactly where it has always been.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (fired.length === 0) { root.style.removeProperty("--os-reminder-stack"); return; }
+    const h = stackRef.current?.offsetHeight ?? 0;
+    root.style.setProperty("--os-reminder-stack", `${h + 12}px`);
+    return () => { root.style.removeProperty("--os-reminder-stack"); };
+  }, [fired]);
+
+  /** Opening it is acting on it, so it dismisses in the same gesture. */
   const openReminder = useCallback((r: Fired) => {
-    const link = r.entityType === "BOARD_ITEM" && r.entityId ? `/item/${r.entityId}` : WORK_HOME_HREF;
-    void act(r.id, {});
-    router.push(link);
+    void act(r, { action: "dismiss" });
+    if (r.entityType === "BOARD_ITEM" && r.entityId) openTask(router, r.entityId);
+    else router.push(WORK_HOME_HREF);
   }, [act, router]);
 
   if (fired.length === 0 || typeof document === "undefined") return null;
 
-  const dismissAll = () => { for (const r of fired) void act(r.id, {}); };
+  const shown = fired.slice(0, MAX_CARDS);
+  const hidden = fired.length - shown.length;
 
   return createPortal(
-    <div
-      className="workwrk-os fixed bottom-4 end-4 z-[130] w-[340px] max-w-[92vw] flex flex-col gap-2 max-h-[75vh] overflow-y-auto"
-      role="alertdialog"
-      aria-label="Fired reminders"
-    >
-      {fired.length > 1 ? (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            {fired.length} reminders
-          </span>
-          <button
-            type="button"
-            onClick={dismissAll}
-            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100"
-          >
-            Dismiss all
-          </button>
-        </div>
+    <div ref={stackRef} className="workwrk-os os-chrome rmc" role="alertdialog" aria-label="Reminders that went off">
+      {hidden > 0 ? (
+        <button
+          type="button"
+          className="rmc__more"
+          onClick={() => window.dispatchEvent(new CustomEvent("workwrk:open-reminders"))}
+        >
+          and {hidden} more
+        </button>
       ) : null}
 
-      {fired.map((r) => {
-        const isTask = r.entityType === "BOARD_ITEM" && !!r.entityId;
+      {shown.map((r) => {
+        const isTask = r.entityType === "BOARD_ITEM" && Boolean(r.entityId);
         return (
-          <div
-            key={r.id}
-            className="rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl overflow-hidden"
-          >
-            <div className="flex items-start gap-2.5 p-3">
-              <span className="mt-0.5 w-7 h-7 rounded-lg bg-[#0073EA]/10 flex items-center justify-center flex-shrink-0">
-                <AlarmClock className="w-4 h-4 text-[#0073EA]" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-micro font-semibold uppercase tracking-wide text-[#0073EA]">Reminder</div>
-                <div className="text-base font-medium text-zinc-900 dark:text-zinc-100 leading-snug break-words">
-                  {r.title}
-                </div>
-                {r.body ? (
-                  <div className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-2">{r.body}</div>
+          <div key={r.id} className="rmc__card">
+            <div className="rmc__top">
+              <span className="rmc__icon"><AlarmClock aria-hidden /></span>
+              <div className="rmc__text">
+                <p className="rmc__title">{r.title}</p>
+                {r.body ? <p className="rmc__body">{r.body}</p> : null}
+                <p className="rmc__meta">{agoLabel(r.firedAt)}</p>
+                {failedId === r.id ? (
+                  <p className="rmc__bad">
+                    Couldn&rsquo;t update it.{" "}
+                    <button type="button" onClick={() => { void act(r, { action: "dismiss" }); }}>Retry</button>
+                  </p>
                 ) : null}
-                <div className="flex items-center gap-1 text-xs text-zinc-400 mt-1">
-                  {isTask ? <CheckSquare className="w-3 h-3" /> : null}
-                  <span>{agoLabel(r.firedAt)}</span>
-                </div>
               </div>
               <button
                 type="button"
-                onClick={() => void act(r.id, {})}
-                title="Dismiss"
+                className="rmc__x"
+                onClick={() => { void act(r, { action: "dismiss" }); }}
                 aria-label="Dismiss"
-                className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 flex-shrink-0"
+                title="Dismiss"
               >
-                <X className="w-3.5 h-3.5" />
+                <X aria-hidden />
               </button>
             </div>
 
             {snoozeOpenId === r.id ? (
-              <div className="flex items-center gap-1.5 px-3 pb-2.5 flex-wrap">
-                {SNOOZE.map((s) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    onClick={() => void act(r.id, { snoozeMinutes: s.minutes() })}
-                    className="px-2 py-1 rounded-md text-sm border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-                  >
+              <div className="rmc__snooze">
+                {SNOOZE_CHOICES.map((s) => (
+                  <button key={s.label} type="button" onClick={() => { void act(r, { snoozeMinutes: s.minutes() }); }}>
                     {s.label}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => setSnoozeOpenId(null)}
-                  className="px-2 py-1 rounded-md text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"
-                >
-                  Cancel
-                </button>
+                <button type="button" className="rmc__cancel" onClick={() => setSnoozeOpenId(null)}>Cancel</button>
               </div>
             ) : (
-              <div className="flex items-center gap-1 px-2.5 pb-2.5">
+              <div className="rmc__actions">
                 {isTask ? (
-                  <button
-                    type="button"
-                    onClick={() => openReminder(r)}
-                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-base font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]"
-                  >
-                    <ArrowUpRight className="w-3.5 h-3.5" /> Open
+                  <button type="button" className="rmc__open" onClick={() => openReminder(r)}>
+                    <ArrowUpRight aria-hidden /> Open
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => setSnoozeOpenId(r.id)}
-                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
-                >
-                  <Clock className="w-3.5 h-3.5" /> Snooze <ChevronDown className="w-3 h-3" />
+                <button type="button" className="rmc__ghost" onClick={() => setSnoozeOpenId(r.id)}>
+                  <Clock aria-hidden /> Snooze <ChevronDown aria-hidden />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void act(r.id, {})}
-                  className="ms-auto inline-flex items-center h-7 px-2.5 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
-                >
-                  Dismiss
+                <button type="button" className="rmc__ghost rmc__ghost--end" onClick={() => { void act(r, { action: "dismiss" }); }}>
+                  <Check aria-hidden /> Done
                 </button>
               </div>
             )}

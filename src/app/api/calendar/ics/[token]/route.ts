@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { renderICalendar, type ICalEvent } from "@/services/icalExport";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /**
  * Public iCal feed. Auth is the per-user token in the URL — no session
@@ -54,6 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     prisma.item.findMany({
       where: {
         archivedAt: null,
+        ...NOT_SYSTEM_ITEMS,
         OR: [{ ownerId: sub.userId }, { assigneeIds: { has: sub.userId } }],
         AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
       },

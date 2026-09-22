@@ -1,111 +1,185 @@
 "use client";
 
-// ReminderPopover — quick reminder creator opened from the topbar "Reminder"
-// quick-tool (workwrk:tool event, detail "reminder"). Fires in-app + email at
-// the chosen time (see /api/reminders + the ticker/cron).
+// ReminderCreate: the panel that sets an alarm (spec-planner.md section 2,
+// Reminders, "Reminder create panel").
+//
+// Opened by the top bar "+" > Reminder, the Planner sidebar "+" > Reminder
+// and the Calendar's New event split menu, all three through the shell's
+// `workwrk:tool` window event with detail "reminder", which is the contract
+// that already existed and is deliberately unchanged.
+//
+// WHAT PHASE 4 CHANGED:
+//
+//   * FOUR QUICK CHIPS, NOT THREE, and they are the SAME four the fired
+//     card and the calendar's reminder popover offer, imported from one
+//     place so the three surfaces cannot drift apart.
+//   * THE CHOSEN TIME IS SHOWN as a sentence in the viewer's own format,
+//     under the chips, rather than left to be read off a raw
+//     `datetime-local` control. The control is still there, because "pick
+//     an exact time" is a real thing to want.
+//   * "Also email me" REMEMBERS the last choice in
+//     `home.notifications.reminderEmailDefault`, which is the open question
+//     spec-planner section 2 Reminders answers that way.
+//   * TOKENS, NOT HEXES, and the toast on success carries an Undo that
+//     actually dismisses the reminder it just made.
+//
+// The Esc key goes through the shell's LayerStack, not a listener here.
 
-import { useEffect, useState } from "react";
-import { X, AlarmClock } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AlarmClock, X } from "lucide-react";
 import { useOsToast } from "./toast";
-import { useLayer } from "./shell-context";
+import { useLayer, useOsShell } from "./shell-context";
 import { Dots } from "@/components/ui/dots";
+import { Switch } from "@/components/ui/switch";
+import { apiFetch } from "@/lib/api-fetch";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { useEffectiveLocale } from "@/hooks/use-effective-locale";
+import { hhmm, minutesOfHhmm } from "@/lib/calendar-blocks";
+import { zonedDayKey, zonedMinutesOfDay } from "@/lib/calendar-grid";
+import { SNOOZE_CHOICES } from "@/components/planner/event-popover";
 
-function pad(n: number) { return String(n).padStart(2, "0"); }
-function toLocalInput(d: Date) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/**
+ * A Date as the string a `datetime-local` wants, IN THE VIEWER'S ZONE.
+ *
+ * `d.getHours()` would read the machine's zone, so a person whose
+ * preference says New York on a laptop set to Kolkata typed "4:31 PM" and
+ * the panel then told them, correctly and uselessly, that it would go off
+ * at 7:01 AM. The control and the sentence under it now agree because both
+ * are the preference's zone.
+ */
+function toZonedInput(d: Date, zone: string | null): string {
+  return `${zonedDayKey(d, zone)}T${hhmm(zonedMinutesOfDay(d, zone))}`;
 }
-function inHour() { return new Date(Date.now() + 60 * 60 * 1000); }
-function thisEvening() {
-  const d = new Date(); d.setHours(18, 0, 0, 0);
-  if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
-  return d;
-}
-function tomorrowMorning() {
-  const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0);
-  return d;
-}
+
+/** The four quick chips, expressed as the instants they mean. */
+const QUICK = SNOOZE_CHOICES.map((c) => ({
+  label: c.label === "10 minutes" ? "In 10 minutes" : c.label === "1 hour" ? "In 1 hour" : c.label,
+  at: () => new Date(Date.now() + c.minutes() * 60_000),
+}));
 
 export function ReminderPopover() {
   const { toast } = useOsToast();
+  const { prefs, patchPrefs } = useOsShell();
+  const fmt = useFormat();
+  const locale = useEffectiveLocale();
+  const zone = locale.timezone;
+
+  /** The instant a `datetime-local` string means, read in the viewer's zone. */
+  const parseZoned = useCallback((v: string): Date => {
+    const [day, time] = String(v).split("T");
+    if (!day || !time) return new Date(NaN);
+    return locale.instantAt(day, minutesOfHhmm(time));
+  }, [locale]);
+
+  const emailDefault = prefs.home.notifications?.reminderEmailDefault === true;
+
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
-  const [when, setWhen] = useState(() => toLocalInput(inHour()));
-  const [email, setEmail] = useState(false);
+  const [when, setWhen] = useState(() => toZonedInput(new Date(Date.now() + 3_600_000), zone));
+  const [email, setEmail] = useState(emailDefault);
   const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
-    function onTool(e: Event) {
-      if ((e as CustomEvent).detail === "reminder") {
-        setTitle(""); setWhen(toLocalInput(inHour())); setEmail(false); setOpen(true);
-      }
-    }
-    window.addEventListener("workwrk:tool", onTool as EventListener);
-    return () => {
-      window.removeEventListener("workwrk:tool", onTool as EventListener);
+    const onTool = (e: Event) => {
+      if ((e as CustomEvent).detail !== "reminder") return;
+      setTitle("");
+      setWhen(toZonedInput(new Date(Date.now() + 3_600_000), zone));
+      setEmail(emailDefault);
+      setFailure(null);
+      setOpen(true);
     };
-  }, []);
-  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener here.
-  useLayer(open, { id: "reminder-popover", kind: "popover", close: () => setOpen(false) });
+    window.addEventListener("workwrk:tool", onTool as EventListener);
+    return () => window.removeEventListener("workwrk:tool", onTool as EventListener);
+  }, [emailDefault, zone]);
 
-  async function create() {
+  useLayer(open, { id: "reminder-create", kind: "popover", close: () => setOpen(false) });
+
+  const create = useCallback(async () => {
     if (!title.trim() || saving) return;
-    const remindAt = new Date(when);
-    if (isNaN(remindAt.getTime())) { toast("Pick a valid time"); return; }
+    const remindAt = parseZoned(when);
+    if (Number.isNaN(remindAt.getTime())) { setFailure("Pick a time that exists."); return; }
     setSaving(true);
-    try {
-      const res = await fetch("/api/reminders", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), remindAt: remindAt.toISOString(), notifyEmail: email }),
-      });
-      if (!res.ok) { toast("Couldn't set reminder"); return; }
-      toast(`Reminder set for ${remindAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
-      setOpen(false);
-    } catch { toast("Couldn't set reminder"); }
-    finally { setSaving(false); }
-  }
+    setFailure(null);
+    const r = await apiFetch<{ reminder?: { id: string } }>("/api/reminders", {
+      method: "POST",
+      json: { title: title.trim(), remindAt: remindAt.toISOString(), notifyEmail: email },
+      keepalive: true,
+    });
+    setSaving(false);
+    // A failed create KEEPS THE PANEL OPEN with what was typed: the old one
+    // toasted and closed, so the sentence was gone with the failure.
+    if (!r.ok) { setFailure(r.error); return; }
+    setOpen(false);
+    // Remember the email choice, so the switch matches what this person does.
+    if (email !== emailDefault) void patchPrefs({ home: { notifications: { reminderEmailDefault: email } } });
+    window.dispatchEvent(new CustomEvent("workwrk:reminders-changed"));
+    const id = r.data?.reminder?.id;
+    toast(`Reminder set for ${fmt.date(remindAt, "datetime")}`, {
+      ...(id
+        ? { onUndo: () => { void apiFetch(`/api/reminders/${id}`, { method: "DELETE", keepalive: true }).then(() => window.dispatchEvent(new CustomEvent("workwrk:reminders-changed"))); } }
+        : {}),
+    });
+  }, [title, when, email, emailDefault, saving, patchPrefs, toast, fmt, parseZoned]);
 
   if (!open) return null;
-  const chip = "px-2.5 py-1 rounded-md text-sm border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10";
+
+  const parsed = parseZoned(when);
+  const whenSentence = Number.isNaN(parsed.getTime()) ? null : fmt.date(parsed, "datetime");
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] bg-black/30" onClick={() => setOpen(false)}>
-      <div className="w-[400px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 dark:border-[#2A2F38]">
-          <AlarmClock className="w-4 h-4 text-danger-solid" />
-          <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100 flex-1">New reminder</div>
-          <button type="button" onClick={() => setOpen(false)} className="w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400" aria-label="Close"><X className="w-4 h-4" /></button>
-        </div>
-        <div className="p-4 space-y-3">
+    <div className="rmn os-chrome" onPointerDown={() => setOpen(false)}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="New reminder"
+        className="rmn__card"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <header className="rmn__head">
+          <AlarmClock aria-hidden />
+          <h2>New reminder</h2>
+          <button type="button" onClick={() => setOpen(false)} aria-label="Close"><X aria-hidden /></button>
+        </header>
+
+        <div className="rmn__body">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
             autoFocus
-            placeholder="Remind me to…"
-            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
+            placeholder="Remind me to..."
+            aria-label="What to be reminded about"
+            className="rmn__title"
           />
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" className={chip} onClick={() => setWhen(toLocalInput(inHour()))}>In 1 hour</button>
-            <button type="button" className={chip} onClick={() => setWhen(toLocalInput(thisEvening()))}>This evening</button>
-            <button type="button" className={chip} onClick={() => setWhen(toLocalInput(tomorrowMorning()))}>Tomorrow 9am</button>
+
+          <div className="rmn__chips">
+            {QUICK.map((q) => (
+              <button key={q.label} type="button" onClick={() => setWhen(toZonedInput(q.at(), zone))}>{q.label}</button>
+            ))}
           </div>
-          <input
-            type="datetime-local"
-            value={when}
-            onChange={(e) => setWhen(e.target.value)}
-            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-base text-zinc-900 dark:text-zinc-100 outline-none focus:border-zinc-400 [color-scheme:light] dark:[color-scheme:dark]"
-          />
-          <label className="flex items-center gap-2 text-base text-zinc-700 dark:text-zinc-200 cursor-pointer select-none">
-            <input type="checkbox" checked={email} onChange={(e) => setEmail(e.target.checked)} className="accent-brand" />
-            Also email me
+
+          <label className="rmn__row">
+            <span>When</span>
+            <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
           </label>
+          {whenSentence ? <p className="rmn__note">Goes off {whenSentence}.</p> : null}
+
+          <div className="rmn__row rmn__row--switch">
+            <span id="rmn-email">Also email me</span>
+            <Switch checked={email} onChange={setEmail} aria-labelledby="rmn-email" />
+          </div>
+
+          {failure ? <p className="rmn__bad">Couldn&rsquo;t set it. {failure}</p> : null}
         </div>
-        <div className="flex justify-end gap-2 px-4 h-14 items-center border-t border-zinc-100 dark:border-[#2A2F38]">
-          <button type="button" onClick={() => setOpen(false)} className="px-3 h-8 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
-          <button type="button" onClick={() => void create()} disabled={!title.trim() || saving} className="px-3.5 h-8 rounded-md text-base font-medium text-white bg-brand hover:bg-brand-hover disabled:opacity-40 inline-flex items-center gap-1.5">
-            {saving ? <Dots variant="pending" /> : null} Set reminder
+
+        <footer className="rmn__foot">
+          <button type="button" className="rmn__ghost" onClick={() => setOpen(false)}>Cancel</button>
+          <button type="button" className="rmn__primary" onClick={() => { void create(); }} disabled={!title.trim() || saving}>
+            {saving ? <Dots variant="pending" /> : null}
+            {failure ? "Retry" : "Create"}
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

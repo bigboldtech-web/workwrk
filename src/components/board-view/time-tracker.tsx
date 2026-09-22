@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Square, Plus, Clock, X } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
+import { HoursInput } from "@/components/ui/hours-input";
+import Link from "next/link";
 
 interface Session {
   id: string;
@@ -66,6 +68,8 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
   const [state, setState] = useState<ApiState | null>(null);
   const [busy, setBusy] = useState(false);
   const [addingManual, setAddingManual] = useState(false);
+  /** "tracked, but your week could not take it" — kept on screen, not toasted. */
+  const [bridgeNote, setBridgeNote] = useState<string | null>(null);
   const [now, setNow] = useState<number>(() => Date.now());
 
   // Tick once per second when there's a running timer, so the elapsed
@@ -108,11 +112,16 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
   const stop = async () => {
     setBusy(true);
     try {
-      await fetch("/api/timers/stop", {
+      const res = await fetch("/api/timers/stop", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ entityType, entityId }),
+        keepalive: true,
       });
+      // Same rule as the manual form: a stop whose hours could not reach
+      // the week says so rather than dropping them in silence.
+      const body = res.ok ? await res.json().catch(() => null) : null;
+      setBridgeNote((body?.timesheet?.message as string | undefined) ?? null);
       load();
     } finally {
       setBusy(false);
@@ -184,6 +193,13 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
         </div>
       ) : null}
 
+      {bridgeNote ? (
+        <p className="mb-2 text-sm text-danger-solid">
+          {bridgeNote}{" "}
+          <Link href="/timesheets" className="underline">Open Timesheets</Link>
+        </p>
+      ) : null}
+
       {addingManual ? (
         <ManualEntryForm
           entityType={entityType}
@@ -231,6 +247,21 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
   );
 }
 
+/**
+ * The manual "I worked 45 minutes on this" form.
+ *
+ * TWO THINGS CHANGED IN PHASE 4 (spec-planner.md section 4 step 3):
+ *
+ *  1. IT USES HoursInput. Two number spinners (h and m) were the third
+ *     duration field in this product, each parsing what it was given its
+ *     own way. There is one now, and it takes "1:30", "1.5" and "90m" the
+ *     way every other duration field in the Planner unit does.
+ *  2. IT SAYS WHEN THE HOURS DID NOT REACH THE WEEK. POST /api/timers now
+ *     bridges into the timesheet, and a week that is submitted, sent back
+ *     or approved cannot take the entry. That used to be a silent drop
+ *     (time.md #21): the task showed the time and the week did not have it.
+ *     The message the API hands back stays on screen until the form closes.
+ */
 function ManualEntryForm({
   entityType,
   entityId,
@@ -242,29 +273,41 @@ function ManualEntryForm({
   onCancel: () => void;
   onSaved: () => void;
 }) {
-  const [hours, setHours] = useState("0");
-  const [minutes, setMinutes] = useState("30");
+  const [minutes, setMinutes] = useState<number | null>(30);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const submit = async () => {
-    const h = Math.max(0, parseInt(hours, 10) || 0);
-    const m = Math.max(0, parseInt(minutes, 10) || 0);
-    const durationMs = (h * 3600 + m * 60) * 1000;
-    if (durationMs < 1000) {
-      onCancel();
-      return;
-    }
+    if (minutes === null || minutes <= 0) return;
+    const durationMs = minutes * 60_000;
     setBusy(true);
+    setFailed(null);
     try {
-      await fetch("/api/timers", {
+      const res = await fetch("/api/timers", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ entityType, entityId, durationMs, notes: notes.trim() || undefined }),
+        keepalive: true,
       });
+      if (!res.ok) {
+        // The form stays open with the amount and the note still in it.
+        setFailed("That did not save. Try again.");
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      const message = body?.timesheet?.message as string | undefined;
+      if (message) {
+        // Written to the task, NOT written to the week. Say so, and leave
+        // the form open so the sentence is read.
+        setNote(message);
+        onSaved();
+        return;
+      }
       onSaved();
     } catch {
-      onCancel();
+      setFailed("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -273,26 +316,12 @@ function ManualEntryForm({
   return (
     <div className="mb-2 rounded-md border border-zinc-200 bg-zinc-50 p-2.5 space-y-2">
       <div className="flex items-center gap-1.5">
-        <input
-          type="number"
-          min={0}
-          max={24}
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
-          aria-label="Hours"
+        <HoursInput
+          initialMinutes={30}
+          onChange={setMinutes}
+          onSubmit={() => { void submit(); }}
+          label="How long"
         />
-        <span className="text-xs text-zinc-500">h</span>
-        <input
-          type="number"
-          min={0}
-          max={59}
-          value={minutes}
-          onChange={(e) => setMinutes(e.target.value)}
-          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
-          aria-label="Minutes"
-        />
-        <span className="text-xs text-zinc-500">m</span>
         <input
           type="text"
           value={notes}
@@ -301,6 +330,13 @@ function ManualEntryForm({
           className="flex-1 h-7 px-2 rounded border border-zinc-200 bg-white text-sm focus:outline-none focus:border-zinc-400"
         />
       </div>
+      {note ? (
+        <p className="text-sm text-danger-solid">
+          {note}{" "}
+          <Link href="/timesheets" className="underline">Open Timesheets</Link>
+        </p>
+      ) : null}
+      {failed ? <p className="text-sm text-danger-solid">{failed}</p> : null}
       <div className="flex items-center gap-1 justify-end">
         <button
           type="button"

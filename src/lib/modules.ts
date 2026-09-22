@@ -27,7 +27,7 @@ export const MODULES: ModuleDef[] = [
     productSlug: "workwrk-talk",
     label: "Talk",
     competesWith: "Slack + Zoom",
-    blurb: "Channels, DMs, threads, reactions, huddles and calls on your own server.",
+    blurb: "Channels, DMs, threads, reactions and calls on your own server.",
   },
   {
     appKey: "tables",

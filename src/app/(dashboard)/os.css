@@ -2941,7 +2941,13 @@ table.os-tbl {
    layers: Esc never touches them. */
 .os-toasts {
   position: fixed;
-  inset-block-end: 24px;
+  /* Lifted clear of any fired-reminder cards, which share this corner and
+     are PERSISTENT where a toast is transient (spec-planner section 2
+     Reminders: the cards sit "bottom-left in the toast stack position").
+     ReminderTicker sets --os-reminder-stack to its own height while it has
+     cards and clears it when it does not, so with no alarm ringing this is
+     exactly the 24px it always was. */
+  inset-block-end: calc(24px + var(--os-reminder-stack, 0px));
   inset-inline-start: 24px;
   z-index: 70;
   display: flex;
@@ -3925,222 +3931,11 @@ table.os-tbl {
   color: var(--os-c-green);
 }
 
-/* ════════════════════════════════════════════════════════════════
- * CALENDAR (month grid)
- * Shared by Tasks / Meetings / CRM / ITSM / Helpdesk
- * ════════════════════════════════════════════════════════════════ */
-.os-cal {
-  padding: 16px 24px 60px;
-  display: flex;
-  flex-direction: column;
-}
-.os-cal__head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.os-cal__nav {
-  display: flex;
-  gap: 2px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-r-sm);
-  background: var(--os-canvas);
-  overflow: hidden;
-}
-.os-cal__nav-btn {
-  width: 30px; height: 30px;
-  display: grid; place-items: center;
-  color: var(--os-ink-2);
-  border-right: 1px solid var(--os-line);
-}
-.os-cal__nav-btn:last-child { border-right: none; }
-.os-cal__nav-btn:hover { background: var(--os-surface-1); color: var(--os-ink); }
-.os-cal__nav-btn svg { width: 13px; height: 13px; }
-.os-cal__today {
-  height: 30px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--os-ink);
-  border: 1px solid var(--os-line);
-  background: var(--os-canvas);
-  border-radius: var(--os-r-sm);
-}
-.os-cal__today:hover { background: var(--os-surface-1); }
-.os-cal__title {
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--os-ink);
-  margin-left: 8px;
-}
-.os-cal__title-month { font-weight: 800; }
-.os-cal__title-year { color: var(--os-ink-3); font-weight: 600; margin-left: 4px; }
-.os-cal__count {
-  margin-left: auto;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--os-ink-3);
-}
-.os-cal__count strong { color: var(--os-ink); font-weight: 700; }
-
-.os-cal__grid {
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-r-md);
-  background: var(--os-canvas);
-  overflow: hidden;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.os-cal__weekdays {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  background: var(--os-surface-1);
-  border-bottom: 1px solid var(--os-line);
-}
-.os-cal__weekday {
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--os-ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border-right: 1px solid var(--os-line);
-}
-.os-cal__weekday:last-child { border-right: none; }
-
-.os-cal__weeks {
-  display: grid;
-  grid-template-rows: repeat(6, minmax(120px, 1fr));
-  flex: 1;
-}
-.os-cal__week {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  border-bottom: 1px solid var(--os-line);
-}
-.os-cal__week:last-child { border-bottom: none; }
-.os-cal__day {
-  border-right: 1px solid var(--os-line);
-  padding: 7px 7px 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  overflow: hidden;
-  background: var(--os-canvas);
-  position: relative;
-  transition: background 120ms;
-}
-.os-cal__day:last-child { border-right: none; }
-.os-cal__day:hover { background: color-mix(in srgb, var(--os-brand) 3%, var(--os-canvas)); }
-.os-cal__day.is-other-month {
-  background: var(--os-surface-1);
-}
-.os-cal__day.is-other-month .os-cal__day-num { color: var(--os-ink-4); }
-.os-cal__day.is-other-month:hover { background: var(--os-surface-1); }
-.os-cal__day.is-today {
-  background: color-mix(in srgb, var(--os-brand) 6%, var(--os-canvas));
-}
-.os-cal__day.is-today:hover {
-  background: color-mix(in srgb, var(--os-brand) 9%, var(--os-canvas));
-}
-.os-cal__day-num {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--os-ink);
-  align-self: flex-end;
-  padding: 2px 6px;
-  border-radius: 999px;
-  min-width: 22px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.os-cal__day.is-today .os-cal__day-num {
-  background: var(--os-brand);
-  color: white;
-  font-weight: 700;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--os-brand) 30%, transparent);
-}
-
-.os-cal__event {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
-  border-radius: 5px;
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: all 140ms;
-  text-align: left;
-  width: 100%;
-  border: none;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-}
-.os-cal__event:hover { filter: brightness(1.08); box-shadow: 0 3px 8px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.18); }
-.os-cal__event:focus-visible { outline: 2px solid var(--os-brand); outline-offset: 1px; }
-.os-cal__event--done { opacity: 0.55; text-decoration: line-through; }
-.os-cal__event--ghost {
-  background: var(--os-surface-2);
-  color: var(--os-ink-2);
-  box-shadow: none;
-}
-.os-cal__more {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--os-ink-3);
-  text-align: center;
-  padding: 3px 6px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px dashed var(--os-line);
-  border-radius: 4px;
-  transition: all 120ms;
-}
-.os-cal__more:hover { color: var(--os-brand); border-color: var(--os-brand); border-style: solid; }
-
-/* Per-day overflow popover (click "+N more") */
-.os-cal-pop-bd {
-  position: fixed;
-  inset: 0;
-  background: transparent;
-  z-index: 95;
-}
-.os-cal-pop {
-  position: fixed;
-  z-index: 100;
-  background: var(--os-canvas);
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-r-md);
-  box-shadow: var(--os-shadow-pop);
-  min-width: 240px;
-  max-width: 320px;
-  padding: 12px;
-  animation: osCalPopIn 140ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-@keyframes osCalPopIn {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.os-cal-pop__title {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--os-ink);
-  margin-bottom: 8px;
-}
-.os-cal-pop__list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* The .os-cal block that stood here (216 lines, the OsCalendar month grid,
+   its day cells, chips and the day popover) is removed with its component
+   in Phase 4. src/components/layout/os/calendar.tsx had ZERO importers
+   anywhere in src, so nothing rendered a single one of these selectors.
+   The one calendar is /planner (spec-planner.md section 2). */
 
 /* ════════════════════════════════════════════════════════════════
  * MY TASKS — personal focus queue (no table, no kanban)
@@ -13949,19 +13744,22 @@ table.os-tbl {
 .mtg-hero__signals { display: flex; gap: 12px; }
 .mtg-hero__sig { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--os-ink-3); font-weight: 600; }
 .mtg-hero__sig svg { width: 12px; height: 12px; }
+/* Secondary, in the token set. It was a green gradient with a coloured
+   drop shadow, which is neither a product colour nor a product elevation,
+   and it competed with the page's one blue New meeting button. */
 .mtg-hero__join {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 16px;
-  background: linear-gradient(135deg, var(--os-c-green), color-mix(in srgb, var(--os-c-green) 70%, #fff));
-  color: white;
-  border-radius: 8px;
-  font-size: 14px; font-weight: 700;
+  background: var(--os-surface);
+  color: var(--os-ink);
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-md);
+  font-size: 14px; font-weight: 500;
   margin-left: auto;
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--os-c-green) 25%, transparent);
-  transition: all 140ms;
+  transition: background 140ms;
   text-decoration: none;
 }
-.mtg-hero__join:hover { box-shadow: 0 8px 18px color-mix(in srgb, var(--os-c-green) 35%, transparent); }
+.mtg-hero__join:hover { background: var(--os-surface-hov); }
 .mtg-hero__join svg { width: 14px; height: 14px; }
 .mtg-hero__open { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 14px; font-weight: 600; color: var(--mtg-color); transition: gap 140ms; }
 .mtg-hero:hover .mtg-hero__open { gap: 8px; }
@@ -14035,11 +13833,6 @@ table.os-tbl {
   background: var(--os-canvas);
   position: relative;
 }
-.mtgr__head::before {
-  content: ""; position: absolute; left: 0; right: 0; top: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--mtgr-color), color-mix(in srgb, var(--mtgr-color) 50%, transparent));
-}
 .mtgr__back {
   width: 36px; height: 36px;
   display: grid; place-items: center;
@@ -14051,10 +13844,12 @@ table.os-tbl {
   flex-shrink: 0;
   transition: all 120ms;
 }
-.mtgr__back:hover { background: var(--os-canvas); color: var(--os-ink); border-color: var(--mtgr-color); }
+.mtgr__back:hover { background: var(--os-canvas); color: var(--os-ink); border-color: var(--os-brand); }
 .mtgr__back svg { width: 16px; height: 16px; }
 .mtgr__head-main { flex: 1; min-width: 0; }
-.mtgr__head-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--os-ink-3); margin-bottom: 6px; }
+.mtgr__head-title { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 36px; }
+.mtgr__head-title .mtgr__title { width: auto; flex: 0 1 auto; min-width: 0; }
+.mtgr__head-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--os-ink-3); margin-top: 2px; }
 .mtgr__type-chip { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 9px; border-radius: 4px; }
 .mtgr__live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--os-c-green); text-transform: uppercase; letter-spacing: 0.05em; }
 .mtgr__live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--os-c-green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--os-c-green) 22%, transparent); animation: heroPulse 1.4s ease-in-out infinite; }
@@ -14063,8 +13858,8 @@ table.os-tbl {
 .mtgr__head-when svg { width: 12px; height: 12px; }
 .mtgr__title {
   width: 100%;
-  font-size: 24px; font-weight: 700; color: var(--os-ink);
-  letter-spacing: -0.02em;
+  font-size: 22px; font-weight: 600; color: var(--os-ink);
+  letter-spacing: -0.01em;
   border: none; background: transparent; outline: none;
   padding: 4px 6px; margin: 0 -6px;
   border-radius: 6px;
@@ -14089,6 +13884,17 @@ table.os-tbl {
 .mtgr__followup li { display: flex; align-items: center; gap: 8px; }
 .mtgr__followup em { color: var(--os-ink-3); font-style: normal; }
 .mtgr__followup-more { color: var(--os-ink-3); font-style: italic; }
+.mtgr__followup-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtgr__followup-link { margin-inline-start: 6px; font-weight: 500; color: var(--os-brand); text-decoration: none; }
+.mtgr__followup-link:hover { text-decoration: underline; }
+.mtgr__followup-carry {
+  margin-inline-start: auto; flex-shrink: 0;
+  height: 26px; padding: 0 9px; border-radius: 6px;
+  border: 1px solid var(--os-line-strong); background: var(--os-surface);
+  font-size: 12.5px; font-weight: 500; color: var(--os-ink-2); cursor: pointer;
+}
+.mtgr__followup-carry:hover:not(:disabled) { background: var(--os-surface-hov); color: var(--os-ink); }
+.mtgr__followup-carry:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Body 2-col layout ── */
 .mtgr__body {
@@ -14101,6 +13907,88 @@ table.os-tbl {
   .mtgr__body { grid-template-columns: 1fr; }
 }
 
+/* The details strip: When, Length, Type, People and the Room, all of which
+   were display only before Phase 4. Label and value rows on the token set,
+   sized to match the task drawer's field strip so the two read as one
+   pattern. */
+.mtgr-strip {
+  border: 1px solid var(--os-line);
+  border-radius: 8px;
+  background: var(--os-surface);
+  padding: 4px 12px;
+  margin-bottom: 16px;
+}
+.mtgr-strip__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--os-line-soft);
+}
+.mtgr-strip__row:last-child { border-bottom: 0; }
+.mtgr-strip__label {
+  flex: 0 0 120px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--os-ink-2);
+}
+.mtgr-strip__minutes {
+  height: 32px; width: 68px;
+  border-radius: 6px; border: 1px solid var(--os-line-strong);
+  background: var(--os-surface); padding: 0 8px;
+  font-size: 14px; font-variant-numeric: tabular-nums; color: var(--os-ink);
+}
+.mtgr-strip__hint { font-size: 13px; color: var(--os-ink-3); }
+.mtgr-strip__value {
+  min-width: 0;
+  font-size: 14px;
+  color: var(--os-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.mtgr-strip__room code {
+  font-size: 12.5px;
+  color: var(--os-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+.mtgr-strip__control { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.mtgr-strip__faces { display: inline-flex; align-items: center; gap: 2px; }
+.mtgr-strip__input {
+  height: 32px;
+  border: 1px solid var(--os-line-strong);
+  border-radius: 6px;
+  background: var(--os-surface);
+  color: var(--os-ink);
+  font-size: 14px;
+  padding: 0 8px;
+}
+.mtgr-strip__input:focus { outline: none; box-shadow: 0 0 0 3px var(--os-focus-halo); }
+.mtgr-strip__btn {
+  height: 28px;
+  border: 1px solid var(--os-line-strong);
+  border-radius: 6px;
+  background: var(--os-surface);
+  color: var(--os-ink);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.mtgr-strip__btn:hover { background: var(--os-surface-hov); }
+.mtgr-strip__saving {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+  font-size: 12.5px;
+  color: var(--os-ink-3);
+}
+
 /* ── Notes (left column) ── */
 .mtgr__notes {
   background: var(--os-canvas);
@@ -14111,10 +13999,37 @@ table.os-tbl {
   flex-direction: column;
   min-height: 600px;
 }
-.mtgr__notes-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.mtgr__notes-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--os-ink); display: inline-flex; align-items: center; gap: 7px; }
-.mtgr__notes-head h2 svg { width: 14px; height: 14px; color: var(--mtgr-color); }
+.mtgr__notes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.mtgr__notes-head h2 { flex: 1; min-width: 0; }
+.mtgr__notes-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--os-ink); display: inline-flex; align-items: center; gap: 7px; }
+.mtgr__notes-head h2 svg { width: 14px; height: 14px; color: var(--os-brand); }
 .mtgr__notes-status { font-size: 12.5px; color: var(--os-ink-3); display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.mtgr__tools-toggle {
+  width: 28px; height: 28px; margin-inline-start: 8px;
+  display: grid; place-items: center;
+  border-radius: 6px; border: 0; background: transparent;
+  color: var(--os-ink-2); cursor: pointer;
+}
+.mtgr__tools-toggle:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.mtgr__tools-toggle[aria-expanded="true"] { background: var(--os-surface-act); color: var(--os-ink); }
+.mtgr__tools-toggle svg { width: 16px; height: 16px; }
+
+.mtgr__savefail {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 8px 12px;
+  border: 1px solid var(--os-danger-solid);
+  background: var(--os-danger-soft);
+  border-radius: 8px;
+  font-size: 14px; color: var(--os-ink);
+}
+.mtgr__savefail > svg { width: 16px; height: 16px; color: var(--os-danger-solid); flex-shrink: 0; }
+.mtgr__savefail > span { flex: 1; min-width: 0; }
+.mtgr__savefail > button {
+  height: 28px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid var(--os-line-strong); background: var(--os-surface);
+  font-size: 13px; font-weight: 500; color: var(--os-ink); cursor: pointer;
+}
+.mtgr__savefail > button:hover { background: var(--os-surface-hov); }
 
 .mtgr__tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .mtgr-tool { display: inline-flex; align-items: center; gap: 8px; }
@@ -14129,7 +14044,7 @@ table.os-tbl {
   cursor: pointer;
   transition: all 120ms;
 }
-.mtgr-tool__btn:hover:not(:disabled) { background: var(--os-canvas); color: var(--os-ink); border-color: var(--mtgr-color); }
+.mtgr-tool__btn:hover:not(:disabled) { background: var(--os-canvas); color: var(--os-ink); border-color: var(--os-brand); }
 .mtgr-tool__btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mtgr-tool__btn svg { width: 13px; height: 13px; }
 .mtgr-tool__btn.is-recording { background: var(--os-c-red); color: white; border-color: var(--os-c-red); }
@@ -14154,7 +14069,7 @@ table.os-tbl {
   font-family: inherit;
   transition: border-color 140ms, box-shadow 140ms;
 }
-.mtgr__textarea:focus { border-color: var(--mtgr-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mtgr-color) 14%, transparent); }
+.mtgr__textarea:focus { border-color: var(--os-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-brand) 14%, transparent); }
 
 /* ── Sidebar cards ── */
 .mtgr__side { display: flex; flex-direction: column; gap: 14px; }
@@ -14165,8 +14080,8 @@ table.os-tbl {
   padding: 14px 16px;
 }
 .mtgr-card header { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
-.mtgr-card h3 { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--os-ink); text-transform: uppercase; letter-spacing: 0.06em; display: inline-flex; align-items: center; gap: 6px; flex: 1; }
-.mtgr-card h3 svg { width: 13px; height: 13px; color: var(--os-ink-3); }
+.mtgr-card h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--os-ink); text-transform: none; letter-spacing: 0; display: inline-flex; align-items: center; gap: 6px; flex: 1; }
+.mtgr-card h3 svg { width: 16px; height: 16px; color: var(--os-ink-3); }
 .mtgr-card__count { font-size: 11.5px; font-weight: 600; color: var(--os-ink-2); background: var(--os-surface-1); padding: 2px 8px; border-radius: 10px; font-variant-numeric: tabular-nums; }
 .mtgr-card__add {
   width: 22px; height: 22px;
@@ -14178,7 +14093,7 @@ table.os-tbl {
   cursor: pointer;
   transition: all 120ms;
 }
-.mtgr-card__add:hover { background: var(--mtgr-color); color: white; }
+.mtgr-card__add:hover { background: var(--os-brand); color: white; }
 .mtgr-card__add svg { width: 13px; height: 13px; }
 .mtgr-card__empty { font-size: 13px; color: var(--os-ink-3); padding: 8px 4px; text-align: center; font-style: italic; }
 
@@ -14197,7 +14112,7 @@ table.os-tbl {
   font-family: inherit;
   transition: border-color 140ms;
 }
-.mtgr-card__agenda:focus { border-color: var(--mtgr-color); }
+.mtgr-card__agenda:focus { border-color: var(--os-brand); }
 
 /* Attendees */
 .mtgr-att-list { display: flex; flex-direction: column; gap: 4px; }
@@ -14209,8 +14124,8 @@ table.os-tbl {
 
 /* Decisions */
 .mtgr-dec-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.mtgr-dec-row { padding: 10px 12px; border-radius: 8px; background: var(--os-surface-1); border-left: 3px solid var(--mtgr-color); position: relative; transition: background 120ms; }
-.mtgr-dec-row:hover { background: color-mix(in srgb, var(--mtgr-color) 6%, var(--os-surface-1)); }
+.mtgr-dec-row { padding: 10px 12px; border-radius: 8px; background: var(--os-surface-1); border-left: 3px solid var(--os-brand); position: relative; transition: background 120ms; }
+.mtgr-dec-row:hover { background: color-mix(in srgb, var(--os-brand) 6%, var(--os-surface-1)); }
 .mtgr-dec-row p { margin: 0; font-size: 13.5px; color: var(--os-ink); line-height: 1.5; padding-right: 24px; }
 .mtgr-dec-row span { display: block; font-size: 11.5px; color: var(--os-ink-3); margin-top: 4px; }
 .mtgr-dec-row button { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; display: grid; place-items: center; background: transparent; border: none; color: var(--os-ink-3); cursor: pointer; border-radius: 4px; opacity: 0; transition: opacity 120ms; }
@@ -14225,7 +14140,7 @@ table.os-tbl {
 .mtgr-action-row.is-done { opacity: 0.6; }
 .mtgr-action-row.is-done .mtgr-action-row__body p { text-decoration: line-through; }
 .mtgr-action-row > button { width: 18px; height: 18px; display: grid; place-items: center; background: transparent; border: none; cursor: pointer; color: var(--os-ink-3); flex-shrink: 0; padding: 0; margin-top: 1px; }
-.mtgr-action-row > button:hover { color: var(--mtgr-color); }
+.mtgr-action-row > button:hover { color: var(--os-brand); }
 .mtgr-action-row > button svg { width: 16px; height: 16px; }
 .mtgr-action-row.is-done > button { color: var(--os-c-green); }
 .mtgr-action-row__body { flex: 1; min-width: 0; }
@@ -26794,27 +26709,28 @@ table.os-tbl {
 .clk__nav-link svg { width: 12px; height: 12px; }
 .clk__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
 
+/* Phase 4: flat and bordered, not a gradient hero. Design-system 3.5 says
+   cards are bordered, and the two-colour wash plus the 88px digits were the
+   loudest thing in the product for a page whose job is one button. The full
+   PunchCard rebuild is spec-planner section 4 step 4. */
 .clk__hero {
-  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--os-brand) 4%, var(--os-surface)));
-  border: 1px solid color-mix(in srgb, var(--os-brand) 22%, var(--os-line));
-  border-radius: 14px;
-  padding: 38px 32px 28px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 8px;
+  padding: 32px 32px 28px;
   text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
   position: relative;
   overflow: hidden;
 }
 .clk__hero.is-running {
-  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--os-c-green) 6%, var(--os-surface)));
-  border-color: color-mix(in srgb, var(--os-c-green) 28%, var(--os-line));
+  background: var(--os-surface);
+  border-color: color-mix(in srgb, var(--os-success-solid) 40%, var(--os-line));
 }
-.clk__hero.is-running::before {
-  content: "";
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, var(--os-c-green), var(--os-c-teal));
-  animation: heroPulse 2.4s ease-in-out infinite;
-}
+/* The pulsing two-colour bar across the top of the running hero is gone
+   with the gradient. The Dots live glyph beside "Clocked in" is the one
+   signal that a clock is running, and it is the same glyph the sidebar row
+   and the top bar use for the same fact. */
 
 .clk__hero-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
 .clk__hero-state {
@@ -26826,38 +26742,37 @@ table.os-tbl {
   border: 1px solid var(--os-line);
 }
 .clk__hero-state svg { width: 12px; height: 12px; }
-.clk__hero-state.is-on { background: var(--os-c-green); color: white; border-color: transparent; box-shadow: inset 0 1px 0 rgba(255,255,255,0.18); }
+.clk__hero-state.is-on { background: var(--os-success-bg); color: var(--os-success-text); border-color: color-mix(in srgb, var(--os-success-solid) 30%, transparent); }
 .clk__hero-date { font-size: 13px; color: var(--os-ink-3); font-weight: 600; }
 
 .clk__hero-time {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 88px;
+  font-size: 44px;
   font-weight: 700;
   color: var(--os-ink);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.clk__hero.is-running .clk__hero-time { color: var(--os-c-green); }
+.clk__hero.is-running .clk__hero-time { color: var(--os-success-text); }
 .clk__hero-sub { font-size: 14px; color: var(--os-ink-3); font-weight: 600; }
 
+/* One flat blue button, in and out. Clocking out is not destructive: it is
+   the same routine action as clocking in, and the red gradient read as a
+   warning for something that happens twice a day. spec-planner section 2
+   /clock puts it plainly: "the one blue button Clock in ... or Clock out
+   (same button)". */
 .clk__hero-btn {
   display: inline-flex; align-items: center; gap: 8px;
-  height: 56px; padding: 0 32px; border-radius: 12px;
-  background: linear-gradient(135deg, var(--os-brand), var(--os-c-blue));
-  color: white; border: none;
-  font-family: var(--os-font); font-size: 15px; font-weight: 700; cursor: pointer;
+  height: 44px; padding: 0 24px; border-radius: 6px;
+  background: var(--os-brand);
+  color: #fff; border: 1px solid var(--os-brand);
+  font-family: var(--os-font); font-size: 15px; font-weight: 500; cursor: pointer;
   margin-top: 8px;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--os-brand) 24%, transparent), inset 0 1px 0 rgba(255,255,255,0.18);
-  transition: all 160ms;
 }
 .clk__hero-btn svg { width: 16px; height: 16px; }
-.clk__hero-btn:hover:not(:disabled) { }
+.clk__hero-btn:hover:not(:disabled) { background: var(--os-brand-deep); border-color: var(--os-brand-deep); }
 .clk__hero-btn:disabled { opacity: 0.6; cursor: wait; }
-.clk__hero-btn.is-out {
-  background: linear-gradient(135deg, var(--os-c-red), #C62D42);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--os-c-red) 24%, transparent), inset 0 1px 0 rgba(255,255,255,0.18);
-}
 
 .clk__hero-since {
   display: inline-flex; align-items: center; gap: 5px;
@@ -26882,8 +26797,8 @@ table.os-tbl {
 .clk__today { display: flex; flex-direction: column; gap: 4px; padding: 12px 6px; }
 .clk__today-big {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 48px; font-weight: 700;
-  color: var(--os-c-green);
+  font-size: 32px; font-weight: 700;
+  color: var(--os-ink);
   font-variant-numeric: tabular-nums;
   line-height: 1; letter-spacing: -0.02em;
 }
@@ -26904,7 +26819,10 @@ table.os-tbl {
 .clk__session { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--os-surface-1); border-radius: 7px; }
 .clk__session-time { font-size: 13px; font-weight: 600; color: var(--os-ink); font-variant-numeric: tabular-nums; }
 .clk__session-date { font-size: 11.5px; color: var(--os-ink-3); margin-top: 1px; }
-.clk__session-dur { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 14px; font-weight: 700; color: var(--os-c-green); font-variant-numeric: tabular-nums; }
+/* The overnight marker on a session row. Lighter than the times it follows,
+   because it qualifies them rather than competing with them. */
+.clk__session-nextday { font-weight: 500; color: var(--os-ink-3); }
+.clk__session-dur { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 14px; font-weight: 600; color: var(--os-ink); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 900px) { .clk__hero-time { font-size: 60px; } .clk__grid { grid-template-columns: 1fr; } }
 
@@ -30357,3 +30275,712 @@ html[data-density="compact"] .os-tc__row:focus-within .os-tc__check { opacity: 1
 .os-prose .bdoc-bn .bn-block-content[data-content-type="heading"][data-level="2"] { font-size: 16px; line-height: 22px; font-weight: 600; letter-spacing: 0; }
 .os-prose .bdoc-bn .bn-block-content[data-content-type="heading"][data-level="3"] { font-size: 15px; line-height: 22px; font-weight: 500; letter-spacing: 0; }
 .os-prose .bdoc-bn .bn-editor { font-size: var(--os-t-prose); line-height: var(--os-t-prose-lh); }
+
+/* ───────────────────────── Calendar and connections (/account/connections)
+   Phase 4, Time and Talk. Tokens only: no hex, no zinc, no gradient. */
+.cxn { padding: 16px 28px 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+.cxn__loading { display: flex; align-items: center; gap: 10px; padding: 32px 0; color: var(--os-ink-2); font-size: 13px; }
+.cxn__error {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border: 1px solid var(--os-line); border-radius: 8px;
+  background: var(--os-surface); color: var(--os-ink); font-size: 13px;
+}
+.cxn__error svg { width: 16px; height: 16px; color: var(--os-danger-text); flex: none; }
+.cxn__result { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; }
+.cxn__result svg { width: 16px; height: 16px; flex: none; }
+.cxn__result--ok { color: var(--os-ink-2); }
+.cxn__result--ok svg { color: var(--os-success-text); }
+.cxn__result--bad { color: var(--os-danger-text); }
+.cxn__card {
+  border: 1px solid var(--os-line); border-radius: 8px; background: var(--os-surface);
+  padding: 20px; display: flex; flex-direction: column; gap: 12px;
+}
+.cxn__card-head { display: flex; gap: 12px; align-items: flex-start; }
+.cxn__card-head h2 { font-size: 16px; font-weight: 600; color: var(--os-ink); margin: 0; }
+.cxn__card-head p { font-size: 13px; color: var(--os-ink-2); margin: 2px 0 0; }
+.cxn__card-icon {
+  width: 32px; height: 32px; border-radius: 8px; flex: none;
+  display: grid; place-items: center;
+  background: var(--os-surface-1); border: 1px solid var(--os-line);
+}
+.cxn__card-icon svg { width: 16px; height: 16px; color: var(--os-ink-2); }
+.cxn__note { font-size: 13px; color: var(--os-ink-2); margin: 0; }
+.cxn__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cxn__btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px;
+  border-radius: 6px; border: 1px solid var(--os-line-strong); background: var(--os-surface);
+  color: var(--os-ink); font-size: 14px; font-weight: 500; cursor: pointer; text-decoration: none;
+}
+.cxn__btn:hover { background: var(--os-surface-hov); }
+.cxn__btn[disabled] { cursor: default; opacity: 0.6; }
+.cxn__btn svg { width: 16px; height: 16px; }
+.cxn__btn--primary { background: var(--os-brand); border-color: var(--os-brand); color: #fff; }
+.cxn__btn--primary:hover { background: var(--os-brand-deep); }
+.cxn__btn--danger { color: var(--os-danger-text); }
+.cxn__icon-btn {
+  width: 28px; height: 28px; flex: none; display: grid; place-items: center;
+  border-radius: 6px; border: 1px solid transparent; background: transparent;
+  color: var(--os-ink-2); cursor: pointer;
+}
+.cxn__icon-btn:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.cxn__icon-btn svg { width: 15px; height: 15px; }
+.cxn__feed {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-surface-1);
+}
+.cxn__feed code {
+  flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font-family: var(--os-font-mono, ui-monospace, monospace); font-size: 12px; color: var(--os-ink);
+}
+.cxn__link-btn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-size: 13px; font-weight: 500; text-decoration: underline;
+}
+.cxn__foot { font-size: 13px; color: var(--os-ink-2); margin: 0; }
+.cxn__foot a { color: var(--os-brand); }
+
+/* Clock in/out: the states Phase 4 added (blocked week, the other clock,
+   a read error on the sessions panel). Tokens only. */
+.clk__loading { display: flex; align-items: center; gap: 10px; padding: 40px 0; justify-content: center; color: var(--os-ink-2); font-size: 13px; }
+.clk__blocked {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  margin: 8px 0 0; font-size: 13px; color: var(--os-ink-2); max-width: 420px; text-align: center;
+}
+.clk__blocked svg { width: 16px; height: 16px; color: var(--os-warning-text, var(--os-danger-text)); flex: none; }
+.clk__blocked a { color: var(--os-brand); font-weight: 500; }
+.clk__timer-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  font-size: 13px; color: var(--os-ink-2);
+}
+.clk__panel-error {
+  display: flex; align-items: center; gap: 8px; padding: 12px 6px;
+  font-size: 13px; color: var(--os-ink-2);
+}
+.clk__panel-error svg { width: 15px; height: 15px; color: var(--os-danger-text); flex: none; }
+.clk__link-btn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-size: 13px; font-weight: 500; text-decoration: underline;
+}
+.clk__guardrails { font-size: 13px; color: var(--os-ink-2); margin: 0; max-width: 620px; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Calendar (/planner) - Phase 4, spec-planner.md section 2.
+   Prefix .pln. It replaces .os-cal* (deleted with OsCalendar, which had
+   no importer) and the ad-hoc Tailwind of the week-only grid before it.
+   Geometry lives here because a calendar is geometry: 48px per hour, a
+   56px hour gutter, lane-packed blocks. The colours are all tokens.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.pln { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.pln-body { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 0 24px 16px; }
+.pln-main { display: flex; gap: 16px; min-height: 0; flex: 1; }
+
+/* One quiet line, not a card: the calendar renders either way. */
+.pln-connect {
+  display: flex; align-items: center; gap: 8px; height: 36px; flex: none;
+  font-size: 13px; color: var(--os-ink-2);
+}
+.pln-connect a { color: var(--os-brand); font-weight: 500; }
+.pln-connect button {
+  margin-inline-start: auto; width: 28px; height: 28px; border: 0; background: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--os-ink-3); cursor: pointer;
+}
+.pln-connect button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-connect svg { width: 14px; height: 14px; }
+
+.pln-notice { margin: 0 0 8px; font-size: 13px; color: var(--os-ink-2); flex: none; }
+
+.pln-error {
+  display: flex; align-items: center; gap: 8px; height: 44px; flex: none;
+  font-size: 13px; color: var(--os-danger-text);
+}
+.pln-error button {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-weight: 500; text-decoration: underline; font-size: 13px;
+}
+
+/* The period stepper in the toolbar's left slot. */
+.pln-period { display: inline-flex; align-items: center; gap: 4px; }
+.pln-period button {
+  height: 32px; min-width: 32px; padding: 0 6px; border: 0; background: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--os-ink-2); cursor: pointer; font-size: 14px;
+}
+.pln-period button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-period svg { width: 16px; height: 16px; }
+.pln-period__today { padding: 0 10px; font-weight: 500; }
+/* Already on today: the button stays real and clickable and only its ink
+   softens, because a disabled Today is a control that lies about being off. */
+.pln-period__today.is-here { color: var(--os-ink-4); }
+.pln-period__label {
+  margin-inline-start: 6px; font-size: 15px; font-weight: 500;
+  color: var(--os-ink); font-variant-numeric: tabular-nums;
+}
+
+.pln-card {
+  flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px;
+  overflow: hidden;
+}
+/* The last good range while a refetch failed (audit P-7). */
+.pln-card.is-stale { opacity: 0.55; }
+
+/* ── week view ── */
+
+.pln-week { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.pln-week__head { display: flex; border-bottom: 1px solid var(--os-line); padding-inline-end: 14px; flex: none; }
+.pln-week__gutter { width: 56px; flex: none; }
+.pln-week__daycol { flex: 1; min-width: 0; padding: 0; text-align: center; }
+.pln-week__dow {
+  font-size: 12px; font-weight: 500; letter-spacing: 0.06em; line-height: 18px;
+  text-transform: uppercase; color: var(--os-ink-3);
+}
+.pln-week__dom {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; height: 24px; margin-top: 2px; padding: 0 6px; border-radius: 999px;
+  font-size: 15px; font-weight: 600; color: var(--os-ink); font-variant-numeric: tabular-nums;
+}
+.pln-week__dom.is-today { background: var(--os-brand); color: #fff; }
+/* The all-day lane: an all-day task or event had nowhere to render before
+   this and simply did not appear (audit P-1). */
+/* Auto-height, minimum 28: when the lane is empty it stays a quiet reserved
+   band rather than collapsing, so a day with an all-day row and a day without
+   one line up. */
+.pln-week__allday { display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 0; min-height: 28px; }
+
+.pln-week__scroll { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+.pln-week__body { display: flex; position: relative; }
+.pln-week__gutter--hours { position: relative; }
+.pln-week__hour {
+  position: absolute; inset-inline-end: 8px; transform: translateY(-50%);
+  font-size: 12px; font-weight: 500; color: var(--os-ink-3); font-variant-numeric: tabular-nums;
+}
+.pln-week__col {
+  position: relative; flex: 1; min-width: 0; cursor: pointer;
+  border-inline-start: 1px solid var(--os-line-soft); user-select: none; touch-action: pan-y;
+}
+.pln-week__slot { position: absolute; inset-inline: 0; border-bottom: 1px solid var(--os-line-soft); }
+.pln-week__slot.is-off { background: var(--os-surface-1); }
+/* A day outside the organization's working days, whichever days those are. */
+.pln-week__col.is-rest { background: var(--os-surface-1); }
+.pln-week__col.is-rest .pln-week__slot.is-off { background: var(--os-surface-2, var(--os-surface-1)); }
+.pln-week__daycol.is-rest .pln-week__dow,
+.pln-week__daycol.is-rest .pln-week__dom:not(.is-today) { color: var(--os-ink-3); }
+.pln-week__ghost {
+  position: absolute; inset-inline: 4px; z-index: 20; border-radius: 6px;
+  border: 1px solid var(--os-brand); background: var(--os-brand-soft);
+  font-size: 12px; color: var(--os-brand-deep); padding: 2px 6px; pointer-events: none;
+  overflow: hidden;
+}
+.pln-week__now { position: absolute; inset-inline: 0; z-index: 12; pointer-events: none; }
+.pln-week__now::before { content: ""; display: block; height: 1px; background: var(--os-danger-solid); }
+.pln-week__now i {
+  position: absolute; inset-inline-start: -4px; top: -3px;
+  width: 7px; height: 7px; border-radius: 999px; background: var(--os-danger-solid);
+}
+
+/* ── one block ── */
+
+.pln-block {
+  position: absolute; z-index: 10; overflow: hidden; border-radius: 6px;
+  background: var(--os-surface); border: 1px solid var(--os-line);
+  border-inline-start: 3px solid var(--pln-tone);
+}
+.pln-block.is-movable { cursor: grab; }
+.pln-block.is-movable:active { cursor: grabbing; }
+.pln-block__hit {
+  display: block; width: 100%; height: 100%; text-align: start;
+  border: 0; background: none; padding: 2px 6px; cursor: inherit; overflow: hidden;
+}
+.pln-block__title {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+  font-size: 13px; font-weight: 500; color: var(--os-ink);
+}
+.pln-block__title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pln-block__title svg { width: 12px; height: 12px; flex: none; }
+.pln-block__meta {
+  display: block; font-size: 12px; color: var(--os-ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pln-block__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--pln-tone); flex: none; }
+.pln-block__overdue { margin-inline-start: 6px; font-style: normal; color: var(--os-danger-text); }
+.pln-block__grip {
+  position: absolute; inset-inline: 0; bottom: 0; height: 6px; cursor: ns-resize;
+}
+/* Past three packed columns the rest go behind this, which opens the day
+   list: four blocks in a 142px column are 31px each and no title survives. */
+.pln-week__more {
+  position: absolute; inset-inline-end: 4px; z-index: 11; height: 18px;
+  border: 1px solid var(--os-line); border-radius: 999px; background: var(--os-surface);
+  padding: 0 8px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--os-ink-2);
+}
+.pln-week__more:hover { color: var(--os-brand); border-color: var(--os-brand); }
+
+/* The 24px chip: all-day lane, Month cells, People cells. */
+.pln-chip {
+  display: flex; align-items: center; gap: 4px; width: 100%; height: 22px;
+  padding: 0 6px; border: 0; border-radius: 4px; cursor: pointer; text-align: start;
+  background: color-mix(in srgb, var(--pln-tone) 14%, var(--os-surface));
+  border-inline-start: 3px solid var(--pln-tone);
+  font-size: 12px; color: var(--os-ink);
+}
+.pln-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pln-chip svg { width: 11px; height: 11px; flex: none; }
+.pln-chip__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--pln-tone); flex: none; }
+.pln-chip:hover { filter: brightness(0.97); }
+
+/* ── month view ── */
+
+.pln-month { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.pln-month__head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--os-line); }
+.pln-month__dow {
+  padding: 6px 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--os-ink-3);
+}
+.pln-month__grid { display: grid; grid-template-columns: repeat(7, 1fr); flex: 1; min-height: 0; overflow: auto; }
+.pln-month__cell {
+  border-inline-start: 1px solid var(--os-line-soft); border-bottom: 1px solid var(--os-line-soft);
+  padding: 4px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 2px;
+  cursor: pointer; overflow: hidden;
+}
+.pln-month__cell:nth-child(7n + 1) { border-inline-start: 0; }
+/* Lead and trail days are tinted AND still valid drop targets. */
+.pln-month__cell.is-outside { background: var(--os-surface-1); }
+.pln-month__cell.is-over { background: var(--os-brand-soft); }
+.pln-month__num { font-size: 15px; color: var(--os-ink-2); font-variant-numeric: tabular-nums; }
+.pln-month__num .is-today {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; border-radius: 999px;
+  background: var(--os-brand); color: #fff; font-weight: 600;
+}
+.pln-month__chips { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* A real button, not a static line: it opens the day list (audit note on
+   BoardCalendarView, carried here). */
+.pln-month__more {
+  border: 0; background: none; padding: 0 6px; text-align: start; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--os-ink-2);
+}
+.pln-month__more:hover { color: var(--os-brand); text-decoration: underline; }
+
+/* ── people view ── */
+
+.pln-people { flex: 1; min-height: 0; overflow: auto; }
+.pln-people__empty { padding: 32px 24px; font-size: 15px; color: var(--os-ink-2); }
+.pln-people__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pln-people__table th,
+.pln-people__table td {
+  border-inline-start: 1px solid var(--os-line-soft); border-bottom: 1px solid var(--os-line-soft);
+  padding: 6px; vertical-align: top; text-align: start; min-width: 120px;
+}
+.pln-people__table thead th { background: var(--os-table-head-bg, var(--os-surface-1)); font-weight: 500; }
+.pln-people__table .is-today { background: var(--os-brand-soft); }
+.pln-people__who {
+  position: sticky; inset-inline-start: 0; z-index: 2; width: 200px; min-width: 200px;
+  background: var(--os-surface); border-inline-start: 0;
+}
+.pln-people__name {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  border: 0; background: none; padding: 0; cursor: pointer; text-align: start;
+  font-size: 15px; color: var(--os-ink);
+}
+.pln-people__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pln-people__table th.is-rest,
+.pln-people__table td.is-rest { background: var(--os-surface-1); }
+.pln-people__table td.is-rest.is-today,
+.pln-people__table th.is-rest.is-today { background: var(--os-brand-soft); }
+.pln-people__name:hover { color: var(--os-brand); text-decoration: underline; }
+.pln-people__avatar {
+  width: 24px; height: 24px; border-radius: 999px; flex: none; object-fit: cover;
+  background: var(--os-surface-2, var(--os-surface-1));
+}
+.pln-people__avatar.is-initials {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; font-style: normal; color: var(--os-ink-2);
+}
+.pln-people__dow { display: block; font-size: 12px; color: var(--os-ink-3); text-transform: uppercase; }
+.pln-people__dom { display: block; font-size: 15px; font-weight: 500; color: var(--os-ink); }
+.pln-people__chips { display: flex; flex-direction: column; gap: 2px; }
+.pln-people__logged { display: block; margin-top: 4px; font-size: 12px; font-weight: 500; color: var(--os-ink-2); }
+.pln-people__table tbody tr:hover td { background: var(--os-surface-hov); }
+.pln-people__table tfoot td,
+.pln-people__table tfoot th { font-weight: 600; color: var(--os-ink-2); }
+
+/* ── unscheduled panel ── */
+
+.pln-unsched {
+  width: 272px; flex: none; display: flex; flex-direction: column; gap: 4px;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px;
+  padding: 10px; overflow-y: auto;
+}
+.pln-unsched header { display: flex; align-items: center; gap: 8px; }
+.pln-unsched h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--os-ink); }
+.pln-unsched__count { font-size: 12px; font-weight: 500; color: var(--os-ink-3); }
+.pln-unsched ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pln-unsched__task {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 36px;
+  border: 0; background: none; padding: 0 6px; border-radius: 6px; cursor: pointer; text-align: start;
+  font-size: 14px; color: var(--os-ink);
+}
+.pln-unsched__task:hover { background: var(--os-surface-hov); }
+.pln-unsched__task i { width: 8px; height: 8px; border-radius: 999px; background: var(--os-ink-4); flex: none; }
+.pln-unsched__task span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pln-unsched__row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; margin: 0; font-size: 13px; color: var(--os-ink-2); }
+.pln-unsched__row.is-quiet { color: var(--os-ink-3); }
+.pln-unsched__row.is-bad { color: var(--os-danger-text); }
+.pln-unsched__row button {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-weight: 500; text-decoration: underline;
+}
+.pln-unsched__more {
+  border: 0; background: none; padding: 8px 6px; cursor: pointer; text-align: start;
+  font-size: 13px; color: var(--os-ink-2);
+}
+.pln-unsched__more:hover { color: var(--os-brand); }
+
+/* ── empty and skeleton ── */
+
+.pln-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 72px 24px; }
+.pln-empty__line { margin: 0; font-size: 15px; color: var(--os-ink-2); }
+.pln-empty__link {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--os-brand); text-decoration: underline;
+}
+.pln-skeleton { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.pln-skeleton__head { height: 44px; border-radius: 6px; background: var(--os-skeleton, var(--os-surface-1)); }
+.pln-skeleton__grid { display: flex; flex-direction: column; gap: 8px; }
+.pln-skeleton__grid span { display: block; border-radius: 6px; background: var(--os-skeleton, var(--os-surface-1)); }
+.pln-skeleton__line { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--os-ink-2); }
+.pln-skeleton__line svg { width: 14px; height: 14px; }
+
+/* ── popovers ── */
+
+.pln-pop {
+  position: fixed; z-index: 90; border-radius: 8px;
+  background: var(--os-surface); border: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow-pop, 0 8px 24px rgba(0, 0, 0, 0.14));
+  display: flex; flex-direction: column; max-height: 80vh; overflow: hidden;
+}
+.pln-pop__head {
+  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--os-line-soft); flex: none;
+}
+.pln-pop__kind {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--os-ink-3); margin-inline-end: auto;
+}
+.pln-pop__x {
+  width: 28px; height: 28px; border: 0; background: none; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--os-ink-3);
+}
+.pln-pop__x:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-pop__x svg { width: 15px; height: 15px; }
+.pln-pop__body { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.pln-pop__title {
+  width: 100%; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px;
+  font-size: 15px; font-weight: 500; color: var(--os-ink); background: none;
+}
+.pln-pop__title:focus { border-color: var(--os-line-strong); outline: none; box-shadow: 0 0 0 3px var(--os-focus-halo); }
+.pln-pop__row { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; color: var(--os-ink-2); }
+.pln-pop__row > label,
+.pln-pop__rowlabel { width: 48px; flex: none; }
+.pln-pop__times { display: inline-flex; align-items: center; gap: 6px; }
+.pln-pop__times em { font-style: normal; color: var(--os-ink-3); }
+/* Description: the New event modal has always written one, and until now
+   nothing read it back, so a description typed at create time was stored and
+   then unreachable. */
+.pln-pop__desc { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--os-ink-2); }
+.pln-pop__desc textarea {
+  width: 100%; resize: vertical; min-height: 44px;
+  border: 1px solid var(--os-line-strong); border-radius: 6px; padding: 6px 8px;
+  font: inherit; font-size: 13px; color: var(--os-ink); background: var(--os-surface);
+}
+.pln-pop__desc textarea:focus { outline: none; box-shadow: 0 0 0 3px var(--os-focus-halo); }
+.pln-pop__desc textarea:disabled { opacity: 0.6; }
+/* "Move to...": the keyboard and touch alternative to dragging a block. */
+.pln-pop__moveto { position: relative; margin-inline-end: auto; }
+.pln-pop__movefields {
+  position: absolute; bottom: calc(100% + 6px); inset-inline-start: 0; z-index: 5;
+  display: flex; align-items: center; gap: 6px; padding: 8px;
+  border: 1px solid var(--os-line); border-radius: 8px; background: var(--os-surface);
+  box-shadow: var(--os-shadow-pop);
+}
+.pln-pop__note { margin: 0; font-size: 13px; color: var(--os-ink-2); line-height: 1.45; }
+.pln-pop__bad { margin: 0; font-size: 13px; color: var(--os-danger-text); }
+.pln-pop__readtitle {
+  margin: 0; display: flex; align-items: center; gap: 6px;
+  font-size: 15px; font-weight: 500; color: var(--os-ink);
+}
+.pln-pop__readtitle svg { width: 15px; height: 15px; color: var(--os-ink-2); }
+.pln-pop__link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--os-brand); font-weight: 500; }
+.pln-pop__link svg { width: 14px; height: 14px; }
+.pln-pop__snooze { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pln-pop__snoozelabel { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--os-ink-3); width: 100%; }
+.pln-pop__snoozelabel svg { width: 13px; height: 13px; }
+.pln-pop__snooze button {
+  height: 26px; padding: 0 8px; border: 1px solid var(--os-line-strong); border-radius: 6px;
+  background: var(--os-surface); font-size: 13px; color: var(--os-ink-2); cursor: pointer;
+}
+.pln-pop__snooze button:hover:not(:disabled) { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-pop__snooze button:disabled { opacity: 0.5; cursor: wait; }
+.pln-pop__foot {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-top: 1px solid var(--os-line-soft); flex: none;
+}
+.pln-pop__ghost,
+.pln-pop__danger {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: none; cursor: pointer; font-size: 13px; font-weight: 500;
+}
+.pln-pop__ghost { color: var(--os-ink-2); }
+.pln-pop__ghost:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-pop__danger { color: var(--os-danger-text); }
+.pln-pop__danger:hover { background: var(--os-danger-bg); }
+.pln-pop__ghost svg,
+.pln-pop__danger svg { width: 14px; height: 14px; }
+.pln-pop__confirm { font-size: 13px; color: var(--os-ink-2); margin-inline-end: auto; }
+.pln-pop__save { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--os-ink-3); }
+.pln-pop__save svg { width: 13px; height: 13px; }
+.pln-pop__save.is-bad { color: var(--os-danger-text); }
+.pln-pop__save button {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-weight: 500; text-decoration: underline; font-size: 12px;
+}
+.pln-pop__daylist { padding: 6px; display: flex; flex-direction: column; overflow-y: auto; }
+.pln-pop__dayrow {
+  display: flex; align-items: center; gap: 8px; height: 36px; width: 100%;
+  border: 0; background: none; border-radius: 6px; padding: 0 8px; cursor: pointer; text-align: start;
+  font-size: 14px; color: var(--os-ink);
+}
+.pln-pop__dayrow:hover { background: var(--os-surface-hov); }
+.pln-pop__dayrow span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pln-pop__dayrow em { font-style: normal; font-size: 12px; color: var(--os-ink-3); }
+.pln-pop__daydot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+
+/* ── new event modal ── */
+
+.pln-modal {
+  position: fixed; inset: 0; z-index: 95; display: flex; align-items: center; justify-content: center;
+  background: var(--os-scrim, rgba(0, 0, 0, 0.32));
+}
+.pln-modal__card {
+  width: 560px; max-width: 94vw; max-height: 90vh; display: flex; flex-direction: column;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 12px;
+  box-shadow: var(--os-shadow-modal, 0 24px 60px rgba(0, 0, 0, 0.24));
+}
+.pln-modal__head { padding: 16px 20px 8px; flex: none; }
+.pln-modal__head h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--os-ink); }
+.pln-modal__body { padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+.pln-field { display: flex; flex-direction: column; gap: 6px; }
+.pln-field > span { font-size: 13px; font-weight: 500; color: var(--os-ink-2); }
+.pln-field input[type="text"],
+.pln-field input:not([type]),
+.pln-field textarea {
+  width: 100%; border: 1px solid var(--os-line-strong); border-radius: 6px; padding: 8px 10px;
+  font-size: 15px; color: var(--os-ink); background: var(--os-surface); resize: vertical;
+}
+.pln-field input:focus,
+.pln-field textarea:focus { outline: none; box-shadow: 0 0 0 3px var(--os-focus-halo); }
+.pln-field--row { flex-direction: row; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.pln-field--row label,
+.pln-field__sub { display: flex; flex-direction: column; gap: 6px; }
+.pln-field--row label > span,
+.pln-field__sub > span { font-size: 13px; font-weight: 500; color: var(--os-ink-2); }
+.pln-field--row input[type="date"],
+.pln-field--row input[type="time"] {
+  height: 36px; border: 1px solid var(--os-line-strong); border-radius: 6px; padding: 0 8px;
+  font-size: 15px; color: var(--os-ink); background: var(--os-surface);
+}
+.pln-field__hint { font-style: normal; font-size: 13px; color: var(--os-ink-3); padding-bottom: 9px; }
+.pln-field--switch { flex-direction: row; align-items: center; justify-content: space-between; }
+.pln-modal__note { margin: 0; font-size: 13px; color: var(--os-ink-3); }
+.pln-modal__bad { margin: 0; font-size: 13px; color: var(--os-danger-text); }
+.pln-modal__foot {
+  display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px;
+  border-top: 1px solid var(--os-line-soft); flex: none;
+}
+.pln-modal__ghost {
+  height: 36px; padding: 0 12px; border: 0; background: none; border-radius: 6px;
+  font-size: 15px; color: var(--os-ink-2); cursor: pointer;
+}
+.pln-modal__ghost:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.pln-modal__primary {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  border: 0; border-radius: 6px; background: var(--os-brand); color: #fff;
+  font-size: 15px; font-weight: 500; cursor: pointer;
+}
+.pln-modal__primary:hover:not(:disabled) { background: var(--os-brand-hover); }
+.pln-modal__primary:disabled { opacity: 0.55; cursor: wait; }
+.pln-modal__primary svg { width: 16px; height: 16px; }
+
+/* ── narrow ── */
+
+@media (max-width: 1024px) {
+  .pln-unsched { display: none; }
+  .pln-people__who { width: 140px; min-width: 140px; }
+}
+@media (max-width: 768px) {
+  .pln-body { padding-inline: 12px; }
+  .pln-month__chips .pln-chip span { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Reminders: the fired cards (.rmc) and the create panel (.rmn).
+   Phase 4, spec-planner.md section 2 Reminders.
+   The cards sit bottom-LEFT, in the toast stack position (design-system
+   5.7). They used to open their own bottom-right portal, which is where
+   the call dock lives, so an alarm during a call landed on top of it.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.rmc {
+  position: fixed; inset-block-end: 24px; inset-inline-start: 24px; z-index: 130;
+  width: 360px; max-width: 92vw; display: flex; flex-direction: column-reverse; gap: 8px;
+  max-height: 70vh; overflow-y: auto;
+}
+.rmc__more {
+  border: 0; background: none; padding: 4px 6px; cursor: pointer; text-align: start;
+  font-size: 12px; font-weight: 500; color: var(--os-ink-2); align-self: flex-start;
+}
+.rmc__more:hover { color: var(--os-brand); text-decoration: underline; }
+.rmc__card {
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px;
+  box-shadow: var(--os-shadow-pop, 0 8px 24px rgba(0, 0, 0, 0.14)); overflow: hidden;
+}
+.rmc__top { display: flex; align-items: flex-start; gap: 10px; padding: 12px 10px 8px 12px; }
+.rmc__icon {
+  width: 28px; height: 28px; flex: none; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--os-brand-soft); color: var(--os-brand-deep);
+}
+.rmc__icon svg { width: 16px; height: 16px; }
+.rmc__text { flex: 1; min-width: 0; }
+.rmc__title { margin: 0; font-size: 14px; font-weight: 500; color: var(--os-ink); line-height: 1.35; overflow-wrap: anywhere; }
+.rmc__body { margin: 2px 0 0; font-size: 13px; color: var(--os-ink-2); line-height: 1.4; }
+.rmc__meta { margin: 4px 0 0; font-size: 12px; font-weight: 500; color: var(--os-ink-3); }
+.rmc__bad { margin: 4px 0 0; font-size: 12px; color: var(--os-danger-text); }
+.rmc__bad button {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--os-brand); font-weight: 500; text-decoration: underline; font-size: 12px;
+}
+.rmc__x {
+  width: 24px; height: 24px; flex: none; border: 0; background: none; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--os-ink-3); cursor: pointer;
+}
+.rmc__x:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmc__x svg { width: 14px; height: 14px; }
+.rmc__actions { display: flex; align-items: center; gap: 4px; padding: 0 10px 10px; }
+.rmc__snooze { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 10px; }
+.rmc__snooze button {
+  height: 26px; padding: 0 8px; border: 1px solid var(--os-line-strong); border-radius: 6px;
+  background: var(--os-surface); font-size: 13px; color: var(--os-ink-2); cursor: pointer;
+}
+.rmc__snooze button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmc__snooze .rmc__cancel { border-color: transparent; color: var(--os-ink-3); }
+.rmc__open {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border: 0; border-radius: 6px; background: var(--os-brand); color: #fff;
+  font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.rmc__open:hover { background: var(--os-brand-hover); }
+.rmc__ghost {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: none; color: var(--os-ink-2);
+  font-size: 14px; cursor: pointer;
+}
+.rmc__ghost:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmc__ghost--end { margin-inline-start: auto; }
+.rmc__open svg,
+.rmc__ghost svg { width: 14px; height: 14px; }
+
+/* The cards slide in, unless the viewer asked for no motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .rmc__card { animation: rmcIn 180ms var(--os-ease-out, ease-out); }
+}
+@keyframes rmcIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── the create panel ── */
+
+.rmn {
+  position: fixed; inset: 0; z-index: 95; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh; background: var(--os-scrim, rgba(0, 0, 0, 0.32));
+}
+.rmn__card {
+  width: 400px; max-width: 92vw; display: flex; flex-direction: column;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 12px;
+  box-shadow: var(--os-shadow-modal, 0 24px 60px rgba(0, 0, 0, 0.24));
+}
+.rmn__head {
+  display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--os-line-soft);
+}
+.rmn__head h2 { flex: 1; margin: 0; font-size: 16px; font-weight: 600; color: var(--os-ink); }
+.rmn__head > svg { width: 16px; height: 16px; color: var(--os-brand-deep); }
+.rmn__head button {
+  width: 28px; height: 28px; border: 0; background: none; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--os-ink-3);
+}
+.rmn__head button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmn__head button svg { width: 15px; height: 15px; }
+.rmn__body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.rmn__title {
+  width: 100%; height: 40px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--os-line-strong); background: var(--os-surface);
+  font-size: 15px; color: var(--os-ink);
+}
+.rmn__title:focus { outline: none; box-shadow: 0 0 0 3px var(--os-focus-halo); }
+.rmn__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rmn__chips button {
+  height: 26px; padding: 0 10px; border: 1px solid var(--os-line-strong); border-radius: 6px;
+  background: var(--os-surface); font-size: 13px; color: var(--os-ink-2); cursor: pointer;
+}
+.rmn__chips button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmn__row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--os-ink-2); }
+.rmn__row > span { width: 88px; flex: none; font-weight: 500; }
+.rmn__row input[type="datetime-local"] {
+  flex: 1; height: 36px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid var(--os-line-strong); background: var(--os-surface);
+  font-size: 15px; color: var(--os-ink);
+}
+.rmn__row--switch { justify-content: space-between; }
+.rmn__row--switch > span { width: auto; }
+.rmn__note { margin: 0; font-size: 13px; color: var(--os-ink-3); }
+.rmn__bad { margin: 0; font-size: 13px; color: var(--os-danger-text); }
+.rmn__foot {
+  display: flex; justify-content: flex-end; gap: 8px; align-items: center;
+  padding: 12px 16px; border-top: 1px solid var(--os-line-soft);
+}
+.rmn__ghost {
+  height: 32px; padding: 0 12px; border: 0; background: none; border-radius: 6px;
+  font-size: 15px; color: var(--os-ink-2); cursor: pointer;
+}
+.rmn__ghost:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+.rmn__primary {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px;
+  border: 0; border-radius: 6px; background: var(--os-brand); color: #fff;
+  font-size: 15px; font-weight: 500; cursor: pointer;
+}
+.rmn__primary:hover:not(:disabled) { background: var(--os-brand-hover); }
+.rmn__primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The Google calendar picker on /account/connections (Phase 4). The two
+   switches write CalendarSubscription."direction" and "shareTitles", both
+   of which the sync cron has always honoured and neither of which had a
+   control anywhere in the product. */
+.cxn__cals { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
+.cxn__cals > li {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px;
+  padding: 10px 0; border-top: 1px solid var(--os-line-soft);
+}
+.cxn__cal-name { flex: 1 1 200px; min-width: 0; font-size: 15px; color: var(--os-ink); }
+.cxn__cal-name em {
+  font-style: normal; margin-inline-start: 8px; padding: 1px 6px; border-radius: 10px;
+  background: var(--os-surface-1); font-size: 12px; font-weight: 500; color: var(--os-ink-3);
+}
+.cxn__cal-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--os-ink-2); }
+.cxn__cal-switch > span { display: flex; flex-direction: column; }
+.cxn__cal-switch em { font-style: normal; font-size: 12px; color: var(--os-ink-3); }
+.cxn__upcoming { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }

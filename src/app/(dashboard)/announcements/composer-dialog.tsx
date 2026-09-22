@@ -20,7 +20,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -320,19 +319,6 @@ export function AnnouncementComposer({
                   </button>
                 );
               })}
-            </div>
-          </div>
-
-          {/* Audience — only "Everyone" is actually wired (notifications +
-              ack roster both run org-wide). Narrower targeting is honest
-              Coming-soon rather than a selector the backend ignores. */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-[var(--os-ink-2)]">Audience</span>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center h-8 px-3 rounded-lg text-base border border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium">
-                Everyone in the organization
-              </span>
-              <UpcomingOnly><ComingSoonRow label="Specific teams / roles" className="h-8" /></UpcomingOnly>
             </div>
           </div>
 

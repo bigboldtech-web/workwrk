@@ -10,8 +10,16 @@ import { exchangeCode } from "@/services/googleCalendar";
  * calendars to sync from on the settings page — that's what the
  * `externalCalendarId` field gets set to on the subscribe call.
  *
- * On success, redirects back to /settings/calendar?connected=1 so the
- * UI can fetch the calendar list and present the picker.
+ * On success, redirects back to /account/connections?connected=google so
+ * the UI can fetch the calendar list and present the picker.
+ *
+ * THE TARGET MOVED IN PHASE 4. It used to be /settings/calendar?connected=1,
+ * a workspace-settings stub, although every row this flow writes
+ * (CalendarSubscription, the ICS token) belongs to one person. Calendar
+ * connections are a personal setting, so they live on the My settings door
+ * (settings-architecture section 2.4, spec-planner section 0 row 4).
+ * /settings/calendar is a 308 to the same page, so an old bookmark still
+ * lands correctly.
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -21,8 +29,8 @@ export async function GET(req: NextRequest) {
 
   const appBase = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const returnTo = (ok: boolean, msg?: string) => {
-    const target = new URL(`${appBase}/settings/calendar`);
-    target.searchParams.set(ok ? "connected" : "error", ok ? "1" : (msg ?? "unknown"));
+    const target = new URL(`${appBase}/account/connections`);
+    target.searchParams.set(ok ? "connected" : "error", ok ? "google" : (msg ?? "unknown"));
     return NextResponse.redirect(target);
   };
 

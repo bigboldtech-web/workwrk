@@ -99,7 +99,6 @@ const DOORS: NavDoor[] = [
           { label: "Audit log", icon: FileCheck, href: "/settings/audit", keywords: ["activity", "history", "who did what"] },
           { label: "API & webhooks", icon: Key, href: "/settings/api", keywords: ["api keys", "tokens", "byok"] },
           { label: "Integrations", icon: Plug, href: "/settings/integrations", keywords: ["connect", "slack", "google"] },
-          { label: "Calendar & connections", icon: Calendar, href: "/settings/calendar", keywords: ["ics", "feed", "sync"] },
         ],
       },
       {
@@ -119,6 +118,12 @@ const DOORS: NavDoor[] = [
           { label: "Notifications", icon: Bell, href: "/settings/notifications", keywords: ["inbox", "email", "mute", "quiet hours"] },
           { label: "Preferences", icon: Palette, href: "/account/appearance", keywords: ["theme", "dark", "density", "language"] },
           { label: "Security", icon: Shield, href: "/account/security", keywords: ["password", "two step", "sessions"] },
+          // Phase 4: this row moved out of Workspace settings > Security &
+          // data. Every row the page writes (CalendarSubscription, the ICS
+          // token) belongs to ONE PERSON, so it is a My settings row, which
+          // is where the settings registry has always declared it
+          // (src/lib/settings-registry.ts, door "me").
+          { label: "Calendar & connections", icon: Calendar, href: "/account/connections", keywords: ["ics", "feed", "sync", "google calendar"] },
         ],
       },
     ],

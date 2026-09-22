@@ -168,6 +168,8 @@ model Organization {
   integrationConnections IntegrationConnection[]
   // 🆕 Comms Hub — team chat
   conversations          Conversation[]
+  // 🆕 Phase 4 (Time and Talk) — the org's working calendar
+  workSchedule           WorkSchedule?
 
   @@index([slug])
 }
@@ -1336,6 +1338,52 @@ model TaskLabelOnTask {
   @@index([labelId])
 }
 
+/// A personal calendar entry: a block of somebody's own time that is not a
+/// task and not a meeting. Phase 4, spec-planner section 2 `/planner` Data.
+///
+/// WHY THIS TABLE EXISTS. Before it, the Calendar's "New event" wrote a
+/// personal TASK (POST /api/me/work), and the Google sync cron wrote rows
+/// into the legacy `Task` table with `externalSource = "GCAL"` while the
+/// Planner read `Item`. So a block of focus time became a to-do that never
+/// got done, and a connected Google Calendar produced rows that no surface
+/// in the product rendered. An event and a task are different things and
+/// this is the event's home.
+///
+/// OWNER ONLY. Every row belongs to `userId`. There is no read-around for an
+/// Admin: the Team calendar projects a teammate's rows as "Busy" and never
+/// sends a title unless the row's subscription says `shareTitles`.
+///
+/// ADDITIVE AND OPTIONAL. Every reader wraps its query and answers "no
+/// events" while the table is absent, so a release can ship before
+/// prisma/sql/2026-09-22-calendar-event.sql is applied.
+model CalendarEvent {
+  id             String    @id @default(cuid())
+  organizationId String
+  userId         String
+  title          String
+  /// "EVENT" | "FOCUS" | "OOO". A word and not an enum, so a new kind is a
+  /// release and not a migration.
+  kind           String    @default("EVENT")
+  startAt        DateTime
+  endAt          DateTime
+  allDay         Boolean   @default(false)
+  description    String?
+  /// "GCAL" on a row the sync cron wrote; null on one a person created here.
+  externalSource String?
+  /// `${calendarId}::${eventId}` for a Google row: the sync's idempotency key.
+  externalId     String?
+  /// The viewer said no to this invitation. Google rows only; the Display
+  /// menu's "Show declined Google events" (default off) filters on it.
+  declined       Boolean   @default(false)
+  subscriptionId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, externalSource, externalId])
+  @@index([organizationId, userId, startAt])
+  @@index([subscriptionId])
+}
+
 model CalendarSubscription {
   id                 String    @id @default(cuid())
   userId             String
@@ -1868,6 +1916,34 @@ model Meeting {
   decisions      String?
   organizationId String
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Phase 4 (spec-planner section 1 Access): the creator holds Full access.
+  /// Nullable forever: rows written before this column have no recorded
+  /// creator and every reader falls back to "attendee or Owner/Admin".
+  createdById    String?
+  /// Phase 4: the soft-delete stamp. Nothing writes it yet (Trash captures
+  /// the row with its attendees and action items, then removes it, and
+  /// restore recreates all three with their original ids). Every meeting
+  /// read filters `deletedAt: null` regardless, so switching Trash to a
+  /// soft delete is one line in src/lib/trash.ts and not an audit of every
+  /// reader.
+  deletedAt      DateTime?
+  /// Phase 4 (spec-planner section 1 Access, section 4 step 6): the Item
+  /// row that represents this meeting in the hidden per-organization
+  /// "Meetings" List, so a gate can ask the ONE Item ladder about a meeting
+  /// rather than the product growing a second object type
+  /// (access-model-spec section 9: "meetings, if revived, are a List item
+  /// type").
+  ///
+  /// Deliberately a bare column and not a relation: adding a relation means
+  /// a back-reference field on Item, and Item is the busiest model in the
+  /// schema. Nothing joins through this; readers look the Item up by id.
+  ///
+  /// Nullable forever. Every meeting written before the backfill has none,
+  /// the backfill leaves a row it cannot resolve alone, and
+  /// src/lib/meeting-access.ts answers the same ladder with or without it,
+  /// so a release deployed ahead of the column and a row that never gets
+  /// one behave identically.
+  itemId         String?
   attendees      MeetingAttendee[]
   actionItems    ActionItem[]
   createdAt      DateTime          @default(now())
@@ -1875,6 +1951,9 @@ model Meeting {
 
   @@index([organizationId])
   @@index([scheduledAt])
+  @@index([createdById])
+  @@index([deletedAt])
+  @@index([itemId])
 }
 
 enum MeetingType {
@@ -1916,8 +1995,15 @@ model ActionItem {
   deadline    DateTime?
   status      ActionItemStatus @default(NOT_STARTED)
   completedAt DateTime?
+  /// Phase 4: the Item created by "Convert to task", so a second click
+  /// reopens the same task instead of writing a duplicate. Nullable: every
+  /// action item written before this column has no link and readers treat
+  /// that as "not converted yet".
+  itemId      String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+
+  @@index([itemId])
 }
 
 model CheckIn {
@@ -3311,6 +3397,47 @@ model Timesheet {
   @@index([approverId, status])
 }
 
+/// The organization's working calendar: which days are work days, how long a
+/// work day is, and which dates are holidays.
+///
+/// WHY IT IS A ROW AND NOT Organization.settings JSON. Two surfaces read it
+/// on every render (the Workload grid's capacity columns and the Timesheets
+/// week card's "expected hours"), and a future third writes it from a
+/// settings page. A JSON blob makes every one of those a read-modify-write
+/// of the whole organization row, with no shape and no default.
+///
+/// ONE ROW PER ORGANIZATION, and the row is OPTIONAL. Every reader falls
+/// back to WORK_SCHEDULE_DEFAULTS in src/lib/work-schedule.ts (Monday to
+/// Friday, 8 hours, no holidays), which is exactly what those surfaces
+/// hard-coded before this model existed, so an org that never opens the
+/// settings page sees no change at all and a release deployed before the
+/// SQL file degrades to the same defaults rather than failing.
+model WorkSchedule {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// Working days as ISO weekday numbers, 0 = Sunday through 6 = Saturday,
+  /// matching JavaScript's Date.getDay() so no surface has to convert.
+  /// Default is Monday to Friday.
+  workdays Int[] @default([1, 2, 3, 4, 5])
+
+  /// Length of a full work day, in hours. Decimal so 7.5 is expressible.
+  hoursPerDay Decimal @default(8) @db.Decimal(4, 2)
+
+  /// IANA zone the schedule is written in, e.g. "Europe/London". Null means
+  /// "each person's own zone", which is what the product did before.
+  timezone String?
+
+  /// Holidays, as [{ "date": "2026-12-25", "name": "Christmas Day" }].
+  /// A list rather than rows: it is read whole, written whole, and never
+  /// queried across organizations.
+  holidays Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model TimeEntry {
   id             String       @id @default(cuid())
   organizationId String
@@ -3349,10 +3476,24 @@ model TimeEntry {
   itemId String?
   item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
 
+  // Phase 4, time-tracking depth. Both are additive and both default to the
+  // behaviour that exists today, so a database without them reads the same.
+  //
+  //   billable   the flag an agency or a services team invoices from. Default
+  //              false: nothing in the product has ever marked an hour
+  //              billable, so defaulting true would invent revenue.
+  //   tags       free text labels on ONE entry, which is a different thing
+  //              from the cost-center TagAssignment that rides the parent
+  //              Timesheet: that one tags a whole week, this one tags an
+  //              hour. Empty by default.
+  billable Boolean  @default(false)
+  tags     String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId, day])
+  @@index([organizationId, billable])
   @@index([userId, day])
   @@index([timesheetId])
   // Hot index for "is this user clocked in right now?" — used on
@@ -5642,10 +5783,21 @@ model Conversation {
   /// Rotates the derived call room. Bumped when a member leaves so
   /// ex-members' captured room names stop working.
   callEpoch      Int              @default(0)
+  /// Phase 4 (spec-talk section 4 step 4). One line under the channel name.
+  topic          String?
+  /// Private channel: only people added to it reach it. Default false, so
+  /// every channel that exists today stays exactly as open as it was.
+  restricted     Boolean          @default(false)
+  /// Listed in Browse channels. Default true for public channels; the
+  /// backfill writes it explicitly rather than relying on the default.
+  findable       Boolean          @default(true)
+  /// Archived channels are read-only until a Full-access holder restores.
+  archivedAt     DateTime?
   members        ConversationMember[]
   messages       ConversationMessage[]
 
   @@index([organizationId, lastMessageAt])
+  @@index([organizationId, archivedAt])
 }
 
 model ConversationMember {

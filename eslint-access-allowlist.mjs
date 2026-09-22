@@ -40,6 +40,43 @@
 // and the fifth (`boards/[id]/views/order`) replaces one PATCH per view with
 // one request. Each one gates exactly like the sibling route already on this
 // list, so they leave it in the same batch those siblings do, at access step 6.
+// Phase 4 (Time and Talk, 2026-09-22) adds THREE, and all three are the same
+// story.
+// This phase's brief is explicit that the access pivot stays inert: "use the
+// existing gate helpers and module checks". Each of these two new routes is a
+// sibling of an allow-listed route and deliberately carries THE SAME gate as
+// that sibling, so the count and the list it counts can never disagree:
+//
+//   api/meetings/route.ts          gained `isOrgAdmin(session)` when its GET
+//     stopped being org-wide for everyone. Its sibling
+//     api/meetings/[id]/route.ts is already on this list, and the two now
+//     read one ladder (src/lib/meeting-access.ts, which is pure and reads
+//     no session at all).
+//   api/meetings/[id]/ics/route.ts  is the "Add to my calendar" download.
+//     It carries the SAME MeetingFacts and the SAME canReadMeeting() gate as
+//     its parent api/meetings/[id]/route.ts, because it is the same read of
+//     the same object in another file format. A different gate here would
+//     mean the .ics could say a meeting exists where the page answers 404.
+//   api/meetings/[id]/action-items/route.ts  reads `accessLevel` through
+//     legacyIsAdminLevel to build the SAME MeetingFacts its parent
+//     api/meetings/[id]/route.ts builds, and hands them to the same three
+//     helpers in src/lib/meeting-access.ts. Before Phase 4 stage B these
+//     four verbs scoped to organizationId alone, so a Member who got 404
+//     opening a one to one could still read, tick off, rename and delete its
+//     action items by calling this route. A different gate here would be the
+//     hole coming straight back.
+//   api/timesheets/summary/route.ts  is one COUNT over exactly the query
+//     api/timesheets/route.ts runs for scope=approve, which is on this list
+//     and calls isManager four times. A different gate here would mean the
+//     sidebar badge and the page disagreeing.
+//   api/organization/work-schedule/route.ts  gates its PUT on
+//     `isOrgAdmin(session)`, exactly like its four siblings already on this
+//     list (organization/ai-profile, branding, byok, org/preferences). It is
+//     an organization-wide setting with no object to point an ObjectRef at,
+//     so it is one of the rows that leaves when those four do.
+//
+// Both leave together, with their siblings, when the access engine's step 6
+// turns these gates into can() / accessibleIds().
 export const ACCESS_LEGACY_ALLOWLIST = [
   // Phase 0 step 2b: GET /api/boot folds the shell's four boot calls into one
   // and has to run the SAME legacy rail resolver the client runs today
@@ -84,7 +121,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/team/reviews/page.tsx",
   "src/app/(dashboard)/team/rollup/page.tsx",
   "src/app/(dashboard)/team/workload/page.tsx",
-  "src/app/(dashboard)/timesheets/timesheet-manager.tsx",
   "src/app/(dashboard)/tlk/layout.tsx",
   "src/app/(dashboard)/today/page.tsx",
   "src/app/api/accounting-periods/\\[id\\]/route.ts",
@@ -248,7 +284,10 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/me/mentions/route.ts",
   "src/app/api/me/route.ts",
   "src/app/api/meeting-templates/route.ts",
+  "src/app/api/meetings/\\[id\\]/action-items/route.ts",
+  "src/app/api/meetings/\\[id\\]/ics/route.ts",
   "src/app/api/meetings/\\[id\\]/route.ts",
+  "src/app/api/meetings/route.ts",
   "src/app/api/my-team/route.ts",
   "src/app/api/offices/route.ts",
   "src/app/api/okrs/route.ts",
@@ -256,6 +295,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/organization/ai-profile/route.ts",
   "src/app/api/organization/branding/route.ts",
   "src/app/api/organization/byok/route.ts",
+  "src/app/api/organization/work-schedule/route.ts",
   "src/app/api/organizations/delete/route.ts",
   "src/app/api/organizations/restore/route.ts",
   "src/app/api/ownership-areas/\\[id\\]/route.ts",
@@ -382,6 +422,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/thresholds/route.ts",
   "src/app/api/timesheets/\\[id\\]/route.ts",
   "src/app/api/timesheets/route.ts",
+  "src/app/api/timesheets/summary/route.ts",
   "src/app/api/tools/\\[id\\]/route.ts",
   "src/app/api/tools/\\[id\\]/share/route.ts",
   "src/app/api/tools/route.ts",

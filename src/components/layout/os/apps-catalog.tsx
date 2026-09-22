@@ -11,7 +11,7 @@
 // read for highlighting; `ROUTE_HUB` replaced it.
 
 import Link from "next/link";
-import { ChatSidebar } from "./chat-sidebar";
+import { TalkSidebar } from "./talk-sidebar";
 import { canAccessTier, MANAGER_LEVELS, type AccessTier } from "./access-tiers";
 import type { PermissionModule } from "@/lib/permissions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +21,7 @@ export { canAccessTier };
 export type { AccessTier };
 import {
   Home, House, Lock, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
-  Video, Trophy, Clock, CircleUser, Frame, Mic,
+  Video, Trophy, Clock, Timer, AlarmClock, CircleUser, Frame, Mic,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
@@ -29,7 +29,7 @@ import {
   HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
-  ListChecks, ListOrdered,
+  ListChecks,
   Activity, LayoutTemplate, Plug, LineChart,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
@@ -50,6 +50,8 @@ import {
   hydrateSidebarState, hiddenSpaces, setAllExpanded, subscribeSidebarState,
 } from "@/lib/work/sidebar-expand";
 import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
+import { apiFetch } from "@/lib/api-fetch";
+import { Dots } from "@/components/ui/dots";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsShell } from "./shell-context";
@@ -58,6 +60,7 @@ import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
 import { useActiveRowHref } from "./use-active-row";
+import { useFormat } from "@/lib/format/use-date-prefs";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import {
@@ -1153,28 +1156,170 @@ function HomeSidebar() {
   );
 }
 
-/* ───────────────────────── Calendar sidebar ───────────────────────── */
-
-// sidebar-map 2. Meetings (row 2) and Clock in/out (row 4) are live, ungated
-// pages that carried a ROUTE_HUB row and a ROUTE_TITLES label but no door
-// anywhere in the product; these two rows are that door. Team calendar (row 5)
-// and Approvals (row 6) still have no page and stay out until they do.
+/* ───────────────────────── Planner sidebar ─────────────────────────
+ *
+ * sidebar-map.md section 2, six rows in its order. Phase 4 adds the live
+ * counts and the TEAM section that Phase 3 could not: Meetings and
+ * Approvals had no summary endpoint to count, and Clock in/out had no
+ * shared "is a clock running" read. All three exist now:
+ *
+ *   GET /api/meetings/summary            my meetings still to come today
+ *   GET /api/timesheets/summary?scope=approve   weeks waiting on me
+ *   GET /api/time/active                 the punch and the task timer
+ *
+ * One fetch each, on mount and on the `workwrk:timesheets-changed` window
+ * event, and NO poller: the sidebar renders on every page in the hub and a
+ * timer here would be a third clock in the app (spec-planner section 2
+ * Realtime: "the sidebar Clock row and the top bar time pill share the
+ * shell's single GET /api/time/active poll and this page starts no third
+ * timer"). The event has real publishers: /clock dispatches it on every
+ * punch, /timesheets on every submit, retract, reopen and decision.
+ *
+ * A count that fails to load is absent, never zero and never an error row:
+ * a badge is a convenience and a sidebar that shouts at you because one
+ * request failed is worse than a sidebar with no badge. `undefined` is what
+ * NavItem takes for "no badge", so a null count passes `undefined` rather
+ * than 0: relying on the primitive to hide a zero would make the rule an
+ * accident of SidebarRow rather than something this file states.
+ */
 const PLANNER_ROWS = [
   { href: "/planner", label: "Calendar", Icon: Calendar },
   { href: "/meetings", label: "Meetings", Icon: Video },
-  { href: "/clock", label: "Clock in/out", Icon: Clock },
-  { href: "/timesheets", label: "Timesheets", Icon: ListOrdered },
+  { href: "/timesheets", label: "Timesheets", Icon: Clock },
+  { href: "/clock", label: "Clock in/out", Icon: Timer },
 ];
 
+// sidebar-map rows 5 and 6. BOTH rows now land somewhere real, which is the
+// condition they were withheld under:
+//
+//   Team calendar  /planner?calendar=team. The Calendar reads `?calendar`
+//                  and GET /api/calendar/events scopes a team read to the
+//                  viewer's report tree. A viewer with no reports gets
+//                  their own calendar back with the parameter stripped and
+//                  one notice line saying why, so the row can never render
+//                  a byte-identical copy of the viewer's own week while
+//                  claiming it is the team's.
+//   Approvals      /timesheets?view=approvals, which lands the approver on
+//                  the approve queue with the segmented control already on
+//                  it, and that is what its badge counts.
+const PLANNER_TEAM_ROWS = [
+  { href: "/planner?calendar=team", label: "Team calendar", Icon: Users },
+  { href: "/timesheets?view=approvals", label: "Approvals", Icon: ClipboardCheck },
+];
+
+const PLANNER_ALL_ROWS = [...PLANNER_ROWS, ...PLANNER_TEAM_ROWS];
+
+type PlannerCounts = {
+  meetings: number | null;
+  approvals: number | null;
+  /** ISO instant the current punch started, or null when clocked out. */
+  punchSince: string | null;
+};
+
 function CalendarSidebar() {
-  const activeHref = useActiveRowHref(PLANNER_ROWS);
+  const activeHref = useActiveRowHref(PLANNER_ALL_ROWS);
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  // sidebar-map row 5 and 6 audience: anyone with at least one report, the
+  // People team, an Owner or an Admin. The manager tier is the closest the
+  // catalog can ask without a server round trip; the pages and the APIs
+  // enforce the relationship itself, so a manager with no reports sees the
+  // rows and lands on the page's own "shows the people who report to you"
+  // notice rather than on a denial.
+  const showTeam = canAccessTier("manager", accessLevel);
+
+  const [counts, setCounts] = useState<PlannerCounts>({ meetings: null, approvals: null, punchSince: null });
+  const fmt = useFormat();
+
+  const load = useCallback(async () => {
+    const now = new Date();
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
+    const [m, a, t] = await Promise.all([
+      apiFetch<{ count: number }>(`/api/meetings/summary?from=${encodeURIComponent(now.toISOString())}&to=${encodeURIComponent(dayEnd.toISOString())}`),
+      showTeam
+        ? apiFetch<{ count: number }>("/api/timesheets/summary?scope=approve")
+        : Promise.resolve({ ok: false as const, status: 0, error: "not asked" }),
+      apiFetch<{ punch: { since: string } | null }>("/api/time/active"),
+    ]);
+    setCounts({
+      meetings: m.ok ? m.data.count : null,
+      approvals: a.ok ? a.data.count : null,
+      punchSince: t.ok ? (t.data.punch?.since ?? null) : null,
+    });
+  }, [showTeam]);
+
+  // Wrapped, so the effect body sets no state before its first await
+  // (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    const run = async () => { await load(); };
+    void run();
+  }, [load]);
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    window.addEventListener("workwrk:timesheets-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("workwrk:timesheets-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [load]);
+
   return (
     <>
       <ul>
-        {PLANNER_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
+        <NavItem href="/planner" Icon={Calendar} label="Calendar" active={activeHref === "/planner"} />
+        <NavItem href="/meetings" Icon={Video} label="Meetings" active={activeHref === "/meetings"} badge={counts.meetings ?? undefined} />
+        <NavItem href="/timesheets" Icon={Clock} label="Timesheets" active={activeHref === "/timesheets"} />
+        {/* sidebar-map section 2 row 4: "when clocked in: a 6px Dots live
+            then 'since 9:02'". It rides the LABEL rather than `dot` or
+            `trailing`, and both alternatives are wrong for a reason: `dot`
+            paints --os-attention, which is the UNREAD red, and being clocked
+            in is a running state rather than something waiting to be read;
+            `trailing` is the hover affordance slot and is invisible until
+            the pointer is over the row, which is no use for a status. */}
+        <SidebarRow
+          href="/clock"
+          icon={Timer}
+          active={activeHref === "/clock"}
+          label={
+            counts.punchSince ? (
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">Clock in/out</span>
+                <Dots variant="live" />
+                {/* THE VIEWER'S zone and time format, not the machine's.
+                    `toLocaleTimeString(undefined, ...)` reads the browser's
+                    zone, so this row said "since 1:02 PM" while the Clock
+                    page beside it said "since 3:32 AM" for the same punch,
+                    because the page goes through home.locale and this did
+                    not. One clock, one answer. */}
+                <span className="shrink-0 text-xs font-medium text-ink-2">
+                  since {fmt.date(counts.punchSince, "time")}
+                </span>
+              </span>
+            ) : (
+              "Clock in/out"
+            )
+          }
+        />
       </ul>
+      {showTeam ? (
+        <>
+          <SectionLabel>Team</SectionLabel>
+          <ul>
+            {PLANNER_TEAM_ROWS.map((r) => (
+              <NavItem
+                key={r.href}
+                href={r.href}
+                Icon={r.Icon}
+                label={r.label}
+                active={r.href === activeHref}
+                badge={r.href === "/timesheets?view=approvals" ? counts.approvals ?? undefined : undefined}
+              />
+            ))}
+          </ul>
+        </>
+      ) : null}
     </>
   );
 }
@@ -1293,6 +1438,17 @@ function TeamsSidebar() {
   const isManagerTier = MANAGER_LEVELS.has(accessLevel);
   const isHrAdmin = canAccessTier("hr-admin", accessLevel);
 
+  // THE MEMBER BRANCH IS ONE ROW, AND THAT IS THE PRODUCT'S OWN DOOR MODEL,
+  // not an oversight. /people and /organization both call
+  // requireManagerPage() (src/lib/page-gates.ts: "Door 1 EMPLOYEE / AGENT ->
+  // their own career home"), so a Directory or Org chart row here would land
+  // a Member on the in-shell 404. sidebar-map.md section 5 reads the other
+  // way ("the Directory is the one Teams page every Member holds"); opening
+  // the Directory to Members is a change to those two page gates and to what
+  // the whole organization can browse, which is the access engine's decision
+  // and not a menu change. Until that is taken, the row that renders is the
+  // one that opens. /people/me is every person's own career home and is
+  // reachable for everybody.
   if (!isManagerTier) {
     return (
       <ul>
@@ -1440,24 +1596,18 @@ function GoalsSidebar() {
   );
 }
 
-/* ───────────────────────── Timesheets sidebar ───────────────────────── */
-
-const TIMESHEETS_ROWS = [{ href: "/timesheets", label: "My Timesheets", Icon: Clock }];
-
-function TimesheetsSidebar() {
-  const activeHref = useActiveRowHref(TIMESHEETS_ROWS);
-  return (
-    <>
-      <ul>
-        {TIMESHEETS_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-      <SectionLabel>Approvals</SectionLabel>
-      <EmptyState title="No pending approvals" />
-    </>
-  );
-}
+/* TimesheetsSidebar is GONE (Phase 4, spec-planner section 4 step 2).
+ *
+ * It was one row labelled "My Timesheets" plus a hard-coded
+ * <SectionLabel>Approvals</SectionLabel> over an EmptyState that always read
+ * "No pending approvals" whatever the queue held (audit T-9). It was also
+ * unreachable: `timesheets` has been in FOLDED_APP_HUB since the rail
+ * consolidation, so it has no rail pill and this sidebar never rendered.
+ *
+ * Both of its rows live in the Planner hub sidebar above: Timesheets is row
+ * 3 and Approvals is row 6 of the TEAM section, with a real count from
+ * GET /api/timesheets/summary?scope=approve. The `timesheets` catalog entry
+ * now points at CalendarSidebar, so the fold and the sidebar agree. */
 
 /* ───────────────────────── Settings ─────────────────────────
  * Settings is a takeover (spec-shell 2.8): SettingsShell carries its own 264px
@@ -1486,13 +1636,50 @@ export const APPS: AppEntry[] = [
     newAction: { label: "New Space", event: "home-new-space" },
     // Home is the OS-wide catch-all: it keeps the global create menu.
     createActions: "global" },
+  // The Planner sidebar "+" (sidebar-map.md section 2): Event, Meeting,
+  // Reminder, Time entry. All four are live, and all four reach a composer
+  // from EVERY Planner route, which is what they did not do before:
+  //
+  //   Reminder    fires the shell's reminder panel
+  //   Event       /planner?new=event, consumed by the Calendar page
+  //   Meeting     /meetings?new=1, consumed by the meetings page
+  //   Time entry  /timesheets?add=today, consumed by the timesheets page
+  //
+  // The three deep links all used to be one-way: the effects that consume
+  // them set their fired-guard BEFORE scheduling the timer that did the
+  // work, so StrictMode's cleanup cancelled the only run and the parameter
+  // was never even stripped. Event was worse: it dispatched a window event
+  // with a single listener mounted on /planner, so from /timesheets, /clock
+  // or /meetings it did nothing at all.
+  //
+  // "New task" is not here and that is the spec's list, not an omission:
+  // Task lives in the top bar "+" (design-system 4.3) and on the task
+  // chord, both of which work from the Planner like anywhere else.
   { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner", Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
-    createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
+    // sidebar-map section 2: Event * Meeting * Reminder * Time entry, and it
+    // is the only place Event and Meeting are created from chrome. Every row
+    // lands on a real create: Event opens the Planner's own create popover,
+    // Meeting opens the meetings page with its composer already open, Time
+    // entry opens the Log time composer on this week.
+    createActions: [
+      // A ROUTE, NOT AN EVENT. `event:` dispatches on the window, and the
+      // only listener lives on the Calendar page, which mounts on /planner
+      // alone: the Planner sidebar also renders on /timesheets, /clock,
+      // /meetings and /meetings/[id], so on four of the five Planner routes
+      // this row closed the menu and did nothing. `/planner?new=event` lands
+      // on the Calendar and opens the New event modal there.
+      { label: "Event", icon: Calendar, href: "/planner?new=event" },
+      { label: "Meeting", icon: Video, href: "/meetings?new=1" },
+      { label: "Reminder", icon: AlarmClock, onSelect: () => {
+        window.setTimeout(() => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })), 0);
+      } },
+      { label: "Time entry", icon: Clock, href: "/timesheets?add=today" },
+    ] },
   { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick", Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
-  { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk", Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+  { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk", Sidebar: TalkSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },
@@ -1572,9 +1759,19 @@ export const APPS: AppEntry[] = [
   { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs", Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New Goal", icon: Trophy, href: "/okrs?new=1" }] },
-  { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets", Sidebar: TimesheetsSidebar,
+  { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets", Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "Start this week", icon: Clock, onSelect: startTimesheetWeek }] },
+  // Phase 4: the two Planner routes that had a ROUTE_HUB row, a
+  // ROUTE_TITLES label and no catalog entry at all, so neither could be
+  // gated (access section 5.2.1: "a key with no row does not render and its
+  // route 404s"). Both fold into the Planner hub, so neither takes a rail
+  // pill; their rows are sidebar-map section 2 rows 2 and 4. They share
+  // CalendarSidebar because they are rows of it.
+  { key: "meetings", label: "Meetings", Icon: Video, defaultHref: "/meetings", Sidebar: CalendarSidebar,
+    category: "Core", defaultPinned: true },
+  { key: "clock", label: "Clock in/out", Icon: Timer, defaultHref: "/clock", Sidebar: CalendarSidebar,
+    category: "Core", defaultPinned: true },
 
   // ── PPMS scope (2026-06-03): CRM / Marketing / Helpdesk / ITSM
   // intentionally not pinned. WorkwrK is a People + Project Management

@@ -24,10 +24,10 @@ You started with 5 people. Everyone knew everything. Decisions happened over lun
 
 Now you're at 30. Or 80. Or 200. And suddenly:
 
-- **Performance is invisible.** You don't know who's actually delivering until quarterly reviews — which are mostly storytelling sessions.
+- **Performance is invisible.** You don't know who's actually delivering until quarterly reviews, which are mostly storytelling sessions.
 - **Processes live in people's heads.** When someone leaves, their process leaves with them.
-- **You're using 15 tools** — a CRM here, an HRMS there, Google Sheets for KPIs, WhatsApp for task follow-ups, and a project management tool nobody actually uses.
-- **Decisions are gut-based.** Promotions, hikes, PIPs — all based on who talks the loudest in meetings, not who actually performs.
+- **You're using fourteen tools.** A CRM here, an HRMS there, a spreadsheet for KPIs, a messaging app for task follow-ups, and a project management tool nobody actually uses.
+- **Decisions are gut-based.** Promotions, hikes and PIPs are all based on who talks the loudest in meetings, not who actually performs.
 
 This is not a technology problem. It's an operating system problem.
 
@@ -35,20 +35,20 @@ This is not a technology problem. It's an operating system problem.
 
 A business operating system (Business OS) is a single platform that unifies how your company manages **people, performance, processes, and decisions**.
 
-Think of it like this: your phone has an operating system (iOS or Android) that makes all your apps work together seamlessly. A Business OS does the same for your company — it makes people management, KPIs, SOPs, tasks, reviews, and analytics work together as one system.
+Your phone has an operating system that makes its apps work together. A business OS does the same for a company: people management, KPIs, SOPs, tasks, reviews and analytics stop being separate products and become one set of linked records.
 
 ### The Core Components
 
 A complete Business OS includes:
 
-1. **People Management** — Org chart, profiles, departments, onboarding
-2. **KPI Engine** — Goal setting, tracking, auto-scoring
-3. **Task Management** — Assignment, tracking, completion rates
-4. **SOP Playbook** — Process documentation, compliance tracking
-5. **Performance Reviews** — 360° feedback, calibration, data-driven decisions
-6. **Recognition** — Peer kudos, value alignment, social feed
-7. **Composite Scoring** — One number that captures total performance
-8. **AI Intelligence** — Ask your business anything in plain English
+1. **People Management**: Org chart, profiles, departments, onboarding
+2. **KPI Engine**: Goal setting, tracking, auto-scoring
+3. **Task Management**: Assignment, tracking, completion rates
+4. **SOP Playbook**: Process documentation, compliance tracking
+5. **Performance Reviews**: 360° feedback, calibration, data-driven decisions
+6. **Recognition**: Peer kudos, value alignment, social feed
+7. **Composite Scoring**: One number that captures total performance
+8. **AI Intelligence**: Ask your business anything in plain English
 
 ## Why Spreadsheets and Disconnected Tools Fail
 
@@ -88,7 +88,7 @@ A Business OS isn't another tool to add to your stack. It's the tool that **repl
     slug: "how-to-build-performance-review-system",
     title: "How to Build a Performance Review System That Actually Works",
     excerpt:
-      "Most performance reviews are broken — they're subjective, infrequent, and dreaded by everyone. Here's how to build a system that uses real data and drives real decisions.",
+      "Most performance reviews are broken: they're subjective, infrequent, and dreaded by everyone. Here's how to build a system that uses real data and drives real decisions.",
     content: `
 ## Why Most Performance Reviews Fail
 
@@ -108,20 +108,20 @@ Imagine opening a review form and seeing:
 - **Peer Rating: 4.2/5** (from peer feedback)
 - **Kudos Received: 12 this quarter** (from the recognition system)
 
-Now the review conversation shifts from "I think you did well" to "Your data shows strong KPI performance but SOP compliance dropped — let's talk about why."
+Now the review conversation shifts from "I think you did well" to "Your data shows strong KPI performance but SOP compliance dropped. Let's talk about why."
 
 ## The 360° Approach
 
 A complete review system includes multiple perspectives:
 
 ### Self-Assessment
-Employees rate themselves against their KRAs. This reveals self-awareness gaps — if someone rates themselves 5/5 but their KPI score is 60%, that's a coaching conversation.
+Employees rate themselves against their KRAs. This reveals self-awareness gaps: if someone rates themselves 5/5 but their KPI score is 60%, that's a coaching conversation.
 
 ### Manager Review
 The manager adds qualitative context to quantitative data. They can see the numbers and add nuance: "The KPI dip in February was because we shifted her to a new project mid-quarter."
 
 ### Peer Feedback
-Colleagues provide ratings and written feedback. This catches things managers miss — collaboration quality, helpfulness, communication.
+Colleagues provide ratings and written feedback. This catches things managers miss, such as collaboration quality, helpfulness, communication.
 
 ### Calibration
 Managers across the organization compare scores to ensure fairness. This prevents one team from being graded on a curve while another is graded harshly.
@@ -130,23 +130,19 @@ Managers across the organization compare scores to ensure fairness. This prevent
 
 After all inputs are collected, the system should calculate a **composite performance score** that weighs all factors:
 
-| Component | Default Weight |
-|-----------|---------------|
-| KPI Achievement | 30% |
-| Manager Rating | 25% |
-| Task Completion | 15% |
-| Peer Feedback | 10% |
-| Self-Assessment | 10% |
-| SOP Compliance | 10% |
+- **KPI achievement** 40 percent
+- **Behavioural rating against the anchors** 30 percent
+- **SOP compliance** 20 percent
+- **Peer feedback** 10 percent
 
-This gives you one number (0–100) that represents total performance — not just one manager's opinion.
+Those four are WorkwrK's shipped defaults, and an admin can change every one of them. The result is one number from 0 to 100 that represents total performance, rather than one manager's opinion.
 
 ## Making Reviews Actionable
 
 The review shouldn't end with a score. It should trigger decisions:
 
 - **Score > 85**: Promotion/hike eligible. Flag for discussion.
-- **Score 60–85**: On track. Identify growth areas.
+- **Score 60 to 85**: On track. Identify growth areas.
 - **Score < 60**: Performance improvement plan. Set 30-day milestones.
 
 When decisions are tied to data, they're fair, defensible, and trusted by the team.
@@ -183,8 +179,8 @@ The result? The same task gets done 5 different ways by 5 different people. Qual
 SOPs fail for three reasons:
 
 1. **They're buried in Google Docs** that nobody knows exist
-2. **There's no accountability** — nobody tracks who's following them
-3. **They're outdated** — written once and never updated
+2. **There's no accountability**: nobody tracks who's following them
+3. **They're outdated**: written once and never updated
 
 The fix isn't better documentation. It's a **system that assigns, tracks, and scores compliance**.
 
@@ -192,7 +188,7 @@ The fix isn't better documentation. It's a **system that assigns, tracks, and sc
 
 ### Step 1: Create Step-by-Step SOPs
 
-Break every process into discrete steps. Not paragraphs of text — actual checkable steps.
+Break every process into discrete steps. Not paragraphs of text, actual checkable steps.
 
 Bad: "Process the customer order by checking inventory, creating the invoice, and scheduling delivery."
 
@@ -226,7 +222,7 @@ Aggregate by:
 
 ### Step 5: Feed Into Performance Scores
 
-SOP compliance should be one factor in the composite performance score. In WorkwrK, it carries a default weight of 10% — enough to matter, not enough to dominate.
+SOP compliance should be one factor in the composite performance score. In WorkwrK it carries a default weight of 20 percent: enough to matter, not enough to dominate. An admin can change the weights.
 
 ## Common Compliance Problems and Fixes
 
@@ -257,17 +253,23 @@ Companies that track SOP compliance see:
   },
   {
     slug: "employee-recognition-impact-on-performance",
-    title: "How Employee Recognition Directly Impacts Performance Scores",
+    // The title and excerpt used to claim a causal research result
+    // ("measurably improve engagement, retention, and output. Here's the
+    // data.") that the body of this very post refuses to make, in its
+    // fourth paragraph, in as many words. The excerpt is not buried: it is
+    // the card copy on /blog twice, the meta description on the post and
+    // its og:description. So it now says what the post actually argues.
+    title: "What Recognition Leaves Behind That a Review Can Read",
     excerpt:
-      "Recognition isn't just feel-good fluff. When tied to performance data, kudos systems measurably improve engagement, retention, and output. Here's the data.",
+      "We will not quote you an engagement multiple. The narrower claim is checkable: vague praise leaves no record, and recognition tied to a named value leaves one a review can read.",
     content: `
 ## Recognition Is Not a Nice-to-Have
 
-Most companies treat recognition as an afterthought — an annual award ceremony or a Slack channel that nobody checks. Meanwhile, their best performers quietly disengage because their work goes unnoticed.
+Most companies treat recognition as an afterthought: an annual award ceremony, or a team chat channel that nobody checks. Meanwhile, their best performers quietly disengage because their work goes unnoticed.
 
-The research is clear: employees who receive regular recognition are **4x more likely to be engaged** and **5x more likely to feel connected to company culture**.
+We are not going to quote you an engagement multiple. The numbers that circulate for this are vendor surveys with no method attached, and we have not run the study ourselves.
 
-But vague praise ("great job!") doesn't move the needle. Structured, value-aligned recognition does.
+What we can say is narrower and checkable: vague praise ("great job!") leaves no record, so nothing can read it later. Structured recognition tied to a named company value leaves one, and that record is the thing a review can read.
 
 ## What Effective Recognition Looks Like
 
@@ -279,15 +281,15 @@ The most impactful recognition comes from colleagues, not just managers. When a 
 
 Instead of generic praise, tie recognition to specific values:
 
-- **"Customer First"** — "You stayed late to resolve the client's issue same-day"
-- **"Ownership"** — "You caught the bug before it hit production"
-- **"Teamwork"** — "You onboarded the new hire even though it wasn't your job"
+- **"Customer First"**: "You stayed late to resolve the client's issue same-day"
+- **"Ownership"**: "You caught the bug before it hit production"
+- **"Teamwork"**: "You onboarded the new hire even though it wasn't your job"
 
 This reinforces what behaviors the company actually values.
 
 ### 3. It's Visible
 
-Recognition should be public — a social feed that everyone sees. This normalizes appreciation and creates positive competition.
+Recognition should be public, on a social feed that everyone sees. This normalizes appreciation and creates positive competition.
 
 ### 4. It Impacts Performance Scores
 
@@ -295,7 +297,7 @@ Here's where recognition gets strategic. In a composite performance scoring syst
 
 **+1 point per 2 kudos received in the last 30 days, up to +5 bonus points.**
 
-This means a person with a composite score of 80 who received 10 kudos this month gets bumped to 85. That's not insignificant — it can be the difference between "on track" and "promotion eligible."
+This means a person with a composite score of 80 who received 10 kudos this month gets bumped to 85. That's not insignificant: it can be the difference between "on track" and "promotion eligible."
 
 ## The Recognition-Performance Flywheel
 
@@ -320,7 +322,7 @@ This flywheel runs itself once it's set up.
 - Monthly leaderboard
 
 **Nice-to-haves:**
-- Slack/Teams notification when you receive kudos
+- A notification in your team chat when you receive kudos
 - Kudos count on employee profiles
 - Manager dashboard showing recognition patterns
 
@@ -328,10 +330,10 @@ This flywheel runs itself once it's set up.
 
 Beyond the feel-good factor, recognition data reveals:
 
-- **Who's being recognized most** — your informal leaders
-- **Who's never recognized** — potential engagement risk
-- **Which values are reinforced most** — culture health check
-- **Which teams recognize each other** — collaboration patterns
+- **Who's being recognized most**: your informal leaders
+- **Who's never recognized**: potential engagement risk
+- **Which values are reinforced most**: culture health check
+- **Which teams recognize each other**: collaboration patterns
     `.trim(),
     author: "WorkwrK Team",
     authorRole: "People & Culture",
@@ -344,13 +346,13 @@ Beyond the feel-good factor, recognition data reveals:
     slug: "ai-for-business-intelligence-practical-guide",
     title: "AI for Business Intelligence: A Practical Guide for Growing Companies",
     excerpt:
-      "Forget chatbots that give generic answers. Here's how AI actually works when it's connected to your real business data — and why it changes how you make decisions.",
+      "Forget chatbots that give generic answers. Here's how AI actually works when it's connected to your real business data, and why it changes how you make decisions.",
     content: `
 ## AI That Actually Knows Your Business
 
 Most "AI features" in business tools are glorified chatbots. They give generic advice based on general knowledge. Ask "who should I promote?" and you'll get a blog post about promotion criteria.
 
-Real AI intelligence is different. It's connected to **your actual data** — your people, their KPIs, their task completion rates, their SOP compliance, their peer feedback, their review scores.
+Real AI intelligence is different. It's connected to **your actual data**: your people, their KPIs, their task completion rates, their SOP compliance, their peer feedback, their review scores.
 
 When you ask "who should I promote?" it answers with names, scores, and evidence.
 
@@ -367,7 +369,7 @@ No dashboards to navigate. No filters to set. Just ask:
 
 ### Cross-Module Intelligence
 
-The power isn't in any single data point — it's in the connections. AI can correlate:
+The power isn't in any single data point: it's in the connections. AI can correlate:
 
 - Declining KPI scores with increased task overload
 - Low SOP compliance with recent team changes
@@ -386,16 +388,16 @@ With enough data, AI can predict:
 
 When you're at 20 people, you know everyone. At 100, you can't. At 300, it's impossible.
 
-AI bridges this gap. It gives the founder or CEO the same visibility they had at 20 people — but at scale. Instead of walking the floor and asking "how's it going?", they ask the AI "how's it going?" and get a data-backed answer.
+AI bridges this gap. It gives the founder or CEO the same visibility they had at 20 people, but at scale. Instead of walking the floor and asking "how's it going?", they ask the AI "how's it going?" and get a data-backed answer.
 
 ## Getting Started with AI Intelligence
 
 You don't need a data science team. You need a platform that:
 
-1. **Collects data automatically** — KPIs, tasks, reviews, SOPs, kudos
-2. **Normalizes it** — composite scores that make different data types comparable
-3. **Makes it queryable** — natural language, not SQL
-4. **Provides context** — not just numbers, but trends, comparisons, and recommendations
+1. **Collects data automatically**: KPIs, tasks, reviews, SOPs, kudos
+2. **Normalizes it**: composite scores that make different data types comparable
+3. **Makes it queryable**: natural language, not SQL
+4. **Provides context**: not just numbers, but trends, comparisons, and recommendations
 
 The AI gets smarter as more data flows in. After 3 months, it can spot trends. After 6, it can predict outcomes.
     `.trim(),
@@ -414,21 +416,21 @@ The AI gets smarter as more data flows in. After 3 months, it can spot trends. A
     content: `
 ## Mistake 1: Too Many KPIs
 
-If everyone has 15 KPIs, nobody has priorities. The data shows that employees with more than 5 KPIs perform worse on all of them compared to employees with 3–5 focused KPIs.
+If everyone has 15 KPIs, nobody has priorities. We have no study to hand you on this, and you should be suspicious of anyone who produces one; what we will say is that a KPI you cannot recite from memory is not steering anything.
 
-**Fix:** Each person gets 3–5 KPIs max. If it's important, it gets a KPI. If it doesn't get a KPI, it's either not important or it's someone else's responsibility.
+**Fix:** Each person gets three to five KPIs at most. If it's important, it gets a KPI. If it doesn't get a KPI, it's either not important or it's someone else's responsibility.
 
 ## Mistake 2: KPIs Without Targets
 
 "Increase sales" is not a KPI. "Achieve ₹50L in monthly revenue" is. Without a specific target, you can't score performance.
 
-**Fix:** Every KPI needs a numeric target with a clear timeframe. Auto-scoring requires this — the system calculates achievement as (actual / target) × 100.
+**Fix:** Every KPI needs a numeric target with a clear timeframe. Auto-scoring requires this: the system calculates achievement as (actual / target) × 100.
 
 ## Mistake 3: Annual KPIs Only
 
 Setting KPIs once a year and reviewing them 12 months later is like driving with your eyes closed and checking the map once a year.
 
-**Fix:** Monthly or quarterly KPI cycles. Score them rolling — look at the last 90 days, not just the last quarter.
+**Fix:** Monthly or quarterly KPI cycles. Score them rolling: look at the last 90 days, not just the last quarter.
 
 ## Mistake 4: No Cascading
 
@@ -458,13 +460,13 @@ KPIs live in one system. Reviews live in another. The manager has to manually cr
 
 For each role, define:
 
-1. **3–5 KPIs** with numeric targets
+1. **Three to five KPIs** with numeric targets
 2. **Monthly scoring** (automated)
-3. **Traffic-light indicators** (Green > 80%, Amber 60–80%, Red < 60%)
+3. **Traffic-light indicators** (Green above 80%, Amber 60 to 80%, Red under 60%)
 4. **Trend tracking** (is this person improving or declining?)
 5. **Integration with composite score** (KPI achievement = 30% of total performance)
 
-When KPIs are tracked this way, they become the foundation of a data-driven culture — not just numbers in a spreadsheet that nobody looks at.
+When KPIs are tracked this way, they become the foundation of a data-driven culture, not just numbers in a spreadsheet that nobody looks at.
     `.trim(),
     author: "WorkwrK Team",
     authorRole: "Product",

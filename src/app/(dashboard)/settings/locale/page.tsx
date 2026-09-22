@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { Globe, Loader2 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
+import { WorkWeekCard } from "./work-week-card";
 
 const TIMEZONES = [
   "UTC",
@@ -213,6 +214,13 @@ export default function LocaleSettingsPage() {
           </div>
         </>
       )}
+
+      {/* The organization's working calendar. It is on this page because the
+          settings registry already names it here ("week start", "capacity"
+          are this page's own search keywords), and it is its own card
+          because it is its own record and its own save. */}
+      <WorkWeekCard />
+
       <div className="h-10" />
     </div>
   );

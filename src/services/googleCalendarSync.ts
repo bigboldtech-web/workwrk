@@ -8,12 +8,16 @@ import {
 } from "./googleCalendar";
 
 /**
- * Incremental sync of Google Calendar events → Workwrk Task rows.
+ * Incremental sync of Google Calendar events into WorkwrK.
  *
  * Design decisions:
- *  · Google events arrive as Tasks with `externalSource = "GCAL"` so the
- *    existing view code renders them for free. The edit/delete guard in
- *    the Task API blocks the user from mutating them.
+ *  · Google events land as `CalendarEvent` rows with
+ *    `externalSource = "GCAL"`, which is the table the Calendar reads
+ *    (`GET /api/calendar/events`). They are reported to the client under
+ *    `kind: "external"` and are not editable there; edit them in Google
+ *    and the next pass brings the change across.
+ *  · A legacy `Task` row is written alongside for one release. See the
+ *    long note above `applyEvent` for exactly why and what removes it.
  *  · `externalId` is stored as `${calendarId}::${eventId}` — lets us
  *    scope cleanup by calendar when the user unsubscribes.
  *  · `syncToken` lives on each per-calendar subscription row. First run
@@ -114,6 +118,7 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
         organizationId: user.organizationId,
         calendarId,
         shareTitles: sub.shareTitles,
+        subscriptionId: sub.id,
       });
       if (result === "inserted") inserted++;
       else if (result === "updated") updated++;
@@ -139,15 +144,44 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
   return { inserted, updated, deleted };
 }
 
+/**
+ * Write one Google event into the product.
+ *
+ * WHERE IT LANDS, AND WHY THAT CHANGED (Phase 4, spec-planner section 2
+ * `/planner` Data and section 4 step 5).
+ *
+ * It used to write a row into the LEGACY `Task` table. The Planner read
+ * `Item`. So a connected Google Calendar produced rows that no surface in
+ * the product rendered, and the whole connect flow was invisible end to
+ * end: a person clicked Connect, granted access, and saw nothing, forever.
+ *
+ * It writes `CalendarEvent` now, which is the table the calendar read
+ * actually reads. The legacy `Task` write is kept BESIDE it, deliberately
+ * and temporarily, for two reasons:
+ *
+ *   1. `/api/calendar/events` still reads the GCAL-marked Item rows the
+ *      previous migration left behind, so the two sources agree while
+ *      scripts/backfill-calendar-events.mjs has not been run in a given
+ *      workspace.
+ *   2. Disconnecting deletes the legacy rows by `assigneeId` +
+ *      `externalSource` (src/app/api/integrations/google-calendar/route.ts),
+ *      and that path has to keep finding what it is meant to remove until
+ *      it moves in its own step.
+ *
+ * The CalendarEvent write is WRAPPED: a deployment that has not applied
+ * prisma/sql/2026-09-22-calendar-event.sql yet keeps syncing exactly as it
+ * did before rather than failing the whole cron.
+ */
 async function applyEvent(
   event: GoogleEvent,
-  ctx: { userId: string; organizationId: string; calendarId: string; shareTitles: boolean },
+  ctx: { userId: string; organizationId: string; calendarId: string; shareTitles: boolean; subscriptionId?: string },
 ): Promise<"inserted" | "updated" | "deleted" | "skipped"> {
   if (!event.id) return "skipped";
   const externalId = `${ctx.calendarId}::${event.id}`;
 
-  // Deleted / cancelled events — tombstone handling.
+  // Deleted / cancelled events: tombstone handling on both tables.
   if (event.status === "cancelled") {
+    await deleteCalendarEvent(ctx.userId, externalId);
     const existing = await prisma.task.findFirst({
       where: { externalSource: GOOGLE_CAL_SOURCE, externalId },
       select: { id: true },
@@ -164,8 +198,29 @@ async function applyEvent(
   const endAt = end.dateTime ? new Date(end.dateTime) : null;
   const date = startAt ?? (start.date ? new Date(start.date) : new Date());
 
+  // The viewer's own reply to the invitation. Google marks their attendee
+  // entry with `self`; an event nobody was invited to has no attendees at
+  // all and is never declined.
+  const declined = (event.attendees ?? []).some((a) => a.self && a.responseStatus === "declined");
+
   const title = ctx.shareTitles ? (event.summary?.trim() || "(No title)") : "Busy";
   const description = ctx.shareTitles ? (event.description?.trim() || null) : null;
+
+  await upsertCalendarEvent({
+    userId: ctx.userId,
+    organizationId: ctx.organizationId,
+    subscriptionId: ctx.subscriptionId ?? null,
+    externalId,
+    title,
+    description,
+    startAt: date,
+    // An all-day Google event carries no end time; the day it sits on is
+    // the whole answer, so the row ends a minute before the same time
+    // tomorrow and never bleeds into the next column.
+    endAt: endAt ?? (allDay ? new Date(date.getTime() + 24 * 3_600_000 - 60_000) : new Date(date.getTime() + 3_600_000)),
+    allDay,
+    declined,
+  });
 
   const existing = await prisma.task.findFirst({
     where: { externalSource: GOOGLE_CAL_SOURCE, externalId },
@@ -200,4 +255,92 @@ async function applyEvent(
     },
   });
   return "inserted";
+}
+
+/** Upsert on (userId, externalSource, externalId): the sync's idempotency key. */
+async function upsertCalendarEvent(row: {
+  userId: string;
+  organizationId: string;
+  subscriptionId: string | null;
+  externalId: string;
+  title: string;
+  description: string | null;
+  startAt: Date;
+  endAt: Date;
+  allDay: boolean;
+  declined: boolean;
+}): Promise<void> {
+  // TWO ATTEMPTS, AND THE SECOND ONE IS THE TOLERANCE RULE. `declined`
+  // arrives with prisma/sql/2026-09-22-calendar-declined.sql; a deployment
+  // that has the table but not yet the column must keep syncing rather than
+  // losing every event, so the write is retried without the field.
+  try {
+    await writeCalendarEvent(row, true);
+  } catch {
+    try {
+      await writeCalendarEvent(row, false);
+    } catch {
+      // The table is not there on this deployment yet. The legacy write in
+      // applyEvent still happens, so the sync is exactly as useful as it was.
+    }
+  }
+}
+
+async function writeCalendarEvent(
+  row: {
+    userId: string;
+    organizationId: string;
+    subscriptionId: string | null;
+    externalId: string;
+    title: string;
+    description: string | null;
+    startAt: Date;
+    endAt: Date;
+    allDay: boolean;
+    declined: boolean;
+  },
+  withDeclined: boolean,
+): Promise<void> {
+  await prisma.calendarEvent.upsert({
+      where: {
+        userId_externalSource_externalId: {
+          userId: row.userId,
+          externalSource: GOOGLE_CAL_SOURCE,
+          externalId: row.externalId,
+        },
+      },
+      create: {
+        organizationId: row.organizationId,
+        userId: row.userId,
+        title: row.title,
+        kind: "EVENT",
+        startAt: row.startAt,
+        endAt: row.endAt,
+        allDay: row.allDay,
+        description: row.description,
+        externalSource: GOOGLE_CAL_SOURCE,
+        externalId: row.externalId,
+        subscriptionId: row.subscriptionId,
+        ...(withDeclined ? { declined: row.declined } : {}),
+      },
+      update: {
+        title: row.title,
+        startAt: row.startAt,
+        endAt: row.endAt,
+        allDay: row.allDay,
+        description: row.description,
+        subscriptionId: row.subscriptionId,
+        ...(withDeclined ? { declined: row.declined } : {}),
+      },
+  });
+}
+
+async function deleteCalendarEvent(userId: string, externalId: string): Promise<void> {
+  try {
+    await prisma.calendarEvent.deleteMany({
+      where: { userId, externalSource: GOOGLE_CAL_SOURCE, externalId },
+    });
+  } catch {
+    // Same tolerance as the upsert above.
+  }
 }

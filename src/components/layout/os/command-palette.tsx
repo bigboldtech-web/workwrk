@@ -370,6 +370,21 @@ function PaletteBody() {
         glyph: <Glyph icon={ListTodo} />,
         action: () => openCreateList(),
       });
+    if (isMember)
+      rows.push({
+        // spec-planner section 2 `/planner`: "command palette 'Calendar'
+        // (navigate) and 'New event' (action)". The jump row for Calendar
+        // is the Planner hub row below; this is the action half.
+        //
+        // A ROUTE, NOT A WINDOW EVENT: the composer lives on /planner and
+        // the palette opens from anywhere, so a window event would do
+        // nothing on every page but one. The Calendar consumes `?new=event`
+        // on arrival and strips it.
+        id: "c-event",
+        label: "Event",
+        glyph: <Glyph icon={CalendarDays} />,
+        href: "/planner?new=event",
+      });
     rows.push({
       id: "c-reminder",
       label: "Reminder",

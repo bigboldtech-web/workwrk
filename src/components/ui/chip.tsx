@@ -42,16 +42,42 @@ export interface ChipProps
   /** Ergonomic shortcut: `active` resolves to the active state unless
    *  an explicit `state` is passed (e.g. `danger`). */
   active?: boolean;
+  /**
+   * A Chip that only LABELS something is a span, not a button.
+   *
+   * The default is a real `<button type="button">`, which is right for the
+   * toolbar pills this primitive was written for and wrong everywhere a Chip
+   * is used to print a value: a meeting type in a table cell took a tab
+   * stop, drew a hover and a focus ring, and did nothing when clicked, inside
+   * a row that was itself a link ("no control without a handler").
+   */
+  as?: "button" | "span";
 }
 
 const Chip = React.forwardRef<HTMLButtonElement, ChipProps>(
-  ({ className, state, size, active, ...props }, ref) => {
+  ({ className, state, size, active, as = "button", ...props }, ref) => {
     const resolved = state ?? (active ? "active" : "idle");
+    const classes = cn(chipVariants({ state: resolved, size }), className);
+    if (as === "span") {
+      // `onClick` and `disabled` are dropped rather than forwarded: a label
+      // has neither, and a span with a click handler is the dead control
+      // this branch exists to stop.
+      const rest = { ...props } as Record<string, unknown>;
+      delete rest.onClick;
+      delete rest.disabled;
+      return (
+        <span
+          ref={ref as unknown as React.Ref<HTMLSpanElement>}
+          className={cn(classes, "cursor-default hover:border-line hover:bg-raised hover:text-ink-2")}
+          {...(rest as React.HTMLAttributes<HTMLSpanElement>)}
+        />
+      );
+    }
     return (
       <button
         ref={ref}
         type="button"
-        className={cn(chipVariants({ state: resolved, size }), className)}
+        className={classes}
         {...props}
       />
     );

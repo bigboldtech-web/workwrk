@@ -64,6 +64,45 @@ const SQL_MANIFEST = [
   "2026-09-21-doc-lock.sql",
   "2026-09-21-contract-send-decline.sql",
   "2026-09-21-agreement-archived-by.sql",
+  // Phase 4 (Time and Talk). Seven ADD COLUMN IF NOT EXISTS statements plus
+  // one already-satisfied UPDATE. It belongs here because Prisma selects
+  // every model field on a findMany with no select, so the moment the client
+  // knows about Meeting.deletedAt or Conversation.findable, a database
+  // without those columns 500s the meetings list and the Talk sidebar.
+  "2026-09-22-time-and-talk.sql",
+  // Phase 4, decided additions (b) and (c): the org working calendar table
+  // and the two time-tracking-depth columns. It is late-safe only because
+  // every TimeEntry query on the clock and timesheet paths names its
+  // columns explicitly (a bare Prisma query emits every scalar, including
+  // billable and tags, and would 500 the clock against a database without
+  // them) and because readOrgWorkSchedule swallows a missing table and
+  // answers the defaults. Read the header of the .sql file before touching
+  // any TimeEntry query.
+  "2026-09-22-work-schedule.sql",
+  // Phase 4, spec-planner section 4 step 6: Meeting."itemId", the link to
+  // the hidden per-organization Meetings List, so a meeting is gated through
+  // the one Item ladder rather than through a new object type. Same reason
+  // as the file two above: once the generated client knows about the column,
+  // a database without it 500s the meetings list, because a findMany with no
+  // select asks for every scalar. The Item rows themselves are a separate,
+  // dry-run-by-default data script (scripts/backfill-meeting-items.mjs) and
+  // are NOT part of the deploy.
+  "2026-09-22-meeting-item.sql",
+  // Phase 4, spec-planner section 2 `/planner` Data: the CalendarEvent
+  // table, the home for a personal calendar entry and for the rows the
+  // Google sync cron brings in. Deploy order is free (every reader is
+  // wrapped and answers "no events" while the relation is absent), but it
+  // belongs in the manifest anyway: until it is applied, "New event" on the
+  // Calendar surfaces a failure instead of saving, and that is a visible
+  // regression rather than a quiet one.
+  "2026-09-22-calendar-event.sql",
+  // Phase 4, the Calendar's "Show declined Google events" switch:
+  // CalendarEvent."declined". Genuinely late-safe, and checked rather than
+  // asserted: the calendar read tries the filtered query and falls back to
+  // the unfiltered one, and the sync write retries without the field. It is
+  // in the manifest so the switch stops being a control with no effect on
+  // the same deploy that ships it.
+  "2026-09-22-calendar-declined.sql",
 ];
 
 /**

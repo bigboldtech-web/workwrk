@@ -35,6 +35,7 @@ import { kindFor } from "@/lib/inbox-kinds";
 import { tabUnreadWhere, unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { notificationTarget } from "@/lib/notification-target";
 import type { HomePayload, HomeTaskRow } from "@/lib/home-payload";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,7 @@ async function loadWork(userId: string, organizationId: string, now: Date, local
     where: {
       organizationId,
       archivedAt: null,
+      ...NOT_SYSTEM_ITEMS,
       // Mine: primary assignee or one of several.
       OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
       // Anything that could land in one of the three groups. Everything

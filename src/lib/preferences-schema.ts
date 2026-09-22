@@ -162,7 +162,31 @@ export const notificationsPatchSchema = z.strictObject({
   /** Muted object ids ("space:abc", "list:def"). */
   muted: stringList.optional(),
   desktop: z.boolean().optional(),
+  /**
+   * "Ring for incoming calls" (spec-talk.md section 4 step 10).
+   *
+   * A SIBLING of `desktop`, not a child of it, and deliberately so:
+   * settings-architecture section 4.3 defines `desktop` as a plain boolean
+   * for "Browser notifications", and .strict() would reject a child key
+   * under a boolean anyway. The row on My settings > Notifications >
+   * Desktop greys out with the caption "Turn on browser notifications
+   * first" when the parent is off; it does not disappear, because the
+   * preference is still the person's and still remembered.
+   */
+  desktopRingCalls: z.boolean().optional(),
   reminderEmail: z.boolean().optional(),
+  /**
+   * The state the reminder panel's "Also email me" switch opens in
+   * (spec-planner.md section 2 Reminders, open question 1: recommendation
+   * "off, with the last choice remembered per user").
+   *
+   * A SEPARATE key from `reminderEmail`, which is the Notifications page's
+   * "email me about reminders at all" row: this one is only the default
+   * position of a switch inside one panel, and a person who turns it on
+   * once for one reminder has not asked to be emailed about every future
+   * one.
+   */
+  reminderEmailDefault: z.boolean().optional(),
 });
 
 export const localePatchSchema = z.strictObject({
@@ -298,6 +322,48 @@ export const workPatchSchema = z.strictObject({
   drawerWidth: z.number().int().min(480).max(720).optional(),
 });
 
+// ── Planner and Timesheets display options (Phase 4) ──────────────
+//
+// spec-planner.md section 2 names every one of these and its default. They
+// are personal preferences (settings section 9.2 storage class), written by
+// the Calendar's Display menu, its filter panel and the Timesheets Display
+// menu, and read per field with an explicit default.
+//
+// THEY HAD TO LAND FIRST. `homePatchSchema` is a z.strictObject, so before
+// this block ANY patch carrying home.planner.* or home.timesheets.* was a
+// 400 naming the key, which would have made every switch on those two
+// toolbars cosmetic: it would appear to work and reset on the next load.
+//
+// READ THEM PER FIELD, NEVER BY SPREADING THE NAMESPACE.
+// getEffectivePreferences merges `home` with a SHALLOW spread
+// (src/lib/preferences.ts), so an org-level `home.planner` object is
+// REPLACED WHOLE by any user-level one rather than merged into it. A reader
+// that spreads the namespace silently loses org defaults for every key the
+// user never set. `plannerPrefs()` and `timesheetPrefs()` in
+// src/lib/planner-prefs.ts are the readers, and they take one field at a
+// time with the default written beside it.
+
+export const plannerSurfaceSchema = z.strictObject({
+  /** Last used Calendar view. Week on a first load. */
+  view: z.enum(["week", "month", "people"]).optional(),
+  /** Which kinds render. Default: all five on. */
+  sources: stringList.optional(),
+  showWeekends: z.boolean().optional(),
+  /** Google events the viewer declined. Default off. */
+  showDeclined: z.boolean().optional(),
+  showReminders: z.boolean().optional(),
+  highlightWorkHours: z.boolean().optional(),
+  /** The right-hand Unscheduled tasks panel. Default off. */
+  showUnscheduled: z.boolean().optional(),
+});
+
+export const timesheetsSurfaceSchema = z.strictObject({
+  /** The note under an entry title. Default ON. */
+  showNotes: z.boolean().optional(),
+  /** "From timer" / "Clocked" / "Manual" / "Imported". Default ON. */
+  showSource: z.boolean().optional(),
+});
+
 export const homePatchSchema = z.strictObject({
   cards: stringList.optional(),
   order: stringList.optional(),
@@ -325,6 +391,9 @@ export const homePatchSchema = z.strictObject({
   notetaker: notetakerSurfaceSchema.optional(),
   // The SOP library's Display options (spec-process section 2 `/sops`).
   sops: sopsSurfaceSchema.optional(),
+  // Planner hub surfaces (spec-planner.md section 2, Phase 4).
+  planner: plannerSurfaceSchema.optional(),
+  timesheets: timesheetsSurfaceSchema.optional(),
 });
 
 // ── theme, density ────────────────────────────────────────────────

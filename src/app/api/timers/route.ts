@@ -17,6 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { logTimerToTimesheet, timerBridgeMessage, type TimerBridgeResult } from "@/lib/timesheet";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 
@@ -96,5 +97,39 @@ export async function POST(req: Request) {
       notes: parsed.data.notes,
     },
   });
-  return NextResponse.json({ session }, { status: 201 });
+
+  // THE SAME BRIDGE THE STOP ROUTE RUNS. A manual "I worked 45 minutes on
+  // this card" wrote a TimerSession and stopped there, so the hours showed
+  // on the task and never reached the week the person submits for approval
+  // (spec-planner section 4 step 3, time.md #21). Running and manual now
+  // land in the same place, and a week that cannot take the entry says so
+  // rather than dropping it.
+  let bridge: TimerBridgeResult | null = null;
+  if (parsed.data.entityType === "BOARD_ITEM") {
+    try {
+      const item = await prisma.item.findUnique({
+        where: { id: parsed.data.entityId },
+        select: { id: true, title: true, organizationId: true },
+      });
+      if (item && item.organizationId === ctx.orgId) {
+        bridge = await logTimerToTimesheet({
+          orgId: ctx.orgId,
+          userId: ctx.userId,
+          itemId: item.id,
+          title: parsed.data.notes?.trim() || item.title,
+          durationMs: parsed.data.durationMs,
+          when: stoppedAt,
+        });
+      }
+    } catch (err) {
+      console.error("timer to timesheet bridge failed", err);
+    }
+  }
+
+  return NextResponse.json({
+    session,
+    timesheet: bridge
+      ? { logged: bridge.logged, message: timerBridgeMessage(bridge) }
+      : null,
+  }, { status: 201 });
 }

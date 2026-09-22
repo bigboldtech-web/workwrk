@@ -3,7 +3,7 @@
 // The one answer to "which sidebar row is current", shared by every hub
 // sidebar (spec-shell.md §1.1). It lives in its own module because the hub
 // sidebars are split across apps-catalog.tsx, docs-sidebar.tsx,
-// tables-sidebar.tsx and chat-sidebar.tsx, and a second hand-rolled copy of
+// tables-sidebar.tsx and talk-sidebar.tsx, and a second hand-rolled copy of
 // the rule is exactly how two rows used to light at once.
 
 import { usePathname, useSearchParams } from "next/navigation";

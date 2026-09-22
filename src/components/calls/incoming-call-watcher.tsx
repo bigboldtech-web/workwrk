@@ -1,6 +1,6 @@
 "use client";
 
-// IncomingCallWatcher — makes an incoming call RING in real time (a few
+// IncomingCallWatcher, makes an incoming call RING in real time (a few
 // seconds), instead of waiting on the 15s notification poll. Mounted once at
 // shell level; polls /api/calls/incoming every 5s while the tab is focused and
 // you're NOT already on a call. Each fresh call rings ONCE (top-right toast
@@ -14,7 +14,7 @@ import { useSession } from "next-auth/react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useToast } from "@/components/ui/toast";
 
-// Backstop — SSE (workwrk:call-incoming) triggers an instant check when a call
+// Backstop, SSE (workwrk:call-incoming) triggers an instant check when a call
 // starts. Kept fairly tight (15s) because a missed call ring is costly if the
 // stream ever drops; the instant SSE path is ~1s.
 const POLL_MS = 15_000;
@@ -71,7 +71,7 @@ export function IncomingCallWatcher() {
           rung.current.add(call.conversationId);
           toastRef.current({
             type: "neutral",
-            icon: <Phone className="h-4 w-4 text-emerald-500" />,
+            icon: <Phone className="h-4 w-4 text-success-text" />,
             title: call.isDM
               ? `${call.callerName} is calling`
               : `${call.callerName} started a call in ${call.label}`,
@@ -85,7 +85,6 @@ export function IncomingCallWatcher() {
                 onClick: () =>
                   startCallRef.current({
                     conversationId: call.conversationId,
-                    room: call.roomName,
                     subject: call.label,
                     displayName: myNameRef.current,
                     audioOnly: true, // answer camera-off; toggle on in-call
@@ -97,18 +96,25 @@ export function IncomingCallWatcher() {
           });
         }
       } catch {
-        /* ignore — the bell's poll is the backstop */
+        /* ignore, the bell's poll is the backstop */
       }
     };
     void tick();
     const iv = setInterval(() => void tick(), POLL_MS);
-    // Real-time: a call just started somewhere → check immediately.
+    // Real-time: a call just started somewhere, or a roster changed, or one
+    // ended. All three mean "the list you are holding is stale", so both
+    // window names re-read it rather than waiting out the poll. call-changed
+    // is what src/lib/realtime-events.ts fans call.ended and call.changed
+    // out to; without this listener call.ended reached nobody and a finished
+    // call's toast stood for up to POLL_MS.
     const onRealtime = () => void tick();
     window.addEventListener("workwrk:call-incoming", onRealtime);
+    window.addEventListener("workwrk:call-changed", onRealtime);
     return () => {
       alive = false;
       clearInterval(iv);
       window.removeEventListener("workwrk:call-incoming", onRealtime);
+      window.removeEventListener("workwrk:call-changed", onRealtime);
     };
   }, []);
 

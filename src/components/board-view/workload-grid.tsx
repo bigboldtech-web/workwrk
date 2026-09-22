@@ -27,6 +27,8 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import { MorePortal } from "@/components/layout/os/more-portal";
+import { useWorkSchedule } from "@/lib/use-work-schedule";
+import { holidayOn, isWorkingDay, type Holiday } from "@/lib/work-schedule";
 import { Switch } from "@/components/ui/switch";
 import { PersonAvatar } from "./assignee-picker";
 import { StatusGlyph } from "./status-glyph";
@@ -48,7 +50,19 @@ export interface WorkloadPerson {
 export interface WorkloadSettings {
   mode: "tasks" | "hours";
   windowDays: 7 | 14 | 28;
-  dailyHours: number;
+  /**
+   * Hours in a full day for THIS view, or null for "follow the company's
+   * working calendar" (/api/organization/work-schedule).
+   *
+   * WHY IT CAN BE NULL NOW. It used to be a plain number defaulting to 8,
+   * so every view in every workspace asserted an eight-hour day whether or
+   * not the company worked one, and an admin who set the company to 7.5
+   * changed nothing anywhere. Null is the new DEFAULT, so a view nobody has
+   * touched follows the company; a view where somebody typed a number keeps
+   * that number, which is the per-view override this control has always
+   * been. A stored 8 from before today is an explicit 8 and stays.
+   */
+  dailyHours: number | null;
   dailyTasks: number;
   perPersonHours: Record<string, number>;
   countWeekends: boolean;
@@ -58,7 +72,7 @@ export interface WorkloadSettings {
 export const DEFAULT_WORKLOAD_SETTINGS: WorkloadSettings = {
   mode: "tasks",
   windowDays: 14,
-  dailyHours: 8,
+  dailyHours: null,
   dailyTasks: 3,
   perPersonHours: {},
   countWeekends: false,
@@ -80,7 +94,13 @@ export function sanitizeWorkloadSettings(raw: Partial<Record<keyof WorkloadSetti
   return {
     mode: raw.mode === "hours" ? "hours" : "tasks",
     windowDays: raw.windowDays === 7 || raw.windowDays === 28 ? raw.windowDays : d.windowDays,
-    dailyHours: num(raw.dailyHours, 1, 24, d.dailyHours),
+    // An absent or unusable value means "follow the company calendar", not
+    // "eight": that is the whole point of the null above. A stored number
+    // inside 1..24 is somebody's deliberate override and survives.
+    dailyHours: typeof raw.dailyHours === "number" && Number.isFinite(raw.dailyHours)
+      && raw.dailyHours >= 1 && raw.dailyHours <= 24
+      ? raw.dailyHours
+      : null,
     dailyTasks: num(raw.dailyTasks, 1, 99, d.dailyTasks),
     perPersonHours: perPerson,
     countWeekends: raw.countWeekends === true,
@@ -142,6 +162,11 @@ function fmtH(n: number): string {
 const WEEKDAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"] as const;
 
 export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSettingsChange, onOpenItem }: WorkloadGridProps) {
+  // The organization's working calendar. Starts at the Monday-to-Friday
+  // eight-hour defaults and settles onto the real one, so the grid never
+  // flashes a week of zero capacity while the read is in flight.
+  const { schedule, configured: scheduleConfigured } = useWorkSchedule();
+
   // Controlled (board view / team page persist) vs local-only fallback so
   // the mode/window selects never become dead controls for read-only
   // viewers of a board WORKLOAD view.
@@ -228,7 +253,10 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
       const spanDays = Math.max(1, Math.round((hi.getTime() - lo.getTime()) / MS_PER_DAY) + 1);
       const rawEst = it.metadata?.timeEstimate;
       const estMinutes = typeof rawEst === "number" && Number.isFinite(rawEst) && rawEst > 0 ? rawEst : 0;
-      const hoursPerDay = estMinutes / 60 / spanDays;
+      // Estimate spread, NOT capacity. Named apart from the working
+      // calendar's hoursPerDay on purpose: this is how much of ONE task
+      // lands on each day of its span, and the two used to share a name.
+      const estHoursPerSpanDay = estMinutes / 60 / spanDays;
       let touched = false;
       for (let i = 0; i < spanDays; i++) {
         const day = new Date(lo.getFullYear(), lo.getMonth(), lo.getDate() + i);
@@ -236,7 +264,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
         if (idx < 0 || idx >= s.windowDays) continue;
         const cell = row.days[idx];
         cell.tasks += 1;
-        cell.hours += hoursPerDay;
+        cell.hours += estHoursPerSpanDay;
         if (estMinutes === 0) cell.unestimated += 1;
         touched = true;
       }
@@ -272,15 +300,33 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
   const hiddenCount = sorted.filter((r) => r.key !== UNASSIGNED && !hasWork(r)).length;
   const visible = sorted.filter((r) => (r.key === UNASSIGNED ? hasWork(r) : s.showAllPeople || hasWork(r)));
 
+  // WHICH DAYS HAVE CAPACITY, and how much.
+  //
+  // This used to be `dow === 0 || dow === 6`, an assumption that every
+  // company on earth works Monday to Friday and takes no holidays. It now
+  // asks the organization's working calendar
+  // (/api/organization/work-schedule): a Sunday-to-Thursday week is zero on
+  // Friday and Saturday, and Christmas Day is zero everywhere. The "Count
+  // weekends" switch is unchanged and still wins: ticking it puts capacity
+  // on EVERY day, which is what it always meant.
+  //
+  // Holidays are deliberately NOT overridden by that switch. A weekend is a
+  // pattern somebody may want to plan across; a holiday is a specific date
+  // the company has said nobody is working.
+  //
+  // The hours ladder, most specific first: the per-person override, then
+  // this view's own dailyHours, then the company calendar. A view where
+  // nobody typed a number carries null and follows the company.
   const capFor = useCallback((r: PersonRowData, day: Date): number => {
-    const dow = day.getDay();
-    if ((dow === 0 || dow === 6) && !s.countWeekends) return 0;
+    if (!s.countWeekends && !isWorkingDay(schedule, day)) return 0;
+    if (holidayOn(schedule, day)) return 0;
     if (s.mode === "hours") {
       const override = r.person ? s.perPersonHours[r.person.id] : undefined;
-      return typeof override === "number" ? override : s.dailyHours;
+      if (typeof override === "number") return override;
+      return s.dailyHours ?? schedule.hoursPerDay;
     }
     return s.dailyTasks;
-  }, [s.mode, s.countWeekends, s.perPersonHours, s.dailyHours, s.dailyTasks]);
+  }, [s.mode, s.countWeekends, s.perPersonHours, s.dailyHours, s.dailyTasks, schedule]);
 
   // ── Expand / collapse ─────────────────────────────────────────────
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -391,14 +437,32 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                     type="number"
                     min={1}
                     max={24}
-                    defaultValue={s.dailyHours}
+                    // Empty means "follow the company calendar", which is
+                    // what a view nobody has touched does. Typing a number
+                    // is the per-view override this control always was;
+                    // clearing the field hands it back.
+                    defaultValue={s.dailyHours ?? ""}
+                    placeholder={String(schedule.hoursPerDay)}
                     onChange={(e) => {
-                      const v = Number(e.target.value);
+                      const raw = e.target.value.trim();
+                      if (raw === "") { change({ dailyHours: null }); return; }
+                      const v = Number(raw);
                       if (Number.isFinite(v) && v >= 1 && v <= 24) change({ dailyHours: v });
                     }}
                     className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-sm tabular-nums text-right"
                   />
                 </div>
+                {/* The sentence that makes the empty field legible. It names
+                    the number the grid is actually using and where it came
+                    from, so nobody has to guess whether a blank box means
+                    zero. */}
+                <p className="text-xs text-zinc-500">
+                  {s.dailyHours === null
+                    ? scheduleConfigured
+                      ? `Following the company working calendar: ${fmtH(schedule.hoursPerDay)}h a day.`
+                      : `No company working calendar set, so ${fmtH(schedule.hoursPerDay)}h a day is assumed.`
+                    : "This view only. Clear the box to follow the company working calendar."}
+                </p>
                 <div className="flex items-center gap-2">
                   <span className="text-base text-zinc-700 flex-1">Daily tasks</span>
                   <input
@@ -432,7 +496,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                         type="number"
                         min={1}
                         max={24}
-                        placeholder={String(s.dailyHours)}
+                        placeholder={String(s.dailyHours ?? schedule.hoursPerDay)}
                         defaultValue={s.perPersonHours[p.id] ?? ""}
                         onChange={(e) => {
                           const raw = e.target.value.trim();
@@ -613,6 +677,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                         load={r.days[i]}
                         cap={capFor(r, d)}
                         mode={s.mode}
+                        holiday={holidayOn(schedule, d)}
                         onToggle={() => toggleExpanded(r.key)}
                       />
                     ))}
@@ -641,11 +706,13 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
 // capacity (emerald, bottom fill = utilization) / overloaded (solid red
 // fill + overage badge). Hours mode marks days whose count includes
 // unestimated tasks with an amber dot (the load number is a floor).
-function DayCell({ day, load, cap, mode, onToggle }: {
+function DayCell({ day, load, cap, mode, holiday, onToggle }: {
   day: Date;
   load: DayLoad;
   cap: number;
   mode: WorkloadSettings["mode"];
+  /** The company holiday on this date, if there is one. */
+  holiday: Holiday | null;
   onToggle: () => void;
 }) {
   const loadVal = mode === "hours" ? load.hours : load.tasks;
@@ -656,11 +723,17 @@ function DayCell({ day, load, cap, mode, onToggle }: {
     ? `${fmtH(load.hours)}h of ${fmtH(cap)}h · ${load.tasks} task${load.tasks === 1 ? "" : "s"}`
     : `${load.tasks} of ${cap} task${cap === 1 ? "" : "s"} · ${fmtH(load.hours)}h est`;
   const unest = mode === "hours" && load.unestimated > 0 ? ` · ${load.unestimated} unestimated` : "";
-  const title = `${dayLabel} · ${breakdown}${unest}`;
+  // A zero-capacity cell has a reason, and the tooltip is where it belongs:
+  // "Sat, 27 Sep" reads as a weekend on its own, but "Fri, 25 Dec" with no
+  // capacity and no explanation reads as a bug.
+  const why = holiday ? ` · ${holiday.name}` : cap === 0 ? " · Not a working day" : "";
+  const title = `${dayLabel} · ${breakdown}${unest}${why}`;
 
   let block: React.ReactNode;
   if (cap === 0) {
-    // Weekend (capacity off) — muted; load still visible as a gray bar.
+    // No capacity (a non-working day or a company holiday) — muted; load
+    // still visible as a gray bar, because work scheduled onto a day off is
+    // exactly what a manager wants to see rather than have hidden.
     block = (
       <>
         {loadVal > 0 ? (

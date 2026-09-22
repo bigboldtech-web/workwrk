@@ -34,6 +34,8 @@ import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { KindIcon } from "@/components/inbox/inbox-row";
+import { formatDate, type DateFormatPrefs } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
 
 type Notification = {
   id: string;
@@ -60,7 +62,12 @@ type Reminder = {
   entityId: string | null;
 };
 
-function fmtRelative(iso: string) {
+// THE VIEWER'S LOCALE, NOT en-US. Both of these hard-coded the American
+// format and the browser's own zone, so a person whose preferences say 24h
+// and Asia/Kolkata still read "5:30 PM" on their own bell (critic #13).
+// They take the preferences as an argument rather than reading a hook, so
+// they stay callable from inside a map.
+function fmtRelative(iso: string, prefs: DateFormatPrefs) {
   const d = new Date(iso);
   const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60000);
@@ -70,15 +77,14 @@ function fmtRelative(iso: string) {
   if (h < 24) return `${h}h`;
   const days = Math.floor(h / 24);
   if (days < 7) return `${days}d`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatDate(d, prefs, "date");
 }
 
-function fmtDue(iso: string): string {
+function fmtDue(iso: string, prefs: DateFormatPrefs): string {
   const d = new Date(iso);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const sameDay = d >= today && d.getTime() < today.getTime() + 86_400_000;
-  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  return sameDay ? `Due ${time}` : `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${time}`;
+  return sameDay ? `Due ${formatDate(d, prefs, "time")}` : `Due ${formatDate(d, prefs, "datetime")}`;
 }
 
 function tomorrow9amMinutes(): number {
@@ -103,6 +109,16 @@ export function BellPopover() {
   const desktop = useDesktopNotifications();
 
   useNewItemAlerts(mutedNotifications, desktop);
+
+  // The fired-reminder cards cap at three and offer "and N more"; that line
+  // dispatches this, because the bell is where the rest of them are. Without
+  // it the line would be a control with nowhere to go, which is the thing
+  // this refresh is here to stop shipping.
+  useEffect(() => {
+    const onOpen = () => { setOpen(true); setTab("reminders"); };
+    window.addEventListener("workwrk:open-reminders", onOpen);
+    return () => window.removeEventListener("workwrk:open-reminders", onOpen);
+  }, []);
 
   return (
     <ChromePopover
@@ -256,6 +272,7 @@ function DesktopAlertsDoor({ desktop }: { desktop: ReturnType<typeof useDesktopN
 }
 
 function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => void; onMutated: () => void }) {
+  const datePrefs = useDatePrefs();
   const [data, setData] = useState<NotifResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -327,7 +344,7 @@ function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => 
                   <span className="min-w-0 flex-1">
                     <span className={cn("block truncate text-base", n.read ? "text-ink" : "font-medium text-ink")}>{n.title}</span>
                     <span className="block truncate text-xs text-ink-2">
-                      {n.message ? `${n.message} · ` : ""}{fmtRelative(n.createdAt)}
+                      {n.message ? `${n.message} · ` : ""}{fmtRelative(n.createdAt, datePrefs)}
                     </span>
                   </span>
                 </button>
@@ -361,6 +378,8 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: () => void; onMutated: () => void }) {
+  const datePrefs = useDatePrefs();
+  const { toast } = useOsToast();
   const [pending, setPending] = useState<Reminder[] | null>(null);
   const [fired, setFired] = useState<Reminder[]>([]);
   const [history, setHistory] = useState<Reminder[]>([]);
@@ -397,12 +416,28 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
 
   const act = async (id: string, body: Record<string, unknown>) => {
     const row = pending?.find((r) => r.id === id) ?? fired.find((r) => r.id === id) ?? null;
+    const wasPending = Boolean(pending?.some((r) => r.id === id));
     setPending((prev) => (prev ? prev.filter((r) => r.id !== id) : prev));
     setFired((prev) => prev.filter((r) => r.id !== id));
     // Done: the row moves to the history at once (the server answers the
     // same on the next read); a snooze goes back to Upcoming on reload.
     if (row && !("snoozeMinutes" in body)) setHistory((prev) => [{ ...row, updatedAt: new Date().toISOString() }, ...prev].slice(0, 10));
-    await apiFetch(`/api/reminders/${id}`, { method: "PATCH", json: body });
+    const r = await apiFetch(`/api/reminders/${id}`, { method: "PATCH", json: body, keepalive: true });
+    // A FAILURE PUTS THE ROW BACK AND SAYS SO. It used to await the call and
+    // ignore the answer, so a reminder that failed to snooze looked snoozed
+    // and went off again later with nothing to explain it (critic #11).
+    if (!r.ok) {
+      if (row) {
+        if (wasPending) setPending((prev) => (prev ? [row, ...prev] : prev));
+        else setFired((prev) => [row, ...prev]);
+        setHistory((prev) => prev.filter((h) => h.id !== id));
+      }
+      toast("Couldn't update the reminder", {
+        tone: "danger",
+        action: { label: "Retry", onClick: () => { void act(id, body); } },
+      });
+      return;
+    }
     window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.remindersChanged));
     onMutated();
   };
@@ -430,7 +465,7 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
         <Icon className="h-5 w-5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-base text-ink">{r.title}</span>
-          <span className="block truncate text-xs text-ink-2">{fmtDue(r.remindAt)}</span>
+          <span className="block truncate text-xs text-ink-2">{fmtDue(r.remindAt, datePrefs)}</span>
         </span>
       </>
     );
@@ -444,7 +479,7 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
         <span className="absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 group-hover/r:opacity-100 focus-within:opacity-100">
           <RowAction label="Snooze 1 hour" icon={Clock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: 60 }); }} />
           <RowAction label="Snooze until tomorrow 9am" icon={AlarmClock} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { snoozeMinutes: tomorrow9amMinutes() }); }} />
-          <RowAction label="Done" icon={Check} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, {}); }} />
+          <RowAction label="Done" icon={Check} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void act(r.id, { action: "dismiss" }); }} />
         </span>
       </li>
     );
@@ -480,7 +515,7 @@ function RemindersTab({ open, onClose, onMutated }: { open: boolean; onClose: ()
                         <Check className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-base text-ink-2 line-through">{r.title}</span>
-                          <span className="block truncate text-xs text-ink-3">{fmtRelative(r.updatedAt || r.firedAt || r.remindAt)}</span>
+                          <span className="block truncate text-xs text-ink-3">{fmtRelative(r.updatedAt || r.firedAt || r.remindAt, datePrefs)}</span>
                         </span>
                       </>
                     );

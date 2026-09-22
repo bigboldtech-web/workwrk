@@ -14,7 +14,9 @@ export type TrashType =
   // Project hierarchy — "board" is the ClickUp "List", "item" is a Task.
   | "space" | "folder" | "board" | "item"
   // A drive folder (FileFolder) with its subfolders and files as one snapshot.
-  | "file_folder";
+  | "file_folder"
+  // A Meeting with its attendees and action items as one snapshot.
+  | "meeting";
 
 /** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
 export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
@@ -52,7 +54,7 @@ export const TRASH_LABEL: Record<TrashType, string> = {
   note: "Note", sop: "SOP", whiteboard: "Canvas", table: "Table",
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
-  file_folder: "Folder",
+  file_folder: "Folder", meeting: "Meeting",
 };
 
 /**
@@ -88,6 +90,7 @@ const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
   // A drive folder files under the Folder pill with the Space Folders; it is
   // reached from /files, so its restore href is informational like theirs.
   file_folder: "folder",
+  meeting: "meeting",
 };
 
 export const TRASH_HREF: Record<TrashType, string> = Object.fromEntries(
@@ -267,6 +270,33 @@ const REGISTRY: Record<TrashType, Entry> = {
     },
   },
 
+  // A Meeting, with its attendee list and its action items. Both cascade on
+  // delete, so both have to be IN the snapshot or a restored meeting comes
+  // back empty: the notes and the decisions are columns on the row, but the
+  // people and the follow-ups are not, and those are the part somebody
+  // actually needs back.
+  meeting: {
+    capture: async (id) => {
+      const row = await prisma.meeting.findUnique({ where: { id } });
+      if (!row) return null;
+      const [attendees, actionItems] = await Promise.all([
+        prisma.meetingAttendee.findMany({ where: { meetingId: id } }),
+        prisma.actionItem.findMany({ where: { meetingId: id } }),
+      ]);
+      return {
+        label: row.title || "Untitled meeting",
+        snapshot: { row: row as unknown as Row, children: { attendees: attendees as unknown as Row[], actionItems: actionItems as unknown as Row[] } },
+      };
+    },
+    restore: async (s) => {
+      await prisma.meeting.create({ data: asData(s.row) });
+      const attendees = s.children?.attendees ?? [];
+      if (attendees.length) await prisma.meetingAttendee.createMany({ data: asData(attendees), skipDuplicates: true });
+      const actionItems = s.children?.actionItems ?? [];
+      if (actionItems.length) await prisma.actionItem.createMany({ data: asData(actionItems), skipDuplicates: true });
+    },
+  },
+
   // A Task. Snapshot the item + its whole subtask subtree; the live delete
   // cascades the subtasks (Item.parentItem onDelete: Cascade), so restore
   // rebuilds the root then its descendants parents-first.
@@ -403,6 +433,9 @@ export async function moveToTrash(
     case "file": await prisma.fileEntry.delete({ where: { id } }); break;
     case "policy": await prisma.policy.delete({ where: { id } }); break;
     case "contract": await prisma.agreement.delete({ where: { id } }); break;
+    // Meeting cascades its attendees and action items; both are in the
+    // snapshot above, so the row leaves the live table and comes back whole.
+    case "meeting": await prisma.meeting.delete({ where: { id } }); break;
     // Item + Board cascade their children (subtasks / items+views+members).
     case "item": await prisma.item.delete({ where: { id } }); break;
     case "board": await prisma.board.delete({ where: { id } }); break;

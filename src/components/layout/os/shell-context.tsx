@@ -63,15 +63,17 @@ export type CreateTaskTemplate = {
   config: Record<string, unknown>;
 };
 
-/** The one call/huddle in progress, hoisted to the shell so it survives page
+/** The one call in progress, hoisted to the shell so it survives page
  *  navigation (a Slack-style floating dock). Exactly one lives at a time; the
  *  CallDock renders a single, never-unmounted CallPanel from it. */
 export type ActiveCall = {
   /** Talk call (conversationId) XOR scheduled-meeting call (meetingId). */
   conversationId?: string;
   meetingId?: string;
-  /** Legacy Jitsi room name, which CallPanel needs for the dark-box fallback. */
-  room: string;
+  // `room` is GONE (Phase 4, decision Q1). It carried the legacy Jitsi room
+  // name for the public fallback, and the fallback is gone: the LiveKit room
+  // is derived server side by POST /api/calls/token from the conversation or
+  // meeting id, so no client has to know or forward it.
   /** Title shown in the dock header (channel/DM name or meeting subject). */
   subject: string;
   displayName: string | null;

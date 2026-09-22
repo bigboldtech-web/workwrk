@@ -267,10 +267,10 @@ describe("ROUTE_HUB completeness", () => {
 });
 
 describe("FOLDED_APP_HUB", () => {
-  it("holds exactly the 19 folded app keys from the spec", () => {
+  it("holds exactly the 21 folded app keys from the spec", () => {
     expect(Object.keys(FOLDED_APP_HUB).sort()).toEqual(
       [
-        "goals", "timesheets",
+        "goals", "timesheets", "meetings", "clock",
         "library", "clips", "sops", "policies", "agreements",
         "reviews", "candor", "kudos", "surveys",
         "announcements",

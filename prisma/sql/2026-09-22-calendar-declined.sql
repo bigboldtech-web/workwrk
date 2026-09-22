@@ -1,0 +1,38 @@
+-- 2026-09-22 - Phase 4, Time and Talk - "Show declined Google events".
+--
+-- spec-planner.md section 2 `/planner`, the Display menu: "Show declined
+-- Google events (switch, default off)".
+--
+-- WHAT IT ADDS. One nullable-by-default boolean column,
+-- "CalendarEvent"."declined", defaulting to false. Nothing is renamed,
+-- retyped, dropped or made required, and every existing row reads false,
+-- which is exactly what every existing row means today.
+--
+-- WHY IT EXISTS. The Display switch was persisted and read by nothing:
+-- `home.planner.showDeclined` had its registry entry, its default and its
+-- menu row, and its only two references in the whole tree were its own
+-- label and its own onClick. There was no data for it to act on either,
+-- because the Google sync never looked at the viewer's own response to an
+-- invitation. So the menu offered a control that could not change the
+-- screen, which is the one thing this phase's rules forbid.
+--
+-- Now src/services/googleCalendarSync.ts reads the `attendees` array
+-- Google already returns, finds the entry marked `self` and stamps
+-- `declined = true` when its `responseStatus` is 'declined'. The calendar
+-- read filters on it unless the switch is on.
+--
+-- DEPLOY ORDER IS FREE, AND THIS ONE IS CHECKED RATHER THAN ASSERTED.
+-- The calendar read (src/app/api/calendar/events/route.ts) attempts the
+-- filtered query and falls back to the unfiltered one when the column is
+-- absent, so a release deployed ahead of this file shows declined events
+-- (the behaviour before the switch existed) rather than losing the
+-- calendar. The sync write (upsertCalendarEvent) is already wrapped and
+-- retries without the field for the same reason. No other query names the
+-- column, and none of them uses a bare `findMany` on "CalendarEvent"
+-- without a `select`, which is the shape that would make Prisma emit a
+-- column the database does not have.
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS.
+
+ALTER TABLE "CalendarEvent"
+  ADD COLUMN IF NOT EXISTS "declined" BOOLEAN NOT NULL DEFAULT false;

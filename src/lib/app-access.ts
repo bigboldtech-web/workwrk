@@ -20,6 +20,10 @@ const ROWS: readonly Row[] = [
   { key: "planner", label: "Planner", defaultHref: "/planner" },
   { key: "ai", label: "AI", defaultHref: "/sidekick" },
   { key: "chat", label: "Talk", defaultHref: "/tlk" },
+  // `manager`, matching the gate on the hub's own default href: /people
+  // calls requireManagerPage(). sidebar-map section 5 wants this tier gone
+  // and the Directory opened to every Member; that is a change to two page
+  // gates, not to this table, and it belongs to the Teams unit.
   { key: "teams", label: "Teams", defaultHref: "/people", requiredAccess: "manager" },
   { key: "docs", label: "Docs", defaultHref: "/docs" },
   { key: "tables", label: "Tables", defaultHref: "/tables" },
@@ -28,6 +32,8 @@ const ROWS: readonly Row[] = [
   { key: "clips", label: "Notetaker", defaultHref: "/notetaker" },
   { key: "goals", label: "Goals", defaultHref: "/okrs" },
   { key: "timesheets", label: "Timesheets", defaultHref: "/timesheets" },
+  { key: "meetings", label: "Meetings", defaultHref: "/meetings" },
+  { key: "clock", label: "Clock in/out", defaultHref: "/clock" },
   { key: "reviews", label: "Review cycles", defaultHref: "/reviews", requiredAccess: "hr-admin" },
   { key: "candor", label: "Candor", defaultHref: "/candor", requiredAccess: "hr-admin" },
   { key: "announcements", label: "Announcements", defaultHref: "/announcements" },

@@ -121,6 +121,13 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   timesheet_approved: k("timesheet_approved", "Timesheet approved", "ClipboardCheck", "primary", "people"),
   timesheet_rejected: k("timesheet_rejected", "Timesheet returned", "ClipboardCheck", "primary", "people"),
   timesheet_submitted: k("timesheet_submitted", "Timesheet to review", "ClipboardCheck", "primary", "people"),
+  // The two Phase 4 timesheet kinds. Both are action-required notices about
+  // somebody's pay week, so they sit in Primary beside their three siblings
+  // rather than falling through `fallbackKind` into Other with a grey Bell.
+  //   timesheet_changed_after_close  api/time-entries/punch/route.ts
+  //   timesheet_reopened            api/timesheets/[id]/route.ts
+  timesheet_changed_after_close: k("timesheet_changed_after_close", "Closed week changed", "ClipboardCheck", "primary", "people"),
+  timesheet_reopened: k("timesheet_reopened", "Timesheet reopened", "ClipboardCheck", "primary", "people"),
   task_escalated: k("task_escalated", "Task escalated to you", "ShieldCheck", "primary", "tasks"),
   call_incoming: k("call_incoming", "Incoming call", "Video", "primary", "talk"),
 

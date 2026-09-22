@@ -24,6 +24,34 @@ export type TimerStartedEvent = { type: "timer.started"; session: ActiveTimer };
 export type TimerStoppedEvent = { type: "timer.stopped"; session: { id: string } };
 export type CallIncomingEvent = { type: "call.incoming"; conversationId?: string; meetingId?: string };
 export type CallEndedEvent = { type: "call.ended"; conversationId?: string; meetingId?: string };
+/**
+ * A call's roster changed (somebody joined or left), for the live-call chip
+ * and the sidebar row (spec-talk.md section 2.6 Data: "the webhook publishes
+ * workwrk:call-changed:<conversationId>").
+ *
+ * WHY IT IS `call.changed` AND NOT `call-changed`. The spec writes the
+ * WINDOW event name, which is hyphenated like every other
+ * `workwrk:*-changed`; the WIRE name follows this table's own dotted
+ * convention, beside `call.incoming` and `call.ended`. One concept, the two
+ * spellings each contract already uses, and `legacyWindowEventsFor` is where
+ * they meet. A third naming style on the wire would have been the fourth
+ * word for one thing.
+ *
+ * TRIGGER-ONLY, like every member here: the client refetches
+ * `GET /api/conversations/[id]`, so a mis-scoped emit leaks no roster.
+ */
+export type CallChangedEvent = { type: "call.changed"; conversationId?: string; meetingId?: string };
+/**
+ * Something with a time on it changed: a personal event, a meeting's time, a
+ * task's dates, a synced Google row (spec-planner.md section 2 `/planner`
+ * Realtime, "the SSE event calendar.changed").
+ *
+ * TRIGGER-ONLY: it carries no title, no attendee and no time, only the fact
+ * that the visible range is stale. The Calendar refetches
+ * `GET /api/calendar/events` for the range it is showing and the server
+ * scopes that read, so this event can never carry somebody else's schedule.
+ */
+export type CalendarChangedEvent = { type: "calendar.changed" };
 export type AccessChangedEvent = { type: "access.changed"; objectType: string; objectId: string };
 export type PrefsChangedEvent = { type: "prefs.changed" };
 export type SessionIdleEvent = { type: "session.idle"; idleUntil: string | null };
@@ -51,6 +79,8 @@ export type ShellRealtimeEvent =
   | TimerStoppedEvent
   | CallIncomingEvent
   | CallEndedEvent
+  | CallChangedEvent
+  | CalendarChangedEvent
   | AccessChangedEvent
   | PrefsChangedEvent
   | SessionIdleEvent
@@ -82,6 +112,8 @@ export const REALTIME_EVENT_NAMES: readonly RealtimeEventName[] = [
   "timer.stopped",
   "call.incoming",
   "call.ended",
+  "call.changed",
+  "calendar.changed",
   "access.changed",
   "prefs.changed",
   "session.idle",
@@ -109,6 +141,8 @@ export const WINDOW_EVENTS = {
   convoPrefix: "workwrk:convo:",
   notifChanged: "workwrk:notif-changed",
   callIncoming: "workwrk:call-incoming",
+  /** A call's roster changed, or it ended (spec-talk section 2.6). */
+  callChanged: "workwrk:call-changed",
   remindersChanged: "workwrk:reminders-changed",
   prefsChanged: "workwrk:prefs-changed",
   /** One task changed; `detail: { itemId, boardId }`. */
@@ -168,6 +202,21 @@ export function legacyWindowEventsFor(ev: RealtimeEvent): string[] {
     case "call.incoming":
       return [WINDOW_EVENTS.callIncoming];
     case "call.ended":
+    case "call.changed":
+      // Both mean "the roster you are showing is stale". Its consumer is
+      // IncomingCallWatcher (src/components/calls/incoming-call-watcher.tsx),
+      // which listens for BOTH this name and workwrk:call-incoming and
+      // re-reads the live-call list on either: a call that ended used to
+      // leave its chip standing until the next 20s poll, because call.ended
+      // fanned out to nothing at all.
+      return [WINDOW_EVENTS.callChanged];
+    case "calendar.changed":
+      // No legacy fan-out on purpose. The Calendar's consumer is
+      // spec-planner section 4 step 5 (the one GET /api/calendar/events
+      // feed) and nothing publishes this wire event yet either, so a window
+      // event here would be a name with nobody on either end. New consumers
+      // subscribe to `workwrk:realtime` and read `detail.type`, which is the
+      // contract this file says new consumers use.
       return [];
     case "timer.started":
     case "timer.stopped":
