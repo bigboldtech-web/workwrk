@@ -182,12 +182,51 @@ describe("rule 7: one move", () => {
  * copy tree is counted the same as one written in it.
  * ═══════════════════════════════════════════════════════════════════ */
 
-/** Every literal claim and headline a page file writes out. */
+/**
+ * Replace every {...} expression with a single placeholder word.
+ *
+ * Brace-aware rather than a regex, because the expressions in these
+ * headlines nest and contain template literals with their own braces, e.g.
+ * `{chapter.moments.length === 1 ? \`What happened at ${x}.\` : ...}`. A
+ * non-greedy `\{[^}]*\}` stops at the first inner brace and leaves debris
+ * behind that then gets counted as words.
+ */
+function collapseExpressions(text: string): string {
+  let out = "";
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "{") {
+      if (depth === 0) out += "X";
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) depth--;
+    } else if (depth === 0) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Every claim and headline a page file writes out. */
 function literalHeadlines(src: string): string[] {
   const out: string[] = [];
   // <Claim id="x">Literal words.</Claim> and the same for Headline.
-  for (const m of src.matchAll(/<(?:Claim|Headline)\b[^>]*>([^<{}]+)<\/(?:Claim|Headline)>/g)) {
-    out.push(m[1]);
+  //
+  // THE BODY USED TO BE `[^<{}]+`, WHICH EXCLUDED ANY HEADLINE CONTAINING A
+  // BRACE. That is not a small gap: /features shipped "{BLOCKS.length}
+  // blocks. One data model." as its h1 and this sweep never saw it, and six
+  // more on /compare/[slug] and /product/[module] were invisible the same
+  // way. They were found by hand, which is the thing this file exists to
+  // stop being necessary.
+  //
+  // Now the body is `[^<]+` and the expressions collapse to one placeholder
+  // word each, so a mixed headline is counted with its literal words plus
+  // one per interpolation. A headline that is ONLY an expression, like
+  // `{COPY.hero.h1}`, collapses to "X" and is dropped below: its words live
+  // in the copy tree, where iconic.test.ts already counts them.
+  for (const m of src.matchAll(/<(?:Claim|Headline)\b[^>]*>([^<]+)<\/(?:Claim|Headline)>/g)) {
+    const collapsed = collapseExpressions(m[1]).replace(/\s+/g, " ").trim();
+    if (collapsed && collapsed !== "X") out.push(collapsed);
   }
   // <Close headline="..." /> and the two sub-page shells' `title=`.
   for (const m of src.matchAll(/\b(?:headline|title|workflowTitle|painsTitle|kpisLabel)="([^"]+)"/g)) {
