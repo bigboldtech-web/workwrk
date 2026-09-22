@@ -28,6 +28,7 @@ import {
   PRODUCT_COPY,
 } from "./copy";
 import { BANNED_WORDS_RE } from "../lint/marketing-copy-rules.mjs";
+import { tierCtaIsPrimary } from "../config";
 import { pricing, starterSeatCap, tier } from "../data/pricing";
 import { MODULE_ORDER } from "../product/module-page";
 import { tuesday } from "../data/tuesday";
@@ -211,11 +212,30 @@ describe("rule 8: one button", () => {
     const demo = readFileSync("src/app/(marketing)/demo/page.tsx", "utf8");
     expect(demo).toContain('<PrimaryCta placement="demo-close" variant="ghost" />');
 
-    // And the money page's three plan buttons are ghost, so the only filled
-    // blue on it is the close.
+    // The money page fills EXACTLY ONE plan button, the recommended one.
+    //
+    // This used to assert all three were ghost, on the reasoning that the
+    // page's only blue belonged to its close. That was written while the
+    // plans were three unbordered rows, where a filled button had nothing
+    // to anchor to. The plans are bordered cards again, and marking the
+    // recommended card with a filled button is the category's own pattern
+    // and what the rebuilt home page's price strip does.
+    //
+    // The rule this test protects is one filled button per VIEWPORT, and
+    // that still holds: the plans band and the closing band are far apart
+    // on this page and are never on screen together.
     const price = readFileSync("src/app/(marketing)/pricing/page.tsx", "utf8");
-    expect(price).toContain('variant="ghost"');
-    expect(price).not.toContain("<TierCta");
+    expect(price).toContain('tierCtaIsPrimary(t.id) ? "primary" : "ghost"');
+  });
+
+  it("marks exactly one tier as the filled one, so the page cannot grow a second blue", () => {
+    // The skin above is chosen by `tierCtaIsPrimary`, which reads the
+    // `recommended` flag in the pricing source. If two tiers ever carried
+    // that flag, the plans band would ship two filled buttons in one
+    // viewport and the assertion above would still pass, because it only
+    // checks the expression.
+    const filled = pricing.tiers.filter((t) => tierCtaIsPrimary(t.id));
+    expect(filled.map((t) => t.id)).toHaveLength(1);
   });
 });
 

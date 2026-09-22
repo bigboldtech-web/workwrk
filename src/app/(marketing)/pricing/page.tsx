@@ -1,9 +1,13 @@
 // /pricing, rebuilt on the iconic sheet.
 //
-// THE ARGUMENT OF THE PAGE IS THE NUMBER. Everything else got out of its
-// way: the three bordered cards are three rows, the six currency pills are
-// six words, and the two notes that used to sit under the tier grid are one
-// line at the bottom of it.
+// THE ARGUMENT OF THE PAGE IS THE NUMBER, and it still is: the price is the
+// loudest thing in each plan. What has changed since this note was written
+// is that the plans are bordered CARDS again, with the recommended one
+// marked by a border and a filled button. That is the category's pattern
+// (ClickUp, Asana, monday.com), it is the register the founder asked for,
+// and it is the same three card shape the rebuilt home page uses, so the
+// two pages read as one site. The six currency pills are still six words,
+// and the notes under the tier grid are still one line.
 //
 // WHAT IS UNCHANGED, and must stay unchanged: every commercial fact on this
 // page is READ from the pricing source or from the constant the server
@@ -34,7 +38,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 import { MarketingCta, PrimaryCta } from "@/components/marketing/cta";
-import { flags, moduleNames, tierCta } from "@/components/marketing/config";
+import { flags, moduleNames, tierCta, tierCtaIsPrimary } from "@/components/marketing/config";
 import {
   pricing,
   isMarketingCurrency,
@@ -340,16 +344,31 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
     ],
   };
 
-  // EVERY PLAN BUTTON IS GHOST, and the page's one blue is at the bottom.
+  // THE RECOMMENDED PLAN'S BUTTON IS FILLED AGAIN.
   //
-  // `TierCta` fills the recommended plan, which was right on a page of three
-  // bordered cards competing for the eye. On this page it put a filled blue
-  // button in the plans viewport and a second one in the closing viewport,
-  // which is two blues on a page whose rule is one. The recommended plan is
-  // still signposted, in words, on the plan itself. Destination, label and
-  // measurement id are `tierCta`'s exactly as before: only the skin changed.
+  // This was ghost, and the note that made it ghost said why: "`TierCta`
+  // fills the recommended plan, which was right on a page of three bordered
+  // cards competing for the eye". The cards had been taken away at the time,
+  // so the fill had nothing to anchor and read as a loose blue button on a
+  // list.
+  //
+  // The cards are back (see plans.client.tsx), which restores exactly the
+  // condition that note names, and a filled button on the recommended card
+  // is the category's own pattern: the rebuilt home page's price strip does
+  // the same thing.
+  //
+  // The "two blues" worry does not apply. The plans and the closing band are
+  // a long way apart on this page and are never on screen together, so the
+  // rule being protected, one filled button per VIEWPORT, still holds.
   const tierCtas: Record<string, React.ReactNode> = Object.fromEntries(
-    pricing.tiers.map((t) => [t.id, <MarketingCta key={t.id} cta={tierCta(t.id, "pricing")} variant="ghost" />]),
+    pricing.tiers.map((t) => [
+      t.id,
+      <MarketingCta
+        key={t.id}
+        cta={tierCta(t.id, "pricing")}
+        variant={tierCtaIsPrimary(t.id) ? "primary" : "ghost"}
+      />,
+    ]),
   );
 
   return (

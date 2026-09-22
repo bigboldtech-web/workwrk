@@ -1,11 +1,18 @@
 "use client";
 
-// The three plans on /pricing, as three ROWS and not three cards.
+// The three plans on /pricing, as three CARDS.
 //
-// A card grid is rule 5, and it is also what every rival on this shelf
-// ships. The thing a buyer came to this page for is one number, so the
-// number is set at display size with nothing boxed around it, and the words
-// under it are the short answer to "what do I get".
+// This was written as three rows on the reasoning that a card grid "is also
+// what every rival on this shelf ships", treating that as a reason not to.
+// On a pricing page it is a reason to: the free floor, highlighted middle
+// and quoted top is a pattern a buyer can already read, and the rebuilt
+// home page uses the same three card shape, so matching it here is what
+// keeps the two pages reading as one site. The founder named this register
+// (ClickUp, Asana, monday.com) after rejecting the quiet one twice.
+//
+// The number is still the loudest thing in each card. What changed is that
+// the card has an edge, and the recommended one is marked with a border as
+// well as with the line of words under its price.
 //
 // WHY THIS IS A CLIENT ISLAND AT ALL, on a page that is otherwise static:
 // the currency switch. The page's own answer to "which currencies do you
@@ -91,7 +98,7 @@ export function IconicPlans({
               ? t.priceSubLabel
               : `${t.priceLabel}, ${t.priceSubLabel.toLowerCase()}`;
           return (
-            <li key={t.id} className="ic-plan">
+            <li key={t.id} className="ic-plan" data-pick={Boolean(t.recommended)}>
               <span className="ic-planname">{t.name}</span>
               <span className="ic-planprice">{price}</span>
               <span className="ic-plansub">{sub}</span>

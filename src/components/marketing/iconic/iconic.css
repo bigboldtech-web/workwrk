@@ -29,17 +29,26 @@
 .mk-iconic {
   /* Fluid, so there is one number per role and no breakpoint table to keep
      in step with a second one. */
-  /* 5.7vw, not 5vw, and the number is the rule rather than a taste.
-     "Hero headline 72px or larger on desktop" is the one measurable line in
-     the brief, and at 5vw a claim only reached 72px at exactly 1440: it was
-     64px at 1280 and 68px at 1366, which are the two commonest laptop
-     widths, so the rule failed on most desktops that ever opened the page.
-     72 / 1264 = 5.7vw, so the cap is now reached at 1264 and every desktop
-     width above it is at the ceiling. Below that it still ramps down,
-     because a 72px claim on a tablet is not restraint, it is a wall. */
-  --ic-h1: clamp(40px, 5.7vw, 72px);
-  --ic-h2: clamp(30px, 3.2vw, 46px);
-  --ic-fig: clamp(56px, 7.4vw, 104px);
+  /* RETUNED TO THE HOME PAGE, 2026-09-22.
+   *
+     These were 72px, 46px and 104px, which came from the brief's line
+     "hero headline 72px or larger on desktop". That brief is the quiet
+     register the founder rejected, and the home page has been rebuilt in
+     the category's own register (see home/stack.css). Leaving the kit at
+     72 left the site reading as two designs joined at the nav: a 56px
+     home page, then a 72px inner page one click away.
+
+     The kit is the leverage point. All 43 non-home routes draw through
+     it, so these three numbers move the whole site into one rhythm
+     without editing a single page file. They now match the home page's
+     own steps: 56 for a claim, 38 for a section head.
+
+     The ramp maths is unchanged in kind, only in target. 56 / 1264 =
+     4.4vw, so a claim reaches its ceiling at 1264 and every desktop width
+     above it is at the cap, which is what 5.7vw was buying at 72. */
+  --ic-h1: clamp(34px, 4.4vw, 56px);
+  --ic-h2: clamp(26px, 3.2vw, 38px);
+  --ic-fig: clamp(48px, 5.6vw, 76px);
   --ic-name: clamp(24px, 2.4vw, 34px);
   --ic-sub: clamp(17px, 1.5vw, 22px);
   --ic-line: clamp(16px, 1.2vw, 18px);
@@ -74,11 +83,20 @@
    opening one. */
 .ic-sec[data-air="tight"] { padding-block: 0 80px; }
 
+/* RETUNED WITH THE TYPE ABOVE, 2026-09-22. These were 150, 190, 104/110
+   and 0/150. That is roughly half a laptop screen of empty page between
+   one idea and the next, which is the quiet register's density and not
+   this category's: the home page's bands pay 80 to 112. An inner page at
+   150 read as a different site, and on a 900px screen a single sentence
+   could hold the viewport on its own with nothing else in it.
+
+   These are still generous, and deliberately more than the home page's,
+   because an inner page carries one argument rather than eight bands. */
 @media (min-width: 768px) {
-  .ic-sec { padding-block: 150px; }
-  .ic-sec[data-air="wide"] { padding-block: 190px; }
-  .ic-sec[data-air="hero"] { padding-block: 104px 110px; }
-  .ic-sec[data-air="tight"] { padding-block: 0 150px; }
+  .ic-sec { padding-block: 104px; }
+  .ic-sec[data-air="wide"] { padding-block: 128px; }
+  .ic-sec[data-air="hero"] { padding-block: 72px 88px; }
+  .ic-sec[data-air="tight"] { padding-block: 0 104px; }
 }
 
 /* The one alternate ground. Used sparingly: on a seven band page it appears
@@ -419,26 +437,34 @@ a.ic-stackname:hover {
 /* ─────────────────────────────────────────────────────────────────
  * The plans. /pricing only.
  *
- * Three rows, not three cards. A card grid is rule 5, and it is also what
- * every rival ships: the thing a buyer is looking for on this page is one
- * number, so the number is set at display size and the rest is one line of
- * plain words under it.
+ * THREE CARDS, AND THE REVERSAL IS THE POINT. This block used to read
+ * "three rows, not three cards. A card grid is rule 5, and it is also what
+ * every rival ships." Shipping what every rival ships was being treated as
+ * an argument against doing it. On a pricing page it is an argument FOR:
+ * the pattern is bordered cards with a free floor, a highlighted middle and
+ * a quoted top, and a buyer arrives already knowing how to read it. The
+ * founder asked for this category's register by name, and the rebuilt home
+ * page uses the same three card shape, so /pricing matching it is also what
+ * stops the two pages reading as two sites.
  * ───────────────────────────────────────────────────────────────── */
 
 .ic-plans {
   list-style: none;
-  margin: 48px auto 0;
+  margin: 40px auto 0;
   padding: 0;
   display: grid;
-  gap: 56px;
+  gap: 20px;
   max-width: 1040px;
 }
 
 @media (min-width: 900px) {
   .ic-plans {
-    margin-top: 64px;
+    margin-top: 48px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 48px;
+    gap: 20px;
+    /* Equal height cards, so three different bullet counts still put the
+       three buttons on one line. */
+    align-items: stretch;
   }
 }
 
@@ -446,11 +472,24 @@ a.ic-stackname:hover {
    three different bullet counts otherwise put their three buttons at three
    different heights, which reads as a mistake rather than as a list. */
 .ic-plan {
+  position: relative;
   text-align: center;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  padding: 28px 24px;
+  border: 1px solid var(--os-line);
+  border-radius: 14px;
+  background: var(--os-surface);
+}
+
+/* The recommended plan, said with a border and a shadow as well as in
+   words. The note under it (`.ic-planpick`) stays: the border says which
+   one, the words say why. */
+.ic-plan[data-pick="true"] {
+  border-color: var(--os-brand);
+  box-shadow: 0 10px 30px -12px rgb(0 115 234 / 0.28);
 }
 
 .ic-planname {
