@@ -60,6 +60,38 @@ echo "==> guards"
 node scripts/check-app-prefixes.mjs
 node scripts/check-schema-sql.mjs
 
+# THE TEST SUITE, INSIDE THE WORKTREE, AGAINST THE COMMIT'S OWN FILES.
+#
+# WHY THIS STEP EXISTS (added 2026-09-22, after it let two pushes through).
+# The gate proved a commit BUILDS and that every `@/` import resolves inside
+# it, and reported PASS on faf276e3 and e1f44924. CI then failed both, and
+# the Deploy job is gated on CI, so it was skipped: two commits reported as
+# shipped were not on the box at all.
+#
+# The cause was a dependency the import scan cannot see. A test reads a
+# source file BY PATH:
+#
+#   marketing-tokens.test.ts:169  readFileSync(OG_ROUTE)   <- api/og/receipt
+#
+# That file was not in the path-scoped marketing commit. It existed
+# untracked on my disk, so the local `vitest run` passed; it did not exist
+# in the commit, so CI could not open it. A `readFileSync` of a route is not
+# an import and never appears in an import graph.
+#
+# The lesson generalises past this one file: the ONLY way to know a commit's
+# tests pass is to run them against the commit's own tree, which is what the
+# worktree already is. Building is not enough, because a test that reads the
+# repo is testing the repo, not the bundle.
+#
+# TZ=UTC to match CI. Note this still runs on the local Node (24) while CI
+# and production are Node 20, so it cannot catch a Node-20-only failure; see
+# the ICU midnight bug in reference_workwrk_ci_node20_traps.
+echo "==> unit tests (the commit's own tree)"
+TZ=UTC npx vitest run > /tmp/verify-test.log 2>&1 || {
+  echo "TESTS FAILED. Last 40 lines:"; sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-test.log | tail -40; exit 1;
+}
+sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-test.log | grep -E "^ *(Test Files|Tests) " || true
+
 echo "==> production build"
 rm -rf .next
 NODE_OPTIONS=--max-old-space-size=3072 npx next build > /tmp/verify-build.log 2>&1 || {
