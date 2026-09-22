@@ -17,6 +17,35 @@ const nextConfig: NextConfig = {
   // `cpus: 1` is the knob that actually bounds the total, because it is the
   // worker count the build scales by. The build gets slower on that box and it
   // fits, which is the trade worth making on a machine this size.
+  //
+  // IT WENT MARGINAL AGAIN ON 2026-09-22, AND THE CAP IS NOT THE FIX.
+  //
+  // The deploy of 08e5a2fa died with the same signature as before: exit 1,
+  // no `::error::DEPLOY FAILED` line, so the `fail` handler never ran and
+  // the session went with the process. That commit changed metadata STRINGS
+  // and nothing else, and the deploy immediately before it succeeded, so the
+  // build now sometimes fits in 3921 MB and sometimes does not.
+  //
+  // MEASURED, so nobody repeats it: a full production build was run at two
+  // lower caps and BOTH died with a JS heap OOM (SIGABRT), which is the
+  // build saying it genuinely needs the memory rather than merely being
+  // allowed to take it.
+  //
+  //   --max-old-space-size=2048   SIGABRT, heap exhausted
+  //   --max-old-space-size=2560   SIGABRT, heap exhausted
+  //   --max-old-space-size=3072   completes
+  //
+  // So the requirement sits between 2560 and 3072 on a box with roughly
+  // 3000 MB free after the OS. There is no cap that both completes and
+  // leaves headroom: lowering it does not make the build smaller, it only
+  // converts an intermittent kernel kill into a deterministic heap crash,
+  // which is worse. 3072 stays.
+  //
+  // THE REAL FIX IS THE BOX, and it is not a code change: more RAM, or swap
+  // so a spike pages instead of being killed. Until then a deploy can fail
+  // for reasons unrelated to the commit being deployed, and the retry is a
+  // fresh push (workflow_dispatch needs credentials this session does not
+  // have).
   experimental: {
     cpus: 1,
     // Scale what workers there are by memory actually free at the time rather
