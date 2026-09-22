@@ -63,7 +63,7 @@ const APP_PREFIXES = new Set([
   "surveys", "tables", "talent", "tasks", "team", "templates", "timesheets",
   "tlk", "today", "tools", "trash",
   // (auth) + onboarding
-  "login", "register", "forgot-password", "reset-password", "verify-email",
+  "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
   "welcome", "onboard", "setup",
 ]);
 
@@ -78,7 +78,7 @@ const SHARED_PREFIXES = new Set([
 // edge auth gate must never bounce them — that would trap a user on the way to
 // signing in). Everything else under APP_PREFIXES needs a session.
 const AUTH_PUBLIC_PREFIXES = new Set([
-  "login", "register", "forgot-password", "reset-password", "verify-email",
+  "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
 ]);
 function isAuthPublicPath(path: string): boolean {
   return AUTH_PUBLIC_PREFIXES.has(firstSeg(path));

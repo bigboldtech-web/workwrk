@@ -28,10 +28,26 @@ const nextConfig: NextConfig = {
   // stored notification links and bookmarks keep working.
   async redirects() {
     return [
-      { source: "/chat", destination: "/tlk", permanent: false },
-      { source: "/chat/:id", destination: "/tlk/:id", permanent: false },
-      { source: "/room", destination: "/tlk", permanent: false },
-      { source: "/room/:id", destination: "/tlk/:id", permanent: false },
+      // Phase 4 (docs/plans/ui-refresh/spec-talk.md section 0 row 1): the four
+      // are now PERMANENT (308). Talk has been at /tlk for two renames and
+      // there is no page behind /chat or /room to come back to, so a browser
+      // caching the hop forever is the outcome we want. Stored notification
+      // links and bookmarks keep working either way; what changes is that a
+      // returning user stops paying for the round trip.
+      //
+      // A 308 is cached by the browser indefinitely and cannot be taken back
+      // for someone who has already seen it, so these four paths are spent:
+      // none of them can ever be a page again.
+      { source: "/chat", destination: "/tlk", permanent: true },
+      { source: "/chat/:id", destination: "/tlk/:id", permanent: true },
+      { source: "/room", destination: "/tlk", permanent: true },
+      { source: "/room/:id", destination: "/tlk/:id", permanent: true },
+      // Calendar connections are a personal setting, not a workspace one
+      // (spec-planner section 0 row 4). The stub that lived at
+      // /settings/calendar is gone; /account/connections is the page. The
+      // settings registry still carries /settings/calendar as an alias, so
+      // settings search finds the page under its old name.
+      { source: "/settings/calendar", destination: "/account/connections", permanent: true },
       // The Work landing. WORK_HOME_HREF (src/lib/nav/route-hub.ts) is the one
       // constant every in-app href reads; it cannot be imported here because
       // next.config runs before the "@/" alias exists, so this literal is its
@@ -98,8 +114,12 @@ const nextConfig: NextConfig = {
       { source: "/tasks/board", destination: "/my-work?view=board", permanent: true },
       { source: "/tasks/gantt", destination: "/my-work?view=gantt", permanent: true },
       { source: "/tasks/sprint", destination: "/my-work?view=sprint", permanent: true },
-      // One calendar for the whole app; the Planner hub owns it.
+      // One calendar for the whole app; the Planner hub owns it. Both of
+      // these are real 308s with a Location header, so a stored /calendar
+      // bookmark and its query string land on the Planner without the app
+      // booting first and hopping client-side (which dropped ?date=).
       { source: "/tasks/calendar", destination: "/planner", permanent: true },
+      { source: "/calendar", destination: "/planner", permanent: true },
       //
       // DELIBERATELY NOT HERE, and it is not an oversight:
       //
@@ -279,6 +299,31 @@ const nextConfig: NextConfig = {
       // It ships with the access gate step.
       // Bare /account had no page (a 404 inside the takeover).
       { source: "/account", destination: "/account/profile", permanent: true },
+      //
+      // /signup and /join: the marketing site's CTA targets, which had no
+      // route behind them.
+      //
+      // src/components/marketing/config.ts has named these two since the site
+      // was written, every "Start free" button on every marketing page builds
+      // its href from them (primaryCta appends ?utm_content=, the Tuesday
+      // template appends ?template=tuesday), and the sign-up page has always
+      // been at /register. So every conversion button on the marketing site
+      // pointed at nothing. It never showed as a 404 in testing: under the
+      // hard host split an unlisted first segment is taken for a marketing
+      // path, so /signup on the app host answered with the marketing site,
+      // HTTP 200, no error anywhere.
+      //
+      // Next appends the source query to the destination, so ?template= and
+      // ?utm_content= ride along to /register intact.
+      //
+      // 307, NOT 308. A 308 is cached by the browser forever and cannot be
+      // withdrawn, which would spend the URL: /signup is the name the whole
+      // site's conversion path is built on and it has to stay available to
+      // become a real page (a plan-aware or template-aware sign-up) later.
+      // Same for /join, whose destination is the invite arm of the same form
+      // (register reads ?token and switches to "Join <org>").
+      { source: "/signup", destination: "/register", permanent: false },
+      { source: "/join", destination: "/register", permanent: false },
     ];
   },
   /* config options here */
