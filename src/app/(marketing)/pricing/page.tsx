@@ -398,7 +398,7 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
       {sharedReceipt ? (
         <Band labelledBy="pricing-shared">
           <Eyebrow>A shared receipt</Eyebrow>
-          <Headline id="pricing-shared">Someone priced their stack.</Headline>
+          <Headline id="pricing-shared">Someone already priced their stack</Headline>
           <Line>
             {`${shared.selected.length} ${shared.selected.length === 1 ? "category" : "categories"} at ${shared.seats} seats, in ${shared.currency}.`}
           </Line>

@@ -135,19 +135,26 @@ export function capabilityPagesFor(hubId: string): CapabilityPage[] {
  * beside a picture, not set at 64px, and Work's ran to five lines of display
  * type before the lede began.
  */
-// SIX WORDS OR FEWER, every one of them, because these eight strings are
-// the h1 on eight routes and rule 2 is the one measurable line in the brief.
-// They ran to seven, eight and nine words, which at 72px is three lines of
-// display type before a visitor reaches a single idea.
+// SEVEN OR EIGHT WORDS, and they read as phrases rather than as two clipped
+// sentences. These eight strings are the h1 on eight routes.
+//
+// The cap here was six, from the brief's rule 2. That brief is the quiet
+// register the founder rejected twice; the one he asked for instead writes
+// plainer, longer lines (see iconic.test.ts, where the cap moved to ten).
+// The original worry behind the six still holds and is why these did not
+// simply get longer: at 72px a nine-word headline was three lines of display
+// type before a visitor reached one idea. The kit now sets a claim at 56px,
+// which is what buys the extra words, so the constraint that actually
+// matters is LINES ON SCREEN and not words on a ruler.
 const HEADLINES: Record<ModuleId, string> = {
-  work: "One task. Everything attached to it.",
-  docs: "Docs, SOPs and contracts, one library.",
-  talk: "Channels and calls, beside the work.",
-  tables: "Sheets and forms, with real formulas.",
-  goals: "Goals, with the work underneath.",
-  teams: "The roles, and what each owns.",
-  planner: "The week, the call, the hours.",
-  ai: "One Ask, on every page.",
+  work: "One task, with everything attached to it",
+  docs: "Docs, SOPs and contracts in one library",
+  talk: "Channels and calls, right beside the work",
+  tables: "Sheets and forms, with real formulas",
+  goals: "Goals, with the work underneath them",
+  teams: "Every role, and what each one owns",
+  planner: "The week, the call and the hours",
+  ai: "One Ask, on every page",
 };
 
 export function moduleHeadline(hubId: string): string {

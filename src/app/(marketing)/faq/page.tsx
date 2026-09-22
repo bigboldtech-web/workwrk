@@ -105,7 +105,7 @@ export default function FaqPage() {
       {/* 2. The questions. */}
       <Band ground="quiet" labelledBy="faq-list">
         <Eyebrow>Questions</Eyebrow>
-        <Headline id="faq-list">Every one we get asked.</Headline>
+        <Headline id="faq-list">Every question we actually get asked</Headline>
         <Qa
           items={entries.map((entry) => ({
             q: entry.q,

@@ -76,7 +76,7 @@ export default function TuesdayPage() {
     <Page>
       <Band air="hero" labelledBy="tue-h1" still>
         <Eyebrow>The share route</Eyebrow>
-        <Claim id="tue-h1">One task. One day. One trail.</Claim>
+        <Claim id="tue-h1">One task, one day, one trail</Claim>
         <Sub>
           Follow one task from nine to six and watch every block of the system do exactly one thing to it.
         </Sub>

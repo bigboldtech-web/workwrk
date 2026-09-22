@@ -82,7 +82,7 @@ export default function FeaturesPage() {
     <Page>
       <Band air="hero" labelledBy="feat-h1" still>
         <Eyebrow>Features</Eyebrow>
-        <Claim id="feat-h1">{BLOCKS.length} blocks. One data model.</Claim>
+        <Claim id="feat-h1">{BLOCKS.length} parts, all on one data model</Claim>
         <Sub>
           One task, one role and one goal, referenced by every block instead of copied between them.
         </Sub>
@@ -91,7 +91,7 @@ export default function FeaturesPage() {
       {/* The product, on the page that sells the blocks. */}
       <Band ground="quiet" labelledBy="feat-shell">
         <Eyebrow>The screen</Eyebrow>
-        <Headline id="feat-shell">All {BLOCKS.length} on one rail.</Headline>
+        <Headline id="feat-shell">All {BLOCKS.length} of them on one rail</Headline>
         <Obj>
           <MarketingShell
             hub="work"
@@ -113,7 +113,7 @@ export default function FeaturesPage() {
           avoid. What a block IS is the line that stays. */}
       <Band labelledBy="feat-blocks">
         <Eyebrow>The blocks</Eyebrow>
-        <Headline id="feat-blocks">What each block does.</Headline>
+        <Headline id="feat-blocks">What each part of the platform does</Headline>
         <Stack
           items={BLOCKS.map((block) => ({
             title: block.label,
@@ -126,7 +126,7 @@ export default function FeaturesPage() {
 
       <Band ground="quiet" labelledBy="feat-pages">
         <Eyebrow>In detail</Eyebrow>
-        <Headline id="feat-pages">One page per capability.</Headline>
+        <Headline id="feat-pages">One page for every capability</Headline>
         <Line>Each one describes a capability against the product today, including the parts that do not exist yet.</Line>
         <Stack
           items={SUB_PAGES.map((page) => ({
@@ -140,7 +140,7 @@ export default function FeaturesPage() {
 
       <Band labelledBy="feat-day">
         <Eyebrow>The argument</Eyebrow>
-        <Headline id="feat-day">A feature list is not it.</Headline>
+        <Headline id="feat-day">A feature list is not the point</Headline>
         <Line>Every block above does exactly one thing to one task on one Tuesday.</Line>
         <ol className="ic-steps">
           {BLOCKS.map((block) => (

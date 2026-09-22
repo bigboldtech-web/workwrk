@@ -196,15 +196,23 @@ function literalHeadlines(src: string): string[] {
   return out.map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
+// TEN WORDS, NOT SIX. See the matching note in iconic.test.ts: six was the
+// rejected register's rule, where a headline was a clipped two-part
+// fragment. The register the founder asked for writes plainer, longer
+// lines, and the rebuilt home page's own claim is nine words. The cap
+// stays, because "a headline that became a paragraph" is a real failure
+// and is not a matter of register.
+const HEADLINE_MAX = 10;
+
 describe("rule 2: few words", () => {
-  it("holds every literal headline on every route to six words or fewer", () => {
+  it("holds every literal headline on every route to ten words or fewer", () => {
     for (const page of ROUTES) {
       for (const line of literalHeadlines(page.src)) {
         // A `title=` in a `metadata` block is a browser tab name, not a
         // headline, and those legitimately run long.
         if (/title="[^"]*"/.test(line)) continue;
         expect(`${page.route}: "${line}" is ${words(line)} words`).toBe(
-          `${page.route}: "${line}" is ${Math.min(words(line), 6)} words`,
+          `${page.route}: "${line}" is ${Math.min(words(line), HEADLINE_MAX)} words`,
         );
       }
     }
@@ -215,11 +223,11 @@ describe("rule 2: few words", () => {
     expect(withHeadlines.length).toBeGreaterThanOrEqual(30);
   });
 
-  it("holds the eight module chapter claims to six words", () => {
+  it("holds the eight module chapter claims to ten words", () => {
     for (const id of MODULE_ORDER) {
       const headline = moduleHeadline(id);
       expect(`${id}: "${headline}" is ${words(headline)} words`).toBe(
-        `${id}: "${headline}" is ${Math.min(words(headline), 6)} words`,
+        `${id}: "${headline}" is ${Math.min(words(headline), HEADLINE_MAX)} words`,
       );
     }
   });

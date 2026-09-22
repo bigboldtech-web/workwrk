@@ -77,14 +77,14 @@ export default function CustomersPage() {
       </Band>
 
       <Band ground="quiet" air="wide" labelledBy="customers-why">
-        <Headline id="customers-why">Empty beats invented.</Headline>
+        <Headline id="customers-why">An empty page beats an invented one</Headline>
         <Line>
           There is no logo wall, no counter and no quote on this site, because we have not earned one yet.
         </Line>
       </Band>
 
       <Band air="wide" labelledBy="customers-close">
-        <Headline id="customers-close">Be the first one here.</Headline>
+        <Headline id="customers-close">Be the first one on this page</Headline>
         <div className="ic-cta">
           <PrimaryCta placement="customers-empty" />
         </div>

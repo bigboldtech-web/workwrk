@@ -99,7 +99,7 @@ export default function DevelopersPage() {
           and the air around it rather than a smaller size. */}
       <Band ground="quiet" labelledBy="dev-res">
         <Eyebrow>Reference</Eyebrow>
-        <Headline id="dev-res">The whole v1 surface.</Headline>
+        <Headline id="dev-res">The whole of the v1 surface</Headline>
         <Line>Eight resources over REST, and an OpenAPI document you can generate a client from.</Line>
         <div className="ic-matrix" tabIndex={0} role="group" aria-label="The v1 resources">
           <table>

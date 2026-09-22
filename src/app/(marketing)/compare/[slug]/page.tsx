@@ -75,7 +75,7 @@ export default async function CompareSlugPage({ params }: ComparePageProps) {
           own type is nominative use; a logo is not. */}
       <Band air="hero" labelledBy="cs-h1" still>
         <Eyebrow>Compare</Eyebrow>
-        <Claim id="cs-h1">WorkwrK and {entry.name}.</Claim>
+        <Claim id="cs-h1">WorkwrK and {entry.name}</Claim>
         <Sub>Bought for {entry.boughtFor}.</Sub>
         <Note>
           We are not going to summarise someone else&apos;s product for you in a tick box. What follows is what we
@@ -85,7 +85,7 @@ export default async function CompareSlugPage({ params }: ComparePageProps) {
 
       <Band ground="quiet" labelledBy="cs-ours">
         <Eyebrow>Our answer</Eyebrow>
-        <Headline id="cs-ours">What we do instead.</Headline>
+        <Headline id="cs-ours">What we do instead</Headline>
         <Line>{entry.ours}</Line>
       </Band>
 
@@ -111,7 +111,7 @@ export default async function CompareSlugPage({ params }: ComparePageProps) {
 
       <Band ground="quiet" air="wide" labelledBy="cs-when">
         <Eyebrow>Their case</Eyebrow>
-        <Headline id="cs-when">When {entry.name} is the answer.</Headline>
+        <Headline id="cs-when">When {entry.name} is the better answer</Headline>
         <Line>{entry.theirs}</Line>
       </Band>
 
@@ -163,7 +163,7 @@ export default async function CompareSlugPage({ params }: ComparePageProps) {
 
       <Band ground="quiet" labelledBy="cs-tuesday">
         <Eyebrow>The test</Eyebrow>
-        <Headline id="cs-tuesday">The comparison is a Tuesday.</Headline>
+        <Headline id="cs-tuesday">See the difference on one real day</Headline>
         <Line>
           Run one real process end to end in ours and see whether the trail it leaves is worth the move:{" "}
           <Link className="ic-a mk-focus" href={routes.tuesday} data-cta={`compare-${slug}-tuesday`}>

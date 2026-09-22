@@ -59,7 +59,7 @@ export default function AboutPage() {
           eight words, left aligned at 64px beside 750px of nothing. */}
       <Band air="hero" labelledBy="about-h1" still>
         <Eyebrow>About</Eyebrow>
-        <Claim id="about-h1">One system. Everything else is no.</Claim>
+        <Claim id="about-h1">One system, and a long list of noes</Claim>
         <Sub>
           A company of thirty or three hundred does not lack tools, it lacks one place where the role, the process,
           the work and the number are the same records.
@@ -69,7 +69,7 @@ export default function AboutPage() {
       {/* 2. The decisions. Four names, not a two column card grid. */}
       <Band ground="quiet" labelledBy="about-ideas">
         <Eyebrow>Decisions</Eyebrow>
-        <Headline id="about-ideas">Four things we decided early.</Headline>
+        <Headline id="about-ideas">Four things we decided early on</Headline>
         <Stack items={IDEAS} />
       </Band>
 
@@ -77,7 +77,7 @@ export default function AboutPage() {
           the site can be caught out. */}
       <Band labelledBy="about-check">
         <Eyebrow>Verify it</Eyebrow>
-        <Headline id="about-check">Check anything on this site.</Headline>
+        <Headline id="about-check">Check anything we say on this site</Headline>
         <Stack
           items={[
             {

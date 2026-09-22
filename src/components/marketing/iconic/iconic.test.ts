@@ -113,9 +113,23 @@ function supportingLines(): Array<[string, string]> {
  * ═══════════════════════════════════════════════════════════════════ */
 
 describe("rule 2: few words", () => {
-  it("holds every headline to six words or fewer", () => {
+  // TEN WORDS, NOT SIX. The six came from the quiet register the founder
+  // rejected twice, where a headline was a clipped two-part fragment: "Pay
+  // for people. Nothing else.", "Three plans. One number." The register he
+  // asked for instead (ClickUp, Asana, monday.com) writes plainer, longer,
+  // benefit-led lines that read as sentences, and the rebuilt home page's
+  // own claim is nine words.
+  //
+  // The cap is kept rather than removed, because the failure it guards
+  // against is real and unrelated to register: a headline that turns into a
+  // paragraph. Ten is the home page's longest line plus one.
+  const HEADLINE_MAX = 10;
+
+  it("holds every headline to ten words or fewer", () => {
     for (const [where, line] of headlines()) {
-      expect(`${where}: ${line} (${words(line)} words)`).toBe(`${where}: ${line} (${Math.min(words(line), 6)} words)`);
+      expect(`${where}: ${line} (${words(line)} words)`).toBe(
+        `${where}: ${line} (${Math.min(words(line), HEADLINE_MAX)} words)`,
+      );
     }
   });
 

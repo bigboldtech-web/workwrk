@@ -100,14 +100,14 @@ export default function SecurityPage() {
           top row inside the first viewport. */}
       <Band ground="quiet" labelledBy="sec-controls">
         <Eyebrow>Account security</Eyebrow>
-        <Headline id="sec-controls">The controls that ship.</Headline>
+        <Headline id="sec-controls">The controls that ship today</Headline>
         <Stack items={CONTROLS} />
       </Band>
 
       {/* 3. Procurement. One address, and what we will and will not say. */}
       <Band labelledBy="sec-review">
         <Eyebrow>Procurement</Eyebrow>
-        <Headline id="sec-review">Send the questionnaire.</Headline>
+        <Headline id="sec-review">Send us your security questionnaire</Headline>
         <Line>
           Write to{" "}
           <a className="ic-a mk-focus" href={`mailto:${mailboxes.sales}`}>

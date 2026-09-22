@@ -130,7 +130,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
       {/* 2. The block itself, in the product's own chrome. */}
       <Band ground="quiet" labelledBy="mod-frame">
         <Eyebrow>The screen</Eyebrow>
-        <Headline id="mod-frame">This is the real surface.</Headline>
+        <Headline id="mod-frame">This is the real product surface</Headline>
         <Obj>
           <MarketingShell
             hub={hub.id}
@@ -187,7 +187,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
       {chapter.neighbours.length > 0 ? (
         <Band labelledBy="mod-connects">
           <Eyebrow>The wires</Eyebrow>
-          <Headline id="mod-connects">What {hub.label} connects to.</Headline>
+          <Headline id="mod-connects">What {hub.label} connects to</Headline>
           <Line>
             A block is a neighbour here because one stop of Tuesday puts the two of them on the ends of the same wire.
           </Line>
@@ -212,7 +212,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
       {/* 5. What is in the block, and what is not yet. */}
       <Band ground="quiet" labelledBy="mod-inside">
         <Eyebrow>Inside it</Eyebrow>
-        <Headline id="mod-inside">What is inside {hub.label}.</Headline>
+        <Headline id="mod-inside">What is inside {hub.label}</Headline>
         <Terms items={inside} />
 
         {chapter.capabilities.length > 0 ? (
@@ -251,7 +251,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
       {/* 6. The close. One line, one button. */}
       <Band labelledBy="mod-point">
         <Eyebrow>{chapter.tierLine}</Eyebrow>
-        <Headline id="mod-point">The point is the wires.</Headline>
+        <Headline id="mod-point">The point is what it connects to</Headline>
         <Line>
           {hub.label} is one of {spellCount(tuesday.hubs.length, true)}, and the whole day is at{" "}
           <Link className="ic-a mk-focus" href={routes.tuesday} data-cta={`product-${id}-tuesday`}>

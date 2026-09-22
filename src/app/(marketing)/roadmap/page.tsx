@@ -153,7 +153,7 @@ export default function RoadmapPage() {
     <Page>
       <Band air="hero" labelledBy="road-h1" still>
         <Eyebrow>Roadmap</Eyebrow>
-        <Claim id="road-h1">What is live. What is not.</Claim>
+        <Claim id="road-h1">What is live, and what is not</Claim>
         <Sub>
           {shipped} things on this board are usable today, and the further right a card sits the less of a commitment
           it is.

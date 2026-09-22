@@ -79,7 +79,7 @@ export default function ComparePage() {
               <span className="ic-entryname">{c.name}</span>
               <p className="ic-entrypara">Bought for: {c.boughtFor}</p>
               <p className="ic-entrypara">
-                <span className="ic-entrylead">What we do instead. </span>
+                <span className="ic-entrylead">What we do instead </span>
                 {c.ours}
               </p>
               <p className="ic-entrypara">

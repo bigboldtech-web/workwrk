@@ -109,7 +109,7 @@ export default function IndustriesPage() {
 
       <Band labelledBy="ind-rhyme">
         <Eyebrow>Why a trade page</Eyebrow>
-        <Headline id="ind-rhyme">Four things that rhyme.</Headline>
+        <Headline id="ind-rhyme">Four things every arrangement shares</Headline>
         <Stack items={REUSABLE.map(([title, body]) => ({ title, body }))} />
       </Band>
 

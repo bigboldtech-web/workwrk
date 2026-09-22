@@ -28,7 +28,7 @@ import { starterSeatCap } from "../data/pricing";
 export const PRODUCT_COPY = {
   hero: {
     eyebrow: "Product",
-    h1: "One record. Eight parts read it.",
+    h1: "Eight parts of your company, on one set of records",
     sub: "Every part below is one surface of the same workspace, on the same records.",
   },
   tour: {
@@ -36,10 +36,10 @@ export const PRODUCT_COPY = {
   },
   chapters: {
     eyebrow: "Chapters",
-    h2: "Each part has a page.",
+    h2: "Every part has a page of its own",
   },
   close: {
-    h2: "Open it on your own work.",
+    h2: "Try it on your own work",
   },
 } as const;
 
@@ -72,43 +72,43 @@ export const PART_LINE: Record<string, string> = {
 export const PRICING_COPY = {
   hero: {
     eyebrow: "Pricing",
-    h1: "Pay for people. Nothing else.",
+    h1: "Pay for the people on your team, nothing else",
     sub: `Free up to ${starterSeatCap} people, then one price per person per month.`,
   },
   plans: {
     eyebrow: "Plans",
-    h2: "Three plans. One number.",
+    h2: "Three plans, one price per person",
   },
   matrix: {
     eyebrow: "Side by side",
-    h2: "What each plan includes.",
+    h2: "What each plan includes",
     line: "Every row here ships today, and nothing on the table is a feature in build.",
   },
   questions: {
-    h2: "Questions about money.",
+    h2: "Questions about billing and plans",
   },
   close: {
-    h2: "Free to start. No card.",
+    h2: "Start free, with no card",
   },
 } as const;
 
 export const COMPARE_COPY = {
   hero: {
     eyebrow: "Compare",
-    h1: "The only page that names names.",
+    h1: "An honest comparison, with the names named",
     sub: "Every row about us is one you can check by opening ours.",
   },
   facts: {
     eyebrow: "About us",
-    h2: "The facts, in one place.",
+    h2: "The facts about us, in one place",
   },
   entries: {
     eyebrow: "The category",
-    h2: "Who we get put beside.",
+    h2: "The tools we get compared with",
     line: "What each one is bought for, what we do instead, and when they are the better answer.",
   },
   close: {
-    h2: "Run one process in ours.",
+    h2: "Run one of your processes in ours",
     line: "See whether the trail it leaves behind is worth the move.",
   },
 } as const;
@@ -116,20 +116,20 @@ export const COMPARE_COPY = {
 export const DEMO_COPY = {
   hero: {
     eyebrow: "Book a demo",
-    h1: "Twenty minutes. No slide deck.",
+    h1: "Twenty minutes with the product, no slide deck",
     sub: "We open the product on the parts you asked about and answer what you bring.",
   },
   call: {
     eyebrow: "The call",
-    h2: "What a call actually is.",
+    h2: "What actually happens on the call",
   },
   form: {
     eyebrow: "Book it",
-    h2: "Tell us what to open.",
+    h2: "Tell us what you want to see",
     line: "We reply to every request.",
   },
   close: {
-    h2: "Or just open it yourself.",
+    h2: "Or skip the call and open it yourself",
     line: "Start free, with no card and no demo gate, and the call is here when you want one.",
   },
 } as const;

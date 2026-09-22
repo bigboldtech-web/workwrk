@@ -154,7 +154,7 @@ export default function HowItConnectsPage() {
       {/* 2. The map. This page's one object. */}
       <Band ground="quiet" labelledBy="hic-map">
         <Eyebrow>The map</Eyebrow>
-        <Headline id="hic-map">Every record. Every wire.</Headline>
+        <Headline id="hic-map">Every record, and every wire between them</Headline>
         <Line>
           {CONNECT_NODES.length} records across the {tuesday.hubs.length} blocks, and a solid wire is a relation you
           can open today.
@@ -167,14 +167,14 @@ export default function HowItConnectsPage() {
       {/* 3. Why one system. Names, not a three column card grid. */}
       <Band labelledBy="hic-why">
         <Eyebrow>The reason</Eyebrow>
-        <Headline id="hic-why">One system, not integrations.</Headline>
+        <Headline id="hic-why">One system, not a pile of integrations</Headline>
         <Stack items={WHY} />
       </Band>
 
       {/* 4. The administrator's half of the same argument. */}
       <Band ground="quiet" labelledBy="hic-gov">
         <Eyebrow>For whoever signs it off</Eyebrow>
-        <Headline id="hic-gov">One model. One place to govern.</Headline>
+        <Headline id="hic-gov">One model, one place to govern it</Headline>
         <Line>If a record exists once, permission on it is decided once.</Line>
         <Stack items={GOVERNANCE} />
         <Note>
@@ -188,7 +188,7 @@ export default function HowItConnectsPage() {
 
       <Band labelledBy="hic-walk">
         <Eyebrow>Or ask</Eyebrow>
-        <Headline id="hic-walk">Want it walked through?</Headline>
+        <Headline id="hic-walk">Have it walked through</Headline>
         <Line>
           Book twenty minutes and we will follow one of your own processes from the SOP to the task to the goal, or
           read{" "}

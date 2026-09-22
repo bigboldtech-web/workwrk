@@ -114,7 +114,7 @@ export default function ChangelogPage() {
     <Page>
       <Band air="hero" labelledBy="log-h1" still>
         <Eyebrow>Changelog</Eyebrow>
-        <Claim id="log-h1">What actually shipped.</Claim>
+        <Claim id="log-h1">What actually shipped, and when</Claim>
         <Sub>
           Newest first, taken from the repository rather than from a release calendar, and nothing on this page is a
           plan or a preview.
