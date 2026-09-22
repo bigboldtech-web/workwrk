@@ -38,7 +38,7 @@ import { detectCurrency } from "@/components/marketing/geo";
 import { SITE_TITLE_DEFAULT } from "@/components/marketing/positioning";
 
 const SITE = "https://workwrk.com";
-const OG_ALT = "WorkwrK: every task knows who owns it.";
+const OG_ALT = "WorkwrK: the work platform your whole company runs on.";
 
 export const metadata: Metadata = {
   title: SITE_TITLE_DEFAULT,
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "WorkwrK",
-    description: "Every task knows who owns it.",
+    description: "Tasks, plans, docs, spreadsheets, chat, people and goals in one workspace.",
     images: [{ url: "/opengraph-image", alt: OG_ALT }],
   },
   alternates: { canonical: SITE },

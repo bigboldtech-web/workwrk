@@ -94,7 +94,7 @@ export function homeJsonLd({ site, currency = pricing.defaultCurrency }: JsonLdO
  * be walked back.
  */
 export const HOME_DESCRIPTION =
-  "Every task knows who owns it. The owner, the standard and the goal travel with the work, so when the quarter ends the record of who delivered what already exists. " +
+  "Tasks, plans, docs, spreadsheets, chat, people and goals in one workspace, so the work and the record of the work are the same thing. " +
   `${moduleNames.length} parts, one system.`;
 
 /** The eight block names, for the metadata keywords. */

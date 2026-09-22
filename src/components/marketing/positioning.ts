@@ -60,11 +60,22 @@ export function positioningLine(): string {
  * not set its own.
  *
  * Why they live here rather than being left to the root layout: the root
- * layout is shared with the product and the auth host, and its metadata is
- * still the pre-refresh positioning. Its keywords read "business operating
- * system, performance management software India, OKR software India, HR
- * operations India, SaaS for Indian SMBs" and its title reads "The operating
- * system for teams that mean business". Decision D25 retired that in favour
+ * layout is shared with the product and the auth host, so a marketing
+ * claim set there would also be the default for the app and the login
+ * page. Keeping the marketing defaults in the marketing unit is still the
+ * right split.
+ *
+ * WHAT CHANGED ON 2026-09-22. This note used to end "and its metadata is
+ * still the pre-refresh positioning", and it was: the root layout read
+ * "SaaS for Indian SMBs", "performance management software India", "OKR
+ * software India", an og:locale of en_IN and a title with an em dash in
+ * it. The founder reset the target market to ENTERPRISE and the marketing
+ * unit deliberately names no country, so that default contradicted the
+ * site on every route that does not set its own, including the product and
+ * the auth host. It has been corrected at the source.
+ *
+ * The old title read "The operating system for teams that mean business".
+ * Decision D25 retired that in favour
  * of a people and project management system, sold globally, priced in US
  * dollars by default with the currency a data decision.
  *
@@ -76,14 +87,14 @@ export function positioningLine(): string {
  * Changing the ROOT layout would reach outside this unit, so it is not
  * touched: the marketing group overrides what the marketing group serves.
  */
-export const SITE_TITLE_DEFAULT = "WorkwrK: every task knows who owns it";
+export const SITE_TITLE_DEFAULT = "WorkwrK: the work platform your whole company runs on";
 
 /** The template a child page's string title is poured into. */
 export const SITE_TITLE_TEMPLATE = "%s · WorkwrK";
 
 /** The description a marketing page inherits when it sets none. */
 export function siteDescription(): string {
-  return `${positioningLine()} A people and project management system for companies of 25 to 500.`;
+  return `${positioningLine()} A people and project management system for the whole company.`;
 }
 
 /**

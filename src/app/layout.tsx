@@ -29,23 +29,28 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://workwrk.com"),
   title: {
-    default: "WorkwrK — The operating system for teams that mean business",
+    default: "WorkwrK: the work platform your whole company runs on",
     template: "%s · WorkwrK",
   },
   description:
-    "One system for people, performance, KPIs, SOPs, and AI. Replaces 15 disconnected tools. Built for Indian SMBs scaling from 25 to 500 people.",
+    "Tasks, plans, docs, spreadsheets, chat, people and goals in one workspace, so the work and the record of the work are the same thing.",
   applicationName: "WorkwrK",
+  // NO COUNTRY IS NAMED. These read "performance management software India",
+  // "OKR software India", "HR operations India" and "SaaS for Indian SMBs"
+  // until 2026-09-22. The site sells in six currencies, the target market was
+  // reset to ENTERPRISE, and the marketing unit's own keyword set (see
+  // positioning.ts) deliberately names no geography. This one contradicted it
+  // on every route that does not set its own.
   keywords: [
-    "business operating system",
-    "performance management software India",
+    "work management platform",
+    "project management software",
+    "task management software",
     "KPI tracking",
+    "OKR software",
     "SOP management software",
     "360 review platform",
     "employee recognition kudos",
-    "OKR software India",
-    "AI business intelligence",
-    "HR operations India",
-    "SaaS for Indian SMBs",
+    "enterprise work platform",
     "workwrk",
   ],
   authors: [{ name: "WorkwrK" }],
@@ -64,18 +69,18 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    locale: "en_IN",
+    locale: "en_US",
     siteName: "WorkwrK",
-    title: "WorkwrK — The operating system for teams that mean business",
+    title: "WorkwrK: the work platform your whole company runs on",
     description:
-      "People, performance, KPIs, SOPs, and AI in one system. Built for teams scaling past 25.",
+      "Tasks, plans, docs, spreadsheets, chat, people and goals in one workspace.",
     url: "https://workwrk.com",
   },
   twitter: {
     card: "summary_large_image",
-    title: "WorkwrK — Business Operating System",
+    title: "WorkwrK: one platform your whole company runs on",
     description:
-      "One system for people, performance, KPIs, SOPs, and AI. Replaces 15 tools. Built for Indian SMBs.",
+      "Tasks, plans, docs, spreadsheets, chat, people and goals in one workspace.",
     creator: "@workwrk",
   },
   alternates: {

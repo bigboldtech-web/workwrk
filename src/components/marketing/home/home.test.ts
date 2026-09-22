@@ -492,11 +492,16 @@ describe("the home structured data", () => {
 
   it("describes the product with the page's own claim, not a rating or a count", () => {
     // The description is the sentence a search engine quotes back, so it
-    // is the page's first line and its payoff, and nothing else. It used
-    // to end "in place of the stack a company buys one tool at a time",
-    // which is the replacement argument the home page no longer makes.
-    expect(HOME_DESCRIPTION).toContain("Every task knows who owns it.");
-    expect(HOME_DESCRIPTION).toContain("already exists");
+    // is the page's first line and its payoff, and nothing else.
+    //
+    // It has tracked the home page's claim through two rewrites: first
+    // "in place of the stack a company buys one tool at a time", then
+    // "Every task knows who owns it." Both are gone with the pages that
+    // made them. The claim now is the rebuilt home page's lede, and the
+    // thing this assertion is really protecting is that the two agree:
+    // the sentence Google quotes has to be the sentence on the page.
+    expect(HOME_DESCRIPTION).toContain("in one workspace");
+    expect(HOME_DESCRIPTION).toContain("the record of the work are the same thing");
     expect(/\b(?:trusted by|leading|rating|reviews)\b/i.test(HOME_DESCRIPTION)).toBe(false);
     expect(HOME_KEYWORDS.length).toBeGreaterThan(8);
     expect(HOME_KEYWORDS).toContain("workwrk");

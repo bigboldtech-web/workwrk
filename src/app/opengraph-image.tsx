@@ -40,7 +40,7 @@ import { heroHeadline } from "@/components/marketing/headline";
 import { workReceiptModel } from "@/components/marketing/receipt/receipt-model";
 
 export const runtime = "nodejs";
-export const alt = "WorkwrK: every task knows who owns it.";
+export const alt = "WorkwrK: the work platform your whole company runs on.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
