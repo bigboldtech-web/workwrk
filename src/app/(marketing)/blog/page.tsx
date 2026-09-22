@@ -1,128 +1,143 @@
+// /blog, on the iconic sheet.
+//
+// THE INDEX READS ONE SOURCE. Eight posts were once hand-listed in this file
+// and all eight slugs 404'd, because the posts that exist live in
+// src/data/blog-posts.ts, which is what /blog/[slug] renders and what the
+// sitemap submits. It reads that file now, so the index, the article route
+// and the sitemap cannot disagree again.
+//
+// THE FILTERS ARE LINKS, not labelled spans. They once rendered as a
+// selected pill and six unselected ones, which is the universal picture of a
+// working filter, and they were <span> elements with no handler, no role, no
+// href and tabIndex -1: unreachable by keyboard and silent when clicked. A
+// link also means /blog?category=AI is a URL somebody can send.
+//
+// WHAT THE RESTYLE REMOVED:
+//
+//   The six colour rotation. Every post was assigned a hue from a cycle, so
+//   a page of eight essays carried violet, sky, emerald, amber, fuchsia and
+//   indigo pills at once. Colour is almost absent on this site.
+//
+//   The featured card and the three column card grid under it. One post in a
+//   bordered box with a coloured top rule, then seven in tiles with
+//   hover-lift shadows, is two card treatments on one page. It is one list
+//   now: title, one line, date, hairline.
+//
+//   The closing sales band. An essay index that ends in a signup button is
+//   an ad with reading material attached.
+
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  Button,
-  CTABand,
-  GradientText,
-  HUES,
-  type Hue,
-} from "@/components/marketing/primitives";
+
+import { blogPosts } from "@/data/blog-posts";
+// The site's own date formatter, so a row prints "25 Mar 2026" rather than
+// the raw ISO string the fixture stores.
+import { formatDate } from "@/lib/utils";
+import { BLOG_COPY } from "@/components/marketing/iconic/copy";
+import { Band, Claim, Eyebrow, Headline, Page, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
+
+const BLOG_DESCRIPTION =
+  "Essays from the team building WorkwrK: how the parts connect, what the category words mean, and what we have decided not to build.";
 
 export const metadata: Metadata = {
-  title: "Blog — WorkwrK",
-  description: "Operator playbooks, product news, and category essays from the workwrk team.",
+  title: "Blog",
+  description: BLOG_DESCRIPTION,
   alternates: { canonical: "https://workwrk.com/blog" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Blog", description: BLOG_DESCRIPTION },
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: BLOG_DESCRIPTION },
 };
 
-const POSTS: readonly { slug: string; title: string; excerpt: string; date: string; readMins: number; category: string; hue: Hue }[] = [
-  { slug: "why-we-built-7-hubs",      title: "Why we built 7 hubs, not 1 (or 70)",                excerpt: "The product architecture decision that defines workwrk. Why hub-orientation beats both monolithic and modular extremes.",      date: "2026-05-15", readMins: 8, category: "Product",  hue: "violet" },
-  { slug: "the-kpi-engine-design",    title: "Inside the KPI engine: how composite scoring works", excerpt: "A deep technical look at how we weight KPI achievement, manager review, peer review, and kudos into a single composite.",  date: "2026-05-08", readMins: 11, category: "Engineering", hue: "sky"    },
-  { slug: "smb-vs-workday",            title: "What Workday taught us — and what it got wrong",     excerpt: "Workday is a marvel of enterprise software. It's also why 90% of mid-market companies still run on spreadsheets.",          date: "2026-04-28", readMins: 14, category: "Category", hue: "fuchsia" },
-  { slug: "cancel-bonusly",           title: "Why we built kudos into the perf system",            excerpt: "Bonusly is a great product. It's also the wrong shape — recognition belongs in the system that values it.",                  date: "2026-04-15", readMins: 6,  category: "Product",  hue: "pink"    },
-  { slug: "ai-runtime-not-chatbot",   title: "AI as runtime, not as chatbot",                       excerpt: "The category mistake everyone is making. Why workwrk doesn't ship a 'workwrk AI' — and what it ships instead.",                date: "2026-04-02", readMins: 10, category: "AI",       hue: "indigo"  },
-  { slug: "india-uae-first",          title: "Building emerging-markets-first software in 2026",    excerpt: "Why we ship INR, AED, and SGD as first-class — and what that means for product decisions every engineer should know.",         date: "2026-03-19", readMins: 9,  category: "Category", hue: "amber"   },
-  { slug: "weekly-ship-cadence",      title: "Every Tuesday: how we ship a v4 marketing site",      excerpt: "How a 35-person company ships product every Tuesday without burning out or breaking customers.",                                date: "2026-03-12", readMins: 7,  category: "Engineering", hue: "emerald" },
-  { slug: "perf-review-myths",        title: "Five myths about performance reviews",                 excerpt: "If your perf cycle takes 6 weeks, it's probably because you believe one of these. Here's what to do instead.",                  date: "2026-02-28", readMins: 8,  category: "People",  hue: "rose"    },
-];
+/* The copy lives in iconic/copy.ts with the other seven pages. */
+const COPY = BLOG_COPY;
 
-const CATEGORIES = ["All", "Product", "Engineering", "Category", "AI", "People"];
+interface IndexPost {
+  slug: string;
+  title: string;
+  excerpt: string;
+  date: string;
+  readMins: number;
+  category: string;
+}
 
-export default function BlogPage() {
-  const featured = POSTS[0];
-  const rest = POSTS.slice(1);
-  const fHue = HUES[featured.hue];
+const POSTS: readonly IndexPost[] = [...blogPosts]
+  .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+  .map((post) => ({
+    slug: post.slug,
+    title: post.title,
+    excerpt: post.excerpt,
+    date: post.date,
+    readMins: Number.parseInt(post.readTime, 10) || 0,
+    category: post.category,
+  }));
+
+/** Derived, so a filter can never offer a category with nothing behind it. */
+const CATEGORIES = ["All", ...Array.from(new Set(POSTS.map((p) => p.category)))];
+
+/** A category's own URL. "All" is the bare index, so it has no parameter. */
+function categoryHref(category: string): string {
+  return category === "All" ? "/blog" : `/blog?category=${encodeURIComponent(category)}`;
+}
+
+export default async function BlogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string | string[] }>;
+}) {
+  const sp = await searchParams;
+  const raw = Array.isArray(sp.category) ? sp.category[0] : sp.category;
+  // An unknown category falls back to All rather than to an empty page.
+  const active = raw && CATEGORIES.includes(raw) ? raw : "All";
+  const visible = active === "All" ? POSTS : POSTS.filter((p) => p.category === active);
+
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="violet" className="mb-5">Blog</Eyebrow>
-            <H1>
-              <GradientText hue="violet">Operator playbooks.</GradientText> Product essays. Category takes.
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              Stuff worth your time, from the team building workwrk and the operators using it.
-            </p>
-          </div>
+    <Page>
+      <Band air="hero" labelledBy="blog-h1" still>
+        <Eyebrow>{COPY.hero.eyebrow}</Eyebrow>
+        <Claim id="blog-h1">{COPY.hero.h1}</Claim>
+        <Sub>{COPY.hero.sub}</Sub>
+      </Band>
 
-          <div className="mt-10 flex flex-wrap gap-2">
-            {CATEGORIES.map((c) => (
-              <button
-                key={c}
-                className={`inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full border transition ${
-                  c === "All" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </Container>
-      </Section>
+      {/* The list continues the band above rather than opening a new idea,
+          so it pays no top air: the claim and the posts are one screen and
+          one screen after it. */}
+      <Band air="tight">
+        {CATEGORIES.length > 1 ? (
+          <nav aria-label="Filter posts by category">
+            <ul className="ic-filters">
+              {CATEGORIES.map((c) => (
+                <li key={c}>
+                  <Link
+                    className="ic-tab mk-focus"
+                    href={categoryHref(c)}
+                    aria-current={c === active ? "page" : undefined}
+                  >
+                    {c}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ) : null}
 
-      {/* Featured */}
-      <Section py="md">
-        <Container>
-          <Link
-            href={`/blog/${featured.slug}`}
-            className={`group block rounded-3xl overflow-hidden bg-gradient-to-br ${fHue.gradVia} p-1`}
-          >
-            <div className="bg-white rounded-[1.4rem] p-8 lg:p-12">
-              <div className="flex items-center gap-3">
-                <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${fHue.bgTint} ${fHue.text} border ${fHue.border}`}>
-                  Featured · {featured.category}
-                </span>
-                <span className="text-sm text-slate-500">{featured.date} · {featured.readMins} min</span>
-              </div>
-              <h2 className="mt-5 font-extrabold tracking-[-0.025em] text-slate-900" style={{ fontSize: "clamp(1.7rem, 3.2vw, 2.4rem)", lineHeight: 1.1 }}>
-                {featured.title}
-              </h2>
-              <p className="mt-4 text-slate-600 text-lg leading-relaxed max-w-3xl">{featured.excerpt}</p>
-              <span className={`mt-6 inline-flex items-center gap-1.5 text-base font-semibold ${fHue.text} group-hover:gap-2 transition-all`}>
-                Read the essay <ArrowRight size={14} />
-              </span>
-            </div>
-          </Link>
-        </Container>
-      </Section>
-
-      <Section py="lg">
-        <Container>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {rest.map((p) => {
-              const t = HUES[p.hue];
-              return (
-                <Link
-                  key={p.slug}
-                  href={`/blog/${p.slug}`}
-                  className="group p-7 bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
-                >
-                  <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-2.5 h-6 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
-                    {p.category}
+        {visible.length > 0 ? (
+          <ul className="ic-posts">
+            {visible.map((p) => (
+              <li key={p.slug}>
+                <Link className="ic-post mk-focus" href={`/blog/${p.slug}`}>
+                  <span className="ic-posttitle">{p.title}</span>
+                  <span className="ic-postexcerpt">{p.excerpt}</span>
+                  <span className="ic-postmeta">
+                    {p.category} &middot; {formatDate(p.date)} &middot; {p.readMins} min
                   </span>
-                  <h3 className="mt-4 font-bold text-slate-900 text-xl tracking-tight leading-snug">{p.title}</h3>
-                  <p className="mt-3 text-base text-slate-600 leading-relaxed line-clamp-3">{p.excerpt}</p>
-                  <p className="mt-5 text-sm text-slate-500">{p.date} · {p.readMins} min</p>
                 </Link>
-              );
-            })}
-          </div>
-        </Container>
-      </Section>
-
-      <CTABand
-        hue="violet"
-        title={<>Want this in your <GradientText hue="amber">inbox</GradientText>?</>}
-        body="Monthly digest of essays + product news. No spam, no fluff."
-        primary={{ label: "Subscribe", href: "/signup?source=blog" }}
-        secondary={{ label: "All posts", href: "/blog" }}
-      />
-    </>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Headline id="blog-empty">{COPY.empty.h2}</Headline>
+        )}
+      </Band>
+    </Page>
   );
 }

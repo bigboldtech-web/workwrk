@@ -1,46 +1,60 @@
+// /industries/technology, rewritten against the product.
+//
+// The old page named four competitor products in its lede and three more in
+// its pains, sold two way ticket sync, a sales pipeline and a customer 360
+// that are not in this product at all, promised "SOC 2 by default. Audit
+// log, SCIM, SAML SSO included" against three flags that are false, printed
+// an invented counter ("perf cycles in 10 days, not 6 weeks") and carried an
+// invented customer at an invented company. What survives is the shape of
+// the argument, which was always the good part.
+
 import type { Metadata } from "next";
-import { Cpu, Code2, GitMerge, Bot, BarChart3, Zap } from "lucide-react";
 import { IndustrySubPage } from "@/components/marketing/sub-page";
-import { GradientText } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "WorkwrK for Technology Companies",
-  description: "Engineering and GTM under one operating system. Tickets, sprints, OKRs, perf reviews, kudos, and pipeline — connected by a single data model.",
+  title: "WorkwrK for technology companies",
+  description:
+    "Roles, result areas, processes and goals for an engineering and go to market org on one data model, so a promotion case and a quarter review read from the same records.",
   alternates: { canonical: "https://workwrk.com/industries/technology" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "WorkwrK for technology companies",
+    description: "One data model under engineering and go to market.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "One data model under engineering and go to market." },
 };
 
 export default function TechnologyIndustryPage() {
   return (
     <IndustrySubPage
-      hue="violet"
+      slug="technology"
       eyebrow="Technology"
-      title={<>Engineering + GTM <GradientText hue="violet">under one OS.</GradientText></>}
-      lede="Stop running engineering on Linear, sales on HubSpot, perf on Lattice, and gluing it with Notion. One data model. One platform. One bill."
+      title="One record for every function."
+      lede="The role, the process, the measure and the goal are the same objects in engineering as they are in go to market."
+      painsTitle="Where the company question fails."
       pains={[
-        "Engineering KPIs live in Linear; revenue lives in HubSpot; perf reviews live in Lattice. None talk to each other.",
-        "Onboarding a new hire means setting up 8 accounts and writing the same SOP three times.",
-        "Quarterly OKRs are a Notion doc, not a system. Slippage is invisible until the retro.",
-        "Recognition is a #shoutouts channel that everyone scrolls past.",
+        "Each function runs on its own tool, and the quarter review is a manual reconciliation of four exports.",
+        "Onboarding a hire means creating accounts in several products and writing the same process down twice.",
+        "Quarterly goals are a document rather than a system, so slippage is only visible at the retro.",
+        "Recognition happens in a chat channel that scrolls past, and nothing of it survives to the review.",
       ]}
       capabilities={[
-        { icon: Code2,    title: "Eng-aware roles + KPIs",  body: "Pre-built role ladders (SWE I → Staff → Principal), velocity + quality KPIs, comp bands per band." },
-        { icon: GitMerge, title: "Linear + Jira sync",      body: "Tickets, sprints, releases — two-way sync. Ticket velocity feeds engineering KPIs automatically." },
-        { icon: BarChart3,title: "GTM under the same roof", body: "Sales pipeline, AE quotas, customer 360 — same data model as engineering. Promotion-relevant data on every profile." },
-        { icon: Bot,      title: "AI for tech orgs",        body: "Cmd-K across people, code repos, tickets, deals. Who built what. Who closed what. Who should be promoted." },
-        { icon: Zap,      title: "Fast deploys, faster perf",body: "Quarterly perf cycles in 10 days, not 6 weeks. Calibration baked in. Comp planning exports to Carta or your payroll." },
-        { icon: Cpu,      title: "SOC 2 by default",         body: "Audit log, SCIM, SAML SSO included. Security review takes a weekend, not a quarter." },
+        { title: "Role ladders that own things", body: "A role definition carries its result areas, the processes it owns and what it escalates, so a level is a job rather than a title." },
+        { title: "Measures with owners", body: "Each KPI has a target, a direction and the person who records the reading. No metric without a name against it." },
+        { title: "Processes that stay current", body: "Four kinds of process doc with version history and an acknowledgement list, which is what a runbook needs to be trusted." },
+        { title: "Goals that read the work", body: "Cascade, rollup and a computed on track verdict, with the linked tasks visible on the goal as the effort behind it." },
+        { title: "A v1 API", body: "People, tasks, processes, result areas, KPIs and readings, with an OpenAPI document. Build the connection your stack needs; none ships." },
+        { title: "The conversation on the work", body: "Channels, calls and comments attached to the task, so a decision survives the thread it was made in." },
       ]}
-      kpis={["Sprint velocity", "PR cycle time", "Deploy frequency", "Pipeline coverage", "Win rate", "Quota attainment", "Time-to-promote", "eNPS", "Customer NPS"]}
-      testimonial={{
-        quote: "Eng and GTM finally read off the same scoreboard. Promotions aren't a black box anymore.",
-        author: "Sarah Chen",
-        role: "Founder + CEO",
-        company: "Crest AI",
-      }}
+      kpisLabel="What teams here measure."
+      kpis={["Cycle time", "Review cycle completion", "Process acknowledgement", "Goal progress", "On track verdict"]}
       faq={[
-        { q: "Does this replace Linear?",                 a: "No — we two-way sync. Engineers stay in Linear. KPIs, perf, and cross-functional roll-up live in workwrk." },
-        { q: "What about salary banding?",                a: "Per-role comp bands tied to level, location, and tenure. Auto-flagged when offers go out of band." },
-        { q: "How fast can we deploy this?",              a: "Tech-company template ships with role ladders, KPIs, OKR examples, and SOC 2 SOPs. Most teams are live in a week." },
+        { q: "Does this replace our issue tracker?", a: "It can, and for a small team it usually does. It does not sync with one: nothing here connects to a third party product." },
+        { q: "Do you do compensation banding?", a: "No. Compensation, payroll and benefits are not in this product." },
+        { q: "What about a security review?", a: "Read the security page. We hold no third party certification, there is no single sign-on and there is no choice of region. Better to know that on the first call." },
       ]}
     />
   );

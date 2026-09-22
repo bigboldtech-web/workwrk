@@ -1,37 +1,49 @@
-// Landing v4 — built from scratch (premium aesthetic, hub-aligned, real
-// product mock). v2 has been deleted; if you need to roll back, recover
-// from git history before commit ee0c141 / f704baf range.
-import { LandingV4 } from "@/components/landing/landing-v4";
+// The home route.
+//
+// The page is built in the project-management category's own register, the
+// one ClickUp, Asana and monday.com share, because that is the register the
+// founder asked for after rejecting a quieter one twice. The bands, and the
+// survey rule each one answers, are documented in
+// src/components/marketing/home/stack.tsx; the visual half is stack.css.
+//
+//   0 nav        the layout owns it
+//   1 hero       claim, product frame, one filled button
+//   2 proof      the honest rung, where a logo wall would go
+//   3 breadth    a tab strip over seven real product surfaces
+//   4 modules    the eight hubs as a card grid
+//   5 use cases  three alternating rows, words and product
+//   6 security   a boring table of what actually ships
+//   7 pricing    free floor, highlighted middle, quoted top
+//   8 close      one line, one button
+//   9 footer     the layout owns it
+//
+// It is a Server Component and stays one. There is exactly one client
+// island on the page, the tab strip, and it owns which chip is on and
+// nothing else: every product frame inside it is server markup. So the
+// whole page is complete and legible at first paint, with JavaScript off,
+// in a link preview and on paper.
+//
+// What is NOT on this page, and will not come back without the evidence
+// named beside it: a customer logo, a counter, a case study, a
+// certification badge, an analyst placement, a testimonial, and a play
+// control with no video behind it. The category puts a proof ladder right
+// under the hero and this site cannot climb it yet, so band 2 says what is
+// true instead of implying what is not.
+
 import type { Metadata } from "next";
 
+import { HomeStack } from "@/components/marketing/home/stack";
+import { HOME_DESCRIPTION, HOME_KEYWORDS, homeJsonLd } from "@/components/marketing/home/json-ld";
+import { detectCurrency } from "@/components/marketing/geo";
+import { SITE_TITLE_DEFAULT } from "@/components/marketing/positioning";
+
+const SITE = "https://workwrk.com";
+const OG_ALT = "WorkwrK: every task knows who owns it.";
+
 export const metadata: Metadata = {
-  title: "WorkwrK — Business Operating System | People, Performance, KPIs, SOPs & AI",
-  description:
-    "WorkwrK is the all-in-one business operating system that unifies people management, KPI tracking, performance reviews, SOPs, task management, recognition, and AI intelligence. Replace 15 disconnected tools with one platform. Built for growing businesses in India, UAE, Southeast Asia & beyond.",
-  keywords: [
-    "business operating system",
-    "employee performance management software",
-    "KPI tracking tool",
-    "SOP management software",
-    "performance review platform",
-    "360 degree feedback software",
-    "task management for teams",
-    "HR management software",
-    "people management platform",
-    "employee recognition software",
-    "kudos platform",
-    "AI business intelligence",
-    "OKR tracking software",
-    "workforce management",
-    "business process management",
-    "team performance analytics",
-    "employee onboarding software",
-    "meeting notes software",
-    "HRMS India",
-    "business software UAE",
-    "SaaS for SMBs",
-    "workwrk",
-  ],
+  title: SITE_TITLE_DEFAULT,
+  description: HOME_DESCRIPTION,
+  keywords: HOME_KEYWORDS,
   authors: [{ name: "WorkwrK" }],
   creator: "WorkwrK",
   publisher: "WorkwrK",
@@ -46,169 +58,40 @@ export const metadata: Metadata = {
       "max-snippet": -1,
     },
   },
+  // The card, named explicitly.
+  //
+  // A `metadata` export that declares openGraph or twitter WITHOUT an images
+  // key replaces the file convention's inferred one rather than merging with
+  // it, so the home page, and only the home page, unfurled with no picture
+  // at all while every other route carried the root card. That is the one
+  // route whose link gets shared most.
   openGraph: {
     type: "website",
     locale: "en_US",
     siteName: "WorkwrK",
-    title: "WorkwrK — The Business Operating System Your Team Deserves",
-    description:
-      "Unify people, KPIs, SOPs, performance reviews, tasks, recognition, and AI intelligence into one platform. Stop managing chaos — start operating your business.",
-    url: "https://workwrk.com",
+    title: SITE_TITLE_DEFAULT,
+    description: HOME_DESCRIPTION,
+    url: SITE,
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: OG_ALT }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "WorkwrK — Business Operating System",
-    description:
-      "One platform for people, performance, KPIs, SOPs, tasks, recognition & AI. Replace 15 tools with one.",
-    creator: "@workwrk",
+    title: "WorkwrK",
+    description: "Every task knows who owns it.",
+    images: [{ url: "/opengraph-image", alt: OG_ALT }],
   },
-  alternates: {
-    canonical: "https://workwrk.com",
-  },
+  alternates: { canonical: SITE },
   category: "Business Software",
 };
 
 export default async function Home() {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "WebSite",
-        name: "WorkwrK",
-        url: "https://workwrk.com",
-        description:
-          "All-in-one business operating system for people, performance, KPIs, SOPs, and AI intelligence.",
-        potentialAction: {
-          "@type": "SearchAction",
-          target: "https://workwrk.com/search?q={search_term_string}",
-          "query-input": "required name=search_term_string",
-        },
-      },
-      {
-        "@type": "SoftwareApplication",
-        name: "WorkwrK",
-        applicationCategory: "BusinessApplication",
-        operatingSystem: "Web",
-        description:
-          "Business operating system that unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI-powered analytics into one seamless platform.",
-        offers: [
-          {
-            "@type": "Offer",
-            name: "Starter",
-            price: "4999",
-            priceCurrency: "INR",
-            priceValidUntil: "2027-12-31",
-            description: "Up to 25 users. Core modules.",
-          },
-          {
-            "@type": "Offer",
-            name: "Growth",
-            price: "14999",
-            priceCurrency: "INR",
-            priceValidUntil: "2027-12-31",
-            description: "Up to 100 users. Full suite with AI.",
-          },
-          {
-            "@type": "Offer",
-            name: "Scale",
-            price: "29999",
-            priceCurrency: "INR",
-            priceValidUntil: "2027-12-31",
-            description: "Up to 500 users. Unlimited AI. Custom integrations.",
-          },
-        ],
-        featureList: [
-          "People Management & Org Chart",
-          "KRA/KPI Engine with Auto-Scoring",
-          "Performance Review Engine with 360° Feedback",
-          "SOP Playbook with Compliance Tracking",
-          "Task Management with Auto-Escalation",
-          "Employee Recognition & Kudos",
-          "Composite Performance Scores",
-          "AI-Powered Business Intelligence",
-          "Meeting Notes & Action Items",
-          "Analytics & Reporting Dashboard",
-          "Employee Onboarding System",
-          "Data Export & Integrations",
-        ],
-      },
-      {
-        "@type": "Organization",
-        name: "WorkwrK",
-        url: "https://workwrk.com",
-        sameAs: [
-          "https://twitter.com/workwrk",
-          "https://linkedin.com/company/workwrk",
-        ],
-        contactPoint: {
-          "@type": "ContactPoint",
-          contactType: "sales",
-          email: "hello@workwrk.com",
-        },
-      },
-      {
-        "@type": "FAQPage",
-        mainEntity: [
-          {
-            "@type": "Question",
-            name: "What is WorkwrK?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "WorkwrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one seamless platform — from the CEO to the last field agent.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "How does WorkwrK calculate performance scores?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "WorkwrK uses a weighted composite scoring engine that combines 6 data sources: KPI achievement (30%), manager review ratings (25%), task completion rate (15%), peer review ratings (10%), self-assessment (10%), and SOP compliance (10%). Scores auto-recalculate whenever any input changes. Organizations can customize the weight distribution.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "Can I use WorkwrK for my business in India?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "Yes. WorkwrK is built for growing businesses across India, UAE, Southeast Asia, and globally. It supports INR pricing, multi-location organizations, and is designed for the operational realities of businesses scaling from 10 to 500 employees.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "Does WorkwrK have AI features?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "Yes. WorkwrK includes an AI intelligence layer that lets you ask your business anything in plain English — 'Who should I promote?', 'Which SOPs have lowest compliance?', 'Compare branch performance'. AI uses real data from all modules to give instant, data-backed answers.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "How is WorkwrK different from an HRMS?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "Traditional HRMS tools focus on HR administration (payroll, leave, attendance). WorkwrK is a business operating system that focuses on operational excellence — KPIs, SOPs, performance, tasks, and AI intelligence. It helps you run your business better, not just manage HR paperwork.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "What is the employee recognition/kudos feature?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "WorkwrK's recognition system lets anyone give kudos to colleagues with messages and company value tags. Kudos appear in a social feed, count on profiles, factor into performance scores as a bonus, and drive a monthly 'Most Recognized' leaderboard — building a culture of appreciation.",
-            },
-          },
-        ],
-      },
-    ],
-  };
+  const currency = await detectCurrency();
+  const jsonLd = homeJsonLd({ site: SITE, currency });
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-      <LandingV4 />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <HomeStack currency={currency} />
     </>
   );
 }

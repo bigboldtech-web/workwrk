@@ -1,156 +1,127 @@
+// /security, rewritten against the running product.
+//
+// This page was the biggest truth hole on the site, and it is one click from
+// every page through the footer. What it asserted, none of which this repo
+// can evidence: SOC 2 Type II, ISO 27001, GDPR, DPDP, "HIPAA-ready" and
+// PCI-DSS as six badges; customer managed keys through AWS KMS; SAML SSO and
+// SCIM with five named identity providers; EU, India and US data residency
+// pinned at workspace creation; AWS across three regions; a 99.95 percent
+// uptime SLA; annual penetration tests by a named firm; a private HackerOne
+// programme with a four tier bounty table up to 20,000 dollars; a public PGP
+// key at /security.asc, which does not exist and answered with the app shell;
+// a trust portal at a subdomain that is not ours to link; a four hour breach
+// notification commitment; and a VPC deployment add-on at 50k a year.
+//
+// Every one of those is a legal or contractual commitment a buyer's
+// procurement team quotes back, and the home FAQ, which is also the FAQPage
+// structured data Google reads, says in as many words: "We hold no third
+// party security certification yet." The site contradicted itself one click
+// apart.
+//
+// What is on the page now is the list of controls that are in the code, each
+// of which can be checked by opening the product, plus the one honest
+// sentence about certifications. The certification list is generated from the
+// flags, so the day a report exists the page says so by flipping a flag.
+
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowRight, ShieldCheck, Lock, Globe, Database, Key, FileText, ServerCog, Eye } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  H3,
-  Button,
-  CTABand,
-  FAQ,
-  FeatureCard,
-  GradientText,
-  HUES,
-  type Hue,
-} from "@/components/marketing/primitives";
+
+import { mailboxes } from "@/components/marketing/config";
+import { heldCertifications } from "@/components/marketing/flags";
+import { Band, Claim, Close, Eyebrow, Headline, Line, Note, Page, Stack, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Security — WorkwrK",
-  description: "SOC 2 Type II, ISO 27001, GDPR + DPDP compliant. SSO + SCIM, audit log, encryption end-to-end, EU/India/US data residency. Built for the security review.",
+  title: "Security",
+  description:
+    "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope.",
   alternates: { canonical: "https://workwrk.com/security" },
+  // Per page social text. The root layout's og:description is the
+  // pre-refresh positioning ("Replaces 15 tools. Built for Indian SMBs"),
+  // and the site's own arithmetic says 14 everywhere: the pricing source
+  // has fourteen categories, the hero eyebrow reads fourteen and the share
+  // card counts fourteen. A page that does not set its own inherits the
+  // wrong number and the wrong positioning.
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Security", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope." },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope." },
 };
 
-const CERTS: readonly { name: string; hue: Hue }[] = [
-  { name: "SOC 2 Type II", hue: "violet"  },
-  { name: "ISO 27001",      hue: "emerald" },
-  { name: "GDPR",           hue: "sky"     },
-  { name: "DPDP (India)",   hue: "amber"   },
-  { name: "HIPAA-ready",    hue: "rose"    },
-  { name: "PCI-DSS",        hue: "fuchsia" },
-];
-
-const PILLARS: readonly { hue: Hue; icon: typeof Lock; title: string; body: string }[] = [
-  { hue: "violet",  icon: Lock,       title: "Encryption end-to-end", body: "AES-256 at rest. TLS 1.3 in transit. Customer-managed keys (CMK) on Scale via AWS KMS." },
-  { hue: "emerald", icon: Key,        title: "SSO + SCIM",              body: "SAML SSO with Okta, Azure AD, Google, OneLogin, Auth0. SCIM auto-provisioning + deprovisioning." },
-  { hue: "amber",   icon: Globe,      title: "Data residency",          body: "EU, India, or US. Pinned at workspace creation; honored for storage, AI, and backups." },
-  { hue: "fuchsia", icon: Eye,        title: "Audit log",                body: "Every read, write, export, share — logged with user, time, IP, device. Tamper-evident; exportable to your SIEM." },
-  { hue: "sky",     icon: ServerCog,  title: "Infrastructure",           body: "AWS-hosted across 3 regions. Multi-AZ. 99.95% uptime SLA on Scale. Pen-tested annually by Cure53." },
-  { hue: "indigo",  icon: ShieldCheck,title: "Bug bounty",               body: "HackerOne private program. Critical findings paid up to $20,000. Public PGP for vuln disclosure." },
+/** Each control names something in the product a customer can go and see. */
+const CONTROLS: Array<{ title: string; body: string }> = [
+  {
+    title: "Two step verification at login",
+    body: "A second factor is asked for at sign in, and an administrator can require it for everyone in the workspace.",
+  },
+  {
+    title: "Sessions that expire",
+    body: "A session ends after a period of inactivity, and signing out everywhere ends every session on every device at once.",
+  },
+  {
+    title: "Lockout after repeated failures",
+    body: "Repeated failed sign in attempts lock the account rather than letting a list of passwords be tried against it.",
+  },
+  {
+    title: "Password reset tokens, stored hashed",
+    body: "A reset link is single use and time limited, and what the database holds is a hash of it, never the link itself.",
+  },
+  {
+    title: "A security activity log",
+    body: "Sign ins, password changes, multi factor changes and session revocations are recorded and readable by the account holder.",
+  },
+  {
+    title: "Access by role and by scope",
+    body: "A person sees the spaces, folders and lists they have been given. Administrators can narrow that further, and sharing is per entity rather than all or nothing.",
+  },
+  {
+    title: "Your data leaves with you",
+    body: "Export is available on every tier including the free one, any time. Deleted items sit in a trash window before they go.",
+  },
 ];
 
 export default function SecurityPage() {
+  const certified = heldCertifications.length > 0;
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="rose" className="mb-5">Security</Eyebrow>
-            <H1>
-              Built for the <br />
-              <GradientText hue="rose">security review.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              SOC 2 Type II + ISO 27001 + GDPR + DPDP. Encryption end-to-end.
-              SSO + SCIM. Audit log on everything. Pen-tested annually. Designed
-              to pass your CISO&apos;s review on the first pass.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="mailto:security@workwrk.com" variant="secondary" hue="rose" size="lg" rightIcon={<ArrowRight size={15} />}>
-                Request SOC 2 report
-              </Button>
-              <Button href="https://trust.workwrk.com" variant="outline" size="lg">View trust portal</Button>
-            </div>
-          </div>
+    <Page>
+      {/* 1. The claim. The page's whole value to a buyer is the second half
+          of this sentence, so the second half is the headline. */}
+      <Band air="hero" labelledBy="sec-h1" still>
+        <Eyebrow>Security</Eyebrow>
+        <Claim id="sec-h1">What we do not claim.</Claim>
+        <Sub>
+          {certified
+            ? `We hold ${heldCertifications.join(" and ")}, and the reports are available on request.`
+            : "We hold no third party security certification yet, and this page names only what is in the product today."}
+        </Sub>
+      </Band>
 
-          <div className="mt-12 grid grid-cols-3 lg:grid-cols-6 gap-3">
-            {CERTS.map((c) => {
-              const t = HUES[c.hue];
-              return (
-                <div key={c.name} className={`p-4 rounded-xl border ${t.border} ${t.bgTint} text-center`}>
-                  <ShieldCheck size={20} className={`mx-auto ${t.text}`} />
-                  <p className={`mt-2 text-sm font-bold ${t.textStrong}`}>{c.name}</p>
-                </div>
-              );
-            })}
-          </div>
-        </Container>
-      </Section>
+      {/* 2. The controls. Seven names, each one a thing a buyer can go and
+          open. It was a three column grid of bordered cards, which put the
+          top row inside the first viewport. */}
+      <Band ground="quiet" labelledBy="sec-controls">
+        <Eyebrow>Account security</Eyebrow>
+        <Headline id="sec-controls">The controls that ship.</Headline>
+        <Stack items={CONTROLS} />
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue="violet" className="mb-4">Six pillars</Eyebrow>
-            <H2>How we keep <GradientText hue="violet">your data safe</GradientText>.</H2>
-          </div>
-          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {PILLARS.map((p) => (
-              <FeatureCard key={p.title} hue={p.hue} icon={p.icon} title={p.title} body={p.body} />
-            ))}
-          </div>
-        </Container>
-      </Section>
+      {/* 3. Procurement. One address, and what we will and will not say. */}
+      <Band labelledBy="sec-review">
+        <Eyebrow>Procurement</Eyebrow>
+        <Headline id="sec-review">Send the questionnaire.</Headline>
+        <Line>
+          Write to{" "}
+          <a className="ic-a mk-focus" href={`mailto:${mailboxes.sales}`}>
+            {mailboxes.sales}
+          </a>{" "}
+          and we answer what is true today, including where the answer is no.
+        </Line>
+        <Note>
+          Reporting a vulnerability: the same address, with enough detail to reproduce it. There is no bug bounty
+          programme, so we will not promise a payment. We will confirm we received it and tell you what we did.
+        </Note>
+      </Band>
 
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue="emerald" className="mb-4">Vulnerability disclosure</Eyebrow>
-              <H2>Found a bug?</H2>
-              <p className="mt-5 text-slate-600 text-lg leading-relaxed">
-                We run a private HackerOne program. Critical findings paid up to $20,000.
-                Public PGP key for direct reports. Acknowledged within 24h, triaged within 72h.
-              </p>
-              <div className="mt-7 space-y-2 text-base">
-                <p><span className="font-bold text-slate-900">Email:</span> <Link href="mailto:security@workwrk.com" className="text-emerald-700 underline underline-offset-2">security@workwrk.com</Link></p>
-                <p><span className="font-bold text-slate-900">PGP key:</span> <Link href="/security.asc" className="text-emerald-700 underline underline-offset-2">/security.asc</Link></p>
-                <p><span className="font-bold text-slate-900">HackerOne:</span> Private program (invite via email)</p>
-              </div>
-            </div>
-            <div className="p-7 bg-white border border-slate-200 rounded-2xl">
-              <H3>Bounty tiers</H3>
-              <ul className="mt-5 divide-y divide-slate-100">
-                {[
-                  ["Critical", "$10,000 – $20,000", "RCE, auth bypass, mass data exposure"],
-                  ["High",     "$3,000 – $7,500",    "Privilege escalation, IDOR, stored XSS"],
-                  ["Medium",   "$750 – $2,500",      "Reflected XSS, CSRF on sensitive actions"],
-                  ["Low",      "$150 – $500",         "Self-XSS, minor leaks, edge config issues"],
-                ].map(([sev, amt, eg]) => (
-                  <li key={sev} className="py-4 grid grid-cols-3 gap-3 items-center">
-                    <p className="text-base font-bold text-slate-900">{sev}</p>
-                    <p className="text-base text-emerald-700 font-bold">{amt}</p>
-                    <p className="text-sm text-slate-500">{eg}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      <FAQ
-        hue="rose"
-        eyebrow="Security FAQ"
-        title="Common security questions."
-        items={[
-          { q: "Can I sign a BAA / DPA / MSA?",         a: "Yes — Standard DPA available on Growth+. HIPAA BAA, custom MSAs, and SOC 2 ToA available on Scale. Request via security@workwrk.com." },
-          { q: "How long do you retain customer data?", a: "Live for the contract duration. 30 days after termination unless you request earlier deletion. Backups retained 90 days then purged." },
-          { q: "Sub-processors?",                        a: "AWS (infra), Stripe (billing), Sentry (errors), Datadog (monitoring), Anthropic (AI). Full list and DPAs at /security/subprocessors. 30-day notice for additions." },
-          { q: "Can I run workwrk in my own AWS / GCP?",  a: "Yes — VPC deployment available on Scale ($50k+/yr add-on). Fully isolated from our multi-tenant infra; you control keys, network, and access." },
-          { q: "Penetration testing?",                    a: "Annual pen tests by Cure53. Letter of attestation available; full report on Scale with NDA." },
-          { q: "Incident response?",                       a: "PagerDuty-rotated 24/7. SLA: critical breach notification within 4 hours to all affected customers. Public post-mortems within 30 days." },
-        ]}
-      />
-
-      <CTABand
-        hue="rose"
-        title={<>Bringing workwrk through <GradientText hue="indigo">security review</GradientText>?</>}
-        body="Ask for our SOC 2 report, ISO 27001 cert, and DPA template — usually one email."
-        primary={{ label: "Email security@workwrk.com", href: "mailto:security@workwrk.com" }}
-        secondary={{ label: "Trust portal",             href: "https://trust.workwrk.com" }}
-      />
-    </>
+      <Close headline="Open it and check." placement="security-close" />
+    </Page>
   );
 }

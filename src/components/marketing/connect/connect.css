@@ -1,0 +1,404 @@
+/* The connection map (marketing-concept.md section 5, "/how-it-connects").
+ *
+ * Rules kept:
+ *
+ *   Light only. The navy chrome inside the product frame below the map is
+ *   the only dark element, and it comes from the shell sheet.
+ *   Every colour is a token. The four brand dot hexes arrive inline from
+ *   the brand module, which is the only place they live.
+ *   No motion. Selecting a node changes colour and text and moves nothing,
+ *   so there is no reduced motion branch to write and no static fallback to
+ *   maintain: the resting state is the designed state.
+ *   A variant is a data attribute, never a BEM modifier.
+ */
+
+.mk-map2 {
+  margin-top: 26px;
+}
+
+.mk-map2__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.mk-map2__modes {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-surface);
+}
+
+.mk-map2__mode {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  height: 30px;
+  padding-inline: 12px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--mk-caption, 13px);
+  color: var(--os-ink-2);
+  cursor: pointer;
+}
+/* The selected segment is the accent blue, not ink.
+ *
+ * Concept 10 allows ONE dark element on the public site and it is the navy
+ * chrome inside a product frame. This pill painted --os-ink, rgb(31,36,48),
+ * which sat on white a few hundred pixels from the rail's rgb(27,37,55):
+ * two near blacks on one screen, neither of them the navy, so the site read
+ * as having three darks. Concept 10's own answer for an active state is a
+ * blue or a grey pill. */
+.mk-map2__mode[aria-pressed="true"] {
+  background: var(--os-brand);
+  color: var(--os-ink-inv);
+}
+
+.mk-map2__hint {
+  margin: 0;
+  color: var(--os-ink-2);
+}
+
+.mk-map2__grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1024px) {
+  .mk-map2__grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    align-items: start;
+  }
+}
+
+/* The stage, with the faint blueprint grid behind it. The grid is two
+   repeating gradients on the token hairline colour, so it needs no asset
+   and carries no raw colour. */
+.mk-map2__stage {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background-color: var(--os-canvas);
+  background-image:
+    repeating-linear-gradient(to right, var(--os-line-soft) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(to bottom, var(--os-line-soft) 0 1px, transparent 1px 40px);
+  padding: 10px;
+  overflow: hidden;
+}
+
+/* The plot keeps the stage's aspect so a node's percentage position lands
+   where the wire under it ends. */
+/* `width: 100%` is load bearing and is not a default.
+   With width left at auto, `aspect-ratio` resolves against the DEFINITE
+   dimension, which `min-height` had just made the height: the plot came out
+   815px wide inside a 662px stage and threw the whole right hand column of
+   records off the picture. A definite width makes the height the derived
+   one, and the floor then only ever raises the height. */
+.mk-map2__plot {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1000 / 540;
+  min-height: 440px;
+}
+
+/* The field is what the coordinates are measured against, and it is inset
+   from the plot on purpose: a node is positioned by its centre, so at 89
+   percent of the width half of it hangs past the frame. The inset is half a
+   node plus a hairline, which is what keeps the outermost column inside the
+   picture at every width. */
+.mk-map2__field {
+  position: absolute;
+  inset: 26px 58px;
+}
+
+.mk-map2__wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mk-map2__wire {
+  stroke: var(--os-line-strong);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.mk-map2__wire[data-lit] {
+  stroke: var(--os-brand);
+  stroke-width: 2;
+}
+
+.mk-map2__node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 104px;
+  padding: 7px 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-sm);
+  background: var(--os-surface);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.mk-map2__node:hover {
+  border-color: var(--os-line-strong);
+}
+.mk-map2__node[data-lit] {
+  border-color: var(--os-brand);
+  box-shadow: 0 0 0 1px var(--os-brand);
+}
+
+.mk-map2__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  display: inline-block;
+  flex: none;
+}
+
+.mk-map2__nodelabel {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--os-ink);
+}
+
+.mk-map2__nodeblock {
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+/* The phone reading of the same map.
+   A twelve node graph at 390px is a picture nobody can use, so the stage is
+   display:none below this breakpoint, which takes its twelve buttons out of
+   the tab order, and the chip list is the map instead. */
+.mk-map2__chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.mk-map2__chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding-inline: 11px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--os-ink);
+  cursor: pointer;
+}
+.mk-map2__chip[data-lit] {
+  border-color: var(--os-brand);
+  color: var(--os-brand-deep);
+}
+
+.mk-map2__stage {
+  display: none;
+}
+@media (min-width: 768px) {
+  .mk-map2__stage {
+    display: block;
+  }
+  .mk-map2__chips {
+    display: none;
+  }
+}
+
+/* ── The right pane ──────────────────────────────────────────────── */
+
+.mk-map2__pane {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background: var(--os-surface);
+  padding: 18px;
+  min-width: 0;
+}
+
+.mk-map2__clock {
+  margin: 0;
+  font-size: var(--mk-caption, 13px);
+  color: var(--os-brand-deep);
+}
+
+.mk-map2__block {
+  margin-bottom: 6px;
+}
+
+.mk-map2__title {
+  margin: 6px 0 0;
+}
+
+.mk-map2__sub {
+  display: block;
+  margin-top: 18px;
+  color: var(--os-ink-2);
+}
+
+.mk-map2__wirelabel {
+  margin: 14px 0 0;
+  font-size: var(--mk-caption, 13px);
+  color: var(--os-ink);
+}
+
+.mk-map2__gate {
+  margin-top: 10px;
+  color: var(--os-ink-2);
+  padding: 8px 10px;
+  border: 1px dashed var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+}
+
+.mk-map2__edges {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.mk-map2__edges li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--os-line-soft);
+}
+.mk-map2__edges li:last-child {
+  border-bottom: 0;
+}
+
+.mk-map2__edgebtn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--os-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.mk-map2__edgebtn:hover {
+  color: var(--os-brand-deep);
+}
+
+.mk-map2__edgetext {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--os-ink-2);
+}
+
+.mk-map2__edgesoon {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--os-ink-2);
+}
+
+.mk-map2__where {
+  margin-top: 16px;
+  color: var(--os-ink-2);
+}
+
+.mk-map2__link {
+  color: var(--os-brand-deep);
+}
+
+/* ── Follow Tuesday: the step nav ────────────────────────────────── */
+
+.mk-map2__steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--os-line-soft);
+}
+
+.mk-map2__step {
+  appearance: none;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+  background: var(--os-surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--os-ink);
+  cursor: pointer;
+}
+.mk-map2__step:disabled {
+  color: var(--os-ink-3);
+  border-color: var(--os-line);
+  cursor: default;
+}
+
+.mk-map2__ticks {
+  list-style: none;
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.mk-map2__tick {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--os-r-sm);
+  background: transparent;
+  padding: 3px 6px;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  cursor: pointer;
+  color: var(--os-ink-2);
+}
+.mk-map2__tick[aria-current="step"] {
+  border-color: var(--os-brand);
+  color: var(--os-ink);
+}
+
+.mk-map2__ticknum {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mk-map2__ticktime {
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--os-ink-2);
+}
+
+/* ── The surface under the map ───────────────────────────────────── */
+
+.mk-map2__frame {
+  margin-top: 20px;
+}

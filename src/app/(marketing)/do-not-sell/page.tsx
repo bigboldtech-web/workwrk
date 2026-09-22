@@ -1,143 +1,122 @@
-"use client";
+// /do-not-sell.
+//
+// Two things were wrong here and both were the kind that matter on a page
+// about a legal right.
+//
+//   1. "Verified by [a named security vendor] (annual audit)" under our own
+//      statement of practice. No such audit exists and the vendor has never
+//      been engaged. A fabricated assurance on a privacy page is the worst
+//      possible place for one.
+//   2. The opt-out form had no handler beyond local state. Submitting it set
+//      a boolean, rendered "Request received" and "we will email you a
+//      confirmation within 15 business days", and sent nothing anywhere. A
+//      person exercising a statutory right was told it had been recorded
+//      when nothing had. That is not a broken form; it is a page telling
+//      somebody their request is filed when it is in the bin.
+//
+// The page is now a statement of practice and one real mailbox, which is
+// what a request under this act actually needs. No client state is left,
+// so it is a server component again.
+//
+// A THIRD THING WAS WRONG, found on the rebuild and fixed here. This page
+// named four sub-processors outright ("AWS, Stripe, Anthropic, Datadog")
+// and sent the reader to /privacy "for the full list". /privacy had already
+// deleted its six name list as unevidenced against the running deployment,
+// and now says in as many words that it will give the current list by name
+// in writing on request. So this page asserted four specific vendors the
+// privacy policy declines to name, and pointed at a list that is not there.
+// Both halves go: the disclosure is the same one /privacy makes, and the
+// link points at the paragraph that makes it.
+//
+// It also published "Last updated: May 18, 2026" while the three documents
+// it sits beside all moved to the date this build was written. A statutory
+// disclosure is read at its effective date, so it takes the same one they
+// carry, from the same file.
 
-import { useState } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
-import { CheckCircle2, ArrowRight, ShieldCheck } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  H3,
-  Button,
-  CTABand,
-  GradientText,
-  HUES,
-} from "@/components/marketing/primitives";
+import { mailboxes } from "@/components/marketing/config";
+import { LEGAL_COPY } from "@/components/marketing/iconic/copy";
+import { Band, Claim, Close, Eyebrow, Headline, Note, Page, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
+
+// THIS PAGE HAD NO METADATA AT ALL, and it was the only content page in the
+// group without it. Everything therefore fell through to src/app/layout.tsx:
+// the pre-refresh title and og:title with an em dash in them, the old
+// og:description ("Replaces 15 disconnected tools. Built for Indian SMBs"),
+// og:locale en_IN, and, the part that actually costs something,
+// `canonical: https://workwrk.com`, which tells a search engine that this
+// page is a duplicate of the home page and should not be indexed on its own.
+// It is a statutory disclosure, so being de-indexed is a compliance problem
+// as well as an SEO one: the whole point is that a Californian resident can
+// find it.
+const DESCRIPTION =
+  "WorkwrK does not sell or share personal information. What that means under the CCPA, and the mailbox to write to if you want to exercise the right anyway.";
+
+export const metadata: Metadata = {
+  title: "Do not sell or share my personal information",
+  description: DESCRIPTION,
+  alternates: { canonical: "https://workwrk.com/do-not-sell" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Do not sell or share my personal information", description: DESCRIPTION },
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: DESCRIPTION },
+};
 
 export default function DoNotSellPage() {
-  const [submitted, setSubmitted] = useState(false);
-
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="rose" className="mb-5">CCPA · CPRA</Eyebrow>
-            <H1>
-              Do Not Sell or Share <br />
-              <GradientText hue="rose">My Personal Information.</GradientText>
-            </H1>
-            <p className="mt-5 text-lg text-slate-600">
-              Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
-            </p>
-            <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">
-              California Consumer Privacy Act (CCPA) and California Privacy Rights Act (CPRA)
-              give California residents the right to opt out of the sale or sharing of personal
-              information.
-            </p>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      <Band air="hero" labelledBy="dns-h1" still>
+        <Eyebrow>CCPA and CPRA</Eyebrow>
+        <Claim id="dns-h1">We do not sell your data.</Claim>
+        <Sub>
+          California residents have the right to opt out of the sale or sharing of personal information, and there is
+          nothing here to opt out of.
+        </Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.2fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue="emerald" className="mb-4">Our position</Eyebrow>
-              <H2>We don&apos;t sell <GradientText hue="emerald">your data.</GradientText></H2>
-              <p className="mt-5 text-slate-700 text-[15.5px] leading-relaxed">
-                WorkwrK does not sell personal information. We do not exchange your data for
-                money or other valuable consideration with third parties for their independent use.
-              </p>
-              <p className="mt-4 text-slate-700 text-[15.5px] leading-relaxed">
-                We use a small number of sub-processors (AWS, Stripe, Anthropic, Datadog) under
-                strict data processing agreements that prohibit them from using your data for
-                their own purposes. See <Link href="/privacy" className="text-emerald-700 underline underline-offset-2">our Privacy Policy</Link> for the full list.
-              </p>
-              <div className="mt-7 inline-flex items-center gap-2 text-base font-semibold text-emerald-700">
-                <ShieldCheck size={16} /> Verified by Cure53 (annual audit)
-              </div>
-            </div>
+      <Band ground="quiet" width="read" align="start" labelledBy="dns-position">
+        <Eyebrow>Our position</Eyebrow>
+        <Headline id="dns-position">Nothing is sold or shared.</Headline>
+        <div className="ic-docbody">
+          <p>
+            WorkwrK does not sell personal information. We do not exchange your data for money or other valuable
+            consideration with third parties for their independent use.
+          </p>
+          <p>
+            We use a small number of sub-processors to run the service, under agreements that prohibit them from using
+            your data for their own purposes. We will give you the current list, by name, in writing, on request:{" "}
+            <Link className="ic-a mk-focus" href="/privacy#share">
+              the privacy policy
+            </Link>{" "}
+            says how to ask.
+          </p>
+          <p>No third party has audited this statement.</p>
+        </div>
+      </Band>
 
-            {/* Opt-out form */}
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 lg:p-10">
-              <H3>File an opt-out request</H3>
-              <p className="mt-2 text-base text-slate-600">
-                If we ever change our practice, this form ensures you&apos;re excluded. We respond
-                within 15 business days.
-              </p>
-              {submitted ? (
-                <div className="mt-7 p-6 rounded-2xl bg-emerald-50 border border-emerald-200">
-                  <CheckCircle2 className="text-emerald-600" size={28} />
-                  <p className="mt-3 font-bold text-emerald-900">Request received.</p>
-                  <p className="mt-2 text-base text-emerald-800">
-                    We&apos;ll email you a confirmation at the address you provided within 15 business days.
-                  </p>
-                </div>
-              ) : (
-                <form
-                  onSubmit={(e) => { e.preventDefault(); setSubmitted(true); }}
-                  className="mt-7 space-y-4"
-                >
-                  <Field label="Full name *"   name="name"  placeholder="Jordan Park" required />
-                  <Field label="Email *"        name="email" placeholder="jordan@example.com" required type="email" />
-                  <Field
-                    label="California resident? *"
-                    name="state"
-                    as="select"
-                    options={["I am a California resident", "I am authorized to submit this on behalf of a California resident"]}
-                  />
-                  <Field
-                    label="Anything else we should know?"
-                    name="notes"
-                    as="textarea"
-                    placeholder="(Optional) Details about your request..."
-                  />
-                  <button
-                    type="submit"
-                    className="w-full h-12 mt-2 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition"
-                  >
-                    Submit request <ArrowRight size={15} />
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-        </Container>
-      </Section>
+      <Band width="read" align="start" labelledBy="dns-request">
+        <Eyebrow>Exercising it</Eyebrow>
+        <Headline id="dns-request">How to file a request.</Headline>
+        <div className="ic-docbody">
+          <p>
+            Email{" "}
+            <a
+              className="ic-a mk-focus"
+              href={`mailto:${mailboxes.general}?subject=Do%20not%20sell%20or%20share`}
+            >
+              {mailboxes.general}
+            </a>{" "}
+            with the words &ldquo;Do not sell or share&rdquo; in the subject, from the address on your account or with
+            enough detail to identify it. Say whether you are a California resident or are authorised to act for one.
+          </p>
+          <p>
+            We will reply to confirm. We are not publishing a turnaround commitment we have no process to be held to,
+            and we would rather tell you that than print a number.
+          </p>
+        </div>
+        <Note>Last updated {LEGAL_COPY.privacy.updated}.</Note>
+      </Band>
 
-      <CTABand hue="rose" />
-    </>
-  );
-}
-
-function Field({
-  label, name, type = "text", placeholder, as = "input", options, required,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  placeholder?: string;
-  as?: "input" | "textarea" | "select";
-  options?: readonly string[];
-  required?: boolean;
-}) {
-  const base = "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 transition";
-  return (
-    <label className="block">
-      <span className="block text-sm font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
-      {as === "textarea" ? (
-        <textarea name={name} rows={3} placeholder={placeholder} className={`${base} h-auto py-3`} />
-      ) : as === "select" ? (
-        <select name={name} className={base} required={required} defaultValue="">
-          <option value="" disabled>Select</option>
-          {options?.map((o) => <option key={o}>{o}</option>)}
-        </select>
-      ) : (
-        <input type={type} name={name} placeholder={placeholder} required={required} className={base} />
-      )}
-    </label>
+      <Close headline="Read the whole policy." placement="do-not-sell" />
+    </Page>
   );
 }

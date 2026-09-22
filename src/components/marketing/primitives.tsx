@@ -1,24 +1,27 @@
-// Marketing primitives — the shared design system for every page under
+// Marketing primitives: the shared design system for every page under
 // /(marketing).
 //
-// Aesthetic: ClickUp / Linear / Workday restraint.
+// Aesthetic: the restraint of the category's best work.
 //   - White is the canvas. Black is the ink.
 //   - Massive confident headlines in slate-900, never rainbow gradients.
 //   - Color emerges from product visuals (mocks, icons), not from chrome.
-//   - At most ONE accent per section — usually a small label or a single
+//   - At most ONE accent per section, usually a small label or a single
 //     icon tint. Never a multi-hue gradient on a hero CTA.
-//   - Dark sections (slate-950) are used deliberately for product moments,
-//     the way ClickUp uses dark for their AI / Brain sections.
+//   - Light only. The navy chrome inside a product frame is the only dark
+//     element on the public site, and a page section never paints it.
 //
-// Server component — no "use client". The primitives are pure markup;
+// Server component, no "use client". The primitives are pure markup;
 // the only interactive element (FAQ accordion) uses native <details>.
 
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ArrowRight, type LucideIcon } from "lucide-react";
+import { flags } from "./flags";
+import { PrimaryCta, SecondaryCta } from "./cta";
+import { FINAL_HEADLINE } from "./home/content";
 
 // ════════════════════════════════════════════════════════════════════
-// HUE SYSTEM — used sparingly. Most things should be black/white/slate.
+// HUE SYSTEM. One accent; the ten keys survive for the call sites.
 // Hues exist for: product hub icons, small accent labels, occasional
 // product mock fills. Never for chrome (buttons, sections, rims).
 // ════════════════════════════════════════════════════════════════════
@@ -49,22 +52,64 @@ interface HueTokens {
   gradVia: string;
 }
 
-export const HUES: Record<Hue, HueTokens> = {
-  violet:  { hex: "#7c3aed", text: "text-violet-700",  textStrong: "text-violet-900",  bgTint: "bg-violet-50",  bgSoft: "bg-violet-100",  bgStrong: "bg-violet-600",  bgStrongHover: "hover:bg-violet-700",  border: "border-violet-200",  ring: "ring-violet-200",  grad: "from-violet-500 to-purple-600",   gradVia: "from-violet-500 via-violet-600 to-violet-700" },
-  fuchsia: { hex: "#d946ef", text: "text-fuchsia-700", textStrong: "text-fuchsia-900", bgTint: "bg-fuchsia-50", bgSoft: "bg-fuchsia-100", bgStrong: "bg-fuchsia-600", bgStrongHover: "hover:bg-fuchsia-700", border: "border-fuchsia-200", ring: "ring-fuchsia-200", grad: "from-fuchsia-500 to-pink-600",    gradVia: "from-fuchsia-500 via-fuchsia-600 to-fuchsia-700" },
-  pink:    { hex: "#ec4899", text: "text-pink-700",    textStrong: "text-pink-900",    bgTint: "bg-pink-50",    bgSoft: "bg-pink-100",    bgStrong: "bg-pink-600",    bgStrongHover: "hover:bg-pink-700",    border: "border-pink-200",    ring: "ring-pink-200",    grad: "from-pink-500 to-rose-600",       gradVia: "from-pink-500 via-pink-600 to-pink-700" },
-  coral:   { hex: "#f97316", text: "text-orange-700",  textStrong: "text-orange-900",  bgTint: "bg-orange-50",  bgSoft: "bg-orange-100",  bgStrong: "bg-orange-600",  bgStrongHover: "hover:bg-orange-700",  border: "border-orange-200",  ring: "ring-orange-200",  grad: "from-orange-500 to-amber-500",    gradVia: "from-orange-500 via-orange-600 to-orange-700" },
-  amber:   { hex: "#f59e0b", text: "text-amber-700",   textStrong: "text-amber-900",   bgTint: "bg-amber-50",   bgSoft: "bg-amber-100",   bgStrong: "bg-amber-500",   bgStrongHover: "hover:bg-amber-600",   border: "border-amber-200",   ring: "ring-amber-200",   grad: "from-amber-400 to-orange-500",    gradVia: "from-amber-500 via-amber-600 to-amber-700" },
-  emerald: { hex: "#10b981", text: "text-emerald-700", textStrong: "text-emerald-900", bgTint: "bg-emerald-50", bgSoft: "bg-emerald-100", bgStrong: "bg-emerald-600", bgStrongHover: "hover:bg-emerald-700", border: "border-emerald-200", ring: "ring-emerald-200", grad: "from-emerald-500 to-teal-600",    gradVia: "from-emerald-500 via-emerald-600 to-emerald-700" },
-  teal:    { hex: "#14b8a6", text: "text-teal-700",    textStrong: "text-teal-900",    bgTint: "bg-teal-50",    bgSoft: "bg-teal-100",    bgStrong: "bg-teal-600",    bgStrongHover: "hover:bg-teal-700",    border: "border-teal-200",    ring: "ring-teal-200",    grad: "from-teal-500 to-sky-600",        gradVia: "from-teal-500 via-teal-600 to-teal-700" },
-  sky:     { hex: "#0ea5e9", text: "text-sky-700",     textStrong: "text-sky-900",     bgTint: "bg-sky-50",     bgSoft: "bg-sky-100",     bgStrong: "bg-sky-600",     bgStrongHover: "hover:bg-sky-700",     border: "border-sky-200",     ring: "ring-sky-200",     grad: "from-sky-500 to-indigo-600",      gradVia: "from-sky-500 via-sky-600 to-sky-700" },
-  indigo:  { hex: "#6366f1", text: "text-indigo-700",  textStrong: "text-indigo-900",  bgTint: "bg-indigo-50",  bgSoft: "bg-indigo-100",  bgStrong: "bg-indigo-600",  bgStrongHover: "hover:bg-indigo-700",  border: "border-indigo-200",  ring: "ring-indigo-200",  grad: "from-indigo-500 to-violet-600",   gradVia: "from-indigo-500 via-indigo-600 to-indigo-700" },
-  rose:    { hex: "#f43f5e", text: "text-rose-700",    textStrong: "text-rose-900",    bgTint: "bg-rose-50",    bgSoft: "bg-rose-100",    bgStrong: "bg-rose-600",    bgStrongHover: "hover:bg-rose-700",    border: "border-rose-200",    ring: "ring-rose-200",    grad: "from-rose-500 to-pink-600",       gradVia: "from-rose-500 via-rose-600 to-rose-700" },
+// ONE ACCENT. The ten hue keys survive because two dozen pages name them,
+// but every one of them now resolves to the same token set: the product's
+// one blue on the product's neutral ramp. Phase 10's rule is a light only
+// site with a single accent and the four brand dots quarantined to
+// src/components/brand, which the ten-hue table broke on every page that
+// had not been rebuilt: a violet H1 here, an emerald icon tile there, a
+// three-stop gradient on a card rim.
+//
+// Repointing the table rather than editing twenty six pages is deliberate.
+// The pages keep their structure, their words and their hue props, and the
+// palette becomes a thing one file decides. `grad` and `gradVia` are kept
+// as class strings so `bg-gradient-to-br ${t.gradVia}` still parses, and
+// both ends are the same colour, so what paints is a flat fill.
+//
+// The class names are the mk-a-* rules in src/app/(marketing)/marketing.css,
+// which read the --os-* tokens. No hex is written here: one palette, one
+// file, and a class that cannot drift from the token it names.
+//
+// `hex` is the exception and is unavoidable: a handful of call sites pass it
+// to an inline style or an SVG fill, where a class cannot reach. It is the
+// one blue, --os-brand.
+const ACCENT: HueTokens = {
+  hex: "var(--os-brand)",
+  text: "mk-a-text",
+  textStrong: "mk-a-ink",
+  bgTint: "mk-a-tint",
+  bgSoft: "mk-a-soft",
+  bgStrong: "mk-a-solid",
+  bgStrongHover: "mk-a-solid-hoverable",
+  border: "mk-a-line",
+  ring: "",
+  grad: "mk-a-solid",
+  gradVia: "mk-a-solid",
 };
 
-// Hub catalog — the 7 product surfaces of workwrk. The marketing site
-// repeatedly references these. Each hub still owns one hue so its icon
-// can carry a tint, but the chrome around it stays neutral.
+export const HUES: Record<Hue, HueTokens> = {
+  violet: ACCENT,
+  fuchsia: ACCENT,
+  pink: ACCENT,
+  coral: ACCENT,
+  amber: ACCENT,
+  emerald: ACCENT,
+  teal: ACCENT,
+  sky: ACCENT,
+  indigo: ACCENT,
+  rose: ACCENT,
+};
+
+// Hub catalog. These are the EIGHT blocks the whole site names, in rail
+// order, and they are the same eight the Tuesday fixture carries. The list
+// used to be seven hubs from the pre-refresh taxonomy (Home, People, Work,
+// Money, Talent, Culture, Growth), three of which are not the product:
+// WorkwrK is a people and project management system, and CRM, finance and
+// helpdesk were taken out of its scope. A sub-page saying it was "part of
+// the Money hub" was pointing at a hub that does not exist.
+//
+// The hue survives as a field so nothing has to change at the call sites,
+// and every one of them resolves to the one accent.
 export interface Hub {
   slug: string;
   name: string;
@@ -73,17 +118,18 @@ export interface Hub {
 }
 
 export const HUBS: readonly Hub[] = [
-  { slug: "home",    name: "Home",    tagline: "The morning command center",       hue: "indigo"  },
-  { slug: "people",  name: "People",  tagline: "Org, roles, performance",          hue: "violet"  },
-  { slug: "work",    name: "Work",    tagline: "Tasks, OKRs, KPIs, SOPs, Process", hue: "sky"     },
-  { slug: "money",   name: "Money",   tagline: "Spend, vendors, financials",       hue: "emerald" },
-  { slug: "talent",  name: "Talent",  tagline: "Reviews, comp, onboarding",        hue: "fuchsia" },
-  { slug: "culture", name: "Culture", tagline: "Kudos, ideas, surveys",            hue: "pink"    },
-  { slug: "growth",  name: "Growth",  tagline: "Pipeline, deals, customers",       hue: "amber"   },
+  { slug: "work",    name: "Work",    tagline: "Tasks, lists, boards, every view", hue: "sky" },
+  { slug: "planner", name: "Planner", tagline: "Calendar and time",                hue: "sky" },
+  { slug: "ai",      name: "AI",      tagline: "Ask, on every page",               hue: "indigo" },
+  { slug: "talk",    name: "Talk",    tagline: "Channels, calls, threads",         hue: "indigo" },
+  { slug: "teams",   name: "Teams",   tagline: "Directory, roles, reviews, kudos", hue: "violet" },
+  { slug: "docs",    name: "Docs",    tagline: "Docs, SOPs, policies, contracts",  hue: "violet" },
+  { slug: "tables",  name: "Tables",  tagline: "Sheets and forms",                 hue: "emerald" },
+  { slug: "goals",   name: "Goals",   tagline: "OKRs, KRAs, KPIs",                 hue: "emerald" },
 ] as const;
 
 // ════════════════════════════════════════════════════════════════════
-// LAYOUT — containers, sections, spacing.
+// LAYOUT: containers, sections, spacing.
 // ════════════════════════════════════════════════════════════════════
 
 export function Container({
@@ -93,17 +139,18 @@ export function Container({
   children: ReactNode;
   className?: string;
 }) {
-  return (
-    <div className={`max-w-7xl mx-auto px-6 lg:px-10 ${className}`}>
-      {children}
-    </div>
-  );
+  // `mk-wrap`, the site's one column: 1200 max with a 20/24 gutter, which
+  // is a 144px offset at 1440. It used to be `max-w-7xl px-6 lg:px-10`,
+  // a 1280 column with a 40px gutter, which is 120 at 1440. Two gutters on
+  // one site is the difference a reader sees when they follow a nav link
+  // from a rebuilt page to a legacy one: the page appears to shift.
+  return <div className={`mk-wrap ${className}`}>{children}</div>;
 }
 
-// Section — vertical rhythm and an optional background variant.
+// Section: vertical rhythm and an optional background variant.
 //   - default: plain white
-//   - tint:    pale slate (rest stop between bright sections)
-//   - dark:    slate-950 — for AI / product moment sections (ClickUp-style)
+//   - tint:    the quiet surface (a rest stop between white sections)
+//   - dark:    kept for API compatibility; paints the same quiet surface
 //   - mesh:    barely-there backdrop. Just a clean off-white wash; no
 //              rainbow blobs. The legacy "mesh" name is kept so existing
 //              pages don't need to change.
@@ -113,24 +160,51 @@ export function Section({
   variant = "default",
   id,
   py = "lg",
+  pb,
 }: {
   children: ReactNode;
   className?: string;
   variant?: "default" | "tint" | "dark" | "mesh";
   id?: string;
   py?: "sm" | "md" | "lg" | "xl";
+  /**
+   * Bottom padding, when it should not match the top.
+   *
+   * A hero band and the band under it each pay their own full rhythm, so a
+   * `lg` hero above an `md` band puts 192px of nothing between the last
+   * thing the hero says and the first card. On /blog that landed between
+   * the category filters and the first post and read as a failed render
+   * rather than as rhythm: it was the only gap of its size on the site.
+   */
+  pb?: "none" | "sm" | "md" | "lg" | "xl";
 }) {
-  const pad =
-    py === "sm" ? "py-12 lg:py-16" :
-    py === "md" ? "py-16 lg:py-20" :
-    py === "lg" ? "py-20 lg:py-28" :
-                  "py-28 lg:py-36";
+  const scale = {
+    none: "",
+    sm: "py-12 lg:py-16",
+    md: "py-16 lg:py-20",
+    lg: "py-20 lg:py-28",
+    xl: "py-28 lg:py-36",
+  } as const;
+  // Each override carries its own `lg:` too. Without it the base `pb-0`
+  // loses to the scale's `lg:py-28` from 1024 up, because Tailwind emits
+  // every lg variant after every base utility and both are one class: the
+  // override worked on a phone and did nothing on a desktop.
+  const bottom = {
+    none: "pb-0 lg:pb-0",
+    sm: "pb-12 lg:pb-16",
+    md: "pb-16 lg:pb-20",
+    lg: "pb-20 lg:pb-28",
+    xl: "pb-28 lg:pb-36",
+  } as const;
+  const pad = pb ? `${scale[py]} ${bottom[pb]}` : scale[py];
 
+  // Light only (concept 10). There is no dark block on the public site: the
+  // navy chrome inside a product frame is the only dark element anywhere,
+  // and it is drawn by MarketingShell, never by a page section. The "dark"
+  // variant is kept so an old call site still type checks, and it paints the
+  // quiet tint the rest of the site uses for a rest stop.
   const bg =
-    variant === "tint" ? "bg-slate-50" :
-    variant === "dark" ? "bg-slate-950 text-white" :
-    variant === "mesh" ? "bg-white" :
-    "bg-white";
+    variant === "tint" || variant === "dark" ? "mk-quiet" : "mk-white";
 
   return (
     <section id={id} className={`${bg} ${pad} ${className}`}>
@@ -140,11 +214,11 @@ export function Section({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// TYPOGRAPHY — eyebrow, headings, lede.
+// TYPOGRAPHY: eyebrow, headings, lede.
 //
-// Eyebrow = ClickUp's tiny tracked uppercase label ("REVENUE INCREASE").
+// Eyebrow: the small tracked uppercase label above a heading.
 // Plain text, no chip, no dot. The `hue` prop only tints the small
-// label text — chrome stays neutral.
+// label text; chrome stays neutral.
 // ════════════════════════════════════════════════════════════════════
 
 export function Eyebrow({
@@ -158,11 +232,14 @@ export function Eyebrow({
   className?: string;
   invert?: boolean;
 }) {
-  const color = invert ? "text-white/70" : HUES[hue].text;
+  // `mk-eyebrow` is the grammar's own label: 12px, weight 600, 0.04em, and
+  // ink-2 GREY. It used to be weight 700 at 0.18em in the hue's blue, which
+  // put a blue eyebrow over half the site's H1s and a grey one over the
+  // other half. The hue prop is kept because two dozen pages pass it and is
+  // no longer read: there is one eyebrow.
+  void hue;
   return (
-    <span
-      className={`inline-block text-[12px] font-bold uppercase tracking-[0.18em] ${color} ${className}`}
-    >
+    <span className={`mk-eyebrow ${invert ? "text-white/70" : ""} ${className}`}>
       {children}
     </span>
   );
@@ -177,14 +254,19 @@ export function H1({
   className?: string;
   invert?: boolean;
 }) {
+  // The ramp, not a second one. `mk-display-md` is 48 then 64 at weight
+  // 600 with leading 1.05, defined once in marketing-shell.css, and it is
+  // the class every rebuilt sub page's H1 already carries: /pricing,
+  // /tuesday, /how-it-connects, /demo, /roadmap and every /product chapter.
+  // The top rung, 72, belongs to the home hero alone.
+  //
+  // This used to be a clamp topping out at 72px at weight 700 in
+  // text-slate-900: a fourth near black, a weight Inter is not loaded at
+  // (so the browser synthesised it), and a size that made every legacy sub
+  // page shout louder than /pricing. design-system.md section 1 says one
+  // ramp at one weight.
   return (
-    <h1
-      className={`font-bold tracking-[-0.035em] ${invert ? "text-white" : "text-slate-900"} ${className}`}
-      style={{
-        fontSize: "clamp(2.4rem, 5.6vw, 4.5rem)",
-        lineHeight: 1.02,
-      }}
-    >
+    <h1 className={`mk-display-md ${invert ? "text-white" : "mk-ink"} ${className}`}>
       {children}
     </h1>
   );
@@ -199,14 +281,10 @@ export function H2({
   className?: string;
   invert?: boolean;
 }) {
+  // The section heading rung of the same ramp: 36 then 48. Same weight,
+  // same leading, same ink as every rebuilt page's H2.
   return (
-    <h2
-      className={`font-bold tracking-[-0.03em] ${invert ? "text-white" : "text-slate-900"} ${className}`}
-      style={{
-        fontSize: "clamp(1.9rem, 3.6vw, 3rem)",
-        lineHeight: 1.08,
-      }}
-    >
+    <h2 className={`mk-title-lg ${invert ? "text-white" : "mk-ink"} ${className}`}>
       {children}
     </h2>
   );
@@ -221,10 +299,9 @@ export function H3({
   className?: string;
   invert?: boolean;
 }) {
+  // The third rung: 22 then 26, under the ramp on purpose.
   return (
-    <h3
-      className={`text-xl lg:text-2xl font-bold tracking-tight ${invert ? "text-white" : "text-slate-900"} ${className}`}
-    >
+    <h3 className={`mk-title ${invert ? "text-white" : "mk-ink"} ${className}`}>
       {children}
     </h3>
   );
@@ -239,16 +316,17 @@ export function Lede({
   className?: string;
   invert?: boolean;
 }) {
+  // One reading size, 16, which is what design-system section 1 names for
+  // body. The lede used to run at 18 then 20, so a page carried three body
+  // sizes and disagreed with the rebuilt half at both breakpoints.
   return (
-    <p
-      className={`text-lg lg:text-xl ${invert ? "text-white/75" : "text-slate-600"} leading-relaxed max-w-2xl ${className}`}
-    >
+    <p className={`mk-lede ${invert ? "text-white/75" : ""} ${className}`}>
       {children}
     </p>
   );
 }
 
-// Accent span — for highlighting a single word/phrase inside a headline.
+// Accent span, for de-emphasising part of a headline.
 // Default treatment is a tasteful single-tone color shift, NOT a multi-hue
 // gradient. Pass `subtle` to get a softened slate-500 emphasis instead.
 export function GradientText({
@@ -262,17 +340,20 @@ export function GradientText({
   className?: string;
   subtle?: boolean;
 }) {
+  // The name is legacy and so is the `hue` prop; both are kept because two
+  // dozen pages pass them. What renders is a second INK tone, never a hue
+  // and never a gradient: the display ramp is one weight and one colour,
+  // and the emphasis in a headline is a shift in tone, not in temperature.
+  void hue;
   if (subtle) {
-    return <span className={`text-slate-500 ${className}`}>{children}</span>;
+    return <span className={`mk-ink3 ${className}`}>{children}</span>;
   }
-  return (
-    <span className={`${HUES[hue].text} ${className}`}>{children}</span>
-  );
+  return <span className={`mk-ink2 ${className}`}>{children}</span>;
 }
 
 // ════════════════════════════════════════════════════════════════════
 // BUTTONS
-//   primary   = solid slate-900 pill (ClickUp's signature)
+//   primary   = the one blue, filled
 //   secondary = solid hue (used sparingly)
 //   outline   = white with a hairline border
 //   ghost     = no chrome, hover only
@@ -297,27 +378,28 @@ export function Button({
   rightIcon?: ReactNode;
   leftIcon?: ReactNode;
 }) {
+  // The same geometry CtaLink draws (44px, 8px radius, 16px/500), so a
+  // legacy page's button and a rebuilt page's button are the same object.
   const sizeCls =
     size === "sm" ? "h-9 px-4 text-[14px]" :
-    size === "lg" ? "h-12 px-6 text-[15px]" :
-                    "h-10 px-5 text-base";
+    size === "lg" ? "h-11 px-5 text-[16px]" :
+                    "h-11 px-5 text-[16px]";
 
-  const t = HUES[hue];
+  void hue;
+  // "primary" and "secondary" are both the one blue: a legacy page names the
+  // main door "secondary" and the rebuilt canon calls it primary, and there
+  // is only one filled skin on this site either way.
   const variantCls =
-    variant === "primary"
-      ? `bg-slate-900 text-white hover:bg-slate-800`
-      : variant === "secondary"
-      ? `${t.bgStrong} text-white ${t.bgStrongHover}`
-      : variant === "invert"
-      ? `bg-white text-slate-900 hover:bg-slate-100`
-      : variant === "outline"
-      ? `bg-white text-slate-900 border border-slate-200 hover:border-slate-300 hover:bg-slate-50`
-      : `text-slate-600 hover:text-slate-900 hover:bg-slate-100`;
+    variant === "primary" || variant === "secondary"
+      ? "mk-btn mk-btn-solid"
+      : variant === "invert" || variant === "outline"
+      ? "mk-btn mk-btn-ghost"
+      : "mk-btn mk-btn-quiet";
 
   return (
     <Link
       href={href}
-      className={`inline-flex items-center gap-1.5 rounded-full font-semibold transition-colors ${sizeCls} ${variantCls} ${className}`}
+      className={`mk-focus inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors ${sizeCls} ${variantCls} ${className}`}
     >
       {leftIcon}
       {children}
@@ -327,7 +409,7 @@ export function Button({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// CARDS — base + product cards. Restrained: thin slate-200 border,
+// CARDS: base and product cards. Restrained: a thin hairline border,
 // no gradient rims, no rainbow shadows.
 // ════════════════════════════════════════════════════════════════════
 
@@ -351,7 +433,7 @@ export function Card({
   );
 }
 
-// Hub tile — represents a product hub. The icon carries the hue; the
+// Hub tile: one of the eight blocks. The icon carries the accent; the
 // card itself stays neutral. No rainbow rim. Hover lifts a touch.
 export function HubCard({
   hub,
@@ -386,7 +468,7 @@ export function HubCard({
         </div>
         <div>
           <p className="font-bold text-slate-900 text-[15px] leading-none">{hub.name}</p>
-          <p className="text-sm text-slate-500 mt-1.5">{hub.tagline}</p>
+          <p className="text-sm mk-ink2 mt-1.5">{hub.tagline}</p>
         </div>
       </div>
 
@@ -415,7 +497,7 @@ export function HubCard({
   return href ? <Link href={href}>{body}</Link> : body;
 }
 
-// Feature card — icon + title + body. Icon takes a tint; card stays neutral.
+// Feature card: icon, title, body. The icon takes a tint; the card stays neutral.
 export function FeatureCard({
   icon: Icon,
   title,
@@ -447,8 +529,8 @@ export function FeatureCard({
   );
 }
 
-// Stat card — giant black number, tiny purple eyebrow label, slate body.
-// Patterned on ClickUp's stats strip ("REVENUE INCREASE / $3.9M / ...").
+// Stat card: a large number, a small tracked label, a quiet body.
+// A label, a number, a sentence. Used where a real number exists.
 export function StatCard({
   value,
   label,
@@ -481,7 +563,7 @@ export function StatCard({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// PAGE HERO — for inner pages. Black headline, no gradient noise.
+// PAGE HERO, for inner pages. One ink headline, nothing behind it.
 // ════════════════════════════════════════════════════════════════════
 
 export function PageHero({
@@ -534,48 +616,77 @@ export function PageHero({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// CTA BAND — dark slate, ClickUp-style. No multi-hue gradient.
+// CTA BAND. Light, like the rest of the site: a quiet tinted band, one
+// blue button, one ghost beside it. It used to be a slate-950 slab, which
+// is the dark block the light only rule exists to stop.
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * TWO THINGS THIS BAND GOT WRONG, ON NINETEEN OF THE FORTY ROUTES.
+ *
+ * 1. THE DEFAULT HEADLINE WAS THE OLD SITE'S.
+ *
+ * It read "Stop juggling tools. Start running the business.", which is not
+ * in the concept's section 8 headline set and is the pre-rebuild voice. The
+ * pages that pass their own title (/, /pricing, /tuesday, /compare, /product,
+ * /how-it-connects) close on the new copy; the twelve /features pages, the
+ * seven /industries pages and the four legal pages take the default, so
+ * nearly half the site closed in the voice the rebuild replaced. The default
+ * is now the section 8 line the home page's own closer uses.
+ *
+ * 2. ITS BUTTON WAS THE ONE UNINSTRUMENTED CTA ON THE SITE.
+ *
+ * It rendered a bare `href="/signup"` with no `utm_content` and no
+ * `data-cta`. Concept 6.3 asks for distinct data-cta ids on every placement
+ * and 7.3 asks for utm_content carrying the placement id, and this is the
+ * bottom-of-page conversion button: on nineteen routes the last thing a
+ * visitor could click was the one click nobody could attribute. Worse, it
+ * hard coded the label and the destination, so `ctaPrimary` (the config flag
+ * that flips the whole site to demo-first in an afternoon) would have flipped
+ * every CTA on the site except this one, leaving "Start free" pointing at a
+ * signup page on exactly the pages whose whole point was to stop doing that.
+ *
+ * Both buttons now go through the same components every other CTA on the
+ * site goes through, which is why `placement` is REQUIRED rather than
+ * defaulted: a defaulted placement id is nineteen placements sharing one
+ * number, which is the same as not measuring them. TypeScript asks the
+ * caller for it, so a new page cannot ship uninstrumented by omission.
+ *
+ * `primary` and `secondary` remain for the three callers that need their own
+ * words, and they still route through the measured link.
+ */
 export function CTABand({
+  placement,
   title,
   body,
-  primary = { label: "Get started", href: "/signup" },
-  secondary = { label: "Talk to sales", href: "/demo" },
+  primary,
+  secondary,
 }: {
+  /** The measurement id for this page's closing button. One per page. */
+  placement: string;
   title?: ReactNode;
   body?: ReactNode;
-  primary?: { label: string; href: string };
-  secondary?: { label: string; href: string };
-  // hue kept for API compat but no longer used — palette is neutral.
+  /** Overrides the primary label only. The destination stays the config's. */
+  primary?: { label?: string };
+  /** Overrides the secondary label only. */
+  secondary?: { label?: string };
+  // hue kept for API compat but no longer used: the palette is one blue.
   hue?: Hue;
 }) {
   return (
-    <section className="bg-slate-950 text-white">
-      <Container className="py-24 lg:py-32">
+    <section className="mk-quiet mk-topline">
+      <Container className="py-20 lg:py-24">
         <div className="max-w-3xl">
           <h2
-            className="font-bold tracking-[-0.03em]"
-            style={{ fontSize: "clamp(2rem, 4vw, 3rem)", lineHeight: 1.08 }}
+            className="font-semibold tracking-[-0.02em] mk-a-ink"
+            style={{ fontSize: "clamp(2rem, 4vw, 3rem)", lineHeight: 1.05 }}
           >
-            {title ?? <>Stop juggling tools.<br/>Start running the business.</>}
+            {title ?? FINAL_HEADLINE}
           </h2>
-          {body && (
-            <p className="mt-6 text-white/75 text-lg leading-relaxed max-w-xl">{body}</p>
-          )}
-          <div className="mt-9 flex flex-wrap gap-3">
-            <Link
-              href={primary.href}
-              className="inline-flex items-center gap-1.5 h-12 px-6 rounded-full bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
-            >
-              {primary.label} <ArrowRight size={16} />
-            </Link>
-            <Link
-              href={secondary.href}
-              className="inline-flex items-center gap-1.5 h-12 px-6 rounded-full bg-transparent text-white border border-white/20 font-semibold hover:bg-white/10 transition-colors"
-            >
-              {secondary.label}
-            </Link>
+          {body && <p className="mt-5 mk-ink2 text-lg leading-relaxed max-w-xl">{body}</p>}
+          <div className="mt-8 flex flex-wrap gap-3">
+            <PrimaryCta placement={placement} label={primary?.label} />
+            <SecondaryCta placement={placement} label={secondary?.label} />
           </div>
         </div>
       </Container>
@@ -584,7 +695,7 @@ export function CTABand({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// FAQ — accordion using <details> for SSR-friendly, JS-free expand.
+// FAQ: an accordion built on <details>, so it opens with no JavaScript.
 // ════════════════════════════════════════════════════════════════════
 
 export function FAQ({
@@ -632,27 +743,32 @@ export function FAQ({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// LOGO CLOUD — trust strip. Plain slate-400 wordmarks.
+// LOGO CLOUD. A trust strip is a claim about who uses the product, so it
+// answers to `flags.customerLogos`. It used to ship six invented company
+// names as its DEFAULT argument, which meant a page got a fabricated
+// customer list by calling <LogoCloud /> with nothing at all. There is no
+// default list now and the whole strip renders nothing until the flag is
+// true and real names are passed.
 // ════════════════════════════════════════════════════════════════════
 
 export function LogoCloud({
   title = "Trusted by operators at",
-  brands = ["Helios Labs", "Nimbus Logistics", "Lattice & Co", "Quill Health", "Forge Capital", "Stratum AI"],
+  brands,
   invert = false,
 }: {
   title?: string;
   brands?: readonly string[];
   invert?: boolean;
 }) {
+  if (!flags.customerLogos || !brands || brands.length === 0) return null;
   return (
     <div className="text-center">
-      <p className={`text-[12px] font-bold uppercase tracking-[0.22em] ${invert ? "text-white/50" : "text-slate-400"}`}>{title}</p>
+      <p className={`text-[12px] font-bold uppercase tracking-[0.18em] ${invert ? "text-white/60" : "mk-ink2"}`}>{title}</p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-x-12 gap-y-5">
         {brands.map((b) => (
           <span
             key={b}
-            className={`font-bold text-lg tracking-tight ${invert ? "text-white/40 hover:text-white/70" : "text-slate-400 hover:text-slate-600"} transition-colors`}
-            style={{ fontVariant: "small-caps", letterSpacing: "0.02em" }}
+            className={`font-semibold text-lg tracking-tight ${invert ? "text-white/70" : "mk-ink2"}`}
           >
             {b}
           </span>
@@ -663,7 +779,7 @@ export function LogoCloud({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// QUOTE — a clean editorial pull-quote. White card, slate border.
+// QUOTE: an editorial pull quote. White card, hairline border.
 // ════════════════════════════════════════════════════════════════════
 
 export function Quote({
@@ -685,7 +801,7 @@ export function Quote({
       >
         &ldquo;{quote}&rdquo;
       </blockquote>
-      <figcaption className="mt-7 text-base text-slate-500">
+      <figcaption className="mt-7 text-base mk-ink2">
         <span className="font-bold text-slate-900">{author}</span> &middot; {role}, {company}
       </figcaption>
     </figure>
@@ -693,7 +809,7 @@ export function Quote({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// CHECK LIST — for feature bullets. Neutral by default; hue accent is
+// CHECK LIST, for feature bullets. Neutral by default; the accent is
 // only on the tiny check icon.
 // ════════════════════════════════════════════════════════════════════
 

@@ -1,42 +1,54 @@
+// /features/ai-engine, rewritten against the product.
+//
+// Gone: a named model version and a promise of per customer model pinning,
+// "answers with citations to source records" (the endpoint returns a
+// response and no sources at all, which is stop 6's unbuilt mechanism),
+// "pin useful queries as live dashboards", and "per-user permissions
+// enforced at retrieval", which is the one claim here that was wrong in the
+// dangerous direction: the retrieval is scoped to the ORGANISATION. That is
+// said plainly below rather than quietly dropped.
+
 import type { Metadata } from "next";
-import { Bot, Search, Inbox, Sparkles, Zap, Brain } from "lucide-react";
 import { FeatureSubPage } from "@/components/marketing/sub-page";
-import { GradientText } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "AI Engine — WorkwrK",
-  description: "AI is the runtime, not a chatbot. Cmd-K AI search across every entity, inbox triage, cross-module signals, plain-English business questions over your real data.",
+  title: "AI",
+  description:
+    "One Ask on every page, reading the workspace it is in: people, roles, result areas, KPI readings, processes and reviews. What it does not do yet is listed too.",
   alternates: { canonical: "https://workwrk.com/features/ai-engine" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "AI", description: "One Ask, reading the workspace it is in." },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "One Ask, reading the workspace it is in." },
 };
 
-export default function AIEnginePage() {
+export default function AiFeaturePage() {
   return (
     <FeatureSubPage
-      hubSlug="home"
-      hue="indigo"
-      eyebrow="Home hub · AI Engine"
-      title={<>AI is the <GradientText hue="indigo">runtime</GradientText>.</>}
-      lede="Not a chatbot bolted on. Cmd-K searches every entity in your workspace; inbox triage decides what matters; cross-module signals surface anomalies before you ask."
+      slug="ai-engine"
+      hubSlug="ai"
+      eyebrow="AI"
+      title="One Ask, reading the whole workspace."
+      lede="The roles, the result areas, the readings, the processes and the reviews are in one system, so the question has something to read."
       capabilities={[
-        { icon: Search,   title: "Cmd-K AI search",    body: "Hit Cmd-K, type anything. Find a person, a SOP, an open task, a vendor invoice — across every hub, in one box." },
-        { icon: Inbox,    title: "Inbox triage",       body: "12 streams aggregated. AI sorts urgent / important / informational. You see a hundred items as ten." },
-        { icon: Brain,    title: "Cross-module signals", body: "KPI drift in Work + low kudos in Culture + slipping OKR? AI flags it as an early warning, not after the fact." },
-        { icon: Sparkles, title: "Plain-English questions", body: "Ask: 'Which managers have falling team kudos this quarter?' Get an answer from your real data, not a generic LLM." },
-        { icon: Zap,      title: "Reviewer copilot",   body: "Drafts review summaries from KPI + task + kudos data. Reviewers edit, don't write from blank." },
-        { icon: Bot,      title: "Privacy-first",      body: "Your data isn't training the model. Per-workspace context, per-user permissions enforced at retrieval." },
+        { title: "Ask, anywhere", body: "One Ask on every page rather than a chat button on every control." },
+        { title: "It reads the workspace", body: "People, departments, roles, result areas, KPI readings, processes, review cycles and recent activity." },
+        { title: "Plain questions", body: "Ask whether the quarter is on track, or who owns a process, and get an answer built from those records." },
+        { title: "Beside the work", body: "The answer sits next to the block it is about, so the next click is the record rather than a search box." },
+        { title: "Scoped to the workspace, not the person",
+          body: "Retrieval is filtered by organisation. It is not yet filtered by what the asking person can see, so treat the Ask as an admin surface until that lands.",
+        },
+        { title: "No source chips yet", body: "The answer does not cite the records it read. When it does, the site will show the chips rather than describe them." },
       ]}
-      workflowSteps={[
-        "Cmd-K from anywhere, ask anything in plain English",
-        "Retrieval pulls only what you have permission to see",
-        "AI synthesizes the answer with citations to source records",
-        "Pin useful queries as live dashboards",
-      ]}
-      relatedSlugs={["analytics", "reviews", "kpis", "people"]}
+      surfaceKey="ask-ai"
+      surfaceCrumb="Ask"
+      surfaceLabel="The AI block: one Ask answering a question about the workspace it is in."
+      relatedSlugs={["kpis", "sops", "access"]}
       faq={[
-        { q: "What model runs under the hood?",          a: "We use Claude 4.7 as the primary model. Some structured tasks use specialized smaller models. Per-customer enterprise pinning available on Scale." },
-        { q: "Is my data used for training?",             a: "No. Your data is never used to train a foundation model. Per-workspace embeddings; encrypted at rest; deleted when you leave." },
-        { q: "How does AI honor permissions?",            a: "Retrieval queries are scoped to what the requesting user can see. AI never returns content the user couldn't access via the UI." },
-        { q: "Does AI cost extra?",                       a: "Capped on Growth; unlimited on Scale. Most teams stay under the cap; we tell you when you're approaching." },
+        { q: "Does it cite its sources?", a: "Not yet. That is a real gap and it is on the build list; the story on this site marks the same moment as unbuilt." },
+        { q: "Does it respect per person permissions?", a: "Not yet. Retrieval is scoped to the organisation. Until per person scoping ships, do not open the Ask to people who should not read the whole workspace." },
+        { q: "Is our data used to train a model?", a: "No. The workspace's records are read to answer a question and are not used to train a foundation model." },
       ]}
     />
   );

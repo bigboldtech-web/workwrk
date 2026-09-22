@@ -1,0 +1,2414 @@
+/* The home page's own layout (marketing-concept.md sections 2, 3 and 4).
+ *
+ * Rules this sheet keeps, all from the concept:
+ *
+ *   Light only. The navy chrome inside a product frame is the only dark
+ *   element, and it comes from the shell sheet, not from here.
+ *   Flat. White faces, one hairline edge, the popover shadow only on a
+ *   lifted block. No lighting, no gradient, no glass.
+ *   Every colour is a token. The four brand dot hexes are applied inline
+ *   from the brand module, which is the only place they live.
+ *   Every animation has a resting state, and the resting state is the one
+ *   that is designed. Nothing here depends on motion to be legible.
+ */
+
+/* Page rhythm: .mk-band, .mk-wrap, .mk-eyebrow, .mk-lede, .mk-note and
+ * .mk-ctarow USED TO LIVE HERE, and that was the whole of the split site.
+ *
+ * This sheet is imported by the home components only. Half the routes on
+ * the site are not built out of those components, so half the routes never
+ * saw the grammar: they ran on the legacy Tailwind utilities instead, at a
+ * 120px gutter, a 72px display and a 700 weight against this half's 144,
+ * 64 and 600. Two gutters, two weights and three near blacks on one site.
+ *
+ * The rules now live in src/app/(marketing)/marketing.css, which the route
+ * group's layout imports, so EVERY marketing route gets the same grammar,
+ * and the primitives in src/components/marketing/primitives.tsx render
+ * into it. There is one definition, in one file.
+ */
+
+/* ═════════════════════════════════════════════════════════════════
+ * 1. Hero.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* The hero is tight on purpose: the exploded composition is half the
+   argument, so the type above it is sized to leave the stage inside the
+   first screen on a laptop rather than pushing it under the fold. */
+.mk-hero {
+  padding-block: 28px 0;
+}
+@media (min-width: 768px) {
+  .mk-hero { padding-block: 40px 0; }
+}
+
+.mk-hero__h1 { max-width: 18ch; }
+.mk-hero__h1 span { display: block; }
+
+/* On a phone the H1 avoids ORPHANS rather than balancing line lengths.
+   `text-wrap: balance` evens the lines, and on a 390 screen that put the
+   word "work" alone on a line of its own: "Your people, / processes, /
+   work / and goals. / Snapped / together." A one word line reads as a
+   layout fault, and it is the first thing 83 percent of visitors see.
+   Measured at 390: balance gives lines of 281, 246, 112 and 231px; pretty
+   gives 281, 246, 207 and 136, which is the same four lines with no orphan
+   and the H1 still at the ramp's 48px. An engine without `pretty` drops
+   the declaration and keeps balance, which is where this started.
+   Balance stays on from 768 up, where the H1 has the room for it. */
+@media (max-width: 767px) {
+  .mk-hero .mk-hero__h1 { text-wrap: pretty; }
+}
+.mk-hero .mk-lede { margin-top: 18px; }
+.mk-hero .mk-ctarow { margin-top: 22px; }
+
+/* THE LCP FRAME, on the screen most visitors actually have.
+ *
+ * Concept 2.3 asks for the eyebrow, the H1, the sub, the CTA and the
+ * exploded composition with its dots, labels and Replaces tags in the frame
+ * at 0.0s. On a 1440 by 900 laptop the type stack was 492px tall and the
+ * pinned stage is a viewport high, so five of the eight blocks sat 300 to
+ * 400px under the fold: what a visitor met was a pile of three overlapping
+ * cards, and the argument the hero exists to make was below it.
+ *
+ * So on a short screen the stack is compressed and the H1 takes the ramp's
+ * lowest step, which is still the ramp (48 / 64 / 72). Nothing moves on a
+ * tall screen, where there was never a problem.
+ *
+ * WHAT THIS ACTUALLY BUYS, measured at 1440 by 900 rather than argued:
+ *
+ *   48px   H1 151px tall, stage opens at 397, 3 of 8 blocks under the fold
+ *   64px   H1 202px tall, stage opens at 448, 4 of 8 under the fold
+ *   72px   H1 227px tall, stage opens at 473, 5 of 8 under the fold
+ *
+ * So it is one whole row of the composition per step, and the step is not
+ * free to give back. Three blocks still overhang at 48, and that is the
+ * honest state of this hero: a single column hero cannot fit a three line
+ * headline, a sub, a CTA row and an eight block exploded object above the
+ * fold of a 900px laptop, and the assembled frame underneath needs 632
+ * logical px for its rail (see .mk-stage__frame), which is more room than
+ * shrinking the stage would leave. The composition's bottom row hanging
+ * past the fold is the concept's own resting shape; four or five blocks
+ * hanging past it is not. */
+@media (min-width: 1024px) and (max-height: 1000px) {
+  .mk-hero { padding-block: 20px 0; }
+  .mk-hero .mk-eyebrow { margin-bottom: 8px; }
+  .mk-hero__h1 { font-size: var(--mk-display-3, 48px); max-width: 22ch; }
+  .mk-hero .mk-lede { margin-top: 10px; }
+  .mk-hero .mk-ctarow { margin-top: 14px; }
+  .mk-hero .mk-ctarow + .mk-note { margin-top: 8px; }
+}
+
+/* The stage.
+ *
+ * `perspective` plus one transformed ancestor per block, and nothing with
+ * `overflow` between the stage and a block: an overflow container inside a
+ * 3D stage flattens it, which is the usual reason an exploded composition
+ * renders as a flat pile.
+ *
+ * The aspect ratio is reserved at every breakpoint so the page never shifts
+ * while the faces paint. CLS 0 is a layout property, not a loading trick.
+ */
+.mk-stage {
+  position: relative;
+  /* The top row of blocks hangs above the stage box as well as below it, so
+     the room is reserved on both sides and the AI face never lands on the
+     line of body text above the composition.
+     96 and not 28: a block is about 170px tall now that its face carries the
+     14px the concept asks for, and its centre is what the map places, so it
+     reaches roughly 33px above the stage box. At 28 the AI, Teams and Talk
+     faces sat ON "Free for up to 10 people. No credit card.", which is the
+     free tier's own seat cap and the one line under the primary button.
+     40px of that clearance is enough at 1440 (the AI face then opens 7px
+     under the note); the rest is the overhang the stage needs when it is a
+     16 by 9 box in the flow rather than a pinned viewport. */
+  margin-top: 80px;
+  /* The bottom row of blocks hangs below the stage box by design, because
+     a composition that stops exactly at its container reads as a diagram
+     in a box. The margin is the room that overhang needs, so it never
+     lands on the caption underneath it. */
+  margin-bottom: 64px;
+  perspective: 1600px;
+  perspective-origin: 50% 42%;
+  aspect-ratio: 16 / 9;
+}
+
+/* The blueprint grid, on its own layer.
+ *
+ * It lives on a pseudo-element and NOT on the stage, because the soft edge
+ * is a mask and a mask on the stage masks its children too: the first build
+ * faded the left and right blocks out from the middle of their own labels,
+ * so the two blocks a visitor reads first said "ams" and "alk". A texture
+ * should never be able to eat the type on top of it. */
+.mk-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--os-line-soft) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--os-line-soft) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: center;
+  -webkit-mask-image: radial-gradient(ellipse 70% 66% at 50% 46%, var(--os-ink) 35%, transparent 100%);
+  mask-image: radial-gradient(ellipse 70% 66% at 50% 46%, var(--os-ink) 35%, transparent 100%);
+  pointer-events: none;
+}
+
+.mk-stage__world {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* The navy frame the blocks snap into. It sits centre stage and squares up.
+ *
+ * ONE GEOMETRY, DECLARED IN hero.tsx, READ HERE.
+ *
+ * Every number below arrives as a custom property that hero.tsx writes onto
+ * the stage from exported constants, and `home.test.ts` asserts the resting
+ * composition against those same constants. That is the whole point of the
+ * indirection: the previous build kept the frame's geometry in this sheet
+ * and a MODEL of that geometry in the test, the two drifted, and the test
+ * went green against a hero whose top row of blocks was sitting on the navy
+ * top bar. A number a test reads and a number a browser reads have to be
+ * the same number.
+ *
+ * THE RESTING FRAME IS HALF SIZE, and that is the fix for the occlusion.
+ *
+ * The frame's LAYOUT box is the assembled size, because that is what the
+ * shell inside lays itself out against: at the 0.72 factor below, a 96
+ * percent tall frame gives a 660 logical shell, so the rail's nine items
+ * fit and the grey sidebar clears its 700px width threshold. What changed
+ * is what it PAINTS at rest: `--mk-rest` scales it to half, so the exploded
+ * composition really does have eight blocks AROUND a centre object
+ * (concept 2.2) rather than three of them lying across the navy chrome.
+ * The Snap grows it back to 1 over the square-up, so the frame the visitor
+ * reads at the end is the size it always was, laid out the way it always
+ * was, with nothing re-flowed on the way.
+ */
+.mk-stage__frame {
+  position: absolute;
+  left: calc(var(--mk-fcx, 50) * 1%);
+  top: calc(var(--mk-fcy, 53) * 1%);
+  /* Never under 712px: the shell sheet drops the grey secondary sidebar
+     below 700px of frame, and a percentage alone loses a quarter of the
+     Zoho chassis at laptop widths. */
+  width: max(calc(var(--mk-fw, 64) * 1%), 712px);
+  height: calc(var(--mk-fh, 96) * 1%);
+  /* The square-up (concept 2.4, scroll 0.35 to 0.55). `--mk-p` is the Snap's
+     scroll position, written by the pin; with no pin, no JavaScript or
+     reduced motion it is 0 and this resolves to exactly the resting frame
+     the hero was designed around: 6deg and -7deg, at `--mk-rest`. */
+  --mk-square: clamp(0, calc((var(--mk-p, 0) - 0.35) / 0.2), 1);
+  --mk-tilted: calc(1 - var(--mk-square));
+  --mk-grow: calc(var(--mk-rest, 0.5) + (1 - var(--mk-rest, 0.5)) * var(--mk-square));
+  transform:
+    translate(-50%, -50%)
+    rotateX(calc(6deg * var(--mk-tilted)))
+    rotateY(calc(-7deg * var(--mk-tilted)))
+    scale(var(--mk-grow));
+  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  box-shadow: var(--os-shadow-pop);
+  border-radius: var(--os-r-md);
+}
+/* The hero frame is a composition, not a document: it is cropped by the
+   stage rather than scrolled, so the scroller the shell normally carries is
+   switched off here, and the frame fills the stage box at scale 1 rather
+   than taking a size band from its column. (The stage's own box is about
+   714px wide at 1440, which would otherwise read as a narrow column.) A
+   visitor reads the whole product in the sections below, at full size. */
+.mk-stage__frame .mk-shell-scroll { overflow: hidden; height: 100%; }
+.mk-stage__frame .mk-scale {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+/* THE FRAME LAYS ITSELF OUT BIGGER THAN THE BOX IT IS PAINTED IN.
+ *
+ * `transform: none` made the shell lay out at the frame's own pixel box, and
+ * at 1440 by 900 that box is about 407px tall. The rail is nine items and a
+ * logo, which needs 604 logical px, so the climax frame of the whole page
+ * showed five of nine hubs and cut Docs, Tables, Goals and Settings off its
+ * bottom edge. A rail with half its items missing is not a picture of the
+ * product; it is the same defect the shell sheet's own height floor exists
+ * to prevent, reintroduced by an override.
+ *
+ * So the hero frame uses the mechanism every other frame on the site uses:
+ * the shell lays out at 1 / 0.72 of the painted box and is painted back down
+ * at 0.72, which is MIN_LEGIBLE_SCALE (the product's 14px lands at 10.1px,
+ * its own caption floor). At 1440 that is a 1031 by 632 logical shell, so
+ * the rail is whole and the grey sidebar clears its 700px threshold. */
+.mk-stage__frame .mk-scale > .mk-shell {
+  --mk-hero-f: 0.72;
+  width: calc(100% / var(--mk-hero-f));
+  height: calc(100% / var(--mk-hero-f));
+  transform: scale(var(--mk-hero-f));
+  transform-origin: top left;
+}
+.mk-stage__frame figure { height: 100%; }
+
+/* AT REST THE CENTRE IS A FRAME, NOT A DOCUMENT.
+ *
+ * The frame paints at `--mk-rest` (half) until the square-up, and the shell
+ * inside it paints at a further 0.72, so at the LCP frame the centre object
+ * is at 0.358 of its layout size. At that factor the shell's own type lands
+ * at 3.58px for a 10px rail label and 4.29px for a 12px Replaces tag. That
+ * is not small text, it is sub-pixel noise: cropped out of the LCP frame and
+ * upscaled 3x, the rail labels, the workspace header, the column headers and
+ * the status chips are all unreadable blur. The eight exploded BLOCKS around
+ * it measure 0.98 and land at 12.8px to 13.9px, so they satisfy the rule
+ * section 0.2 of the concept sets ("14px UI text on every block face is
+ * readable at the LCP frame") and the centre was the sole exception.
+ *
+ * Growing the frame is not the fix. At 1440 the resting frame paints in a
+ * 369 by 241 box; for its 14px type to clear the 10px floor the shell inside
+ * would have to lay out at 512 by 335, and the rail alone needs 604 logical
+ * px of height. Half-size AND whole AND legible is geometrically impossible
+ * in that box, which is why the frame lays out big and paints small.
+ *
+ * So the resting frame shows what concept 2.2 actually describes it as: "a
+ * navy frame (rail with eight hub icons, top bar with search and the
+ * four-dot logo)". The rail pills, the navy chrome and the four dots stay.
+ * The things made of words, the rail labels, the search line, the grey
+ * secondary sidebar and the canvas, fade in across the square-up, so they
+ * arrive at full opacity by 0.55, before the blocks land at 0.55 to 0.70 on
+ * a frame that reads. The visitor never sees illegible copy, and the blocks
+ * now land on an empty canvas and fill it, which is the argument the hero is
+ * making anyway.
+ *
+ * `--mk-square` is declared on .mk-stage__frame and inherits, so this needs
+ * no second source for the scroll position. Opacity is compositor-only and
+ * costs no layer the transform above did not already create. Under reduced
+ * motion the whole stage is display:none and .mk-snap-wrap draws both states
+ * at full size, so nothing here can strand content at zero. */
+.mk-stage__frame .mk-shell__canvas,
+.mk-stage__frame .mk-shell__side,
+.mk-stage__frame .mk-shell__search,
+.mk-stage__frame .mk-shell__crumb,
+.mk-stage__frame .mk-shell__tools,
+.mk-stage__frame .mk-rail-item__label,
+.mk-stage__frame .mk-rail-item__tag {
+  opacity: var(--mk-square, 1);
+  transition: opacity 200ms linear;
+}
+
+/* The stage is a desktop composition. Below 1024 the hero uses the two
+   state snap instead, which is legible on a phone. */
+.mk-stage { display: none; }
+@media (min-width: 1024px) {
+  .mk-stage { display: block; }
+}
+
+/* One exploded block.
+ *
+ * Near frontal, and the limits are the concept's: at most 12deg on X and
+ * 14deg on Y. Depth is Z spread plus overlap, not rotation, because a face
+ * turned further than this stops being readable and the whole argument of
+ * the hero is that you can read the product from the first frame.
+ *
+ * Perspective scaling is why the Z range is what it is. At perspective
+ * 1600, translateZ(-240px) renders at 1600 / 1840, about 0.87, so 13px type
+ * on the furthest face lands at 11.3px: above the product's own 10px
+ * caption floor. A deeper spread would look better and would put the text
+ * under it, so the spread stops here.
+ */
+.mk-block {
+  position: absolute;
+  /* 188 between 1024 and 1279, 236 above it (below the stage is not drawn
+     at all). The narrow step used to be 210, and at 1024 the stage is only
+     about 976px wide, so a block at Z 220 rendered 243px: twelve and a half
+     percent of the stage on each side of its centre, which put the Goals
+     face over the frame's one blue button and clipped "Create task" to
+     "Crea". A composition that hides the product's primary action is not a
+     composition of the product. */
+  width: 188px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  padding: 10px;
+  transform-style: flat;
+
+  /* ── THE SNAP, in one transform (concept 2.4). ──────────────────────
+   *
+   * `--mk-p` is the scroll position through the pinned track, 0 to 1,
+   * written onto the stage by snap-pin.client.tsx. Everything below is
+   * derived from it in CSS, on the compositor, with no library and no
+   * per-frame JavaScript beyond that one number.
+   *
+   * `--mk-travel` is this block's OWN progress. Blocks arrive in rail
+   * order rather than together, so block n starts `--mk-delay` into the
+   * scene (n times SNAP_STEP, set in the JSX) and takes SNAP_SPAN of it.
+   *
+   * The travel to the frame's centre is a percentage of the STAGE, and a
+   * transform percentage can only mean a percentage of the element it
+   * sits on, so the arithmetic is done here against two pixel numbers the
+   * pin measures once per resize. With no pin those default to 0px and
+   * every term collapses: at rest this is exactly the exploded
+   * composition the server rendered, which is why there is no hydration
+   * seam and no blank pinned box.
+   *
+   * FRAME_CX and FRAME_CY are the frame's centre. hero.tsx exports both
+   * under those names, writes them onto the stage as `--mk-fcx` and
+   * `--mk-fcy`, and the frame rule above reads the same two properties, so
+   * a block's destination and the frame's position cannot disagree. They
+   * used to be typed as literals in two places in this sheet, which is how
+   * the frame moved to 53 and the blocks kept travelling to 56.
+   */
+  --mk-travel: clamp(0, calc((var(--mk-p, 0) - var(--mk-delay, 0)) / 0.55), 1);
+  --mk-apart: calc(1 - var(--mk-travel));
+  /* The hover lift, as a multiplier inside the same chain rather than as a
+     second `transform` rule. A second rule would REPLACE this one, so
+     hovering a block mid-scrub used to throw it back out to its exploded
+     position. A property that only scales terms cannot do that. */
+  --mk-hover: 0;
+
+  transform:
+    translate(-50%, -50%)
+    translate3d(
+      calc((var(--mk-fcx, 50) - var(--mk-cx, 50)) * var(--mk-sw, 0px) / 100 * var(--mk-travel)),
+      calc((var(--mk-fcy, 53) - var(--mk-cy, 53)) * var(--mk-sh, 0px) / 100 * var(--mk-travel) - 6px * var(--mk-hover)),
+      calc(var(--mk-z, 0px) * var(--mk-apart) + 40px * var(--mk-hover))
+    )
+    rotateX(calc(var(--mk-rx, 0deg) * var(--mk-apart)))
+    rotateY(calc(var(--mk-ry, 0deg) * var(--mk-apart)))
+    scale(calc(1 - 0.45 * var(--mk-travel)));
+
+  /* The block does not land ON the frame and sit there: it lands and is
+     ABSORBED, over the last fifth of its own travel, leaving the assembled
+     shell that was underneath it all along. Concept 2.4's deck of seven
+     canvases behind the front one is the shell's own job, not eight
+     leftover rectangles stacked on its canvas. */
+  opacity: clamp(0, calc(var(--mk-apart) / 0.38), 1);
+
+  transition:
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 200ms linear,
+    box-shadow 240ms var(--os-ease-out);
+}
+@media (min-width: 1280px) {
+  .mk-block { width: 236px; }
+}
+
+/* Hover lifts the SCENE OBJECT, which is the one exception the concept
+   makes to the product's no-hover-transform rule: that rule governs UI
+   chrome, and a block on a stage is not chrome. */
+@media (hover: hover) {
+  .mk-block:hover {
+    --mk-hover: 1;
+    box-shadow: var(--os-shadow-pop);
+    z-index: 3;
+  }
+  .mk-block:hover .mk-block__replaces { color: var(--os-ink); }
+}
+
+.mk-block__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+/* 14px ON EVERY BLOCK FACE, and the reason it is not 12.
+ *
+ * Concept 0.2 resolves the hero's geometry in favour of the near-frontal
+ * stage over the isometric one on one promise: "14px UI text on every block
+ * face is readable at the LCP frame". The limits that promise bought (12deg
+ * on X, 14deg on Y, no deep Z) were respected and the type was left at 10,
+ * 11 and 12px, so the page paid for the compromise and never collected it:
+ * the hero still asked a visitor to read a diagram they could not read.
+ *
+ * Nothing about the composition forbids it. Every block sits at a POSITIVE
+ * Z, so perspective renders all eight larger than authored, never smaller
+ * (at perspective 1600 the furthest, Z 220, renders at 1600 / 1380, about
+ * 1.16). 14px authored is therefore 14px or more on screen everywhere.
+ *
+ * The caption line under the label is 13px, the marketing scale's caption
+ * step, which is also the floor design-system 1 sets for it. */
+.mk-block__label {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.mk-block__replaces {
+  display: block;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+  margin-bottom: 8px;
+  transition: color var(--os-dur-base) var(--os-ease-out);
+}
+.mk-block__face {
+  border-top: 1px solid var(--os-line-soft);
+  padding-top: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--os-ink-2);
+  display: grid;
+  gap: 5px;
+}
+.mk-block__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The phone's eight tiles.
+   Eight three-row faces is 700px of hero before the assembled frame, so the
+   face is CROPPED to its first two rows here. A crop of real content is not
+   a different claim: the label, the Replaces tag and two real rows are what
+   the thirty second test needs, and all eight blocks now carry them. */
+.mk-tiles8 .mk-block__face > *:nth-child(n + 3) { display: none; }
+.mk-block__row > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--os-ink);
+}
+
+/* The idle float. Compositor only, off under reduced motion by the site
+   block in the shell sheet, and it moves nothing the eye has to read. */
+@media (prefers-reduced-motion: no-preference) {
+  .mk-block {
+    animation: mk-float 6s var(--mk-float-delay, 0s) ease-in-out infinite;
+  }
+}
+@keyframes mk-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
+
+/* The wire layer under the blocks. One blue hairline with round caps.
+ *
+ * UNDER them, and under the frame, which needs saying in the 3D stage's own
+ * terms. `inset: 0` with no z-index put the layer in the same plane as the
+ * assembled frame, so painting order fell to whatever the rendering context
+ * decided and a 1.5px blue diagonal ran across the frame's view tabs and its
+ * table rows: a wire through the 14px UI text the near-frontal compromise
+ * exists to keep readable. Pushing the layer 12px back in the world settles
+ * it in 3D rather than by z-index, which is the only thing that holds inside
+ * `transform-style: preserve-3d`. Every block sits at +40px or deeper toward
+ * the viewer, and the frame sits at 0, so both are in front of it. */
+.mk-stage__wires {
+  position: absolute;
+  inset: 0;
+  /* 90px back, and scaled up by exactly the perspective that costs.
+   *
+   * -12px was not enough: the frame is rotated 6deg on X and -7deg on Y at
+   * rest, so its left edge sits about 45px BEHIND the stage plane and its
+   * top about 20px more, and a wire layer at -12 painted over the navy rail
+   * while passing behind the right half. 90px clears the frame's furthest
+   * corner at every rotation the limits allow. At perspective 1600 a plane
+   * at -90px renders at 1600/1690, so it is scaled by 1690/1600 and lands
+   * back at exactly the size it was drawn: depth with no visible change. */
+  transform: translateZ(-90px) scale(1.05625);
+  z-index: 0;
+  /* Both dimensions, explicitly. An SVG with a viewBox has an intrinsic
+     aspect ratio, and `inset: 0` alone leaves `height: auto`, so the
+     element resolved to 1152 by 1152 inside a 1152 by 648 stage and the
+     wires ran 500px down the page, across the quote below. */
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+/* The wires collapse toward the frame's centre as the gaps close (concept
+   2.4): "once assembled you do not see the seams." It is one transform on
+   the group, driven by the same scroll number as the blocks, so the whole
+   wire layer costs nothing to animate.
+   `transform-box: view-box` is what makes the origin mean 50, 56 in the
+   viewBox's own units rather than in the group's bounding box, which is a
+   different point and moves as the lines shorten. */
+.mk-wires {
+  --mk-close: clamp(0, calc((var(--mk-p, 0) - 0.1) / 0.5), 1);
+  transform-box: view-box;
+  transform-origin: 50px 56px;
+  transform: scale(calc(1 - var(--mk-close)));
+  opacity: calc(1 - var(--mk-close));
+  transition: transform 240ms linear, opacity 240ms linear;
+}
+.mk-wire {
+  stroke: var(--os-brand);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  fill: none;
+  opacity: 0.45;
+}
+
+/* The mobile stage: the same DOM, two states, one cross fade.
+ *
+ * Deliberately NOT two build time images. The concept's mobile hero is two
+ * WebP renders of these components, which is the right answer once a build
+ * step renders them; there is no such step in this repo, and a hand drawn
+ * picture of the product is the one thing the honesty rules forbid outright.
+ * So the phone gets the components themselves: they resize, they carry real
+ * text into the DOM for search and for a screen reader, and they cannot
+ * drift from the product the way a picture does.
+ */
+.mk-snap-wrap { margin-top: 28px; }
+@media (min-width: 1024px) {
+  .mk-snap-wrap { display: none; }
+}
+/* One track, and it is the container's width.
+ *
+ * A grid with no explicit columns gets one implicit `auto` track, and an
+ * `auto` track sizes to the MAX-CONTENT of its widest item. The widest item
+ * here is a full size product frame with a 940px minimum, so the phone hero
+ * laid both layers out at 940 inside a 350px column and the site's clip cut
+ * the right half of every block off with no scrollbar to reach it. Naming
+ * the track is the fix; the frame then scrolls inside its own scroller,
+ * which is what the shell provides. */
+.mk-snap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.mk-snap__layer { min-width: 0; }
+
+/* THE RESTING PAIR IS BOTH LAYERS, STACKED.
+ *
+ * This used to be "assembled visible, exploded hidden", which read fine on a
+ * phone with a scroll timeline and badly everywhere else: with reduced
+ * motion on, or in an engine with no scroll driven animations, a phone
+ * visitor never saw the exploded composition at all and had no way to ask
+ * for it. Half the hero's argument, on the breakpoint that carries most of
+ * the traffic.
+ *
+ * So the default, which is also the reduced motion state, is the whole
+ * argument in reading order: the eight blocks apart, then the same blocks
+ * assembled. No control is needed, because there is nothing hidden.
+ *
+ * The overlay and the fade are the ENHANCEMENT, applied only where a scroll
+ * timeline exists and the visitor has not asked for less motion. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-snap { gap: 0; }
+    .mk-snap__layer { grid-area: 1 / 1; }
+    /* `visibility: hidden` and not `opacity: 0`, so the hidden layer is out
+       of the tab order: it holds a focusable scroller. */
+    .mk-snap__layer[data-layer="exploded"] { opacity: 0; visibility: hidden; }
+    .mk-snap__layer[data-layer="assembled"] { opacity: 1; visibility: visible; }
+  }
+}
+
+/* SEQUENTIAL, not a cross fade.
+ *
+ * Two dense compositions fading through each other spend the middle of the
+ * range half transparent and on top of one another, and a scroll linked
+ * animation makes that muddle the resting state at every scroll position in
+ * the middle: at 360 the first screen showed the Teams block, the Docs
+ * block and "My work" all ghosted over each other. The exploded half fades
+ * out first, the assembled half fades in after, and the two ranges do not
+ * meet. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-snap__layer[data-layer="exploded"] {
+      animation: mk-snap-out linear both;
+      animation-timeline: view();
+      animation-range: entry 50% entry 68%;
+    }
+    .mk-snap__layer[data-layer="assembled"] {
+      animation: mk-snap-in linear both;
+      animation-timeline: view();
+      animation-range: entry 68% entry 86%;
+    }
+  }
+}
+/* `both` fill means the pre-range frame is the `from` keyframe, so the
+   exploded blocks are what a visitor sees before the stage is a fifth in
+   view, and the assembled shell is what they see after. */
+@keyframes mk-snap-out {
+  from { opacity: 1; visibility: visible; }
+  to { opacity: 0; visibility: hidden; }
+}
+@keyframes mk-snap-in {
+  from { opacity: 0; visibility: hidden; }
+  to { opacity: 1; visibility: visible; }
+}
+
+.mk-replay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-pill);
+  background: var(--os-surface);
+  color: var(--os-ink-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.mk-replay:hover { background: var(--os-surface-hov); }
+
+/* ═════════════════════════════════════════════════════════════════
+ * 2. Trust line.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-quote {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--os-ink);
+  max-width: 34ch;
+}
+@media (min-width: 768px) {
+  .mk-quote { font-size: 24px; }
+}
+.mk-quote[data-size="display"] { font-size: 26px; max-width: 26ch; }
+@media (min-width: 768px) {
+  .mk-quote[data-size="display"] { font-size: 34px; }
+}
+.mk-quote__by {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--os-ink-2);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 3. The gaps: fourteen grey tiles, then the collapse.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* The tile grid sizes itself to the COLUMN it is in, not to the viewport.
+   Fixed breakpoints put four tiles in the calculator's 600px column, which
+   left 98px for a label and a price and printed "Spreadsheets" straight
+   through "$12". A minimum track width cannot do that at any width. */
+.mk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+/* The "before" is always grey. Never red: cancellation is shown by
+   absorption and strike through, so red keeps its meaning inside a
+   product surface. */
+.mk-tile14 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--os-n200);
+  border-radius: var(--os-r-md);
+  background: var(--os-n0);
+  color: var(--os-n600);
+  text-align: start;
+  font: inherit;
+  font-size: 13px;
+  line-height: 17px;
+}
+.mk-tile14__glyph { flex: 0 0 auto; color: var(--os-n600); display: inline-flex; }
+.mk-tile14__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--os-n700);
+  /* Last resort only. The track minimum above is what actually keeps a long
+     category noun on one line; this stops it running over the price beside
+     it if a narrower container ever appears. */
+  overflow-wrap: break-word;
+}
+/* The price is CONTENT, not the dot beside it.
+ *
+ * The token hook in concept 3 assigns N400 to the tile's DOT ("N0 fill, N200
+ * border, N600 glyph, N400 dot") and the price picked the dot's token up by
+ * mistake: N400 on white is 2.58:1 at 12px, against the 4.5:1 WCAG 1.4.3 AA
+ * floor for text under 18.66px, and it was the only contrast failure on the
+ * page. design-system 1.2 marks text.tertiary decoration only, and these
+ * twenty eight numbers are the ones the Fourteen to One argument and the
+ * Stack Receipt calculator are both built on. So: the secondary ink token,
+ * 6.4:1, at the marketing scale's 13px caption step rather than 12. */
+.mk-tile14__price { flex: 0 0 auto; color: var(--os-ink-2); font-size: 13px; }
+.mk-tile14__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--os-n400);
+  flex: 0 0 auto;
+}
+
+/* The same tile as a toggle chip in the Stack Receipt. */
+button.mk-tile14 { cursor: pointer; transition: background-color var(--os-dur-fast) var(--os-ease-out); }
+button.mk-tile14:hover { background: var(--os-surface-1); }
+button.mk-tile14[aria-pressed="true"] {
+  border-color: var(--os-brand);
+  background: var(--os-brand-soft);
+  color: var(--os-ink);
+}
+button.mk-tile14[aria-pressed="true"] .mk-tile14__label { color: var(--os-ink); }
+button.mk-tile14[aria-pressed="true"] .mk-tile14__glyph { color: var(--os-brand-deep); }
+button.mk-tile14[aria-pressed="true"] .mk-tile14__dot { background: var(--os-brand); }
+
+.mk-old {
+  display: grid;
+  gap: 7px;
+  margin-top: 22px;
+}
+.mk-old__row {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+.mk-old__at { flex: 0 0 74px; }
+
+.mk-count {
+  font-size: 40px;
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--os-ink);
+  letter-spacing: -0.02em;
+}
+@media (min-width: 768px) {
+  .mk-count { font-size: 56px; }
+}
+
+/* The collapse: each tile shrinks toward the rail. One spring, once.
+   The container keeps its height, and `.mk-collapse__after` takes the
+   tiles' place so the band is never an empty rectangle. */
+.mk-collapse { position: relative; }
+.mk-collapse__after {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  opacity: 0;
+  animation: mk-after 400ms 420ms var(--os-ease-out) forwards;
+}
+.mk-collapse__line {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--os-ink);
+  max-width: 22ch;
+}
+@keyframes mk-after {
+  to { opacity: 1; }
+}
+
+.mk-collapse__tile {
+  transition:
+    opacity 520ms var(--os-ease-out),
+    transform 520ms cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+/* Single column, where the tiles are seven rows tall and the result is one
+   short paragraph: the vacated box closes to roughly the height of what
+   replaces it, so the band is a counter and a sentence rather than 400px of
+   white with a sentence floating in the middle of it. The flight path is
+   measured before the collapse starts, so changing the height afterwards
+   does not move where the tiles fly to. */
+@media (max-width: 1099px) {
+  .mk-collapse .mk-tiles {
+    transition: max-height 520ms var(--os-ease-out);
+    overflow: hidden;
+  }
+  .mk-collapse[data-collapsed="true"] .mk-tiles { max-height: 210px; }
+}
+
+/* ONE counter, at every width.
+ *
+ * The after panel that takes the tiles' place already carries the 1 and the
+ * sentence that explains it, so the standalone counter above the shell is a
+ * second one. This rule used to live inside the single column block above,
+ * which meant it only fired below 1100: from 1100 up the two grid columns
+ * sit side by side, so a visitor saw "1 system" beside the shell and
+ * "1 / 14 subscriptions, absorbed into one system." in the box the tiles had
+ * just vacated, in the same viewport, a few hundred pixels apart. The
+ * component's own comment gives the reason it should not happen, and the
+ * reason is stronger at 1440 than it is at 390: two of them a screen apart
+ * reads as a rhyme, two of them side by side reads as a bug. */
+.mk-gaps-count {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mk-gaps-grid:has(.mk-collapse[data-collapsed="true"]) .mk-gaps-count { display: none; }
+.mk-collapse[data-collapsed="true"] .mk-collapse__tile {
+  opacity: 0;
+  transform: translate3d(var(--mk-dx, 0px), var(--mk-dy, 0px), 0) scale(0.2);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 4. The spine, as the eight beat stepper.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-beats {
+  list-style: none;
+  margin: 36px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 24px;
+}
+@media (min-width: 768px) {
+  .mk-beats { gap: 40px; }
+}
+
+.mk-beat {
+  scroll-margin-top: 88px;
+}
+/* The clock is display type on the mobile stepper, so it sits inside the
+   display ramp's 48 to 72 rather than under it, and it is painted in the ONE
+   accent. --os-brand-deep is a second blue, and a second blue beside a blue
+   button is exactly what the single-accent rule exists to stop. */
+.mk-beat__time {
+  font-size: 48px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--os-brand);
+}
+@media (min-width: 768px) {
+  .mk-beat__time { font-size: 72px; }
+}
+.mk-beat__grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The narration, and the card that travels beside it.
+   From 1024 the two blocks need the full column width (two product frames
+   and a wire), so the narration sits under them rather than in a 280px
+   side column, which is also where concept 4 puts it: "narration sits in a
+   fixed caption slot under the stage". */
+.mk-beat__say { display: grid; gap: 16px; align-items: start; }
+.mk-beat__say > * { min-width: 0; }
+@media (min-width: 1024px) {
+  .mk-beat__say { grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr); gap: 28px; }
+}
+
+/* The wire between a beat's two blocks, and the label naming what travels
+   along it. Vertical on the phone, where the blocks stack; horizontal from
+   1024, where they sit left and right. One element, one stylesheet. */
+.mk-wirelink {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  margin: 0;
+  padding-block: 12px;
+}
+
+/* BLUE, always.
+ *
+ * Concept 10: blue is the only colour for wires and the connection lines,
+ * and YBRG appears as the four dots and as the pulse on a wire. The line
+ * took `--mk-stop-dot` for a while, so stop 1 drew a yellow wire and stop 4
+ * a red one, which also collided with red's in-surface meaning. The hue
+ * belongs to the dot travelling along it, and only there. */
+.mk-wirelink__line {
+  display: block;
+  width: 2px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--os-brand);
+  transform-origin: top center;
+}
+.mk-wirelink__dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mk-stop-dot, var(--os-brand));
+}
+/* The ends of the wire, which are what make it a CONNECTION rather than a
+   tick floating in the gutter. One 6px blue dot sits against each block's
+   inner edge, so the line runs dot to dot across the gap exactly as the
+   concept's grammar describes it. They are pseudo-elements because they are
+   the line's own ends, not two more nodes for a screen reader to meet in an
+   already aria-hidden paragraph. */
+.mk-wirelink::before,
+.mk-wirelink::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--os-brand);
+}
+.mk-wirelink::before { top: 6px; left: 50%; translate: -50% 0; }
+.mk-wirelink::after { bottom: 6px; left: 50%; translate: -50% 0; }
+.mk-wirelink__label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--os-ink-2);
+  text-align: center;
+  max-width: 22ch;
+}
+
+/* From 1024 the two blocks sit left and right, so the wire is horizontal and
+   it SPANS the gutter: end dot, line, travelling dot, end dot, with the
+   label under it. It used to be the same 28px vertical stub the phone draws,
+   centred in a 104px column, touching neither panel. */
+@media (min-width: 1024px) {
+  .mk-wirelink {
+    display: flex;
+    align-items: center;
+    justify-content: stretch;
+    padding-block: 0;
+    padding-inline: 3px;
+    gap: 0;
+  }
+  .mk-wirelink__line {
+    width: auto;
+    flex: 1 1 auto;
+    height: 2px;
+    transform-origin: left center;
+  }
+  .mk-wirelink__dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+  }
+  .mk-wirelink::before,
+  .mk-wirelink::after {
+    top: 50%;
+    bottom: auto;
+    translate: 0 -50%;
+  }
+  .mk-wirelink::before { left: 0; }
+  .mk-wirelink::after { left: auto; right: 0; }
+  /* The label sits under the wire and inside the GUTTER. `max-content` put
+     a 30 character sentence across both product frames, where the panel
+     drawn after it in the DOM clipped it mid-word. It wraps in its own
+     column instead, which is why that column is wider than a wire needs. */
+  .mk-wirelink__label {
+    position: absolute;
+    top: calc(50% + 12px);
+    left: 50%;
+    translate: -50% 0;
+    width: 100%;
+    max-width: none;
+    white-space: normal;
+  }
+}
+
+/* The phone draws the carry-over as a sentence rather than as a second
+   identical frame directly under the first (see BeatSurfaces in spine.tsx),
+   so the block it names is not drawn, and a wire above one would hang off
+   nothing. */
+@media (max-width: 1023px) {
+  .mk-beat__block[data-carried="true"] { display: none; }
+  .mk-wirelink[data-lonely="true"] { display: none; }
+}
+
+/* Drawn, at rest. The draw is the enhancement, added only where the browser
+   can run it off the scroll position with no JavaScript at all. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-wirelink__line {
+      animation: mk-draw-down linear both;
+      animation-timeline: view();
+      animation-range: entry 15% entry 65%;
+    }
+    /* Horizontal from 1024, so the draw is too: a scaleY on a 2px tall bar
+       is a line thinning to nothing rather than a wire drawing itself. */
+    @media (min-width: 1024px) {
+      .mk-wirelink__line { animation-name: mk-draw-across; }
+    }
+  }
+}
+@keyframes mk-draw-down {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+@keyframes mk-draw-across {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.mk-trail {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--os-ink-2);
+}
+.mk-trail li {
+  display: flex;
+  gap: 8px;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--os-line);
+}
+.mk-trail li:last-child { border-inline-start-color: var(--os-brand); color: var(--os-ink); }
+
+/* The two links that close the story: replay, and the share route. */
+.mk-spine-close {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.mk-spine-close a { color: var(--os-brand-deep); }
+
+/* The truth gate note under a beat whose mechanism is not built yet. */
+.mk-gate {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 5. Module tour.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--os-line);
+  scrollbar-width: thin;
+}
+.mk-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  height: 38px;
+  padding-inline: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--os-ink-2);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.mk-tab:hover { color: var(--os-ink); }
+.mk-tab[aria-selected="true"] {
+  color: var(--os-ink);
+  font-weight: 500;
+  border-bottom-color: var(--os-brand);
+}
+
+.mk-connects {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--os-ink-2);
+}
+.mk-connects button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-inline: 9px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-pill);
+  background: var(--os-surface);
+  color: var(--os-ink-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mk-connects button:hover { background: var(--os-surface-hov); color: var(--os-ink); }
+
+/* ═════════════════════════════════════════════════════════════════
+ * 6 to 9. Cards, timeline, calculator.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 640px) {
+  .mk-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .mk-cards[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.mk-card {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background: var(--os-surface);
+  padding: 16px;
+  min-width: 0;
+}
+.mk-card__title {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--os-ink);
+  margin: 0;
+}
+.mk-card__body {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--os-ink-2);
+}
+
+.mk-phase {
+  display: grid;
+  gap: 14px;
+}
+@media (min-width: 900px) {
+  .mk-phase { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.mk-phase__when {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-brand-deep);
+}
+.mk-phase__steps {
+  margin: 8px 0 0;
+  padding-inline-start: 18px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--os-ink-2);
+  display: grid;
+  gap: 5px;
+}
+
+/* The thin timeline the three phases hang from.
+ *
+ * It used to be a 1px --os-line rule with a blue ::after over its first
+ * 34%. At a hairline the line token on white is close enough to nothing
+ * that the blue segment was the only part anyone could see, so it read as a
+ * broken rule stopping above "WEEK 1" while "WEEKS 2 TO 6" and "WEEKS 6 TO
+ * 12" sat under empty space. Concept section 8 describes three phases on a
+ * thin timeline, which means the line has to reach all three of them.
+ *
+ * So the rule is now line-strong, still one pixel, and it carries a short
+ * tick at the head of each phase: the three phases visibly hang from it,
+ * and the blue first third still says where a quarter starts. Ticks only
+ * where the phases are a row; below 900 they stack and a horizontal
+ * timeline across a vertical list would be pointing at nothing. */
+.mk-timeline {
+  position: relative;
+  height: 1px;
+  background: var(--os-line-strong);
+  margin-bottom: 18px;
+}
+.mk-timeline::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  height: 1px;
+  width: 33.334%;
+  background: var(--os-brand);
+}
+@media (min-width: 900px) {
+  .mk-timeline {
+    height: 9px;
+    background: none;
+  }
+  /* The rule plus one tick per phase, in a single painted layer: the first
+     background is the hairline across the full width, the second repeats a
+     1px tick every third of it. */
+  .mk-timeline::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 9px;
+    background-image:
+      linear-gradient(to right, var(--os-line-strong) 0 100%),
+      repeating-linear-gradient(to right, var(--os-line-strong) 0 1px, transparent 1px 33.334%);
+    background-size: 100% 1px, 100% 100%;
+    background-repeat: no-repeat;
+  }
+}
+
+.mk-calc {
+  display: grid;
+  gap: 24px;
+  align-items: start;
+}
+@media (min-width: 1024px) {
+  .mk-calc { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 32px; }
+}
+
+.mk-seats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.mk-seats input[type="range"] {
+  flex: 1 1 200px;
+  min-width: 160px;
+  accent-color: var(--os-brand);
+}
+.mk-seats__value {
+  min-width: 96px;
+  font-size: 14px;
+  color: var(--os-ink-2);
+}
+
+.mk-currency {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-sm);
+  background: var(--os-surface-1);
+  flex-wrap: wrap;
+}
+.mk-currency button {
+  height: 28px;
+  min-width: 46px;
+  padding-inline: 8px;
+  /* Transparent rather than none, so the pressed state's hairline costs no
+     2px of layout shift. */
+  border: 1px solid transparent;
+  border-radius: var(--os-r-xs);
+  background: transparent;
+  color: var(--os-ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+/* The pressed state is a surface swap and a 1px line, not a raw shadow:
+   shadow.popover is the only shadow the design system puts on this site, and
+   a hardcoded rgb() here was the one colour in the marketing tree that was
+   not a token. */
+.mk-currency button[aria-pressed="true"] {
+  background: var(--os-surface);
+  color: var(--os-ink);
+  border: 1px solid var(--os-line-strong);
+}
+
+.mk-edit {
+  width: 68px;
+  height: 26px;
+  padding-inline: 6px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-xs);
+  background: var(--os-surface);
+  color: var(--os-ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 10. Pricing preview.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-tier {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background: var(--os-surface);
+  padding: 20px;
+  min-width: 0;
+}
+/* The recommended tier is a 1px blue border and a sentence. No ribbon, no
+   fill: one filled element per viewport is the button. */
+.mk-tier[data-recommended="true"] { border-color: var(--os-brand); }
+.mk-tier__name { font-size: 15px; font-weight: 600; color: var(--os-ink); }
+.mk-tier__price {
+  font-size: 34px;
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+.mk-tier__sub { font-size: 13px; color: var(--os-ink-2); }
+.mk-tier__bullets {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--os-ink-2);
+  /* Grow to keep the three cards' footers aligned, but pack the bullets at
+     the TOP of that space. Without `align-content` the implicit rows shared
+     the slack, so the Scale card, which has three bullets against Growth's
+     five, rendered them with a blank row between each: "Everything in
+     Growth", a gap, "100 SOPs", a gap, "Up to 200 people". It reads as
+     broken spacing, not as alignment. */
+  align-content: start;
+  flex: 1 1 auto;
+}
+.mk-tier__bullets li { display: flex; gap: 8px; }
+.mk-tier__replaces {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--os-ink-2);
+  border-top: 1px solid var(--os-line-soft);
+  padding-top: 10px;
+}
+
+/* A list of statements, each opened by the one accent. Shared, because
+   three pages need the same list and a second copy of it in a page's own
+   sheet is how two of them drift. */
+.mk-plus-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: var(--mk-body, 16px);
+  line-height: 24px;
+  color: var(--os-ink-2);
+  max-width: 62ch;
+}
+.mk-plus-list li { display: flex; gap: 10px; }
+
+/* The plan comparison on /pricing. A TableCard's grammar, as a real table:
+   hairline rows, no zebra, no ticks that depend on colour to be read, and
+   one horizontal scroller so a narrow screen scrolls the table rather than
+   the page (the site never scrolls sideways). */
+.mk-pricetable {
+  overflow-x: auto;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background: var(--os-surface);
+}
+/* It is reachable by keyboard now, so it has the site's one focus ring. */
+.mk-pricetable:focus-visible {
+  outline: 2px solid var(--os-focus);
+  outline-offset: 2px;
+  border-radius: var(--os-r-sm);
+}
+.mk-pricetable table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 20px;
+}
+.mk-pricetable th,
+.mk-pricetable td {
+  text-align: start;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--os-line-soft);
+  font-weight: 400;
+  color: var(--os-ink-2);
+  vertical-align: top;
+}
+.mk-pricetable thead th {
+  background: var(--os-table-head-bg);
+  color: var(--os-ink);
+  font-weight: 600;
+  border-bottom: 1px solid var(--os-line);
+  white-space: nowrap;
+}
+.mk-pricetable thead th:not(:first-child),
+.mk-pricetable tbody td { text-align: center; }
+.mk-pricetable__tier { display: block; }
+.mk-pricetable__price { display: block; font-weight: 400; font-size: 13px; color: var(--os-ink-2); }
+.mk-pricetable tbody th { color: var(--os-ink); font-weight: 400; }
+.mk-pricetable__group th {
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 11. FAQ.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-faq { border-top: 1px solid var(--os-line); max-width: 860px; }
+.mk-faq details { border-bottom: 1px solid var(--os-line); }
+.mk-faq summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 18px 36px 18px 0;
+  font-size: var(--mk-body, 16px);
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--os-ink);
+  position: relative;
+}
+.mk-faq summary::-webkit-details-marker { display: none; }
+.mk-faq summary::after {
+  content: "+";
+  position: absolute;
+  inset-inline-end: 6px;
+  top: 16px;
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--os-ink-2);
+}
+.mk-faq details[open] summary::after { content: "\2212"; }
+.mk-faq__a {
+  padding: 0 0 18px;
+  display: grid;
+  gap: 10px;
+  max-width: 68ch;
+  font-size: var(--mk-body, 16px);
+  line-height: 24px;
+  color: var(--os-ink-2);
+}
+.mk-faq__a p { margin: 0; }
+
+/* ═════════════════════════════════════════════════════════════════
+ * 12. The close, and the sticky bar.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* The signature: the four dots settle into the gap between the two k
+   letters of "workwrk".
+   The dots are the brand `Logo` component (design-system section 7
+   quarantines them to src/components/brand), positioned over the "wr" span
+   the way LogoLockup positions them, so the mark on the last screen of the
+   site is the same object as the mark on the first. */
+.mk-final__mark {
+  display: inline-flex;
+  align-items: baseline;
+  margin: 26px 0 0;
+  font-size: 46px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  color: var(--os-ink);
+  padding-top: 14px;
+}
+.mk-final__anchor {
+  position: relative;
+  display: inline-flex;
+}
+.mk-final .mk-final__dots {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(100% - 7px);
+}
+
+/* At rest the four dots are simply there, between the two k's. The 1.2s
+   settle is the enhancement, and it runs off the scroll position rather
+   than off a pin: concept 0.2 moved this gesture out of a pin on purpose. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-final__dots .wwk-logo__dot {
+      animation: mk-settle 300ms var(--os-ease-out) both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 60%;
+    }
+    /* The dots-loader rhythm is the timing signature of every pulse on the
+       site: yellow, blue, red, green, 1.2s across. */
+    .mk-final__dots .wwk-logo__dot:nth-child(1) { animation-range: entry 0% entry 30%; }
+    .mk-final__dots .wwk-logo__dot:nth-child(2) { animation-range: entry 10% entry 40%; }
+    .mk-final__dots .wwk-logo__dot:nth-child(3) { animation-range: entry 20% entry 50%; }
+    .mk-final__dots .wwk-logo__dot:nth-child(4) { animation-range: entry 30% entry 60%; }
+  }
+}
+@media (max-width: 640px) {
+  .mk-final__mark { font-size: 34px; }
+}
+
+@keyframes mk-settle {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The sticky bar: top right of the nav on desktop, a bottom bar on mobile.
+   It appears after the hero and never covers the content it sits over,
+   because the page reserves room for it at the bottom on small screens. */
+.mk-sticky {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--os-dur-slow) var(--os-ease-out), visibility var(--os-dur-slow);
+}
+.mk-sticky[data-shown="true"] { opacity: 1; visibility: visible; }
+
+/* 48px of bar, as the concept specifies and as this file used to claim while
+   rendering 65. The 44px site button is 40 inside the bar, the padding is 4,
+   and the safe-area inset is added on top of that rather than inside it, so
+   the number below and the room reserved for it are the same number. */
+.mk-sticky[data-at="bottom"] {
+  --mk-bar-h: 48px;
+  inset-inline: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  min-height: var(--mk-bar-h);
+  padding: 4px 12px calc(4px + env(safe-area-inset-bottom, 0px));
+  background: var(--os-surface);
+  border-top: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow-pop);
+}
+.mk-sticky[data-at="bottom"] .mk-chip-num {
+  height: 28px;
+  font-size: 12px;
+}
+/* The desktop half is the chip alone, and it sits UNDER the sticky
+   navigation rather than in it: the nav already carries both doors at this
+   width, so a bar repeating them put a second filled Start free on top of
+   the first. */
+.mk-sticky[data-at="top"] { display: none; }
+
+@media (min-width: 900px) {
+  .mk-sticky[data-at="bottom"] { display: none; }
+  .mk-sticky[data-at="top"] {
+    display: flex;
+    top: 68px;
+    inset-inline-end: 24px;
+    height: 32px;
+  }
+}
+
+.mk-chip-num {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding-inline: 12px;
+  border-radius: var(--os-r-pill);
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Room for the bottom bar so it never hides the footer's last row.
+   The bar measures 49px; 64 clears it with room, and the attribute is set
+   on mount rather than when the bar appears, so the page never grows under
+   a visitor who has already reached the bottom. */
+@media (max-width: 899px) {
+  .mk-site[data-sticky="true"] {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * Reveals. One transition, one resting state, no library.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* The resting state is the READABLE one, and the reveal is the enhancement
+   layered on top of it. A reveal built the other way round, hidden at rest
+   and shown by an observer, hides the whole page when the script fails, the
+   observer is unsupported, or a crawler reads the markup. This one costs no
+   JavaScript and degrades to plain visible text in Firefox. */
+.mk-reveal { opacity: 1; }
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-reveal {
+      animation: mk-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+@keyframes mk-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Two column at the width where both halves are still legible. Each track
+   is minmax(0, 1fr): an implicit `auto` track sizes to the max-content of
+   its widest child, which on this page is a product frame, and that is what
+   used to lay a headline out at 472px inside a 342px phone column. */
+/* Every grid child may shrink below its content.
+ *
+ * A grid or flex item defaults to `min-width: auto`, which refuses to go
+ * narrower than its content, and the widest content on this page is a
+ * product frame. Without this the tour's frame laid out at 714px inside a
+ * 644px column and ran off the right of the page instead of scrolling
+ * inside its own scroller, which is what the shell provides for exactly
+ * this case. */
+.mk-gaps-grid > *,
+.mk-tour-grid > *,
+.mk-calc > *,
+.mk-cards > *,
+.mk-phase > *,
+.mk-beat__grid > * { min-width: 0; }
+
+@media (min-width: 1100px) {
+  .mk-gaps-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mk-tour-grid { grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr); gap: 32px; }
+}
+
+/* The adoption band: the quote beside the two surfaces it is about.
+   The surfaces STACK inside that column rather than sitting side by side:
+   two frames in half of a half column are 328px each, which crops a list
+   past its Status column and makes the point badly. */
+.mk-adopt-list {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-width: 40ch;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink-2);
+}
+.mk-adopt-list li {
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--os-line);
+}
+
+/* The carry-over line: a block the previous beat already showed is named in
+   one sentence rather than drawn a second time, identically, underneath
+   itself. */
+.mk-carry {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--os-line);
+}
+
+.mk-adopt-grid > * { min-width: 0; }
+.mk-adopt-grid .mk-cards { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .mk-adopt-grid { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 13. The two pinned desktop scenes (concept 2.4, 4 and 6.1).
+ *
+ * THE RULE THIS WHOLE SECTION KEEPS: the resting state is the designed
+ * state. Everything below is an enhancement layered onto markup that is
+ * already correct without it. A visitor with JavaScript off, with a bundle
+ * still in flight, on a phone, or with reduced motion asked for, loses the
+ * scrub and keeps the argument.
+ *
+ * So the two client islands write ONE number each and set two attributes.
+ * No transform, no class that changes layout and no node is theirs. All of
+ * the motion is here, on the compositor, in a stylesheet a reviewer can
+ * read end to end.
+ *
+ * `data-scene="on"` is the one condition CSS cannot express on its own: it
+ * means the island attached, which means both the width and the motion
+ * preference matched AND the script ran. Anything that is HIDDEN at rest
+ * and revealed by the scrub hangs off it, so a failed script can never
+ * subtract from the page.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* The track and its sticky child are plain boxes until a wide screen with
+   motion allowed turns them into a scene. */
+.mk-pin-track { position: relative; }
+
+/* The way out of a five viewport scene, and it is the first thing a keyboard
+   reaches because it is server rendered above the pin that creates the
+   problem. Invisible until focused, like the site's other skip link. */
+.mk-skip-scene {
+  position: absolute;
+  inset-inline-start: -9999px;
+  z-index: 30;
+  padding: 8px 14px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+  color: var(--os-ink);
+  font-size: 13px;
+}
+.mk-skip-scene:focus {
+  position: relative;
+  inset-inline-start: 0;
+  display: inline-block;
+  margin-top: 14px;
+}
+
+/* The line the storyboard hands to the shrunken H1 once the shell is
+   assembled. It is simply there at rest; only a running scene holds it back
+   until the shell has actually come together. */
+.mk-stage__caption {
+  position: absolute;
+  inset-inline-start: 0;
+  /* Clear of the frame's top edge. The assembled frame is taller now (96
+     percent of the world, so the rail is whole) and the Snap scales it by
+     another 8 percent about its centre, which brought its upper border up
+     to about 6px inside the world: at -6 this line was being crossed by
+     it. The stage reserves overhang above the world at every state, so
+     there is room here and nothing else in it. */
+  top: -32px;
+  margin: 0;
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--os-ink);
+}
+.mk-stage[data-scene="on"] .mk-stage__caption {
+  opacity: 0;
+  transition: opacity 260ms var(--os-ease-out);
+}
+.mk-stage[data-scene="on"][data-snapped="true"] .mk-stage__caption { opacity: 1; }
+
+/* The scroll hint. Hidden unless the scrub is really running, and gone the
+   moment the blocks land, because from then on it is an instruction to do
+   something that has already happened. */
+.mk-stage__hint {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: -2px;
+  margin: 0;
+  font-size: var(--mk-caption, 13px);
+  line-height: 18px;
+  color: var(--os-ink-2);
+  opacity: 0;
+  transition: opacity 260ms var(--os-ease-out);
+}
+.mk-stage[data-scene="on"] .mk-stage__hint { opacity: 1; }
+.mk-stage[data-scene="on"][data-snapped="true"] .mk-stage__hint { opacity: 0; }
+
+/* The task row arriving in Today (concept 2.4, at 0.85). Present at rest,
+   held back only while a scene is running. */
+.mk-stage[data-scene="on"] .mk-arrive {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 320ms var(--os-ease-out), transform 320ms var(--os-ease-out);
+}
+.mk-stage[data-scene="on"][data-arrived="true"] .mk-arrive {
+  opacity: 1;
+  transform: none;
+}
+
+/* THE EXPLODED COMPOSITION, ON THE BREAKPOINT THAT CARRIES THE TRAFFIC.
+ *
+ * This grid is the hero for two audiences the desktop pin never reaches:
+ * every phone (concept 6.3 puts that at about 83 percent of visits and says
+ * mobile is designed, built and reviewed first) and every visitor at any
+ * width who has asked for less motion. It used to be a flat two column list
+ * of cards with `transform: none`, so the signature idea of the whole page,
+ * eight separate things arranged in depth around one object, reached
+ * neither of them.
+ *
+ * That was a misreading of the reduced motion rule. Concept 4.3 and 6.3 say
+ * reduced motion loses MOTION and nothing else: "nothing is lost except
+ * motion." The arrangement is not motion. It is a static, server rendered
+ * CSS transform that never changes after first paint, so it belongs in both
+ * states. What stays off under reduced motion is the float keyframe and the
+ * scroll driven cross fade, and both are already gated where they are
+ * declared.
+ *
+ * The geometry is the concept's, at the concept's limits: near frontal, at
+ * most 12deg on X and 14deg on Y, depth from Z rather than from rotation.
+ * The columns face the centre line (left column turns its right edge away,
+ * which is the sign the desktop map uses for a block at cx 17) and the rows
+ * carry the Z spread. Nothing is clipped and nothing overlaps: at
+ * perspective 900 a tile at Z 34 renders 3.9 percent larger, which is about
+ * 3.5px per side into a 12px gutter.
+ */
+.mk-tiles8 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 12px;
+  perspective: 900px;
+  perspective-origin: 50% 46%;
+}
+.mk-tiles8 > * {
+  transform:
+    translateZ(var(--mk-t-z, 0px))
+    rotateX(var(--mk-t-rx, 0deg))
+    rotateY(var(--mk-t-ry, 0deg));
+  transform-style: flat;
+}
+
+/* Two across: the pair faces the centre line, the middle rows come forward.
+   The row rules are compound selectors, so they are scoped to their own
+   width rather than left to out-specify the four across block below. */
+@media (max-width: 1023px) {
+  .mk-tiles8 > :nth-child(odd) { --mk-t-ry: 8deg; }
+  .mk-tiles8 > :nth-child(even) { --mk-t-ry: -8deg; }
+  .mk-tiles8 > :nth-child(-n + 2) { --mk-t-z: 10px; --mk-t-rx: -5deg; }
+  .mk-tiles8 > :nth-child(n + 3):nth-child(-n + 4) { --mk-t-z: 34px; --mk-t-rx: -2deg; }
+  .mk-tiles8 > :nth-child(n + 5):nth-child(-n + 6) { --mk-t-z: 34px; --mk-t-rx: 2deg; }
+  .mk-tiles8 > :nth-child(n + 7) { --mk-t-z: 10px; --mk-t-rx: 5deg; }
+}
+
+/* Four across, which is the reduced motion desktop hero: two rows of four
+   around the space the frame occupies underneath them. */
+@media (min-width: 1024px) {
+  .mk-tiles8 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px 14px;
+    perspective: 1400px;
+  }
+  .mk-tiles8 > :nth-child(4n + 1) { --mk-t-ry: 11deg; }
+  .mk-tiles8 > :nth-child(4n + 2) { --mk-t-ry: 4deg; }
+  .mk-tiles8 > :nth-child(4n + 3) { --mk-t-ry: -4deg; }
+  .mk-tiles8 > :nth-child(4n + 4) { --mk-t-ry: -11deg; }
+  .mk-tiles8 > :nth-child(-n + 4) { --mk-t-z: 44px; --mk-t-rx: -4deg; }
+  .mk-tiles8 > :nth-child(n + 5) { --mk-t-z: 12px; --mk-t-rx: 4deg; }
+}
+
+/* ── From 1024: the storyboard's two blocks, left and right. ──────────
+ *
+ * This is NOT gated on the scene. A visitor at 1440 who has asked for less
+ * motion gets exactly the frames the scene rests on, as a flowing list of
+ * six stops with the wires already drawn, which is what concept 4.3 asks
+ * for: "nothing is lost except motion."
+ */
+@media (min-width: 1024px) {
+  .mk-beat__blocks[data-blocks="2"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(88px, 136px) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
+  }
+  /* Above 1024 the carried block is DRAWN, so the sentence that stands in
+     for it on the phone would be saying the same thing twice. */
+  .mk-beat__blocks .mk-carry { display: none; }
+
+  /* The block stays a BLOCK, and its frame is centred with a margin.
+   *
+   * Making it a flex container looks like the obvious way to centre the
+   * frame and silently collapses it: `.mk-shell-scroll` carries
+   * `container-type: inline-size`, which is inline size containment, so as
+   * a flex item it contributes no intrinsic width, resolves to 0, and the
+   * `max-width: 100%` inside it resolves the frame to 0 as well. Two
+   * product windows rendered as nothing, with the wire between them still
+   * drawn. */
+  .mk-beat__block { min-width: 0; }
+  .mk-beat__block .mk-shell-scroll { width: 100%; }
+  .mk-beat__block .mk-scale { margin-inline: auto; }
+
+  /* The frame's size for a two-up row, derived from the column rather than
+     guessed per breakpoint.
+   *
+   * The shell sheet's bands pick a logical width from a ladder, and any
+   * rung of that ladder either overflows a column at one width or leaves a
+   * hole at another: at 1440 the 640 rung painted 461 into a 446px column
+   * and `overflow: hidden` took 15px off the right edge, which is where
+   * the SOP's Share button lives.
+   *
+   * `100cqi` is the column's own inline size, measured on `.mk-shell-scroll`
+   * where the shell sheet declares its container. Laying the shell out at
+   * that divided by the scale factor, and then painting it at the factor,
+   * gives a frame exactly as wide as its column at every width, with the
+   * product's 14px text at 10.1px, the shell's own legibility floor. */
+  .mk-beat__block .mk-scale {
+    --mk-scale-factor: 0.72;
+    --mk-h: 460;
+    width: 100%;
+  }
+  .mk-beat__block .mk-scale > .mk-shell {
+    width: calc(100cqi / var(--mk-scale-factor));
+  }
+
+  /* The wire turns with the blocks: horizontal, across the middle column. */
+  .mk-wirelink { padding-block: 0; }
+  .mk-wirelink__line {
+    width: 100%;
+    min-width: 40px;
+    height: 2px;
+    transform-origin: left center;
+  }
+  .mk-wirelink__label { max-width: none; }
+
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .mk-wirelink__line { animation-name: mk-draw-across; }
+    }
+  }
+}
+
+/* A taller window where there is height to give it. 560 at 0.72 paints 403,
+   which the blocks row still clears at 900 of viewport once the clock, the
+   narration slot and the map have taken theirs. */
+@media (min-width: 1280px) and (min-height: 880px) {
+  .mk-beat__block .mk-scale { --mk-h: 560; }
+}
+
+/* And a shorter one where there is not. At 768 of viewport the stage has
+   about 638px for a stop panel, the narration slot takes 290 of it at the
+   stop with the longest trail, and a 460 frame left the two windows two
+   pixels of clearance: they touched the clock above them and the narration
+   below. 400 at 0.72 paints 288, and the panel breathes again. */
+@media (max-height: 820px) {
+  .mk-beat__block .mk-scale { --mk-h: 400; }
+}
+
+@keyframes mk-draw-across {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* ── Chrome that only a running scene has any meaning for. ──────────── */
+
+/* The narrator. Hidden at rest because the stepper prints each beat's own
+   time at display size, and two clocks disagreeing is worse than none. */
+.mk-spine-clock,
+.mk-map,
+.mk-beatrail { display: none; }
+
+/* The narration for a screen reader. Announced, never drawn: the same
+   sentence is on screen as the stop's own heading. */
+.mk-spine-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── PIN 1: the Snap. One viewport of scrub. ─────────────────────────── */
+
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  /* Two viewports of track: one the sticky child occupies, one to scrub
+     through. A track the height of its sticky child has zero travel, which
+     is the usual reason a pinned scene never moves. */
+  /* The same clearance as the stage's own margin, moved onto the TRACK,
+     because the pinned rule below zeroes the stage's margins: inside a pin
+     the stage is the viewport and has none to hang into. Without it the top
+     row of blocks covers the line under the primary button at every desktop
+     width. It costs no block visibility: the three faces that overhang the
+     fold at 1440 by 900 overhang it either way. */
+  .mk-pin-track[data-pin="snap"][data-scene="on"] { height: 220vh; }
+  /* Its own rule, deliberately: the line above is the TRACK HEIGHT gate and
+     a test reads it literally, because a track height that is not gated on
+     data-scene is how a pin that never attached freezes the centrepiece.
+     This is spacing, and it is here for the same reason the stage carries
+     80px of it in the flow: inside a pin the stage is the viewport and its
+     own margins are zeroed, so without this the top row of blocks lands on
+     the line under the primary button. */
+  .mk-pin-track[data-pin="snap"][data-scene="on"] { margin-top: 40px; }
+
+
+  /* Sticky only inside a track whose island is really attached. The geometry
+     and the stacking that makes it work are now one condition, `data-scene`,
+     written by the pin itself: without it the composition stays in the flow,
+     which is the state the server rendered and the one the page promises to
+     degrade to. */
+  .mk-pin-track[data-scene="on"] > .mk-pin-sticky {
+    position: sticky;
+    top: var(--mk-nav-h, 56px);
+    height: calc(100vh - var(--mk-nav-h, 56px));
+    height: calc(100svh - var(--mk-nav-h, 56px));
+    /* The Snap's own ceiling. A viewport-high stage under a type stack is a
+       composition that starts inside the first screen and ends 400px under
+       it, which is the LCP defect the hero rules exist to prevent. Capping
+       the SNAP's sticky box (not the spine's: that one is a stage of two
+       product frames and wants the height) leaves the exploded object,
+       every label and every Replaces tag inside the first screen on a
+       laptop, and costs the pinned frame nothing a visitor reads. */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  .mk-pin-track[data-pin="snap"][data-scene="on"] > .mk-pin-sticky {
+    /* 560, not 500, and the floor is what this number is for.
+     *
+     * The cap keeps the exploded object inside the first screen on a tall
+     * laptop; the FLOOR has to keep the assembled shell legible on a short
+     * one, and 500 did not. At a 768px viewport it gave the frame 413px of
+     * layout height, which at the 0.72 factor is a 573px logical shell
+     * against a rail that needs 604, so Settings was sliced off the bottom
+     * on the two most common laptop sizes. 560 gives 642 at both. It costs
+     * 60px of stage at 768, where the bottom row of blocks is under the
+     * fold either way, and nothing at all from 875px of viewport up, where
+     * 64svh is already the larger number. */
+    --mk-sticky-h: min(calc(100svh - var(--mk-nav-h, 56px)), max(560px, 64svh));
+    height: var(--mk-sticky-h);
+    /* AND THE BOX IS CENTRED IN THE VIEWPORT ONCE IT STICKS.
+     *
+     * The cap above is about the FIRST screen: a viewport-high stage under
+     * the type stack starts inside the fold and ends 400px below it. It
+     * says nothing about the pinned screen, and there the same cap left
+     * 268px of white under the scene at 1440 by 900, with the assembled
+     * shell jammed against the top of the viewport and the caption
+     * stranded beside the gap. A capped box is meant to be smaller than
+     * the viewport, not stuck to the top of it.
+     *
+     * `top` is what a sticky box uses ONLY while it is stuck, so pushing
+     * the offset down by half the slack centres the pinned scene and
+     * changes nothing about the resting composition the LCP frame shows:
+     * before the track reaches the offset the child is in normal flow.
+     * The pin reads this same offset back (getComputedStyle) for its
+     * progress arithmetic, so the scrub ends where the pin releases. */
+    top: calc(
+      var(--mk-nav-h, 56px) +
+      (100svh - var(--mk-nav-h, 56px) - var(--mk-sticky-h)) / 2
+    );
+  }
+
+  /* Inside the pin the stage is the viewport, not a 16 by 9 box in the
+     flow, so it drops the reserved ratio and the overhang margins it needs
+     when it is a composition on a page. */
+  .mk-pin-track[data-scene="on"] > .mk-pin-sticky > .mk-stage {
+    margin: 0;
+    aspect-ratio: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* The composition's own box, inset from the viewport.
+   *
+   * The map in hero.tsx places blocks by their CENTRE, from 8 to 95 percent
+   * down, and reserves the overhang on both sides with margins when the
+   * stage is a 16 by 9 box in the flow. A pinned stage has no margins to
+   * hang into: it is the viewport, and the bottom row's lower half was
+   * being cut off by it.
+   *
+   * So the world is the viewport minus that overhang, and every percentage
+   * in the composition, the blocks' and the frame's alike, resolves against
+   * it, because the world is what they are positioned in. It is also what
+   * the pin measures for the travel arithmetic, for the same reason. */
+  .mk-pin-track[data-scene="on"] > .mk-pin-sticky > .mk-stage > .mk-stage__world { inset: 6% 0 8%; }
+
+  /* THE FRAME'S GEOMETRY IS NOT REPEATED HERE, and that is deliberate.
+   *
+   * It used to be: this block re-declared `top`, `width`, `height` and the
+   * whole transform for the pinned stage, so the same object had two sets
+   * of numbers, the test modelled a third, and the composition the test
+   * described stopped being the one that shipped. The single set now lives
+   * in hero.tsx (FRAME_CX / FRAME_CY / FRAME_W / FRAME_H / FRAME_REST),
+   * arrives as custom properties on the stage, and is read by the base
+   * `.mk-stage__frame` rule for both the pinned and the unpinned stage.
+   *
+   * The pinned stage differs from the flow stage in exactly one way, and it
+   * is above: the world is the viewport minus the overhang rather than a
+   * 16 by 9 box. Every percentage resolves against that world, so the frame
+   * needs no second opinion about its own size. */
+}
+
+/* Reduced motion at a desktop width: no pin, and the hero becomes the same
+   two honest states the phone gets, both drawn, in reading order. The
+   assembled shell is the end state the concept asks for, and the exploded
+   tiles keep the Replaces vocabulary that the thirty second test needs. */
+@media (prefers-reduced-motion: reduce) and (min-width: 1024px) {
+  .mk-stage { display: none; }
+  .mk-snap-wrap { display: block; }
+}
+
+/* ── PIN 2: Tuesday. Five viewports of scrub, six stops. ─────────────── */
+
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  .mk-pin-track[data-pin="spine"][data-scene="on"] { height: 620vh; }
+}
+
+.mk-spine-stage { position: relative; }
+
+.mk-spine-stage[data-scene="on"] {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  /* The beat rail lives on the right edge, over the stage's own padding,
+     so it costs the blocks no column width. */
+  padding-inline-end: 132px;
+  /* And a gutter at both ends of the pinned viewport.
+     The stage IS the viewport inside the pin, and with no block padding its
+     two outer rows sat flush against the edges: the clock's cap height
+     started 4px under the nav's bottom border, and the "you are here" map's
+     pills ended exactly on the last row of pixels, so the strip read as cut
+     off rather than as the foot of the stage. Both rows are `auto` in the
+     grid, so the 1fr the surfaces sit in absorbs this and the frames do not
+     move. */
+  padding-block: 14px 20px;
+}
+
+/* On a short viewport the gutter shrinks rather than taking height off the
+   frames. The blocks row is already the tightest thing in the stage there:
+   the `--mk-h: 400` band under the same max-height exists for that reason.
+   So the stage keeps a visible edge at both ends without costing the
+   surfaces the pixels they need. */
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) and (max-height: 820px) {
+  .mk-spine-stage[data-scene="on"] { padding-block: 6px 10px; }
+}
+
+/* The stops become one stage: all six in the same box, one visible.
+   `visibility` and not opacity alone, so the five that are not being read
+   are out of the tab order: each holds a focusable frame scroller. */
+.mk-spine-stage[data-scene="on"] .mk-beats {
+  position: relative;
+  display: block;
+  margin: 0;
+  min-height: 0;
+}
+.mk-spine-stage[data-scene="on"] .mk-stop,
+.mk-spine-stage[data-scene="on"] .mk-beat {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 380ms var(--os-ease-out), visibility 380ms;
+}
+.mk-spine-stage[data-scene="on"] .mk-stop[data-current="true"],
+.mk-spine-stage[data-scene="on"] .mk-beat[data-current="true"] {
+  opacity: 1;
+  visibility: visible;
+}
+/* The reveal animation is for a section scrolling past. A panel that is
+   cross faded in place must not also be fading up from 14px. */
+.mk-spine-stage[data-scene="on"] .mk-beat { animation: none; }
+
+.mk-spine-stage[data-scene="on"] .mk-beat__grid {
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 18px;
+}
+/* Blocks over narration inside the scene: the storyboard's caption slot is
+   under the stage. In the flow the words come first, because that is
+   reading order. One `order`, no second DOM. */
+.mk-spine-stage[data-scene="on"] .mk-beat__blocks { order: 1; align-self: center; }
+.mk-spine-stage[data-scene="on"] .mk-beat__say { order: 2; }
+/* The beat's own time label is the STEPPER's narrator, and in the scene it
+   is a second one disagreeing with the first.
+   The scene has a 32px clock at the head of its stage that scrubs through
+   the beat's minutes, so stop 4, which runs 2:00 to 2:30 inside one beat on
+   purpose, showed "2:30" on the clock over a "2:00" under it. Two times for
+   one picture is worse than none, and the stage clock is the one the
+   storyboard asks for. The sr-only stop status still announces the stop's
+   full clock range, so nothing is lost to a screen reader.
+   In the flow, under reduced motion, and with no JavaScript, `data-scene` is
+   absent and this label is the narrator again. */
+.mk-spine-stage[data-scene="on"] .mk-beat__time { display: none; }
+.mk-spine-stage[data-scene="on"] .mk-beat__say .mk-title { font-size: 22px; line-height: 28px; }
+.mk-spine-stage[data-scene="on"] .mk-beat__say .mk-lede { font-size: var(--mk-body, 16px); line-height: 23px; margin-top: 8px; }
+.mk-spine-stage[data-scene="on"] .mk-card { margin-top: 0; }
+
+/* The wire draws itself as its beat arrives, rather than off a scroll
+   timeline: inside a pin the panel never moves, so `view()` has nothing to
+   measure. */
+.mk-spine-stage[data-scene="on"] .mk-wirelink__line {
+  animation: none;
+  transform: scaleX(0);
+  transition: transform 560ms var(--os-ease-out) 140ms;
+}
+.mk-spine-stage[data-scene="on"] .mk-beat[data-current="true"] .mk-wirelink__line { transform: scaleX(1); }
+
+/* The clock: the story's narrator, at the head of the stage.
+ *
+ * Top LEFT, not top right. The concept puts it top right, and the site's own
+ * sticky bar is a fixed element in that corner carrying the Start free
+ * button and, while the spine is in view, the same minute as a chip. At
+ * 1024 the two overlapped and the clock read "6:02 TUESD". A narrator and
+ * the page's one conversion control cannot share a corner. */
+.mk-spine-stage[data-scene="on"] .mk-spine-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  justify-content: flex-start;
+  margin: 0;
+}
+.mk-spine-clock__time {
+  font-size: 32px;
+  line-height: 38px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+.mk-spine-clock__day {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+/* The "you are here" map: the eight blocks as a strip, with the ones this
+   beat is using lit. Colour never travels alone here either, because each
+   item carries its own name beside its glyph. */
+.mk-spine-stage[data-scene="on"] .mk-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.mk-map__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-pill);
+  background: var(--os-surface);
+  color: var(--os-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+  transition: color 240ms var(--os-ease-out), border-color 240ms var(--os-ease-out);
+}
+.mk-map__item[data-lit="true"] {
+  color: var(--os-ink);
+  border-color: var(--os-brand);
+}
+
+/* The beat rail: six real buttons on the right edge, keyboard reachable,
+   each scrolling to the middle of its own stop. */
+.mk-spine-stage[data-scene="on"] .mk-beatrail {
+  display: block;
+  position: absolute;
+  inset-inline-end: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 120px;
+}
+.mk-beatrail ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.mk-beatrail button {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 4px;
+  background: none;
+  border: 0;
+  text-align: start;
+  cursor: pointer;
+  color: var(--os-ink-2);
+}
+.mk-beatrail__tick {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--os-line-strong);
+  background: var(--os-canvas);
+  transition: background 200ms var(--os-ease-out), border-color 200ms var(--os-ease-out);
+}
+.mk-beatrail__time {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+/* The label WRAPS rather than clipping.
+ *
+ * This rail is the keyboard navigation for a pinned scene: its whole job is
+ * to name the six stops. At 120px and `white-space: nowrap` the fourth one
+ * read "2:00 to 2:30 Blocked to unbl...", so the one stop whose name is the
+ * argument ("blocked does not mean stuck") was the one a visitor could not
+ * read. Two lines of 11px cost the rail about 40px of height it has, and an
+ * ellipsis in a navigation label costs the label. */
+.mk-beatrail__title {
+  grid-column: 2;
+  font-size: 11px;
+  line-height: 15px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: break-word;
+}
+.mk-beatrail button:hover { color: var(--os-ink-strong); }
+.mk-beatrail button[aria-current="step"] { color: var(--os-ink); }
+.mk-beatrail button[aria-current="step"] .mk-beatrail__tick {
+  background: var(--os-brand);
+  border-color: var(--os-brand);
+}
+
+/* ── The close: the receipt prints, the dots leave it for the wordmark. ─ */
+
+/* The print. A slab that arrives from under its own top edge, once, as it
+   comes into view: the receipt is the artefact the whole story has been
+   assembling, so it is the one thing on the page that is allowed an
+   entrance. It is fully drawn at rest. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-print {
+      animation: mk-print linear both;
+      animation-timeline: view();
+      animation-range: entry 10% entry 55%;
+    }
+  }
+}
+@keyframes mk-print {
+  from { opacity: 0; transform: translateY(-14px); clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); }
+}
+
+/* The four dots leave the receipt and land between the two k's of the
+   wordmark. At rest they are simply in the wordmark, where they live.
+
+   THE LOCKUP'S OWN GEOMETRY, at 26px instead of the nav's 20.
+   src/components/brand/logo.tsx splits "workwrk" into work + wr + k and
+   floats the dot row above the middle "wr", which is the gap between the
+   two k letters, so the mark holds at any font width. This block reproduces
+   that split because each dot needs its own scroll-timeline landing and a
+   rendered lockup cannot expose them; the ratios below are the lockup's,
+   scaled: dot 0.26em of the size, gap 0.075em, the row dropped 0.16em into
+   the line, and the same top padding reserved so nothing above it shifts.
+
+   It was drawn as one flex row, "workwr" then the dots then "k", which put
+   the dots on the baseline and split the word: the page's last frame read
+   "workwr . . . . k" rather than the logo. */
+.mk-dotfly {
+  display: inline-block;
+  padding-top: 8px;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  color: var(--os-ink);
+  white-space: nowrap;
+}
+.mk-dotfly__anchor { position: relative; }
+.mk-dotfly__slot {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 4px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.mk-dotfly__slot span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mk-dotfly__slot span {
+      animation: mk-dot-land var(--os-ease-out) both;
+      animation-timeline: view();
+    }
+    /* The loader's rhythm, which is the timing signature of every pulse on
+       the site: yellow, blue, red, green, staggered across the range. */
+    .mk-dotfly__slot span:nth-child(1) { animation-range: entry 8% entry 34%; }
+    .mk-dotfly__slot span:nth-child(2) { animation-range: entry 14% entry 40%; }
+    .mk-dotfly__slot span:nth-child(3) { animation-range: entry 20% entry 46%; }
+    .mk-dotfly__slot span:nth-child(4) { animation-range: entry 26% entry 52%; }
+  }
+}
+/* Up and to the left is where the receipt is: the dots come off the slab
+   above and settle into the gap. */
+@keyframes mk-dot-land {
+  from { opacity: 0; transform: translate3d(-26px, -40px, 0) scale(1.6); }
+  to { opacity: 1; transform: none; }
+}

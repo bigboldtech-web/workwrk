@@ -1,327 +1,297 @@
-// Shared shells for feature + industry sub-pages. Both follow a tight
-// pattern (hero, capability grid, "fits in the platform" cross-links,
-// FAQ, CTA), so we abstract them into two functions so each sub-page
-// file is ~50 lines of data instead of 200 lines of layout.
+// THE TWO SHELLS THAT DRAW NINETEEN ROUTES: twelve capability pages under
+// /features and seven under /industries.
+//
+// REBUILT ONTO THE ICONIC KIT, because one file stamping the rejected
+// template onto a fifth of the site is not a thing that can be fixed page by
+// page. What it used to render, and every one of these is a named rule:
+//
+//   * a SPLIT HERO, `grid lg:grid-cols-[1fr_1.05fr]`, headline column beside
+//     a product frame, which is two objects competing in the one region
+//     where rule 4 demands one centred object;
+//   * TWO BUTTONS in every hero, on a site whose page ends on one;
+//   * "Core capabilities.", "One workflow, zero context-switching.",
+//     "One platform. Many surfaces.", "Plays well with", "Sound familiar?".
+//     Six section headings of deck language, against rule 6;
+//   * a CARD GRID under each of them, white boxes with borders and radii,
+//     which rule 5 bans outright, plus a row of bordered pills for the
+//     measures, which is a badge row, also banned;
+//   * `hover:-translate-y-0.5` on the cross links, which rule 7 and the
+//     project's own UI conventions both forbid.
+//
+// Now every route here is the same grammar as /product and /pricing: one
+// idea per band, a claim of six words or fewer over one sentence, one
+// centred object per section, and one blue at the end of the page.
+//
+// WHAT THE PAGES THEMSELVES STILL OWN: the words. The capability names, the
+// lines under them, the steps and the answers are per page and unchanged,
+// because they were written against the product and they are true. What this
+// file changed is the shape they are poured into.
+//
+// WHAT WENT AND IS NOT COMING BACK: the `hue` prop, which every page passed
+// and which already resolved to the one accent, so it was a colour control
+// that controlled nothing; the per capability lucide icon, because a column
+// of icons is the visual grammar of the card grid this replaces; and the
+// `testimonial` prop, which no page passed and which was a prop-shaped hole
+// waiting for an invented quote.
 
-import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { tuesday } from "@/components/marketing/data/tuesday";
+import { PART_LINE } from "@/components/marketing/iconic/copy";
 import {
-  Section,
-  Container,
+  Band,
+  Claim,
+  Close,
   Eyebrow,
-  H1,
-  H2,
-  H3,
-  Lede,
-  Button,
-  FeatureCard,
-  FAQ,
-  CTABand,
-  Quote,
-  GradientText,
-  CheckList,
-  HUES,
-  HUBS,
-  type Hue,
-} from "@/components/marketing/primitives";
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+  Headline,
+  Line,
+  Obj,
+  Page,
+  Qa,
+  type QaItem,
+  Stack,
+  type StackItem,
+  Steps,
+  Sub,
+  Terms,
+} from "@/components/marketing/iconic/iconic";
+import { MarketingShell } from "@/components/marketing/shell/marketing-shell";
+import { MkSidebar, SURFACES } from "@/components/marketing/shell/surfaces";
 
-export interface Capability {
-  icon: LucideIcon;
-  title: string;
-  body: string;
-}
+export type Capability = StackItem;
+export type FAQItem = QaItem;
 
-export interface FAQItem {
-  q: string;
-  a: ReactNode;
+/** The closing headline, shared by both shells and by /product. Six words. */
+const CLOSE = "Open it on your own work.";
+
+/** The questions band, identical on all nineteen routes here. */
+function Questions({ items, id }: { items: readonly FAQItem[]; id: string }) {
+  return (
+    <Band labelledBy={id}>
+      <Eyebrow>Questions</Eyebrow>
+      <Headline id={id}>Straight answers.</Headline>
+      <Qa items={items} />
+    </Band>
+  );
 }
 
 export interface FeatureSubPageProps {
+  /**
+   * This page's own url segment, and the id its closing CTA is measured by.
+   *
+   * It is NOT `hubSlug`: four capability pages share the Goals hub, so a
+   * hub-derived placement would have reported four pages as one number. And
+   * it is not derived from the eyebrow either, because a placement id that
+   * moves when someone edits display copy is an analytics series that
+   * silently breaks on a copy change.
+   */
+  slug: string;
   hubSlug: string;
-  hue: Hue;
   eyebrow: string;
-  title: ReactNode;
-  lede: ReactNode;
+  /** The page's h1. Six words or fewer, and a test counts them. */
+  title: string;
+  /** One sentence under the claim. One, and a test counts the stops. */
+  lede: string;
   capabilities: readonly Capability[];
+  /** The headline over the ordered list, when a page has one. Six words. */
   workflowTitle?: string;
   workflowSteps?: readonly string[];
-  testimonial?: { quote: string; author: string; role: string; company: string };
   faq?: readonly FAQItem[];
   relatedSlugs?: readonly string[];
-  // Optional extra section rendered just before the closing CTA band.
-  bottomSlot?: ReactNode;
+  /**
+   * THE PRODUCT, IN ITS OWN BAND.
+   *
+   * One key into the marketing-lite SURFACES registry. It used to render
+   * beside the headline, which put two objects in the hero; it now owns the
+   * band under it, centred and at full column width, which is both the rule
+   * and the size at which the product's real 14px is legible.
+   *
+   * It is a KEY and not a component so a page cannot draw a UI of its own.
+   * Every surface here is one the home page and the Tuesday story already
+   * render, from the same fixture, through the same truth gates, so a
+   * feature page can never show a screen the product does not have.
+   */
+  surfaceKey?: string;
+  /** The breadcrumb's last crumb. Defaults to the eyebrow. */
+  surfaceCrumb?: string;
+  /** What the frame shows, for a screen reader. Required with surfaceKey. */
+  surfaceLabel?: string;
 }
 
-const ALL_FEATURE_LINKS: Record<string, { title: string; body: string; hue: Hue }> = {
-  kpis:        { title: "KPIs",          body: "Track, weight, score — tied to performance.",   hue: "sky" },
-  kras:        { title: "KRAs",          body: "Key result areas linked to roles.",              hue: "sky" },
-  tasks:       { title: "Tasks",         body: "Auto-escalation when overdue.",                  hue: "sky" },
-  sops:        { title: "SOPs",          body: "Process docs with compliance runs.",             hue: "sky" },
-  okrs:        { title: "OKRs",          body: "Cascade with auto-rollup.",                      hue: "sky" },
-  reviews:     { title: "Reviews",       body: "360° cycles with weighted scoring.",             hue: "violet" },
-  people:      { title: "People",        body: "Org chart + roles + history.",                   hue: "violet" },
-  access:      { title: "Access",        body: "Roles, audit log, scoped sharing.",              hue: "violet" },
-  kudos:       { title: "Kudos",         body: "Recognition tied to performance.",               hue: "pink" },
-  "ai-engine": { title: "AI Engine",     body: "Cmd-K, inbox triage, signals.",                  hue: "indigo" },
-  analytics:   { title: "Analytics",     body: "Role-aware dashboards.",                         hue: "indigo" },
-  integrations:{ title: "Integrations",  body: "Slack, Google, Microsoft, more.",                hue: "emerald" },
+const ALL_FEATURE_LINKS: Record<string, { title: string; body: string }> = {
+  kpis:         { title: "KPIs",         body: "Track, weight and score, tied to performance." },
+  kras:         { title: "KRAs",         body: "Key result areas linked to roles." },
+  tasks:        { title: "Tasks",        body: "Lists, boards and every view." },
+  sops:         { title: "SOPs",         body: "Process docs with acknowledgement." },
+  okrs:         { title: "OKRs",         body: "Cascade with auto-rollup." },
+  reviews:      { title: "Reviews",      body: "Cycles with weighted scoring." },
+  people:       { title: "People",       body: "Org chart, roles and history." },
+  access:       { title: "Access",       body: "Roles, audit log, scoped sharing." },
+  kudos:        { title: "Kudos",        body: "Recognition tied to values." },
+  "ai-engine":  { title: "AI Engine",    body: "Ask, inbox triage, signals." },
+  analytics:    { title: "Analytics",    body: "Role-aware dashboards." },
+  integrations: { title: "Integrations", body: "What connects today, and what does not." },
 };
 
 export function FeatureSubPage({
+  slug,
   hubSlug,
-  hue,
   eyebrow,
   title,
   lede,
   capabilities,
   workflowTitle,
   workflowSteps,
-  testimonial,
   faq,
   relatedSlugs,
-  bottomSlot,
+  surfaceKey,
+  surfaceCrumb,
+  surfaceLabel,
 }: FeatureSubPageProps) {
-  const hub = HUBS.find((h) => h.slug === hubSlug);
+  // The rail hub the frame highlights. /features/access is filed under the
+  // settings hub, which is not one of the story's eight blocks, so it falls
+  // back to Teams, which is where roles and access actually live.
+  const frameHub = tuesday.hubs.some((h) => h.id === hubSlug) ? hubSlug : "teams";
+  const hub = tuesday.hubs.find((h) => h.id === frameHub);
+  const surface = surfaceKey ? SURFACES[surfaceKey] : undefined;
+
+  // THE CRUMB, DEDUPLICATED. It was built as [hub name, crumb] and keyed by
+  // the crumb's own text, so /features/okrs and /features/kpis, whose two
+  // crumbs both resolve to "Goals", emitted a duplicate React key and
+  // rendered a product chrome reading "Goals > Goals". A repeated label is
+  // dropped and the key is the position.
+  const tail = surfaceCrumb ?? eyebrow;
+  const head = hub?.label ?? "Work";
+  const breadcrumb = tail === head ? [head] : [head, tail];
+
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue={hue} className="mb-5">{eyebrow}</Eyebrow>
-            <H1>{title}</H1>
-            <div className="mt-6">
-              <Lede>{lede}</Lede>
-            </div>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/signup" variant="secondary" hue={hue} size="lg" rightIcon={<ArrowRight size={15} />}>
-                Try it free
-              </Button>
-              <Button href="/demo" variant="outline" size="lg">Get a tour</Button>
-            </div>
-            {hub && (
-              <p className="mt-7 text-base text-slate-500">
-                Part of the <Link href={`/features#${hub.slug}`} className={`font-semibold ${HUES[hue].text} underline-offset-2 hover:underline`}>{hub.name}</Link> hub.
-              </p>
-            )}
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      {/* 1. The claim. Type only. The frame below owns the page's first
+          object, and two objects in the first two screens is one too many. */}
+      <Band air="hero" labelledBy={`${slug}-h1`} still>
+        <Eyebrow>{eyebrow}</Eyebrow>
+        <Claim id={`${slug}-h1`}>{title}</Claim>
+        <Sub>{lede}</Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue={hue} className="mb-4">What you get</Eyebrow>
-            <H2>Core capabilities.</H2>
-          </div>
-          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {capabilities.map((c) => (
-              <FeatureCard key={c.title} hue={hue} icon={c.icon} title={c.title} body={c.body} />
-            ))}
-          </div>
-        </Container>
-      </Section>
+      {/* 2. The surface. The part's name is the headline, exactly as it is on
+          the /product tour, so the same object is introduced the same way
+          wherever a visitor meets it. */}
+      {surface && surfaceLabel && hub ? (
+        <Band ground="quiet" labelledBy={`${slug}-surface`}>
+          <Eyebrow>The screen</Eyebrow>
+          <Headline id={`${slug}-surface`}>{hub.label}</Headline>
+          <Line>{PART_LINE[hub.id] ?? lede}</Line>
+          <Obj>
+            <MarketingShell
+              hub={frameHub}
+              breadcrumb={breadcrumb}
+              sidebar={<MkSidebar hub={frameHub} />}
+              label={surfaceLabel}
+            >
+              {surface()}
+            </MarketingShell>
+          </Obj>
+        </Band>
+      ) : null}
 
-      {workflowSteps && workflowSteps.length > 0 && (
-        <Section variant="tint" py="lg">
-          <Container>
-            <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
-              <div>
-                <Eyebrow hue={hue} className="mb-4">How it works</Eyebrow>
-                <H2>{workflowTitle ?? "One workflow, zero context-switching."}</H2>
-              </div>
-              <ol className="space-y-3">
-                {workflowSteps.map((step, i) => {
-                  const t = HUES[hue];
-                  return (
-                    <li
-                      key={step}
-                      className="relative pl-14 pr-5 py-4 bg-white border border-slate-200 rounded-2xl flex items-center gap-4"
-                    >
-                      <span
-                        className={`absolute left-4 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm font-extrabold bg-gradient-to-br ${t.gradVia}`}
-                      >
-                        {i + 1}
-                      </span>
-                      <span className="text-base text-slate-700">{step}</span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          </Container>
-        </Section>
-      )}
+      {/* 3. What you get. Names, not cards. */}
+      <Band labelledBy={`${slug}-caps`}>
+        <Eyebrow>What you get</Eyebrow>
+        <Headline id={`${slug}-caps`}>Everything below ships today.</Headline>
+        <Stack items={capabilities} />
+      </Band>
 
-      {relatedSlugs && relatedSlugs.length > 0 && (
-        <Section py="lg">
-          <Container>
-            <div className="max-w-2xl">
-              <Eyebrow hue="violet" className="mb-4">Plays well with</Eyebrow>
-              <H2>One platform. <GradientText hue="violet">Many surfaces.</GradientText></H2>
-            </div>
-            <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {relatedSlugs.map((slug) => {
-                const r = ALL_FEATURE_LINKS[slug];
-                if (!r) return null;
-                const t = HUES[r.hue];
-                return (
-                  <Link
-                    key={slug}
-                    href={`/features/${slug}`}
-                    className="group p-5 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 hover:-translate-y-0.5 transition shadow-sm"
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className={`font-bold text-slate-900 tracking-tight`}>{r.title}</p>
-                      <ArrowRight size={14} className={`${t.text} group-hover:translate-x-0.5 transition`} />
-                    </div>
-                    <p className="mt-1.5 text-base text-slate-600">{r.body}</p>
-                  </Link>
-                );
-              })}
-            </div>
-          </Container>
-        </Section>
-      )}
+      {/* 4. The order, when the order is the idea. */}
+      {workflowSteps && workflowSteps.length > 0 ? (
+        <Band ground="quiet" labelledBy={`${slug}-flow`}>
+          <Headline id={`${slug}-flow`}>{workflowTitle ?? "What it carries."}</Headline>
+          <Steps items={workflowSteps} />
+        </Band>
+      ) : null}
 
-      {testimonial && (
-        <Section variant="tint" py="lg">
-          <Container>
-            <Quote hue={hue} {...testimonial} />
-          </Container>
-        </Section>
-      )}
+      {/* 5. The rest of the system. Names with a line, no chevrons, no
+          hover transform, no boxes. */}
+      {relatedSlugs && relatedSlugs.length > 0 ? (
+        <Band labelledBy={`${slug}-rest`}>
+          <Headline id={`${slug}-rest`}>It reads the rest.</Headline>
+          <Stack
+            items={relatedSlugs.flatMap((related) => {
+              const r = ALL_FEATURE_LINKS[related];
+              return r
+                ? [{ ...r, href: `/features/${related}`, cta: `feature-${slug}-related-${related}` }]
+                : [];
+            })}
+          />
+        </Band>
+      ) : null}
 
-      {faq && faq.length > 0 && <FAQ items={faq} hue={hue} eyebrow="Common questions" title="Frequently asked." />}
+      {faq && faq.length > 0 ? <Questions items={faq} id={`${slug}-qa`} /> : null}
 
-      {bottomSlot}
-
-      <CTABand hue={hue} />
-    </>
+      <Close headline={CLOSE} placement={`feature-${slug}`} />
+    </Page>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Industry sub-page shell
+// The industry shell. Same grammar, three bands of its own.
 // ════════════════════════════════════════════════════════════════════
 
 export interface IndustrySubPageProps {
-  hue: Hue;
+  /** This page's own url segment, and its closing CTA's measurement id. */
+  slug: string;
   eyebrow: string;
-  title: ReactNode;
-  lede: ReactNode;
+  title: string;
+  lede: string;
+  /** The headline over the problems. Six words or fewer. */
+  painsTitle?: string;
   pains: readonly string[];
   capabilities: readonly Capability[];
   kpisLabel?: string;
   kpis?: readonly string[];
-  testimonial?: { quote: string; author: string; role: string; company: string };
   faq?: readonly FAQItem[];
 }
 
 export function IndustrySubPage({
-  hue,
+  slug,
   eyebrow,
   title,
   lede,
+  painsTitle,
   pains,
   capabilities,
-  kpisLabel = "Templates ready for day one",
+  kpisLabel = "What teams here measure.",
   kpis,
-  testimonial,
   faq,
 }: IndustrySubPageProps) {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue={hue} className="mb-5">Industries · {eyebrow}</Eyebrow>
-            <H1>{title}</H1>
-            <div className="mt-6"><Lede>{lede}</Lede></div>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/signup" variant="secondary" hue={hue} size="lg" rightIcon={<ArrowRight size={15} />}>
-                Start with templates
-              </Button>
-              <Button href="/demo" variant="outline" size="lg">Talk to a specialist</Button>
-            </div>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      <Band air="hero" labelledBy={`${slug}-h1`} still>
+        <Eyebrow>Industries</Eyebrow>
+        <Claim id={`${slug}-h1`}>{title}</Claim>
+        <Sub>{lede}</Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue={hue} className="mb-4">The problems</Eyebrow>
-              <H2>Sound familiar?</H2>
-              <p className="mt-4 text-slate-600">If any of these are you, workwrk was built for you.</p>
-            </div>
-            <ul className="space-y-2.5">
-              {pains.map((p, i) => {
-                const t = HUES[hue];
-                return (
-                  <li key={i} className="p-4 bg-white border border-slate-200 rounded-xl flex items-start gap-3">
-                    <span className={`mt-0.5 w-7 h-7 rounded-lg ${t.bgTint} ${t.text} border ${t.border} flex items-center justify-center text-sm font-extrabold flex-shrink-0`}>
-                      {i + 1}
-                    </span>
-                    <span className="text-[15px] text-slate-700 leading-snug">{p}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </Container>
-      </Section>
+      <Band ground="quiet" labelledBy={`${slug}-pains`}>
+        <Eyebrow>{eyebrow}</Eyebrow>
+        <Headline id={`${slug}-pains`}>{painsTitle ?? "Where the trail breaks."}</Headline>
+        <Steps items={pains} />
+      </Band>
 
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue={hue} className="mb-4">What you get</Eyebrow>
-            <H2>Sector-specific capabilities.</H2>
-          </div>
-          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {capabilities.map((c) => (
-              <FeatureCard key={c.title} hue={hue} icon={c.icon} title={c.title} body={c.body} />
-            ))}
-          </div>
-        </Container>
-      </Section>
+      <Band labelledBy={`${slug}-caps`}>
+        <Eyebrow>What you get</Eyebrow>
+        <Headline id={`${slug}-caps`}>What you would use.</Headline>
+        <Stack items={capabilities} />
+      </Band>
 
-      {kpis && kpis.length > 0 && (
-        <Section py="md">
-          <Container>
-            <div className="grid lg:grid-cols-[1fr_2fr] gap-12 items-start">
-              <div>
-                <Eyebrow hue={hue} className="mb-4">Templates</Eyebrow>
-                <H3>{kpisLabel}</H3>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {kpis.map((k) => {
-                  const t = HUES[hue];
-                  return (
-                    <span key={k} className={`inline-flex items-center text-sm font-bold px-3 h-8 rounded-full bg-white border ${t.border} ${t.textStrong}`}>
-                      {k}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          </Container>
-        </Section>
-      )}
+      {kpis && kpis.length > 0 ? (
+        <Band ground="quiet" labelledBy={`${slug}-kpis`}>
+          <Headline id={`${slug}-kpis`}>{kpisLabel}</Headline>
+          <Terms items={kpis} />
+        </Band>
+      ) : null}
 
-      {testimonial && (
-        <Section py="lg">
-          <Container>
-            <Quote hue={hue} {...testimonial} />
-          </Container>
-        </Section>
-      )}
+      {faq && faq.length > 0 ? <Questions items={faq} id={`${slug}-qa`} /> : null}
 
-      {faq && faq.length > 0 && <FAQ items={faq} hue={hue} eyebrow="Common questions" title="Frequently asked." />}
-
-      <CTABand hue={hue} />
-    </>
+      <Close headline={CLOSE} placement={`industry-${slug}`} />
+    </Page>
   );
 }

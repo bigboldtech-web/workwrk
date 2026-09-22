@@ -1,0 +1,295 @@
+/* The marketing nav: 56px desktop, 48px mobile, white, a 1px bottom line.
+   The underline is the site's one underline (design-system 5.12) and it
+   belongs to the nav alone. Nothing here moves on hover except a colour and
+   the underline, because the product's no-hover-transform rule holds on the
+   website too. */
+
+.mk-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--os-canvas);
+  /* Concept 3 row 0: "white, 1px bottom border after 80px of scroll." The
+     line is a shadow of the content scrolling under the bar, so at the top
+     of a page, where nothing is under it, it should not be there.
+
+     Done with a scroll-driven animation, which needs no JS, no listener and
+     no hydration: the line is the default state, so a browser that has no
+     scroll timeline simply keeps it, which is the old behaviour and is never
+     wrong, only less subtle. */
+  border-bottom: 1px solid var(--os-line);
+}
+
+@supports (animation-timeline: scroll()) {
+  .mk-nav {
+    border-bottom-color: transparent;
+    animation: mk-nav-line linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 80px;
+  }
+  @keyframes mk-nav-line {
+    from { border-bottom-color: transparent; }
+    to   { border-bottom-color: var(--os-line); }
+  }
+  /* A scroll-driven animation is still an animation. Somebody who has asked
+     for less motion gets the line, statically, from the first pixel. */
+  @media (prefers-reduced-motion: reduce) {
+    .mk-nav {
+      animation: none;
+      border-bottom-color: var(--os-line);
+    }
+  }
+}
+
+.mk-nav__bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 48px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: 20px;
+}
+
+@media (min-width: 768px) {
+  .mk-nav__bar { height: 56px; padding-inline: 24px; }
+}
+
+.mk-nav__logo {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+.mk-nav__links {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mk-nav__link {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding-inline: 10px;
+  border-radius: var(--os-r-sm);
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--os-ink-2);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: color var(--os-dur-fast) var(--os-ease-out), border-color var(--os-dur-fast) var(--os-ease-out);
+}
+
+/* Hover and "you are here" must not look the same. An underline navigation
+   has exactly one job, which is to say which page you are on; painting the
+   same 2px blue rule under whatever the pointer happens to be over erases
+   that answer for as long as the pointer is moving. So hover darkens the
+   ink and draws a quiet grey rule, and only the current page gets the blue
+   one. Hover on the current page keeps the blue: the stronger state wins. */
+.mk-nav__link:hover {
+  color: var(--os-ink);
+  border-bottom-color: var(--os-n300);
+}
+
+.mk-nav__link[aria-current="page"],
+.mk-nav__link[aria-current="page"]:hover {
+  color: var(--os-ink);
+  font-weight: 500;
+  border-bottom-color: var(--os-brand);
+}
+
+.mk-nav__actions {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+
+/* The narrow breakpoint uses a native disclosure. The browser owns the
+   toggle, the Enter and Space keys and the expanded state, so there is no
+   handler here to get wrong and nothing to trap focus. */
+.mk-nav__menu {
+  margin-inline-start: auto;
+  position: relative;
+}
+
+.mk-nav__menu > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding-inline: 12px;
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--os-ink);
+}
+.mk-nav__menu > summary::-webkit-details-marker { display: none; }
+
+.mk-nav__drawer {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + 8px);
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  box-shadow: var(--os-shadow-pop);
+}
+
+.mk-nav__drawer .mk-nav__link {
+  height: 40px;
+  border-bottom: 0;
+  border-radius: var(--os-r-sm);
+}
+.mk-nav__drawer .mk-nav__link:hover { background: var(--os-surface-hov); }
+
+.mk-nav__drawer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+@media (min-width: 900px) {
+  .mk-nav__links,
+  .mk-nav__actions { display: flex; }
+  .mk-nav__menu { display: none; }
+}
+
+/* The disclosure's two names. The browser owns the open state, so the label
+   follows it with no script: one of the two words is always hidden, and the
+   accessible name is whichever is rendered. */
+.mk-nav__menu-close { display: none; }
+.mk-nav__menu[open] .mk-nav__menu-open { display: none; }
+.mk-nav__menu[open] .mk-nav__menu-close { display: inline; }
+
+/* ── The Product disclosure (concept 3 row 0). ───────────────────────────
+   Eight modules, each one line, one dot, one "Replaces:" note.
+
+   A native `details`, for the reason written at the top of nav-product-menu:
+   the nav this site replaced was three hover-only mega menus whose 21 links
+   could not be reached without a mouse, and the browser owning the toggle,
+   the keys and the expanded state is what keeps that from coming back.
+
+   It is desktop only. The narrow breakpoint already puts the whole nav
+   behind a disclosure, and a second summary inside the first is two levels
+   of expanding on the width that carries most of the traffic, so the drawer
+   keeps its flat link to /features and the panel is hidden below 900. */
+.mk-nav__product { display: none; position: relative; }
+
+@media (min-width: 900px) {
+  .mk-nav__product { display: block; }
+}
+
+.mk-nav__product > summary {
+  list-style: none;
+  cursor: pointer;
+  gap: 5px;
+}
+.mk-nav__product > summary::-webkit-details-marker { display: none; }
+
+/* The trigger is a summary and not a link, so it carries no aria-current.
+   `data-current` is the island's answer to the same question, and it paints
+   the same blue rule every other row uses: without it /features and the
+   eight module pages would be the only routes on the site where no row in
+   the navigation is underlined. */
+.mk-nav__product > summary[data-current="true"] {
+  color: var(--os-ink);
+  font-weight: 500;
+  border-bottom-color: var(--os-brand);
+}
+
+.mk-nav__caret {
+  transition: transform var(--os-dur-fast) var(--os-ease-out);
+}
+.mk-nav__product[open] .mk-nav__caret { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .mk-nav__caret { transition: none; }
+}
+
+.mk-nav__panel {
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(100% + 10px);
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  box-shadow: var(--os-shadow-pop);
+  z-index: 1;
+}
+
+.mk-nav__panel-row {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  align-items: baseline;
+  column-gap: 9px;
+  row-gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--os-r-sm);
+  text-decoration: none;
+  color: var(--os-ink);
+}
+.mk-nav__panel-row:hover { background: var(--os-surface-hov); }
+
+.mk-nav__panel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* The dot sits on the NAME's baseline rather than on the row's, so it
+     lines up with a one-line row and a two-line one alike. */
+  align-self: center;
+  grid-row: 1;
+  margin-block-start: 1px;
+}
+
+.mk-nav__panel-name {
+  grid-column: 2;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 500;
+}
+
+/* The "Replaces:" note, at the marketing scale's 13px caption step. It sits
+   under the name rather than beside it: the longest tag on the fixture is
+   "Wiki, Whiteboard, Contracts and e-sign", which on one line would either
+   wrap the row to an unpredictable height or force a panel wider than the
+   nav it hangs from. */
+.mk-nav__panel-note {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 13px;
+  line-height: 17px;
+  color: var(--os-ink-2);
+}
+
+.mk-nav__panel-all {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--os-line);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--os-brand);
+  text-decoration: none;
+  border-radius: 0 0 var(--os-r-sm) var(--os-r-sm);
+}
+.mk-nav__panel-all:hover { text-decoration: underline; text-underline-offset: 3px; }

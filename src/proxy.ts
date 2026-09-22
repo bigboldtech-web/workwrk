@@ -32,7 +32,8 @@ const ADMIN_PATH_PREFIX = "/admin";
 const MARKETING_PREFIXES = new Set([
   "about", "blog", "changelog", "compare", "contact", "cookies", "customers",
   "demo", "developers", "do-not-sell", "faq", "features", "help-center",
-  "industries", "partners", "pricing", "privacy", "security", "terms",
+  "how-it-connects", "industries", "partners", "pricing", "privacy", "product",
+  "roadmap", "security", "snap", "terms", "tuesday",
   // The marketing 404 route: the rewrite target for an unknown path on the
   // marketing host under the hard split (spec-shell 2.5).
   "404",

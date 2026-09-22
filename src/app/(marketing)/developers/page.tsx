@@ -1,156 +1,148 @@
+// /developers, rewritten against the repository.
+//
+// The old page sold a product that does not exist: a GraphQL endpoint
+// (there is no GraphQL anywhere in this codebase), type safe SDKs in
+// TypeScript, Python and Go published under an MIT licence on a GitHub
+// organisation, an interactive documentation playground, and rate limits of
+// "1000 req/min on Growth, 10,000 on Scale" against a schema whose defaults
+// are 120 a minute and 50,000 a day and are not plan aware at all. It also
+// printed three code samples against endpoints and payload shapes the API
+// does not serve.
+//
+// What is real: a v1 REST API over eight resources, an OpenAPI 3.1
+// document generated from the running app, API keys with three scopes and a
+// per-key rate limiter, and a signed outbound webhook on a handful
+// of events. That is a smaller page, and it is one an engineer can act on
+// without finding out on day two.
+
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowRight, Code, Webhook, BookOpen, Terminal, GitBranch, Zap } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  Button,
-  CTABand,
-  FeatureCard,
-  GradientText,
-  HUES,
-} from "@/components/marketing/primitives";
+
+import { mailboxes } from "@/components/marketing/config";
+import { Band, Claim, Close, Eyebrow, Headline, Line, Note, Page, Stack, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Developers — WorkwrK",
-  description: "REST + GraphQL API, webhooks on every entity, type-safe SDKs in TS / Python / Go. Build automations, integrations, and extensions on top of workwrk.",
+  title: "Developers",
+  description:
+    "A v1 REST API over eight resources, an OpenAPI 3.1 document, scoped API keys and a per-key rate limiter. No GraphQL and no SDKs, and this page says so.",
   alternates: { canonical: "https://workwrk.com/developers" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "Developers",
+    description: "A v1 REST API, an OpenAPI document, scoped keys. The real surface, including its edges.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "A v1 REST API, an OpenAPI document, scoped keys. The real surface, including its edges." },
 };
 
-const CODE_EXAMPLES = [
-  {
-    title: "Create a person",
-    lang: "ts",
-    code: `import { Workwrk } from "@workwrk/sdk";
-const wwk = new Workwrk({ apiKey: process.env.WORKWRK_KEY });
+/** The v1 resources, from src/app/api/v1. */
+const RESOURCES: readonly [string, string][] = [
+  ["/api/v1/people", "The directory: a person with their role, department and manager."],
+  ["/api/v1/tasks", "Work items, with their status, owner, dates and links."],
+  ["/api/v1/sops", "Processes, with their kind, version and acknowledgement state."],
+  ["/api/v1/kras", "Result areas, with their weight and the role that owns them."],
+  ["/api/v1/kpis", "Measures, with their target, unit and direction."],
+  ["/api/v1/kpi-records", "Readings against a period. This is the write path for a measure."],
+  ["/api/v1/kudos", "Recognitions, with the value each one names."],
+  ["/api/v1/openapi.json", "The OpenAPI 3.1 document for everything above, generated from the running app."],
+];
 
-await wwk.people.create({
-  name: "Priya Iyer",
-  email: "priya@helios.com",
-  role: "Head of Ops",
-  location: "Bengaluru",
-});`,
+const FACTS: readonly { title: string; body: string }[] = [
+  {
+    title: "Keys, with three scopes",
+    body: "Read, write and admin. A key is shown once at creation and stored only as a hash, with the first twelve characters kept so you can tell two keys apart in a list.",
   },
   {
-    title: "Subscribe to KPI changes",
-    lang: "ts",
-    code: `// Webhook: POST /your-endpoint
-{
-  "event": "kpi.score_changed",
-  "payload": {
-    "personId": "p_abc",
-    "kpiId": "k_xyz",
-    "previous": 78,
-    "current": 92,
-    "period": "2026-05"
-  }
-}`,
+    title: "Rate limits you can read",
+    // THE WINDOW IS FIXED, AND THE PAGE NOW SAYS SO. This line used to read
+    // "a rolling window rather than a fixed bucket", which is the opposite of
+    // what src/lib/api-auth.ts does: it keys a bucket on the calendar minute
+    // (now.toISOString().slice(0, 16)) and the calendar day, and computes
+    // retryAfter as 60 minus the current second, which only makes sense for a
+    // fixed bucket. An engineer sizing burst behaviour against the old
+    // sentence would have designed for 120 in any 60 seconds and got 240
+    // across a minute boundary. The numbers themselves are right, from
+    // prisma/schema.prisma.
+    body: "120 requests a minute and 50,000 a day per key by default, counted in fixed calendar minute and calendar day buckets, so a burst can straddle a boundary. They are per key and adjustable, not a plan tier.",
   },
   {
-    title: "Query with GraphQL",
-    lang: "graphql",
-    code: `query TeamPerf {
-  team(id: "t_eng") {
-    members {
-      name
-      compositeScore
-      kpis { name value target }
-    }
-  }
-}`,
+    title: "A signed webhook, on some events",
+    body: "An outbound POST with an HMAC signature header, on a handful of events including a review finalising, a process changing and an invitation going out. It is not an event bus over every entity.",
+  },
+  {
+    title: "CSV, both directions",
+    body: "Import into a table from a spreadsheet, and export activity, compliance, people, reviews and the whole of your own data.",
+  },
+  {
+    title: "No GraphQL",
+    body: "There is no GraphQL endpoint. If you need one, say so and it goes on the roadmap where you can see it.",
+  },
+  {
+    title: "No published SDKs",
+    body: "There is no client library in any language. Generate one from the OpenAPI document, which is the reason that document is served.",
   },
 ];
 
 export default function DevelopersPage() {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="grid lg:grid-cols-[1.1fr_1fr] gap-12 items-center">
-            <div>
-              <Eyebrow hue="indigo" className="mb-5">Developers</Eyebrow>
-              <H1>
-                The API the product <GradientText hue="indigo">runs on.</GradientText>
-              </H1>
-              <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-xl">
-                Same REST + GraphQL endpoints workwrk uses internally. Type-safe
-                SDKs. Webhooks on every entity. Build automations, integrations,
-                or embeds — without backfilling our APIs.
-              </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button href="#docs" variant="secondary" hue="indigo" size="lg" rightIcon={<ArrowRight size={15} />}>
-                  Read the docs
-                </Button>
-                <Button href="https://github.com/workwrk" variant="outline" size="lg" leftIcon={<GitBranch size={15} />}>
-                  GitHub
-                </Button>
-              </div>
-            </div>
+    <Page>
+      <Band air="hero" labelledBy="dev-h1" still>
+        <Eyebrow>Developers</Eyebrow>
+        <Claim id="dev-h1">A small API, described accurately.</Claim>
+        <Sub>Everything this page does not list does not exist, which is the part of an API page that usually costs somebody a week.</Sub>
+      </Band>
 
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-[0_30px_80px_-20px_rgba(15,23,42,0.45)]">
-              <div className="h-9 bg-slate-800 border-b border-slate-700 flex items-center gap-2 px-4">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <span className="ml-3 text-[12px] text-slate-400 font-mono">{CODE_EXAMPLES[0].title}</span>
-              </div>
-              <pre className="p-5 text-[13px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
-                <code>{CODE_EXAMPLES[0].code}</code>
-              </pre>
-            </div>
-          </div>
-        </Container>
-      </Section>
+      {/* The surface. A reference table is the one dense object this sheet
+          allows, for the reason /pricing gives: an engineer reads it row by
+          row, which is the opposite of skimming, so it gets its own screen
+          and the air around it rather than a smaller size. */}
+      <Band ground="quiet" labelledBy="dev-res">
+        <Eyebrow>Reference</Eyebrow>
+        <Headline id="dev-res">The whole v1 surface.</Headline>
+        <Line>Eight resources over REST, and an OpenAPI document you can generate a client from.</Line>
+        <div className="ic-matrix" tabIndex={0} role="group" aria-label="The v1 resources">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Path</th>
+                <th scope="col">What it is</th>
+              </tr>
+            </thead>
+            <tbody>
+              {RESOURCES.map(([path, body]) => (
+                <tr key={path}>
+                  <th scope="row">
+                    <code>{path}</code>
+                  </th>
+                  <td style={{ textAlign: "start" }}>{body}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Note>
+          <a className="ic-a mk-focus" href="/api/v1/openapi.json" data-cta="developers-openapi">
+            Read the OpenAPI document
+          </a>
+          . Keys are created in workspace settings by an admin.
+        </Note>
+      </Band>
 
-      <Section py="lg" id="docs">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue="emerald" className="mb-4">Capabilities</Eyebrow>
-            <H2>Build <GradientText hue="emerald">on the platform</GradientText>.</H2>
-          </div>
-          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            <FeatureCard hue="violet"  icon={Code}     title="REST + GraphQL"  body="Two ways to query. REST for simple flows; GraphQL for nested entities. Same auth, same rate limits." />
-            <FeatureCard hue="emerald" icon={Webhook}  title="Webhooks"        body="Every entity emits events on create / update / delete. Signed payloads, retries with exponential backoff." />
-            <FeatureCard hue="fuchsia" icon={Terminal} title="SDKs"            body="TypeScript, Python, Go. Type-safe, autocomplete-friendly, kept in sync with the API surface." />
-            <FeatureCard hue="amber"   icon={BookOpen} title="Reference docs"  body="OpenAPI 3.1 spec, interactive playground, real example payloads. Built with Stoplight." />
-            <FeatureCard hue="sky"     icon={Zap}      title="Rate limits"     body="Generous defaults (1000 req/min on Growth, 10,000 on Scale). Burst-tolerant. Custom quotas on Scale." />
-            <FeatureCard hue="indigo"  icon={GitBranch}   title="Open SDKs"        body="SDKs are MIT-licensed and on GitHub. Issue trackers, PR-friendly maintainers." />
-          </div>
-        </Container>
-      </Section>
+      <Band labelledBy="dev-facts">
+        <Eyebrow>Limits</Eyebrow>
+        <Headline id="dev-facts">What to design around.</Headline>
+        <Stack items={FACTS} />
+        <Note>
+          Building something and hitting an edge? Write to{" "}
+          <a className="ic-a mk-focus" href={`mailto:${mailboxes.general}`}>
+            {mailboxes.general}
+          </a>
+          .
+        </Note>
+      </Band>
 
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue="indigo" className="mb-4">Snippets</Eyebrow>
-            <H2>Three lines from the docs.</H2>
-          </div>
-          <div className="mt-10 grid lg:grid-cols-3 gap-5">
-            {CODE_EXAMPLES.map((ex) => (
-              <div key={ex.title} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-                <div className="px-4 h-9 border-b border-slate-700 flex items-center justify-between">
-                  <span className="text-[12px] text-slate-300 font-semibold">{ex.title}</span>
-                  <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider">{ex.lang}</span>
-                </div>
-                <pre className="p-4 text-[12.5px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
-                  <code>{ex.code}</code>
-                </pre>
-              </div>
-            ))}
-          </div>
-        </Container>
-      </Section>
-
-      <CTABand
-        hue="indigo"
-        title={<>Build something on <GradientText hue="emerald">workwrk</GradientText>.</>}
-        body="API keys live in workspace settings. Need help? developers@workwrk.com — we respond fast."
-        primary={{ label: "Get an API key",  href: "/signup?source=dev" }}
-        secondary={{ label: "Talk to engineering", href: "mailto:developers@workwrk.com" }}
-      />
-    </>
+      <Close headline="Get a key and try it." placement="developers-close" />
+    </Page>
   );
 }

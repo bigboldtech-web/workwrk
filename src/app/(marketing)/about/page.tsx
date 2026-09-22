@@ -1,139 +1,118 @@
+// /about, rewritten.
+//
+// What came out: a competitor named three times as the thing we are not, a
+// team size of 35, a "$12M Series A from operator funds", a 99.95 percent
+// uptime number against a flag that is false and no status page, a founding
+// date and a "first 100 customers" milestone, and a testimonial from a named
+// CEO at a company that does not exist. The one real quote this site has
+// belongs to the login page and is used on the home page with its own
+// attribution; it is not repeated here.
+//
+// An about page can be honest and still be worth reading. What it has to be
+// about is the argument, not the mythology.
+
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowRight, Compass, Heart, Wrench, Globe } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  H3,
-  Button,
-  FeatureCard,
-  CTABand,
-  Quote,
-  StatCard,
-  GradientText,
-  HUES,
-} from "@/components/marketing/primitives";
+
+
+import { pricing, starterSeatCap, tier } from "@/components/marketing/data/pricing";
+import { Band, Claim, Close, Eyebrow, Headline, Note, Page, Stack, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "About — WorkwrK",
+  title: "About",
   description:
-    "WorkwrK is the business operating system for teams who outgrew spreadsheets but can't afford Workday. Built in India + UAE, for SMBs and the mid-market.",
+    "Why this product is one system rather than a suite, what we deliberately do not build, and how to tell whether a claim on this site is true.",
   alternates: { canonical: "https://workwrk.com/about" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "About",
+    description: "The argument, what we do not build, and how to check a claim on this site.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "The argument, what we do not build, and how to check a claim on this site." },
 };
 
-const VALUES = [
-  { hue: "violet"  as const, icon: Compass, title: "Operators first",      body: "Built by operators, not by ex-Workday product managers. Every screen serves a daily job." },
-  { hue: "emerald" as const, icon: Heart,   title: "Honest math",          body: "Free under five. $8 thereafter. No quote-only nonsense. The math should work on day one." },
-  { hue: "fuchsia" as const, icon: Wrench,  title: "Boringly reliable",    body: "We ship every Tuesday. Uptime is a 99.95% number, not a promise. The platform fades into the background." },
-  { hue: "amber"   as const, icon: Globe,   title: "Built for emerging markets", body: "India, UAE, Southeast Asia — first-class, not afterthoughts. INR/AED/SGD, multi-location, IST timing." },
-];
-
-const TIMELINE = [
-  ["2023", "Founded", "Two cofounders, one whiteboard, one observation: SMBs run on 15 tools and zero data integration."],
-  ["2024", "First 100 customers", "Free tier launched. People + Work hubs go GA. India / UAE early-adopter wave."],
-  ["2025", "AI as runtime", "Cmd-K, inbox triage, cross-module signals ship. Money + Talent hubs added."],
-  ["2026", "Now", "All 7 hubs live. v4 marketing relaunch. 500+ customers across 8 countries. Growth hub in beta."],
+const IDEAS: readonly { title: string; body: string }[] = [
+  {
+    title: "One data model, or it is a suite",
+    body: "A suite is several products with a shared login. What makes this one system is that a task, a role, a process, a measure and a goal are the same objects everywhere, referenced rather than copied. Everything good about the product comes from that, and so does everything hard about building it.",
+  },
+  {
+    title: "The scope is people and work",
+    body: "This is a people and project management system. Payroll, benefits, leave, attendance, invoicing, a CRM and a helpdesk are not in it and are not coming. Naming the edge is more useful to you than a longer feature list.",
+  },
+  {
+    title: "Say the price",
+    body: `${tier("starter").name} is free for up to ${starterSeatCap} people. ${tier("growth").name} is per member per month, authored in ${pricing.currencies.map((c) => c.code).join(", ")} rather than converted from a stale rate. Only the top tier is quoted, and the reason is that it is genuinely negotiated.`,
+  },
+  {
+    title: "A claim is a flag, not a sentence",
+    body: "Every claim on this site that depends on a feature reads a flag in the code, so a page cannot say a thing ships because somebody typed it. Where a mechanism is unbuilt the page says what happens today instead, in the same place, in the same size type.",
+  },
 ];
 
 export default function AboutPage() {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="fuchsia" className="mb-5">About workwrk</Eyebrow>
-            <H1>
-              We build the operating system <br />
-              <GradientText hue="fuchsia">for the rest of the business world.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              Workday is for Fortune 500s with eight-figure rollout budgets.
-              Spreadsheets are for the first ten employees. Everyone in
-              between has been ignored. workwrk is for them.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/contact" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
-                Join the team
-              </Button>
-              <Button href="/contact" variant="outline" size="lg">Get in touch</Button>
-            </div>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      {/* 1. The claim. It was "One system, and a short list of noes." at
+          eight words, left aligned at 64px beside 750px of nothing. */}
+      <Band air="hero" labelledBy="about-h1" still>
+        <Eyebrow>About</Eyebrow>
+        <Claim id="about-h1">One system. Everything else is no.</Claim>
+        <Sub>
+          A company of thirty or three hundred does not lack tools, it lacks one place where the role, the process,
+          the work and the number are the same records.
+        </Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="text-center max-w-2xl mx-auto">
-            <Eyebrow hue="violet" className="mb-4">Our values</Eyebrow>
-            <H2>Four ideas <GradientText hue="violet">non-negotiable</GradientText>.</H2>
-          </div>
-          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {VALUES.map((v) => (
-              <FeatureCard key={v.title} hue={v.hue} icon={v.icon} title={v.title} body={v.body} />
-            ))}
-          </div>
-        </Container>
-      </Section>
+      {/* 2. The decisions. Four names, not a two column card grid. */}
+      <Band ground="quiet" labelledBy="about-ideas">
+        <Eyebrow>Decisions</Eyebrow>
+        <Headline id="about-ideas">Four things we decided early.</Headline>
+        <Stack items={IDEAS} />
+      </Band>
 
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.5fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue="emerald" className="mb-4">The story</Eyebrow>
-              <H2>Built in <GradientText hue="emerald">public</GradientText>.</H2>
-              <p className="mt-5 text-slate-600 text-lg leading-relaxed">
-                Three years from whiteboard to operating system. We shipped
-                every Tuesday in between.
-              </p>
-            </div>
-            <ol className="relative space-y-6 border-l-2 border-dashed border-slate-300 pl-8">
-              {TIMELINE.map(([year, title, body]) => (
-                <li key={year} className="relative">
-                  <span className="absolute -left-[2.4rem] top-0.5 w-6 h-6 rounded-full bg-white border-2 border-emerald-500 flex items-center justify-center">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  </span>
-                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-emerald-700">{year}</p>
-                  <H3 className="mt-1">{title}</H3>
-                  <p className="mt-2 text-slate-600 text-[15px] leading-relaxed">{body}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </Container>
-      </Section>
+      {/* 3. How to check us. Four pages, each one a link, each one a place
+          the site can be caught out. */}
+      <Band labelledBy="about-check">
+        <Eyebrow>Verify it</Eyebrow>
+        <Headline id="about-check">Check anything on this site.</Headline>
+        <Stack
+          items={[
+            {
+              title: "Roadmap",
+              body: "Four columns, and only the first one means you can use it today.",
+              href: "/roadmap",
+              cta: "about-roadmap",
+            },
+            {
+              title: "Changelog",
+              body: "Written from the repository, not from a release calendar.",
+              href: "/changelog",
+              cta: "about-changelog",
+            },
+            {
+              title: "Security",
+              body: "Names what we hold, which is currently no certification at all.",
+              href: "/security",
+              cta: "about-security",
+            },
+            {
+              title: "Compare",
+              body: "Says what a stack of separate tools does better, because some of it is better.",
+              href: "/compare",
+              cta: "about-compare",
+            },
+          ]}
+        />
+        <Note>
+          If you find something on this site that is not true, that is a defect, and we would like to hear about it
+          more than we would like to keep the sentence.
+        </Note>
+      </Band>
 
-      <Section py="md">
-        <Container>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard hue="violet"   value="500+"  label="Customers across 8 countries" />
-            <StatCard hue="emerald"  value="35"    label="Operators on the team" />
-            <StatCard hue="fuchsia"  value="$12M"  label="Series A from operator funds" />
-            <StatCard hue="amber"    value="3 yr"  label="From idea to all-hubs-live" />
-          </div>
-        </Container>
-      </Section>
-
-      <Section py="lg">
-        <Container>
-          <Quote
-            hue="violet"
-            quote="They built the platform we'd have built ourselves if we had the time. Now we don't have to."
-            author="Daniel Park"
-            role="CEO"
-            company="Forge Capital"
-          />
-        </Container>
-      </Section>
-
-      <CTABand
-        hue="fuchsia"
-        title={<>Want to <GradientText hue="amber">build with us</GradientText>?</>}
-        body="We're hiring engineers, designers, and operators across India, UAE, and remote globally."
-        primary={{ label: "Get in touch", href: "/contact" }}
-      />
-    </>
+      <Close headline="Open it and judge it." placement="about-close" />
+    </Page>
   );
 }

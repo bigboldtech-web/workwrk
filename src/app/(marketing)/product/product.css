@@ -1,0 +1,209 @@
+/* The eight module pages (marketing-concept.md section 5, "/product/[module]").
+ *
+ * It sits on top of home.css rather than beside it: the bands, the wrap, the
+ * cards, the lede and the display ramp are the site's, and this sheet adds
+ * only the four things a chapter page has that the home page does not.
+ *
+ * Rules kept, all from the concept and the design system:
+ *
+ *   Light only. The navy chrome inside a product frame is the only dark
+ *   element and it comes from the shell sheet.
+ *   Every colour is a token. No hex in this file.
+ *   A variant is a data attribute, never a BEM modifier, because the copy
+ *   rule reads a double hyphen in a class name as punctuation.
+ *   Every layout has a resting state that works with no motion at all.
+ */
+
+/* The Replaces strip under the hero headline. Category nouns, never a
+   vendor: the strip renders whatever `replacesTag` hands it. */
+.mk-mod-replaces {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--os-ink-2);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 2. The chapter: this block's beats of the one Tuesday.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-mod-moments {
+  list-style: none;
+  margin: 26px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 32px;
+}
+
+.mk-mod-moment {
+  display: grid;
+  gap: 18px;
+  align-items: start;
+  padding-top: 24px;
+  border-top: 1px solid var(--os-line-soft);
+}
+.mk-mod-moment:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (min-width: 900px) {
+  .mk-mod-moment {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 28px;
+  }
+}
+
+.mk-mod-moment__say {
+  min-width: 0;
+}
+
+.mk-mod-moment__time {
+  font-size: var(--mk-caption, 13px);
+  color: var(--os-brand-deep);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.mk-mod-moment__head {
+  margin: 8px 0 0;
+  max-width: 22ch;
+}
+
+.mk-mod-moment__with {
+  color: var(--os-ink-2);
+  margin-top: 10px;
+}
+
+/* The frame can be wider than the column it sits in on a narrow screen, so
+   the column scrolls it rather than the page. */
+.mk-mod-moment__frame {
+  min-width: 0;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 3. Connects to.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-mod-dots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  font-size: var(--mk-caption, 13px);
+  color: var(--os-ink-2);
+}
+
+.mk-mod-dots__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-inline: 9px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-surface);
+  color: var(--os-ink);
+}
+
+/* A whole card that is a link. The hairline is the only thing that moves on
+   hover: no lift, no shadow, no transform, because the card carries text
+   the pointer is already over. */
+.mk-mod-neighbour {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.mk-mod-neighbour:hover {
+  border-color: var(--os-line-strong);
+}
+
+/* The wire between the two dots in a neighbour card's title. */
+.mk-mod-neighbour__wire {
+  display: inline-block;
+  width: 22px;
+  height: 1px;
+  background: var(--os-brand);
+}
+
+.mk-mod-inline {
+  color: var(--os-brand-deep);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * 4. What is inside the block, and what is not yet.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-mod-rows {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  max-width: 72ch;
+}
+
+.mk-mod-row {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--os-line-soft);
+  font-size: var(--mk-body, 16px);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+.mk-mod-row:first-child {
+  border-top: 1px solid var(--os-line-soft);
+}
+
+.mk-mod-upcoming {
+  margin-top: 26px;
+  max-width: 72ch;
+}
+
+.mk-mod-upcoming > summary {
+  cursor: pointer;
+  font-size: var(--mk-caption, 13px);
+  font-weight: 500;
+  color: var(--os-brand-deep);
+  padding: 8px 0;
+  list-style: none;
+}
+.mk-mod-upcoming > summary::-webkit-details-marker {
+  display: none;
+}
+.mk-mod-upcoming > summary::before {
+  content: "+";
+  display: inline-block;
+  width: 14px;
+  color: var(--os-ink-2);
+}
+.mk-mod-upcoming[open] > summary::before {
+  content: "\2212";
+}
+
+/* One name, two states. The stylesheet swaps the label with the disclosure
+   so the accessible name matches what the control will do next.
+   The third rule is not redundant: without it, the open selector hides the
+   "Show" span while the unconditional rule above is still hiding "Hide",
+   and the summary opens with no label at all. Same pattern as the nav's
+   Menu and Close, and the same reason it is written in three lines. */
+.mk-mod-upcoming__hide {
+  display: none;
+}
+.mk-mod-upcoming[open] > summary .mk-mod-upcoming__show {
+  display: none;
+}
+.mk-mod-upcoming[open] > summary .mk-mod-upcoming__hide {
+  display: inline;
+}
+
+.mk-mod-upcoming__body {
+  padding-bottom: 8px;
+}
+
+.mk-mod-tier {
+  margin: 0 0 16px;
+}

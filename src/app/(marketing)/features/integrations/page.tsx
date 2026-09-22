@@ -1,79 +1,67 @@
+// /features/integrations, rewritten against the product.
+//
+// The old page listed twenty two named connectors in a directory grid, sold
+// two way sync with four of them by name, promised five thousand apps
+// through two no code automators and a warehouse mirror, and said
+// "22+ native integrations and counting". Not one connector ships.
+//
+// Keeping the page and telling the truth on it beats deleting it: a
+// procurement team searches for this page, and the answer they need is the
+// real one. Connectors here are demand driven, which is a strategy rather
+// than an apology, and it is written down that way.
+
 import type { Metadata } from "next";
-import { Plug, Zap, Code, Webhook, RefreshCw, Database } from "lucide-react";
 import { FeatureSubPage } from "@/components/marketing/sub-page";
-import { GradientText, Section, Container, Eyebrow, H3 } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Integrations — WorkwrK",
-  description: "Slack, Google Workspace, Microsoft 365, Stripe, Razorpay, QuickBooks, Salesforce, HubSpot, GitHub, Linear — and an API for everything else.",
+  title: "Integrations",
+  description:
+    "What connects today: a v1 REST API with an OpenAPI document, CSV in and CSV out. No third party connectors ship, and this page will not pretend otherwise.",
   alternates: { canonical: "https://workwrk.com/features/integrations" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "Integrations",
+    description: "A v1 API, CSV in and out, and an honest list of what does not connect.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "A v1 API, CSV in and out, and an honest list of what does not connect." },
 };
-
-const INTEGRATIONS = [
-  { name: "Slack",            cat: "Comms" },
-  { name: "Microsoft Teams",  cat: "Comms" },
-  { name: "Google Workspace", cat: "Identity" },
-  { name: "Microsoft 365",    cat: "Identity" },
-  { name: "Okta",             cat: "SSO" },
-  { name: "Azure AD",         cat: "SSO" },
-  { name: "Stripe",           cat: "Money" },
-  { name: "Razorpay",         cat: "Money" },
-  { name: "QuickBooks",       cat: "Money" },
-  { name: "Xero",             cat: "Money" },
-  { name: "HubSpot",          cat: "Growth" },
-  { name: "Salesforce",       cat: "Growth" },
-  { name: "Pipedrive",        cat: "Growth" },
-  { name: "GitHub",           cat: "Engineering" },
-  { name: "Linear",           cat: "Engineering" },
-  { name: "Jira",             cat: "Engineering" },
-  { name: "Notion",           cat: "Docs" },
-  { name: "Confluence",       cat: "Docs" },
-  { name: "Zapier",           cat: "Automation" },
-  { name: "Make",             cat: "Automation" },
-  { name: "Snowflake",        cat: "Warehouse" },
-  { name: "BigQuery",         cat: "Warehouse" },
-];
 
 export default function IntegrationsFeaturePage() {
   return (
     <FeatureSubPage
-      hubSlug="money"
-      hue="emerald"
-      eyebrow="Money hub · Integrations"
-      title={<>Connects to <GradientText hue="emerald">everything you run.</GradientText></>}
-      lede="22+ native integrations. Webhook events for every entity. A full REST + GraphQL API. Plus Zapier and Make for the long tail."
+      slug="integrations"
+      hubSlug="tables"
+      eyebrow="Across every block"
+      title="The short, true list."
+      lede="A connector named on a marketing page is a commitment a buyer quotes back at you, so here is the whole list."
       capabilities={[
-        { icon: Plug,      title: "Native integrations",   body: "Two-way sync with the tools you already pay for. Slack, Google, Microsoft, HubSpot, Stripe, more." },
-        { icon: Webhook,   title: "Webhooks on everything",body: "Every entity emits events on create / update / delete. Subscribe; route; transform; act." },
-        { icon: Code,      title: "REST + GraphQL API",    body: "Same data model the product uses. Type-safe SDKs in TypeScript, Python, Go." },
-        { icon: Zap,       title: "Zapier + Make",         body: "5,000+ apps reachable via the no-code automators. Triggers + actions for every hub." },
-        { icon: RefreshCw, title: "Two-way sync",          body: "Changes flow both ways. People in BambooHR → roles in workwrk. Deals in HubSpot → revenue KPIs." },
-        { icon: Database,  title: "Data warehouse",        body: "Snowflake, BigQuery, Redshift mirroring. Read-only on Growth; bi-directional on Scale." },
+        { title: "A v1 REST API",
+          body: "People, tasks, processes, result areas, KPIs, KPI readings and recognitions, with an OpenAPI document you can generate a client from.",
+        },
+        { title: "CSV in", body: "Import into a table from a spreadsheet, which is how most teams move the data they actually care about." },
+        { title: "CSV out", body: "Exports for activity, compliance, people, reviews and the whole of your own data." },
+        { title: "Email that works", body: "Invitations, reminders and cycle notifications reach a mailbox. That is a delivery path, not an integration." },
+        { title: "Why the list is short",
+          body: "Most connectors exist to keep two products in step. Eight blocks on one data model is the other answer to that problem, and it is the one this product took.",
+        },
+        { title: "Connectors are demand driven",
+          body: "We build one when customers ask for the same one. None ships today, so none is named here, on the comparison table, or in a sales call.",
+        },
       ]}
-      relatedSlugs={["ai-engine", "analytics", "access"]}
+      relatedSlugs={["tasks", "access"]}
       faq={[
-        { q: "Can I request a new integration?",        a: "Yes — most-requested ship within the quarter. Customer-funded custom integrations available as a Scale add-on." },
-        { q: "Do I need engineers to set this up?",       a: "No. Most native integrations are click-to-connect. Webhooks and API are for engineers; everything else is no-code." },
-        { q: "How does conflict resolution work?",        a: "Field-level last-write-wins by default; configurable to source-of-truth-wins or merge-on-conflict per integration." },
+        { q: "Do you connect to my chat, my identity provider or my accounting product?", a: "No. Nothing connects to a third party product today." },
+        { q: "Can I build the connection myself?", a: "Yes, against the v1 API. It is the same data model the product uses." },
+        // This used to refuse to publish a number that /developers publishes
+        // outright, so a buyer asking one question got two answers and the
+        // refusal read as evasive. The figures are the enforced schema
+        // defaults in prisma/schema.prisma, and the window shape is what
+        // src/lib/api-auth.ts actually does.
+        { q: "Is there a rate limit I should design for?", a: "Yes: 120 requests a minute and 50,000 a day per key, counted in fixed calendar minute and day buckets, and adjustable per key." },
       ]}
-      bottomSlot={
-        <Section variant="tint" py="lg">
-          <Container>
-            <div className="max-w-2xl mb-10">
-              <Eyebrow hue="emerald" className="mb-4">The directory</Eyebrow>
-              <H3>22+ native integrations and counting.</H3>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {INTEGRATIONS.map((i) => (
-                <div key={i.name} className="p-4 bg-white border border-slate-200 rounded-xl text-center">
-                  <p className="font-bold text-slate-900 text-base">{i.name}</p>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700 mt-1">{i.cat}</p>
-                </div>
-              ))}
-            </div>
-          </Container>
-        </Section>
-      }
     />
   );
 }

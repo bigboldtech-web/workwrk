@@ -1,0 +1,895 @@
+{
+  "version": 1,
+  "workspace": {
+    "org": "Northwind Ops",
+    "sidebarLabel": "Sample workspace: Northwind Ops",
+    "templateName": "Tuesday: client onboarding",
+    "templateDeepLink": "/signup?template=tuesday",
+    "notice": "The Tuesday workspace is a template. It's yours on day one.",
+    "receiptFooterSite": "Tuesday workspace template",
+    "receiptFooterShare": "The Tuesday workspace"
+  },
+  "cast": [
+    {
+      "id": "maya",
+      "name": "Maya Dsouza",
+      "initials": "MD",
+      "jobTitle": "Operations lead",
+      "note": "The manager, the visitor's proxy."
+    },
+    {
+      "id": "sam",
+      "name": "Sam Okafor",
+      "initials": "SO",
+      "jobTitle": "Onboarding lead",
+      "note": "Task owner, resolved from the role."
+    },
+    {
+      "id": "priya",
+      "name": "Priya Nair",
+      "initials": "PN",
+      "jobTitle": "Finance",
+      "note": "Unblocks the finance sign off."
+    }
+  ],
+  "client": {
+    "name": "Bluefin Foods",
+    "signedAt": "9:02",
+    "sourceTable": "Clients",
+    "sourceRow": 41
+  },
+  "hubs": [
+    {
+      "id": "work",
+      "label": "Work",
+      "dot": "blue",
+      "icon": "SquareKanban",
+      "href": "/home",
+      "replaces": [
+        "task-tracker"
+      ],
+      "surface": "my-work",
+      "tourLine": "Work: the task was born at 9:04 and finished at 4:45.",
+      "tourLineFallback": "Work: the task is on the Onboarding board and in Sam's Today by 9:04, and done at 4:45.",
+      "tourLineStop": 2,
+      "features": "Tasks, lists, boards, 17 views."
+    },
+    {
+      "id": "planner",
+      "label": "Planner",
+      "dot": "blue",
+      "icon": "CalendarDays",
+      "href": "/planner",
+      "replaces": [
+        "calendar",
+        "timesheets"
+      ],
+      "surface": "planner-week",
+      "tourLine": "Planner: the 15 minute call at 2:15 is what unblocked it.",
+      "features": "Calendar, timesheets."
+    },
+    {
+      "id": "ai",
+      "label": "AI",
+      "dot": "blue",
+      "icon": "Sparkles",
+      "href": "/sidekick",
+      "replaces": [],
+      "replacesNote": "the status meeting",
+      "surface": "ask-ai",
+      "tourLine": "AI: at 6:02 it answered from the four blocks it read.",
+      "tourLineFallback": "AI: at 6:02 it answered from the workspace it reads.",
+      "tourLineStop": 6,
+      "features": "Ask AI on every page, reading the workspace. Not a chatbot on every button."
+    },
+    {
+      "id": "talk",
+      "label": "Talk",
+      "dot": "blue",
+      "icon": "MessagesSquare",
+      "href": "/tlk",
+      "replaces": [
+        "team-chat",
+        "video-calls"
+      ],
+      "surface": "talk-thread",
+      "tourLine": "Talk: the decision landed on the task at 10:30.",
+      "tourLineFallback": "Talk: the decision was recorded on the task at 10:30.",
+      "tourLineStop": 3,
+      "features": "Channels, calls, threads."
+    },
+    {
+      "id": "teams",
+      "label": "Teams",
+      "dot": "yellow",
+      "icon": "Users",
+      "href": "/people",
+      "replaces": [
+        "hris-directory",
+        "review-tool",
+        "survey-tool"
+      ],
+      "surface": "role-page",
+      "tourLine": "Teams: the role owned the process before anybody asked.",
+      "tourLineFallback": "Teams: the role carries the KRA, and the SOP names its owner.",
+      "tourLineStop": 1,
+      "features": "Directory, org chart, roles, reviews, kudos, candor, surveys."
+    },
+    {
+      "id": "docs",
+      "label": "Docs",
+      "dot": "yellow",
+      "icon": "FileText",
+      "href": "/docs",
+      "replaces": [
+        "wiki",
+        "whiteboard",
+        "contracts-esign"
+      ],
+      "surface": "sop-doc",
+      "tourLine": "Docs: step 3 of the SOP is where the task came from.",
+      "tourLineFallback": "Docs: step 3 of the SOP is linked to the task it governs.",
+      "tourLineStop": 2,
+      "features": "Docs, wikis, SOPs, policies, contracts, canvases, files."
+    },
+    {
+      "id": "tables",
+      "label": "Tables",
+      "dot": "green",
+      "icon": "Sheet",
+      "href": "/tables",
+      "replaces": [
+        "spreadsheets",
+        "forms"
+      ],
+      "surface": "table",
+      "tourLine": "Tables: row 41 was written by the signed form at 9:02.",
+      "features": "Sheets and forms."
+    },
+    {
+      "id": "goals",
+      "label": "Goals",
+      "dot": "green",
+      "icon": "Target",
+      "href": "/okrs",
+      "replaces": [
+        "okr-tool"
+      ],
+      "surface": "goal-detail",
+      "tourLine": "Goals: the ring moved at 4:45 because the work moved.",
+      "tourLineFallback": "Goals: the task lands on the goal's Effort card, and the ring moves with the KPI reading.",
+      "tourLineStop": 5,
+      "features": "OKRs, KRAs, KPIs, the on track verdict."
+    }
+  ],
+  "role": {
+    "id": "onboarding-lead",
+    "title": "Onboarding lead",
+    "holder": "sam",
+    "department": "Operations",
+    "kraId": "kra-onboarding",
+    "ownsSops": [
+      "sop-client-onboarding"
+    ],
+    "boundaries": [
+      "Owns every client onboarding from signature to day 10.",
+      "Escalates finance sign off to Finance."
+    ]
+  },
+  "kra": {
+    "id": "kra-onboarding",
+    "title": "Client onboarding runs on time",
+    "weight": 30,
+    "progress": 88,
+    "roleId": "onboarding-lead",
+    "kpiId": "kpi-cycle-time"
+  },
+  "kpi": {
+    "id": "kpi-cycle-time",
+    "name": "Onboarding cycle time",
+    "unit": "days",
+    "target": 10,
+    "current": 8,
+    "direction": "lower-is-better"
+  },
+  "sop": {
+    "id": "sop-client-onboarding",
+    "title": "Client onboarding v4",
+    "kind": "CHECKLIST",
+    "owner": "sam",
+    "ownedByKra": "Client onboarding runs on time",
+    "slaDays": 10,
+    "steps": [
+      {
+        "n": 1,
+        "title": "Confirm the signed agreement",
+        "owner": "Onboarding lead"
+      },
+      {
+        "n": 2,
+        "title": "Create the client record",
+        "owner": "Onboarding lead"
+      },
+      {
+        "n": 3,
+        "title": "Kick off internal onboarding",
+        "owner": "Onboarding lead",
+        "spawnsTask": true,
+        "linkedKpi": "kpi-cycle-time"
+      },
+      {
+        "n": 4,
+        "title": "Confirm the reporting cadence",
+        "owner": "Onboarding lead"
+      },
+      {
+        "n": 5,
+        "title": "Collect finance sign off",
+        "owner": "Finance"
+      },
+      {
+        "n": 6,
+        "title": "Schedule the kickoff call",
+        "owner": "Onboarding lead"
+      },
+      {
+        "n": 7,
+        "title": "Hand over to the account team",
+        "owner": "Onboarding lead"
+      }
+    ]
+  },
+  "board": {
+    "id": "board-onboarding",
+    "name": "Onboarding",
+    "space": "Operations",
+    "view": "List",
+    "views": [
+      "All",
+      "This week",
+      "Mine",
+      "Blocked"
+    ],
+    "groups": [
+      {
+        "name": "This week",
+        "rows": [
+          {
+            "id": "task-bluefin",
+            "primary": true
+          },
+          {
+            "id": "task-harbour",
+            "title": "Onboard Harbour Mills",
+            "status": "in-progress",
+            "owner": "sam",
+            "due": "Day 6"
+          },
+          {
+            "id": "task-quayside",
+            "title": "Onboard Quayside Coffee",
+            "status": "done",
+            "owner": "maya",
+            "due": "Closed"
+          }
+        ]
+      },
+      {
+        "name": "Next week",
+        "rows": [
+          {
+            "id": "task-lowtide",
+            "title": "Onboard Lowtide Produce",
+            "status": "not-started",
+            "owner": "sam",
+            "due": "Day 12"
+          }
+        ]
+      }
+    ]
+  },
+  "task": {
+    "id": "task-bluefin",
+    "title": "Onboard Bluefin Foods",
+    "status": "in-progress",
+    "statusLabel": "In progress",
+    "owner": "sam",
+    "ownerResolvedFrom": "Onboarding lead",
+    "createdBy": "SOP: Client onboarding, step 3",
+    "dueLabel": "Day 10",
+    "movesKpi": "Onboarding cycle time",
+    "checklist": [
+      {
+        "title": "Confirm the signed agreement",
+        "done": true
+      },
+      {
+        "title": "Create the client record",
+        "done": true
+      },
+      {
+        "title": "Set up the shared space",
+        "done": true
+      },
+      {
+        "title": "Confirm the reporting cadence",
+        "done": true,
+        "addedBy": "Decision from #onboarding"
+      },
+      {
+        "title": "Attach the contract addendum",
+        "done": true
+      },
+      {
+        "title": "Collect finance sign off",
+        "done": true
+      },
+      {
+        "title": "Schedule the kickoff call",
+        "done": false
+      }
+    ],
+    "links": [
+      {
+        "type": "SOP",
+        "label": "Client onboarding v4, step 3"
+      },
+      {
+        "type": "KPI",
+        "label": "Onboarding cycle time"
+      },
+      {
+        "type": "ROLE",
+        "label": "Onboarding lead"
+      }
+    ],
+    "snapCaption": "Created by SOP: Client onboarding, step 3. Owner by role: Onboarding lead. Moves: Onboarding cycle time.",
+    "snapCaptionFallback": "Linked to SOP: Client onboarding, step 3. Held by Sam Okafor, who holds the Onboarding lead role. Moves: Onboarding cycle time.",
+    "snapCaptionStop": 2
+  },
+  "goal": {
+    "id": "goal-ten-days",
+    "title": "Onboard every client in 10 days",
+    "owner": "maya",
+    "progressBefore": 61,
+    "progressAfter": 64,
+    "verdict": "On track. 3 of 4 onboardings this month inside SLA. Bluefin projected day 8.",
+    "verdictSource": "deterministic",
+    "effort": [
+      {
+        "taskId": "task-bluefin",
+        "title": "Onboard Bluefin Foods",
+        "owner": "sam"
+      },
+      {
+        "taskId": "task-harbour",
+        "title": "Onboard Harbour Mills",
+        "owner": "sam"
+      },
+      {
+        "taskId": "task-quayside",
+        "title": "Onboard Quayside Coffee",
+        "owner": "maya"
+      }
+    ]
+  },
+  "thread": {
+    "channel": "onboarding",
+    "pinStop": 3,
+    "pinLabelFallback": "Decision recorded on the task",
+    "messages": [
+      {
+        "at": "10:30",
+        "from": "sam",
+        "body": "Bluefin wants weekly reporting, not monthly. Does that change the contract?"
+      },
+      {
+        "at": "10:34",
+        "from": "maya",
+        "body": "It does. Finance has to sign the addendum before we go live."
+      },
+      {
+        "at": "10:36",
+        "from": "sidekick",
+        "body": "Decision: weekly reporting, contract addendum needed.",
+        "pinnedToTask": true
+      }
+    ]
+  },
+  "contract": {
+    "id": "contract-bluefin-v2",
+    "title": "Bluefin Foods services agreement v2",
+    "clause": "Reporting cadence",
+    "clauseBody": "Reporting is delivered weekly, each Monday by 12:00, for the term of the agreement.",
+    "linkedPolicy": "Client reporting",
+    "attachedAt": "11:15"
+  },
+  "huddle": {
+    "at": "2:15",
+    "minutes": 15,
+    "with": "priya",
+    "title": "Finance sign off, Bluefin",
+    "kind": "huddle"
+  },
+  "timer": {
+    "loggedMs": 7800000,
+    "loggedLabel": "2h 10m"
+  },
+  "kudos": {
+    "at": "6:02",
+    "from": "maya",
+    "to": "sam",
+    "value": "Own it",
+    "message": "Took the addendum to Finance the same afternoon and closed it.",
+    "landsOn": "Sam's review timeline as evidence against the KRA"
+  },
+  "review": {
+    "personId": "sam",
+    "cycle": "Q3",
+    "timeline": [
+      {
+        "at": "Jul",
+        "kind": "kpi",
+        "label": "Onboarding cycle time, 9.4 days"
+      },
+      {
+        "at": "Aug",
+        "kind": "kpi",
+        "label": "Onboarding cycle time, 8.8 days"
+      },
+      {
+        "at": "Sep",
+        "kind": "kudos",
+        "label": "Kudos, Own it, from Maya"
+      },
+      {
+        "at": "Sep",
+        "kind": "kra",
+        "label": "Client onboarding runs on time, 88 percent"
+      }
+    ]
+  },
+  "table": {
+    "name": "Clients",
+    "formulaBar": "=IF([Closed]-[Signed]<=10, \"Inside SLA\", \"Over\")",
+    "columns": [
+      "Client",
+      "Signed",
+      "Owner",
+      "Cycle days",
+      "SLA"
+    ],
+    "rows": [
+      {
+        "n": 39,
+        "cells": [
+          "Quayside Coffee",
+          "Aug 26",
+          "MD",
+          "7",
+          "Inside SLA"
+        ]
+      },
+      {
+        "n": 40,
+        "cells": [
+          "Harbour Mills",
+          "Sep 01",
+          "SO",
+          "9",
+          "Inside SLA"
+        ]
+      },
+      {
+        "n": 41,
+        "cells": [
+          "Bluefin Foods",
+          "Sep 16",
+          "SO",
+          "8",
+          "Inside SLA"
+        ],
+        "highlight": true
+      }
+    ]
+  },
+  "askAi": {
+    "question": "Is Q3 on track?",
+    "answer": [
+      "Onboarding is on track. The 10 day goal sits at 64 percent with three of four onboardings this month inside SLA.",
+      "One process has three open steps, all on Bluefin Foods, all owned.",
+      "Nothing is blocked right now. The one block today cleared in 30 minutes."
+    ],
+    "sources": [
+      {
+        "dot": "green",
+        "label": "Goal: 10 day onboarding, 64 percent"
+      },
+      {
+        "dot": "yellow",
+        "label": "SOP: 3 open steps"
+      },
+      {
+        "dot": "blue",
+        "label": "Task: Onboard Bluefin Foods, in progress"
+      },
+      {
+        "dot": "red",
+        "label": "Blocked 2:00 to 2:30, resolved"
+      }
+    ]
+  },
+  "receipt": {
+    "title": "ONBOARD BLUEFIN FOODS",
+    "meta": "Tuesday",
+    "lines": [
+      {
+        "time": "9:02",
+        "label": "Row 41 written by form",
+        "modules": [
+          "Tables"
+        ]
+      },
+      {
+        "time": "9:03",
+        "label": "SOP step 3 live, owner by role",
+        "labelFallback": "SOP step 3 live, owner named on the SOP",
+        "stop": 1,
+        "modules": [
+          "Docs",
+          "Teams"
+        ],
+        "dot": "yellow"
+      },
+      {
+        "time": "9:04",
+        "label": "Onboarding board, Sam's Today",
+        "modules": [
+          "Work"
+        ],
+        "dot": "blue"
+      },
+      {
+        "time": "10:30",
+        "label": "Decision from #onboarding",
+        "labelFallback": "Decision recorded on the task, thread linked",
+        "stop": 3,
+        "modules": [
+          "Talk"
+        ]
+      },
+      {
+        "time": "11:15",
+        "label": "Contract v2 attached",
+        "modules": [
+          "Docs"
+        ]
+      },
+      {
+        "time": "2:00",
+        "label": "Blocked: finance sign off",
+        "modules": [
+          "Work"
+        ],
+        "dot": "red"
+      },
+      {
+        "time": "2:15",
+        "label": "Call with Priya, 15 min",
+        "modules": [
+          "Planner"
+        ]
+      },
+      {
+        "time": "2:30",
+        "label": "Unblocked, 2h 10m logged",
+        "modules": [
+          "Planner"
+        ]
+      },
+      {
+        "time": "4:45",
+        "label": "KPI +1, Goal 64 percent, On track",
+        "labelFallback": "Done, on the goal's Effort card, goal 64 percent",
+        "stop": 5,
+        "modules": [
+          "Goals"
+        ],
+        "dot": "green"
+      },
+      {
+        "time": "6:00",
+        "label": "Asked: is Q3 on track? Four sources",
+        "labelFallback": "Asked: is Q3 on track? Sources from the linked work",
+        "stop": 6,
+        "modules": [
+          "AI"
+        ]
+      },
+      {
+        "time": "6:02",
+        "label": "Kudos \"Own it\" to review evidence",
+        "labelFallback": "Kudos \"Own it\" recorded for Sam",
+        "stop": 6,
+        "modules": [
+          "Teams"
+        ]
+      }
+    ],
+    "totals": [
+      "1 task",
+      "8 modules",
+      "0 tabs switched",
+      "0 status meetings"
+    ]
+  },
+  "stops": [
+    {
+      "n": 1,
+      "id": "people-to-process",
+      "clock": "9:03",
+      "clockRange": "9:02 to 9:03",
+      "title": "People to Process",
+      "headline": "Every role knows its process.",
+      "narration": "Roles carry KRAs. KRAs own SOPs. Nobody has to ask who does this.",
+      "left": {
+        "hub": "teams",
+        "surface": "role-page"
+      },
+      "right": {
+        "hub": "docs",
+        "surface": "sop-doc"
+      },
+      "wireLabel": "Owned by: Onboarding lead",
+      "wireLabelFallback": "Owned by: Sam, Onboarding lead",
+      "dot": "yellow",
+      "trail": "9:02 Row 41 in Clients. 9:03 SOP step 3 live",
+      "truthGate": {
+        "mechanism": "Role page with KRA and KPI, SOP owned by a role, step attached to a KPI",
+        "shipped": false,
+        "status": "Role definition page built, SOP centre shipped, SOP to KPI link not confirmed",
+        "fallbackNarration": "The SOP names its owner and the Role page carries the KRA. The wire reads: Owned by Sam, Onboarding lead."
+      },
+      "trailFallback": "9:02 Row 41 in Clients. 9:03 SOP step 3, owner named"
+    },
+    {
+      "n": 2,
+      "id": "process-to-work",
+      "clock": "9:04",
+      "clockRange": "9:04",
+      "title": "Process to Work",
+      "headline": "Every process becomes work.",
+      "narration": "The SOP step turns into the task with the right owner attached. Sam did not need to be told.",
+      "left": {
+        "hub": "docs",
+        "surface": "sop-doc"
+      },
+      "right": {
+        "hub": "work",
+        "surface": "board-list"
+      },
+      "wireLabel": "Step 3 to the list",
+      "wireLabelFallback": "Step 3, linked to the task",
+      "dot": "blue",
+      "trail": "9:04 Born from SOP step 3, owner by role to Sam",
+      "truthGate": {
+        "mechanism": "The SOP step spawns the task with the owner resolved from the role",
+        "shipped": false,
+        "status": "SOP run execution deferred, RoleInstance migration pending, no SOP surface calls createBoardItem",
+        "fallbackNarration": "Sam creates the task on the onboarding list and links it to step 3 of the SOP and to the KPI it moves. The links are what every other block reads."
+      },
+      "trailFallback": "9:04 On the Onboarding board and in Sam's Today, linked to SOP step 3"
+    },
+    {
+      "n": 3,
+      "id": "work-and-talk",
+      "clock": "10:30",
+      "clockRange": "10:30 to 11:15",
+      "title": "Work and Talk",
+      "headline": "The conversation lives on the task.",
+      "narration": "Not in a thread nobody can find.",
+      "left": {
+        "hub": "work",
+        "surface": "board-list-drawer"
+      },
+      "right": {
+        "hub": "talk",
+        "surface": "talk-thread"
+      },
+      "wireLabel": "Decision to the task",
+      "wireLabelFallback": "Decision recorded on the task",
+      "dot": null,
+      "trail": "10:30 Decision from #onboarding. 11:15 Contract v2 attached",
+      "truthGate": {
+        "mechanism": "A Talk thread referencing the task, a pinned summary on the task, the contract attached",
+        "shipped": false,
+        "status": "Channels and threads shipped, contracts and attachments shipped, task reference from Talk not confirmed",
+        "fallbackNarration": "Maya posts the decision as a comment on the task and links the thread beside it."
+      },
+      "trailFallback": "10:30 Decision recorded on the task. 11:15 Contract v2 attached"
+    },
+    {
+      "n": 4,
+      "id": "blocked-to-unblocked",
+      "clock": "2:30",
+      "clockRange": "2:00 to 2:30",
+      "title": "Blocked to unblocked",
+      "headline": "Blocked doesn't mean stuck.",
+      "narration": "The system knows who unblocks it. It takes a 15 minute call, not a day.",
+      "left": {
+        "hub": "work",
+        "surface": "board-list-blocked"
+      },
+      "right": {
+        "hub": "planner",
+        "surface": "planner-week"
+      },
+      "wireLabel": "Status changed, Finance notified",
+      "wireLabelFallback": "Sam mentions Priya from the task",
+      "dot": "red",
+      "trail": "2:00 Blocked. 2:15 Call with Finance. 2:30 Unblocked, 2h 10m logged",
+      "truthGate": {
+        "mechanism": "An automation notifying the role owner on a status change, plus the call and the timer",
+        "shipped": false,
+        "status": "Calls and TimerSession shipped, task.status_changed really emits, but no action resolves a role to its holder",
+        "fallbackNarration": "Sam mentions Priya from the task. The call and the timer are real."
+      }
+    },
+    {
+      "n": 5,
+      "id": "work-to-goals",
+      "clock": "4:45",
+      "clockRange": "4:45",
+      "title": "Work to Goals",
+      "headline": "Every task moves a goal.",
+      "narration": "The goal moved because the work moved. Nobody updated a spreadsheet.",
+      "left": {
+        "hub": "work",
+        "surface": "board-list-done"
+      },
+      "right": {
+        "hub": "goals",
+        "surface": "goal-detail"
+      },
+      "wireLabel": "KPI +1",
+      "wireLabelFallback": "The task is linked to the KPI",
+      "dot": "green",
+      "trail": "4:45 KPI +1. Goal 64 percent. On track",
+      "truthGate": {
+        "mechanism": "Completing the task writes the KPI record, which moves goal progress, with the Effort card and the on track verdict beside it",
+        "shipped": false,
+        "status": "The Effort card from linked KRA tasks, goal rollups and the deterministic on track verdict all ship. Completing a task writes no KPI record: every KPIRecord in the repo comes from a person or an external door, so the ring does not move by itself.",
+        "fallbackNarration": "The task lands on the goal's Effort card the moment it is linked. The KPI reading is recorded by whoever owns it, and the ring moves with the reading."
+      },
+      "trailFallback": "4:45 Done, and on the goal's Effort card. Goal 64 percent, on track"
+    },
+    {
+      "n": 6,
+      "id": "the-close",
+      "clock": "6:02",
+      "clockRange": "6:02",
+      "title": "The close",
+      "headline": "Ask anything. It knows because it's connected.",
+      "narration": "At 6:02 the manager knows the quarter is on track. She didn't ask anyone.",
+      "left": {
+        "hub": "work",
+        "surface": "shell"
+      },
+      "right": {
+        "hub": "ai",
+        "surface": "ask-ai"
+      },
+      "wireLabel": "Four sources, four blocks",
+      "wireLabelFallback": "Sources from the linked work",
+      "dot": "all",
+      "trail": "6:02 Kudos \"Own it\" to review evidence",
+      "truthGate": {
+        "mechanism": "A Sidekick answer with four source chips, kudos landing as review evidence, the task connection trail",
+        "shipped": false,
+        "status": "Kudos with values shipped. The connection trail is a new product feature and the receipt renders from this fixture until it lands",
+        "fallbackNarration": "Ask reads the workspace it is in. Naming the records behind an answer is in build, and so is filing a kudos as review evidence. The receipt is the Tuesday workspace template's own trail."
+      },
+      "trailFallback": "6:02 Kudos \"Own it\" recorded for Sam"
+    }
+  ],
+  "beats": [
+    {
+      "n": 1,
+      "clock": "9:02",
+      "hubs": [
+        "tables"
+      ],
+      "headline": "The form writes the row.",
+      "narration": "Bluefin signs. Row 41 lands in Clients. Nobody retypes it.",
+      "stop": 1,
+      "fallbackNarration": "Bluefin signs. Row 41 lands in Clients. The onboarding SOP names its owner beside it."
+    },
+    {
+      "n": 2,
+      "clock": "9:03",
+      "hubs": [
+        "teams",
+        "docs"
+      ],
+      "headline": "Every role knows its process.",
+      "narration": "The Onboarding lead role carries the KRA. The KRA owns the SOP.",
+      "stop": 1,
+      "fallbackNarration": "The SOP names its owner and the Role page carries the KRA: owned by Sam, Onboarding lead."
+    },
+    {
+      "n": 3,
+      "clock": "9:04",
+      "hubs": [
+        "docs",
+        "work"
+      ],
+      "headline": "Every process becomes work.",
+      "narration": "Step 3 becomes the task, with Sam on it because Sam holds the role.",
+      "stop": 2,
+      "fallbackNarration": "Sam applies the onboarding template. The SOP and the KPI come with it."
+    },
+    {
+      "n": 4,
+      "clock": "10:30",
+      "hubs": [
+        "talk",
+        "work"
+      ],
+      "headline": "The conversation lives on the task.",
+      "narration": "Weekly reporting, not monthly. The decision lands where the work is.",
+      "stop": 3,
+      "fallbackNarration": "Maya posts the decision as a comment on the task and links the thread beside it."
+    },
+    {
+      "n": 5,
+      "clock": "11:15",
+      "hubs": [
+        "docs",
+        "work"
+      ],
+      "headline": "The paperwork follows.",
+      "narration": "Contract v2 carries the reporting clause and attaches to the task.",
+      "stop": 3,
+      "fallbackNarration": "Contract v2 carries the reporting clause and is attached to the task as a file.",
+      "surfaces": {
+        "docs": "contract-doc"
+      }
+    },
+    {
+      "n": 6,
+      "clock": "2:00",
+      "hubs": [
+        "work",
+        "planner"
+      ],
+      "headline": "Blocked doesn't mean stuck.",
+      "narration": "Finance sign off blocks it at 2:00. A 15 minute call clears it by 2:30.",
+      "stop": 4,
+      "fallbackNarration": "Sam mentions Priya from the task. The call and the timer are real: 15 minutes at 2:15, 2h 10m logged."
+    },
+    {
+      "n": 7,
+      "clock": "4:45",
+      "hubs": [
+        "work",
+        "goals"
+      ],
+      "headline": "Every task moves a goal.",
+      "narration": "Done at 4:45. The KPI records. The ring moves to 64 percent.",
+      "stop": 5,
+      "fallbackNarration": "Done at 4:45, and on the goal's Effort card. The KPI reading is recorded by its owner, and the ring moves with it."
+    },
+    {
+      "n": 8,
+      "clock": "6:02",
+      "hubs": [
+        "ai",
+        "teams"
+      ],
+      "headline": "Ask anything. It knows because it's connected.",
+      "narration": "Four sources, one answer, and a kudos that becomes review evidence.",
+      "stop": 6,
+      "fallbackNarration": "Ask reads the workspace it is in. Naming the records behind an answer is in build, and so is filing the kudos as review evidence."
+    }
+  ]
+}

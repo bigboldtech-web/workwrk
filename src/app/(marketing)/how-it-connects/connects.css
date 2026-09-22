@@ -1,0 +1,10 @@
+/* /how-it-connects: the page around the map.
+ *
+ * The map itself is styled by connect.css, which travels with the island.
+ * All this sheet owns is the one inline link colour the page uses outside a
+ * CTA, kept here rather than written as a style attribute in four places.
+ */
+
+.mk-hic-link {
+  color: var(--os-brand-deep);
+}

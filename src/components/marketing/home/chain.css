@@ -1,0 +1,369 @@
+/* The chain of ownership: the home page's own sheet.
+ *
+ * It replaces the 2,414 line snap-and-pin stylesheet that drove the
+ * rejected composition. Everything here serves eight rules, and each rule
+ * is a thing a reviewer can fail a section on:
+ *
+ *   1. One idea per screen. One section, one statement, one object.
+ *   2. Few words, enormous type. The claim is 80px at 1440 and six words.
+ *   3. Whitespace is the design. 160px between sections, 200px around a
+ *      statement, and nothing crowds a headline.
+ *   4. One object per section, centred and large.
+ *   5. No card grid, no badge row, no logo wall.
+ *   6. Power words, plain words. That one is the copy's job, not this file's.
+ *   7. Motion is one move. One fade and rise on entry, once, never a loop.
+ *   8. Colour is almost absent. Near black on white. The one blue appears
+ *      once on the page, on the closing button. Every other colour on the
+ *      page is inside a product frame, where it belongs.
+ *
+ * The type sizes are authored here rather than taken from the mk-display
+ * ramp because the ramp tops out at 72px and the claim needs 80. Everything
+ * else on the page reads the same tokens the rest of the site does.
+ */
+
+.mk-chain {
+  /* The ramp. Fluid, so there is one number per role and no breakpoint
+     table to keep in step with a second one. */
+  /* 6.3vw, not 5.6vw. The brief's one measurable rule is "72px or larger on
+     desktop", and at 5.6vw the site's loudest claim measured 71.68px at
+     1280: under the floor by a third of a pixel, on one of the two commonest
+     laptop widths. 80 / 1270 = 6.3vw, so the ceiling is reached just below
+     1280 and the claim is never the thing that fails the rule. */
+  --chain-h1: clamp(44px, 6.3vw, 80px);
+  --chain-h2: clamp(32px, 3.4vw, 48px);
+  --chain-fig: clamp(64px, 8vw, 116px);
+  --chain-name: clamp(26px, 2.6vw, 38px);
+  --chain-sub: clamp(17px, 1.5vw, 22px);
+  --chain-line: clamp(16px, 1.25vw, 19px);
+  --chain-gutter: 20px;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .mk-chain { --chain-gutter: 24px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The band. One per idea, and it owns its share of the page.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-sec {
+  padding-block: 88px;
+  /* A section is a stack: its parts sit under each other, centred, with
+     the object last. No section on this page is a row of things. */
+  display: block;
+}
+
+/* A statement gets more air than a beat, because a sentence with nothing
+   around it is the whole of its design. */
+.chain-sec[data-air="wide"] { padding-block: 112px; }
+
+/* The hero carries the navigation above it, so its top padding is smaller
+   than its bottom: the air the nav already supplies is not paid for twice. */
+.chain-sec[data-air="hero"] { padding-block: 64px 88px; }
+
+@media (min-width: 768px) {
+  .chain-sec { padding-block: 160px; }
+  .chain-sec[data-air="wide"] { padding-block: 200px; }
+  .chain-sec[data-air="hero"] { padding-block: 104px 120px; }
+}
+
+/* The one alternate ground, used twice on the page and nowhere else: the
+   problem and the payoff. Two quiet grey bands in ten sections is the
+   rhythm; a third would make white the exception. */
+.chain-sec[data-ground="quiet"] { background: var(--os-surface-1); }
+
+.chain-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: var(--chain-gutter);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Type.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-eyebrow {
+  margin: 0 0 20px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  /* ink 2, not ink 3. An eyebrow is read, so it clears 4.5 to 1. */
+  color: var(--os-ink-2);
+}
+
+/* The numbered label on a chain beat. The numeral is what makes four
+   sections read as one sequence rather than four features. */
+.chain-eyebrow .chain-n {
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+  margin-inline-end: 10px;
+}
+
+.chain-h1 {
+  margin: 0 auto;
+  max-width: 17ch;
+  font-size: var(--chain-h1);
+  font-weight: 600;
+  line-height: 1.03;
+  letter-spacing: -0.022em;
+  color: var(--os-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.chain-h2 {
+  margin: 0 auto;
+  max-width: 18ch;
+  font-size: var(--chain-h2);
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.chain-sub {
+  margin: 20px auto 0;
+  max-width: 34ch;
+  font-size: var(--chain-sub);
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--os-ink-2);
+  /* `balance`, not `pretty`. A centred sentence of two lines reads as one
+     shape only if the lines are the same length: `pretty` left "travel
+     with" on line one and "the work." alone on line two. */
+  text-wrap: balance;
+}
+
+@media (min-width: 768px) {
+  .chain-sub { margin-top: 28px; max-width: 38ch; }
+}
+
+.chain-line {
+  margin: 20px auto 0;
+  max-width: 44ch;
+  font-size: var(--chain-line);
+  line-height: 1.5;
+  color: var(--os-ink-2);
+  /* Same reason as the subhead: a centred line breaks into even halves
+     rather than leaving two words alone on the second. */
+  text-wrap: balance;
+}
+
+.chain-center { text-align: center; }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The object. One per section, centred, as large as the column allows.
+ *
+ * A product frame sizes itself: MarketingShell reads the width of the
+ * column it is given through a container query and re-lays the product out
+ * rather than shrinking its 14px text below the legibility floor. So the
+ * only thing this rule does is centre it and give it its air.
+ *
+ * THE FRAME IS WHOLE AND LEGIBLE AT REST. The composition this page
+ * replaces held the frame's canvas, sidebar, crumb and search at opacity 0
+ * until a scroll scrub passed 0.35, so the object the entire hero pointed
+ * at was an empty white rectangle in every screenshot, every link preview
+ * and every visit that did not scroll. Nothing on this page is revealed by
+ * scrolling. What the first paint shows is the whole picture.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* A BLOCK, NOT A FLEX ROW, and this is the whole of it.
+ *
+ * `.mk-shell-scroll` declares `container-type: inline-size`, which is also
+ * `contain: inline-size`: the element's own width may not be decided by its
+ * contents. As a flex item it therefore has nothing to size from, so it
+ * resolved to a few hundred pixels, the container query picked the
+ * narrowest band, and the hero's product frame rendered at about a fifth
+ * of the column while the page around it had 1,150px to give it.
+ *
+ * So the object is a plain block: the figure fills the column, the query
+ * measures the column, the frame lays itself out to fit it, and the scaled
+ * box is centred with an auto margin instead of a flex rule. */
+.chain-obj { margin-top: 48px; }
+
+.chain-obj .mk-scale { margin-inline: auto; }
+
+/* THE PAGE IS CENTRED. THE PRODUCT IS NOT.
+ *
+ * Every band on this page sets `text-align: center`, and text alignment
+ * inherits, so it reached inside the frames: the role page's Boundaries
+ * list, the goal's verdict and the SOP's step text all rendered centred,
+ * which is the site restyling the product. The product's chrome is fixed
+ * wherever it appears, and that includes which edge a sentence starts at.
+ *
+ * The figure's caption is the site's own line about the sample workspace,
+ * not the product's, so it keeps the centre. */
+.chain-obj .mk-shell { text-align: start; }
+
+@media (min-width: 768px) {
+  .chain-obj { margin-top: 60px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The number, which is the object of the problem section.
+ *
+ * It is set well under the claim's size on purpose. Nobody in this register
+ * sets a statistic at hero scale: the figure carries the caption, and the
+ * caption is what makes a number credible.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-fig {
+  margin: 0;
+  font-size: var(--chain-fig);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  /* The tracking pulls the letters together and leaves the word space
+     looking like a gap, so the space is pulled in with them. */
+  word-spacing: -0.06em;
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-figcap {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The rest of the system: a list that reads as a headline.
+ *
+ * Eight names stacked and centred at display weight, one line of plain
+ * words under each. No cards, no borders, no icons, no chevrons. A grid of
+ * eight tiles is what every rival does and it is the least memorable
+ * section on any of their pages.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-mods {
+  list-style: none;
+  margin: 56px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 36px;
+}
+
+@media (min-width: 768px) {
+  .chain-mods { margin-top: 72px; gap: 44px; }
+}
+
+.chain-mod { text-align: center; }
+
+.chain-modname {
+  display: block;
+  font-size: var(--chain-name);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+
+.chain-modline {
+  display: block;
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Proof, and the shape of it is the argument.
+ *
+ * Three short facts, no figures, no badges, no borders. Two of the three
+ * are what we do NOT have, and they are read from the flags rather than
+ * typed, so the day a certification or a customer story is real the words
+ * change with it and not before.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-proof {
+  margin: 56px auto 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 40px;
+  max-width: 1000px;
+}
+
+@media (min-width: 860px) {
+  .chain-proof {
+    margin-top: 72px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 48px;
+  }
+}
+
+.chain-proof > li { text-align: center; min-width: 0; }
+
+.chain-prooflead {
+  display: block;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--os-ink);
+}
+
+.chain-proofline {
+  display: block;
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink-2);
+}
+
+/* Ink, not blue. The page spends its one blue on the closing button. */
+.chain-prooflink {
+  color: var(--os-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--os-line-strong);
+}
+.chain-prooflink:hover { text-decoration-color: var(--os-ink); }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The close. One line, one button, nothing else in the band.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-cta {
+  margin-top: 44px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Motion, and there is one move on this page.
+ *
+ * A section fades and rises 24px on entry, once, and never again. Nothing
+ * loops, nothing parallaxes, nothing is pinned, and no element is hidden
+ * waiting for a scroll: the island in reveal.client.tsx only ever hides a
+ * block that is already BELOW the fold, so a visitor with no JavaScript, a
+ * crawler, a link preview and a printed page all get the finished page.
+ * ───────────────────────────────────────────────────────────────── */
+
+.chain-reveal[data-state="hidden"] {
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.chain-reveal[data-state="in"] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chain-reveal[data-state="hidden"],
+  .chain-reveal[data-state="in"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

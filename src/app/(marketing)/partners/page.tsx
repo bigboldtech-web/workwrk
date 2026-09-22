@@ -1,137 +1,84 @@
+// /partners, rewritten.
+//
+// What was here: three partner tracks with published economics ("20% rev
+// share for the first year", "30% margin on first-year ACV", "Pays within
+// 30 days of customer pay"), a partner portal with real time pipeline and
+// commission tracking, co-marketing including joint webinars and conference
+// sponsorship, and an "Active partners" strip naming eight consulting firms.
+// None of it exists: there is no programme, no portal, no commission
+// schedule and no partner. The eight names are the same class of invention
+// as a customer logo wall, and the on-brand rule bans both outright.
+//
+// A partner page with nothing behind it is still worth keeping, because the
+// people who land on it are exactly the people worth talking to. It just has
+// to say what is true, which is: not yet, and here is what we would want.
+
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Handshake, Wrench, Code, BarChart3, DollarSign, Globe } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  Button,
-  CTABand,
-  FeatureCard,
-  GradientText,
-  HUES,
-  type Hue,
-} from "@/components/marketing/primitives";
+
+import { mailboxes } from "@/components/marketing/config";
+import { Band, Claim, Eyebrow, Headline, Note, Page, Stack, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Partners — WorkwrK",
-  description: "Build with us. Three partner tracks: implementation, integration, and resell. Generous economics, real co-marketing, no lock-in.",
+  title: "Partners",
+  description:
+    "There is no partner programme yet: no portal, no published economics, no signed partners. What we would want from one, and how to start the conversation.",
   alternates: { canonical: "https://workwrk.com/partners" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "Partners",
+    description: "No programme yet. What we would want from one, and how to start.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "No programme yet. What we would want from one, and how to start." },
 };
 
-const PROGRAMS: readonly { hue: Hue; icon: typeof Wrench; title: string; body: string; reward: string }[] = [
+const WANTED: readonly { title: string; body: string }[] = [
   {
-    hue: "violet",  icon: Wrench, title: "Implementation Partners",
-    body: "Consulting firms, agencies, and operators who help customers roll out workwrk. Get certified, get qualified leads.",
-    reward: "20% rev share for the first year",
+    title: "People who implement",
+    body: "Consultants and operators who set a company up properly: the roles, the result areas, the measures and the first three processes. That first fortnight is the whole difference between a workspace that sticks and one that does not.",
   },
   {
-    hue: "emerald", icon: Code, title: "Integration Partners",
-    body: "Software companies whose product belongs next to workwrk. Build a native integration, get featured, drive mutual adoption.",
-    reward: "Co-marketing + GTM support",
+    title: "People who know one trade deeply",
+    body: "The industry pages on this site describe arrangements, not templates. Someone who has run operations in a trade knows the arrangement better than we do, and that is worth building a programme around.",
   },
   {
-    hue: "fuchsia", icon: DollarSign, title: "Reseller Partners",
-    body: "Distributors and VARs in India, UAE, SEA who sell workwrk to their book of business. Generous economics, full GTM enablement.",
-    reward: "30% margin on first-year ACV",
+    title: "People who build on the API",
+    body: "There is a v1 REST API and an OpenAPI document, and no connector to any third party product. If you would build one, we would rather it be a partnership than a support ticket.",
   },
 ];
 
-const PARTNERS_PREVIEW = ["Brindle Consulting", "Quartz Implementation", "Apex Cloud Group", "Helix Advisors", "Stratus Partners", "Numero One", "Edge Catalyst", "Flux GTM"];
-
 export default function PartnersPage() {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="emerald" className="mb-5">Partners</Eyebrow>
-            <H1>
-              Build with us. <br />
-              <GradientText hue="emerald">Grow with us.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              Three partner tracks, generous economics, real co-marketing, and a
-              support team that actually picks up the phone. No lock-in, no
-              exclusivity, no NDA-only nonsense.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="mailto:partners@workwrk.com" variant="secondary" hue="emerald" size="lg" rightIcon={<ArrowRight size={15} />}>
-                Become a partner
-              </Button>
-              <Button href="/developers" variant="outline" size="lg">For developers</Button>
-            </div>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      <Band air="hero" labelledBy="partners-h1" still>
+        <Eyebrow>Partners</Eyebrow>
+        <Claim id="partners-h1">There is no programme yet.</Claim>
+        <Sub>No portal, no certification, no published revenue share, and no partners to name.</Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue="fuchsia" className="mb-4">Three tracks</Eyebrow>
-            <H2>Pick the partner program <GradientText hue="fuchsia">that fits.</GradientText></H2>
-          </div>
-          <div className="mt-10 grid md:grid-cols-3 gap-5">
-            {PROGRAMS.map((p) => {
-              const t = HUES[p.hue];
-              return (
-                <div key={p.title} className="relative p-7 bg-white border border-slate-200 rounded-2xl">
-                  <div className={`absolute inset-x-0 -top-px h-[3px] bg-gradient-to-r ${t.gradVia}`} aria-hidden />
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
-                    <p.icon size={20} strokeWidth={2.4} />
-                  </div>
-                  <p className="mt-5 font-bold text-slate-900 text-lg tracking-tight">{p.title}</p>
-                  <p className="mt-2 text-base text-slate-600 leading-relaxed">{p.body}</p>
-                  <div className={`mt-5 inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
-                    {p.reward}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Container>
-      </Section>
-
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue="violet" className="mb-4">What you get</Eyebrow>
-              <H2>Everything to land + grow.</H2>
-              <p className="mt-4 text-slate-600">No bait-and-switch. The same things our own GTM team gets.</p>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <FeatureCard hue="violet" icon={Handshake}  title="Qualified pipeline"   body="Pre-vetted leads from our inbound funnel routed to certified partners." />
-              <FeatureCard hue="emerald" icon={BarChart3} title="Partner portal"        body="Real-time pipeline, commission tracking, marketing collateral, certification." />
-              <FeatureCard hue="amber"  icon={Globe}      title="Co-marketing"           body="Featured logos, joint webinars, customer story development, conference sponsorships." />
-              <FeatureCard hue="fuchsia" icon={DollarSign} title="Generous economics"   body="20–30% revenue share. Stacks across multi-year deals. Pays within 30 days of customer pay." />
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      <Section py="md">
-        <Container>
-          <div className="text-center">
-            <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Active partners</p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
-              {PARTNERS_PREVIEW.map((p) => (
-                <span key={p} className="text-slate-400 font-bold text-lg tracking-tight">{p}</span>
-              ))}
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      <CTABand
-        hue="emerald"
-        title={<>Ready to <GradientText hue="amber">partner</GradientText>?</>}
-        body="Fill out a short form. We'll get back to you within 3 business days."
-        primary={{ label: "Apply to partner program", href: "mailto:partners@workwrk.com" }}
-        secondary={{ label: "Talk to our team",        href: "/contact" }}
-      />
-    </>
+      <Band ground="quiet" labelledBy="partners-want">
+        <Eyebrow>Later</Eyebrow>
+        <Headline id="partners-want">Who we would build it with.</Headline>
+        <Stack items={WANTED} />
+        <Note>
+          If one of those is you, write to{" "}
+          <a className="ic-a mk-focus" href={`mailto:${mailboxes.sales}`}>
+            {mailboxes.sales}
+          </a>{" "}
+          and we will answer with what we can commit to today. The developer reference is at{" "}
+          <Link className="ic-a mk-focus" href="/developers">
+            /developers
+          </Link>
+          , and what is built and what is not is on the{" "}
+          <Link className="ic-a mk-focus" href="/roadmap">
+            roadmap
+          </Link>
+          .
+        </Note>
+      </Band>
+    </Page>
   );
 }

@@ -1,0 +1,959 @@
+/* ═════════════════════════════════════════════════════════════════
+ * The marketing token scope: `.mk-os`
+ *
+ * design-system.md 13.9 says the marketing-lite surfaces consume the
+ * product's --os-* aliases through MarketingShell in the navy variant.
+ * They cannot simply import the product token file. Three reasons, all
+ * load bearing:
+ *
+ *   1. src/app/(dashboard)/tokens.css declares its tokens on :root and
+ *      also sets `font-size: 14px`, a background and a colour there. The
+ *      marketing site is a 16px document. Importing that sheet would
+ *      re-scale every rem on the public site.
+ *   2. The same file rebinds every token to the dark palette under
+ *      `prefers-color-scheme: dark` unless html carries
+ *      data-theme="light". Marketing is light only (concept 10, spec 13.14)
+ *      and the marketing layout does not own the html element.
+ *   3. It lives inside the (dashboard) route group, which another unit
+ *      owns.
+ *
+ * So the values are mirrored here, scoped to a class, light locked by
+ * construction. Declaring them on .mk-os also beats any inherited dark
+ * value, because a declaration on the element always wins over one
+ * inherited from :root.
+ *
+ * Drift is not left to discipline: marketing-tokens.test.ts parses both
+ * files and fails when a mirrored token stops matching the light value in
+ * src/app(dashboard)/tokens.css. tokens.css stays the source of truth.
+ *
+ * Two classes, on purpose:
+ *
+ *   .mk-tokens  the VALUES only. Custom properties inherit and paint
+ *               nothing, so the whole site can carry this with no effect on
+ *               a page that has not been rebuilt yet.
+ *   .mk-os      the values PLUS the product's own reading scale and 4px
+ *               grid. Only a product frame wears it, because rebinding the
+ *               font size and the Tailwind spacing unit across a 16px
+ *               marketing document would re-scale every page on the site.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-tokens,
+.mk-os {
+  /* ── Accent: the one blue ─────────────────────────────────────── */
+  --os-brand:         #0073EA;
+  --os-brand-hover:   #0062CC;
+  --os-brand-pressed: #0A4C9B;
+  --os-brand-soft:    #EAF3FE;
+  --os-brand-deep:    #0B5FC2;
+
+  --os-blue-50:  #EAF3FE;
+  --os-blue-100: #D4E7FD;
+  --os-blue-200: #A9CFFB;
+
+  /* ── Neutral ramp ─────────────────────────────────────────────── */
+  --os-n0:   #FFFFFF;
+  --os-n50:  #F6F7F9;
+  --os-n100: #EEF0F3;
+  --os-n200: #E4E7EC;
+  --os-n300: #D0D5DD;
+  --os-n400: #98A2B3;
+  --os-n500: #5C6779;
+  --os-n600: #475467;
+  --os-n700: #344054;
+  --os-n800: #1F2430;
+  --os-n900: #101215;
+
+  /* ── Surfaces ─────────────────────────────────────────────────── */
+  --os-canvas:       #FFFFFF;
+  --os-surface:      #FFFFFF;
+  --os-surface-1:    #F6F7F9;
+  --os-surface-hov:  #EEF0F3;
+  --os-surface-2:    #E4E7EC;
+  --os-selected:     #EAF3FE;
+  --os-selected-hov: #D4E7FD;
+  --os-scrim:        rgba(16, 18, 21, 0.40);
+  --os-inverse-bg:   #1F2430;
+  --os-inverse-fg:   #FFFFFF;
+
+  /* ── Borders ──────────────────────────────────────────────────── */
+  --os-line-soft:   #EEF0F3;
+  --os-line:        #E4E7EC;
+  --os-line-strong: #D0D5DD;
+
+  /* ── Ink ──────────────────────────────────────────────────────── */
+  --os-ink:        #1F2430;
+  --os-ink-2:      #5C6779;
+  --os-ink-strong: #475467;
+  --os-ink-3:      #98A2B3;
+  --os-ink-4:      #D0D5DD;
+  --os-ink-inv:    #FFFFFF;
+
+  /* ── Focus (13.13: blue-200 halo, 2px ring, 2px offset) ───────── */
+  --os-focus:      #0073EA;
+  --os-focus-halo: #A9CFFB;
+
+  /* ── The semantic trio. Status inside a surface uses these and
+     never the brand hexes: a Done chip is semantic green, the 2:00
+     block is semantic danger, not brand red. ───────────────────── */
+  --os-success-bg:    #ECFDF3;
+  --os-success-text:  #15803D;
+  --os-success-solid: #15803D;
+  --os-warning-bg:    #FFFAEB;
+  --os-warning-text:  #854D0E;
+  --os-warning-solid: #FACC15;
+  --os-danger-bg:     #FEF3F2;
+  --os-danger-text:   #B42318;
+  --os-danger-solid:  #D92D20;
+  --os-presence:      #15803D;
+  --os-attention:     #D92D20;
+
+  /* ── Chrome: the navy frame. The only dark element on the whole
+     public site. Blue never sits on it. ────────────────────────── */
+  --os-chrome-bg:        #1B2537;
+  --os-chrome-hov:       #242F44;
+  --os-chrome-fg:        #FFFFFF;
+  --os-chrome-fg-2:      #A3AEC2;
+  --os-chrome-line:      rgba(255, 255, 255, 0.12);
+  --os-chrome-pill:      #FFFFFF;
+  --os-chrome-pill-fg:   #1B2537;
+  --os-chrome-field:     rgba(255, 255, 255, 0.10);
+  --os-chrome-field-fg:  #FFFFFF;
+  --os-chrome-field-ph:  rgba(255, 255, 255, 0.64);
+  --os-chrome-presence:  #4ADE80;
+  --os-chrome-attention: #F87171;
+  --os-side-bg:          #F6F7F9;
+  --os-side-pill:        #E4E7EC;
+
+  /* ── Component tokens ─────────────────────────────────────────── */
+  --os-chip-h:         24px;
+  --os-table-head-bg:  #F6F7F9;
+  --os-table-row-line: #EEF0F3;
+  --os-rail-pill-size: 40px;
+  --os-kbd-bg:         #EEF0F3;
+  --os-skeleton:       #EEF0F3;
+
+  /* ── Type. The nine product sizes, unchanged, so a surface drawn
+     here is the size it is in the product. ─────────────────────── */
+  --os-font:   var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --os-f-mono: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --os-t-rail:       10px; --os-t-rail-lh:       12px;
+  --os-t-micro:      11px; --os-t-micro-lh:      14px;
+  --os-t-meta:       12px; --os-t-meta-lh:       16px;
+  --os-t-helper:     13px; --os-t-helper-lh:     18px;
+  --os-t-body:       14px; --os-t-body-lh:       20px;
+  --os-t-row:        15px; --os-t-row-lh:        22px;
+  --os-t-title:      16px; --os-t-title-lh:      22px;
+  --os-t-page:       22px; --os-t-page-lh:       28px;
+
+  /* ── Rhythm ───────────────────────────────────────────────────── */
+  --os-r-xs:   4px;
+  --os-r-sm:   6px;
+  --os-r-md:   8px;
+  --os-r-lg:   12px;
+  --os-r-pill: 999px;
+
+  --os-shadow-pop:   0 8px 24px rgba(16, 18, 21, 0.12);
+  --os-shadow-modal: 0 8px 32px rgba(16, 18, 21, 0.16);
+
+  --os-rail-w:    64px;
+  --os-side-w:    264px;
+  --os-top-h:     48px;
+  --os-head-h:    48px;
+  --os-views-h:   36px;
+  --os-toolbar-h: 44px;
+  --os-row-h:     44px;
+  --os-nav-row-h: 36px;
+  --os-control-h: 36px;
+  --os-page-pad:  24px;
+  --os-card-pad:  16px;
+
+  --os-dur-fast: 120ms;
+  --os-dur-base: 160ms;
+  --os-dur-slow: 220ms;
+  --os-ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The frame's own scale. The product frame is drawn on the 4px grid in px:
+   Tailwind's spacing and radius utilities are theme driven, so rebinding
+   them inside the frame makes h-9 render at 36 and rounded-md at 6, exactly
+   as in the product, inside a 16px marketing document. This block is why
+   .mk-os goes on a frame and never on the page. */
+.mk-os {
+  --spacing: 4px;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  font-family: var(--os-font);
+  font-size: var(--os-t-body);
+  line-height: var(--os-t-body-lh);
+  color: var(--os-ink);
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Row type is a container property, exactly as in the product: the table
+   card, the sidebar tree and the views row carry .os-row and their
+   children inherit it. */
+.mk-os .os-row {
+  font-size: var(--os-t-row);
+  line-height: var(--os-t-row-lh);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * The marketing display ramp. Marketing only, as design-system 2.2
+ * words it: display 48 to 72 at ONE weight, leading 1.05, on white.
+ * Only Inter 400, 500 and 600 are loaded by the root layout, so the
+ * one weight is 600. Nothing here is 700 or 800; a synthesised bold
+ * is what made the old marketing headlines look like a different
+ * typeface from the product.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-type {
+  /* The three display steps, largest first. The concept writes them as
+     48 mobile and 64 to 72 desktop; that is one ramp read at three
+     breakpoints, not three separate ramps. */
+  --mk-display-1: 72px;
+  --mk-display-2: 64px;
+  --mk-display-3: 48px;
+  /* 600 is the one weight. The root layout loads Inter 400, 500 and 600
+     only, so 700 and 800 would be synthesised: that faux bold is what made
+     the old marketing headlines photograph as a different typeface from
+     the product. */
+  --mk-display-weight: 600;
+  --mk-display-leading: 1.05;
+  --mk-body: 16px;
+  --mk-body-leading: 1.55;
+  --mk-caption: 13px;
+  --mk-label: 12px;
+  --mk-label-weight: 600;
+}
+
+/* THE display ramp is 48 to 72, and nothing wearing a `mk-display-` class
+   is allowed outside it. The earlier version invented a 40px and a 32px
+   step under those names, which is not the ramp design-system 2.2 specifies
+   and, worse, made "display" mean two different things on one page.
+
+   A section heading is not display type. It gets `mk-title`, below, which
+   is the product's own heading scale rather than a fourth invention. */
+.mk-display-lg,
+.mk-display-md,
+.mk-display-sm {
+  font-weight: var(--mk-display-weight, 600);
+  line-height: var(--mk-display-leading, 1.05);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  /* A 72px word is the usual cause of a page that scrolls sideways on a
+     phone, so the ramp breaks a long word rather than running off. */
+  overflow-wrap: break-word;
+  margin: 0;
+}
+.mk-display-lg { font-size: var(--mk-display-3, 48px); }
+.mk-display-md { font-size: var(--mk-display-3, 48px); }
+.mk-display-sm { font-size: var(--mk-display-3, 48px); }
+
+@media (min-width: 768px) {
+  .mk-display-lg { font-size: var(--mk-display-2, 64px); }
+  .mk-display-md { font-size: var(--mk-display-3, 48px); }
+  .mk-display-sm { font-size: var(--mk-display-3, 48px); }
+}
+@media (min-width: 1280px) {
+  .mk-display-lg { font-size: var(--mk-display-1, 72px); }
+  .mk-display-md { font-size: var(--mk-display-2, 64px); }
+}
+
+/* Section headings.
+ *
+ * `.mk-title-lg` IS on the ramp from 768 up, at its lowest step, and it
+ * carries the ramp's leading. It used to top out at 36px with leading 1.15,
+ * which left the loudest sentence on the page ("You don't pay for 14 tools.
+ * You pay for the gaps between them.") set two steps under a ramp whose
+ * whole job, in concept 10's words, is that "type does the shouting". Below
+ * 768 it stays at 36: a 48px H2 under a 48px H1 on a 390 phone is two
+ * headlines competing, and the ramp's floor is the H1's.
+ *
+ * `.mk-title` is the third rung, for a heading inside a band rather than
+ * over one, and it stays under the ramp on purpose. */
+.mk-title-lg,
+.mk-title {
+  font-weight: var(--mk-display-weight, 600);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  margin: 0;
+}
+.mk-title-lg { font-size: 36px; line-height: var(--mk-display-leading, 1.05); }
+.mk-title { font-size: 22px; line-height: 1.15; }
+
+@media (min-width: 768px) {
+  .mk-title-lg { font-size: var(--mk-display-3, 48px); }
+  .mk-title { font-size: 26px; }
+}
+
+/* A SHORT DESKTOP VIEWPORT STEPS THE SECTION HEADING DOWN, because the H1
+ * steps down there too and the hierarchy has to survive it.
+ *
+ * On a 900px laptop the home hero takes the ramp's lowest step (48) so the
+ * exploded composition is not pushed entirely under the fold. `mk-title-lg`
+ * is also 48 from 768 up, so at 1440 by 900 the page's one H1 measured
+ * exactly the same as every section H2 on it: a hierarchy with no steps in
+ * it is not a hierarchy, and design-system 2.2 gives the display ramp to
+ * the headline.
+ *
+ * 40 is not a display step and is not pretending to be one: `mk-title-lg`
+ * is already 36 below 768 and 48 above it, and this is the rung between
+ * them, on the viewport where the H1 is on the ramp's floor. Every other
+ * page keeps an H1 at 64 over a 40px H2, which is the same relationship
+ * one notch tighter. */
+@media (min-width: 1024px) and (max-height: 1000px) {
+  .mk-title-lg { font-size: 40px; }
+}
+
+.mk-body {
+  font-size: var(--mk-body, 16px);
+  line-height: var(--mk-body-leading, 1.55);
+}
+.mk-caption {
+  font-size: var(--mk-caption, 13px);
+  line-height: 1.5;
+}
+.mk-label {
+  font-size: var(--mk-label, 12px);
+  font-weight: var(--mk-label-weight, 590);
+  line-height: 16px;
+}
+
+/* Tabular figures: the clock, the counter, both receipts and the 14 to 1
+   mark (spec 13.7). JetBrains Mono is already loaded; the fallback is the
+   grotesk's own tabular set. */
+.mk-figures {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.mk-mono {
+  font-family: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * The shell frame itself.
+ * ═════════════════════════════════════════════════════════════════ */
+
+/* A frame can still be wider than its column at the in-between widths, so
+   it scrolls inside its OWN container rather than pushing the page sideways:
+   nothing on the site scrolls horizontally at 360 (concept 6.3).
+   It is also the CONTAINER the size bands below are measured against: its
+   width is the column's width, which is the number that decides how much
+   product can honestly fit. */
+.mk-shell-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  container-type: inline-size;
+  container-name: mkcol;
+}
+
+/* Three bands in a row: the navy rail, the optional grey sidebar, the white
+   canvas that takes what is left.
+   FLEX, NOT GRID, and the reason is a rule the grid version could not state.
+   The sidebar is dropped on a narrow frame by the container query below, and
+   the query is named on this element, so only its DESCENDANTS can be styled
+   by it: an element is never inside its own container. A grid therefore kept
+   its three declared columns while the sidebar stopped generating a box, the
+   canvas auto-placed into the middle track, and the third track was left over
+   as an empty white strip to the right of the navy top bar on every frame
+   under 700px. In a row of flex items the tracks ARE the children, so a
+   sidebar that is not there costs nothing and the canvas ends where the
+   frame does. */
+.mk-shell {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  overflow: hidden;
+  isolation: isolate;
+  /* The secondary sidebar is narrower on the website than in the product:
+     a 264px column inside a frame that is itself a picture leaves too
+     little canvas to read. The rows and the type are the product's. */
+  --os-side-w: 216px;
+  /* The frame is its own container, so the top bar can drop the search pill
+     when the frame is narrow rather than overflow it. */
+  container-type: inline-size;
+  container-name: mkshell;
+}
+/* A grey sidebar costs 216px, which is most of the canvas once the frame is
+   narrow. Below that width the frame is the rail, the bar and the canvas. */
+@container mkshell (max-width: 700px) {
+  .mk-shell__side { display: none; }
+}
+
+.mk-shell__rail {
+  flex: 0 0 var(--os-rail-w);
+  background: var(--os-chrome-bg);
+  color: var(--os-chrome-fg-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  /* 4, not 8. The rail carries nine items now (the eight story blocks plus
+     Settings at the foot, which the product pins there too) and the
+     smallest frame on the site is 400 tall. Four pixels between items and
+     two inside them is what makes the ninth fit without any frame growing,
+     and it is still the product's own 40px pill at the product's own rail
+     label size. */
+  gap: 4px;
+}
+
+.mk-shell__side {
+  flex: 0 0 var(--os-side-w);
+  width: var(--os-side-w);
+  background: var(--os-side-bg);
+  border-inline-end: 1px solid var(--os-line);
+  padding: 8px;
+  overflow: hidden;
+}
+
+.mk-shell__main {
+  /* Takes the whole of what the rail and the sidebar leave, and never less:
+     `min-width: 0` is what lets a wide surface shrink to the frame instead
+     of pushing the frame past the width the size band set for it. */
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-rows: var(--os-top-h) 1fr;
+  min-width: 0;
+  background: var(--os-canvas);
+}
+
+.mk-shell__top {
+  background: var(--os-chrome-bg);
+  color: var(--os-chrome-fg-2);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mk-shell__search {
+  margin-inline: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  width: 320px;
+  max-width: 36%;
+  padding-inline: 10px;
+  border-radius: var(--os-r-sm);
+  background: var(--os-chrome-field);
+  border: 1px solid var(--os-chrome-line);
+  color: var(--os-chrome-field-ph);
+  font-size: var(--os-t-body);
+  white-space: nowrap;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.mk-shell__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--os-chrome-fg-2);
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+
+/* Under 620px of frame the pill cannot hold its own label on one line. */
+@container mkshell (max-width: 620px) {
+  .mk-shell__search { display: none; }
+}
+
+/* A grey sidebar takes 216px out of the same row, so the bar runs out of
+   width 216px sooner. At 737px of frame with a sidebar, "Work > My work"
+   came out as "W > M.": the crumb is what tells a visitor where in the
+   product they are looking, and a search pill with nothing typed in it
+   tells them nothing. The pill goes first. */
+@container mkshell (max-width: 860px) {
+  .mk-shell[data-sidebar="grey"] .mk-shell__search { display: none; }
+}
+
+/* The board list and its task drawer.
+   A 320px drawer inside a narrow frame leaves the list too little to be a
+   list: at 619px of shell the task title wrapped into three fragments with
+   a status chip in the middle of it. The drawer is the subject of the two
+   stops that open it, so the list steps aside rather than being rendered
+   as noise, exactly as a real product does at the same width.
+ *
+ * ONLY where a drawer is there to take its place. Written without that
+ * condition this hid the list on every narrow frame, drawer or not, and
+ * the phone's stepper showed the Onboarding board as an empty window with
+ * a toolbar: the beat that says "every process becomes work" illustrated
+ * by no work at all. */
+@container mkshell (max-width: 700px) {
+  .mk-boardlist[data-drawer="true"] .mk-boardlist__list { display: none; }
+}
+
+/* And 216px sooner where the grey sidebar is still standing.
+ *
+ * The frame's logical width is not a ladder everywhere: the spine derives it
+ * from its own column (`100cqi` divided by the scale factor), so it lands on
+ * any number at all. Between 700 and 880 the sidebar is still there, the
+ * drawer still wants its 320, and the list was getting what was left: at 711
+ * that was 32px, which rendered the board as one letter per line down the
+ * side of the drawer. The subject here is the list, a descendant, so the
+ * query reaches it; the shell's own attribute is read as an ancestor, which
+ * is allowed and is the only reason this can say "with a sidebar" at all. */
+@container mkshell (max-width: 880px) {
+  .mk-shell[data-sidebar="grey"] .mk-boardlist[data-drawer="true"] .mk-boardlist__list {
+    display: none;
+  }
+}
+
+.mk-shell__canvas {
+  background: var(--os-canvas);
+  overflow: hidden;
+  min-width: 0;
+  position: relative;
+}
+
+/* THE TASK DRAWER ENDS AT THE WINDOW'S EDGE INSTEAD OF BEING SLICED BY IT.
+ *
+ * The drawer is a 320px card with a header, three chip rows, a seven item
+ * checklist and a timer row, and in a two-up spine stop the frame is about
+ * 555px tall. So the card ran past the canvas and the frame's bottom edge
+ * cut it through the middle of a checklist row: "Confirm the reporting
+ * cadence" sliced through its own glyphs, with the card's bottom border
+ * missing. A row cut in half reads as a broken render, not as a list that
+ * continues.
+ *
+ * The canvas's own 26px fade could not help, because it is the canvas
+ * colour over the drawer's surface colour and it is outside the card.
+ *
+ * So the canvas becomes a full height column for this surface, the drawer
+ * stretches to the room that is left rather than to its content, and it
+ * carries its own fade in its own colour. The card then has a bottom edge
+ * again, and the checklist fades under it the way a scrolled panel does. */
+/* THE CLOSE: the Sidekick panel open over the assembled workspace.
+ *
+ * Stop 6 of the Tuesday is the one stop that is not a pair of frames with a
+ * wire between them, so it is not drawn as one. The shell underneath is the
+ * whole workspace the story has been assembling, and the Ask panel floats
+ * over its canvas exactly the way a panel does in the product: bottom
+ * right, the popover shadow, nothing else. */
+.mk-close-surface {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.mk-close-surface__ask {
+  position: absolute;
+  inset-inline-end: 20px;
+  bottom: 20px;
+  width: 420px;
+  max-width: calc(100% - 40px);
+  border-radius: var(--os-r-md);
+  box-shadow: var(--os-shadow-pop);
+  background: var(--os-surface);
+}
+/* The panel already carries its own border and rounding; the shadow above
+   is what makes it read as open OVER the canvas rather than in it. */
+.mk-close-surface__ask > * { margin: 0; }
+
+.mk-canvas-fill {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.mk-canvas-fill > .mk-boardlist {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+.mk-canvas-fill > .mk-boardlist > .mk-boardlist__list {
+  min-height: 0;
+  overflow: hidden;
+}
+.mk-drawer {
+  position: relative;
+  min-height: 0;
+}
+.mk-drawer::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 24px;
+  background: linear-gradient(to top, var(--os-surface) 20%, rgb(255 255 255 / 0));
+  pointer-events: none;
+}
+
+/* The canvas is a WINDOW on a page, and the reserved height rarely lands on
+   a row boundary, so the last row in view is usually a half row. Left alone
+   that reads as a slice through real product text. The fade says what is
+   true instead: the page continues under the edge. It is 26px, it is the
+   canvas colour, and it never covers a whole row. */
+.mk-shell__canvas::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 26px;
+  background: linear-gradient(to top, var(--os-canvas) 10%, rgb(255 255 255 / 0));
+  pointer-events: none;
+}
+
+/* The rail hub: icon in a 40px pill area with a 10px label under it. */
+.mk-rail-item {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-block: 2px;
+  color: var(--os-chrome-fg-2);
+}
+.mk-rail-item__pill {
+  width: var(--os-rail-pill-size);
+  height: var(--os-rail-pill-size);
+  border-radius: var(--os-r-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mk-rail-item[data-active="true"] { color: var(--os-chrome-fg); }
+.mk-rail-item[data-active="true"] .mk-rail-item__pill {
+  background: var(--os-chrome-pill);
+  color: var(--os-chrome-pill-fg);
+}
+.mk-rail-item__label {
+  font-size: var(--os-t-rail);
+  line-height: var(--os-t-rail-lh);
+  font-weight: 500;
+}
+.mk-rail-item[data-active="true"] .mk-rail-item__label { color: var(--os-chrome-fg); }
+
+/* "Replaced: Task tracker, Sprint board" (concept 2.4, after the pin
+   releases). The exploded blocks carry this vocabulary at rest; once the
+   blocks have become the rail, the rail carries it, which is how a visitor
+   learns the eight hub icons before signup rather than after it.
+ *
+ * It is a hover flyout and nothing else: the shell is an illustration, it is
+ * aria-hidden, and nothing in it is focusable, so this is decoration over a
+ * picture rather than a tooltip on a control. The same string is on the
+ * item's `title`, which is what a visitor gets with no hover and with this
+ * sheet missing.
+ *
+ * The frame clips it, deliberately: the tag appears INSIDE the product
+ * window, next to the rail, the way a product's own rail tooltip would. */
+.mk-rail-item__tag {
+  position: absolute;
+  inset-inline-start: calc(100% - 4px);
+  top: 50%;
+  z-index: 3;
+  transform: translateY(-50%);
+  max-width: 190px;
+  padding: 5px 9px;
+  border-radius: var(--os-r-sm);
+  background: var(--os-chrome-bg);
+  color: var(--os-chrome-fg);
+  font-size: var(--os-t-meta);
+  line-height: var(--os-t-meta-lh);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--os-shadow-pop);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms var(--os-ease-out), visibility 160ms;
+}
+@media (hover: hover) {
+  .mk-rail-item:hover .mk-rail-item__tag {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Frame size, as three properties.
+ *
+ * `--mk-w` and `--mk-h` are the frame's LOGICAL size: the width the product
+ * lays itself out at, in px, before anything is scaled. `--mk-scale-factor`
+ * is how much of that is painted, so the 14px UI text on the face is always
+ * the product's real 14px scaled, never a second type scale.
+ *
+ * They are custom properties rather than inline pixel values so the bands
+ * below can change them, and that is the whole of the mobile fix. A 940px
+ * frame cannot fit a 350px column at any scale at or above the legibility
+ * floor, so on a phone the frame is NARROWER and re-lays itself out, rather
+ * than being a desktop frame cropped to its top-left corner behind a
+ * horizontal scroller the visitor has to drag with a thumb.
+ *
+ * `overflow: hidden` clips the untransformed tail of the scaled child, which
+ * is layout rather than content. The bottom edge, the one real clip, is
+ * handled by the canvas fade above.
+ */
+.mk-scale {
+  --mk-scale-base: 1;
+  --mk-w-base: 1180;
+  --mk-h-base: 680;
+  --mk-scale-factor: var(--mk-scale-base);
+  --mk-w: var(--mk-w-base);
+  --mk-h: var(--mk-h-base);
+  display: block;
+  overflow: hidden;
+  width: calc(var(--mk-w) * var(--mk-scale-factor) * 1px);
+  height: calc(var(--mk-h) * var(--mk-scale-factor) * 1px);
+  max-width: 100%;
+}
+.mk-scale > .mk-shell {
+  width: calc(var(--mk-w) * 1px);
+  height: calc(var(--mk-h) * 1px);
+  transform: scale(var(--mk-scale-factor));
+  transform-origin: top left;
+}
+
+/* The size bands.
+ *
+ * Each band's painted width, `--mk-w` times the factor, fits inside that
+ * band's NARROWEST column, so no band needs a horizontal scroller. Heights
+ * grow as widths shrink, because a surface laid out narrower is taller.
+ *
+ * THE BANDS HAVE TO COVER EVERY COLUMN WIDTH, not just the phone ones, and
+ * that is what these first five rows are. The table used to start at 719,
+ * which left the whole desktop range uncovered: an authored 1180px frame
+ * stayed 1180px in a 1152px column, and because `.mk-scale` is
+ * `max-width: 100%` with `overflow: hidden`, the 28px that did not fit was
+ * CROPPED rather than scrolled. `.mk-shell-scroll` never saw the overflow,
+ * so there was no scrollbar to notice it by either. At a 1024 viewport the
+ * same frame lost 204px. The symptom was the same at every desktop width and
+ * it read as a rendering fault rather than a size one: the frame had no
+ * right border, the top bar's avatar was sliced in half, and the table ran
+ * off the edge of a card that appeared to have no edge.
+ *
+ * Above 720 the factor stays at the authored value, so these bands cost no
+ * legibility at all: the frame RE-LAYS ITSELF OUT narrower at the product's
+ * real 14px, which is the honest trade and the cheaper one. Only below 720,
+ * where no amount of relayout fits, does the factor drop to 0.72, the
+ * legibility floor, so the product's 14px never lands under its own 10px
+ * caption floor.
+ */
+@container mkcol (max-width: 1179px) {
+  .mk-scale { --mk-w: 1040; --mk-h: 700; }
+}
+@container mkcol (max-width: 1059px) {
+  .mk-scale { --mk-w: 940; --mk-h: 700; }
+}
+@container mkcol (max-width: 959px) {
+  .mk-scale { --mk-w: 860; --mk-h: 710; }
+}
+@container mkcol (max-width: 879px) {
+  .mk-scale { --mk-w: 780; --mk-h: 710; }
+}
+@container mkcol (max-width: 799px) {
+  .mk-scale { --mk-w: 700; --mk-h: 720; }
+}
+/* Below 720 no amount of relayout fits, so the factor drops to the floor.
+ *
+ * THE HEIGHTS HAVE A FLOOR TOO, and it is the rail's. The rail is eight hub
+ * items and a logo, which needs about 610 logical px at the product's own
+ * spacing, and these bands used to set 560. The eighth item, Goals, was
+ * therefore sliced in half on every scaled frame on the site: a site whose
+ * argument is "Eight blocks. One system." was showing seven and a half.
+ * A frame's bottom edge fades on purpose, because a surface continues past
+ * the window, but the RAIL is chrome rather than content: it is the whole
+ * object, and half of one is a crop, not a view.
+ *
+ * So no band goes under the rail's height. Compressing the rail instead was
+ * the other option and is the wrong one: the rail on the site is the rail in
+ * the product, at the product's spacing, or the site is illustrating
+ * something the visitor will not be given. */
+@container mkcol (max-width: 719px) {
+  .mk-scale { --mk-scale-factor: 0.72; --mk-w: 760; --mk-h: 620; }
+}
+@container mkcol (max-width: 560px) {
+  .mk-scale { --mk-w: 660; --mk-h: 640; }
+}
+@container mkcol (max-width: 480px) {
+  .mk-scale { --mk-w: 550; --mk-h: 660; }
+}
+@container mkcol (max-width: 400px) {
+  .mk-scale { --mk-w: 480; --mk-h: 680; }
+}
+@container mkcol (max-width: 345px) {
+  .mk-scale { --mk-w: 440; --mk-h: 680; }
+}
+
+/* Optional table columns, dropped on the same bands the frame narrows on.
+ *
+ * A grid of one flexible column and four fixed ones does not fit a 480
+ * logical frame, and flexbox pays for that out of the only column that can
+ * shrink, which is the record's NAME. At 390 the Clients grid in spine beat
+ * 1 rendered "Client" at ZERO pixels: three rows of a date, initials, a
+ * number and a chip, under a headline reading "The form writes the row" and
+ * a narration reading "Row 41 lands in Clients". The row whose name the beat
+ * is about had no name on it, at the width concept 6.3 says carries most of
+ * the visits.
+ *
+ * So the narrow bands take a column OUT rather than crushing one, which is
+ * the same trade the frame makes one block above: a surface laid out
+ * narrower re-lays itself out. The classes are set on the header cell and
+ * the body cell at the same index, so a dropped column leaves the track
+ * aligned. Nothing here is a product behaviour: the product's own tables
+ * keep every column, and their real hide, resize, reorder and freeze
+ * controls, untouched.
+ */
+/* `!important` earns its place here, and only here. A body cell carries an
+   inline `display: flex` so a chip and an avatar can sit on one baseline,
+   and an inline declaration outranks a stylesheet one. Without the flag the
+   header dropped its column and the rows below it did not, which is a worse
+   picture than the one this fixes: five values under three labels. */
+@container mkcol (max-width: 959px) {
+  .mk-col-drop-1 { display: none !important; }
+}
+@container mkcol (max-width: 560px) {
+  .mk-col-drop-2 { display: none !important; }
+}
+
+/* A frame is a picture of a product, not a control panel: nothing inside it
+   is focusable, so a scroller that really scrolls has to announce itself to
+   a keyboard. Only a frame laid out wider than its column is one, and the
+   bands above are written so that never happens, so the tabindex is now a
+   caller's decision (MarketingShell's `scrollable` prop) rather than an
+   unconditional attribute on 33 boxes that cannot move. This is the ring for
+   the ones that can. */
+.mk-shell-scroll:focus-visible {
+  outline: 2px solid var(--os-focus);
+  outline-offset: 2px;
+}
+
+/* The one shadow on the site, on a lifted block and on the receipt card. */
+.mk-lift { box-shadow: var(--os-shadow-pop); }
+
+/* Focus: blue-200 halo, 2px ring, 2px offset, on everything focusable. */
+.mk-os :focus-visible,
+.mk-focus:focus-visible {
+  outline: 2px solid var(--os-focus);
+  outline-offset: 2px;
+  border-radius: var(--os-r-sm);
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * Receipt.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-receipt {
+  background: var(--os-canvas, #ffffff);
+  border: 1px solid var(--os-line, #E4E7EC);
+  border-radius: var(--os-r-md, 8px);
+  padding: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.mk-receipt__rule {
+  border: 0;
+  border-top: 1px solid var(--os-line, #E4E7EC);
+  margin: 12px 0;
+}
+.mk-receipt__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-block: 5px;
+  font-size: 13px;
+  line-height: 18px;
+}
+.mk-receipt__lead {
+  flex: 0 0 auto;
+  color: var(--os-ink-2, #5C6779);
+  min-width: 52px;
+}
+.mk-receipt__label { flex: 1 1 auto; min-width: 0; color: var(--os-ink, #1F2430); }
+/* Cancellation reads as a strike and a step back in the grey ramp. Never as
+   red: red keeps its meaning inside a product surface. */
+.mk-receipt__label[data-struck="true"],
+.mk-receipt__lead[data-struck="true"] {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--os-ink-2, #5C6779);
+}
+.mk-receipt__meta { flex: 0 0 auto; color: var(--os-ink-2, #5C6779); }
+.mk-receipt__amount { flex: 0 0 auto; color: var(--os-ink-2, #5C6779); min-width: 76px; text-align: right; }
+.mk-receipt__dot { width: 7px; height: 7px; border-radius: 999px; flex: 0 0 auto; }
+
+/* A totals row is two phrases, not a label and a number, so it wraps rather
+   than crushing the first one until a word breaks across lines. */
+.mk-receipt__total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mk-receipt__total-value {
+  flex: 0 0 auto;
+  min-width: 88px;
+  text-align: right;
+  margin-inline-start: auto;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+ * Reduced motion.
+ *
+ * Read this before adding a pin, a scrub or a timeline.
+ *
+ * What this block can do: switch off CSS animations, transitions and
+ * smooth scrolling across the whole site. Note the scope. It used to be
+ * `.mk-os *, .mk-type *`, which reached only the descendants of a
+ * product frame or a type scope and missed every page section between
+ * them; it is now the site root, so nothing on the public site is
+ * outside it.
+ *
+ * What it CANNOT do, and the trap it used to set: an animation driven
+ * from JavaScript writes inline transforms, and no media query reaches
+ * those. Concept 6.2 puts the Snap and the Tuesday spine on GSAP
+ * ScrollTrigger. A stage that adds one and relies on this block ships an
+ * animation that ignores the setting entirely.
+ *
+ * So the rule for JS motion is the one the concept states: gate it in
+ * JS, on `matchMedia("(prefers-reduced-motion: no-preference)")`, and
+ * render the RESTING frame when the answer is no. Not the last frame,
+ * not a 1ms fast-forward to it: the frame the composition is designed
+ * around. `useReducedMotion()` in shell/reduced-motion.ts is that check,
+ * and it re-reads on change.
+ *
+ * `animation-duration: 0.01ms` here is deliberately the fast-forward
+ * anti-pattern and is deliberately a floor rather than the answer: it
+ * guarantees that a decorative CSS loop someone forgets about stops,
+ * and it is not a substitute for designing the static state.
+ * ═════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .mk-site,
+  .mk-site *,
+  .mk-site *::before,
+  .mk-site *::after,
+  .mk-os,
+  .mk-os *,
+  .mk-type,
+  .mk-type * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Settings is pinned to the bottom of the rail, the way the product pins
+   it. `margin-block-start: auto` inside the rail's column, so it stays
+   there whether the rail holds eight items or nine. */
+.mk-rail-item-foot { margin-block-start: auto; }

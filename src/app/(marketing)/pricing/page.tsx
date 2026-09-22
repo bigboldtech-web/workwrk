@@ -1,342 +1,475 @@
+// /pricing, rebuilt on the iconic sheet.
+//
+// THE ARGUMENT OF THE PAGE IS THE NUMBER. Everything else got out of its
+// way: the three bordered cards are three rows, the six currency pills are
+// six words, and the two notes that used to sit under the tier grid are one
+// line at the bottom of it.
+//
+// WHAT IS UNCHANGED, and must stay unchanged: every commercial fact on this
+// page is READ from the pricing source or from the constant the server
+// enforces. Not one price, seat cap, SOP allowance or AI allowance is typed
+// into this file. The comparison matrix is still gated row by row on the
+// flags and on the storyboard's own truth gates, so a capability that has
+// not shipped cannot get a tick by somebody being in a hurry, and a support
+// or connector commitment cannot appear because a column looked empty.
+//
+// WHAT CHANGED BESIDES THE STYLE:
+//
+//   The dead link is fixed. The page carried "Tap what you pay on the home
+//   page" pointing at /#stack-receipt, and the home page rebuild removed the
+//   calculator and that anchor with it. The calculator lives at
+//   /compare/your-stack, so that is where the line points.
+//
+//   `YourReceipt` is off this page for the same reason. It read a receipt
+//   the home page no longer writes and rendered it above the hero, so on the
+//   rare visit where it fired it put a bordered card above the page's own
+//   claim. A shared receipt still unfurls and still renders, because that
+//   link is a promise somebody made when they copied it.
+//
+//   The two "add on" style notes under the cards are gone: every plan
+//   includes email support and export, which is a fact that belongs in the
+//   matrix, and the matrix has it.
+
 import Link from "next/link";
 import type { Metadata } from "next";
+
+import { MarketingCta, PrimaryCta } from "@/components/marketing/cta";
+import { flags, moduleNames, tierCta } from "@/components/marketing/config";
 import {
-  ArrowRight,
-  Check,
-  Minus,
-  Sparkles,
-  Shield,
-  Zap,
-  Building2,
-} from "lucide-react";
+  pricing,
+  isMarketingCurrency,
+  softwareApplicationJsonLd,
+  stackReceipt,
+  starterSeatCap,
+  tier,
+} from "@/components/marketing/data/pricing";
+import { detectCurrency } from "@/components/marketing/geo";
+import { PRICING_COPY } from "@/components/marketing/iconic/copy";
+import { Band, Claim, Eyebrow, Headline, Line, Note, Obj, Page, Sub } from "@/components/marketing/iconic/iconic";
+import { IconicPlans } from "@/components/marketing/iconic/plans.client";
+import { PricingCurrencyProvider } from "@/components/marketing/pricing-currency.client";
+import { Receipt } from "@/components/marketing/receipt/receipt";
 import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  H3,
-  Lede,
-  Button,
-  CTABand,
-  FAQ,
-  GradientText,
-  CheckList,
-  HUES,
-} from "@/components/marketing/primitives";
+  parseReceiptQuery,
+  stackReceiptModelFrom,
+  receiptShareQuery,
+} from "@/components/marketing/receipt/receipt-model";
+import { stopShipped } from "@/components/marketing/data/tuesday";
+// The enforced limits, straight from the constant the server reads. It is a
+// pure object with zero imports, so a page can read it without pulling
+// prisma in behind it.
+import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 
-export const metadata: Metadata = {
-  title: "Pricing — WorkwrK",
-  description:
-    "Free under five people. $8/user thereafter. Three tiers — Starter, Growth, Scale. WorkwrK replaces 15+ tools so the math always works.",
-  alternates: { canonical: "https://workwrk.com/pricing" },
-};
+const SITE = "https://workwrk.com";
+const STARTER = tier("starter");
+const GROWTH = tier("growth");
+const SCALE = tier("scale");
+const SCALE_FROM = GROWTH.seatCap + 1;
+const PRICING_DESCRIPTION = `Free up to ${starterSeatCap} people, then one price per person per month. Three plans: ${STARTER.name}, ${GROWTH.name}, ${SCALE.name}.`;
 
-const TIERS = [
-  {
-    name: "Starter",
-    price: "Free",
-    sub: "Up to 5 people · forever",
-    description: "For founding teams and pilots. Every core hub. No time limit.",
-    hue: "indigo" as const,
-    icon: Sparkles,
-    features: [
-      "All 7 hubs unlocked",
-      "Inbox aggregating 12 streams",
-      "Cmd-K AI search across every entity",
-      "Tasks, OKRs, KPIs, SOPs, processes",
-      "Announcements, kudos, ideas, surveys",
-      "Email support · 24h",
-    ],
-    cta: { label: "Start free", href: "/signup" },
-  },
-  {
-    name: "Growth",
-    price: "$8",
-    priceSuffix: "/user/mo",
-    sub: "14-day trial · no credit card",
-    description: "Everything most SMB → mid-market companies actually need.",
-    hue: "fuchsia" as const,
-    icon: Zap,
-    featured: true,
-    features: [
-      "Everything in Starter",
-      "Money + Talent + Growth hubs",
-      "AI Inbox triage + cross-module signals",
-      "Slack + Google Workspace + Microsoft 365",
-      "Custom KPI weights + composite scores",
-      "Priority support · 4h SLA",
-    ],
-    cta: { label: "Start 14-day trial", href: "/signup?plan=growth" },
-  },
-  {
-    name: "Scale",
-    price: "Custom",
-    sub: "From $29,999 / year",
-    description: "For 250+ seat operators who need controls, SLAs, and a CSM.",
-    hue: "emerald" as const,
-    icon: Building2,
-    features: [
-      "Everything in Growth",
-      "Unlimited AI usage",
-      "SSO (SAML) + SCIM provisioning",
-      "Audit log + retention controls",
-      "Custom integrations + API quota",
-      "Dedicated CSM · 1h SLA · 99.95% uptime",
-    ],
-    cta: { label: "Talk to sales", href: "/demo" },
-  },
-];
+/* The copy lives in iconic/copy.ts with the other seven pages. */
+const COPY = PRICING_COPY;
 
-const COMPARE_GROUPS = [
-  {
-    name: "Core hubs",
-    rows: [
-      ["Home (inbox + Cmd-K)", true, true, true],
-      ["People (org + performance)", true, true, true],
-      ["Work (tasks + OKRs + KPIs + SOPs)", true, true, true],
-      ["Culture (kudos + ideas + surveys)", true, true, true],
-      ["Money (spend + procurement + financials)", false, true, true],
-      ["Talent (reviews + comp + onboarding)", false, true, true],
-      ["Growth (pipeline + customers)", false, true, true],
-    ],
-  },
-  {
-    name: "AI & intelligence",
-    rows: [
-      ["Cmd-K AI search", true, true, true],
-      ["Inbox AI triage", false, true, true],
-      ["Cross-module signals & alerts", false, true, true],
-      ["AI promotion / comp recommendations", false, false, true],
-      ["Unlimited AI usage", false, "Capped", true],
-    ],
-  },
-  {
-    name: "Integrations",
-    rows: [
-      ["Slack + Google Workspace", false, true, true],
-      ["Microsoft 365 + Teams", false, true, true],
-      ["Zapier / webhook events", false, true, true],
-      ["Custom integrations + API quota", false, false, true],
-    ],
-  },
-  {
-    name: "Admin & security",
-    rows: [
-      ["SSO via Google / Microsoft", true, true, true],
-      ["SAML SSO + SCIM provisioning", false, false, true],
-      ["Audit log & retention controls", false, false, true],
-      ["EU / India data residency", false, false, true],
-      ["99.95% uptime SLA", false, false, true],
-    ],
-  },
-  {
-    name: "Support",
-    rows: [
-      ["Email support · 24h", true, true, true],
-      ["Priority chat · 4h SLA", false, true, true],
-      ["Dedicated CSM · 1h SLA", false, false, true],
-    ],
-  },
-];
+/**
+ * The comparison table, with every row either shipped or behind a flag.
+ *
+ * The module rows are read from the same eight blocks the rail and the tour
+ * read, so a ninth cannot appear here alone, and the two premium modules are
+ * the two the price list puts on a tier.
+ */
+type CompareValue = boolean | string;
 
-export default function PricingPage() {
-  return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-2xl mx-auto text-center">
-            <Eyebrow hue="emerald" className="mb-5">Pricing</Eyebrow>
-            <H1>
-              Honest pricing. <br />
-              <GradientText hue="emerald">The math always works.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed">
-              Free forever under five people. $8/user thereafter. No per-module
-              surcharges, no surprise tiers, no quote-only marketing nonsense.
-            </p>
-          </div>
+/**
+ * The AI allowance, read from the constant the server enforces.
+ *
+ * THE PAGE'S PROMISE IS THAT THE ARITHMETIC IS PLAIN, and this was the one
+ * enforced limit it did not disclose. src/lib/plan-limits.ts refuses the
+ * next Ask at `current >= limit` counted from `org._count.aiQueries`, and
+ * that count has NO period filter: it is a lifetime total, so a free
+ * workspace's Ask stops permanently at 50. Read from PLAN_LIMITS rather
+ * than typed into the pricing JSON for the same reason the seat cap is: a
+ * number on this page has to be the number the server checks.
+ */
+const AI_CAP = {
+  starter: PLAN_LIMITS.STARTER.ai,
+  growth: PLAN_LIMITS.GROWTH.ai,
+  scale: PLAN_LIMITS.SCALE.ai,
+} as const;
 
-          <div className="mt-14 grid md:grid-cols-3 gap-5">
-            {TIERS.map((tier) => {
-              const t = HUES[tier.hue];
-              return (
-                <div
-                  key={tier.name}
-                  className={`relative rounded-2xl p-7 bg-white border ${
-                    tier.featured
-                      ? "border-slate-900 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.25)]"
-                      : "border-slate-200"
-                  }`}
-                >
-                  {tier.featured && (
-                    <span className="absolute -top-3 left-7 inline-flex items-center text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full bg-slate-900 text-white">
-                      Most chosen
-                    </span>
-                  )}
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text}`}
-                    >
-                      <tier.icon size={18} strokeWidth={2.2} />
-                    </span>
-                    <div>
-                      <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700">
-                        {tier.name}
-                      </p>
-                      <p className="text-sm text-slate-500 mt-0.5">{tier.sub}</p>
-                    </div>
-                  </div>
-                  <p className="mt-5 flex items-baseline gap-1.5">
-                    <span className="text-5xl font-bold text-slate-900 tracking-tight">
-                      {tier.price}
-                    </span>
-                    {tier.priceSuffix && (
-                      <span className="text-base text-slate-500 font-medium">{tier.priceSuffix}</span>
-                    )}
-                  </p>
-                  <p className="mt-2.5 text-base text-slate-600 leading-relaxed">{tier.description}</p>
-                  <Link
-                    href={tier.cta.href}
-                    className={`mt-6 inline-flex items-center justify-center gap-1.5 w-full h-11 rounded-full font-semibold text-base transition-colors ${
-                      tier.featured
-                        ? "bg-slate-900 text-white hover:bg-slate-800"
-                        : "bg-white border border-slate-200 text-slate-900 hover:border-slate-300 hover:bg-slate-50"
-                    }`}
-                  >
-                    {tier.cta.label} <ArrowRight size={14} />
-                  </Link>
-                  <CheckList hue={tier.hue} items={tier.features} className="mt-7" />
-                </div>
-              );
-            })}
-          </div>
-
-          <p className="mt-10 text-center text-base text-slate-500">
-            All plans include unlimited storage, 99.9% uptime, daily backups, and email support.
-          </p>
-        </Container>
-      </Section>
-
-      {/* Comparison table */}
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="max-w-2xl">
-            <Eyebrow hue="violet" className="mb-4">Compare plans</Eyebrow>
-            <H2>The full plan comparison.</H2>
-            <p className="mt-4 text-slate-600">Every capability, side by side.</p>
-          </div>
-
-          <div className="mt-10 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-base">
-              <thead>
-                <tr className="border-b-2 border-slate-200">
-                  <th className="text-left p-4 font-bold text-slate-900 w-2/5">Feature</th>
-                  {TIERS.map((t) => (
-                    <th key={t.name} className="text-center p-4">
-                      <span className={`block text-sm font-bold uppercase tracking-[0.16em] ${HUES[t.hue].text}`}>
-                        {t.name}
-                      </span>
-                      <span className="block text-sm text-slate-500 mt-0.5">{t.price}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {COMPARE_GROUPS.flatMap((group) => [
-                  <tr key={`g-${group.name}`}>
-                    <td colSpan={4} className="pt-8 pb-3 px-4 text-[12px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                      {group.name}
-                    </td>
-                  </tr>,
-                  ...group.rows.map(([label, ...vals]) => (
-                    <tr key={`${group.name}-${String(label)}`} className="border-b border-slate-100">
-                      <td className="p-4 text-slate-700">{label}</td>
-                      {vals.map((v, i) => (
-                        <td key={i} className="p-4 text-center">
-                          {v === true ? (
-                            <Check size={16} className="inline text-emerald-600" />
-                          ) : v === false ? (
-                            <Minus size={16} className="inline text-slate-300" />
-                          ) : (
-                            <span className="text-sm text-slate-600">{v as string}</span>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  )),
-                ])}
-              </tbody>
-            </table>
-          </div>
-        </Container>
-      </Section>
-
-      {/* Add-ons */}
-      <Section py="md">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_2fr] gap-10 items-start">
-            <div>
-              <Eyebrow hue="amber" className="mb-4">Add-ons</Eyebrow>
-              <H3>Optional, when you need them.</H3>
-              <p className="mt-4 text-slate-600 text-base">
-                Most teams never need these. They&apos;re available a-la-carte
-                for the edge cases — and they never gate the core product.
-              </p>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <AddonCard hue="violet"  title="Implementation help"     price="$3,500 / one-time" body="Two-week white-glove rollout with a workwrk solutions architect."/>
-              <AddonCard hue="emerald" title="Custom integration"      price="$7,500 / connector" body="We build a connector to your internal/legacy system you can't get off."/>
-              <AddonCard hue="sky"     title="On-prem / VPC deployment" price="From $50k / yr"     body="Run workwrk inside your own AWS / GCP. Available on Scale only."/>
-              <AddonCard hue="fuchsia" title="Premium support · 1h"     price="$2,500 / mo"        body="Globally-distributed 24×7 chat with a named pod of three engineers."/>
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      {/* FAQ */}
-      <FAQ
-        hue="emerald"
-        eyebrow="Pricing FAQ"
-        title="Common pricing questions."
-        items={[
-          { q: "Is the free plan really forever?",            a: "Yes. Up to five people, all 7 hubs unlocked, no time limit. We don't believe in 14-day clocks that pressure you into paying before you've decided. About 40% of our paid customers spent 6+ months on free." },
-          { q: "How does per-user billing work?",              a: "Monthly or annual (annual saves 18%). New seats are pro-rated on the day they're added. Deactivated seats free up immediately and credit to your next invoice. There's no annual-commitment trap." },
-          { q: "Do you charge for guests or read-only users?", a: "No. Guests, contractors with view-only roles, and external auditors are free. We only charge for full members who can create or edit." },
-          { q: "What payment methods do you accept?",          a: "All major cards (Stripe), ACH/SEPA bank transfers on annual, wire transfers for Scale plans, and INR via Razorpay for Indian customers." },
-          { q: "Can I get a discount?",                        a: "Annual billing saves 18%. We have NGO / nonprofit / education discounts (40% off) — email hello@workwrk.com with your details. We don't do 'first 100 customers' or other artificial scarcity." },
-          { q: "What about a free trial of Scale?",            a: "Scale includes a 30-day pilot with implementation help included. Talk to sales to set it up." },
-        ]}
-      />
-
-      <CTABand
-        title={<>Free to start. <GradientText hue="emerald">Honest to grow.</GradientText></>}
-        body="No credit card. No demo gate. No quote-only games. Just sign up."
-        hue="emerald"
-      />
-    </>
-  );
+/** "50" or "2,000", in the page's own locale-free grouping. */
+function cap(n: number): string {
+  return n.toLocaleString("en-US");
 }
 
-function AddonCard({
-  hue,
-  title,
-  price,
-  body,
-}: {
-  hue: keyof typeof HUES;
-  title: string;
-  price: string;
-  body: string;
-}) {
-  const t = HUES[hue];
+const MODULE_ROWS: Array<[string, CompareValue, CompareValue, CompareValue]> = moduleNames.map((name) => {
+  const premium = pricing.premiumModules.find((m) => m.name === name);
+  if (name === "AI") {
+    // Not a tick. The allowance is a number per tier and it is a total, not
+    // a monthly refill, so the row says so in the row.
+    return [
+      "AI (questions in total, not per month)",
+      `${cap(AI_CAP.starter)}`,
+      `${cap(AI_CAP.growth)}`,
+      `${cap(AI_CAP.scale)}`,
+    ];
+  }
+  return premium ? [name, false, true, true] : [name, true, true, true];
+});
+
+const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, CompareValue, CompareValue]> }> = [
+  { name: "The eight parts", rows: MODULE_ROWS },
+  {
+    // The SOP allowance is NOT a row here: it is a number per tier, it
+    // lives in each tier's own bullets in the pricing source, and a yes/no
+    // column would have to invent one.
+    name: "Process and goals",
+    rows: [
+      ["Roles, KRAs and KPIs", true, true, true],
+      ["Reviews, kudos and surveys", false, true, true],
+    ],
+  },
+  {
+    name: "AI",
+    // "Ask, across everything you can see" was wrong in the risky
+    // direction, which is worse than wrong: the retrieval filters by
+    // organizationId and by nothing else, so the Ask reads the whole
+    // workspace regardless of who is asking. A buyer choosing this product
+    // on the strength of that row would be choosing it for a scoping
+    // guarantee that does not exist. It says what the endpoint does.
+    //
+    // "Answers sourced from the entities they read" is stop 6's declared
+    // unbuilt mechanism word for word, so it is gated on the stop.
+    rows: [
+      ["Ask, across the workspace (not yet scoped per person)", true, true, true],
+      ...(stopShipped(6)
+        ? ([["Answers sourced from the entities they read", true, true, true]] as Array<
+            [string, CompareValue, CompareValue, CompareValue]
+          >)
+        : []),
+      ...(flags.aiPeopleRecommendations
+        ? ([
+            ["AI promotion and compensation recommendations", false, false, true],
+            ["Uncapped AI usage", false, "Capped", true],
+          ] as Array<[string, CompareValue, CompareValue, CompareValue]>)
+        : []),
+    ],
+  },
+  ...(flags.thirdPartyIntegrations
+    ? [
+        {
+          name: "Integrations",
+          rows: [
+            ["Slack and Google Workspace", false, true, true], // copy-gate: thirdPartyIntegrations
+            ["Microsoft 365 and Teams", false, true, true], // copy-gate: thirdPartyIntegrations
+            ["Webhook events", false, true, true], // copy-gate: thirdPartyIntegrations
+          ] as Array<[string, CompareValue, CompareValue, CompareValue]>,
+        },
+      ]
+    : []),
+  {
+    name: "Admin and security",
+    rows: [
+      ["Two step verification at login", true, true, true],
+      ["Roles, scopes and per-space visibility", true, true, true],
+      // Nothing in the product gates either of these by plan: /api/audit
+      // checks isManager and no plan, /api/me/security-activity is per user
+      // and ungated, and src/lib/plan-limits.ts knows about users, sops and
+      // AI queries and nothing else. So they are capabilities every tier
+      // has, and the matrix says so rather than inventing a ladder.
+      ["Security activity log", true, true, true],
+      ["Audit log for managers", true, true, true],
+      ...(flags.enterpriseIdentity
+        ? ([["SSO via Google or Microsoft", false, true, true]] as Array<
+            [string, CompareValue, CompareValue, CompareValue]
+          >)
+        : []),
+    ],
+  },
+  {
+    name: "Support and data",
+    // "Priority support" and "Named contact" came off this group and have
+    // not come back. Nothing in this repo gates support by plan: there is no
+    // ticketing system, no queue with a priority field and no account
+    // assignment. A procurement team reads a tick in a matrix as a
+    // commitment, and a support commitment is the one a customer escalates
+    // on. They return the day a support tier exists, with a response time
+    // beside each one, which is what the tick was standing in for.
+    rows: [
+      ["Email support", true, true, true],
+      ["Export everything, any time", true, true, true],
+    ],
+  },
+];
+
+/** The pricing FAQ. Every answer is checkable against this repo. */
+const FAQ: Array<{ q: string; a: string }> = [
+  {
+    q: "Is the free plan really forever?",
+    a: `Yes. Up to ${starterSeatCap} people, no time limit, no card. There is no 14 day clock pressuring you to pay before you have decided.`,
+  },
+  {
+    q: "How does per-user billing work?",
+    a: `${GROWTH.name} is priced per member per month, billed annually. A member is anyone with an account on the workspace: the seat count the product enforces is the number of people in it, so that is the number the price is built on.`,
+  },
+  {
+    q: "Which currencies do you price in?",
+    a: `Prices are authored per currency in ${pricing.currencies
+      .map((c) => c.code)
+      .join(", ")}, not converted from a stale exchange rate, so the number you see is the number you pay. The switch above the plans changes them.`,
+  },
+  {
+    q: `What happens above ${GROWTH.seatCap} people?`,
+    a: `${SCALE.name} is quoted rather than listed, because at that size the answer depends on how many workspaces, how much history you are bringing and which modules you turn on. From ${SCALE_FROM} people, talk to sales.`,
+  },
+  {
+    q: "Can we leave, and take our data?",
+    a: "Yes, on every tier including the free one. Export is available any time, and deleted items sit in a trash window before they go.",
+  },
+  {
+    q: "Are Talk and Tables extra?",
+    a: `No. They are included from ${pricing.tiers.find((t) => t.id === pricing.premiumModules[0]?.fromTier)?.name ?? GROWTH.name} at no surcharge. There is no per-module pricing.`,
+  },
+];
+
+interface PricingPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function toParams(raw: Record<string, string | string[] | undefined>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") params.set(key, value);
+    else if (Array.isArray(value) && value[0]) params.set(key, value[0]);
+  }
+  return params;
+}
+
+export async function generateMetadata({ searchParams }: PricingPageProps): Promise<Metadata> {
+  const shared = parseReceiptQuery(toParams(await searchParams));
+  // A shared receipt unfurls as THAT receipt, from the route that already
+  // renders it, rather than as the site's generic card.
+  const image =
+    shared.selected.length > 0
+      ? `/api/og/receipt?${receiptShareQuery({
+          selected: shared.selected,
+          seats: shared.seats,
+          currency: shared.currency,
+          overrides: shared.overrides,
+        })}`
+      : "/opengraph-image";
+  return {
+    title: "Pricing",
+    description: PRICING_DESCRIPTION,
+    alternates: { canonical: `${SITE}/pricing` },
+    openGraph: { images: [{ url: image, width: 1200, height: 630 }] },
+    twitter: { card: "summary_large_image", images: [{ url: image }] },
+  };
+}
+
+function Cell({ value }: { value: CompareValue }) {
+  if (value === true) {
+    return (
+      <span className="ic-yes" aria-label="Included">
+        Yes
+      </span>
+    );
+  }
+  if (value === false) {
+    return (
+      <span className="ic-no" aria-label="Not included">
+        No
+      </span>
+    );
+  }
+  // A STRING IS AN ALLOWANCE, NOT A REFUSAL, and it used to fall through to
+  // the "No" class. The AI row's real entitlements therefore painted as
+  // 50 / 500 / 2,000 in the same grey as the noes beside them, so a reader
+  // scanning the column read three escalating allowances as three gaps.
+  return <span className="ic-val">{value}</span>;
+}
+
+export default async function PricingPage({ searchParams }: PricingPageProps) {
+  const params = toParams(await searchParams);
+  const shared = parseReceiptQuery(params);
+  // Precedence: an explicit ?currency= the visitor chose and shared, then a
+  // shared receipt's own currency, then the geo guess. The switch writes
+  // that parameter with replaceState, so a reload keeps the choice instead
+  // of snapping back to whatever the edge header says.
+  const chosen = params.get("currency");
+  const currency =
+    chosen && isMarketingCurrency(chosen)
+      ? chosen
+      : shared.selected.length > 0
+        ? shared.currency
+        : await detectCurrency();
+  const sharedReceipt =
+    shared.selected.length > 0
+      ? stackReceiptModelFrom(
+          stackReceipt({
+            selected: shared.selected,
+            seats: shared.seats,
+            currency: shared.currency,
+            // The prices the sharer corrected, so this page shows the
+            // receipt they copied and not the list prices they had just
+            // edited away.
+            overrides: shared.overrides,
+          }),
+        )
+      : null;
+
+  // The offers graph, from the pricing source, and the FAQ graph from the
+  // FAQ this page renders. Both are mapped from the same constants the page
+  // shows, so the structured answer and the visible answer are one string
+  // and cannot drift into the mismatch that gets a rich result withdrawn.
+  // `@context` comes off the node: the graph declares it once, and a node
+  // repeating it is noise in the one document a crawler reads literally.
+  const software = { ...softwareApplicationJsonLd(currency, SITE) } as Record<string, unknown>;
+  delete software["@context"];
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      software,
+      {
+        "@type": "FAQPage",
+        mainEntity: FAQ.map((entry) => ({
+          "@type": "Question",
+          name: entry.q,
+          acceptedAnswer: { "@type": "Answer", text: entry.a },
+        })),
+      },
+    ],
+  };
+
+  // EVERY PLAN BUTTON IS GHOST, and the page's one blue is at the bottom.
+  //
+  // `TierCta` fills the recommended plan, which was right on a page of three
+  // bordered cards competing for the eye. On this page it put a filled blue
+  // button in the plans viewport and a second one in the closing viewport,
+  // which is two blues on a page whose rule is one. The recommended plan is
+  // still signposted, in words, on the plan itself. Destination, label and
+  // measurement id are `tierCta`'s exactly as before: only the skin changed.
+  const tierCtas: Record<string, React.ReactNode> = Object.fromEntries(
+    pricing.tiers.map((t) => [t.id, <MarketingCta key={t.id} cta={tierCta(t.id, "pricing")} variant="ghost" />]),
+  );
+
   return (
-    <div className="p-5 bg-white border border-slate-200 rounded-2xl">
-      <div className="flex items-center justify-between gap-2">
-        <p className="font-bold text-slate-900 text-base">{title}</p>
-        <span className={`text-sm font-bold ${t.text}`}>{price}</span>
-      </div>
-      <p className="mt-2 text-sm text-slate-600 leading-relaxed">{body}</p>
-    </div>
+    <Page>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+
+      {/* 1. The claim. */}
+      <Band air="hero" labelledBy="pricing-h1" still>
+        <Eyebrow>{COPY.hero.eyebrow}</Eyebrow>
+        <Claim id="pricing-h1">{COPY.hero.h1}</Claim>
+        <Sub>{COPY.hero.sub}</Sub>
+      </Band>
+
+      {/* 2. The plans. One object: three rows and the switch above them. */}
+      <Band ground="quiet" labelledBy="pricing-plans">
+        <Eyebrow>{COPY.plans.eyebrow}</Eyebrow>
+        <Headline id="pricing-plans">{COPY.plans.h2}</Headline>
+        <PricingCurrencyProvider initialCurrency={currency}>
+          <IconicPlans tierCtas={tierCtas} />
+        </PricingCurrencyProvider>
+      </Band>
+
+      {/* A shared receipt, and only when somebody shared one. The link is a
+          promise its sender made, and the card it unfurls as is generated
+          from these same numbers, so the page has to render what the card
+          showed. */}
+      {sharedReceipt ? (
+        <Band labelledBy="pricing-shared">
+          <Eyebrow>A shared receipt</Eyebrow>
+          <Headline id="pricing-shared">Someone priced their stack.</Headline>
+          <Line>
+            {`${shared.selected.length} ${shared.selected.length === 1 ? "category" : "categories"} at ${shared.seats} seats, in ${shared.currency}.`}
+          </Line>
+          <Obj>
+            <div style={{ margin: "0 auto", maxWidth: 520, textAlign: "start" }}>
+              <Receipt model={sharedReceipt} />
+            </div>
+          </Obj>
+        </Band>
+      ) : null}
+
+      {/* 3. The matrix. The one dense object on the sheet, and it gets its
+          own screen rather than a smaller size: a procurement team reads it
+          row by row, which is the opposite of skimming. */}
+      <Band labelledBy="pricing-matrix">
+        <Eyebrow>{COPY.matrix.eyebrow}</Eyebrow>
+        <Headline id="pricing-matrix">{COPY.matrix.h2}</Headline>
+        <Line>{COPY.matrix.line}</Line>
+        {/* This table scrolls sideways on a phone and holds nothing
+            focusable, so without a tabindex and a name a keyboard or switch
+            user cannot reach its right hand columns. WCAG 2.1.1. */}
+        <div className="ic-matrix" tabIndex={0} role="region" aria-label="What each plan includes, scrolls sideways">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                {/* Names only. The price belongs to the plans above, which
+                    follow the currency switch; a second copy here is
+                    rendered on the server in the server's currency, so the
+                    page would print dollars in the table while the plans
+                    showed rupees. One number, one place. */}
+                {pricing.tiers.map((t) => (
+                  <th key={t.id} scope="col">
+                    {t.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {COMPARE_GROUPS.flatMap((group) => [
+                <tr key={`g-${group.name}`} className="ic-group">
+                  <th scope="colgroup" colSpan={4}>
+                    {group.name}
+                  </th>
+                </tr>,
+                ...group.rows.map(([label, ...values]) => (
+                  <tr key={`${group.name}-${String(label)}`}>
+                    <th scope="row">{label}</th>
+                    {values.map((v, i) => (
+                      <td key={i}>
+                        <Cell value={v} />
+                      </td>
+                    ))}
+                  </tr>
+                )),
+              ])}
+            </tbody>
+          </table>
+        </div>
+        <Note>
+          Comparing against what you pay now?{" "}
+          <Link className="ic-a mk-focus" href="/compare/your-stack" data-cta="pricing-your-stack">
+            Price your current stack
+          </Link>
+          .
+        </Note>
+      </Band>
+
+      {/* 4. The questions. */}
+      <Band ground="quiet" labelledBy="pricing-faq">
+        <Headline id="pricing-faq">{COPY.questions.h2}</Headline>
+        <div className="ic-qa">
+          {FAQ.map((entry) => (
+            <details key={entry.q}>
+              <summary className="mk-focus">{entry.q}</summary>
+              <div className="ic-qa__a">
+                <p>{entry.a}</p>
+              </div>
+            </details>
+          ))}
+        </div>
+      </Band>
+
+      {/* 5. One line. One button. The page's only blue. */}
+      <Band air="wide" labelledBy="pricing-close">
+        <Headline id="pricing-close">{COPY.close.h2}</Headline>
+        <div className="ic-cta">
+          <PrimaryCta placement="pricing-close" />
+        </div>
+      </Band>
+    </Page>
   );
 }

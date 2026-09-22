@@ -1,0 +1,301 @@
+{
+  "version": 1,
+  "asOf": "2026-09",
+  "asOfLabel": "September 2026",
+  "listPriceFootnote": "Typical list price, September 2026, editable.",
+  "defaultCurrency": "USD",
+  "defaultSeats": 50,
+  "seatCapSource": "src/lib/plan-limits-data.ts PLAN_LIMITS.STARTER.users",
+  "seatCapNote": "The free Starter cap is the number the product actually enforces. If PLAN_LIMITS changes, this file and the copy change with it; the unit test fails otherwise.",
+  "currencies": [
+    {
+      "code": "USD",
+      "symbol": "$",
+      "locale": "en-US",
+      "position": "before",
+      "decimals": 0
+    },
+    {
+      "code": "INR",
+      "symbol": "₹",
+      "locale": "en-IN",
+      "position": "before",
+      "decimals": 0
+    },
+    {
+      "code": "AED",
+      "symbol": "AED ",
+      "locale": "en-AE",
+      "position": "before",
+      "decimals": 0
+    },
+    {
+      "code": "SGD",
+      "symbol": "S$",
+      "locale": "en-SG",
+      "position": "before",
+      "decimals": 0
+    },
+    {
+      "code": "GBP",
+      "symbol": "£",
+      "locale": "en-GB",
+      "position": "before",
+      "decimals": 0
+    },
+    {
+      "code": "EUR",
+      "symbol": "€",
+      "locale": "de-DE",
+      "position": "after",
+      "decimals": 0
+    }
+  ],
+  "tiers": [
+    {
+      "id": "starter",
+      "name": "Starter",
+      "plan": "STARTER",
+      "free": true,
+      "seatCap": 10,
+      "forWhom": "One team getting its first process out of a spreadsheet.",
+      "perSeat": {
+        "USD": 0,
+        "INR": 0,
+        "AED": 0,
+        "SGD": 0,
+        "GBP": 0,
+        "EUR": 0
+      },
+      "priceLabel": "Free",
+      "priceSubLabel": "Up to 10 people, forever",
+      "cta": "trial",
+      "recommended": false,
+      "bullets": [
+        "Work, Planner, Teams, Docs and Goals",
+        "AI: 50 questions in total, not per month",
+        "Unlimited tasks, lists and boards",
+        "3 SOPs, drafts included",
+        "Roles, KRAs and KPIs",
+        "Export everything, any time",
+        "Scoped visibility and the security activity log"
+      ],
+      "modules": {
+        "work": true,
+        "planner": true,
+        "ai": "limited",
+        "talk": false,
+        "teams": true,
+        "docs": true,
+        "tables": false,
+        "goals": true
+      },
+      "gatedBullets": []
+    },
+    {
+      "id": "growth",
+      "name": "Growth",
+      "plan": "GROWTH",
+      "free": false,
+      "seatCap": 50,
+      "forWhom": "The company that wants the whole system connected.",
+      "perSeat": {
+        "USD": 8,
+        "INR": 650,
+        "AED": 30,
+        "SGD": 11,
+        "GBP": 7,
+        "EUR": 8
+      },
+      "priceLabel": "per user, per month",
+      "priceSubLabel": "Billed annually",
+      "cta": "trial",
+      "recommended": true,
+      "recommendedNote": "Most teams start here",
+      "bullets": [
+        "Everything in Starter",
+        "Talk: channels, calls and threads",
+        "AI: 500 questions in total",
+        "Tables: sheets and forms",
+        "20 SOPs, drafts included, with acknowledgement",
+        "Reviews, kudos and surveys"
+      ],
+      "modules": {
+        "work": true,
+        "planner": true,
+        "ai": true,
+        "talk": true,
+        "teams": true,
+        "docs": true,
+        "tables": true,
+        "goals": true
+      },
+      "gatedBullets": []
+    },
+    {
+      "id": "scale",
+      "name": "Scale",
+      "plan": "SCALE",
+      "free": false,
+      "seatCap": 200,
+      "forWhom": "Multi team operations with governance to answer for.",
+      "perSeat": {
+        "USD": null,
+        "INR": null,
+        "AED": null,
+        "SGD": null,
+        "GBP": null,
+        "EUR": null
+      },
+      "priceLabel": "Custom",
+      "priceSubLabel": "Talk to sales",
+      "cta": "demo",
+      "recommended": false,
+      "bullets": [
+        "Everything in Growth",
+        "AI: 2,000 questions in total",
+        "100 SOPs, drafts included",
+        "Up to 200 people on one workspace"
+      ],
+      "modules": {
+        "work": true,
+        "planner": true,
+        "ai": true,
+        "talk": true,
+        "teams": true,
+        "docs": true,
+        "tables": true,
+        "goals": true
+      },
+      "gatedBullets": [
+        {
+          "text": "Migration help on the way in",
+          "flag": "migrationConcierge"
+        }
+      ]
+    }
+  ],
+  "premiumModules": [
+    {
+      "id": "talk",
+      "name": "Talk",
+      "fromTier": "growth"
+    },
+    {
+      "id": "tables",
+      "name": "Tables",
+      "fromTier": "growth"
+    }
+  ],
+  "categories": [
+    {
+      "id": "task-tracker",
+      "label": "Task tracker",
+      "hub": "work",
+      "icon": "SquareKanban",
+      "usdPerSeat": 12
+    },
+    {
+      "id": "wiki",
+      "label": "Wiki",
+      "hub": "docs",
+      "icon": "BookOpen",
+      "usdPerSeat": 8
+    },
+    {
+      "id": "team-chat",
+      "label": "Team chat",
+      "hub": "talk",
+      "icon": "MessagesSquare",
+      "usdPerSeat": 8
+    },
+    {
+      "id": "video-calls",
+      "label": "Video calls",
+      "hub": "talk",
+      "icon": "Video",
+      "usdPerSeat": 13
+    },
+    {
+      "id": "spreadsheets",
+      "label": "Spreadsheets",
+      "hub": "tables",
+      "icon": "Sheet",
+      "usdPerSeat": 12
+    },
+    {
+      "id": "forms",
+      "label": "Forms",
+      "hub": "tables",
+      "icon": "ClipboardList",
+      "usdPerSeat": 5
+    },
+    {
+      "id": "okr-tool",
+      "label": "OKR tool",
+      "hub": "goals",
+      "icon": "Target",
+      "usdPerSeat": 10
+    },
+    {
+      "id": "hris-directory",
+      "label": "HRIS directory",
+      "hub": "teams",
+      "icon": "Users",
+      "usdPerSeat": 9
+    },
+    {
+      "id": "review-tool",
+      "label": "Review tool",
+      "hub": "teams",
+      "icon": "Star",
+      "usdPerSeat": 6,
+      "fromTier": "growth"
+    },
+    {
+      "id": "survey-tool",
+      "label": "Survey tool",
+      "hub": "teams",
+      "icon": "BarChart3",
+      "usdPerSeat": 7,
+      "fromTier": "growth"
+    },
+    {
+      "id": "calendar",
+      "label": "Calendar",
+      "hub": "planner",
+      "icon": "CalendarDays",
+      "usdPerSeat": 6
+    },
+    {
+      "id": "timesheets",
+      "label": "Timesheets",
+      "hub": "planner",
+      "icon": "Clock",
+      "usdPerSeat": 5
+    },
+    {
+      "id": "whiteboard",
+      "label": "Whiteboard",
+      "hub": "docs",
+      "icon": "PenLine",
+      "usdPerSeat": 8
+    },
+    {
+      "id": "contracts-esign",
+      "label": "Contracts and e-sign",
+      "hub": "docs",
+      "icon": "FileSignature",
+      "usdPerSeat": 15
+    }
+  ],
+  "categoryPriceCurrencies": {
+    "USD": 1,
+    "INR": 80,
+    "AED": 3.7,
+    "SGD": 1.35,
+    "GBP": 0.8,
+    "EUR": 0.95
+  },
+  "categoryPriceCurrenciesNote": "Presentation multipliers for the editable before tiles only. They are round local figures for a what if calculator, never an FX quote, and they never touch a WorkwrK price: every tier price is authored per currency above."
+}

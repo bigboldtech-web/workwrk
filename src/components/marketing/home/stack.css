@@ -1,0 +1,704 @@
+/* The home page, in the project-management category's own register.
+ *
+ * WHY THIS SHEET REPLACED chain.css. The previous home page was built to a
+ * set of rules borrowed from consumer hardware marketing: six word
+ * headlines at 80px, one object per section, almost no colour, no card
+ * grids. The founder rejected it twice and named the register he wants
+ * instead: ClickUp, Asana, monday.com. Those sites are denser, warmer and
+ * far more product forward, and they solve a problem the quiet register
+ * cannot: a buyer evaluating a work platform is shopping for BREADTH, and
+ * breadth has to be shown rather than implied.
+ *
+ * What the rivals actually do, from the survey in
+ * docs/plans/marketing-directions-2026-09.md:
+ *
+ *   1. Nobody opens with a narrative. The hero states a claim and shows the
+ *      product. No fictional company, no walkthrough of a day.
+ *   2. The eyebrow is a release pill or a caps category label, never an
+ *      anecdote.
+ *   3. The product shot is real and never restyled: shipped UI, its own
+ *      chrome, its own colours.
+ *   4. A chip row or tab strip is the category's answer to breadth: twelve
+ *      capabilities without twelve sections.
+ *   5. One accent colour, and it only ever paints the primary button.
+ *   6. Enterprise is proved with a boring table, not with adjectives.
+ *
+ * The one rung of their ladder this site CANNOT copy is proof. Every rival
+ * runs a greyscale logo wall under the hero, then a scale number, then
+ * named case studies, then a G2 badge. WorkwrK has no customers yet, and
+ * src/components/marketing/flags.ts gates every one of those claims to
+ * false on purpose. So the slot in the page order where a logo wall would
+ * sit is filled with the only proof that is true today: the product
+ * itself, shown at length. That is a deliberate substitution, not an
+ * omission, and it is the section commented as "the honest rung" below.
+ *
+ * Grounds stay light. `Section`'s own note records the site wide decision
+ * (concept 10): the navy chrome inside a product frame is the only dark
+ * element anywhere on the public site. That is not a conflict with the
+ * brief, because ClickUp's current site is white rather than the purple
+ * gradient it used to be, and white plus one accent is exactly where the
+ * category has landed. Colour arrives through the module tiles and the
+ * status chips inside the frames, which is where the rivals put it too.
+ */
+
+/* ── The band system ───────────────────────────────────────────────── */
+
+.mk-stack {
+  /* The one accent, stated once so nothing below reaches for a literal. */
+  --stack-accent: var(--os-brand);
+  --stack-navy: var(--os-chrome-bg, #1b2537);
+}
+
+/* A tint band. Alternating white and tint is the category's page rhythm:
+   it gives a long page joints a reader can feel without drawing a rule. */
+.mk-band-tint {
+  background: var(--os-surface-1);
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────── */
+
+.mk-hero-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+}
+
+/* The eyebrow pill. A release marker, per rule 2: it names what shipped,
+   and it is a link because a pill that cannot be opened is decoration. */
+.mk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 6px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-surface);
+  color: var(--os-ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.mk-pill:hover {
+  border-color: var(--os-line-strong);
+  color: var(--os-ink);
+}
+
+.mk-pill__tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--os-brand-soft);
+  color: var(--os-brand-deep);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* The headline. 56px, not the 72 to 80 the quiet register used: the
+   category sets a heavy geometric sans at a size that still lets a second
+   line and a subhead share the first screen with the product frame. */
+.mk-hero-stack__h1 {
+  /* A px cap, not a ch one. `ch` is the width of a zero, and at 56px in a
+     bold geometric sans that made 17ch about 530px, which broke this
+     headline over THREE lines. The category sets its hero on two. 900
+     leaves `text-wrap: balance` room to find an even two line break. */
+  max-width: 900px;
+  margin: 0;
+  font-size: clamp(34px, 5.4vw, 56px);
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: -0.025em;
+  color: var(--os-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.mk-hero-stack__lede {
+  max-width: 54ch;
+  margin: 0;
+  font-size: clamp(16px, 1.6vw, 19px);
+  line-height: 1.55;
+  color: var(--os-ink-2);
+  text-wrap: pretty;
+}
+
+/* Button plus the risk reversal BESIDE it, in small grey type. Every rival
+   does this and it is load bearing: it answers "what does clicking cost
+   me?" in the same glance as the button, which a line below it does not. */
+.mk-hero-stack__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 16px;
+  margin-top: 4px;
+}
+
+.mk-reassure {
+  color: var(--os-ink-3);
+  font-size: 13px;
+}
+
+/* The caps micro line under the actions. The rivals use it to name the
+   thing they want remembered. Ours names what the free tier really is. */
+.mk-microline {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--os-ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mk-microline li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* The separator is a pseudo element so the list reads as five plain items
+   to a screen reader rather than as five items and four bullet glyphs. */
+.mk-microline li + li::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--os-ink-4);
+}
+
+/* ── The hero frame ────────────────────────────────────────────────── */
+
+/* The product, immediately, at width. Rule 3. The frame carries its own
+   navy chrome, so this wrapper supplies only the lift; the centring, the
+   crop and the decoration are on `.mk-scale` below, for the reason given
+   there. */
+.mk-hero-frame {
+  margin-top: 44px;
+}
+
+/* CENTRE AND DECORATE `.mk-scale`, NOT ANY WRAPPER AROUND IT.
+ *
+ * MarketingShell paints a fixed size box: `.mk-scale` has an explicit
+ * `width: calc(var(--mk-w) * ...)` AND `max-width: 100%`. That percentage
+ * is the trap. Give any ancestor a content-derived width, `fit-content` or
+ * `max-content`, and the percentage has nothing definite to resolve
+ * against; the cycle resolves to zero and the frame disappears entirely.
+ * Both were tried here and both left the hero with no picture.
+ *
+ * So every wrapper stays a full width block, and the box that already has
+ * a definite width centres itself inside one with `margin-inline: auto`.
+ * The radius, the shadow and the crop go on that same box, which is also
+ * where they belong visually: they trace the frame rather than the column
+ * it sits in. */
+.mk-hero-frame .mk-scale,
+.mk-tabpanel .mk-scale,
+.mk-row__art .mk-scale {
+  margin-inline: auto;
+}
+
+.mk-hero-frame .mk-scale {
+  /* Crops the bottom on purpose, see the note above. */
+  max-height: 560px;
+  border-radius: 14px 14px 0 0;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.06),
+    0 24px 48px -12px rgb(16 24 40 / 0.18);
+}
+
+/* ── Tab strip: the breadth mechanic ───────────────────────────────── */
+
+.mk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.mk-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-surface);
+  color: var(--os-ink-2);
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.mk-tab:hover {
+  border-color: var(--os-line-strong);
+  color: var(--os-ink);
+}
+
+/* The selected chip is the ONE place on this page other than the primary
+   button where the accent fills a shape. It is the same blue, so the page
+   still reads as one accent rather than two. */
+.mk-tab[aria-selected="true"] {
+  border-color: var(--stack-accent);
+  background: var(--stack-accent);
+  color: #fff;
+}
+
+.mk-tab svg {
+  flex: none;
+}
+
+/* Same reasoning as the hero frame: the decoration rides on the box that
+   already has a definite width. */
+.mk-tabpanel .mk-scale {
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.06),
+    0 18px 36px -12px rgb(16 24 40 / 0.16);
+}
+
+/* The caption under the panel: what this view is, in one line. */
+.mk-tabpanel__note {
+  margin: 16px auto 0;
+  max-width: 62ch;
+  text-align: center;
+  color: var(--os-ink-2);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* A link in a note has to look like one. The security band's "Read the
+   whole security page" sat in body grey and read as a full stop. */
+.mk-tabpanel__note a {
+  color: var(--stack-accent);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.mk-tabpanel__note a:hover {
+  text-decoration: underline;
+}
+
+/* ── Module grid ───────────────────────────────────────────────────── */
+
+/* A card grid, which the quiet register forbade and this one requires. The
+   grid is the only honest way to show eight hubs at once. */
+.mk-modules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 16px;
+}
+
+.mk-module {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  background: var(--os-surface);
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mk-module:hover {
+  border-color: var(--os-line-strong);
+  box-shadow: 0 6px 16px -6px rgb(16 24 40 / 0.12);
+}
+
+/* The tile is where colour lives on this page. Each hub owns a hue, which
+   is how a reader tells eight cards apart at a glance. */
+.mk-module__tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--tile-bg, var(--os-brand-soft));
+  color: var(--tile-fg, var(--os-brand-deep));
+}
+
+.mk-module__name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--os-ink);
+}
+
+.mk-module__what {
+  margin: 0;
+  color: var(--os-ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Section headers ───────────────────────────────────────────────── */
+
+.mk-head {
+  max-width: 62ch;
+  margin: 0 auto 40px;
+  text-align: center;
+}
+
+.mk-head--left {
+  margin-left: 0;
+  text-align: left;
+}
+
+.mk-eyebrow {
+  margin: 0 0 12px;
+  color: var(--os-ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mk-head__h2 {
+  margin: 0;
+  font-size: clamp(26px, 3.2vw, 38px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  text-wrap: balance;
+}
+
+.mk-head__sub {
+  margin: 14px 0 0;
+  color: var(--os-ink-2);
+  font-size: 17px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+/* ── Alternating use case rows ─────────────────────────────────────── */
+
+.mk-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: 56px;
+}
+
+.mk-row + .mk-row {
+  margin-top: 88px;
+}
+
+/* The picture leads on every other row. `order` and not a second grid,
+   so the DOM order stays "words then picture" for a screen reader. */
+.mk-row--flip .mk-row__art {
+  order: -1;
+}
+
+.mk-row__art {
+  min-width: 0;
+}
+
+/* On the frame box, not the grid cell, so the shadow traces the frame
+   rather than the column it sits in. */
+.mk-row__art .mk-scale {
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.06),
+    0 14px 30px -12px rgb(16 24 40 / 0.16);
+}
+
+.mk-row__h3 {
+  margin: 0 0 14px;
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--os-ink);
+}
+
+.mk-row__body {
+  margin: 0;
+  color: var(--os-ink-2);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.mk-row__list {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mk-row__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--os-ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.mk-row__list svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--stack-accent);
+}
+
+@media (max-width: 900px) {
+  .mk-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  /* On one column the picture goes back under the words on every row, so
+     the flip does not strand a screenshot above the text explaining it. */
+  .mk-row--flip .mk-row__art {
+    order: 0;
+  }
+
+  .mk-row + .mk-row {
+    margin-top: 56px;
+  }
+}
+
+/* ── The enterprise table ──────────────────────────────────────────── */
+
+/* Boring on purpose, per rule 6. Every row below names something that is
+   live in the product today; nothing here is an adjective. */
+.mk-facts {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 15px;
+}
+
+.mk-facts caption {
+  padding-bottom: 14px;
+  color: var(--os-ink-3);
+  font-size: 13px;
+  text-align: left;
+}
+
+.mk-facts th,
+.mk-facts td {
+  padding: 14px 18px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--os-line-soft);
+}
+
+.mk-facts thead th {
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mk-facts tbody th {
+  width: 34%;
+  color: var(--os-ink);
+  font-weight: 600;
+}
+
+.mk-facts td {
+  color: var(--os-ink-2);
+}
+
+.mk-facts tbody tr:last-child th,
+.mk-facts tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Anything wider than a phone carries its own scroller rather than letting
+   the page scroll sideways, which marketing.css forbids at the source. */
+.mk-facts-scroll {
+  overflow-x: auto;
+}
+
+.mk-facts-scroll .mk-facts {
+  min-width: 560px;
+}
+
+/* ── Pricing strip ─────────────────────────────────────────────────── */
+
+/* `stretch`, not `start`. The three tiers do not carry the same number of
+   bullets, so sizing each card to its own content left three cards of
+   three different heights with their buttons at three different
+   baselines. Equal height cards plus `margin-top: auto` on the button row
+   puts every CTA on one line, which is what makes a price table read as
+   one object rather than three. */
+.mk-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  align-items: stretch;
+}
+
+.mk-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 26px;
+  border: 1px solid var(--os-line);
+  border-radius: 14px;
+  background: var(--os-surface);
+}
+
+/* The highlighted middle, which every rival in the category has. */
+.mk-plan--featured {
+  border-color: var(--stack-accent);
+  box-shadow: 0 10px 30px -12px rgb(0 115 234 / 0.28);
+}
+
+/* The flag is rendered on EVERY card and hidden on the ones that do not
+   have one, rather than rendered only on the featured card. Rendering it
+   conditionally made the middle card one row taller than its neighbours,
+   so its name, its price and every bullet sat lower than the same line on
+   the cards either side: three price cards that no longer read as one
+   object. `visibility: hidden` keeps the row's height and takes the text
+   out of the accessibility tree, which `opacity: 0` would not. */
+.mk-plan__flag {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--os-brand-soft);
+  color: var(--os-brand-deep);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mk-plan__flag[data-on="false"] {
+  visibility: hidden;
+}
+
+.mk-plan__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--os-ink-2);
+}
+
+.mk-plan__price {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-plan__sub {
+  margin: 0;
+  color: var(--os-ink-3);
+  font-size: 13px;
+}
+
+.mk-plan__list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.mk-plan__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--os-ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mk-plan__list svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--stack-accent);
+}
+
+.mk-plan__cta {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+/* ── The honest rung ───────────────────────────────────────────────── */
+
+/* Where a logo wall would go. See the note at the top of this sheet: the
+   flags file gates logos, counters, case studies and badges to false, so
+   this band states what is true instead and links to the page that proves
+   each line. It is not a stat grid dressed up as proof: no number here is
+   about adoption, because there is no adoption to report yet. */
+.mk-honest {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 28px 32px;
+  padding: 28px 0;
+  border-top: 1px solid var(--os-line);
+  border-bottom: 1px solid var(--os-line);
+}
+
+.mk-honest__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mk-honest__key {
+  color: var(--os-ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.mk-honest__val {
+  margin: 0;
+  color: var(--os-ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Closing band ──────────────────────────────────────────────────── */
+
+.mk-close-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+}
+
+.mk-close-stack__h2 {
+  max-width: 20ch;
+  margin: 0;
+  font-size: clamp(28px, 3.6vw, 42px);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  text-wrap: balance;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-pill,
+  .mk-tab,
+  .mk-module {
+    transition: none;
+  }
+}

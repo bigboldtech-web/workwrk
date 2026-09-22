@@ -1,162 +1,158 @@
+// /changelog, rewritten so every line of it is true.
+//
+// What it used to carry: six releases of a product that does not exist.
+// "Money hub expansion" with procurement, purchase orders and budget versus
+// actual; a compensation band editor; onboarding journeys with mentor
+// pairing; kudos counting into a composite review score; "Cross-page nav
+// latency cut by 40%", a number nothing measured; "Marketing site rebuilt
+// with a [two competitor names] aesthetic", which put two competitor names
+// on a page that is not /compare; and, worst, a security row reading
+// "SOC 2 Type II report available; refresh of penetration test from
+// [a named vendor]". That row was live, indexable and linked from the
+// footer of every page, on the same domain as a security page saying no
+// certification is held.
+//
+// The entries below come from the repository's own history. A changelog is
+// the one marketing page where the source of truth is a commit, so that is
+// what it reads from, and the rule at the top of the page says so.
+
+import Link from "next/link";
 import type { Metadata } from "next";
-import { Sparkles, Zap, ShieldCheck, Bug, BookOpen, ArrowRight } from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  Button,
-  CTABand,
-  GradientText,
-  HUES,
-  type Hue,
-} from "@/components/marketing/primitives";
+import { Band, Claim, Close, Eyebrow, Headline, Note, Page, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Changelog — WorkwrK",
-  description: "Every Tuesday, we ship. Here's what's new — features, improvements, fixes — in chronological order.",
+  title: "Changelog",
+  description:
+    "What actually shipped, newest first, drawn from the repository rather than from a marketing calendar. Nothing here is a plan.",
   alternates: { canonical: "https://workwrk.com/changelog" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "Changelog",
+    description: "What actually shipped, newest first, drawn from the repository rather than a marketing calendar.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "What actually shipped, newest first, drawn from the repository rather than a marketing calendar." },
 };
 
 type EntryType = "feature" | "improvement" | "fix" | "security" | "docs";
 
-const TYPE_META: Record<EntryType, { label: string; hue: Hue; icon: typeof Sparkles }> = {
-  feature:     { label: "New",         hue: "fuchsia", icon: Sparkles    },
-  improvement: { label: "Improvement", hue: "sky",     icon: Zap         },
-  fix:         { label: "Fix",         hue: "amber",   icon: Bug         },
-  security:    { label: "Security",    hue: "emerald", icon: ShieldCheck },
-  docs:        { label: "Docs",        hue: "indigo",  icon: BookOpen    },
+// A LABEL, AND NOTHING ELSE. Each kind used to carry a hue and an icon, and
+// they were painted as a bordered uppercase pill in front of every line:
+// five hues of pill down one page, on a site whose rule is one blue at most
+// once per screen. The word does the whole job.
+const TYPE_META: Record<EntryType, { label: string }> = {
+  feature:     { label: "New" },
+  improvement: { label: "Improvement" },
+  fix:         { label: "Fix" },
+  security:    { label: "Security" },
+  docs:        { label: "Docs" },
 };
 
-const ENTRIES: readonly { date: string; version: string; title: string; items: readonly { type: EntryType; text: string }[] }[] = [
+const ENTRIES: readonly { date: string; version?: string; title: string; items: readonly { type: EntryType; text: string }[] }[] = [
   {
-    date: "2026-05-18",
-    version: "v4.2",
-    title: "v4 marketing relaunch — colorful, hub-aligned, full-rainbow",
+    date: "2026-09-21",
+    title: "The interface refresh reaches Knowledge",
     items: [
-      { type: "feature",     text: "Marketing site rebuilt with ClickUp×Workday aesthetic — every page on the new design system." },
-      { type: "feature",     text: "Logo refreshed: multi-hue rainbow bento mark replaces the single-tone violet." },
-      { type: "improvement", text: "Topbar gets a mega-menu for Product and Solutions; mobile drawer redesigned." },
-      { type: "improvement", text: "Marketing primitives library shared across all 22+ marketing pages." },
+      { type: "feature", text: "Docs, SOPs, policies and contracts move onto the shared page frame and the token layer." },
+      { type: "fix", text: "Restored the list and board options an earlier phase of the refresh had dropped, including the column that took a whole view down." },
+      { type: "improvement", text: "One verification script that checks a commit the way the production build does." },
     ],
   },
   {
-    date: "2026-05-11",
-    version: "v4.1",
-    title: "ListPage migration: every dashboard now has a persistent rail",
+    date: "2026-09-18",
+    title: "The frame, then Work",
     items: [
-      { type: "feature",     text: "Tasks, SOPs, Recruiting, Procurement, Expenses — all migrated to the new ListPage shell." },
-      { type: "feature",     text: "OKRs, Ideas, Surveys, People pages on the same shell with hub-aware quick-action rails." },
-      { type: "improvement", text: "Cross-page nav latency cut by 40% via shared shell prefetching." },
+      { type: "feature", text: "One frame for every product page: the navy rail, the top bar, the secondary sidebar and one page header." },
+      { type: "feature", text: "Work, lists and boards rebuilt on that frame, with the seven defects the team reported alongside it." },
+      { type: "improvement", text: "The type scale moved up a step across the product, with a codemod rather than by hand." },
     ],
   },
   {
-    date: "2026-05-04",
-    version: "v4.0",
-    title: "Landing v4 + AI Engine GA",
+    date: "2026-09-17",
+    title: "Tokens, navigation and the access engine",
     items: [
-      { type: "feature",     text: "New landing — confident hero, 7-hub showcase, workflow demo, big-number stat strip." },
-      { type: "feature",     text: "AI Engine GA: Cmd-K AI search, inbox triage, cross-module signals." },
-      { type: "security",    text: "SOC 2 Type II report available; refresh of penetration test from Cure53." },
+      { type: "feature", text: "One token layer for colour, type, spacing and radius, replacing the per page palettes." },
+      { type: "improvement", text: "Navigation derived from the URL rather than from a hand kept map, so a route and its hub cannot disagree." },
+      { type: "improvement", text: "The new access engine landed inert beside the old one, with a parity job comparing every answer." },
     ],
   },
   {
-    date: "2026-04-22",
-    version: "v3.9",
-    title: "Comp + onboarding journeys",
+    date: "2026-09-10",
+    title: "Eight hubs on the rail",
     items: [
-      { type: "feature",     text: "Comp band editor with per-location overrides and tenure-based bumps." },
-      { type: "feature",     text: "Onboarding journeys: forkable, tied to KPI ramp, with mentor pairing." },
-      { type: "improvement", text: "Composite review score now visible inline on the manager 1:1 view." },
+      { type: "improvement", text: "The left rail went from about twenty five icons to eight hubs, with the rest folded into the hub sidebars." },
+      { type: "fix", text: "Every link the consolidation had dropped was restored." },
+      { type: "feature", text: "Boards poll for teammates' changes, so a task someone else moves appears without a refresh." },
     ],
   },
   {
-    date: "2026-04-08",
-    version: "v3.8",
-    title: "Money hub expansion",
+    date: "2026-09-09",
+    title: "Access that matches what people expect",
     items: [
-      { type: "feature",     text: "Procurement: vendor scorecards, PO/GRN tracking, multi-step approvals." },
-      { type: "feature",     text: "Budget vs. actual dashboards per cost center with drill-through." },
-      { type: "fix",         text: "Multi-currency rollup recalculation now correctly handles mid-period FX changes." },
+      { type: "feature", text: "A Space or List member can add and edit the work in it without being able to manage the container." },
+      { type: "fix", text: "Assigning someone a task grants them access to it, so assigned work is never invisible." },
+      { type: "improvement", text: "The share dialog shows the real, additive grants rather than a guess at them." },
+      { type: "feature", text: "Multiple assignees on a task, in the data model and in the picker." },
     ],
   },
   {
-    date: "2026-03-25",
-    version: "v3.7",
-    title: "Kudos boosts + leaderboard",
+    date: "2026-09-08",
+    title: "Sign-in hardening",
     items: [
-      { type: "feature",     text: "Monthly recognition leaderboard with company-value tagging." },
-      { type: "feature",     text: "Kudos count factors into composite review score as a configurable bonus axis." },
-      { type: "docs",        text: "New playbook: 'Designing a recognition system that holds up at scale.'" },
+      { type: "security", text: "Two step verification enforced at login, with authenticator codes and backup codes." },
+      { type: "security", text: "Reset tokens hashed at rest, login timing equalised, and the org password policy enforced on signup, reset and invite." },
+      { type: "security", text: "Rate limits on the public reset and signup endpoints." },
+      { type: "feature", text: "Idle sessions expire, and a person can change their password, sign out everywhere and read their own security activity." },
     ],
   },
 ];
 
 export default function ChangelogPage() {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="fuchsia" className="mb-5">Changelog</Eyebrow>
-            <H1>
-              Every Tuesday, <GradientText hue="fuchsia">we ship.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              Features, improvements, fixes — published the day they hit production. No version-number theater.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/roadmap" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
-                See what&apos;s next
-              </Button>
-              <Button href="/signup" variant="outline" size="lg">Try it free</Button>
-            </div>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      <Band air="hero" labelledBy="log-h1" still>
+        <Eyebrow>Changelog</Eyebrow>
+        <Claim id="log-h1">What actually shipped.</Claim>
+        <Sub>
+          Newest first, taken from the repository rather than from a release calendar, and nothing on this page is a
+          plan or a preview.
+        </Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <ol className="relative space-y-12 border-l-2 border-dashed border-slate-200 pl-8 lg:pl-12">
-            {ENTRIES.map((entry) => (
-              <li key={entry.version} className="relative">
-                <span className="absolute -left-[2.75rem] lg:-left-[3.4rem] top-0.5 w-7 h-7 rounded-full bg-white border-2 border-fuchsia-500 flex items-center justify-center">
-                  <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-500" />
-                </span>
-                <div className="flex flex-wrap items-baseline gap-3">
-                  <h2 className="font-extrabold text-2xl text-slate-900 tracking-tight">{entry.title}</h2>
-                  <span className="text-sm font-mono text-slate-400">{entry.version}</span>
-                </div>
-                <p className="text-base text-slate-500 mt-1">{entry.date}</p>
-                <ul className="mt-5 space-y-2.5">
-                  {entry.items.map((item, i) => {
-                    const meta = TYPE_META[item.type];
-                    const t = HUES[meta.hue];
-                    const Icon = meta.icon;
-                    return (
-                      <li key={i} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-xl">
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.14em] px-2 h-5 rounded-full ${t.bgTint} ${t.text} border ${t.border} flex-shrink-0`}>
-                          <Icon size={10} /> {meta.label}
-                        </span>
-                        <span className="text-[15px] text-slate-700 leading-snug">{item.text}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </li>
-            ))}
-          </ol>
-        </Container>
-      </Section>
+      {/* The log. It was a dashed timeline with a ringed dot per release and
+          a coloured bordered pill in front of every line, five hues of pill
+          down one page. The kind of change is now one grey word. */}
+      <Band ground="quiet" labelledBy="log-list">
+        <Eyebrow>The record</Eyebrow>
+        <Headline id="log-list">Every release, with its date.</Headline>
+        <ol className="ic-log">
+          {ENTRIES.map((entry) => (
+            <li key={entry.date}>
+              <span className="ic-logdate">{entry.date}</span>
+              <span className="ic-logtitle">{entry.title}</span>
+              <ul className="ic-logitems">
+                {entry.items.map((item) => (
+                  <li key={item.text}>
+                    <span className="ic-logkind">{TYPE_META[item.type].label}</span>
+                    <span>{item.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ol>
+        <Note>
+          What is next is on the{" "}
+          <Link className="ic-a mk-focus" href="/roadmap" data-cta="changelog-roadmap">
+            roadmap
+          </Link>
+          , and only its first column means you can use the thing today.
+        </Note>
+      </Band>
 
-      <CTABand
-        hue="fuchsia"
-        title={<>Want updates <GradientText hue="indigo">in your inbox</GradientText>?</>}
-        body="Weekly changelog digest — every Tuesday."
-        primary={{ label: "Subscribe", href: "/signup" }}
-        secondary={{ label: "See roadmap", href: "/roadmap" }}
-      />
-    </>
+      <Close headline="Everything here is live now." placement="changelog" />
+    </Page>
   );
 }

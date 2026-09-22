@@ -1,0 +1,1126 @@
+/* THE ICONIC SHEET: every marketing page that is not the home page.
+ *
+ * The home page has its own sheet (home/chain.css) because it is the only
+ * page with an 80px claim and a four beat chain. This one is the same
+ * grammar for the eight pages that follow it, so a heading on /pricing and a
+ * heading on /compare are the same object at the same size with the same
+ * air, and a rule changes in one place for all of them.
+ *
+ * The eight rules, and each one is a thing a reviewer can fail a section on:
+ *
+ *   1. One idea per screen. One section, one statement, one object.
+ *   2. Few words, enormous type. A page's claim is 72px at 1440.
+ *   3. Whitespace is the design. 160px between sections, 200px around a
+ *      statement, and nothing crowds a headline.
+ *   4. One object per section, centred and large.
+ *   5. No card grid, no badge row, no logo wall.
+ *   6. Power words, plain words. That is the copy's job, not this file's.
+ *   7. Motion is one move. One fade and rise on entry, once, never a loop.
+ *   8. Colour is almost absent. Near black on white. The one blue is the
+ *      closing button, once per page. Every other colour on a page is inside
+ *      a product frame, where the product's own chrome is fixed.
+ *
+ * WHY THE RAMP IS ONE STEP UNDER THE HOME PAGE'S. The claim on / is the
+ * site's loudest sentence and nothing else may match it, so the h1 here tops
+ * out at 72 against its 80 and the h2 at 46 against its 48. Everything else
+ * reads the same tokens the rest of the site does.
+ */
+
+.mk-iconic {
+  /* Fluid, so there is one number per role and no breakpoint table to keep
+     in step with a second one. */
+  /* 5.7vw, not 5vw, and the number is the rule rather than a taste.
+     "Hero headline 72px or larger on desktop" is the one measurable line in
+     the brief, and at 5vw a claim only reached 72px at exactly 1440: it was
+     64px at 1280 and 68px at 1366, which are the two commonest laptop
+     widths, so the rule failed on most desktops that ever opened the page.
+     72 / 1264 = 5.7vw, so the cap is now reached at 1264 and every desktop
+     width above it is at the ceiling. Below that it still ramps down,
+     because a 72px claim on a tablet is not restraint, it is a wall. */
+  --ic-h1: clamp(40px, 5.7vw, 72px);
+  --ic-h2: clamp(30px, 3.2vw, 46px);
+  --ic-fig: clamp(56px, 7.4vw, 104px);
+  --ic-name: clamp(24px, 2.4vw, 34px);
+  --ic-sub: clamp(17px, 1.5vw, 22px);
+  --ic-line: clamp(16px, 1.2vw, 18px);
+  --ic-gutter: 20px;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .mk-iconic { --ic-gutter: 24px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The band. One per idea, and it owns its share of the page.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-sec {
+  padding-block: 80px;
+  display: block;
+}
+
+/* A statement gets more air than a section with an object in it, because a
+   sentence with nothing around it is the whole of its design. */
+.ic-sec[data-air="wide"] { padding-block: 104px; }
+
+/* The page's first band carries the navigation above it, so its top padding
+   is smaller than its bottom: the air the nav already supplies is not paid
+   for twice. */
+.ic-sec[data-air="hero"] { padding-block: 64px 80px; }
+
+/* A band that is a continuation of the one above it, not a new idea: the
+   tour's caption under the tour's frame. It closes the gap rather than
+   opening one. */
+.ic-sec[data-air="tight"] { padding-block: 0 80px; }
+
+@media (min-width: 768px) {
+  .ic-sec { padding-block: 150px; }
+  .ic-sec[data-air="wide"] { padding-block: 190px; }
+  .ic-sec[data-air="hero"] { padding-block: 104px 110px; }
+  .ic-sec[data-air="tight"] { padding-block: 0 150px; }
+}
+
+/* The one alternate ground. Used sparingly: on a seven band page it appears
+   twice at most, because a third would make white the exception. */
+.ic-sec[data-ground="quiet"] { background: var(--os-surface-1); }
+
+.ic-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: var(--ic-gutter);
+}
+
+/* A reading column. Legal prose and long answers only: a paragraph set to
+   1200px is not a paragraph, it is a wall. */
+.ic-wrap[data-width="read"] { max-width: 760px; }
+
+.ic-center { text-align: center; }
+
+/* ─────────────────────────────────────────────────────────────────
+ * Type.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-eyebrow {
+  margin: 0 0 20px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  /* ink 2, not ink 3. An eyebrow is read, so it clears 4.5 to 1. */
+  color: var(--os-ink-2);
+}
+
+.ic-h1 {
+  margin: 0 auto;
+  max-width: 17ch;
+  font-size: var(--ic-h1);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.022em;
+  color: var(--os-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.ic-h2 {
+  margin: 0 auto;
+  max-width: 18ch;
+  font-size: var(--ic-h2);
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.ic-sub {
+  margin: 22px auto 0;
+  max-width: 36ch;
+  font-size: var(--ic-sub);
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--os-ink-2);
+  /* `balance`, not `pretty`. A centred sentence of two lines reads as one
+     shape only when the lines are the same length. */
+  text-wrap: balance;
+}
+
+@media (min-width: 768px) {
+  .ic-sub { margin-top: 28px; max-width: 40ch; }
+}
+
+.ic-line {
+  margin: 20px auto 0;
+  max-width: 46ch;
+  font-size: var(--ic-line);
+  line-height: 1.5;
+  color: var(--os-ink-2);
+  text-wrap: balance;
+}
+
+/* The one small print size on the sheet. A footnote, a source, a currency
+   note: never a sentence the argument depends on. */
+.ic-note {
+  margin: 20px auto 0;
+  max-width: 56ch;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--os-ink-2);
+}
+
+/* Ink, not blue. A page spends its one blue on its closing button, so every
+   link inside a band is an underlined near black. */
+.ic-a {
+  color: var(--os-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--os-line-strong);
+}
+.ic-a:hover { text-decoration-color: var(--os-ink); }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The object. One per section, centred, as large as the column allows.
+ *
+ * A product frame sizes itself: MarketingShell reads the width of the column
+ * it is given through a container query and re-lays the product out rather
+ * than shrinking its 14px text below the legibility floor. So the only thing
+ * this rule does is centre it and give it its air.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* A BLOCK, NOT A FLEX ROW, and this is the whole of it. `.mk-shell-scroll`
+ * declares `container-type: inline-size`, which is also `contain:
+ * inline-size`: the element's own width may not be decided by its contents.
+ * As a flex item it therefore has nothing to size from, the container query
+ * picks the narrowest band, and a frame with 1,150px to fill renders at
+ * about a fifth of it. So the object is a plain block and the scaled box is
+ * centred with an auto margin. */
+.ic-obj { margin-top: 44px; }
+
+.ic-obj .mk-scale { margin-inline: auto; }
+
+/* THE PAGE IS CENTRED. THE PRODUCT IS NOT.
+ *
+ * Every band here sets `text-align: center` and alignment inherits, so it
+ * reaches inside a frame and centres the product's own lists and sentences.
+ * That is the site restyling the product, and the product's chrome is fixed
+ * wherever it appears, down to which edge a sentence starts at. The figure's
+ * caption keeps the centre, because it is the site's line and not the
+ * product's. */
+.ic-obj .mk-shell { text-align: start; }
+
+@media (min-width: 768px) {
+  .ic-obj { margin-top: 56px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The number, when the object of a section is a figure.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-fig {
+  margin: 0;
+  font-size: var(--ic-fig);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  /* The tracking pulls the letters together and leaves the word space
+     looking like a gap, so the space is pulled in with them. */
+  word-spacing: -0.06em;
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ic-figcap {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * A stack of names. The same object the home page's system section uses:
+ * a list that reads as a headline, with no cards, no borders, no icons and
+ * no chevrons.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-stack {
+  list-style: none;
+  margin: 52px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 32px;
+}
+
+@media (min-width: 768px) {
+  .ic-stack { margin-top: 68px; gap: 40px; }
+}
+
+.ic-stack > li { text-align: center; min-width: 0; }
+
+.ic-stackname {
+  display: block;
+  font-size: var(--ic-name);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+
+/* The name as a link, on the pages where each name has a page behind it.
+ *
+ * IT CARRIES ITS UNDERLINE AT REST, and that is a correction rather than a
+ * preference. The same stack with no underline is what the home page renders
+ * for its list of parts, where nothing is clickable, so eight identical
+ * looking words that happen to be the only route into the eight chapters
+ * would be eight links nobody tries. The rule at rest is a hairline; on
+ * hover it is ink and 2px. */
+a.ic-stackname {
+  display: inline-block;
+  text-decoration: underline;
+  text-underline-offset: 8px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--os-line-strong);
+}
+a.ic-stackname:hover {
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--os-ink);
+}
+
+/* A MEASURE, because the stack now carries sentences and not only labels.
+   The capability pages put a full line under each name, and with no maximum
+   it set itself to the band's 1,200px: one 150 character line of 15px type
+   under a 34px name, which is the shape of a specification sheet rather than
+   of a list somebody reads. Centred on the name's own axis. */
+.ic-stackline {
+  display: block;
+  margin: 8px auto 0;
+  max-width: 58ch;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The steps. A short ordered list where the ORDER is the idea: what a task
+ * carries, what goes wrong today, what happens on the call.
+ *
+ * NOT CARDS, and that is the whole reason this exists. The sheet it replaces
+ * drew each step as a white box with a border, a radius, a shadow and a
+ * filled numeral in a coloured tile, which is a card grid wearing a list's
+ * clothes and is what rule 5 bans. Here the number is a quiet counter beside
+ * the sentence and there is no box at all.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-steps {
+  list-style: none;
+  counter-reset: ic-step;
+  margin: 48px auto 0;
+  padding: 0;
+  max-width: 660px;
+  display: grid;
+  gap: 26px;
+  text-align: start;
+}
+
+@media (min-width: 768px) {
+  .ic-steps { margin-top: 64px; gap: 30px; }
+}
+
+.ic-steps > li {
+  counter-increment: ic-step;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: baseline;
+  font-size: var(--ic-line);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+
+.ic-steps > li::before {
+  content: counter(ic-step);
+  font-size: 14px;
+  line-height: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The terms. A wrapped run of short names: the measures a team keeps, the
+ * view types, the field types.
+ *
+ * It replaces a row of bordered pills, which is a badge row, which rule 5
+ * bans by name. A name in a run of names needs no container to be read as
+ * one of a set: the spacing does it.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-terms {
+  list-style: none;
+  margin: 40px auto 0;
+  padding: 0;
+  max-width: 820px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 26px;
+  font-size: 17px;
+  line-height: 26px;
+  color: var(--os-ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The tab strip. /product only.
+ *
+ * Eight names in a row over one full density surface, and the surface is the
+ * object: the strip is a control, set at reading size, never a row of
+ * buttons with borders. The active one is ink with a 2px rule under it and
+ * the rest are ink 2, which is the whole of the state.
+ *
+ * They are LINKS to this page with a query parameter, not a client island,
+ * so the strip works with JavaScript off, every panel has its own URL, and
+ * the page stays a Server Component that renders one surface rather than
+ * eight.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-tabs {
+  margin: 40px 0 0;
+  padding: 0 var(--ic-gutter);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 28px;
+  list-style: none;
+}
+
+@media (min-width: 768px) {
+  .ic-tabs { margin-top: 52px; gap: 12px 36px; }
+}
+
+.ic-tab {
+  display: inline-block;
+  padding-block: 6px;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+  color: var(--os-ink-2);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.ic-tab:hover { color: var(--os-ink); }
+
+.ic-tab[aria-current="page"] {
+  color: var(--os-ink);
+  border-bottom-color: var(--os-ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The plans. /pricing only.
+ *
+ * Three rows, not three cards. A card grid is rule 5, and it is also what
+ * every rival ships: the thing a buyer is looking for on this page is one
+ * number, so the number is set at display size and the rest is one line of
+ * plain words under it.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-plans {
+  list-style: none;
+  margin: 48px auto 0;
+  padding: 0;
+  display: grid;
+  gap: 56px;
+  max-width: 1040px;
+}
+
+@media (min-width: 900px) {
+  .ic-plans {
+    margin-top: 64px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 48px;
+  }
+}
+
+/* A column, so the button can be pushed to the bottom: three plans with
+   three different bullet counts otherwise put their three buttons at three
+   different heights, which reads as a mistake rather than as a list. */
+.ic-plan {
+  text-align: center;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ic-planname {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+.ic-planprice {
+  display: block;
+  margin-top: 14px;
+  font-size: clamp(44px, 4.6vw, 64px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ic-plansub {
+  display: block;
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink-2);
+}
+
+.ic-planfor {
+  display: block;
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--os-ink);
+}
+
+/* The one plan most teams land on, said in words rather than with a border,
+   a ribbon or a second blue. */
+.ic-planpick {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+.ic-planwhat {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--os-ink-2);
+}
+
+.ic-plancta { margin-top: auto; padding-top: 24px; display: flex; justify-content: center; }
+
+/* The currency switch. Six words in a row, ink on hover, the chosen one
+   underlined. Not six pills: a pill row above a price list is a second
+   object in a section that already has one. */
+/* Scoped under the page, deliberately. `CurrencyToggle` is a shared
+   component that carries its own `mk-currency` class as well as this one, so
+   these rules are written one level more specific than that sheet's in case
+   a page ever loads both. */
+.mk-iconic .ic-currency {
+  margin-top: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.mk-iconic .ic-currency button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--os-ink-2);
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  box-shadow: none;
+}
+
+.mk-iconic .ic-currency button:hover { color: var(--os-ink); background: none; }
+
+.mk-iconic .ic-currency button[aria-pressed="true"] {
+  color: var(--os-ink);
+  background: none;
+  border-bottom-color: var(--os-ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The matrix. /pricing only, and it is the one dense object on this sheet.
+ *
+ * A comparison table is dense because a procurement team reads it row by
+ * row, which is the opposite of skimming, so it gets its own screen and the
+ * air around it rather than a smaller size. No zebra, no fills, one hairline
+ * per row.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-matrix {
+  margin: 48px auto 0;
+  max-width: 980px;
+  overflow-x: auto;
+  text-align: start;
+}
+
+.ic-matrix table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.ic-matrix th,
+.ic-matrix td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--os-line);
+  vertical-align: top;
+  text-align: start;
+}
+
+.ic-matrix thead th {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+  border-bottom-color: var(--os-line-strong);
+}
+
+.ic-matrix tbody th {
+  font-weight: 400;
+  color: var(--os-ink);
+}
+
+.ic-matrix td { color: var(--os-ink-2); text-align: center; }
+
+.ic-matrix thead th:not(:first-child) { text-align: center; }
+
+/* ON A PHONE THE VALUES ARE THE POINT, so the table gives the capability
+   column less and the three answer columns more. Four columns cannot fit a
+   390px screen at any honest size, so it still scrolls; this is the
+   difference between a reader seeing one plan's answer without scrolling and
+   seeing none of them. The scroller carries a tabindex and a name, so it is
+   reachable by keyboard and by a switch. */
+@media (max-width: 640px) {
+  .ic-matrix table { min-width: 470px; font-size: 14px; }
+  .ic-matrix th,
+  .ic-matrix td { padding: 12px 8px; }
+  .ic-matrix tbody th { width: 52%; }
+}
+
+.ic-matrix .ic-group th {
+  padding-top: 34px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+  border-bottom-color: var(--os-line-strong);
+}
+
+/* Yes is ink and No is grey. Not a green tick and a red cross: the one blue
+   rule applies to green and red too, and a matrix of coloured glyphs is the
+   loudest thing on a page whose argument is somewhere else. */
+.ic-yes { color: var(--os-ink); }
+.ic-no { color: var(--os-ink-2); }
+
+/* AN ALLOWANCE IS NOT AN ABSENCE. The matrix used to send every string value
+   down the same class as "No", so the AI row's real entitlements painted as
+   50 / 500 / 2,000 in the negative grey, and a buyer scanning the column
+   read three escalating allowances as three things the plan lacks. A value
+   is a value: it reads as ink, like the Yes it is a more precise form of. */
+.ic-val { color: var(--os-ink); }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The rows. /compare, and anywhere a label needs its fact beside it.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-rows {
+  list-style: none;
+  margin: 48px auto 0;
+  padding: 0;
+  max-width: 900px;
+  text-align: start;
+}
+
+.ic-rows > li {
+  display: grid;
+  gap: 4px;
+  padding-block: 22px;
+  border-bottom: 1px solid var(--os-line);
+}
+
+.ic-rows > li:first-child { border-top: 1px solid var(--os-line); }
+
+@media (min-width: 768px) {
+  .ic-rows { margin-top: 64px; }
+  .ic-rows > li {
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 32px;
+    padding-block: 24px;
+  }
+}
+
+.ic-rowlabel {
+  font-size: 15px;
+  line-height: 23px;
+  color: var(--os-ink-2);
+}
+
+.ic-rowvalue {
+  font-size: 16px;
+  line-height: 25px;
+  color: var(--os-ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The entries. /compare: one name, then what a team buys it for, what we do
+ * instead and when they are the better answer. No logos, ever.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-entries {
+  list-style: none;
+  margin: 52px auto 0;
+  padding: 0;
+  max-width: 820px;
+  display: grid;
+  gap: 60px;
+  text-align: start;
+}
+
+@media (min-width: 768px) {
+  .ic-entries { margin-top: 72px; gap: 76px; }
+}
+
+.ic-entryname {
+  display: block;
+  font-size: var(--ic-name);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+
+.ic-entrypara {
+  margin: 14px 0 0;
+  font-size: 16px;
+  line-height: 26px;
+  color: var(--os-ink-2);
+}
+
+.ic-entrylead {
+  color: var(--os-ink);
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Questions. /pricing and anywhere an answer is genuinely optional.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-qa {
+  margin: 48px auto 0;
+  max-width: 760px;
+  text-align: start;
+}
+
+.ic-qa > details {
+  border-bottom: 1px solid var(--os-line);
+}
+
+.ic-qa > details:first-child { border-top: 1px solid var(--os-line); }
+
+.ic-qa summary {
+  list-style: none;
+  cursor: pointer;
+  padding-block: 22px;
+  font-size: 18px;
+  line-height: 27px;
+  color: var(--os-ink);
+}
+
+.ic-qa summary::-webkit-details-marker { display: none; }
+
+.ic-qa summary::after {
+  content: "+";
+  float: inline-end;
+  margin-inline-start: 16px;
+  color: var(--os-ink-2);
+  font-weight: 400;
+}
+
+.ic-qa > details[open] summary::after { content: "\2212"; }
+
+.ic-qa__a {
+  padding-bottom: 24px;
+  font-size: 16px;
+  line-height: 26px;
+  color: var(--os-ink-2);
+}
+
+.ic-qa__a p { margin: 0; }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The document. /privacy, /terms, /cookies.
+ *
+ * One reading column, left aligned, because a centred paragraph of legal
+ * prose is unreadable and the rule about centring is a rule about
+ * statements. The sticky two column table of contents these pages used to
+ * carry is gone: a contents list that follows you down a page is chrome, and
+ * this is a document.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-doc {
+  margin: 0 auto;
+  max-width: 720px;
+  text-align: start;
+}
+
+.ic-toc {
+  list-style: none;
+  margin: 0 0 76px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ic-toc a {
+  display: block;
+  padding-block: 7px;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--os-ink-2);
+  text-decoration: none;
+}
+
+.ic-toc a:hover { color: var(--os-ink); }
+
+.ic-docsec { margin-top: 64px; scroll-margin-top: 32px; }
+.ic-docsec:first-of-type { margin-top: 0; }
+
+.ic-doch {
+  margin: 0 0 18px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: -0.015em;
+  color: var(--os-ink);
+}
+
+.ic-docbody {
+  font-size: 17px;
+  line-height: 29px;
+  color: var(--os-ink-2);
+}
+
+.ic-docbody p { margin: 0 0 16px; }
+.ic-docbody p:last-child { margin-bottom: 0; }
+.ic-docbody strong { color: var(--os-ink); font-weight: 600; }
+.ic-docbody a {
+  color: var(--os-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--os-line-strong);
+}
+
+/* The cookie table, which is the one table inside a document. */
+.ic-doctable { margin-top: 4px; overflow-x: auto; }
+
+.ic-doctable table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.ic-doctable th,
+.ic-doctable td {
+  padding: 12px 14px 12px 0;
+  border-bottom: 1px solid var(--os-line);
+  text-align: start;
+  vertical-align: top;
+}
+
+.ic-doctable thead th {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+  border-bottom-color: var(--os-line-strong);
+}
+
+.ic-doctable tbody th {
+  font-weight: 400;
+  color: var(--os-ink);
+  font-family: var(--os-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 14px;
+}
+
+.ic-doctable td { color: var(--os-ink-2); }
+
+/* ─────────────────────────────────────────────────────────────────
+ * The form. /demo.
+ *
+ * One column, centred in the page, left aligned inside itself. A form is the
+ * section's one object, so nothing sits beside it: the four facts about a
+ * call are a band of their own above it.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-form {
+  margin: 48px auto 0;
+  max-width: 560px;
+  text-align: start;
+}
+
+@media (min-width: 768px) {
+  .ic-form { margin-top: 60px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The posts. /blog.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-posts {
+  list-style: none;
+  margin: 48px auto 0;
+  padding: 0;
+  max-width: 820px;
+  text-align: start;
+}
+
+@media (min-width: 768px) {
+  .ic-posts { margin-top: 64px; }
+}
+
+.ic-posts > li { border-bottom: 1px solid var(--os-line); }
+.ic-posts > li:first-child { border-top: 1px solid var(--os-line); }
+
+.ic-post {
+  display: block;
+  padding-block: 30px;
+  text-decoration: none;
+}
+
+.ic-posttitle {
+  display: block;
+  font-size: clamp(21px, 2vw, 27px);
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.018em;
+  color: var(--os-ink);
+}
+
+.ic-post:hover .ic-posttitle {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+  text-decoration-color: var(--os-line-strong);
+}
+
+.ic-postexcerpt {
+  display: block;
+  margin-top: 10px;
+  max-width: 62ch;
+  font-size: 16px;
+  line-height: 25px;
+  color: var(--os-ink-2);
+}
+
+.ic-postmeta {
+  display: block;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+
+/* The category filter, the same object as the tab strip and for the same
+   reason: real links, one per category, ink when chosen. */
+.ic-filters {
+  margin: 36px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  list-style: none;
+}
+
+/* Seven category names at reading size wrapped over five lines on a phone,
+   which is more filter than index above the first headline. Tighter, so it
+   is three. It still wraps rather than scrolling sideways: a category a
+   reader cannot see is a category they will not use, and a scroller with no
+   affordance hides them. */
+@media (max-width: 640px) {
+  .ic-filters { margin-top: 28px; gap: 4px 16px; }
+  .ic-filters .ic-tab { font-size: 15px; padding-block: 4px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The close. One line, one button, nothing else in the band.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-cta {
+  margin-top: 40px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Motion, and there is one move on every page.
+ *
+ * A section fades and rises 24px on entry, once, and never again. Nothing
+ * loops, nothing parallaxes, nothing is pinned, and no element is hidden
+ * waiting for a scroll: the island only ever hides a block already BELOW the
+ * fold, so a visitor with no JavaScript, a crawler, a link preview and a
+ * printed page all get the finished page.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-reveal[data-state="hidden"] {
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.ic-reveal[data-state="in"] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ic-reveal[data-state="hidden"],
+  .ic-reveal[data-state="in"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The log. /changelog only.
+ *
+ * It replaces a dashed vertical rule with a ringed dot per release and a
+ * coloured, bordered, uppercase pill in front of every line: five hues of
+ * pill down one page, which is the loudest thing on a site whose rule is one
+ * blue at most once per screen. Here the release date is a quiet line, the
+ * release title is a name at stack size, and the kind of change is one grey
+ * word in front of the sentence, aligned so the sentences still form a
+ * column.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-log {
+  list-style: none;
+  margin: 52px auto 0;
+  padding: 0;
+  max-width: 760px;
+  display: grid;
+  gap: 56px;
+  text-align: start;
+}
+
+@media (min-width: 768px) {
+  .ic-log { margin-top: 68px; gap: 72px; }
+}
+
+.ic-logdate {
+  display: block;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+.ic-logtitle {
+  display: block;
+  margin-top: 10px;
+  font-size: var(--ic-name);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+}
+
+.ic-logitems {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.ic-logitems > li {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+  font-size: 16px;
+  line-height: 25px;
+  color: var(--os-ink);
+}
+
+@media (max-width: 640px) {
+  .ic-logitems > li { grid-template-columns: 1fr; gap: 2px; }
+}
+
+.ic-logkind {
+  font-size: 12px;
+  line-height: 25px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * The article. /blog/[slug].
+ *
+ * A POST'S TITLE IS NOT A CLAIM, and this is the one place on the site the
+ * h1 is deliberately not set at the claim size. The claim rule exists for a
+ * page that makes an argument in six words; a post is titled by what it is
+ * about, in the visitor's own search words, and these run to nine and
+ * thirteen. At claim size in a 17ch measure that is six lines of 72px type
+ * before a reader has begun. So an article title is set at the section
+ * headline size, left aligned, on the reading column it shares with the
+ * prose below it, which is what a document title has always been.
+ * ───────────────────────────────────────────────────────────────── */
+
+.ic-article {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: start;
+}
+
+.ic-doctitle {
+  margin: 0;
+  font-size: var(--ic-h2);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--os-ink);
+  text-wrap: balance;
+}
+
+.ic-articlelede {
+  margin: 22px 0 0;
+  font-size: var(--ic-sub);
+  line-height: 1.45;
+  color: var(--os-ink-2);
+}
+
+.ic-byline {
+  margin: 24px 0 0;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--os-ink-2);
+}

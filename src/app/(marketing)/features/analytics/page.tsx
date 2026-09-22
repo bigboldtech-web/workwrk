@@ -1,35 +1,51 @@
+// /features/analytics, rewritten against the product.
+//
+// The old page sold a drag and drop dashboard builder, SQL access, rolling
+// 30/60/90 windows on every entity, one click pivots, PDF and PNG export
+// and bi-directional warehouse sync. None of that ships, and the separate
+// dashboards surface was removed from the product. What is true is smaller
+// and is what this page now says: the numbers live in the block that owns
+// them, and you read them there.
+
 import type { Metadata } from "next";
-import { BarChart3, PieChart, LineChart, Filter, Download, Eye } from "lucide-react";
 import { FeatureSubPage } from "@/components/marketing/sub-page";
-import { GradientText } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Analytics — WorkwrK",
-  description: "Role-aware dashboards. The CEO sees the company. The manager sees their team. The IC sees themselves. One platform, three layers of insight.",
+  title: "Reporting",
+  description:
+    "Where the numbers are: the goal rollup and its verdict, KPI readings by period, review scores, SOP acknowledgement, saved views and CSV export. And what there is not.",
   alternates: { canonical: "https://workwrk.com/features/analytics" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Reporting", description: "What the numbers are, and where they are not." },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "What the numbers are, and where they are not." },
 };
 
 export default function AnalyticsFeaturePage() {
   return (
     <FeatureSubPage
-      hubSlug="home"
-      hue="indigo"
-      eyebrow="Home hub · Analytics"
-      title={<>Dashboards <GradientText hue="indigo">that know your role.</GradientText></>}
-      lede="The same screen renders differently for the CEO, the manager, and the IC. Permissions and relevance baked in — no fifteen-tab dashboard archeology."
+      slug="analytics"
+      hubSlug="goals"
+      eyebrow="Across every block"
+      title="The number lives beside the work."
+      lede="A number read three screens away from the thing it measures is how a company ends up arguing about the number."
       capabilities={[
-        { icon: Eye,        title: "Role-aware views",   body: "Auto-scoped to what you should see. No 'permission denied' walls. No info overload either." },
-        { icon: LineChart,  title: "Rolling windows",     body: "30/60/90 day windows on every KPI, OKR, and signal. Trend lines that mean something." },
-        { icon: PieChart,   title: "Breakdown by anything", body: "Slice by role, team, location, manager, hub. One-click pivot." },
-        { icon: Filter,     title: "Saved views",         body: "Pin queries as dashboards. Share with stakeholders. They see the same numbers, the same way." },
-        { icon: Download,   title: "Export-friendly",     body: "Every view exports to CSV, PDF, or PNG. For the auditor, the board, the all-hands deck." },
-        { icon: BarChart3,  title: "Built on AI Engine",  body: "Cmd-K → 'show me X' → live dashboard pinned. Reuse forever." },
+        { title: "Goal rollup", body: "Progress computed from the key results and the children beneath them, with the on track verdict derived the same way for every goal." },
+        { title: "KPI readings by period", body: "The readings against the target and the direction, in the unit the KPI is actually kept in." },
+        { title: "Compliance views", body: "Who has acknowledged the current version of an SOP or a policy, and who has not, per person and per document." },
+        { title: "Views do the slicing", body: "Group, filter and sort a list or a table and save the result as a named view. That is the pivot, and it lives on the data." },
+        { title: "Tables for the rest", body: "A spreadsheet with formulas, lookups and rollups, for the working that does not belong in a product surface." },
+        { title: "CSV out", body: "Exports for activity, compliance, people, reviews and your own data. No PDF renderer and no warehouse sync." },
       ]}
-      relatedSlugs={["ai-engine", "kpis", "okrs", "people"]}
+      surfaceKey="table"
+      surfaceCrumb="Tables"
+      surfaceLabel="The Tables block: a sheet with a formula bar, which is where a number on this page comes from."
+      relatedSlugs={["okrs", "kpis", "tasks"]}
       faq={[
-        { q: "Can I build custom dashboards?",            a: "Yes — drag-and-drop builder; Cmd-K natural language path; or SQL access on Scale." },
-        { q: "Real-time or batched?",                      a: "Most metrics are real-time. Heavy aggregations refresh every 15 min. SLA-grade real-time available on Scale." },
-        { q: "Does it work with my data warehouse?",       a: "Bi-directional sync with Snowflake, BigQuery, Redshift on Scale. Read-only mirroring on Growth." },
+        { q: "Is there a dashboard builder?", a: "No. There was a dashboards surface and it was removed rather than half maintained. Saved views on the data are what replaced it." },
+        { q: "Can I query the database directly?", a: "No. There is a v1 REST API with an OpenAPI document for the entities it covers." },
+        { q: "Does it connect to a data warehouse?", a: "No." },
       ]}
     />
   );

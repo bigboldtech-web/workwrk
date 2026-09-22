@@ -1,0 +1,528 @@
+/* The marketing site's own base rules. Light only.
+ *
+ * This sheet paints; the token scope in
+ * src/components/marketing/shell/marketing-shell.css only declares values.
+ * Anything here is deliberately small: the site's look comes from the
+ * tokens, not from a second design system.
+ */
+
+.mk-site {
+  min-height: 100vh;
+  background: var(--os-canvas);
+  color: var(--os-ink);
+  font-family: var(--os-font);
+  /* THE SITE READS AT 16, NOT AT THE PRODUCT'S 14.
+   *
+   * design-system 1 and concept 13.6 both set the marketing body at 16 and
+   * its caption at 13, and the layout withholds `mk-os` from the page for
+   * exactly that reason: `mk-os` carries the product's 14px reading scale
+   * and belongs inside a frame. But withholding it only stopped the site
+   * from being re-scaled; it never SET anything, so every marketing page
+   * inherited the app's 14px root and any text not explicitly wearing
+   * `mk-lede` read one step small. The intent was written down and never
+   * applied.
+   *
+   * This is the base, so a product frame is unaffected: `.mk-os` declares
+   * its own `font-size` and every shell on the site is an `.mk-os`. */
+  font-size: var(--mk-body, 16px);
+  line-height: var(--mk-body-leading, 1.55);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The selection colour used to be violet, which the design system
+   quarantines outright. It is the one blue, at its softest step. */
+.mk-site ::selection {
+  background: var(--os-blue-100);
+  color: var(--os-ink);
+}
+
+/* Nothing on the site scrolls sideways, at any width down to 360.
+ *
+ * This is NOT done with overflow-x on the page, and that is the whole point
+ * of the note. Clipping the site satisfies the rule by amputating whatever
+ * overflows: on a 390 phone it cut the home page headline mid-word, with no
+ * scrollbar left to reach the rest. A rule about what a visitor can scroll
+ * became a rule about what a visitor can read.
+ *
+ * So the page never clips. Overflow is prevented at the source instead:
+ *
+ *   1. Long words and headlines wrap rather than run off. A display size on a
+ *      narrow screen is the usual culprit, so the display steps below carry
+ *      overflow-wrap and a hyphen fallback.
+ *   2. A grid or flex child defaults to min-width: auto, which refuses to
+ *      shrink below its content. .mk-section children are told they may.
+ *   3. Anything genuinely wider than a phone, a table or a product frame,
+ *      carries its own scroller: .mk-scroll-x here, .mk-shell-scroll and
+ *      .mk-scale in the shell sheet.
+ */
+.mk-site {
+  /* `clip`, never `hidden`. `hidden` makes this a scroll container, which
+     would break the sticky nav and hand the page a second scrollbar; `clip`
+     creates no scroll container at all. It is a belt for an absolutely
+     positioned decoration that pokes past the viewport, and it is NOT how the
+     rule is kept: the rules below are. */
+  overflow-x: clip;
+}
+
+/*
+ * Rule 1, and this is the one that actually fixed the amputated home page
+ * headline. A grid with no explicit `grid-template-columns` gets one
+ * implicit `auto` track, and an `auto` track sizes to the MAX-CONTENT of its
+ * widest item. On the home hero that widest item is the product mock, so the
+ * single stacked column came out 472px wide inside a 342px container and the
+ * headline beside it was laid out at 472 and ran off the right of a 390
+ * phone. The fix is an explicit base track, `grid-cols-1`, which is
+ * `minmax(0, 1fr)`: the track is the container.
+ *
+ * Worth recording because it was diagnosed wrong twice: the `overflow-x`
+ * above was blamed for the clipping, and it is not the cause. The hero
+ * section carries its own `overflow-x: hidden`, and the render is identical
+ * with the site rule switched off. Removing the clip would have moved the
+ * cut, not healed it.
+ *
+ * Every responsive grid on the site therefore names its base track. This
+ * rule is the backstop for the other half of the same problem: a grid or
+ * flex ITEM also defaults to `min-width: auto` and refuses to shrink below
+ * its content.
+ */
+.mk-site :where(.mk-grid, .mk-row) > *,
+.mk-site :where(.mk-section) :where(.grid, .flex) > * {
+  min-width: 0;
+}
+
+/* Rule 2. Long words and display sizes wrap rather than run off. */
+.mk-site :where(h1, h2, h3, p, li, blockquote, figcaption, dd, dt) {
+  overflow-wrap: break-word;
+}
+
+.mk-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* One focus treatment everywhere on the site: blue 200 halo, 2px ring,
+   2px offset (design-system 13.13). */
+.mk-site :focus-visible {
+  outline: 2px solid var(--os-focus);
+  outline-offset: 2px;
+  border-radius: var(--os-r-sm);
+}
+
+/* The skip link: visible the moment it is focused, invisible otherwise. */
+.mk-skip {
+  position: absolute;
+  inset-inline-start: -9999px;
+  top: 0;
+  z-index: 60;
+  padding: 10px 16px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line-strong);
+  border-radius: var(--os-r-sm);
+  color: var(--os-ink);
+  font-size: 14px;
+}
+.mk-skip:focus {
+  inset-inline-start: 12px;
+  top: 12px;
+}
+
+/* A quiet page section. 24px gutters at every width, a 1200 column. */
+.mk-section {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px 20px;
+}
+@media (min-width: 768px) {
+  .mk-section { padding: 72px 24px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * THE PAGE GRAMMAR, FOR EVERY ROUTE.
+ *
+ * These six rules used to sit in src/components/marketing/home/home.css,
+ * which only the home components import. The consequence was a site in two
+ * halves: about half the routes rendered through those components on a
+ * 1200 column with a 600 weight display, and the other half rendered
+ * through the legacy Tailwind primitives on a max-w-7xl column with a 700
+ * weight and text-slate-900. Measured side by side that is a 120px gutter
+ * against 144, a 72px H1 against 64, and three different near blacks on
+ * one site. design-system.md section 1 specifies ONE display ramp at ONE
+ * weight, so the two halves could not both be right.
+ *
+ * They live here now, in the sheet the route group's layout imports, and
+ * the primitives render into them. One definition, every route.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ═════════════════════════════════════════════════════════════════
+ * Page rhythm. One band per section of concept 3.
+ * ═════════════════════════════════════════════════════════════════ */
+
+.mk-band {
+  padding-block: 56px;
+  border-top: 1px solid var(--os-line-soft);
+}
+.mk-band[data-tone="plain"] { border-top: 0; }
+.mk-band[data-tone="tint"] {
+  /* THE SPINE'S STAGE, AND IT IS GREY NOW, NOT BLUE.
+     It was `--os-blue-50`, a full bleed accent surface five viewports tall,
+     which is the largest painted thing on the site and sits outside every
+     product frame. Rule 8 puts one blue on a screen at most and every other
+     colour inside the frame, so the stage takes the same quiet grey the
+     iconic sheet gives `ground="quiet"`: the ground still changes under the
+     story, which is what the tint was for, and the site keeps exactly one
+     alternate ground instead of two. */
+  background: var(--os-surface-1);
+  border-top: 0;
+}
+/* "Quiet" is a WHITE band with a rule over it, not a grey one.
+ *
+ * Concept 10: "One tinted stage (blue-50) for the spine; the only non-white
+ * ground on the page." Three bands were shipping a grey ground as well,
+ * which is a defensible rhythm and is not the rule, and it cost the spine's
+ * tint its status as the one moment the ground changes. The attribute stays
+ * where it is on the three sections: what it means is the separating
+ * hairline and the calmer rhythm around it, and the ground stays white. */
+.mk-band[data-tone="quiet"] { background: var(--os-canvas); }
+
+@media (min-width: 768px) {
+  .mk-band { padding-block: 88px; }
+}
+
+.mk-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-inline: 20px;
+}
+@media (min-width: 768px) {
+  .mk-wrap { padding-inline: 24px; }
+}
+
+.mk-eyebrow {
+  font-size: var(--mk-label, 12px);
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+  margin: 0 0 14px;
+}
+
+/* Body is 16, which is the token spec's one reading size (design-system 1:
+   body 16, caption 13). The lede ran at 17 and the FAQ at 17 and 15, so the
+   page carried five body sizes against a ramp that names two. */
+.mk-lede {
+  font-size: var(--mk-body, 16px);
+  line-height: var(--mk-body-leading, 1.55);
+  color: var(--os-ink-2);
+  max-width: 62ch;
+  margin: 14px 0 0;
+}
+
+.mk-note {
+  font-size: var(--mk-caption, 13px);
+  line-height: 1.5;
+  color: var(--os-ink-2);
+  margin: 10px 0 0;
+}
+
+.mk-ctarow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * The one accent, as classes.
+ *
+ * src/components/marketing/primitives.tsx carries a ten key hue table that
+ * two dozen pages name by prop. Phase 10 collapsed all ten keys onto one
+ * set of values, and these are the classes that set holds. They are real
+ * CSS rather than Tailwind arbitrary values for two reasons: a class here
+ * reads a token, so there is no second hex table in the repo, and it does
+ * not depend on the utility generator seeing a string that was assembled
+ * at runtime.
+ *
+ * Naming: mk-a is "the accent". Short because it is concatenated into
+ * class strings in a dozen template literals.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.mk-a-text        { color: var(--os-brand-deep); }
+.mk-a-ink         { color: var(--os-ink); }
+.mk-a-tint        { background-color: var(--os-brand-soft); }
+.mk-a-soft        { background-color: var(--os-blue-100); }
+.mk-a-line        { border-color: var(--os-line); }
+
+/* The filled accent. It carries its own hover, so the hue table has no
+   separate hover class to hand out, and it kills any background-image the
+   caller may also have asked for: several legacy call sites still write
+   `bg-gradient-to-br` beside it, and the site has no gradients. */
+.mk-a-solid {
+  background-color: var(--os-brand);
+  background-image: none;
+  color: var(--os-ink-inv);
+}
+a.mk-a-solid:hover,
+button.mk-a-solid:hover,
+.mk-a-solid-hoverable:hover {
+  background-color: var(--os-brand-hover);
+}
+
+/* Surfaces and ink, for the same reason: a legacy page names a background
+   and a text tone through a prop, and both now read a token. */
+.mk-white  { background-color: var(--os-canvas); }
+.mk-quiet  { background-color: var(--os-surface-1); }
+.mk-topline { border-top: 1px solid var(--os-line); }
+/* Full ink. The display ramp's one colour, so a heading rendered by the
+   primitives and a heading rendered by a rebuilt page are the same black.
+   The legacy primitives painted text-slate-900, which is a fourth near
+   black on a site that is allowed one. */
+.mk-ink    { color: var(--os-ink); }
+.mk-ink2   { color: var(--os-ink-2); }
+/* ink 3 is 2.58 to 1 on white. It is a decoration tone and never reading
+   text, so the one caller that asks for it is a de-emphasised fragment
+   inside a heading that is otherwise full ink. */
+.mk-ink3   { color: var(--os-ink-strong); }
+
+/* The button, one geometry for the whole site: 44px, 8px radius, 16px at
+   weight 500. It is the same object CtaLink draws inline, written once here
+   so a legacy page's <Button> and a rebuilt page's <PrimaryCta> cannot end
+   up different shapes. */
+.mk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--os-r-sm, 8px);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.mk-btn-solid { background-color: var(--os-brand); color: var(--os-ink-inv); }
+.mk-btn-solid:hover { background-color: var(--os-brand-hover); }
+.mk-btn-ghost {
+  background-color: var(--os-canvas);
+  color: var(--os-ink);
+  border: 1px solid var(--os-line-strong);
+}
+.mk-btn-ghost:hover { background-color: var(--os-surface-hov); }
+.mk-btn-quiet { background-color: transparent; color: var(--os-ink-2); }
+.mk-btn-quiet:hover { background-color: var(--os-surface-hov); color: var(--os-ink); }
+
+/* ═══════════════════════════════════════════════════════════════════
+ * The roadmap board.
+ *
+ * Four columns at desktop, two at tablet, one on a phone. The columns
+ * scroll with the page rather than inside themselves: a column of thirty
+ * cards inside its own scroller is how a public roadmap hides the half of
+ * itself nobody scrolled to.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.mk-roadmap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (min-width: 640px) {
+  .mk-roadmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .mk-roadmap { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.mk-roadmap__col {
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md, 10px);
+  padding: 14px;
+}
+.mk-roadmap__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mk-roadmap__title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.mk-roadmap__count {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+  border-radius: var(--os-r-sm, 6px);
+  padding: 2px 7px;
+}
+.mk-roadmap__note {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+.mk-roadmap__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mk-roadmap__card {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-sm, 6px);
+  background: var(--os-canvas);
+  padding: 12px;
+}
+.mk-roadmap__card-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.mk-roadmap__card-body {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--os-ink-2);
+}
+.mk-roadmap__area {
+  display: inline-flex;
+  align-items: center;
+  height: var(--os-chip-h, 24px);
+  margin-top: 9px;
+  padding: 0 8px;
+  border-radius: var(--os-r-pill, 999px);
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+/* The first column is the one that matters, so it is the one that is
+   marked. A blue hairline on the left edge, and nothing else: four coloured
+   columns would be a colour code the reader has to learn. */
+.mk-roadmap__col:first-child {
+  border-inline-start: 3px solid var(--os-brand);
+}
+
+/* A plain two column reference table. /developers uses it for the API
+   surface; anything else needing "term, then definition" at reading width
+   can wear it too. It scrolls inside .mk-scroll-x at narrow widths rather
+   than making the page scroll. */
+.mk-devtable {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 20px;
+}
+.mk-devtable th,
+.mk-devtable td {
+  text-align: start;
+  vertical-align: top;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--os-line);
+}
+.mk-devtable thead th {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--os-ink-2);
+  background: var(--os-table-head-bg);
+  border-bottom: 1px solid var(--os-line-strong);
+}
+.mk-devtable tbody th {
+  font-weight: 400;
+  white-space: nowrap;
+}
+.mk-devtable tbody th code {
+  font-family: var(--os-f-mono);
+  font-size: 13px;
+  color: var(--os-ink);
+}
+.mk-devtable td { color: var(--os-ink-2); }
+
+/* The one accent as a top rule, for a card that wants to be marked as the
+   lead item without being filled. */
+.mk-a-solid-top { border-top-color: var(--os-brand); }
+
+/* ═══════════════════════════════════════════════════════════════════
+ * The article body.
+ *
+ * WHY THIS IS HAND WRITTEN AND NOT A PLUGIN. The blog body used to declare
+ * `prose prose-slate prose-h2:text-2xl prose-h2:mt-12 ...`, and
+ * @tailwindcss/typography is not installed in this repo, so not one of
+ * those variants resolved: six sitemap listed routes rendered as an
+ * undifferentiated wall with headings the same size as body text, lists
+ * with no markers and paragraphs with no spacing. That is a reading defect
+ * and an accessibility one, because the H2s were in the DOM and invisible
+ * to a sighted reader scanning for them.
+ *
+ * Adding the plugin would be a dependency for something CSS does in thirty
+ * lines, and it would bring a second type scale and a second colour table
+ * into a site whose whole rule is one token layer. So the body is set here,
+ * on the marketing ramp and the --os-* tokens, and nothing else.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.mk-prose {
+  max-width: 68ch;
+  font-size: var(--mk-body, 16px);
+  line-height: 1.7;
+  color: var(--os-ink-2);
+}
+.mk-prose > * { margin-block: 0; }
+.mk-prose > * + * { margin-block-start: 20px; }
+
+.mk-prose h2 {
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: var(--mk-display-weight, 600);
+  letter-spacing: -0.015em;
+  color: var(--os-ink);
+}
+.mk-prose > * + h2 { margin-block-start: 44px; }
+
+.mk-prose h3 {
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: var(--mk-display-weight, 600);
+  color: var(--os-ink);
+}
+.mk-prose > * + h3 { margin-block-start: 32px; }
+
+.mk-prose strong { color: var(--os-ink); font-weight: 600; }
+
+.mk-prose ul {
+  list-style: disc;
+  padding-inline-start: 22px;
+}
+.mk-prose li + li { margin-block-start: 8px; }
+
+.mk-prose blockquote {
+  border-inline-start: 2px solid var(--os-brand);
+  padding-inline-start: 16px;
+  color: var(--os-ink-2);
+}
+
+/* The one accent, as everywhere else on the site. It used to be
+   `prose-a:text-violet-700`, a raw utility that bypassed the repointed hue
+   table entirely and painted purple links on a live indexed route. */
+.mk-prose a {
+  color: var(--os-brand-deep);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

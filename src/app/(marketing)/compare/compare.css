@@ -1,0 +1,104 @@
+/* The compare pages (marketing-concept.md section 5).
+ *
+ * One list style and one link colour. Everything else on these pages is the
+ * site's own bands, wrap, cards and tables from home.css.
+ *
+ * Light only, every colour a token, and the four brand dot hexes arrive
+ * inline from the brand module, which is the only place they live.
+ */
+
+.mk-cs-link {
+  color: var(--os-brand-deep);
+}
+
+.mk-cs-gaps {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  max-width: 78ch;
+}
+
+/* Four children, two columns: the dot sits in the first and the name, the
+   block and the sentence stack in the second. Written as explicit column
+   placement rather than as a three column template, because the template
+   version silently wrapped the fourth child onto a phantom row. */
+.mk-cs-gap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--os-line-soft);
+}
+.mk-cs-gap > * {
+  grid-column: 2;
+}
+.mk-cs-gap:first-child {
+  border-top: 1px solid var(--os-line-soft);
+}
+
+.mk-cs-gap__dot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  align-self: center;
+}
+
+.mk-cs-gap__name {
+  font-size: var(--mk-body, 16px);
+  font-weight: 600;
+  color: var(--os-ink);
+}
+
+.mk-cs-gap__block {
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--os-ink-2);
+}
+
+.mk-cs-gap__what {
+  font-size: var(--mk-caption, 13px);
+  line-height: 1.5;
+  color: var(--os-ink-2);
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * The lit map at the close of a compare page.
+ *
+ * It reuses the stage, the wires and the node chips from connect.css so
+ * the picture on this page is the same object as the one on
+ * /how-it-connects. These rules only add what a picture needs that a
+ * control does not: a dim state for the records the named category's
+ * stack does carry, and no pointer affordance on anything.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.mk-staticmap {
+  margin: 22px 0 0;
+}
+
+/* A span, not a button: no hover, no pointer, nothing to click. */
+.mk-staticmap .mk-map2__node {
+  cursor: default;
+}
+.mk-staticmap .mk-map2__node:hover {
+  border-color: var(--os-line);
+}
+
+/* The dimmed half of the map. Opacity rather than a grey token, so the
+   dot colours fade with the chip and the picture stays one object. */
+.mk-staticmap .mk-map2__node[data-dim] {
+  opacity: 0.42;
+}
+
+.mk-staticmap__cap {
+  display: block;
+  margin: 10px 0 0;
+  color: var(--os-ink-2);
+}

@@ -1,40 +1,50 @@
+// /industries/manufacturing, rewritten against the product. The old page
+// promised native connections to four named enterprise systems, a native
+// mobile app, and audit trails for two named standards.
+
 import type { Metadata } from "next";
-import { Factory, Wrench, Truck, Gauge, ShieldCheck, Clipboard } from "lucide-react";
 import { IndustrySubPage } from "@/components/marketing/sub-page";
-import { GradientText } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "WorkwrK for Manufacturing",
-  description: "Shop floor + SOPs + KPIs in one platform. Per-shift performance, vendor management, ISO 9001 audit trails, multi-site rollup — built for plants and OEMs.",
+  title: "WorkwrK for manufacturing teams",
+  description:
+    "Per shift measures, version controlled procedures with acknowledgement, roles that own them, and tables for the working that does not fit a product surface.",
   alternates: { canonical: "https://workwrk.com/industries/manufacturing" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "WorkwrK for manufacturing teams", description: "Procedure, shift measures and roles." },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "Procedure, shift measures and roles." },
 };
 
 export default function ManufacturingIndustryPage() {
   return (
     <IndustrySubPage
-      hue="emerald"
+      slug="manufacturing"
       eyebrow="Manufacturing"
-      title={<>Shop floor + SOPs + KPIs. <GradientText hue="emerald">One operating layer.</GradientText></>}
-      lede="Run plants the way modern software companies run engineering — per-shift KPIs, version-controlled SOPs, vendor + procurement, all tied to the people doing the work."
+      title="One record for line and office."
+      lede="A plant already runs on written process and on numbers per shift, and those belong on the same records as the goals above them."
+      painsTitle="Where the shift record stops."
       pains={[
-        "Each plant has its own KPI definitions, so cross-site comparisons are guesswork.",
-        "Quality audits surface SOP drift you couldn't have detected.",
-        "Procurement is a spreadsheet, an email, and a hope.",
-        "Frontline supervisors don't have dashboards because the IT stack was built for the CFO.",
+        "Standard operating procedure lives in a binder and a shared drive, at two different versions.",
+        "Shift numbers are written down, then retyped, then argued about at the weekly meeting.",
+        "Supervisors own results nobody wrote down, so handover loses half of it.",
+        "Improvement goals are a slide, and no one can point at the work that moved them.",
       ]}
       capabilities={[
-        { icon: Factory,    title: "Per-shift dashboards",  body: "Per-shift, per-line, per-site KPI views. Supervisors see their floor; the C-suite sees the system." },
-        { icon: Clipboard,  title: "ISO 9001 / 14001 SOPs",  body: "Forkable, audit-trailed SOP library. Sign-off, version history, compliance runs — built for audits." },
-        { icon: Wrench,     title: "Maintenance + uptime",   body: "PM schedules tied to SOPs, downtime tracked as a KPI, root cause analysis with audit trail." },
-        { icon: Truck,      title: "Vendor + procurement",   body: "Approval workflows, vendor scorecards, PO + GRN tracking. Tied to budget vs actual in real time." },
-        { icon: Gauge,      title: "Multi-site rollup",      body: "Plant → region → enterprise. Drill any direction; compare any unit; calibrate KPIs at the apex." },
-        { icon: ShieldCheck,title: "Safety + incidents",     body: "Incident reporting with SOP linkage. Near-misses tracked. Closure tied to specific actions and owners." },
+        { title: "Versioned procedure", body: "Four kinds of process doc, published with a version, with the old one readable for the period it governed." },
+        { title: "Sign off that is recorded", body: "Who acknowledged the current version, per person and per line, exportable." },
+        { title: "Measures per shift", body: "A target, a direction and an owner for the reading, kept per period so the trend is the record." },
+        { title: "Roles, not names", body: "A role definition carries its result areas and what it escalates, which is what a handover actually needs." },
+        { title: "Tables for the rest", body: "A real spreadsheet with formulas, lookups and rollups, for the working a product surface should not try to own." },
+        { title: "Improvement goals", body: "Goals that roll up with a computed verdict, and an effort panel listing the linked work." },
       ]}
-      kpis={["OEE", "Scrap %", "Downtime hours", "PM compliance", "Cycle time", "Vendor on-time rate", "Audit findings", "Safety incidents/M hrs"]}
+      kpisLabel="What teams here measure."
+      kpis={["Output per shift", "Rework rate", "Downtime", "Acknowledgement rate", "Goal progress"]}
       faq={[
-        { q: "Mobile-ready for the shop floor?",          a: "Yes — PWA and native iOS/Android. Supervisors and line leads can update KPIs and complete SOP runs from a tablet on the floor." },
-        { q: "Does it integrate with MES or ERP?",         a: "Yes — SAP, Oracle, NetSuite, Tally on Scale. Webhooks for any custom MES on Growth." },
-        { q: "Offline support?",                            a: "Mobile app supports offline SOP runs and KPI entry; syncs when reconnected." },
+        { q: "Does it connect to our plant or finance systems?", a: "No. There is a v1 REST API and CSV import and export. No connector to a third party product ships." },
+        { q: "Is there a native mobile app?", a: "No. The site is responsive and works on a phone browser. There is no app in a store." },
+        { q: "Can we keep our standard's documentation here?", a: "You can keep the documents, the versions and the acknowledgement record. We hold no certification ourselves and make no claim about yours." },
       ]}
     />
   );

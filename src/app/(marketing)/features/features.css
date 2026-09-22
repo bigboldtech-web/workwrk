@@ -1,0 +1,17 @@
+/* /features: the one thing the index needs beyond home.css.
+ *
+ * Each block card is now a link to that block's chapter under /product, so
+ * it needs the same restrained hover the module pages give their own
+ * neighbour cards: the hairline changes and nothing moves, because the card
+ * carries text the pointer is already over.
+ */
+
+.mk-feat-block {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.mk-feat-block:hover {
+  border-color: var(--os-line-strong);
+}

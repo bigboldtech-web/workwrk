@@ -1,35 +1,46 @@
+// /features/kras, rewritten against the product. The claims here are small
+// on purpose: what shipped is the role definition page, the KRA with its
+// weight, and the link from the KRA to the KPI that measures it.
+
 import type { Metadata } from "next";
-import { Target, ListChecks, Link2, FileText, Users, Star } from "lucide-react";
 import { FeatureSubPage } from "@/components/marketing/sub-page";
-import { GradientText } from "@/components/marketing/primitives";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "KRAs — WorkwrK",
-  description: "Key Result Areas defined at the role level. Linked to KPIs, surfaced in reviews, and the single source of truth for what each person owns.",
+  title: "KRAs",
+  description:
+    "Key result areas defined on the role rather than the person, weighted, linked to the KPI that measures them, and read by every review.",
   alternates: { canonical: "https://workwrk.com/features/kras" },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "KRAs", description: "What a role owns, not what a person remembers." },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "What a role owns, not what a person remembers." },
 };
 
-export default function KRAsFeaturePage() {
+export default function KrasFeaturePage() {
   return (
     <FeatureSubPage
-      hubSlug="work"
-      hue="sky"
-      eyebrow="Work hub · KRAs"
-      title={<>KRAs that everyone <GradientText hue="sky">actually agrees on.</GradientText></>}
-      lede="Key Result Areas live on the role, not the person. Hire someone into the role and their KRAs are inherited automatically — and surface in every review."
+      slug="kras"
+      hubSlug="goals"
+      eyebrow="Goals"
+      title="What the role owns, written once."
+      lede="A key result area belongs to the role, so the next person to hold it inherits the job instead of negotiating it from a blank page."
       capabilities={[
-        { icon: Target,     title: "Role-defined",       body: "KRAs live on the role. Move a person between roles and the KRAs move with them." },
-        { icon: Link2,      title: "Linked to KPIs",     body: "Every KRA points to the KPIs that measure it. Drift becomes visible at a glance." },
-        { icon: ListChecks, title: "Versioned",          body: "Quarterly cycles fork the KRA set. History stays attached to historical reviews." },
-        { icon: FileText,   title: "Reviewer copilot",   body: "Reviewers see the KRAs alongside KPI scores, kudos, and prior cycles. No tab switching." },
-        { icon: Users,      title: "Manager + employee", body: "Both edit. Both sign off. Version history shows the negotiation, not just the result." },
-        { icon: Star,       title: "Weight per KRA",     body: "Not all KRAs are equal. Weight them so the composite score reflects what actually matters." },
+        { title: "On the role", body: "KRAs sit on the role definition. Move a person into the role and the result areas come with the seat." },
+        { title: "Weighted", body: "Each KRA carries a weight, so a composite score reflects what the role is actually for." },
+        { title: "Linked to a KPI", body: "A KRA names the KPI that measures it, which is how a reading becomes evidence rather than an opinion." },
+        { title: "Owns its SOPs", body: "The processes that serve a result area hang off it, so the question of who runs this has one answer." },
+        { title: "Read by reviews", body: "A review cycle opens on the subject's KRAs, with the self rating and the manager rating against each one." },
+        { title: "Boundaries", body: "A role definition also records what it escalates and to whom, which is the half of a job description everyone skips." },
       ]}
-      relatedSlugs={["kpis", "reviews", "people", "okrs"]}
+      surfaceKey="role-page"
+      surfaceCrumb="Roles"
+      surfaceLabel="The Teams block: a role definition page showing the KRA it owns and the KPIs weighted under it."
+      relatedSlugs={["kpis", "reviews", "people"]}
       faq={[
-        { q: "Why role-defined and not person-defined?",  a: "Because roles change less than people. New hire steps into a role — KRAs are inherited. No fresh-onboarding KRA drafting." },
-        { q: "How are KRAs used in reviews?",             a: "Every review opens with the KRA list. Each KRA gets a manager rating, a self-assessment, and rollup from the linked KPIs." },
-        { q: "Can KRAs be edited mid-cycle?",             a: "Yes — but they're version-locked. The next cycle picks up the new set; the in-flight one continues on the old set." },
+        { q: "Why on the role and not on the person?", a: "Because roles change less often than people do. A new hire steps into a seat that already knows what it owns." },
+        { q: "Can a KRA be edited during a cycle?", a: "Yes. The cycle in flight keeps the set it opened with, and the next one picks up the new set." },
+        { q: "Do KRAs move by themselves when work is done?", a: "A KRA moves with the KPI reading behind it, and a reading is recorded by whoever owns it. Completing a task does not write a reading today." },
       ]}
     />
   );

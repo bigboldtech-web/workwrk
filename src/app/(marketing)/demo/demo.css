@@ -1,0 +1,63 @@
+/* /demo's own two columns, and the card the form sits in.
+ *
+ * Everything here is a token. The page used to be styled with the legacy
+ * primitives, whose violet and fuchsia hues are raw purples and whose
+ * GradientText paints a two stop gradient, none of which the brand rules
+ * allow: blue is the only fill, and there are no gradients.
+ */
+
+.mk-demo {
+  display: grid;
+  gap: 32px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+@media (min-width: 1024px) {
+  .mk-demo { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 44px; }
+}
+
+.mk-demo__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--os-r-sm);
+  background: var(--os-brand-soft);
+  color: var(--os-brand-deep);
+}
+
+.mk-demo__card {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-r-md);
+  background: var(--os-surface);
+  box-shadow: var(--os-shadow-pop);
+  overflow: hidden;
+}
+@media (min-width: 1024px) {
+  .mk-demo__card { position: sticky; top: 88px; }
+}
+/* White, with a hairline under it.
+   The card header used to be a near-black slab. The navy chrome inside a
+   product frame is the only dark element anywhere on the public site
+   (concept 10), and this card is not a product frame. */
+.mk-demo__cardhead {
+  background: var(--os-surface-1);
+  color: var(--os-ink);
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--os-line);
+}
+.mk-demo__cardtitle { margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; }
+.mk-demo__cardsub { margin: 4px 0 0; font-size: var(--mk-caption, 13px); line-height: 18px; color: var(--os-ink-2); }
+
+/* The input focus halo (design-system 5, "Buttons, chips, tables"):
+   a field additionally gets a 3px halo in the focus-halo token on ANY
+   focus, pointer as well as keyboard, on top of the 2px ring every
+   focusable thing on the site gets.
+   It is `:focus`, not `:focus-visible`, and that is the difference between
+   the two rules: the ring says "the keyboard is here", the halo says "this
+   field is taking what you type", and a pointer user needs the second one
+   just as much. */
+.mk-field:focus {
+  box-shadow: 0 0 0 3px var(--os-focus-halo);
+}

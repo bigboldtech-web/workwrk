@@ -1,133 +1,119 @@
+// /industries, rewritten against the product.
+//
+// The old index sold "sector-specific templates: KPIs, SOPs, review cycles,
+// comp bands, so your team is operational the same week you sign up", plus
+// four cards promising pre-built KPI templates per sector, a forkable SOP
+// library that ships "audit-ready", industry competency models and
+// sector-typical compensation bands. The Template Center ships with five
+// seeds and none of those things exists. Compensation is not in this
+// product at all.
+//
+// What an industry page is honestly FOR is the second half of that idea,
+// and it is the half worth keeping: the same eight blocks, arranged the way
+// a particular kind of operation already thinks. So the index says that, and
+// each page underneath describes the arrangement rather than a library.
+
 import type { Metadata } from "next";
-import Link from "next/link";
-import {
-  ArrowRight,
-  Cpu,
-  Stethoscope,
-  Factory,
-  Truck,
-  Briefcase,
-  TrendingUp,
-  Home,
-} from "lucide-react";
-import {
-  Section,
-  Container,
-  Eyebrow,
-  H1,
-  H2,
-  Button,
-  CTABand,
-  GradientText,
-  HUES,
-  type Hue,
-} from "@/components/marketing/primitives";
+
+import { Band, Claim, Close, Eyebrow, Headline, Page, Stack, Sub } from "@/components/marketing/iconic/iconic";
+import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
 
 export const metadata: Metadata = {
-  title: "Industries — WorkwrK",
+  title: "Industries",
   description:
-    "WorkwrK adapts to your industry. Technology, healthcare, manufacturing, logistics, services, sales, real estate — one platform, sector-specific workflows.",
+    "The same eight blocks, arranged the way a particular operation already thinks. Technology, healthcare, manufacturing, logistics, services, sales and real estate.",
   alternates: { canonical: "https://workwrk.com/industries" },
+  openGraph: {
+    images: [OG_DEFAULT_IMAGE],
+    title: "Industries",
+    description: "The same eight blocks, arranged the way your operation already thinks.",
+  },
+  // The root layout's twitter:description still reads "Replaces 15 tools",
+  // which collides with the fourteen this site counts everywhere else.
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "The same eight blocks, arranged the way your operation already thinks." },
 };
 
-const INDUSTRIES: readonly { slug: string; name: string; hue: Hue; tagline: string; body: string; icon: typeof Cpu }[] = [
-  { slug: "technology",    name: "Technology",    hue: "violet",   icon: Cpu,         tagline: "Engineering + GTM under one OS",        body: "Tickets, sprints, OKRs, perf, kudos — and a pipeline that ties revenue back to the people who built it." },
-  { slug: "healthcare",    name: "Healthcare",    hue: "sky",      icon: Stethoscope, tagline: "Compliance-grade workflows",            body: "SOPs with audit trail, scoped access, training compliance, and the people layer to back it all up." },
-  { slug: "manufacturing", name: "Manufacturing", hue: "emerald",  icon: Factory,     tagline: "Shop floor + SOPs + KPIs",              body: "Per-shift KPIs, vendor + procurement, SOP runs, daily standups — built for plants and multi-site ops." },
-  { slug: "logistics",     name: "Logistics",     hue: "amber",    icon: Truck,       tagline: "Fleet, hubs, daily routes",             body: "Route SLAs as KPIs, hub-level performance dashboards, driver onboarding, and field-team scheduling." },
-  { slug: "services",      name: "Services",      hue: "pink",     icon: Briefcase,   tagline: "Projects, billables, capacity",         body: "Project P&L, capacity by role, billable utilization tied to performance, client portals on top." },
-  { slug: "sales",         name: "Sales",         hue: "fuchsia",  icon: TrendingUp,  tagline: "Pipeline + people in one",              body: "Forecasting, quotas as KPIs, pipeline reviews as cadence, rep onboarding and ramp — all under one roof." },
-  { slug: "real-estate",   name: "Real Estate",   hue: "rose",     icon: Home,        tagline: "Listings, leads, deals",                body: "Listing inventory, lead pipelines per agent, deal stages, commissions and comp bands — all in workwrk." },
+const INDUSTRIES: readonly { slug: string; name: string; body: string }[] = [
+  {
+    slug: "technology",
+    name: "Technology",
+    body: "Roles that own result areas, measures with a named owner, and goals that read the work underneath them.",
+  },
+  {
+    slug: "healthcare",
+    name: "Healthcare",
+    body: "Versioned procedure with a record of who has read the current one. No certification is held and no agreement is signed.",
+  },
+  {
+    slug: "manufacturing",
+    name: "Manufacturing",
+    body: "Per shift targets with owners, versioned standard procedure, and tables for the working underneath.",
+  },
+  {
+    slug: "logistics",
+    name: "Logistics",
+    body: "Daily measures per hub, exception procedures with owners, and roles that survive a handover.",
+  },
+  {
+    slug: "services",
+    name: "Services",
+    body: "Projects as lists with every view, capacity by role, and the repeatable part of delivery written down once.",
+  },
+  {
+    slug: "sales",
+    name: "Sales",
+    body: "Keep your pipeline tool. This is the half about what a seat owns and whether the quarter is on track.",
+  },
+  {
+    slug: "real-estate",
+    name: "Real estate",
+    body: "Inventory as a real spreadsheet, transactions as lists, and the closing checklist out of somebody's head.",
+  },
+];
+
+/** What is genuinely reusable between two companies in the same trade. */
+const REUSABLE: readonly [string, string][] = [
+  ["The shape of a role", "What a seat owns, what it escalates, and the result areas under it. That part rhymes between firms."],
+  ["The measures kept", "The three or four numbers a trade actually reads weekly, with an owner against each reading."],
+  ["The repeated process", "The handful of procedures every firm in the trade writes down eventually, and re-writes badly."],
+  ["The cadence", "How often the check-in, the cycle and the review happen, which is a trade habit more than a company one."],
 ];
 
 export default function IndustriesPage() {
   return (
-    <>
-      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
-        <Container>
-          <div className="max-w-3xl">
-            <Eyebrow hue="sky" className="mb-5">Industries</Eyebrow>
-            <H1>
-              One platform. <br />
-              <GradientText hue="sky">Built for your sector.</GradientText>
-            </H1>
-            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
-              workwrk ships with sector-specific templates — KPIs, SOPs, review
-              cycles, comp bands — so your team is operational the same week
-              you sign up.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/signup" variant="secondary" hue="sky" size="lg" rightIcon={<ArrowRight size={15} />}>
-                Start with templates
-              </Button>
-              <Button href="/demo" variant="outline" size="lg">Talk to an expert</Button>
-            </div>
-          </div>
-        </Container>
-      </Section>
+    <Page>
+      <Band air="hero" labelledBy="ind-h1" still>
+        <Eyebrow>Industries</Eyebrow>
+        <Claim id="ind-h1">One system, arranged your way.</Claim>
+        <Sub>
+          There is no separate edition per trade and no sector library behind a signup, only eight blocks and one data
+          model.
+        </Sub>
+      </Band>
 
-      <Section py="lg">
-        <Container>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {INDUSTRIES.map((ind) => {
-              const t = HUES[ind.hue];
-              const Icon = ind.icon;
-              return (
-                <Link
-                  key={ind.slug}
-                  href={`/industries/${ind.slug}`}
-                  className="group relative p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 hover:-translate-y-0.5 transition shadow-sm hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] overflow-hidden"
-                >
-                  <div className={`absolute inset-x-0 -top-px h-[3px] bg-gradient-to-r ${t.gradVia}`} aria-hidden />
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
-                    <Icon size={22} strokeWidth={2.4} />
-                  </div>
-                  <p className="mt-5 font-extrabold text-slate-900 text-xl tracking-tight">{ind.name}</p>
-                  <p className={`mt-1 text-sm font-bold uppercase tracking-[0.14em] ${t.text}`}>{ind.tagline}</p>
-                  <p className="mt-3 text-base text-slate-600 leading-relaxed">{ind.body}</p>
-                  <span className={`mt-5 inline-flex items-center gap-1 text-base font-semibold ${t.text} group-hover:gap-2 transition-all`}>
-                    See how → <ArrowRight size={13} />
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        </Container>
-      </Section>
+      {/* The seven. It was a three column grid of bordered cards, each with a
+          tinted icon tile and a coloured uppercase tagline, and the top row
+          began 691px down a 900px screen. Seven names now. */}
+      <Band ground="quiet" labelledBy="ind-list">
+        <Eyebrow>The arrangements</Eyebrow>
+        <Headline id="ind-list">Seven ways teams arrange it.</Headline>
+        <Stack
+          items={INDUSTRIES.map((ind) => ({
+            title: ind.name,
+            body: ind.body,
+            href: `/industries/${ind.slug}`,
+            cta: `industries-${ind.slug}`,
+          }))}
+        />
+      </Band>
 
-      <Section variant="tint" py="lg">
-        <Container>
-          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
-            <div>
-              <Eyebrow hue="emerald" className="mb-4">Why sector matters</Eyebrow>
-              <H2>Templates first, customization second.</H2>
-              <p className="mt-5 text-slate-600 text-lg leading-relaxed">
-                Generic platforms make you build everything from scratch.
-                workwrk ships with the patterns your industry already runs on
-                — then lets you customize where it actually matters.
-              </p>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              {[
-                ["KPI templates",   "Pre-built per sector. Tweak weights, not the math.", "violet"],
-                ["SOP libraries",   "Reference SOPs you can fork. Ship audit-ready in days.", "emerald"],
-                ["Review cycles",   "Cadence and competency models that match your industry.", "fuchsia"],
-                ["Role + comp bands", "Sector-typical role ladders and comp bands.", "amber"],
-              ].map(([title, body, hue]) => {
-                const t = HUES[hue as Hue];
-                return (
-                  <div key={title} className={`p-5 bg-white rounded-2xl border ${t.border}`}>
-                    <p className={`font-bold text-base ${t.textStrong}`}>{title}</p>
-                    <p className="mt-1.5 text-base text-slate-600">{body}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </Container>
-      </Section>
+      <Band labelledBy="ind-rhyme">
+        <Eyebrow>Why a trade page</Eyebrow>
+        <Headline id="ind-rhyme">Four things that rhyme.</Headline>
+        <Stack items={REUSABLE.map(([title, body]) => ({ title, body }))} />
+      </Band>
 
-      <CTABand hue="sky" />
-    </>
+      <Close headline="Arrange it for your own team." placement="industries-index" />
+    </Page>
   );
 }
