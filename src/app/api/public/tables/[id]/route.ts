@@ -14,9 +14,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const table = await prisma.dataTable.findFirst({
     where: { id, isPublic: true },
-    select: { id: true, name: true, description: true, columns: true },
+    // `settings` is selected but NEVER returned whole. It is the table's
+    // private blob (saved views, freeze positions, conditional formats and
+    // whatever a later release puts there), and this route answers with no
+    // authentication at all. Only `namedRanges` is copied out, because the
+    // embed has to evaluate formulas and a formula written as SUM(Revenue)
+    // resolves to #NAME? without the name that defines it.
+    select: { id: true, name: true, description: true, columns: true, settings: true },
   });
   if (!table) return jsonError("not found", 404);
+
+  // Defensive on every field: settings is Json, so anything could be in it.
+  const settings = table.settings as { namedRanges?: unknown } | null;
+  const namedRanges = Array.isArray(settings?.namedRanges)
+    ? settings.namedRanges.filter(
+        (r): r is { name: string; ref: string } =>
+          !!r && typeof r === "object" &&
+          typeof (r as { name?: unknown }).name === "string" &&
+          typeof (r as { ref?: unknown }).ref === "string",
+      )
+    : [];
 
   const rows = await prisma.dataTableRow.findMany({
     where: { tableId: id, deletedAt: null },
@@ -28,5 +45,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     select: { id: true, values: true, position: true },
   });
 
-  return jsonSuccess({ ...table, rows });
+  // Spread the named fields, never `...table`: that would put the whole
+  // settings blob on an unauthenticated response.
+  return jsonSuccess({
+    id: table.id,
+    name: table.name,
+    description: table.description,
+    columns: table.columns,
+    namedRanges,
+    rows,
+  });
 }

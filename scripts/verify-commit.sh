@@ -86,6 +86,27 @@ node scripts/check-schema-sql.mjs
 # TZ=UTC to match CI. Note this still runs on the local Node (24) while CI
 # and production are Node 20, so it cannot catch a Node-20-only failure; see
 # the ICU midnight bug in reference_workwrk_ci_node20_traps.
+# TYPE CHECK. NOTHING ELSE IN THE PIPELINE DOES ONE.
+#
+# CI runs prisma validate, the two guards and vitest. It does not run tsc.
+# And `next build` under Turbopack does not type check either, which is the
+# part that surprises people: a green build is not a green compile. So until
+# this line existed, a real type error could pass the gate, pass CI, and ship.
+#
+# Found on 2026-09-22 while the Phase 4 deploy was in flight: four genuine
+# errors in a Talk component (a `export { X as Y } from` re-export, which
+# creates no local binding, followed by uses of the bare name, plus an icon
+# dropped from an import while still rendered). Those would have been a
+# ReferenceError in the message feed at runtime, not a build failure.
+#
+# It runs BEFORE the tests because it is much faster and its failures are
+# more specific: a type error usually explains a test failure downstream.
+echo "==> type check"
+npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
+  echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30; exit 1;
+}
+echo "   ok, 0 type errors"
+
 echo "==> unit tests (the commit's own tree)"
 TZ=UTC npx vitest run > /tmp/verify-test.log 2>&1 || {
   echo "TESTS FAILED. Last 40 lines:"; sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-test.log | tail -40; exit 1;

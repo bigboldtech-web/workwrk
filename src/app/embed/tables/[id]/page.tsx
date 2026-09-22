@@ -5,12 +5,31 @@
  * by /api/public/tables/[id]).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table as TableIcon, Loader2 } from "lucide-react";
 
-type Column = { id: string; type: string; label: string; options?: string[] };
+import { createTableEngine, type NamedRangeDef } from "@/lib/sheet-engine-host";
+import { formatCellValue, type ColumnFormat } from "@/lib/sheet-format";
+
+type Column = {
+  id: string;
+  type: string;
+  label: string;
+  options?: string[];
+  /** A whole-column formula; every cell in the column evaluates it. */
+  formula?: string;
+  /** Currency, percent, date and number display options. */
+  format?: ColumnFormat;
+};
 type Row = { id: string; values: Record<string, unknown>; position: number };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rows: Row[] };
+type ApiTable = {
+  id: string;
+  name: string;
+  description?: string | null;
+  columns: Column[];
+  rows: Row[];
+  namedRanges?: NamedRangeDef[];
+};
 
 export default function TableEmbed({ params }: { params: Promise<{ id: string }> }) {
   const [id, setId] = useState<string | null>(null);
@@ -35,6 +54,38 @@ export default function TableEmbed({ params }: { params: Promise<{ id: string }>
   }, [id]);
   useEffect(() => { void load(); }, [load]);
 
+  // THE SAME ENGINE THE GRID USES, SO THE EMBED SHOWS THE SAME NUMBERS.
+  //
+  // A formula is stored as an object, `{ "=": "SUM(A1:A5)" }`, and nothing
+  // caches its result (sheet-engine/types.ts: "extra keys are tolerated so a
+  // cached computed value can be added later"). This page used to render
+  // every cell with `String(v)`, so every formula cell in every public embed
+  // read literally "[object Object]" while the same table in the product
+  // showed the number.
+  //
+  // `engine.display(colId, rowId)` is the grid's own renderer: it evaluates
+  // per-cell formulas AND whole-column ones, and returns real error codes
+  // ("#REF!", "#DIV/0!") instead of an object or a blank.
+  //
+  // Rows MUST go in unsorted storage order, which is what the API returns
+  // (position asc, then id). Row anchoring is the engine's law: A1 row N is
+  // index N-1, so re-ordering here would silently change what every formula
+  // points at.
+  const engine = useMemo(() => {
+    if (!table) return null;
+    try {
+      return createTableEngine({
+        columns: table.columns.map((c) => ({ id: c.id, label: c.label, type: c.type, formula: c.formula })),
+        rows: table.rows.map((r) => ({ id: r.id, values: r.values })),
+        namedRanges: table.namedRanges ?? [],
+      });
+    } catch {
+      // A malformed table must not blank a public page. Falling back to null
+      // renders literals only, which is what this page did before.
+      return null;
+    }
+  }, [table]);
+
   if (err) return <Wrap><div style={S.error}><TableIcon /><p>{err}</p></div></Wrap>;
   if (!table) return <Wrap><div style={S.loading}><Loader2 style={{ animation: "spin 1s linear infinite" }} /> Loading…</div></Wrap>;
 
@@ -57,11 +108,9 @@ export default function TableEmbed({ params }: { params: Promise<{ id: string }>
               <tr><td colSpan={table.columns.length} style={S.empty}>No rows yet.</td></tr>
             ) : table.rows.map((r) => (
               <tr key={r.id}>
-                {table.columns.map((c) => {
-                  const v = r.values[c.id];
-                  const display = v === undefined || v === null ? "" : Array.isArray(v) ? v.join(", ") : c.type === "checkbox" ? (v ? "✓" : "") : String(v);
-                  return <td key={c.id} style={S.td}>{display}</td>;
-                })}
+                {table.columns.map((c) => (
+                  <td key={c.id} style={S.td}>{cellText(c, r, engine)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -69,6 +118,46 @@ export default function TableEmbed({ params }: { params: Promise<{ id: string }>
       </div>
     </Wrap>
   );
+}
+
+/**
+ * One cell's text, by the same rules the product's grid uses.
+ *
+ * Order matters here:
+ *   1. Checkbox first, because `false` is a real value that must render as
+ *      an empty cell rather than as the word "false".
+ *   2. The engine next, when there is one. It answers for formula cells and
+ *      formula COLUMNS, and returns error codes as text.
+ *   3. `formatCellValue` last, so a currency column reads "$1,240" and a date
+ *      column reads in the table's date format, exactly as in the product.
+ *      The embed used to skip this entirely and print raw stored values.
+ *
+ * An array (multi-select, people) still joins with commas, and anything else
+ * that is somehow an object falls back to empty rather than "[object
+ * Object]": on a public page a blank cell is honest and the literal string is
+ * not.
+ */
+function cellText(
+  column: Column,
+  row: Row,
+  engine: ReturnType<typeof createTableEngine> | null,
+): string {
+  const raw = row.values[column.id];
+
+  if (column.type === "checkbox") return raw ? "✓" : "";
+
+  if (engine) {
+    try {
+      return engine.display(column.id, row.id);
+    } catch {
+      // Fall through to the literal path rather than blanking the row.
+    }
+  }
+
+  if (raw === undefined || raw === null) return "";
+  if (Array.isArray(raw)) return raw.join(", ");
+  if (typeof raw === "object") return "";
+  return formatCellValue(raw, column.type, column.format);
 }
 
 function Wrap({ children }: { children: React.ReactNode }) {
