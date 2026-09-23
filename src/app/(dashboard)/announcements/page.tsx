@@ -1,6 +1,6 @@
 "use client";
 
-/* Announcements — broadcast feed grouped by priority with KPI strip + ack tracking.
+/* Announcements: broadcast feed grouped by priority with KPI strip + ack tracking.
  *
  *  GET   /api/announcements
  *  POST  /api/announcements
@@ -25,6 +25,7 @@ import {
   Clock,
   Users2,
 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C } from "@/components/layout/os/catalog";
@@ -73,6 +74,19 @@ const PRIO_HUE: Record<AnnPrio, string> = {
 };
 const PRIO_ORDER: AnnPrio[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
 
+/* The list route answers one page at a time and hands back a cursor for the
+ * next, so the browser has to ask for the rest. PAGE_SIZE is the route's own
+ * MAX_PAGE, which makes the ordinary workspace a single round trip, and
+ * MAX_REQUESTS is a stop rather than a limit: the route reads a 500-row
+ * window, so five requests already exhaust everything it can see. */
+const PAGE_SIZE = 100;
+const MAX_REQUESTS = 10;
+
+/** The shape the list route answers with. It used to answer with a bare
+ *  array, which a tab still running the previous bundle will receive. */
+type FeedCounts = { toAck: number; total: number };
+type FeedResponse = { data?: ApiAnn[]; next?: string | null; counts?: FeedCounts };
+
 // Past a week this falls back to a calendar date, and that date is the
 // VIEWER'S (home.locale), not the machine's and not en-US. The same bug is
 // why an announcement expiring on 31 December read "Expires Jan 1" to a
@@ -100,6 +114,9 @@ export default function AnnouncementsPage() {
     return () => { clearTimeout(first); clearInterval(every); };
   }, []);
   const [rows, setRows] = useState<ApiAnn[] | null>(null);
+  // The route's own tally of the whole visible feed, kept apart from the rows
+  // so the KPI strip quotes the workspace rather than the browser's copy.
+  const [feedCounts, setFeedCounts] = useState<FeedCounts | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | AnnType>("ALL");
@@ -108,15 +125,70 @@ export default function AnnouncementsPage() {
   const { toast } = useOsToast();
   // Mirrors the POST /api/announcements gate (requirePermission
   // "announcements","create") so the composer + ack-status view only
-  // surface for admins/HR/managers. null while the matrix loads.
-  const canManage = usePermission("announcements", "create") === true;
+  // surface for admins/HR/managers. null while the matrix loads, and the
+  // raw value is kept because the ?new=1 effect below has to tell "not
+  // answered yet" apart from "no".
+  const managePerm = usePermission("announcements", "create");
+  const canManage = managePerm === true;
 
+  // /announcements?new=1 opens the composer. It is the destination of the
+  // Talk hub "+" row "New announcement" (spec-talk section 1) and of the
+  // /tlk toolbar's "..." square (2.1), both of which had nowhere to go
+  // before this. The parameter is consumed once and stripped, so a refresh
+  // or a back does not re-open the dialog on top of the list.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew) return;
+    // Hold the intent until the matrix answers. On a cold load (cmd-click,
+    // middle-click, or a pasted or bookmarked link) the permission fetch is
+    // still in flight on the first commit, so stripping the parameter here
+    // threw the request away before anyone had said yes to it and the
+    // manager landed on the list with the composer shut and no explanation.
+    if (managePerm === null) return;
+    if (managePerm) setComposerOpen(true);
+    router.replace("/announcements", { scroll: false });
+  }, [wantsNew, managePerm, router]);
+
+  // Read the feed to the end, not just its first page. Everything on this
+  // screen is computed in the browser over the rows it holds: the search box,
+  // the type chips, the priority sections, and the Pinned section, which the
+  // route does not hoist ahead of the page boundary, so a post pinned
+  // precisely so it stays visible is the first thing a half-read feed drops.
+  // The cursor loop follows the route's own `next` until it runs out, which
+  // its 500-row scan window bounds at five requests and an ordinary
+  // workspace settles in one.
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/announcements");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRows(Array.isArray(data) ? data : (data.data ?? []));
+      const all: ApiAnn[] = [];
+      const seen = new Set<string>();
+      let totals: FeedCounts | null = null;
+      let cursor: string | null = null;
+      for (let i = 0; i < MAX_REQUESTS; i++) {
+        const qs = new URLSearchParams({ limit: String(PAGE_SIZE) });
+        if (cursor) qs.set("cursor", cursor);
+        const res = await fetch(`/api/announcements?${qs.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body: ApiAnn[] | FeedResponse = await res.json();
+        // Cursor paging by offset can hand back a row twice when two posts
+        // share an instant and the tie breaks differently between requests,
+        // and a repeat would be a duplicate key in the lists below, so the
+        // id decides what is already held.
+        for (const a of Array.isArray(body) ? body : (body.data ?? [])) {
+          if (seen.has(a.id)) continue;
+          seen.add(a.id);
+          all.push(a);
+        }
+        if (Array.isArray(body)) break;
+        if (body.counts) totals = body.counts;
+        const nextCursor = typeof body.next === "string" ? body.next : null;
+        // A cursor that does not move would spin here, so it ends the read.
+        if (!nextCursor || nextCursor === cursor) break;
+        cursor = nextCursor;
+      }
+      setRows(all);
+      setFeedCounts(totals);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
@@ -142,10 +214,16 @@ export default function AnnouncementsPage() {
     const counts: Record<AnnType, number> = { INFO: 0, WARNING: 0, CELEBRATION: 0, POLICY: 0, EVENT: 0 };
     for (const a of list) counts[a.type] = (counts[a.type] ?? 0) + 1;
     const pinned = list.filter((a) => a.pinned).length;
-    const ackPending = list.filter((a) => a.mustAcknowledge && !a.ackedByMe).length;
     const urgent = list.filter((a) => a.priority === "URGENT").length;
-    return { total: list.length, counts, pinned, ackPending, urgent };
-  }, [rows]);
+    // The two totals the route hands back are counted over the whole visible
+    // feed before it is paged, so they are the workspace's numbers and not a
+    // count of what this browser happens to be holding. The derived values
+    // behind them answer the route's older bare-array reply, which carried
+    // no counts at all.
+    const total = feedCounts?.total ?? list.length;
+    const ackPending = feedCounts?.toAck ?? list.filter((a) => a.mustAcknowledge && !a.ackedByMe).length;
+    return { total, counts, pinned, ackPending, urgent };
+  }, [rows, feedCounts]);
 
   const filtered = useMemo(() => {
     let list = rows ?? [];

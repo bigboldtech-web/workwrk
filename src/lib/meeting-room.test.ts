@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   CHAT_GUEST_CODE_TTL_MS,
   LEGACY_GUEST_CODE_GRACE_UNTIL,
+  MEETING_GUEST_CODE_TTL_MS,
   chatGuestCode,
   guestCodeExpired,
+  meetingGuestCode,
+  meetingGuestExpiry,
   verifyChatGuestCode,
+  verifyMeetingGuestCode,
 } from "./meeting-room";
 
 // Guest links expire (spec-talk section 2.5 Data, comms #25). These are the
@@ -72,4 +76,73 @@ function legacyShapeSig(conversationId: string, epoch: number): string {
   const { createHmac } = require("crypto") as typeof import("crypto");
   const secret = process.env.NEXTAUTH_SECRET || "workwrk-dev-secret";
   return createHmac("sha256", secret).update(`chatguest:${conversationId}:${epoch}`).digest("hex").slice(0, 16);
+}
+
+describe("meeting guest codes", () => {
+  const MEETING = "cmv1meetingid0000000000000";
+
+  it("round-trips a fresh code with its expiry", () => {
+    const exp = Date.now() + MEETING_GUEST_CODE_TTL_MS;
+    const code = meetingGuestCode(MEETING, exp);
+    expect(code.startsWith("m.")).toBe(true);
+    expect(code.split(".")).toHaveLength(4); // m . id . exp . sig
+    expect(verifyMeetingGuestCode(code)).toEqual({ meetingId: MEETING, expiresAt: Math.floor(exp) });
+  });
+
+  it("reads as expired past its own exp, and the signature still verifies", () => {
+    const parsed = verifyMeetingGuestCode(meetingGuestCode(MEETING, Date.now() - 1000));
+    expect(parsed).not.toBeNull();
+    expect(guestCodeExpired(parsed!.expiresAt)).toBe(true);
+  });
+
+  it("REFUSES A TAMPERED EXPIRY, which is the whole point of signing it", () => {
+    const parts = meetingGuestCode(MEETING, Date.now() + 60_000).split(".");
+    parts[2] = String(Number(parts[2]) + 10 * 365 * 24 * 3600_000);
+    expect(verifyMeetingGuestCode(parts.join("."))).toBeNull();
+  });
+
+  it("refuses a code signed for another meeting", () => {
+    const code = meetingGuestCode(MEETING, Date.now() + 60_000);
+    expect(verifyMeetingGuestCode(code.replace(MEETING, "cmv1othermeeting000000000"))).toBeNull();
+    expect(verifyMeetingGuestCode("m.x.1.abc")).toBeNull();
+    expect(verifyMeetingGuestCode("nonsense")).toBeNull();
+  });
+
+  it("honours pre-expiry codes through the grace, and not after it", () => {
+    const legacy = `${MEETING}.${legacyMeetingSig(MEETING)}`;
+    expect(verifyMeetingGuestCode(legacy, LEGACY_GUEST_CODE_GRACE_UNTIL - 1000))
+      .toEqual({ meetingId: MEETING, expiresAt: null });
+    expect(verifyMeetingGuestCode(legacy, LEGACY_GUEST_CODE_GRACE_UNTIL + 1000)).toBeNull();
+  });
+
+  it("does not confuse the two code kinds", () => {
+    const chat = chatGuestCode("conv-1", 0, Date.now() + 60_000);
+    expect(verifyMeetingGuestCode(chat)).toBeNull();
+    expect(verifyChatGuestCode(meetingGuestCode(MEETING))).toBeNull();
+  });
+});
+
+describe("meetingGuestExpiry", () => {
+  const start = Date.parse("2026-09-22T09:00:00.000Z");
+
+  it("is the meeting's END plus 24 hours", () => {
+    expect(meetingGuestExpiry(new Date(start), 30)).toBe(start + 30 * 60_000 + 24 * 3600_000);
+    expect(meetingGuestExpiry(new Date(start).toISOString(), 60)).toBe(start + 60 * 60_000 + 24 * 3600_000);
+  });
+
+  it("falls back to 24 hours from now when there is no schedule to read", () => {
+    const before = Date.now();
+    const got = meetingGuestExpiry(null);
+    expect(got).toBeGreaterThanOrEqual(before + MEETING_GUEST_CODE_TTL_MS);
+    expect(meetingGuestExpiry("not a date")).toBeGreaterThanOrEqual(before + MEETING_GUEST_CODE_TTL_MS);
+  });
+});
+
+/** The pre-Phase-4 meeting signature, recomputed so the grace branch is
+ *  tested against a code of the exact shape the old minter produced. */
+function legacyMeetingSig(meetingId: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createHmac } = require("crypto") as typeof import("crypto");
+  const secret = process.env.NEXTAUTH_SECRET || "workwrk-dev-secret";
+  return createHmac("sha256", secret).update(`guest:${meetingId}`).digest("hex").slice(0, 16);
 }

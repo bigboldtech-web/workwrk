@@ -1,0 +1,13 @@
+-- Drop AnnouncementDismissal (spec-talk.md section 0, section 4 step 9).
+--
+-- DO NOT RUN THIS IN THE SAME RELEASE as the code removal. It is staged one
+-- release behind POST /api/announcements/[id]/dismiss and its only caller,
+-- the /dashboard announcements banner, both of which are gone as of
+-- 2026-09-22. See scripts/MIGRATIONS.md for the reason and the founder step.
+--
+-- Nothing reads this table: no query in src joins it, and the endpoint that
+-- wrote it no longer exists. The rows record only "somebody hid a banner",
+-- which the product no longer has.
+--
+-- Idempotent: IF EXISTS, so a second run is a no-op.
+DROP TABLE IF EXISTS "AnnouncementDismissal";

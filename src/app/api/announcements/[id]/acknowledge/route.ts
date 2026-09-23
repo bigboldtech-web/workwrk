@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { canSeeAckRoster } from "@/lib/announcement-access";
+import { announcementViewer } from "@/lib/announcement-server";
+import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
 
 /**
  * Acknowledge a must-ack announcement.
@@ -26,9 +29,30 @@ export async function POST(
 
   const announcement = await prisma.announcement.findUnique({
     where: { id: announcementId },
-    select: { id: true, mustAcknowledge: true, organizationId: true },
+    select: {
+      id: true, mustAcknowledge: true, organizationId: true,
+      // For the publish check below. It was not selected, so it could not be
+      // checked, which is how the gap got here.
+      publishedAt: true, createdAt: true,
+    },
   });
   if (!announcement || announcement.organizationId !== orgId) {
+    return jsonError("Announcement not found", 404);
+  }
+  // A SCHEDULED POST CANNOT BE ACKNOWLEDGED BEFORE IT PUBLISHES.
+  //
+  // This route checked the org and `mustAcknowledge` and nothing else. The
+  // detail route now refuses to serve a scheduled post to its audience, so
+  // the UI path here is closed, but the endpoint was still reachable
+  // directly: a POST before the publish instant wrote a real ack row, and
+  // the author would later read an acknowledgement for a post nobody had
+  // been shown. The row is also the thing the reminder and the roster count,
+  // so one forged ack silently removes that person from both.
+  //
+  // 404 rather than 403, matching the line above: to someone outside the
+  // audience of an unpublished post, it does not exist yet.
+  const publishedMs = (announcement.publishedAt ?? announcement.createdAt).getTime();
+  if (publishedMs > Date.now()) {
     return jsonError("Announcement not found", 404);
   }
   if (!announcement.mustAcknowledge) {
@@ -65,11 +89,19 @@ export async function POST(
 }
 
 /**
- * Admin-only — list who has and hasn't acked.
+ * Who has and who has not acknowledged, for the Acknowledgments tab.
  *
- * Returns the full org user roster (minus the author) with an
- * `acknowledgedAt` field populated when the row exists. Pure
- * read-only — no side effects.
+ * THE ROSTER IS THE AUDIENCE, not the organization (comms #9). The old
+ * version returned every non-deleted user in the workspace minus the author
+ * and never resolved `targetAudience`, so a post aimed at one department
+ * reported the whole company as Pending and the dialog it fed literally
+ * labelled itself "Organization-wide". A targeted post now reports the people
+ * it was actually sent to, which is the only number that means anything.
+ *
+ * WHO MAY SEE IT is the same rule as Edit: the author, Owners and Admins. A
+ * legacy manager level is no longer enough.
+ *
+ * Pure read, no side effects.
  */
 export async function GET(
   _req: NextRequest,
@@ -77,29 +109,34 @@ export async function GET(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id: announcementId } = await params;
   const orgId = getOrgId(session);
+  const viewer = await announcementViewer(session as never);
 
-  const announcement = await prisma.announcement.findUnique({
-    where: { id: announcementId },
-    select: { id: true, organizationId: true, authorId: true, mustAcknowledge: true },
+  const announcement = await prisma.announcement.findFirst({
+    where: { id: announcementId, organizationId: orgId },
+    select: { id: true, organizationId: true, authorId: true, mustAcknowledge: true, targetAudience: true },
   });
-  if (!announcement || announcement.organizationId !== orgId) {
-    return jsonError("Announcement not found", 404);
+  if (!announcement) return jsonError("Announcement not found", 404);
+  if (!canSeeAckRoster(announcement, viewer)) {
+    return jsonError("Only the author, an Owner or an Admin can see the roster", 403);
   }
 
+  const audienceIds = await resolveAnnouncementAudienceUserIds(
+    orgId,
+    parseAnnouncementAudience(announcement.targetAudience),
+  );
+  const expectedIds = audienceIds.filter((u) => u !== announcement.authorId);
+
   const [users, acks] = await Promise.all([
-    prisma.user.findMany({
-      where: {
-        organizationId: orgId,
-        deletedAt: null,
-        id: { not: announcement.authorId },
-      },
-      select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
-      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    }),
+    expectedIds.length > 0
+      ? prisma.user.findMany({
+          where: { id: { in: expectedIds }, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true } } },
+          orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+        })
+      : Promise.resolve([]),
     prisma.announcementAcknowledgment.findMany({
       where: { announcementId },
       select: { userId: true, acknowledgedAt: true },
@@ -107,14 +144,20 @@ export async function GET(
   ]);
 
   const ackMap = new Map(acks.map((a) => [a.userId, a.acknowledgedAt]));
+  const roster = users.map((u) => ({
+    id: u.id,
+    firstName: u.firstName,
+    lastName: u.lastName,
+    email: u.email,
+    avatar: u.avatar,
+    department: u.department?.name ?? null,
+    acknowledgedAt: ackMap.get(u.id) ?? null,
+  }));
 
   return jsonSuccess({
     mustAcknowledge: announcement.mustAcknowledge,
-    roster: users.map((u) => ({
-      ...u,
-      acknowledgedAt: ackMap.get(u.id) ?? null,
-    })),
-    acknowledgedCount: acks.length,
-    totalCount: users.length,
+    roster,
+    acknowledgedCount: roster.filter((r) => r.acknowledgedAt).length,
+    totalCount: roster.length,
   });
 }

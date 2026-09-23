@@ -48,20 +48,24 @@ export async function POST(req: NextRequest) {
     organizationId = conversation.organizationId;
     conversationId = conversation.id;
   } else {
-    const mid = verifyMeetingGuestCode(code);
-    if (!mid) return jsonError("This link is no longer valid", 404);
-    // deletedAt is part of the revocation, not a display filter: deleting
-    // the meeting is the only way to kill a guest code, which is a
-    // permanent HMAC of the meeting id.
+    const meetingCode = verifyMeetingGuestCode(code);
+    if (!meetingCode) return jsonError("This link is no longer valid", 404);
+    // The expiry is signed INTO the code now, so it cannot be forgotten by a
+    // call site. 410, not 404: the link was real and it is over.
+    if (guestCodeExpired(meetingCode.expiresAt)) {
+      return jsonError("This link has expired", 410);
+    }
+    // deletedAt is part of the revocation, not a display filter.
     const meeting = await prisma.meeting.findFirst({
-      where: { id: mid, deletedAt: null },
-      select: { id: true, organizationId: true, scheduledAt: true },
+      where: { id: meetingCode.meetingId, deletedAt: null },
+      select: { id: true, organizationId: true, scheduledAt: true, duration: true },
     });
     if (!meeting) return jsonError("This link is no longer valid", 404);
-    // Meeting guest links die 24h after the meeting's start — a leaked
-    // link from last month must not let a stranger lurk in future calls
-    // that happen to reuse the meeting page. (Members are unaffected.)
-    if (Date.now() > meeting.scheduledAt.getTime() + 24 * 3600_000) {
+    // A LEGACY code (minted before the expiry shipped, inside its 7-day
+    // grace) carries no exp of its own, so the old route-side rule still
+    // applies to it: dead 24 hours after the meeting's start. Nothing minted
+    // from today reaches this branch.
+    if (meetingCode.expiresAt === null && Date.now() > meeting.scheduledAt.getTime() + 24 * 3600_000) {
       return jsonError("This link has expired", 410);
     }
     room = meetingRoomName(meeting.id);

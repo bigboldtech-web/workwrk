@@ -45,9 +45,15 @@ export function ConfirmDialog({
           {description}
         </p>
         <div className="mt-5 flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={loading}>
-            {cancelLabel}
-          </Button>
+          {/* An empty cancelLabel drops the button: a few of these dialogs
+              only acknowledge something ("Calls aren't set up"), where
+              Cancel and the primary would do the same thing under two
+              different names. */}
+          {cancelLabel ? (
+            <Button variant="outline" size="sm" onClick={onClose} disabled={loading}>
+              {cancelLabel}
+            </Button>
+          ) : null}
           <Button
             variant={destructive ? "destructive" : "default"}
             size="sm"

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
+import { jsonSuccess } from "@/lib/api-helpers";
+import { talkGate } from "@/lib/talk-gate";
 
 // Messages that mention me, for Talk home's Mentions view (spec-talk
 // section 2.1 Data).
@@ -37,10 +38,10 @@ type MentionRow = {
 };
 
 export async function GET(req: NextRequest) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
+  const { error, gate } = await talkGate();
   if (error) return error;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
+  const userId = gate.userId;
+  const orgId = gate.organizationId;
 
   const rawCursor = Number(req.nextUrl.searchParams.get("cursor") ?? "0");
   const offset = Number.isFinite(rawCursor) && rawCursor > 0 ? Math.min(Math.floor(rawCursor), 5000) : 0;

@@ -28,11 +28,14 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
   useEffect(() => {
     let active = true;
     const t = setTimeout(() => {
-      const params = new URLSearchParams({ scope: "all", limit: "20" });
-      if (search.trim()) params.set("search", search.trim());
-      fetch(`/api/users?${params}`, { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : { data: [] }))
-        .then((d) => { if (active) setPeople(Array.isArray(d?.data) ? d.data : []); })
+      // /api/people/pick, not /api/users?scope=all: the latter team-scopes
+      // everybody below an org-wide level, so Add people offered a Member
+      // nobody but themselves.
+      const params = new URLSearchParams({ limit: "20" });
+      if (search.trim()) params.set("q", search.trim());
+      fetch(`/api/people/pick?${params}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { people: [] }))
+        .then((d) => { if (active) setPeople(Array.isArray(d?.people) ? d.people : []); })
         .catch(() => { if (active) setPeople([]); });
     }, 200);
     return () => { active = false; clearTimeout(t); };
@@ -74,7 +77,7 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="w-full" style={{ maxWidth: 560 }}>
         <DialogHeader>
           <DialogTitle>Add people</DialogTitle>
         </DialogHeader>

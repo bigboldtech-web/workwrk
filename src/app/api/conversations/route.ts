@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { talkGate } from "@/lib/talk-gate";
 
 // Comms Hub — conversation list + create (docs/plans/comms-hub.md).
 // Every route here is scoped twice: to the caller's org AND to
@@ -16,10 +17,10 @@ const MEMBER_SELECT = {
 } as const;
 
 export async function GET() {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
+  const { error, gate } = await talkGate();
   if (error) return error;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
+  const userId = gate.userId;
+  const orgId = gate.organizationId;
 
   const memberships = await prisma.conversationMember.findMany({
     // hidden = Slack's closed conversations: out of the sidebar, history
@@ -65,6 +66,25 @@ export async function GET() {
     GROUP BY m."conversationId"`;
   const unread = new Map(unreadRows.map((r) => [r.conversationId, Number(r.n)]));
 
+  // UNREAD MENTIONS, separately. The sidebar's row vocabulary (spec-talk
+  // section 1) puts a 6px dot on "there is something here" and a COUNT on
+  // "this many of them are addressed to you", and without this query the
+  // sidebar had no way to tell the two apart, so every unread row wore a
+  // filled count pill. Same shape and same index as the query above; the
+  // mention list lives in the message's metadata, which is where the send
+  // path writes it after checking the person is actually in the room.
+  const mentionRows = await prisma.$queryRaw<{ conversationId: string; n: bigint }[]>`
+    SELECT m."conversationId", COUNT(*)::bigint AS n
+    FROM "ConversationMessage" m
+    JOIN "ConversationMember" cm
+      ON cm."conversationId" = m."conversationId" AND cm."userId" = ${userId}
+    WHERE m."createdAt" > cm."lastReadAt"
+      AND m."authorId" <> ${userId}
+      AND m."deletedAt" IS NULL
+      AND m."metadata" -> 'mentions' @> ${JSON.stringify([userId])}::jsonb
+    GROUP BY m."conversationId"`;
+  const mentions = new Map(mentionRows.map((r) => [r.conversationId, Number(r.n)]));
+
   const conversations = memberships
     .map((m) => ({
       ...m.conversation,
@@ -76,6 +96,7 @@ export async function GET() {
       myNotifyLevel: m.notifyLevel,
       myStarred: m.starred,
       unreadCount: unread.get(m.conversation.id) ?? 0,
+      unreadMentions: mentions.get(m.conversation.id) ?? 0,
     }))
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 
@@ -125,6 +146,9 @@ async function channelDirectory(orgId: string, userId: string) {
     select: {
       id: true,
       name: true,
+      restricted: true,
+      findable: true,
+      archivedAt: true,
       _count: { select: { members: true } },
       members: { where: { userId }, select: { id: true } },
     },
@@ -164,6 +188,9 @@ async function channelDirectory(orgId: string, userId: string) {
       select: {
         id: true,
         name: true,
+        restricted: true,
+        findable: true,
+        archivedAt: true,
         _count: { select: { members: true } },
         members: { where: { userId }, select: { id: true } },
       },
@@ -179,19 +206,30 @@ async function channelDirectory(orgId: string, userId: string) {
     general._count.members += 1;
   }
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    memberCount: r._count.members,
-    isMember: r.members.length > 0,
-  }));
+  // PHASE 4: this list is a DIRECTORY, and a private channel does not belong
+  // in one. A restricted channel appears only for the people actually in it,
+  // and an archived channel only for its members (who still need to read it),
+  // never as a row somebody can click Join on. Without this filter the new
+  // Restricted switch would have been decorative: the channel would have
+  // stayed in everybody's sidebar with a Join affordance beside it.
+  return rows
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      memberCount: r._count.members,
+      isMember: r.members.length > 0,
+      restricted: r.restricted ?? false,
+      findable: r.findable ?? true,
+      archived: r.archivedAt != null,
+    }))
+    .filter((r) => r.isMember || (!r.restricted && !r.archived && r.findable));
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
+  const { error, gate } = await talkGate();
   if (error) return error;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
+  const userId = gate.userId;
+  const orgId = gate.organizationId;
 
   const body = await req.json().catch(() => null);
   const type = body?.type === "GROUP" ? "GROUP" : body?.type === "CHANNEL" ? "CHANNEL" : "DM";
@@ -204,11 +242,24 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     });
     if (clash) return jsonSuccess({ id: clash.id, existed: true });
+    // PRIVACY IS SET ON CREATE, not patched in afterwards.
+    //
+    // New channel used to POST a public channel and then PATCH it private in
+    // a second request. Between the two, and permanently if the PATCH failed,
+    // a channel somebody asked to be private was listed in everybody's Browse
+    // channels and any Member could self-join it. A person's answer to "who
+    // can reach this" has to be part of the row that gets created.
+    const restricted = body?.restricted === true;
+    const findable = restricted ? false : body?.findable !== false;
+    const topic = typeof body?.topic === "string" ? body.topic.trim().slice(0, 500) || null : null;
     const channel = await prisma.conversation.create({
       data: {
         organizationId: orgId,
         type: "CHANNEL",
         name,
+        topic,
+        restricted,
+        findable,
         createdById: userId,
         members: { create: [{ userId, notifyLevel: "mentions" }] },
       },

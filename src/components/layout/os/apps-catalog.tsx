@@ -1683,6 +1683,20 @@ export const APPS: AppEntry[] = [
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },
+      // spec-talk section 1 lists New announcement as the third "+" row for
+      // anybody who may post one. The Talk "+" carried only the first two, so
+      // the sidebar entry point the spec names did not exist. Gated on the
+      // same permission POST /api/announcements enforces, and on the folded
+      // `announcements` app still being on this rail, so it never opens a
+      // door that answers AppOff.
+      {
+        label: "New announcement",
+        icon: Megaphone,
+        href: "/announcements?new=1",
+        requiredPermission: { module: "announcements", action: "create" },
+        requiredApps: ["announcements"],
+        separatorBefore: true,
+      },
     ] },
   // /people (the Directory), not /team: /team is gated on having reports, so a
   // rail pill pointed at it would land a plain Member on a denial. My team is

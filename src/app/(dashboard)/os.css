@@ -30984,3 +30984,86 @@ html[data-density="compact"] .os-tc__row:focus-within .os-tc__check { opacity: 1
 .cxn__cal-switch > span { display: flex; flex-direction: column; }
 .cxn__cal-switch em { font-style: normal; font-size: 12px; color: var(--os-ink-3); }
 .cxn__upcoming { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+
+/* Talk (Phase 4): the touch and narrow escape hatch for a hover-revealed
+   control. critic #10 is "nothing is reachable only by hover or only by
+   right-click", and the message action bar, the sidebar row menu and the
+   member row menu are all hover-revealed on a mouse. A coarse pointer has
+   no hover at all, so on touch and under 1024 the control renders at rest
+   instead. It is a class rather than a Tailwind variant because the rule
+   is one media query in two parts and belongs in one place.
+
+   The rows inside a menu that exist ONLY for touch (the quick reactions and
+   Reply in thread, which a mouse reaches on the bar itself) carry
+   .os-touch-only and are hidden on a fine pointer, so the desktop menu is
+   the four rows the spec lists and nothing more. */
+.os-touch-only { display: none; }
+@media (pointer: coarse), (max-width: 1023px) {
+  .os-touch-visible { display: flex !important; }
+  .os-touch-only { display: flex; }
+  /* At rest the bar must not sit ON the words. It lifts above the row on a
+     mouse because it only appears while the pointer is there; rendered
+     permanently it needs its own space, so the row reserves it and the bar
+     aligns to the row's own top rather than the previous message's bottom.
+
+     At rest the bar is the 28px "..." ALONE. The eight-button flattened bar
+     measured 198px against a 148px reserve, so on every phone and every
+     touch laptop it printed across the words of every message, and its right
+     end fell outside the clipped content box with no scroll that reached it.
+     Folding everything but the menu away is what the spec asks for on a
+     coarse pointer, and it is also the only width a 360px viewport has to
+     give. Nothing becomes unreachable: the menu carries every action. */
+  .os-touch-row > .os-touch-visible > .os-touch-collapse { display: none; }
+  .os-touch-row { padding-inline-end: 44px; }
+}
+
+/* THE CONVERSATION HEADER AT PHONE WIDTH.
+
+   spec-talk section 1 Mobile / narrow keeps BackButton, the title, the member
+   pill ("never hidden"), Call and the "..." at every width. At 390px the row
+   as written measured 503px against a 326px content box that does not scroll,
+   so the "..." rendered outside it with no way to reach: Star, Notifications,
+   Details, Search in conversation, Copy link, Add people, Rename, Archive,
+   Leave and Close had no path at all on the commonest phone sizes.
+
+   What gives way, in order, is the WORDS and then the one control whose
+   destination is reachable from two other places on the same row:
+
+     * the Back and Call labels go, leaving their icons (the tooltip and the
+       aria-label still name them, and BackButton already has an icon-only
+       mode for exactly this);
+     * Share goes under 640, because it opens the Details panel, which the
+       member pill and the "..." both also open. Nothing becomes unreachable.
+
+   The pill stays, as the spec asks. */
+@media (max-width: 640px) {
+  header.tlkc__hdr { padding-inline: 8px; gap: 4px; }
+  .tlkc__hdr .tlkc__hdr-label { display: none; }
+  .tlkc__hdr .tlkc__hdr-share { display: none; }
+  /* The BackButton renders its label in a plain child span, so the rule
+     reaches it through the class the header puts on the button. */
+  .tlkc__hdr .tlkc__hdr-back > span { display: none; }
+}
+
+/* The Talk conversation grid: header, feed, message box, and a right panel
+   that holds exactly one of Thread, Details or Search. Under 1024 the panel
+   becomes a full-width overlay sliding in from the inline end. */
+.tlkc { display: grid; grid-template-rows: auto 1fr; min-height: 0; height: 100%; }
+.tlkc__body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; }
+.tlkc__body[data-panel="none"] { grid-template-columns: minmax(0, 1fr); }
+.tlkc__panel {
+  display: flex; flex-direction: column; min-height: 0;
+  border-inline-start: 1px solid var(--os-line); background: var(--os-surface);
+}
+@media (max-width: 1023px) {
+  .tlkc__body[data-panel]:not([data-panel="none"]) { grid-template-columns: minmax(0, 1fr); }
+  .tlkc__panel {
+    position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 30;
+    width: min(100%, 420px); box-shadow: var(--os-shadow-pop);
+    animation: tlkc-panel-in 220ms ease-out;
+  }
+}
+@keyframes tlkc-panel-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}

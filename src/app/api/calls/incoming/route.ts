@@ -7,7 +7,7 @@
 // Talk-module gated. Cheap: two indexed reads plus a label fetch.
 
 import { NextResponse } from "next/server";
-import { getSessionAndModule, getOrgId, getUserId } from "@/lib/api-helpers";
+import { talkGate } from "@/lib/talk-gate";
 import { prisma } from "@/lib/prisma";
 
 const FRESH_MS = 120_000; // only ring genuinely fresh calls, not hour-old ones
@@ -15,10 +15,10 @@ const FRESH_MS = 120_000; // only ring genuinely fresh calls, not hour-old ones
 type RosterEntry = { identity: string; name: string };
 
 export async function GET() {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
+  const { error, gate } = await talkGate();
   if (error) return error;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
+  const userId = gate.userId;
+  const orgId = gate.organizationId;
 
   const memberships = await prisma.conversationMember.findMany({
     where: { userId, hidden: false, notifyLevel: { not: "mute" } },
@@ -51,7 +51,7 @@ export async function GET() {
       id: true,
       type: true,
       name: true,
-      members: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
+      members: { select: { user: { select: { id: true, firstName: true, lastName: true, avatar: true } } } },
     },
   });
   const byId = new Map(convos.map((c) => [c.id, c]));
@@ -60,6 +60,11 @@ export async function GET() {
     const c = byId.get(s.conversationId as string);
     const roster = s.participants as RosterEntry[];
     const callerName = roster[0]?.name || "Someone";
+    // The incoming-call card shows the caller's real avatar, never a
+    // generated hue. The LiveKit identity IS the user id for a member, so
+    // the roster's first entry resolves against the member list; a guest
+    // has no row and falls through to initials, which is honest.
+    const caller = c?.members.find((m) => m.user.id === roster[0]?.identity)?.user ?? null;
     const isDM = c?.type === "DM";
     const other = isDM ? c?.members.find((m) => m.user.id !== userId)?.user : null;
     const label = isDM
@@ -69,6 +74,7 @@ export async function GET() {
       conversationId: s.conversationId,
       roomName: s.roomName,
       callerName,
+      callerAvatar: caller?.avatar ?? null,
       label,
       isDM,
       startedAt: s.startedAt.toISOString(),

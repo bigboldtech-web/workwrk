@@ -1,18 +1,27 @@
 "use client";
 
-// ConferenceSurface, the shared in-call chrome for members AND guests
-// (native-calls Phase 4): LiveKit conference + WorkwrK's reaction layer.
+// CallStage, the shared in-call surface for members AND guests: the LiveKit
+// conference plus WorkwrK's reaction layer.
+//
+// THE NAME IS THE POINT OF THE RENAME (spec-talk.md section 3). It was
+// `CallStage`, which is a fifth word for the thing the product calls
+// a call: the naming canon settles on Call (the session), Call dock (the
+// floating window) and Call stage (the tiles). "Conference" appeared nowhere
+// a person could read it, only in the code, which is exactly how a product
+// ends up with five words for one thing.
 //
 // Reactions ride LiveKit data channels (topic "wk-react"): an emoji tap
 // broadcasts to every participant and floats up from the bottom of the
 // tiles; ✋ Raise hand is sticky, raised hands pin a chip listing names
-// until their owner lowers them (or leaves, which drops their packets).
+// until their owner lowers them, or leaves, which prunes their entry on the
+// room's own ParticipantDisconnected event (a disconnect sends no packet).
 // Pure client + data channel: zero server involvement, works for guests.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  LiveKitRoom, VideoConference, useConnectionState, useDataChannel, useLocalParticipant, useParticipants,
+  LiveKitRoom, VideoConference, useConnectionState, useDataChannel, useLocalParticipant, useParticipants, useRoomContext,
 } from "@livekit/components-react";
+import { RoomEvent, type RemoteParticipant } from "livekit-client";
 import "@livekit/components-styles";
 import { Hand } from "lucide-react";
 
@@ -50,17 +59,24 @@ type ReactMsg = { kind: "emoji"; emoji: string } | { kind: "hand"; raised: boole
    (src/app/globals.css) rather than from a zinc utility, so it looks the
    same in light and dark and needs no dark-mode pass. The rename to
    CallStage rides step 8 with the reserved-region dock. */
-export function ConferenceSurface({ url, token, video, onDisconnected, onState }: {
+export function CallStage({ url, token, video, audio = true, onDisconnected, onState }: {
   url: string;
   token: string;
   video: boolean;
+  /** Publish the microphone on connect. DEFAULTS TRUE so the member path,
+   *  which has no pre-join mic control and gets a working one from the dock
+   *  the moment it is connected, behaves exactly as it always has. The guest
+   *  door DOES have a pre-join mic toggle and passes it here: without this
+   *  prop a guest who set "Mic off" before joining a stranger's meeting
+   *  arrived with a live microphone, because `audio` was a literal true. */
+  audio?: boolean;
   onDisconnected?: () => void;
   /** Reports live mic/camera/roster up to the dock (see CallDockState). */
   onState?: (state: CallDockState) => void;
 }) {
   return (
     <div className="os-stage relative h-full w-full" data-lk-theme="default">
-      <LiveKitRoom serverUrl={url} token={token} connect audio video={video} onDisconnected={onDisconnected} style={{ height: "100%" }}>
+      <LiveKitRoom serverUrl={url} token={token} connect audio={audio} video={video} onDisconnected={onDisconnected} style={{ height: "100%" }}>
         <VideoConference />
         <ReactionLayer />
         {onState ? <RoomBridge onState={onState} /> : null}
@@ -106,6 +122,27 @@ function ReactionLayer() {
   const [myHand, setMyHand] = useState(false);
   const idRef = useRef(0);
   const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext();
+
+  // A raised hand is sticky and a disconnect broadcasts nothing, so without
+  // this the chip keeps naming somebody who has left for the rest of the
+  // call and NOBODY can clear it: a guest is issued a fresh random identity
+  // with every token, so they cannot even rejoin and lower their own. Pruned
+  // on the room's own disconnect event rather than by diffing the roster,
+  // because `useParticipants` re-renders at speaking-level rate and a stale
+  // snapshot could drop a hand raised in the same tick its owner joined.
+  useEffect(() => {
+    const drop = (participant: RemoteParticipant) => {
+      setHands((prev) => {
+        if (!prev.has(participant.identity)) return prev;
+        const next = new Map(prev);
+        next.delete(participant.identity);
+        return next;
+      });
+    };
+    room.on(RoomEvent.ParticipantDisconnected, drop);
+    return () => { room.off(RoomEvent.ParticipantDisconnected, drop); };
+  }, [room]);
 
   const showFloat = useCallback((emoji: string) => {
     const id = ++idRef.current;
@@ -174,8 +211,11 @@ function ReactionLayer() {
         {floats.map((f) => (
           <span
             key={f.id}
-            className="absolute bottom-16 text-[28px] wk-react-float"
-            style={{ left: `${f.left}%` }}
+            /* A floating reaction is a GLYPH, not text: the type scale is
+               about reading, and 28px here is the size of the emoji itself.
+               Set as a style so it does not read as a text-size decision. */
+            className="absolute bottom-16 wk-react-float"
+            style={{ left: `${f.left}%`, fontSize: 28, lineHeight: 1 }}
           >
             {f.emoji}
           </span>

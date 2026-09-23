@@ -64,7 +64,12 @@ function Inline({ nodes, names }: { nodes: InlineNode[]; names: string[] }) {
       {nodes.map((n, i) => {
         switch (n.t) {
           case "code":
-            return <code key={i} className="rounded bg-hover px-1 py-0.5 text-sm text-rose-600">{n.text}</code>;
+            // Tokens only. `text-rose-600` was a raw Tailwind palette value
+            // with no dark definition, so inline code sat pink and
+            // low-contrast on the dark feed ground, and this renderer also
+            // draws announcement bodies. spec-talk 2.2 asks for code on
+            // --os-surface-hov in the mono face.
+            return <code key={i} className="rounded bg-hover px-1 py-0.5 font-mono text-sm text-ink-strong">{n.text}</code>;
           case "link":
             return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer" className="text-brand underline underline-offset-2">{n.label}</a>;
           case "url":

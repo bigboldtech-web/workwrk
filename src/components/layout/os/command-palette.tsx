@@ -45,6 +45,7 @@ import {
   Layers,
   ListTodo,
   Megaphone,
+  MessageSquare,
   Mic,
   NotebookPen,
   Search,
@@ -126,6 +127,22 @@ type ServerHit = {
   title: string;
   subtitle?: string;
   href?: string;
+};
+
+/** Stable empty list, so "no message hits" never changes identity and the
+ *  sections memo below is not invalidated on every keystroke. */
+const EMPTY_MESSAGE_HITS: MessageHit[] = [];
+
+/** One hit from GET /api/conversations/search-messages. */
+type MessageHit = {
+  messageId: string;
+  conversationId: string;
+  conversationType: string;
+  conversationName: string | null;
+  members: { userId: string; user: { id: string; firstName: string; lastName: string } }[];
+  author: { id: string; firstName: string; lastName: string };
+  snippet: string;
+  inThread: boolean;
 };
 
 const SEARCH_TYPES: Record<
@@ -231,6 +248,7 @@ function PaletteBody() {
     hubHref,
     launcherApps,
     railApps,
+    prefs,
   } = useOsShell();
   const { boot } = useBoot();
   const { isAdmin, isGuest } = useViewerRole();
@@ -299,6 +317,37 @@ function PaletteBody() {
       window.clearTimeout(t);
     };
   }, [q, attempt]);
+  // MESSAGES. spec-talk 2.1 Top bar: "when Talk is on the palette gains a
+  // 'Messages' group backed by GET /api/conversations/search-messages?q=".
+  // This is where cross-conversation message search lives now; it used to
+  // ride the Talk sidebar's own search box, which spec-talk section 1 says
+  // "never searches messages", and whose hits linked to the conversation
+  // with no ?m=, so a result dropped you at the bottom of the channel rather
+  // than at the message you had searched for (comms #30).
+  //
+  // A separate request from /api/search on purpose: it is module-gated, it
+  // answers a different shape, and a failure in it must not take the rest of
+  // the palette's results with it.
+  const talkOn = Array.isArray(prefs.modules?.activeAppKeys) && prefs.modules.activeAppKeys.includes("chat");
+  // The answer carries the query it answered, so a stale one is simply not
+  // the current one and nothing has to be cleared synchronously in the
+  // effect. Same shape as the /api/search state above, for the same reason.
+  const [msgSearch, setMsgSearch] = useState<{ q: string; hits: MessageHit[] }>({ q: "", hits: [] });
+  useEffect(() => {
+    if (!talkOn || q.length < 2) return;
+    let stale = false;
+    const t = window.setTimeout(async () => {
+      const r = await apiFetch<{ results?: MessageHit[] }>(
+        `/api/conversations/search-messages?q=${encodeURIComponent(q)}`,
+      );
+      if (stale) return;
+      setMsgSearch({ q, hits: r.ok ? (r.data?.results ?? []) : [] });
+    }, 180);
+    return () => { stale = true; window.clearTimeout(t); };
+  }, [talkOn, q, attempt]);
+  const messageHits = talkOn && q.length >= 2 && msgSearch.q === q ? msgSearch.hits : EMPTY_MESSAGE_HITS;
+  const viewerId = boot.viewer.id;
+
   const current = search && search.q === q && q.length >= 2 ? search : null;
   const live = current?.status === "ok" ? current.hits : [];
   const searching =
@@ -617,6 +666,28 @@ function PaletteBody() {
         chip: "space",
         rows: groups.space,
       });
+    if (chip === "all" && messageHits.length > 0)
+      out.push({
+        key: "messages",
+        label: "Messages",
+        chip: "any",
+        rows: messageHits.slice(0, 8).map((h) => {
+          const where = h.conversationType === "CHANNEL"
+            ? `#${h.conversationName ?? "channel"}`
+            : h.conversationName
+              || h.members.filter((m) => m.user.id !== viewerId)
+                .map((m) => `${m.user.firstName} ${m.user.lastName}`.trim()).join(", ")
+              || "Direct message";
+          return {
+            id: `msg-${h.messageId}`,
+            label: `${h.author.firstName}: ${h.snippet}`,
+            secondary: h.inThread ? `${where} · in thread` : where,
+            // ?m= is what makes the hit land ON the message.
+            href: `/tlk/${h.conversationId}?m=${encodeURIComponent(h.messageId)}`,
+            glyph: <Glyph icon={MessageSquare} />,
+          };
+        }),
+      });
     if (chip === "all")
       out.push({ key: "more", label: "More", chip: "any", rows: groups.more });
     if (want("app"))
@@ -652,6 +723,8 @@ function PaletteBody() {
     isMember,
     openSidekick,
     openCreateTask,
+    messageHits,
+    viewerId,
   ]);
 
   const flat = useMemo(() => sections.flatMap((s) => s.rows), [sections]);

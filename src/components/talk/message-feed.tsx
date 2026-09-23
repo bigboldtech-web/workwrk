@@ -4,13 +4,19 @@
 // panels: day dividers, author grouping, reactions, attachments,
 // mention highlighting, call cards, edit-in-place, and thread chips.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Smile, Trash2, Video, X,
+  Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
+  Smile, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
+import { Dots } from "@/components/ui/dots";
+import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { RichBody } from "@/components/talk/rich-body";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
+import { QUICK_REACTIONS as QUICK_THREE } from "@/lib/emoji-data";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { dayKey, type DateFormatPrefs } from "@/lib/format/date";
 
 export type ChatAttachment = { url: string; name: string; type: string; size: number; s3Key?: string };
 
@@ -24,6 +30,9 @@ export type FeedMessage = {
   deletedAt?: string | null;
   parentId?: string | null;
   replyCount?: number;
+  /** Thread chip: when the last reply landed, and up to three repliers. */
+  lastReplyAt?: string | null;
+  replyAuthorIds?: string[];
   metadata?: {
     kind?: string;
     reactions?: Record<string, string[]>;
@@ -40,24 +49,42 @@ export type FeedMessage = {
   failed?: boolean;
 };
 
-export const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏", "🙌"];
+// The three quick reactions shown at rest, and the full picker behind the
+// React button, both come from src/lib/emoji-data.ts. The nine-emoji literal
+// that used to live here could not produce clap, which the reaction endpoint
+// accepts, so the picker and the server disagreed about what a reaction is.
+export { REACTION_EMOJI as QUICK_REACTIONS } from "@/lib/emoji-data";
 
-export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, activeCall }: {
+export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, activeCall, highlightId, readOnly = false, canReact = true, onCopyLink, onDiscardFailed, showDayDividers = true }: {
   messages: FeedMessage[];
   meId: string | null;
-  /** userId → display name, for reaction tooltips + mention highlighting. */
+  /** userId -> display name, for reaction tooltips and mention highlighting. */
   memberNames: Map<string, string>;
   onRetry: (m: FeedMessage) => void;
   onJoinCall: () => void;
   onReact: (m: FeedMessage, emoji: string) => void;
   onEdit: (m: FeedMessage, newBody: string) => void;
   onDelete: (m: FeedMessage) => void;
-  /** Absent inside a thread panel, threads don't nest. */
+  /** Absent inside a thread panel: threads do not nest. */
   onOpenThread?: (m: FeedMessage) => void;
   /** The conversation's live call, if one is running, drives the
    *  LIVE card variant on the latest un-ended call card. */
   activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
+  /** ?m=<id>: scroll this message into view and paint it for 1.6s. */
+  highlightId?: string | null;
+  /** Archived or Can view: no action bar, no reactions, no edit. */
+  readOnly?: boolean;
+  /** Can comment and above. False strips reactions and thread replies. */
+  canReact?: boolean;
+  /** Copy a link to one message (the "…" menu). */
+  onCopyLink?: (m: FeedMessage) => void;
+  /** Throw away a message that will not send, rather than retrying forever. */
+  onDiscardFailed?: (m: FeedMessage) => void;
+  /** Off for the thread panel's parent: one message does not need a date
+   *  above it, and with it on the panel printed "Today" twice. */
+  showDayDividers?: boolean;
 }) {
+  const { date: fmtDate, relative: fmtRelative, prefs } = useFormat();
   const liveCardId = useMemo(() => {
     if (!activeCall) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -74,9 +101,14 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
     let prevTime = 0;
     for (const m of messages) {
       const d = new Date(m.createdAt);
-      const day = d.toDateString();
+      // The divider buckets by the VIEWER'S day, from the same preference the
+      // row times read. `d.toDateString()` was the BROWSER'S day, so a person
+      // in New York reading with home.locale.timezone set to Asia/Kolkata got
+      // one "Today" over two Indian calendar days, with the times below it
+      // running 15:30 then 00:30 under the same heading.
+      const day = dayKey(d, prefs);
       if (day !== prevDay) {
-        out.push({ kind: "day", key: `day-${day}`, label: dayLabel(d) });
+        if (showDayDividers) out.push({ kind: "day", key: `day-${day}`, label: dayLabel(d, prefs, fmtDate) });
         prevDay = day;
         prevAuthor = "";
       }
@@ -87,14 +119,14 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
       prevTime = t;
     }
     return out;
-  }, [messages]);
+  }, [messages, fmtDate, prefs, showDayDividers]);
 
   return (
     <div className="flex flex-col">
       {items.map((it) => it.kind === "day" ? (
         <div key={it.key} className="relative flex items-center justify-center py-3">
-          <span className="absolute inset-x-0 top-1/2 h-px bg-hover" />
-          <span className="relative rounded-full border border-line bg-raised px-3 py-1 text-xs font-semibold text-ink-2 shadow-sm">
+          <span className="absolute inset-x-0 top-1/2 h-px bg-line" aria-hidden />
+          <span className="relative rounded-full border border-line bg-raised px-3 py-0.5 text-xs font-medium text-ink-2">
             {it.label}
           </span>
         </div>
@@ -113,13 +145,20 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
           onEdit={onEdit}
           onDelete={onDelete}
           onOpenThread={onOpenThread}
+          highlighted={highlightId === it.msg.id}
+          readOnly={readOnly}
+          canReact={canReact}
+          onCopyLink={onCopyLink}
+          onDiscardFailed={onDiscardFailed}
+          fmtDate={fmtDate}
+          fmtRelative={fmtRelative}
         />
       ))}
     </div>
   );
 }
 
-function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread }: {
+function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, highlighted, readOnly, canReact, onCopyLink, onDiscardFailed, fmtDate, fmtRelative }: {
   msg: FeedMessage;
   head: boolean;
   live: { participants: { identity: string; name: string }[]; startedAt: string } | null;
@@ -132,12 +171,43 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   onEdit: (m: FeedMessage, newBody: string) => void;
   onDelete: (m: FeedMessage) => void;
   onOpenThread?: (m: FeedMessage) => void;
+  highlighted: boolean;
+  readOnly: boolean;
+  canReact: boolean;
+  onCopyLink?: (m: FeedMessage) => void;
+  onDiscardFailed?: (m: FeedMessage) => void;
+  fmtDate: (v: Date | string | number | null | undefined, style?: "smart" | "date" | "datetime" | "time" | "weekday") => string;
+  fmtRelative: (v: Date | string | number | null | undefined) => string;
 }) {
   const [reactOpen, setReactOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.body);
+  const rowRef = useRef<HTMLDivElement>(null);
 
-  const time = new Date(msg.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  // ?m=<id> lands here: bring the message into view once, then let the paint
+  // fade on its own. Scrolling in an effect (rather than at render) is what
+  // makes a deep link work on a feed that is still measuring itself.
+  useEffect(() => {
+    if (!highlighted) return;
+    const el = rowRef.current;
+    if (!el) return;
+    const t = setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+    return () => clearTimeout(t);
+  }, [highlighted]);
+
+  // Every clock time in this unit reads the viewer's zone and 12/24h choice
+  // (spec-talk section 1 Dates and times). It used to be hard-coded "en-US",
+  // which printed an Indian team's afternoon as somebody else's morning.
+  const time = fmtDate(msg.createdAt, "time");
+  // DEFENSIVE, and it earned it: a thread opened from a URL used to hand this
+  // component a stub message with only an id, and reading `.author.firstName`
+  // off it took the whole page down with a white screen. The stub is gone
+  // (ConversationView now loads the parent before rendering it), and a row
+  // that somehow arrives without an author renders as "Someone" rather than
+  // as nothing at all. One missing name is a blemish; a crashed feed loses
+  // somebody their conversation.
+  const author = msg.author ?? { id: msg.authorId, firstName: "Someone", lastName: "", avatar: null };
   const isCall = msg.metadata?.kind === "call";
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
@@ -152,10 +222,14 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   };
 
   return (
-    <div className={`group relative flex gap-2.5 px-1 rounded-md hover:bg-subtle/60 ${head ? "mt-2.5" : "mt-0.5"}`}>
+    <div
+      ref={rowRef}
+      data-message-id={msg.id}
+      className={`group os-touch-row relative flex gap-2.5 rounded-md px-1 transition-colors duration-500 hover:bg-subtle/60 ${head ? "mt-2.5" : "mt-0.5"} ${highlighted ? "bg-selected" : ""}`}
+    >
       <div className="w-8 shrink-0 pt-0.5">
         {head ? (
-          <TeamAvatar name={`${msg.author.firstName} ${msg.author.lastName}`} avatar={msg.author.avatar} size={30} />
+          <TeamAvatar name={`${author.firstName} ${author.lastName}`.trim()} avatar={author.avatar} size={30} />
         ) : (
           <span className="hidden group-hover:block text-xs text-ink-3 tabular-nums pt-1.5 text-right pr-0.5">{time}</span>
         )}
@@ -164,7 +238,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         {head && (
           <div className="flex items-baseline gap-2">
             <span className="text-base font-semibold text-ink-strong">
-              {mine ? "You" : `${msg.author.firstName} ${msg.author.lastName}`}
+              {mine ? "You" : `${author.firstName} ${author.lastName}`.trim()}
             </span>
             <span className="text-xs text-ink-3 tabular-nums">{time}</span>
           </div>
@@ -195,10 +269,14 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
               </span>
             </div>
           ) : (
+            // SECONDARY, not blue. spec-talk 2.2 gives the call card "one
+            // secondary Join 28px" and reserves the page's one blue for the
+            // Send button; on Talk home this card sat beside the toolbar's
+            // blue New message, which is two primaries on one plane.
             <div className="mt-1 inline-flex items-center gap-3 rounded-lg border border-line bg-subtle px-3 py-2">
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--os-brand-soft)] text-[var(--os-brand)]"><Video className="w-4 h-4" /></span>
               <span className="text-base text-ink">{msg.body}</span>
-              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[var(--os-brand)] text-white text-sm font-medium hover:bg-[var(--os-brand-hover)]">
+              <button type="button" onClick={onJoinCall} className="h-7 rounded-md border border-line-strong px-3 text-sm font-medium text-ink hover:bg-hover">
                 Join
               </button>
             </div>
@@ -261,7 +339,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
               <button
                 key={emoji}
                 type="button"
-                onClick={() => onReact(msg, emoji)}
+                onClick={() => { if (canReact && !readOnly) onReact(msg, emoji); }}
+                disabled={!canReact || readOnly}
                 title={users.map((u) => (u === meId ? "You" : memberNames.get(u) ?? "Someone")).join(", ")}
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-xs tabular-nums ${
                   meId && users.includes(meId)
@@ -275,65 +354,149 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           </div>
         )}
 
-        {/* Thread chip */}
+        {/* Thread chip: "3 replies · Last reply 2h ago" with the repliers'
+            faces beside it (spec-talk 2.2). The count alone said a thread
+            existed and nothing about whether it was still moving. */}
         {onOpenThread && !msg.parentId && (msg.replyCount ?? 0) > 0 && (
           <button
             type="button"
             onClick={() => onOpenThread(msg)}
-            className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--os-brand)] hover:underline"
+            className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--os-brand-deep)] hover:underline"
           >
-            <MessageSquare className="w-3.5 h-3.5" />
+            {(msg.replyAuthorIds ?? []).length > 0 ? (
+              <span className="flex -space-x-1">
+                {(msg.replyAuthorIds ?? []).slice(0, 2).map((uid) => (
+                  <TeamAvatar key={uid} name={memberNames.get(uid) ?? "Someone"} avatar={null} size={16} />
+                ))}
+              </span>
+            ) : (
+              <MessageSquare className="w-3.5 h-3.5" />
+            )}
             {msg.replyCount} {msg.replyCount === 1 ? "reply" : "replies"}
+            {msg.lastReplyAt ? (
+              <span className="font-normal text-ink-3">· Last reply {fmtRelative(msg.lastReplyAt)}</span>
+            ) : null}
           </button>
         )}
 
+        {msg.pending && !msg.failed && (
+          <span className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-ink-3">
+            <Dots variant="pending" label="Sending" /> Sending
+          </span>
+        )}
         {msg.failed && (
-          <button type="button" onClick={() => onRetry(msg)} className="mt-0.5 inline-flex items-center gap-1 text-xs text-danger-text hover:text-danger-text">
-            <RefreshCw className="w-3 h-3" /> Failed to send, retry
-          </button>
+          // The message STAYS on screen and stays retryable. A send that
+          // fails is never dropped and never silently swallowed: this row is
+          // the visible failure state the save-path rule asks for.
+          <span className="mt-0.5 inline-flex items-center gap-2 text-xs font-medium text-danger-text">
+            Not sent
+            <button type="button" onClick={() => onRetry(msg)} className="underline underline-offset-2 hover:no-underline">Retry</button>
+            {onDiscardFailed ? (
+              <button type="button" onClick={() => onDiscardFailed(msg)} className="text-ink-3 underline underline-offset-2 hover:no-underline">Delete</button>
+            ) : null}
+          </span>
         )}
       </div>
 
-      {/* Hover actions */}
-      {canAct && !editing && (
-        <div className="absolute -top-3 right-2 hidden group-hover:flex items-center rounded-lg border border-line bg-raised shadow-sm">
-          {["✅", "👀", "🙌"].map((e) => (
-            <button key={e} type="button" onClick={() => onReact(msg, e)} title={`React ${e}`} className="h-7 w-7 inline-flex items-center justify-center text-base hover:bg-hover rounded-md">
-              {e}
-            </button>
-          ))}
-          <div className="relative">
-            <button type="button" onClick={() => setReactOpen((v) => !v)} title="React" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
-              <Smile className="w-4 h-4" />
-            </button>
-            {reactOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setReactOpen(false)} />
-                <div className="absolute right-0 top-8 z-20 flex gap-0.5 rounded-lg border border-line bg-raised p-1 shadow-lg">
-                  {QUICK_REACTIONS.map((e) => (
-                    <button key={e} type="button" onClick={() => { setReactOpen(false); onReact(msg, e); }} className="h-7 w-7 rounded-md hover:bg-hover text-base">
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </>
+      {/* The message action bar (spec-talk 2.2): three quick reactions,
+          React, Reply in thread, then a "…" holding Copy link, Copy text,
+          Edit and Delete.
+          NOT hover-only (section 1 Mobile / narrow, critic #10): on a coarse
+          pointer, or under 1024, `.os-touch-visible` renders it at rest.
+          WHAT THE "…" FIXED. Flattened into eight icon buttons in a row the
+          bar measured 198px, and the rest-state reserve in os.css was 148, so
+          on every phone and every touch laptop the bar printed itself across
+          the words of every message. At rest on those pointers only the 28px
+          "…" shows (`.os-touch-collapse` folds the rest away), which is both
+          what the spec asks for and a bar the row can actually make space
+          for. Nothing moves out of reach: the menu carries every action, and
+          the quick reactions come back inside it at 44px cells. */}
+      {canAct && !editing && !readOnly && (
+        <div className="os-touch-visible absolute -top-3 end-2 hidden items-center rounded-md border border-line bg-raised shadow-[var(--os-shadow-pop)] group-hover:flex group-focus-within:flex">
+          <span className="os-touch-collapse contents">
+            {canReact ? QUICK_THREE.map((e) => (
+              <button key={e} type="button" onClick={() => onReact(msg, e)} title={`React ${e}`} aria-label={`React ${e}`} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-base hover:bg-hover">
+                {e}
+              </button>
+            )) : null}
+            {canReact ? (
+              <span className="relative inline-flex">
+                <button type="button" onClick={() => setReactOpen((v) => !v)} title="React" aria-label="React" aria-expanded={reactOpen} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
+                  <Smile className="h-4 w-4" />
+                </button>
+                <EmojiPicker
+                  open={reactOpen}
+                  onClose={() => setReactOpen(false)}
+                  onPick={(e) => { setReactOpen(false); onReact(msg, e); }}
+                  side="bottom"
+                  align="end"
+                  label="React with an emoji"
+                />
+              </span>
+            ) : null}
+            {onOpenThread && canReact && !msg.parentId && !isCall && (
+              <button type="button" onClick={() => onOpenThread(msg)} title="Reply in thread" aria-label="Reply in thread" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
+                <MessageSquare className="h-4 w-4" />
+              </button>
             )}
-          </div>
-          {onOpenThread && !msg.parentId && !isCall && (
-            <button type="button" onClick={() => onOpenThread(msg)} title="Reply in thread" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
-              <MessageSquare className="w-4 h-4" />
+          </span>
+
+          <span className="relative inline-flex">
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              title="More message actions"
+              aria-label="More message actions"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink"
+            >
+              <MoreHorizontal className="h-4 w-4" />
             </button>
-          )}
-          {mine && !isCall && (
-            <>
-              <button type="button" onClick={() => { setDraft(msg.body); setEditing(true); }} title="Edit" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
-                <Pencil className="w-4 h-4" />
-              </button>
-              <button type="button" onClick={() => onDelete(msg)} title="Delete" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-danger-text">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
+            {moreOpen ? (
+              <>
+                <span className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+                <span role="menu" className="absolute end-0 top-8 z-40 flex w-52 flex-col rounded-lg border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]">
+                  {/* At rest on a touch pointer the quick reactions are folded
+                      away above, so they reappear here as 44px cells. */}
+                  {canReact ? (
+                    <span className="os-touch-only flex items-center gap-1 px-2 pb-1">
+                      {QUICK_THREE.map((e) => (
+                        <button key={e} type="button" role="menuitem" onClick={() => { setMoreOpen(false); onReact(msg, e); }} aria-label={`React ${e}`} className="inline-flex h-11 w-11 items-center justify-center rounded-md text-base hover:bg-hover">
+                          {e}
+                        </button>
+                      ))}
+                    </span>
+                  ) : null}
+                  {onOpenThread && canReact && !msg.parentId && !isCall ? (
+                    <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onOpenThread(msg); }} className="os-touch-only flex h-8 w-full items-center gap-2 px-3 text-start text-sm text-ink hover:bg-subtle">
+                      <MessageSquare className="h-4 w-4 text-ink-3" /> Reply in thread
+                    </button>
+                  ) : null}
+                  {onCopyLink && !isCall ? (
+                    <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onCopyLink(msg); }} className="flex h-8 w-full items-center gap-2 px-3 text-start text-sm text-ink hover:bg-subtle">
+                      <Link2 className="h-4 w-4 text-ink-3" /> Copy link
+                    </button>
+                  ) : null}
+                  {!isCall && !deleted ? (
+                    <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); void copyText(msg.body); }} className="flex h-8 w-full items-center gap-2 px-3 text-start text-sm text-ink hover:bg-subtle">
+                      <ClipboardCopy className="h-4 w-4 text-ink-3" /> Copy text
+                    </button>
+                  ) : null}
+                  {mine && !isCall ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); setDraft(msg.body); setEditing(true); }} className="flex h-8 w-full items-center gap-2 px-3 text-start text-sm text-ink hover:bg-subtle">
+                        <Pencil className="h-4 w-4 text-ink-3" /> Edit
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onDelete(msg); }} className="flex h-8 w-full items-center gap-2 px-3 text-start text-sm text-danger-text hover:bg-danger-bg">
+                        <Trash2 className="h-4 w-4" /> Delete
+                      </button>
+                    </>
+                  ) : null}
+                </span>
+              </>
+            ) : null}
+          </span>
         </div>
       )}
     </div>
@@ -354,12 +517,26 @@ function formatCallRoll(names: string[] | undefined, myName: string | undefined)
   return `${subject} ${display.length === 1 && display[0] !== "You" ? "was" : "were"}`;
 }
 
-function dayLabel(d: Date): string {
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 86_400_000);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+/** Day dividers bucket by the VIEWER'S local day, not UTC, not the server's
+ *  zone and not the browser's (spec-talk section 1 Dates and times). Today
+ *  and Yesterday are decided on the same dayKey the grouping uses, so the
+ *  label and the bucket can never disagree. */
+function dayLabel(
+  d: Date,
+  prefs: DateFormatPrefs,
+  fmtDate: (v: Date, style?: "smart" | "date" | "datetime" | "time" | "weekday") => string,
+): string {
+  const now = new Date();
+  if (dayKey(d, prefs) === dayKey(now, prefs)) return "Today";
+  if (dayKey(d, prefs) === dayKey(new Date(now.getTime() - 86_400_000), prefs)) return "Yesterday";
+  return fmtDate(d, "date");
+}
+
+/** Copy a message's own words (the "…" menu's Copy text). Silent on a
+ *  browser that refuses the clipboard: the menu closing is the whole
+ *  interaction, and a toast for a copy nobody asked twice for is noise. */
+async function copyText(body: string): Promise<void> {
+  try { await navigator.clipboard.writeText(body); } catch { /* clipboard denied */ }
 }
 
 function prettySize(bytes: number): string {

@@ -75,9 +75,38 @@
 //     an organization-wide setting with no object to point an ObjectRef at,
 //     so it is one of the rows that leaves when those four do.
 //
+// Phase 4 stage D (Talk, 2026-09-22) adds TWO, and NET SHRINKS the Talk world.
+//
+//   src/lib/talk-gate.ts  is the replacement for `getSessionAndModule` in
+//     nineteen Talk route files (spec-talk.md section 4 step 3, "one gate
+//     helper"). It reads `accessLevel` in exactly ONE place, to map today's
+//     ladder onto an org role through the engine's own `orgRoleOf()`, and
+//     hands that role to src/lib/talk-access.ts, which is pure and reads no
+//     session at all. Before it, five Talk routes each decided what a member
+//     could do inline and differently, which is how "any member can rename
+//     this channel" was true in the API and false in the menu. This file is
+//     therefore a HOLE-CLOSER and a one-line swap for step 6: when the engine
+//     turns on, `talkGate()` calls `requireCan("view", { type: "app", key:
+//     "chat" })` and `loadConversationRole()` calls `can()` over the channel
+//     ref, and every one of those nineteen routes is already through it.
+//   api/calls/status/route.ts  answers "does this deployment have a media
+//     server" and gates on `legacyIsAdminLevel`, exactly like its settings
+//     siblings on this list. There is no object to point an ObjectRef at: it
+//     describes the server's configuration, not a thing anybody owns.
+//   api/people/pick/route.ts  is the access spec's own step-3 endpoint,
+//     arriving early because Talk needed it: /api/users team-scopes anybody
+//     below an org-wide level, so New message and Add people offered a
+//     Member exactly one person, themselves. It reads `accessLevel` once, to
+//     ask the engine's own `orgRoleOf()` whether the caller is a Guest, and
+//     a Guest is narrowed to people they already share a conversation with.
+//     That Guest branch IS `accessibleUsers` in miniature, and step 3
+//     replaces the whole file with the engine's version.
+//
 // Both leave together, with their siblings, when the access engine's step 6
 // turns these gates into can() / accessibleIds().
 export const ACCESS_LEGACY_ALLOWLIST = [
+  "src/app/api/calls/status/route.ts",
+  "src/app/api/people/pick/route.ts",
   // Phase 0 step 2b: GET /api/boot folds the shell's four boot calls into one
   // and has to run the SAME legacy rail resolver the client runs today
   // (visibleRailApps over accessLevel tiers). It leaves this list with the
@@ -479,6 +508,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/alignment-scope.ts",
   "src/lib/api-auth.ts",
   "src/lib/api-helpers.ts",
+  // Phase 4 stage D: the one Talk gate (see the note above the array).
+  "src/lib/talk-gate.ts",
   "src/lib/auth-helpers.ts",
   "src/lib/auth.ts",
   "src/lib/automation/hub-access.ts",

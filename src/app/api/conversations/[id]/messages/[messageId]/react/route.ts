@@ -1,26 +1,31 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requireConversation } from "@/lib/talk-gate";
+import { canReact } from "@/lib/talk-access";
+import { REACTION_EMOJI } from "@/lib/emoji-data";
 
 // Toggle a reaction. Reactions live in the message's metadata as
 // { reactions: { "👍": [userId, ...] } }. The row is locked FOR UPDATE
 // inside a transaction so two simultaneous toggles can't lose each
 // other's update; the write bumps updatedAt so the poll propagates it.
 
-const ALLOWED = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏", "🙌", "👏"];
+// The allowlist is IMPORTED, not repeated. Before Phase 4 it was a literal
+// here and a different literal in the client picker, and they disagreed:
+// this list accepted clap, and no client surface could send it. One list,
+// one test (src/lib/emoji-data.test.ts asserts the picker can produce every
+// member of it), so the two cannot drift apart again.
+const ALLOWED: readonly string[] = REACTION_EMOJI;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
-  if (error) return error;
   const { id, messageId } = await params;
-  const userId = getUserId(session);
-
-  const member = await prisma.conversationMember.findFirst({
-    where: { conversationId: id, userId, conversation: { organizationId: getOrgId(session) } },
-    select: { id: true },
-  });
-  if (!member) return jsonError("Conversation not found", 404);
+  // canReact is `comment` or better AND not archived: an archived channel is
+  // read-only for everyone, and that has to be true of the API too, not just
+  // of the buttons the page chooses to draw.
+  const { error, ctx } = await requireConversation(id, { floor: "comment", allow: canReact, what: "react here" });
+  if (error) return error;
+  const userId = ctx.viewer.userId;
 
   const payload = await req.json().catch(() => null);
   const emoji = typeof payload?.emoji === "string" ? payload.emoji : "";

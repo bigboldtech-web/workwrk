@@ -13,6 +13,10 @@ export type ConversationListRow = {
   name: string | null;
   lastMessageAt: string;
   unreadCount: number;
+  /** How many of the unread are addressed to me. The sidebar shows a count
+   *  for these and a plain dot for the rest (spec-talk section 1). Optional
+   *  so a client reading an older server renders the dot and loses nothing. */
+  unreadMentions?: number;
   myNotifyLevel?: string;
   myStarred?: boolean;
   members: { userId: string; user: ChatUserLite }[];

@@ -1,6 +1,8 @@
 // POST /api/calls/token — mint a LiveKit access token for a call room
 // (docs/plans/native-calls.md Phase 1). The ONLY door to the media
-// server: membership is checked HERE, LiveKit trusts the JWT.
+// server: access is checked HERE, LiveKit trusts the JWT. For a chat
+// call that check is the Talk gate, the same one the Call button asked
+// before it rendered; for a meeting it is the meeting's own org scope.
 //
 // Body: { conversationId } XOR { meetingId }.
 // Returns { url, token, room } — or 503 while the calls box isn't
@@ -12,7 +14,8 @@ import { NextRequest } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { isModuleActive } from "@/lib/entitlements";
+import { requireConversation } from "@/lib/talk-gate";
+import { canCall } from "@/lib/talk-access";
 import { chatRoomName, meetingRoomName } from "@/lib/meeting-room";
 import { ensureCallSession } from "@/lib/call-session";
 
@@ -41,17 +44,35 @@ export async function POST(req: NextRequest) {
   let displayName = "Member";
 
   if (conversationId) {
-    // Chat call → Talk module must be on for this org.
-    if (!(await isModuleActive(orgId, "workwrk-talk"))) {
-      return jsonError("This module isn't enabled for your workspace.", 403);
-    }
-    const membership = await prisma.conversationMember.findFirst({
-      where: { conversationId, userId, conversation: { organizationId: orgId } },
-      select: { conversation: { select: { callEpoch: true } }, user: { select: { firstName: true, lastName: true } } },
+    // Chat call → the Talk gate decides, exactly as the Call button did.
+    // It carries the module check (same 403 body this branch used to write
+    // itself), so an org with Talk off still can't open a chat call while a
+    // scheduled meeting's video is untouched.
+    //
+    // This used to be a bare conversationMember.findFirst, and that asked the
+    // wrong question in both directions:
+    //
+    //   * Too narrow. A Full holder with no membership row, meaning an Owner
+    //     or Admin on a public channel or its creator after they used Leave,
+    //     is admitted by talkRole() and so sees the Call button and can post
+    //     the "Started a call" card, but had no row here and got a 404. The
+    //     one person locked out of the call was the person who started it.
+    //   * Too wide. Archive froze posting, reacting, adding people and the
+    //     guest link, and stopped at the call layer: any remaining member of
+    //     an archived channel could still mint a publishing grant inside a
+    //     conversation the product presents as frozen. canCall() says no, and
+    //     now this says no with it.
+    const { error: gateError, ctx } = await requireConversation(conversationId, {
+      floor: "edit",
+      allow: canCall,
+      what: "call here",
     });
-    if (!membership) return jsonError("Conversation not found", 404);
-    room = chatRoomName(conversationId, membership.conversation.callEpoch);
-    displayName = `${membership.user.firstName} ${membership.user.lastName}`.trim();
+    if (gateError) return gateError;
+    room = chatRoomName(conversationId, ctx.conversation.callEpoch);
+    // The tile name is this viewer's own, and the session already carries it,
+    // so there is no row to join for it now the membership lookup is gone.
+    const me = session.user as { firstName?: string; lastName?: string };
+    displayName = `${me.firstName ?? ""} ${me.lastName ?? ""}`.trim() || displayName;
   } else {
     const attendee = await prisma.meetingAttendee.findFirst({
       where: { meetingId: meetingId!, userId, meeting: { organizationId: orgId } },

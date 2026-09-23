@@ -34,19 +34,20 @@
  * renders its empty state rather than an error.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CheckCheck, Hash, Link2, Lock, Maximize2, Users, X } from "lucide-react";
+import { CheckCheck, Hash, Link2, Lock, Maximize2, Megaphone, Users, X } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ViewTab, ViewTabStrip } from "@/components/ui/view-tabs";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { TeamAvatar } from "@/components/team/ui";
-import { MessageFeed, type FeedMessage } from "@/components/talk/message-feed";
-import { ChatComposer, type ComposerPayload } from "@/components/talk/chat-composer";
+import { ConversationView } from "@/components/talk/conversation-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useViewerRole } from "@/components/layout/os/boot-context";
+import { usePermission } from "@/hooks/use-permission";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { apiFetch } from "@/lib/api-fetch";
 import { conversationTitle, type ChatUserLite } from "@/components/talk/conversation-utils";
@@ -114,6 +115,10 @@ export default function TalkHomePage() {
   const router = useRouter();
   const params = useSearchParams();
   const { toast } = useOsToast();
+  const { isGuest } = useViewerRole();
+  // The same gate POST /api/announcements enforces, so the row never opens a
+  // composer whose save would 403.
+  const canPostAnnouncement = usePermission("announcements", "create") === true;
   const fmt = useFormat();
   const { prefs } = useOsShell();
   void prefs;
@@ -244,10 +249,16 @@ export default function TalkHomePage() {
     } catch { toast("Couldn't copy the link"); }
   };
 
+  // THE TAB COUNT IS WHAT THE LIST HOLDS, which is what the footer under the
+  // same list says. The unread-only reading printed nothing beside "Threads"
+  // while two threads were listed and the footer read "2 threads", so the
+  // header and the footer disagreed about the same eleven rows. Unread stays
+  // the unread MESSAGE total, because that is what "Unread" counts and what
+  // Mark all as read clears.
   const counts: Record<View, number> = {
     unread: unreadTotal,
-    threads: (threads ?? []).reduce((n, t) => n + (t.unreadReplies > 0 ? 1 : 0), 0),
-    mentions: (mentions ?? []).filter((m) => m.message.unread).length,
+    threads: (threads ?? []).length,
+    mentions: (mentions ?? []).length,
   };
 
   /* ── list bodies ─────────────────────────────────────────────── */
@@ -388,8 +399,22 @@ export default function TalkHomePage() {
           primary: {
             label: "New message",
             onClick: () => window.dispatchEvent(new Event("workwrk:os:new:chat-new")),
-            split: { label: "New channel", onClick: () => window.dispatchEvent(new Event("workwrk:os:new:chat-new-channel")) },
+            // A GUEST SEES NO SPLIT CHEVRON. spec-talk 2.1 says so in as many
+            // words, and section 1 says a Guest never creates a channel. The
+            // sidebar already hid Browse channels and the rest behind
+            // !isGuest; this control did not, so the one place a Guest was
+            // offered "New channel" was the toolbar of the page they land on.
+            split: isGuest
+              ? undefined
+              : { label: "New channel", onClick: () => window.dispatchEvent(new Event("workwrk:os:new:chat-new-channel")) },
           },
+          // The bordered "..." square (spec-talk 2.1), rendered only for
+          // viewers who may post an announcement. It is the second of the two
+          // entry points the spec names for New announcement; the first is
+          // the sidebar header "+".
+          menu: canPostAnnouncement
+            ? [{ label: "New announcement", icon: Megaphone, href: "/announcements?new=1" }]
+            : undefined,
         }}
       />
 
@@ -414,10 +439,13 @@ export default function TalkHomePage() {
               conversationId={openConvo}
               threadId={openThread}
               highlightId={openMessage}
-              meId={meId}
               onClose={closePane}
               onCopyLink={() => void copyPaneLink()}
-              onCloseThread={() => setParams((p) => p.delete("thread"))}
+              onUrlPatch={(patch) => setParams((p) => {
+                for (const [k, v] of Object.entries(patch)) {
+                  if (v == null) p.delete(k); else p.set(k, v);
+                }
+              })}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">
@@ -438,121 +466,30 @@ export default function TalkHomePage() {
 /* ══════════════════════════ the detail pane ══════════════════════════ */
 
 /**
- * A conversation read (and written) inside Talk home. It is deliberately the
- * quiet half of /tlk/[id]: the same feed, the same composer and the same send
- * endpoint, without the page's header cluster, call controls or right panel.
- * "Open full page" is how you get those, and it keeps the same conversation.
+ * A conversation inside Talk home.
+ *
+ * It is THE SAME ConversationView the full page renders, with `primarySend`
+ * off so the page keeps one blue thing (the toolbar's New message) and
+ * `embedded` on so it grows no BackButton of its own.
+ *
+ * It used to be a second, thinner implementation: its own fetch, its own send,
+ * its own optimistic row, and five handlers that answered "Open the full page
+ * to react", "…to edit", "…to delete", "…to retry". Reacting to a message you
+ * are looking at is not a full-page act, and a RETRY you cannot press is the
+ * worst of the five: a message that failed to send in the pane could only be
+ * recovered by navigating away. One component, one send path, one retry.
  */
-function TalkPane({ conversationId, threadId, highlightId, meId, onClose, onCopyLink, onCloseThread }: {
+function TalkPane({ conversationId, threadId, highlightId, onClose, onCopyLink, onUrlPatch }: {
   conversationId: string;
   threadId: string | null;
   highlightId: string | null;
-  meId: string | null;
   onClose: () => void;
   onCopyLink: () => void;
-  onCloseThread: () => void;
+  onUrlPatch: (patch: { thread?: string | null; m?: string | null }) => void;
 }) {
-  const router = useRouter();
-  const { toast } = useOsToast();
-  const [meta, setMeta] = useState<{ id: string; type: string; name: string | null; members: { userId: string; user: ChatUserLite }[] } | null>(null);
-  const [messages, setMessages] = useState<FeedMessage[] | null>(null);
-  const [failed, setFailed] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Every state write lands in the promise callback, never in the synchronous
-  // body, so the effect below does not cascade a render.
-  const load = useCallback(() => {
-    return Promise.all([
-      // GET /api/conversations/[id] answers with the conversation at the top
-      // level (id, type, name, members, call), not wrapped in a key.
-      apiFetch<{ id: string; type: string; name: string | null; members: { userId: string; user: ChatUserLite }[] }>(`/api/conversations/${conversationId}`),
-      apiFetch<{ messages?: FeedMessage[] }>(`/api/conversations/${conversationId}/messages`),
-    ]).then(([m, list]) => {
-      if (!m.ok || !list.ok) { setFailed(true); setMessages([]); return; }
-      setFailed(false);
-      setMeta(m.data ?? null);
-      setMessages(list.data?.messages ?? []);
-    });
-  }, [conversationId]);
-
-  // The pane is keyed on the conversation id, so a new conversation is a
-  // fresh mount with `messages` already null: the effect only loads.
-  useEffect(() => { void load(); }, [load]);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || messages === null) return;
-    if (highlightId) {
-      const target = el.querySelector(`[data-message-id="${CSS.escape(highlightId)}"]`);
-      if (target) { target.scrollIntoView({ block: "center" }); return; }
-    }
-    el.scrollTop = el.scrollHeight;
-  }, [messages, highlightId]);
-
-  const memberNames = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of meta?.members ?? []) map.set(m.userId, personName(m.user));
-    return map;
-  }, [meta]);
-
-  const title = meta ? convoLabel(meta, meId) : "";
-
-  const send = async (payload: ComposerPayload) => {
-    if (!payload.body && payload.attachments.length === 0) return;
-    const temp: FeedMessage = {
-      id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      body: payload.body,
-      authorId: meId ?? "me",
-      createdAt: new Date().toISOString(),
-      parentId: threadId ?? null,
-      metadata: {
-        ...(payload.attachments.length > 0 ? { attachments: payload.attachments } : {}),
-        ...(payload.mentions.length > 0 ? { mentions: payload.mentions } : {}),
-      },
-      author: (meta?.members ?? []).find((m) => m.userId === meId)?.user ?? { id: meId ?? "me", firstName: "Me", lastName: "", avatar: null },
-      pending: true,
-    };
-    setMessages((prev) => [...(prev ?? []), temp]);
-    const metadata: Record<string, unknown> = {};
-    if (payload.attachments.length > 0) metadata.attachments = payload.attachments;
-    if (payload.mentions.length > 0) metadata.mentions = payload.mentions;
-    // keepalive so a send fired as the tab closes still leaves; a failure
-    // never disappears, it becomes the Retry row in the feed.
-    const r = await apiFetch<{ message?: FeedMessage }>(`/api/conversations/${conversationId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        body: payload.body,
-        ...(threadId ? { parentId: threadId } : {}),
-        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-      }),
-      keepalive: true,
-    });
-    if (!r.ok || !r.data?.message) {
-      setMessages((prev) => (prev ?? []).map((m) => (m.id === temp.id ? { ...m, pending: false, failed: true } : m)));
-      return;
-    }
-    const server = r.data.message;
-    setMessages((prev) => (prev ?? []).map((m) => (m.id === temp.id ? server : m)));
-    window.dispatchEvent(new Event("workwrk:chat-changed"));
-  };
-
-  const thread = threadId ? (messages ?? []).find((m) => m.id === threadId) ?? null : null;
-  const replies = threadId ? (messages ?? []).filter((m) => m.parentId === threadId) : [];
-  const topLevel = (messages ?? []).filter((m) => !m.parentId);
-  const shown = threadId && thread ? [thread, ...replies] : topLevel;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4">
-        <h2 className="flex-1 truncate text-base font-semibold text-ink-strong">
-          {threadId ? `Thread in ${title}` : title}
-        </h2>
-        {threadId ? (
-          <button type="button" onClick={onCloseThread} className="h-7 rounded-md px-2 text-sm text-ink-2 hover:bg-hover hover:text-ink">
-            Back to conversation
-          </button>
-        ) : null}
+      <header className="flex h-12 shrink-0 items-center justify-end gap-1 border-b border-line px-3">
         <button type="button" onClick={onCopyLink} aria-label="Copy link" title="Copy link" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
           <Link2 className="h-4 w-4" strokeWidth={1.5} />
         </button>
@@ -563,34 +500,14 @@ function TalkPane({ conversationId, threadId, highlightId, meId, onClose, onCopy
           <X className="h-4 w-4" strokeWidth={1.5} />
         </button>
       </header>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-        {messages === null ? (
-          <SkeletonRows rows={6} />
-        ) : failed ? (
-          <OsEmptyView title="Couldn't open this conversation" action={{ label: "Retry", onClick: () => { setMessages(null); void load(); } }} />
-        ) : (
-          <MessageFeed
-            messages={shown}
-            meId={meId}
-            memberNames={memberNames}
-            onRetry={() => toast("Open the full page to retry this message")}
-            onJoinCall={() => { router.push(`/tlk/${conversationId}?call=video`); }}
-            onReact={() => toast("Open the full page to react")}
-            onEdit={() => toast("Open the full page to edit")}
-            onDelete={() => toast("Open the full page to delete")}
-            onOpenThread={undefined}
-          />
-        )}
-      </div>
-
-      <div className="shrink-0 border-t border-line px-4 py-3">
-        <ChatComposer
-          members={meta?.members ?? []}
-          meId={meId}
-          placeholder={threadId ? "Reply…" : `Message ${title}`}
-          onSend={(p) => void send(p)}
-          onError={(msg) => toast(msg)}
+      <div className="min-h-0 flex-1">
+        <ConversationView
+          id={conversationId}
+          primarySend={false}
+          embedded
+          initialThread={threadId}
+          initialMessage={highlightId}
+          onUrlPatch={onUrlPatch}
         />
       </div>
     </div>

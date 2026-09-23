@@ -4,6 +4,13 @@ import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
 import { docAccessible } from "@/lib/doc-access";
 import { visibleSpaceIds, isOrgAdminAccessLevel } from "@/lib/space";
 import { accessibleFolderIds } from "@/lib/folder";
+import { getUserTagIds } from "@/lib/user-tags";
+import { announcementInFeed } from "@/lib/announcement-view";
+import {
+  parseAnnouncementAudience,
+  viewerInAnnouncementAudience,
+  viewerSpaceIds as announcementViewerSpaceIds,
+} from "@/lib/announcement-audience";
 
 /**
  * Unified entity search across the product. Powers the Cmd-K palette's
@@ -158,9 +165,15 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: "desc" },
       take,
     }),
+    // The select carries the four fields the audience and lifecycle gate
+    // below needs. Without them this query returned every announcement in
+    // the org, and the gate could not have been written.
     prisma.announcement.findMany({
       where: { organizationId: orgId, OR: [{ title: ci }, { content: ci }] },
-      select: { id: true, title: true, type: true, priority: true },
+      select: {
+        id: true, title: true, type: true, priority: true,
+        authorId: true, targetAudience: true, publishedAt: true, expiresAt: true, createdAt: true,
+      },
       orderBy: { createdAt: "desc" },
       take,
     }),
@@ -178,6 +191,39 @@ export async function GET(req: NextRequest) {
   for (const w of whiteboards) if (w.spaceId) spaceIdSet.add(w.spaceId);
 
   const visible = admin ? null : await visibleSpaceIds([...spaceIdSet], me, myAccess);
+
+  // ── Announcements: audience and lifecycle ─────────────────────────
+  //
+  // This kind was NOT gated. The query above asked only for
+  // `organizationId`, so search returned the TITLE of every announcement in
+  // the workspace to any signed-in member: posts scheduled for a future
+  // date, and posts addressed to a department, office, tag, Space or named
+  // user list the reader is not in. A title is often the whole of the
+  // sensitive part ("Redundancies in Support", "Q3 pay review outcome").
+  //
+  // The rule itself lives in announcementInFeed (src/lib/announcement-view.ts)
+  // and the list route reads the same function, so the two surfaces cannot
+  // drift apart again. All this route does is resolve the audience, which
+  // needs the database, and hand it over.
+  const annAudienceTypes = announcements.map((a) => parseAnnouncementAudience(a.targetAudience).type);
+  const [annViewer, annTagIds, annSpaceIds] = await Promise.all([
+    announcements.length > 0
+      ? prisma.user.findUnique({ where: { id: me }, select: { id: true, departmentId: true, officeId: true } })
+      : Promise.resolve(null),
+    annAudienceTypes.includes("TAGS") ? getUserTagIds(orgId, me) : Promise.resolve<string[]>([]),
+    annAudienceTypes.includes("SPACE") ? announcementViewerSpaceIds(orgId, me) : Promise.resolve<string[]>([]),
+  ]);
+  const annNow = Date.now();
+  const readableAnnouncements = announcements.filter((a) =>
+    announcementInFeed(a, {
+      viewerId: me,
+      oversight: admin,
+      inAudience:
+        Boolean(annViewer) &&
+        viewerInAnnouncementAudience(parseAnnouncementAudience(a.targetAudience), annViewer!, annTagIds, annSpaceIds),
+      now: annNow,
+    }),
+  );
   // Folders the viewer reaches via a folder grant (granted + descendants). This
   // admits their OWN folder's boards/subfolders WITHOUT treating them as a full
   // space reader — the leak the security review flagged on visibleSpaceIds.
@@ -330,7 +376,7 @@ export async function GET(req: NextRequest) {
       subtitle: `${p.category ?? "—"} · ${p.status}`,
       href: `/policies#${p.id}`,
     })),
-    ...announcements.map((a) => ({
+    ...readableAnnouncements.map((a) => ({
       type: "announcement" as const,
       id: a.id,
       title: a.title,

@@ -877,6 +877,35 @@ body {
   color-scheme: dark;
 }
 
+/* ── Guest door tokens (spec-talk 2.5, the PRE-join states) ─────────
+   The stage is dark because video reads badly on white. The DOOR is not the
+   stage: spec-talk 2.5 asks for "a white canvas with one centred
+   GuestJoinCard" under "the page's own 48px bar in --os-chrome-bg (navy)",
+   and says of the stage set that "nothing else inside .os-stage reads a
+   theme token". Dressing the door in stage tokens made the whole viewport
+   #101215 and told a guest, before they had even typed their name, that
+   they had arrived somewhere unlit.
+
+   FIXED, like the stage set and for the same reason: a guest has no account
+   and therefore no theme, so this page must look the same to everybody who
+   is sent the link, whatever their laptop happens to prefer. Reading
+   --os-chrome-bg and --os-surface here would follow prefers-color-scheme,
+   which is the one preference the page is not entitled to act on. */
+.os-door {
+  --os-door-bar:     #1B2537;   /* the navy chrome, both variants */
+  --os-door-bar-fg:  #FFFFFF;
+  --os-door-bg:      #FFFFFF;   /* the white canvas the card sits on */
+  --os-door-surface: #FFFFFF;
+  --os-door-line:    #E3E6EB;
+  --os-door-fg:      #1F2430;
+  --os-door-fg-2:    #5A6474;
+  --os-door-field:   #F6F7F9;
+
+  background: var(--os-door-bg);
+  color: var(--os-door-fg);
+  color-scheme: light;
+}
+
 /* The two control styles every .os-stage surface shares (the call dock
    header, the stage control bar, the guest stage). Written as CSS rather
    than Tailwind utilities because the values are stage tokens, and a

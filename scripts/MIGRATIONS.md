@@ -853,3 +853,70 @@ legacy `Task` row it always wrote. That is deliberate and temporary:
 
 The legacy write goes when the work-home unit retires `Task`. Until then,
 removing it early would leave rows in `Task` that nothing deletes.
+
+## Phase 4, stage E: the `AnnouncementDismissal` table, and why it is not dropped here
+
+`spec-talk.md` section 0 and section 4 step 9 remove a route and a table that
+nothing read:
+
+* `POST /api/announcements/[id]/dismiss` wrote an `AnnouncementDismissal` row
+  for the caller. No read anywhere joined that table, so a person who
+  dismissed a banner saw it again on their next load, and the endpoint had no
+  organization check at all: any signed-in account could write a dismissal
+  row against any announcement id in any workspace.
+* Its only caller was `src/components/dashboard/announcements-banner.tsx`, on
+  `/dashboard`.
+
+Both are gone in this release. `/dashboard` is a 308 to `/home` (see
+`src/app/(dashboard)/dashboard/route.ts`), the banner component had no
+importer left (`grep -rn "AnnouncementsBanner" src` returned nothing but its
+own file), and the endpoint directory is deleted.
+
+THE TABLE IS STILL THERE, and that is deliberate. Dropping a table is the one
+step that cannot be undone by a redeploy, so it waits one release behind the
+code that wrote to it, in case a browser tab was open across the deploy or a
+rollback puts the old bundle back. The file below is the drop, ready to run:
+
+```sql
+-- prisma/sql/2026-09-22-drop-announcement-dismissal.sql
+-- RUN THIS ONE RELEASE AFTER the release that removed
+-- POST /api/announcements/[id]/dismiss. Nothing reads or writes the table.
+DROP TABLE IF EXISTS "AnnouncementDismissal";
+```
+
+When it runs, `prisma/schema.prisma` loses the `AnnouncementDismissal` model
+(schema.prisma lines 2394 to 2402) and the `dismissals AnnouncementDismissal[]`
+relation on `Announcement` (line 2385) in the same commit, and
+`npx prisma generate` follows. Until then the model stays so that
+`prisma db pull` and the generated client keep matching the live database.
+
+Founder step, production, one release from now:
+
+```
+DIRECT_URL= DATABASE_URL="<prod url>" npx prisma db execute \
+  --file prisma/sql/2026-09-22-drop-announcement-dismissal.sql \
+  --schema prisma/schema.prisma
+```
+
+## Phase 4, stage E: announcements, what changed in data terms
+
+No schema change. Three behaviour changes worth knowing about before the
+deploy, because each one changes what somebody sees:
+
+1. **Scheduled posts stop leaking.** `GET /api/announcements` never filtered
+   on `publishedAt`, so a post scheduled for next Monday was readable by its
+   whole audience the moment it was created, while its notifications waited
+   for the `announcements-publish` cron. It is now invisible to everyone but
+   its author until its publish instant. Any post currently sitting scheduled
+   will disappear from readers' feeds on deploy and reappear on schedule.
+2. **The oversight read narrows.** Every legacy manager level used to read
+   every announcement in the workspace, including posts aimed at one
+   department. It is Owner, Admin, the People team (`announcements.create` in
+   the permission matrix) and the author now. A team lead with one report
+   will see fewer announcements after this deploy, and each one will be a post
+   aimed at them.
+3. **The acknowledgment roster is the audience.** It used to be every
+   non-deleted user in the organization minus the author, so a
+   department-targeted must-acknowledge post reported the whole company as
+   Pending. Existing `AnnouncementAcknowledgment` rows are untouched; only the
+   denominator changes.

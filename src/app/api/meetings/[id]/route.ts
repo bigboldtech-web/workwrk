@@ -21,7 +21,7 @@
 // visible again on upgrade.
 
 import { NextRequest } from "next/server";
-import { meetingRoomName, meetingGuestCode } from "@/lib/meeting-room";
+import { meetingRoomName, meetingGuestCode, meetingGuestExpiry } from "@/lib/meeting-room";
 import { MEETING_TYPES, isMeetingType, type MeetingTypeWord } from "@/lib/meeting-type";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -90,6 +90,7 @@ export async function GET(
   // gone with the public fallback (decision Q1): the product no longer hands
   // anybody a third-party room.
   const base = process.env.NEXTAUTH_URL || "https://workwrk.com";
+  const guestExpiresAt = meetingGuestExpiry(meeting.scheduledAt, meeting.duration);
   return jsonSuccess({
     ...meeting,
     // What the page may render, decided once here rather than re-guessed
@@ -99,7 +100,13 @@ export async function GET(
     canDelete: canDeleteMeeting(facts),
     call: {
       room: meetingRoomName(meeting.id),
-      guestUrl: `${base}/meet/${meetingGuestCode(meeting.id)}`,
+      // The guest code now carries its own expiry (spec-talk section 2.5):
+      // the meeting's scheduled END plus 24 hours. Re-reading the meeting
+      // mints a FRESH code, so a link copied the morning of a rescheduled
+      // meeting still lands, and a link forwarded out of an email thread in
+      // March stops opening the room in December.
+      guestUrl: `${base}/meet/${meetingGuestCode(meeting.id, guestExpiresAt)}`,
+      guestExpiresAt: new Date(guestExpiresAt).toISOString(),
     },
   });
 }

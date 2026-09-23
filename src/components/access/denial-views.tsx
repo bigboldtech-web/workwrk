@@ -24,12 +24,13 @@
 // module switch) are client islands rendered as children.
 
 import type { ReactNode } from "react";
-import { Lock } from "lucide-react";
+import { Hash, Lock } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
 import { BackButton } from "@/components/ui/back-button";
 import { cn } from "@/lib/utils";
 import type { OrgAdmin } from "@/lib/access/admins";
 import { RequestAccessButton } from "./request-access-button";
+import { JoinChannelButton } from "./join-channel-button";
 import { ModuleOffSwitch } from "./module-off-switch";
 import { SettingsLink } from "./settings-link";
 
@@ -49,10 +50,20 @@ function LockTile() {
   );
 }
 
+/** The same tile with a "#": a public channel the viewer has not joined. */
+function HashTile() {
+  return (
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-hover text-ink-2" aria-hidden>
+      <Hash className="h-5 w-5" strokeWidth={1.5} />
+    </span>
+  );
+}
+
 function DenialBlock({
   title,
   sentence,
   locked = false,
+  tile,
   primary,
   back,
   children,
@@ -62,6 +73,8 @@ function DenialBlock({
   sentence: string;
   /** A lock tile in place of the four-dot drawing (an object or page the viewer cannot open). */
   locked?: boolean;
+  /** An explicit tile, when neither the lock nor the dots is the truth. */
+  tile?: ReactNode;
   primary?: ReactNode;
   back?: BackTarget;
   children?: ReactNode;
@@ -69,7 +82,7 @@ function DenialBlock({
 }) {
   return (
     <div className={cn("os-chrome mx-auto mt-16 flex max-w-md flex-col items-center px-6 pb-16 text-center", className)}>
-      {locked ? <LockTile /> : <DotsArt arrangement="row" />}
+      {tile ?? (locked ? <LockTile /> : <DotsArt arrangement="row" />)}
       {title ? <p className="m-0 mt-4 text-lg font-semibold text-ink">{title}</p> : null}
       <p className={cn("m-0 text-row text-ink-2", title ? "mt-1" : "mt-4")}>{sentence}</p>
       {children}
@@ -83,26 +96,34 @@ function DenialBlock({
   );
 }
 
-/** 24px initials avatars for "Ask an admin" (design-system 5.18). */
+/** 24px initials avatars for "Ask an admin" (design-system 5.18).
+ *
+ *  Each avatar is a MAILTO (spec-talk 2.0: "up to five Owner and Admin
+ *  avatars and mailto links"). "Ask an admin" beside four faces you cannot
+ *  click is a screen that names the problem and withholds the one thing that
+ *  would solve it. An admin without an email on file renders as the same
+ *  circle without a link rather than as a dead one. */
 function AdminAvatars({ admins }: { admins: OrgAdmin[] }) {
   if (admins.length === 0) return null;
+  const face = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink";
   return (
     <span className="mt-3 inline-flex items-center gap-2 text-sm text-ink-2">
       <span className="inline-flex -space-x-1.5">
-        {admins.slice(0, 4).map((a) => (
-          <span
-            key={a.id}
-            title={a.name}
-            className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink"
-          >
-            {a.avatar ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={a.avatar} alt="" className="h-full w-full object-cover" />
-            ) : (
-              a.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()
-            )}
-          </span>
-        ))}
+        {admins.slice(0, 5).map((a) => {
+          const inner = a.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={a.avatar} alt="" className="h-full w-full object-cover" />
+          ) : (
+            a.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()
+          );
+          return a.email ? (
+            <a key={a.id} href={`mailto:${a.email}`} title={`Email ${a.name}`} aria-label={`Email ${a.name}`} className={face}>
+              {inner}
+            </a>
+          ) : (
+            <span key={a.id} title={a.name} className={face}>{inner}</span>
+          );
+        })}
       </span>
       <span>{admins.length === 1 ? admins[0].name : `${admins[0].name} and ${admins.length - 1} more`}</span>
     </span>
@@ -122,21 +143,57 @@ export interface LockedPageProps {
    * (/team, /team/workload) where nobody can grant anything.
    */
   requestAccess?: { objectType: string; objectId: string; roles?: ("VIEW" | "EDIT" | "COMMENT")[] } | null;
+  /**
+   * The JOIN variant (access-model-spec 6.4, spec-talk section 1 Access): a
+   * findable public channel, where self-join replaces Request access because
+   * the answer is already yes and there is nobody to ask. Takes precedence
+   * over `requestAccess` when both are given; a channel is never both.
+   */
+  joinChannelId?: string | null;
   /** "Join channel" for a public channel, "Ask an admin" for a role change. */
   primaryLabel?: string;
+  /**
+   * The glyph for the tile, when a padlock would be a lie. The Join variant
+   * is a PUBLIC, findable channel: the padlock is the one glyph spec-talk
+   * section 1 reserves for private channels, and the same channel renders
+   * with a "#" in the sidebar two columns away, so a lock here said the
+   * opposite of what the product said about it everywhere else.
+   */
+  glyph?: "lock" | "hash";
+  /** The owner's avatar beside their name (spec-talk 2.2 States). */
+  ownerAvatar?: string | null;
   back: BackTarget;
 }
 
-export function LockedPage({ name, sentence, owner, requestAccess, primaryLabel, back }: LockedPageProps) {
+export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId, primaryLabel, glyph, ownerAvatar, back }: LockedPageProps) {
+  const primary = joinChannelId
+    ? <JoinChannelButton conversationId={joinChannelId} label={primaryLabel ?? "Join channel"} />
+    : requestAccess
+      ? <RequestAccessButton {...requestAccess} owner={owner ?? null} label={primaryLabel} />
+      : undefined;
+  // A Join page is an invitation, not a refusal, so it defaults to the hash.
+  const kind = glyph ?? (joinChannelId ? "hash" : "lock");
   return (
     <DenialBlock
       title={name}
       sentence={sentence}
-      locked
+      tile={kind === "hash" ? <HashTile /> : <LockTile />}
       back={back}
-      primary={requestAccess ? <RequestAccessButton {...requestAccess} owner={owner ?? null} label={primaryLabel} /> : undefined}
+      primary={primary}
     >
-      {owner ? <p className="m-0 mt-2 text-sm text-ink-3">Owned by {owner.name}</p> : null}
+      {owner ? (
+        <span className="mt-2 inline-flex items-center gap-2 text-sm text-ink-3">
+          <span className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-active text-micro font-medium text-ink" aria-hidden>
+            {ownerAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={ownerAvatar} alt="" className="h-full w-full object-cover" />
+            ) : (
+              owner.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()
+            )}
+          </span>
+          Owned by {owner.name}
+        </span>
+      ) : null}
     </DenialBlock>
   );
 }

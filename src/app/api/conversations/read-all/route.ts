@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
+import { jsonSuccess } from "@/lib/api-helpers";
+import { talkGate } from "@/lib/talk-gate";
 
 // "Mark all as read" on Talk home (spec-talk section 2.1 toolbar).
 //
@@ -12,10 +13,10 @@ import { getSessionAndModule, getOrgId, getUserId, jsonSuccess } from "@/lib/api
 // can never clear somebody else's unreads.
 
 export async function POST() {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
+  const { error, gate } = await talkGate();
   if (error) return error;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
+  const userId = gate.userId;
+  const orgId = gate.organizationId;
 
   const memberships = await prisma.conversationMember.findMany({
     where: { userId, conversation: { organizationId: orgId } },

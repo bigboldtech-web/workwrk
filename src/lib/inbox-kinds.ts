@@ -129,6 +129,18 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   timesheet_changed_after_close: k("timesheet_changed_after_close", "Closed week changed", "ClipboardCheck", "primary", "people"),
   timesheet_reopened: k("timesheet_reopened", "Timesheet reopened", "ClipboardCheck", "primary", "people"),
   task_escalated: k("task_escalated", "Task escalated to you", "ShieldCheck", "primary", "tasks"),
+  /**
+   * NOTHING WRITES THIS ANY MORE (spec-talk.md section 4 step 10: "call_incoming
+   * never lands as a row; it is the ring"). A call is a live event, so the
+   * answer to it is the incoming call card, and the durable record is the call
+   * card message in the conversation itself, which keeps its roster and its
+   * duration for ever. A bell row about a call that rang out twenty minutes
+   * ago is a row you cannot act on.
+   *
+   * The kind stays registered so the rows written BEFORE this release keep
+   * their label and their icon instead of falling through `fallbackKind` and
+   * reading "Call incoming" on a grey Bell.
+   */
   call_incoming: k("call_incoming", "Incoming call", "Video", "primary", "talk"),
 
   // ── Other ─────────────────────────────────────────────────────────
@@ -154,13 +166,29 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   kudos: k("kudos", "Kudos", "Heart", "other", "kudos"),
   /** The fifth contract kind (see the block in Primary above). */
   kudos_received: k("kudos_received", "Kudos", "Heart", "other", "kudos"),
+  /**
+   * Announcements split in two, because the Inbox routes by TYPE STRING and
+   * one row cannot land in two tabs (spec-talk.md section 4 step 10: "must
+   * acknowledge announcements to Primary, other announcements to Other").
+   * An ordinary announcement is something to read; a must-acknowledge one is
+   * something to DO, and burying it under the kudos and the automation runs is
+   * how a policy goes unsigned.
+   */
   announcement: k("announcement", "Announcement", "Megaphone", "other", "announcements"),
+  announcement_ack: k("announcement_ack", "Announcement to acknowledge", "Megaphone", "primary", "announcements"),
   automation: k("automation", "Automation ran", "Zap", "other", "automations"),
   automation_limit: k("automation_limit", "Automation limit", "Zap", "other", "automations"),
   asset_assigned: k("asset_assigned", "Asset assigned", "Laptop", "other", "announcements"),
   tool_shared: k("tool_shared", "Tool shared", "Laptop", "other", "announcements"),
   idea_update: k("idea_update", "Idea updated", "Lightbulb", "other", "announcements"),
-  chat_message: k("chat_message", "Talk message", "MessageCircle", "other", "talk"),
+  /**
+   * Talk messages split the same way and for the same reason: a direct
+   * message is addressed to you and a channel's "All messages" ring is
+   * ambient. `mention` (Primary, and the only kind that is also in the
+   * Mentions tab) covers being named anywhere.
+   */
+  chat_message: k("chat_message", "Channel message", "MessageCircle", "other", "talk"),
+  chat_message_dm: k("chat_message_dm", "Direct message", "MessageCircle", "primary", "talk"),
   organization_hard_deleted: k("organization_hard_deleted", "Workspace removed", "Megaphone", "other", "announcements"),
 };
 

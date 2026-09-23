@@ -12,6 +12,9 @@ export interface OrgAdmin {
   id: string;
   name: string;
   avatar: string | null;
+  /** So "Ask an admin" can be acted on: the avatars are mailto links
+   *  (spec-talk 2.0). Null when the row has no address on file. */
+  email: string | null;
 }
 
 export async function listOrgAdmins(organizationId: string, limit = 5): Promise<OrgAdmin[]> {
@@ -23,7 +26,12 @@ export async function listOrgAdmins(organizationId: string, limit = 5): Promise<
     },
     orderBy: { createdAt: "asc" },
     take: limit,
-    select: { id: true, firstName: true, lastName: true, avatar: true },
+    select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
   });
-  return rows.map((u) => ({ id: u.id, name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Admin", avatar: u.avatar ?? null }));
+  return rows.map((u) => ({
+    id: u.id,
+    name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Admin",
+    avatar: u.avatar ?? null,
+    email: u.email ?? null,
+  }));
 }

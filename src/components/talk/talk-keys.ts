@@ -81,3 +81,91 @@ export function readTalkLeft(conversationId: string): boolean {
 
 /** The window event that starts a call in the conversation already open. */
 export const TALK_START_CALL_EVENT = "workwrk:talk:start-call";
+
+/* ── The outbox: messages that were written and did not send ──────── */
+
+/**
+ * A MESSAGE THAT FAILED TO SEND OUTLIVES THE PAGE.
+ *
+ * The failed row was correct on screen ("Not sent · Retry · Delete") and
+ * lived only in React state, so clicking another conversation and coming
+ * back threw the person's words away with no prompt and no trace. That is
+ * the one thing the save-path rule forbids: a message that fails to send is
+ * never a silent drop.
+ *
+ * Per-device, per-conversation, and deliberately NOT a preference: it is a
+ * draft that belongs to this browser, it is written on every failure, and it
+ * is deleted the moment the message lands or the person chooses Delete.
+ */
+export interface OutboxEntry {
+  /** The temp id of a message that never landed, or, for an edit, the id of
+   *  the server message being edited. Entries are keyed on it. */
+  id: string;
+  body: string;
+  /** Set on a thread reply, so the reply is restored inside its thread
+   *  rather than as a stray row in the main feed. */
+  parentId?: string | null;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+  /** Set when this entry is an EDIT the server never accepted rather than a
+   *  message it never received: `body` is the text the person typed and the
+   *  server copy still holds the old words. An edit is user content like any
+   *  other, so it is stored, shown and retried the same way a failed send is;
+   *  the reader has to be able to tell the two apart to put each one back
+   *  where it belongs. */
+  editOf?: string | null;
+}
+
+export function talkOutboxKey(conversationId: string): string {
+  return `workwrk:talk:outbox:${conversationId}`;
+}
+
+/**
+ * How many failures one conversation keeps on this device, and WHICH ONES.
+ *
+ * The cap exists so a long outage cannot fill the storage quota. It used to
+ * be `slice(0, 20)` while `rememberFailedSend` appended the new entry to the
+ * end, which kept the twenty OLDEST and silently threw away every failure
+ * after them: the message somebody was looking at right now, told by the row
+ * that it was "still here with a Retry", was the one never written down.
+ * The newest are the ones still worth recovering, so the cap now takes them
+ * from the end, and the entries that drop off are the stalest.
+ */
+const OUTBOX_MAX = 20;
+
+export function readTalkOutbox(conversationId: string): OutboxEntry[] {
+  try {
+    const raw = window.localStorage.getItem(talkOutboxKey(conversationId));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((e): e is OutboxEntry =>
+      typeof e === "object" && e !== null &&
+      typeof (e as OutboxEntry).id === "string" &&
+      typeof (e as OutboxEntry).body === "string",
+    ).slice(-OUTBOX_MAX);
+  } catch {
+    // Corrupt JSON, private mode, or storage blocked. An empty outbox is a
+    // correct answer and the feed renders without one.
+    return [];
+  }
+}
+
+export function writeTalkOutbox(conversationId: string, entries: OutboxEntry[]): void {
+  try {
+    if (entries.length === 0) window.localStorage.removeItem(talkOutboxKey(conversationId));
+    else window.localStorage.setItem(talkOutboxKey(conversationId), JSON.stringify(entries.slice(-OUTBOX_MAX)));
+  } catch { /* storage blocked: the on-screen row is still there */ }
+}
+
+/** Remember one failed send. Idempotent on id, so a retry that fails again
+ *  updates the entry rather than stacking duplicates. */
+export function rememberFailedSend(conversationId: string, entry: OutboxEntry): void {
+  const rest = readTalkOutbox(conversationId).filter((e) => e.id !== entry.id);
+  writeTalkOutbox(conversationId, [...rest, entry]);
+}
+
+/** Forget one, because it sent or because the person threw it away. */
+export function forgetFailedSend(conversationId: string, id: string): void {
+  writeTalkOutbox(conversationId, readTalkOutbox(conversationId).filter((e) => e.id !== id));
+}

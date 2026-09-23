@@ -1,18 +1,29 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requireConversation } from "@/lib/talk-gate";
+import { canPost } from "@/lib/talk-access";
 import type { Prisma } from "@/generated/prisma";
 import { presignGetUrl } from "@/lib/s3";
 import { stripMarkup } from "@/lib/chat-markup";
 import { publishToConversation, publishToUser } from "@/lib/realtime-bus";
+import { inboxKeyForMessage, inboxRecordOf, inboxRowEnabled } from "@/lib/inbox-notify-keys";
 
-// Messages — cursor-paged reads + sends. This is the hot path (the open
+// Messages: cursor-paged reads plus sends. This is the hot path (the open
 // pane polls GET every few seconds), so reads are one indexed query and
 // sends touch exactly the rows they must.
 //
 // Phase 5: the after-cursor keys on updatedAt (not createdAt) so
 // reactions, edits and deletes to OLD messages flow through the same
 // poll; threads ride parentId; mentions and attachments ride metadata.
+//
+// PHASE 4 ACCESS. Both verbs now stand behind requireConversation, which
+// reads the viewer's ROLE rather than a bare ConversationMember row. Two
+// real faults went with that change: an Owner or Admin holding Full access
+// on a public channel they had not joined used to get the whole page and a
+// 404 from this route, so the feed showed "Couldn't load messages" beside a
+// live message box; and POST never looked at archivedAt, so a stale tab
+// could write into a channel the product presents as frozen.
 
 const PAGE = 50;
 const MAX_BODY = 8000;
@@ -20,17 +31,8 @@ const MAX_ATTACHMENTS = 10;
 
 const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, avatar: true } as const;
 
-type Membership = { id: string; conversation: { type: string; name: string | null } };
-
-async function requireMembership(conversationId: string, userId: string, orgId: string): Promise<Membership | null> {
-  return prisma.conversationMember.findFirst({
-    where: { conversationId, userId, conversation: { organizationId: orgId } },
-    select: { id: true, conversation: { select: { type: true, name: true } } },
-  });
-}
-
 /** Outbound shaping for every read path:
- *  - "removed" messages must not leak their content through the API —
+ *  - "removed" messages must not leak their content through the API:
  *    body and metadata are blanked server-side, not just hidden in UI;
  *  - S3-backed attachments carry an s3Key and get a fresh presigned
  *    URL on every read (stored URLs expire after an hour). */
@@ -48,30 +50,108 @@ async function serveMessages<T extends { deletedAt: Date | null; metadata: unkno
   }));
 }
 
-/** Reply counts for a set of top-level message ids — one groupBy. */
-async function replyCounts(conversationId: string, parentIds: string[]): Promise<Map<string, number>> {
-  if (parentIds.length === 0) return new Map();
-  const rows = await prisma.conversationMessage.groupBy({
-    by: ["parentId"],
+/** What the feed's thread chip needs for one parent: "3 replies, last reply
+ *  2h ago" and the two faces beside it (spec-talk section 2.2). One indexed
+ *  read over the whole page's replies rather than a groupBy plus N lookups. */
+export type ReplyMeta = { count: number; lastReplyAt: string; authorIds: string[] };
+
+async function replyMeta(conversationId: string, parentIds: string[]): Promise<Map<string, ReplyMeta>> {
+  const out = new Map<string, ReplyMeta>();
+  if (parentIds.length === 0) return out;
+  const rows = await prisma.conversationMessage.findMany({
     where: { conversationId, parentId: { in: parentIds }, deletedAt: null },
-    _count: { _all: true },
+    orderBy: [{ createdAt: "asc" }],
+    select: { parentId: true, authorId: true, createdAt: true },
   });
-  return new Map(rows.filter((r) => r.parentId).map((r) => [r.parentId as string, r._count._all]));
+  for (const r of rows) {
+    if (!r.parentId) continue;
+    const cur = out.get(r.parentId) ?? { count: 0, lastReplyAt: r.createdAt.toISOString(), authorIds: [] };
+    cur.count += 1;
+    cur.lastReplyAt = r.createdAt.toISOString();
+    if (!cur.authorIds.includes(r.authorId) && cur.authorIds.length < 3) cur.authorIds.push(r.authorId);
+    out.set(r.parentId, cur);
+  }
+  return out;
+}
+
+/** The shape every read path hangs on a top-level message. */
+function withReplies<T extends { id: string }>(rows: T[], meta: Map<string, ReplyMeta>) {
+  return rows.map((m) => {
+    const r = meta.get(m.id);
+    return {
+      ...m,
+      replyCount: r?.count ?? 0,
+      lastReplyAt: r?.lastReplyAt ?? null,
+      replyAuthorIds: r?.authorIds ?? [],
+    };
+  });
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
-  if (error) return error;
   const { id } = await params;
-  const userId = getUserId(session);
-
-  const membership = await requireMembership(id, userId, getOrgId(session));
-  if (!membership) return jsonError("Conversation not found", 404);
+  // Read needs `view`: an archived channel still reads, and a Full holder who
+  // is not a member (an Admin on a public channel) reads rather than 404s.
+  const { error } = await requireConversation(id, { floor: "view" });
+  if (error) return error;
 
   const { searchParams } = new URL(req.url);
-  const before = searchParams.get("before");  // message id — page older history
-  const after = searchParams.get("after");    // ISO timestamp — poll for changes
-  const parent = searchParams.get("parent");  // message id — a thread's replies
+  const before = searchParams.get("before");  // message id: page older history
+  const after = searchParams.get("after");    // ISO timestamp: poll for changes
+  const parent = searchParams.get("parent");  // message id: a thread's replies
+  const around = searchParams.get("around");  // message id: open AT a message
+
+  // ?around=<messageId> is what makes ?m= work: a search hit, a mention
+  // notification or a copied link lands on ONE message that may be a thousand
+  // rows back, and before this the feed simply opened at the bottom and the
+  // highlight had nothing to highlight. It answers the page containing that
+  // message plus context on both sides, and says whether there is more in
+  // either direction so the feed knows which way it may still page.
+  if (around) {
+    const anchor = await prisma.conversationMessage.findFirst({
+      where: { id: around, conversationId: id },
+      select: { id: true, createdAt: true, parentId: true },
+    });
+    if (!anchor) return jsonError("Message not found", 404);
+    // A reply opens its thread's parent in context, not the reply itself:
+    // the main feed holds top-level messages only.
+    const feedAnchor = anchor.parentId
+      ? await prisma.conversationMessage.findFirst({
+          where: { id: anchor.parentId, conversationId: id },
+          select: { id: true, createdAt: true },
+        })
+      : { id: anchor.id, createdAt: anchor.createdAt };
+    if (!feedAnchor) return jsonError("Message not found", 404);
+
+    const HALF = 25;
+    const [olderDesc, newerAsc] = await Promise.all([
+      prisma.conversationMessage.findMany({
+        where: { conversationId: id, parentId: null, createdAt: { lt: feedAnchor.createdAt } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: HALF + 1,
+        include: { author: { select: AUTHOR_SELECT } },
+      }),
+      prisma.conversationMessage.findMany({
+        where: { conversationId: id, parentId: null, createdAt: { gte: feedAnchor.createdAt } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: HALF + 1,
+        include: { author: { select: AUTHOR_SELECT } },
+      }),
+    ]);
+    const hasMore = olderDesc.length > HALF;          // older history above
+    const hasNewer = newerAsc.length > HALF;          // unread tail below
+    const window = [...olderDesc.slice(0, HALF).reverse(), ...newerAsc.slice(0, HALF)];
+    const counts = await replyMeta(id, window.map((m) => m.id));
+    const served = await serveMessages(window);
+    return jsonSuccess({
+      messages: withReplies(served, counts),
+      hasMore,
+      hasNewer,
+      // Which message to scroll to and paint: the reply when it was a reply,
+      // so the thread chip under the parent is the thing that glows.
+      anchorId: feedAnchor.id,
+      threadParentId: anchor.parentId ?? null,
+    });
+  }
 
   if (parent) {
     const parentMsg = await prisma.conversationMessage.findFirst({
@@ -98,7 +178,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (isNaN(afterDate.getTime())) return jsonError("Bad cursor", 400);
     // Keyset cursor (updatedAt, id): strictly-after rows plus same-instant
     // rows with a higher id. Guarantees progress even when many rows share
-    // one timestamp (the migration backfilled identical updatedAt values —
+    // one timestamp (the migration backfilled identical updatedAt values,
     // a plain gte cursor could livelock on 200 equal rows and never reach
     // newer messages), and same-millisecond writes can't be skipped.
     const afterId = searchParams.get("afterId") ?? "";
@@ -114,12 +194,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       take: 200,
       include: { author: { select: AUTHOR_SELECT } },
     });
-    const counts = await replyCounts(id, messages.filter((m) => !m.parentId).map((m) => m.id));
+    const counts = await replyMeta(id, messages.filter((m) => !m.parentId).map((m) => m.id));
     const served = await serveMessages(messages);
     const last = messages[messages.length - 1];
     return jsonSuccess({
-      messages: served.map((m) => ({ ...m, replyCount: counts.get(m.id) ?? 0 })),
-      // 200 rows means there may be more same-poll — the client re-polls
+      messages: withReplies(served, counts),
+      // 200 rows means there may be more in this poll, so the client re-polls
       // immediately from the new cursor instead of waiting a full tick.
       more: messages.length === 200,
       cursor: last ? { ts: last.updatedAt.toISOString(), id: last.id } : null,
@@ -146,9 +226,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const hasMore = page.length > PAGE;
   const window = page.slice(0, PAGE);
-  const counts = await replyCounts(id, window.map((m) => m.id));
+  const counts = await replyMeta(id, window.map((m) => m.id));
   const served = await serveMessages(window);
-  const messages = served.reverse().map((m) => ({ ...m, replyCount: counts.get(m.id) ?? 0 }));
+  const messages = withReplies(served.reverse(), counts);
   return jsonSuccess({ messages, hasMore });
 }
 
@@ -166,7 +246,7 @@ function cleanAttachments(raw: unknown): { url: string; name: string; type: stri
       name: (typeof a?.name === "string" ? a.name : "file").slice(0, 200),
       type: (typeof a?.type === "string" ? a.type : "application/octet-stream").slice(0, 100),
       size: Number.isFinite(a?.size) ? Math.max(0, Math.floor(a.size)) : 0,
-      // S3 object key — reads re-presign from this; local uploads omit it.
+      // S3 object key: reads re-presign from this; local uploads omit it.
       ...(typeof a?.s3Key === "string" && a.s3Key ? { s3Key: a.s3Key.slice(0, 512) } : {}),
     });
   }
@@ -174,14 +254,15 @@ function cleanAttachments(raw: unknown): { url: string; name: string; type: stri
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
-  if (error) return error;
   const { id } = await params;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
-
-  const membership = await requireMembership(id, userId, orgId);
-  if (!membership) return jsonError("Conversation not found", 404);
+  // canPost is the pure predicate: `edit` or better AND not archived. A stale
+  // tab that still shows a message box now gets one 403 with a sentence,
+  // rather than writing into a frozen conversation.
+  const { error, ctx } = await requireConversation(id, { floor: "edit", allow: canPost, what: "post here" });
+  if (error) return error;
+  const userId = ctx.viewer.userId;
+  const membershipId = ctx.membershipId;
+  const conversationFacts = { type: ctx.conversation.type, name: ctx.conversation.name };
 
   const payload = await req.json().catch(() => null);
   const text = typeof payload?.body === "string" ? payload.body.trim() : "";
@@ -233,11 +314,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       include: { author: { select: AUTHOR_SELECT } },
     }),
     prisma.conversation.update({ where: { id }, data: { lastMessageAt: now } }),
-    prisma.conversationMember.update({ where: { id: membership.id }, data: { lastReadAt: now } }),
-    // New activity re-opens closed (hidden) sidebars for every member —
+    // A Full holder who is not a member (an Admin on a public channel) has no
+    // row to stamp; everybody else marks their own read cursor.
+    ...(membershipId
+      ? [prisma.conversationMember.update({ where: { id: membershipId }, data: { lastReadAt: now } })]
+      : []),
+    // New activity re-opens closed (hidden) sidebars for every member.
     // Slack's rule: closing is tidy-up, never a way to miss messages.
     // Inside the send transaction: the reappear invariant is not
-    // best-effort (fleet finding — a detached promise could fail silently).
+    // best-effort (fleet finding: a detached promise could fail silently).
     prisma.conversationMember.updateMany({
       where: { conversationId: id, hidden: true },
       data: { hidden: false },
@@ -245,10 +330,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   ]);
 
   // Real-time: nudge every member's open SSE stream to refetch this thread
-  // (trigger-only — the body is re-fetched through the redaction path).
+  // (trigger-only; the body is re-fetched through the redaction path).
   publishToConversation(id, { type: "message", conversationId: id });
 
-  // A reply changes its parent's reply count — touch the parent so every
+  // A reply changes its parent's reply count, so touch the parent and every
   // open pane's updatedAt poll re-delivers it with fresh counts.
   if (parentId) {
     await prisma.conversationMessage.update({ where: { id: parentId }, data: { updatedAt: now } }).catch(() => {});
@@ -256,23 +341,45 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Bell notifications. Three tiers, all deduped to ONE unread row per
   // conversation per person:
-  //   mentions        → always ring (unless hard-muted) — "mention" type
-  //   thread parent   → the person you replied to gets a ring
-  //   notifyLevel all → the ordinary DM/group ring
+  //   mentions        always ring (unless hard-muted), as type "mention"
+  //   thread parent   the person you replied to gets a ring
+  //   notifyLevel all the ordinary DM or channel ring
+  //
+  // On top of the per-conversation level sits the person's own Inbox choice
+  // (My settings > Notifications > Inbox): home.notifications.inbox.dm,
+  // .channel and .calls. Absent means on, so nobody who has never opened
+  // that page loses a notification. A MENTION is never suppressed by it:
+  // "Direct messages off" is about volume, not about being ignored.
   try {
     const link = `/tlk/${id}`;
     const senderName = `${message.author.firstName} ${message.author.lastName}`.trim();
-    const convoLabel = membership.conversation.type === "DM"
+    const convoLabel = conversationFacts.type === "DM"
       ? senderName
-      : membership.conversation.type === "CHANNEL"
-        ? `#${membership.conversation.name ?? "channel"}`
-        : (membership.conversation.name || "a group chat");
+      : conversationFacts.type === "CHANNEL"
+        ? `#${conversationFacts.name ?? "channel"}`
+        : (conversationFacts.name || "a group chat");
 
     const members = await prisma.conversationMember.findMany({
       where: { conversationId: id, userId: { not: userId } },
       select: { userId: true, notifyLevel: true },
     });
     const mentionSet = new Set(mentions);
+
+    // One read for the whole roster rather than one per person. The key and
+    // the "absent means on" rule live in src/lib/inbox-notify-keys.ts, which
+    // the settings page reads too, so a row cannot be labelled one thing and
+    // gated on another.
+    const inboxKey = inboxKeyForMessage(conversationFacts.type, isCallCard);
+    const prefRows = members.length > 0
+      ? await prisma.userPreference.findMany({
+          where: { userId: { in: members.map((m) => m.userId) } },
+          select: { userId: true, home: true },
+        }).catch(() => [] as Array<{ userId: string; home: unknown }>)
+      : [];
+    const inboxOff = new Set<string>();
+    for (const row of prefRows) {
+      if (!inboxRowEnabled(inboxRecordOf(row.home), inboxKey)) inboxOff.add(row.userId);
+    }
 
     let parentAuthorId: string | null = null;
     if (parentId) {
@@ -285,12 +392,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const targets = members.filter((m) =>
       m.notifyLevel !== "mute" &&
-      (mentionSet.has(m.userId) || m.userId === parentAuthorId || m.notifyLevel === "all"),
+      (mentionSet.has(m.userId) || m.userId === parentAuthorId || m.notifyLevel === "all") &&
+      (mentionSet.has(m.userId) || !inboxOff.has(m.userId)),
     );
 
-    if (targets.length > 0) {
+    // A CALL IS NOT A BELL ROW (spec-talk.md section 4 step 10: "call_incoming
+    // never lands as a row; it is the ring"). The live answer is the incoming
+    // call card, and the durable record is the call card message in the
+    // conversation, which keeps its roster and its duration. A notification
+    // about a call that rang out twenty minutes ago cannot be acted on.
+    if (targets.length > 0 && !isCallCard) {
       // Priority targets (mentioned, or the person you replied to) always
-      // get their own notification — an earlier plain unread must never
+      // get their own notification, because an earlier plain unread must never
       // swallow a mention. Only ordinary "all"-tier targets dedup against
       // an existing unread row for this conversation.
       const isPriority = (uid: string) => mentionSet.has(uid) || uid === parentAuthorId;
@@ -301,28 +414,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const alreadySet = new Set(already.map((a) => a.userId));
       const fresh = targets.filter((t) => isPriority(t.userId) || !alreadySet.has(t.userId));
       if (fresh.length > 0) {
-        const preview = isCallCard
-          ? "📞 Started a call — tap to join"
-          : text ? stripMarkup(text.slice(0, 300)).slice(0, 140) : "📎 Sent an attachment";
+        const preview = text ? stripMarkup(text.slice(0, 300)).slice(0, 140) : "Sent an attachment";
         await prisma.notification.createMany({
           data: fresh.map((t) => ({
             userId: t.userId,
-            title: isCallCard
-              ? `${senderName} started a call in ${convoLabel}`
-              : mentionSet.has(t.userId)
-                ? `${senderName} mentioned you in ${convoLabel}`
-                : t.userId === parentAuthorId
-                  ? `${senderName} replied to your message in ${convoLabel}`
-                  : membership.conversation.type === "DM"
-                    ? `New message from ${senderName}`
-                    : `New messages in ${convoLabel}`,
+            title: mentionSet.has(t.userId)
+              ? `${senderName} mentioned you in ${convoLabel}`
+              : t.userId === parentAuthorId
+                ? `${senderName} replied to your message in ${convoLabel}`
+                : conversationFacts.type === "DM"
+                  ? `New message from ${senderName}`
+                  : `New messages in ${convoLabel}`,
             message: preview,
-            // A distinct type lets the notifier ring it (Join/Dismiss) rather
-            // than show it as an ordinary message toast. The link stays the
-            // plain conversation URL (so the "one unread row per conversation"
-            // dedup still matches); the notifier appends ?call=1 for the ring's
-            // Join so it auto-joins.
-            type: isCallCard ? "call_incoming" : mentionSet.has(t.userId) ? "mention" : "chat_message",
+            // Three kinds, because the Inbox routes by type string and a DM
+            // is addressed to you while a channel's ambient ring is not
+            // (src/lib/inbox-kinds.ts is the routing table): a mention is
+            // Primary and in the Mentions tab, a DM is Primary, a channel or
+            // group message is Other.
+            type: mentionSet.has(t.userId)
+              ? "mention"
+              : conversationFacts.type === "DM"
+                ? "chat_message_dm"
+                : "chat_message",
             link,
           })),
         });

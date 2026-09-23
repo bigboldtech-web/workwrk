@@ -1,25 +1,23 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requireConversation } from "@/lib/talk-gate";
+import { canAddPeople } from "@/lib/talk-access";
 
-// Add people to a group or channel. Any current member can add;
-// DMs never grow (start a group instead). New members see the full
-// history — same model as Slack.
+// Add people to a group or channel. On a public channel any member may add;
+// on a private channel or a group it takes Full access, and an archived
+// conversation takes nobody. DMs never grow (start a group instead). New
+// members see the full history, the same model as Slack.
+//
+// canAddPeople is that whole rule, and it is the same function the page
+// reads to decide whether to draw the control.
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionAndModule("workwrk-talk");
-  if (error) return error;
   const { id } = await params;
-  const userId = getUserId(session);
-  const orgId = getOrgId(session);
-
-  const membership = await prisma.conversationMember.findFirst({
-    where: { conversationId: id, userId, conversation: { organizationId: orgId } },
-    select: { id: true, conversation: { select: { type: true } } },
-  });
-  if (!membership) return jsonError("Conversation not found", 404);
-  if (membership.conversation.type === "DM") {
-    return jsonError("Direct messages can't grow — start a group chat instead", 400);
+  const { error, ctx } = await requireConversation(id, { floor: "edit", allow: canAddPeople, what: "add people here" });
+  if (error) return error;
+  if (ctx.conversation.type === "DM") {
+    return jsonError("Direct messages can't grow. Start a group chat instead.", 400);
   }
 
   const body = await req.json().catch(() => null);
@@ -31,11 +29,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (userIds.length > 50) return jsonError("Too many people at once", 400);
 
   const valid = await prisma.user.count({
-    where: { id: { in: userIds }, organizationId: orgId, deletedAt: null },
+    where: { id: { in: userIds }, organizationId: ctx.gate.organizationId, deletedAt: null },
   });
   if (valid !== userIds.length) return jsonError("Some people could not be added", 400);
 
-  const notifyLevel = membership.conversation.type === "CHANNEL" ? "mentions" : "all";
+  const notifyLevel = ctx.conversation.type === "CHANNEL" ? "mentions" : "all";
   const result = await prisma.conversationMember.createMany({
     data: userIds.map((uid) => ({ conversationId: id, userId: uid, notifyLevel })),
     skipDuplicates: true,
