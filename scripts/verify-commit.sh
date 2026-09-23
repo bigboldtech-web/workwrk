@@ -20,12 +20,31 @@ DIR="${2:-/tmp/workwrk-verify}"
 REPO="$(git rev-parse --show-toplevel)"
 
 echo "==> worktree at $DIR on $SHA"
+# PRUNE FIRST, because a worktree REGISTRATION outlives its directory.
+#
+# $DIR defaults under /tmp, which the OS cleans out. When the directory goes
+# but git's registration stays, the test below sees no .git and takes the
+# `worktree add` branch, and git refuses with "already registered" and exit
+# 128. The gate then died on its very first step with nothing but the banner
+# printed, which reads exactly like a build failure and is not one.
+#
+# `prune` drops registrations whose directory is missing and is a no-op
+# otherwise, so it costs nothing on the common path.
+#
+# NOT `prune -q`: this git does not have that switch, and the `|| true` that
+# was here swallowed the usage error, so the prune silently never ran. A
+# guard that cannot fail cannot help.
+git worktree prune
 if [ -d "$DIR/.git" ] || [ -f "$DIR/.git" ]; then
   git -C "$DIR" fetch -q "$REPO" main 2>/dev/null || true
   git -C "$DIR" checkout -q --detach "$SHA"
   git -C "$DIR" clean -qfd
 else
-  git worktree add -q --detach "$DIR" "$SHA"
+  git worktree add -q --detach "$DIR" "$SHA" || {
+    echo "COULD NOT CREATE THE WORKTREE at $DIR. Registrations now:"
+    git worktree list
+    exit 1
+  }
 fi
 cd "$DIR"
 
@@ -60,6 +79,27 @@ echo "==> guards"
 node scripts/check-app-prefixes.mjs
 node scripts/check-schema-sql.mjs
 
+# TYPE CHECK. NOTHING ELSE IN THE PIPELINE DOES ONE.
+#
+# CI runs prisma validate, the two guards and vitest. It does not run tsc.
+# And `next build` under Turbopack does not type check either, which is the
+# part that surprises people: a green build is not a green compile. So until
+# this line existed, a real type error could pass the gate, pass CI, and ship.
+#
+# Found on 2026-09-22 while the Phase 4 deploy was in flight: four genuine
+# errors in a Talk component (a `export { X as Y } from` re-export, which
+# creates no local binding, followed by uses of the bare name, plus an icon
+# dropped from an import while still rendered). Those would have been a
+# ReferenceError in the message feed at runtime, not a build failure.
+#
+# It runs BEFORE the tests because it is much faster and its failures are
+# more specific: a type error usually explains a test failure downstream.
+echo "==> type check"
+npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
+  echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30; exit 1;
+}
+echo "   ok, 0 type errors"
+
 # THE TEST SUITE, INSIDE THE WORKTREE, AGAINST THE COMMIT'S OWN FILES.
 #
 # WHY THIS STEP EXISTS (added 2026-09-22, after it let two pushes through).
@@ -86,27 +126,6 @@ node scripts/check-schema-sql.mjs
 # TZ=UTC to match CI. Note this still runs on the local Node (24) while CI
 # and production are Node 20, so it cannot catch a Node-20-only failure; see
 # the ICU midnight bug in reference_workwrk_ci_node20_traps.
-# TYPE CHECK. NOTHING ELSE IN THE PIPELINE DOES ONE.
-#
-# CI runs prisma validate, the two guards and vitest. It does not run tsc.
-# And `next build` under Turbopack does not type check either, which is the
-# part that surprises people: a green build is not a green compile. So until
-# this line existed, a real type error could pass the gate, pass CI, and ship.
-#
-# Found on 2026-09-22 while the Phase 4 deploy was in flight: four genuine
-# errors in a Talk component (a `export { X as Y } from` re-export, which
-# creates no local binding, followed by uses of the bare name, plus an icon
-# dropped from an import while still rendered). Those would have been a
-# ReferenceError in the message feed at runtime, not a build failure.
-#
-# It runs BEFORE the tests because it is much faster and its failures are
-# more specific: a type error usually explains a test failure downstream.
-echo "==> type check"
-npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
-  echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30; exit 1;
-}
-echo "   ok, 0 type errors"
-
 echo "==> unit tests (the commit's own tree)"
 TZ=UTC npx vitest run > /tmp/verify-test.log 2>&1 || {
   echo "TESTS FAILED. Last 40 lines:"; sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-test.log | tail -40; exit 1;
