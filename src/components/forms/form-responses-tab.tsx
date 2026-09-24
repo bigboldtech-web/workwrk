@@ -32,6 +32,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { answerText, isQuestion, readFileAnswer, type FormField } from "@/lib/forms/fields";
 import { cn } from "@/lib/utils";
+import { copyObjectLink } from "@/components/layout/os/use-object-href";
 
 type Person = { id: string; name: string; email: string | null; avatar: string | null; firstName: string | null; lastName: string | null };
 type Went = { kind: "list" | "table"; href: string | null; label: string; error: string | null };
@@ -150,7 +151,9 @@ export function FormResponsesTab({
   }
 
   function copyResponseLink(row: ResponseRow) {
-    const url = `${window.location.origin}/forms/${formId}?tab=responses&response=${row.id}`;
+    // The form's share form (the Work door from Work, /forms/<id> elsewhere),
+    // opened at this response.
+    const url = `${copyObjectLink("form", formId)}?tab=responses&response=${row.id}`;
     void navigator.clipboard?.writeText(url).then(() => toast("Link copied"), () => toast("Couldn't copy", { tone: "danger" }));
   }
 

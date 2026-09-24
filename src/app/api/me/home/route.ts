@@ -30,6 +30,8 @@ import { prisma } from "@/lib/prisma";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
 import { docAccessible } from "@/lib/doc-access";
+import { parseRecentDocViews } from "@/lib/recent-doc-views";
+import { getDocSharingMap, resolveDocRole } from "@/lib/doc-sharing";
 import { homeBucketFor, endOfWeekInstant, type LocaleContext } from "@/lib/work-buckets";
 import { kindFor } from "@/lib/inbox-kinds";
 import { tabUnreadWhere, unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
@@ -295,28 +297,29 @@ async function loadRecentDocs(
   accessLevel: string | null | undefined,
   prefs: Awaited<ReturnType<typeof getEffectivePreferences>> | null,
 ) {
-  const views = Array.isArray(prefs?.home?.recentDocViews) ? prefs.home.recentDocViews : [];
-  const ids: string[] = [];
-  const viewedAt = new Map<string, string>();
-  for (const v of views as Array<{ docId?: string; at?: string } | string>) {
-    if (typeof v === "string") { ids.push(v); continue; }
-    if (v && typeof v.docId === "string") {
-      ids.push(v.docId);
-      if (typeof v.at === "string") viewedAt.set(v.docId, v.at);
-    }
-  }
+  // The stored shape is { id, at } (POST /api/me/recent-docs); this card
+  // used to read only { docId }, so it matched nothing and was always empty.
+  const { ids, viewedAt } = parseRecentDocViews(prefs?.home?.recentDocViews);
   if (ids.length === 0) return { rows: [] };
 
-  const docs = await prisma.doc.findMany({
-    where: { id: { in: ids.slice(0, 20) }, organizationId, archivedAt: null },
-    select: { id: true, title: true, updatedAt: true, entityType: true, entityId: true },
-  });
-  // A doc whose anchor the viewer can no longer read is DROPPED rather than
-  // rendered as a row that 404s. `docAccessible` is the same gate the Docs
-  // pages use, so this list can never be wider than what /docs would show.
+  const [docs, org] = await Promise.all([
+    prisma.doc.findMany({
+      where: { id: { in: ids.slice(0, 20) }, organizationId, archivedAt: null },
+      select: { id: true, title: true, updatedAt: true, entityType: true, entityId: true, createdById: true },
+    }),
+    prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } }),
+  ]);
+  // A doc the viewer can no longer open is DROPPED rather than rendered as a
+  // row that 404s. These are GET /api/docs/[id]'s two gates, the anchor
+  // (`docAccessible`) and the per-doc role (a restricted doc they are not
+  // listed on), so no row here names a doc its own page would refuse.
+  const sharing = getDocSharingMap(org?.settings);
   const allowed = await Promise.all(
     docs.map(async (d) =>
-      (await docAccessible({ entityType: d.entityType, entityId: d.entityId }, userId, accessLevel)) ? d.id : null,
+      (await docAccessible({ entityType: d.entityType, entityId: d.entityId }, userId, accessLevel)) &&
+      resolveDocRole(sharing[d.id], { userId, accessLevel, createdById: d.createdById }) !== null
+        ? d.id
+        : null,
     ),
   );
   const allowedIds = new Set(allowed.filter((v): v is string => v !== null));

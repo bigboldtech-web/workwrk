@@ -6,14 +6,18 @@
  * resolves the id and drops the `?id=` residue the /sops/new/*?id= 308s
  * carry through (Next passes the whole request query on to a redirect
  * destination, so the address bar read /sops/X?id=X&edit=1).
+ *
+ * The id is this segment's own param (use(params)), not useParams(): while
+ * the task drawer is open, useParams() merges the drawer's [id] into the same
+ * key. The Work door (/work/sops/[id]) renders the same SopEditorPage.
  */
 
-import { useEffect } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { use, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SopEditorPage } from "@/components/sops/sop-editor-page";
 
-export default function SOPDetailPage() {
-  const { id } = useParams<{ id: string }>();
+export default function SOPDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
 

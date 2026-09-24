@@ -69,6 +69,7 @@ import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
 import { treeChanged, accessChanged } from "@/lib/work/container-events";
+import { objectHrefNow } from "./use-object-href";
 import { hydrateSidebarState, setSpaceHidden } from "@/lib/work/sidebar-expand";
 import {
   containerMenuRows, containerPath, containerNoun,
@@ -406,6 +407,10 @@ function ContainerMenuBody({
   const noun = containerNoun(container.kind);
   const base = `${API_BASE[container.kind]}/${container.id}`;
   const spaceId = container.kind === "space" ? container.id : container.spaceId ?? null;
+  // A Doc, Table or Canvas created from this menu opens in the section it was
+  // made in: at its Space-scoped Work address when the container knows its
+  // Space's slug, at the Work door otherwise (src/lib/nav/object-href.ts).
+  const spaceSlugHint = container.spaceSlug ?? (container.kind === "space" ? container.slug ?? null : null);
 
   useEffect(() => {
     let alive = true;
@@ -691,9 +696,9 @@ function ContainerMenuBody({
       treeChanged({ kind: "doc", action: "created" });
       onClose();
       const id = d?.doc?.id ?? d?.id;
-      if (id) router.push(`/docs/${id}`);
+      if (id) router.push(objectHrefNow("doc", id, spaceSlugHint));
     } catch { toast("Couldn't create doc"); } finally { setBusy(null); }
-  }, [container.id, container.kind, onClose, router, spaceId, toast]);
+  }, [container.id, container.kind, onClose, router, spaceId, spaceSlugHint, toast]);
 
   const createFolder = useCallback(async () => {
     if (!spaceId) { toast("Couldn't create folder"); return; }
@@ -739,9 +744,9 @@ function ContainerMenuBody({
       onClose();
       // The server seeded the canonical sheet (no columns were sent);
       // ?new=1 selects the name so it can be typed.
-      router.push(`/tables/${id}?new=1`);
+      router.push(`${objectHrefNow("table", id, spaceSlugHint)}?new=1`);
     } catch { toast("Couldn't create table"); } finally { setBusy(null); }
-  }, [onClose, router, spaceId, toast]);
+  }, [onClose, router, spaceId, spaceSlugHint, toast]);
 
   const createCanvas = useCallback(async () => {
     setBusy("canvas");
@@ -762,9 +767,9 @@ function ContainerMenuBody({
       treeChanged({ kind: "canvas", action: "created" });
       onClose();
       const id = d?.whiteboard?.id ?? d?.id;
-      if (id) router.push(`/canvas/${id}`);
+      if (id) router.push(objectHrefNow("canvas", id, spaceSlugHint));
     } catch { toast("Couldn't create canvas"); } finally { setBusy(null); }
-  }, [container.id, container.kind, onClose, router, spaceId, toast]);
+  }, [container.id, container.kind, onClose, router, spaceId, spaceSlugHint, toast]);
 
   const openBoardPanel = useCallback((panel: "fields" | "statuses") => {
     onClose();

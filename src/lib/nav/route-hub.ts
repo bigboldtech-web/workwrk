@@ -122,6 +122,15 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // never go active, because the Work sidebar is not rendered on /favorites.
   "/favorites": "home",
   "/marketing": "home",
+  // The Work door for docs, tables, canvases, SOPs and forms opened from Work
+  // when the viewer can see no Space for them: a personal or NOTEPAD doc, an
+  // unscoped table, every SOP and form (src/lib/nav/object-href.ts). Its
+  // children are dynamic (/work/docs/[id] and friends), so like /item and
+  // /folders it is a hub row with no page of its own. A Space item opened
+  // from Work lives under "/spaces" above, which already owns
+  // /spaces/[slug]/docs/[id], /spaces/[slug]/tables/[id] and
+  // /spaces/[slug]/canvas/[id] by longest prefix.
+  "/work": "home",
 
   // ── Planner ───────────────────────────────────────────────────────
   "/planner": "planner",
@@ -208,6 +217,9 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/me/mentions": "Mentions",
   "/activity": "Activity",
   "/marketing": "Marketing",
+  // Equal to the hub label, so the top bar drops it as a repeat of the hub
+  // crumb; an object at the door declares its own crumb anyway.
+  "/work": "Work",
   "/planner": "Calendar",
   "/calendar": "Calendar",
   "/timesheets": "Timesheets",

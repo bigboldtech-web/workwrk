@@ -35,6 +35,9 @@ import {
   tableNameFromFile, type CsvColumnPlan, type TargetColumn,
 } from "@/lib/csv-import";
 import { columnLetter } from "@/lib/sheet-engine-host";
+// The toast's "Open table" is resolved when it is clicked, in the section
+// the person is in then (src/lib/nav/object-href.ts).
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -265,7 +268,7 @@ export function CsvImportDialog({
     notifyTablesChanged();
     const rows = imp.data.rowsCreated ?? parsed.rows.length;
     const id = tableId;
-    toast(`Imported ${rows.toLocaleString()} row${rows === 1 ? "" : "s"}${made && mode === "create" ? ` into ${made.name}` : ""}`, created ? { tone: "success", action: { label: "Open table", onClick: () => router.push(`/tables/${id}`) } } : { tone: "success" });
+    toast(`Imported ${rows.toLocaleString()} row${rows === 1 ? "" : "s"}${made && mode === "create" ? ` into ${made.name}` : ""}`, created ? { tone: "success", action: { label: "Open table", onClick: () => router.push(objectHrefNow("table", id)) } } : { tone: "success" });
     onDone?.({ tableId: id, created, rows });
     reset();
     onClose();

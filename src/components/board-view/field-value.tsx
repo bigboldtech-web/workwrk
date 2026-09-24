@@ -15,6 +15,8 @@ import { Dots } from "@/components/ui/dots";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { useAnchorPos } from "./use-anchor-pos";
+import Link from "next/link";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 
 // Cell-picker dropdown. Uses position:fixed (via useAnchorPos) so it escapes the
 // table's horizontal-scroll container — otherwise the menu is clipped at the
@@ -987,6 +989,11 @@ function LinkedEntityValue({
   onCreate?: (title: string) => Promise<EntityLite | null>;
   createLabel?: string;
 }) {
+  // The builders above stay canonical; the chip opens the object in the
+  // section this task is shown in (Work, for the task drawer and /item), as a
+  // client navigation. They were plain anchors: every chip click was a full
+  // page load into the Docs hub.
+  const { map } = useObjectHref();
   const v = typeof value === "string" ? value : "";
   const [items, setItems] = useState<EntityLite[]>(loader.peek());
   const [loading, setLoading] = useState(loader.peek().length === 0);
@@ -1032,7 +1039,7 @@ function LinkedEntityValue({
   if (readOnly) {
     // In display mode link the chip if we can resolve a destination.
     if (current && hrefFor) {
-      return <a href={hrefFor(current.id)} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</a>;
+      return <Link prefetch={false} href={map(hrefFor(current.id))} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</Link>;
     }
     return chip;
   }
@@ -1045,9 +1052,9 @@ function LinkedEntityValue({
         // Linked: the chip opens the doc/SOP; the caret opens the picker to change.
         <span className="inline-flex items-center gap-0.5">
           {hrefFor ? (
-            <a href={hrefFor(current.id)} onClick={(e) => e.stopPropagation()} className="no-underline" title={`Open ${createLabel ?? "item"}`}>
+            <Link prefetch={false} href={map(hrefFor(current.id))} onClick={(e) => e.stopPropagation()} className="no-underline" title={`Open ${createLabel ?? "item"}`}>
               {chip}
-            </a>
+            </Link>
           ) : chip}
           <button
             type="button"
@@ -1154,6 +1161,8 @@ function RelationshipValue({
   readOnly: boolean;
   onChange?: (v: { kind: RelationKind; id: string } | null) => void;
 }) {
+  // Same as LinkedEntityValue: canonical builders, mapped into this section.
+  const { map } = useObjectHref();
   const rel = parseRelation(value);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -1186,7 +1195,7 @@ function RelationshipValue({
 
   if (readOnly) {
     if (rel && relCfg?.hrefFor) {
-      return <a href={relCfg.hrefFor(rel.id)} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</a>;
+      return <Link prefetch={false} href={map(relCfg.hrefFor(rel.id))} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</Link>;
     }
     return chip;
   }
@@ -1199,9 +1208,9 @@ function RelationshipValue({
         // Linked: chip opens the related item; caret opens the picker.
         <span className="inline-flex items-center gap-0.5">
           {relCfg?.hrefFor ? (
-            <a href={relCfg.hrefFor(rel.id)} onClick={(e) => e.stopPropagation()} className="no-underline" title="Open">
+            <Link prefetch={false} href={map(relCfg.hrefFor(rel.id))} onClick={(e) => e.stopPropagation()} className="no-underline" title="Open">
               {chip}
-            </a>
+            </Link>
           ) : chip}
           <button
             type="button"

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Boxes, FolderKanban, Target, Link2, X, ExternalLink, Loader2, Frame } from "lucide-react";
 import { LinkExistingPicker } from "@/components/board-view/link-existing-picker";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
 interface HydratedLink {
   id: string;
@@ -195,20 +196,21 @@ function LinkRow({
       ) : (
         <ul className="space-y-1.5">
           {items.map((it) => {
+            // Canonical in data; opened in the section the person is in (Work).
             const href = it.target?.href ?? fallbackHref(it.targetId);
             return (
               <li key={it.id} className="group flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 hover:bg-zinc-50">
                 <Icon className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                 <button
                   type="button"
-                  onClick={() => router.push(href)}
+                  onClick={() => router.push(sectionHrefNow(href))}
                   className="flex-1 min-w-0 text-left text-xs font-medium truncate hover:text-zinc-700"
                 >
                   {it.target?.title || "Untitled"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => router.push(href)}
+                  onClick={() => router.push(sectionHrefNow(href))}
                   className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-zinc-100 inline-flex items-center justify-center text-zinc-400"
                   aria-label="Open"
                 >

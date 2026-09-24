@@ -7,15 +7,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { canContributeSpace, canEditSpace, getSpaceForReader, isOrgAdminAccessLevel } from "@/lib/space";
+import { canContributeSpace, canEditSpace, isOrgAdminAccessLevel } from "@/lib/space";
+import { whiteboardSpaceVisible } from "@/lib/whiteboard-gate";
 import { recordSnapshot } from "@/lib/snapshots";
 import { withArchivedBy } from "@/lib/archived-by";
 
-async function checkSpaceVisible(spaceId: string | null, userId: string, accessLevel: string | null | undefined): Promise<boolean> {
-  if (!spaceId) return true;
-  const space = await getSpaceForReader(spaceId, userId, accessLevel ?? "EMPLOYEE");
-  return Boolean(space);
-}
+// The read gate (whiteboardSpaceVisible) lives in src/lib/whiteboard-gate.ts,
+// so the Work canvas routes gate with the same function as these three verbs.
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,7 +24,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!whiteboard) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await checkSpaceVisible(whiteboard.spaceId, ctx.userId, ctx.accessLevel))) {
+  if (!(await whiteboardSpaceVisible(whiteboard.spaceId, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
@@ -76,7 +74,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await checkSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
+  if (!(await whiteboardSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
@@ -144,7 +142,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await checkSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
+  if (!(await whiteboardSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

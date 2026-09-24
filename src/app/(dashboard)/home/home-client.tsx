@@ -41,6 +41,7 @@ import { clockIn, inboxRowTime, type LocaleContext } from "@/lib/work-buckets";
 import { DotsArt } from "@/components/ui/dots-art";
 import { HomeWidget, WidgetGroupHeader } from "@/components/home/home-widget";
 import { WorkTaskRow } from "@/components/home/work-task-row";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 
 /** Dispatched by the create-task modal when a task is created. */
 const ITEM_CREATED = "workwrk:item-created";
@@ -75,6 +76,9 @@ export function HomeClient({
   const { openCreateTask, patchPrefs } = useOsShell();
   const { toast } = useOsToast();
   const { boot } = useBoot();
+  // Home is Work: a doc or a reminder's object opens in Work (the door,
+  // which places a Space item in its own Space before its editor mounts).
+  const objectLinks = useObjectHref();
 
   const [widgets, setWidgets] = useState<HomeWidgetKey[]>(initialWidgets);
   const [greeting, setGreeting] = useState(initialGreeting);
@@ -357,7 +361,7 @@ export function HomeClient({
                   {(data?.recentDocs?.rows ?? []).map((d) => (
                     <li key={d.id} className="border-b border-line-soft last:border-b-0">
                       <Link
-                        href={`/docs/${d.id}`}
+                        href={objectLinks.href("doc", d.id)}
                         className="flex items-center gap-2.5 px-4 hover:bg-hover"
                         style={{ minHeight: "var(--os-row-h)" }}
                       >
@@ -428,7 +432,7 @@ export function HomeClient({
                       style={{ minHeight: "var(--os-row-h)" }}
                     >
                       {r.href ? (
-                        <Link href={r.href} className="min-w-0 flex-1 truncate text-ink hover:underline">{r.title}</Link>
+                        <Link href={objectLinks.map(r.href)} className="min-w-0 flex-1 truncate text-ink hover:underline">{r.title}</Link>
                       ) : (
                         <span className="min-w-0 flex-1 truncate text-ink">{r.title}</span>
                       )}

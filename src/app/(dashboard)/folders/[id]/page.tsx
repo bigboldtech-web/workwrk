@@ -43,6 +43,9 @@ import { FolderTabs } from "./folder-tabs";
 import { NewListGhostRow, NewFolderGhostRow } from "./new-in-folder";
 import { SpaceListItemsTable } from "../../spaces/[slug]/space-list-items";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
+// A Folder page is Work, so what is on the shelf opens at its Work address
+// (src/lib/nav/object-href.ts), with the Work tree beside it.
+import { objectHref } from "@/lib/nav/object-href";
 
 export const dynamic = "force-dynamic";
 
@@ -174,9 +177,11 @@ export default async function FolderPage(props: {
       .findMany({
         where: { organizationId: u.organizationId, folderId: folder.id, archivedAt: null },
         orderBy: { updatedAt: "desc" }, take: 20,
-        select: { id: true, name: true, updatedAt: true, ownerId: true },
+        // spaceId too: a Space move leaves a canvas's folderId behind, so its
+        // link is Space-scoped only when it still sits in this Folder's Space.
+        select: { id: true, name: true, updatedAt: true, ownerId: true, spaceId: true },
       })
-      .catch(() => [] as Array<{ id: string; name: string; updatedAt: Date; ownerId: string | null }>),
+      .catch(() => [] as Array<{ id: string; name: string; updatedAt: Date; ownerId: string | null; spaceId: string | null }>),
     (async () => {
       const ids = Array.from(new Set([
         ...visibleChildFolders.map((f) => f.ownerId),
@@ -359,7 +364,7 @@ export default async function FolderPage(props: {
                   {docs.map((d) => (
                     <ContentsRow
                       key={d.id}
-                      href={`/docs/${d.id}`}
+                      href={objectHref("doc", d.id, "home", space.slug)}
                       glyph={<FileText className="w-4 h-4 text-ink-2 shrink-0" />}
                       name={d.title || "Untitled"}
                       type="Doc"
@@ -370,7 +375,7 @@ export default async function FolderPage(props: {
                   {canvases.map((c) => (
                     <ContentsRow
                       key={c.id}
-                      href={`/canvas/${c.id}`}
+                      href={objectHref("canvas", c.id, "home", c.spaceId === folder.spaceId ? space.slug : null)}
                       glyph={<Brush className="w-4 h-4 text-ink-2 shrink-0" />}
                       name={c.name || "Untitled canvas"}
                       type="Canvas"

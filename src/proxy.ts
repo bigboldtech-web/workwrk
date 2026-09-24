@@ -64,6 +64,10 @@ const APP_PREFIXES = new Set([
   "process-runs", "reviews", "settings", "sidekick", "sops", "spaces", "store",
   "surveys", "tables", "talent", "tasks", "team", "templates", "timesheets",
   "tlk", "today", "tools", "trash",
+  // The Work door (/work/docs/[id] and its four siblings): an object opened
+  // from Work with no Space the viewer can see. Its pages are all nested, so
+  // check-app-prefixes counts a segment whose DESCENDANTS hold a page.
+  "work",
   // (auth) + onboarding
   "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
   "welcome", "onboard", "setup",

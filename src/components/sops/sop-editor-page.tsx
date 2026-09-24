@@ -30,6 +30,13 @@
  * expired session never loses typed content: the DraftRestoreStrip offers
  * it back on the next open. The pure state rules live in
  * src/lib/sop-save-state.ts with a test per state.
+ *
+ * IN WORK. /work/sops/[id] renders this same page when an SOP is opened from
+ * Work, so the person stays in Work (src/lib/nav/object-href.ts). There
+ * (`inWork`, from the route's placement) the WorkPlacementProvider declares
+ * the crumb, Back and Delete land on the Work crumb, and ?edit and its strip
+ * stay at the address the SOP is mounted at (`workSelf`). The create routes
+ * never run in Work: they start without an id.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -81,6 +88,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { getSopKind, getSopLayout, SOP_KIND_LABEL, SOP_STATUS_COLOR, SOP_STATUS_LABEL, sopTypeForKind, type SopKind, type SopLayout, type SopStatus } from "@/lib/sop-kind";
 import { deriveSopSaveState, isMeaningfulFirstChange, nextRetryDelay } from "@/lib/sop-save-state";
+import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-placement";
+import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -155,6 +164,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
 }) {
   const router = useRouter();
   const params = useSearchParams();
+  // Work mode is a value, read before any early return. `workSelf` is the
+  // address the SOP is mounted at in Work; null on /sops/[id] and the
+  // create routes, where every navigation below keeps its /sops URL.
+  const place = useWorkPlacement();
+  const inWork = !!initialSopId && place?.kind === "sop" && place.id === initialSopId;
+  const workSelf = inWork && place ? place.self : null;
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const fmt = useFormat();
@@ -176,6 +191,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   /* ── edit buffers ── */
   const [editing, setEditing] = useState(creating);
   const [title, setTitle] = useState("");
+  // The Work crumb's live title.
+  useWorkTitle(inWork ? (title || sop?.title || null) : null);
   const [description, setDescription] = useState("");
   const [bnDoc, setBnDoc] = useState<BnDocJSON | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -259,8 +276,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     editHandled.current = true;
     if (params?.get("edit") !== "1") return;
     if (canEdit) setEditing(true);
-    else router.replace(`/sops/${sop.id}`);
-  }, [sop, canEdit, params, router]);
+    else router.replace(workSelf ?? `/sops/${sop.id}`);
+  }, [sop, canEdit, params, router, workSelf]);
 
   /* ── the content payload for the kind ── */
   const buildContent = useCallback((): Record<string, unknown> => {
@@ -466,8 +483,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     baselinePendingRef.current = true;
     hydrate(sop);
     setEditing(true);
-    router.replace(`/sops/${sop.id}?edit=1`);
-  }, [canEdit, sop, hydrate, router]);
+    router.replace(`${workSelf ?? `/sops/${sop.id}`}?edit=1`);
+  }, [canEdit, sop, hydrate, router, workSelf]);
 
   const leaveEdit = useCallback(async (opts: { discard?: boolean } = {}) => {
     if (!sop) {
@@ -494,8 +511,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     setEditing(false);
     const fresh = await load();
     if (fresh) { baselinePendingRef.current = true; hydrate(fresh); }
-    router.replace(`/sops/${sop.id}`);
-  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething]);
+    router.replace(workSelf ?? `/sops/${sop.id}`);
+  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething, workSelf]);
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [reack, setReack] = useState(false);
@@ -510,7 +527,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     setReack(false);
     toast("Published");
     setEditing(false);
-    router.replace(`/sops/${sopIdRef.current}`);
+    router.replace(workSelf ?? `/sops/${sopIdRef.current}`);
     void load().then((d) => { if (d) { baselinePendingRef.current = true; hydrate(d); } });
     bumpRowVersion("sops");
   };
@@ -538,7 +555,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     if (!r.ok) { toast(r.error || "Couldn't move it to Trash", { tone: "danger" }); return; }
     toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=sop") } });
     bumpRowVersion("sops");
-    router.push("/sops");
+    router.push(inWork && place ? place.closeHref : "/sops");
   };
   const duplicate = async () => {
     if (!sop) return;
@@ -546,11 +563,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     if (!r.ok) { toast(r.error || "Couldn't duplicate", { tone: "danger" }); return; }
     toast("Duplicated");
     bumpRowVersion("sops");
-    router.push(`/sops/${r.data.id}?edit=1`);
+    router.push(`${objectHrefNow("sop", r.data.id)}?edit=1`);
   };
   const copyLink = useCallback(() => {
     if (!sopIdRef.current) return;
-    void navigator.clipboard.writeText(`${window.location.origin}/sops/${sopIdRef.current}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
+    // The share form: the Work door from Work, /sops/<id> elsewhere.
+    void navigator.clipboard.writeText(copyObjectLink("sop", sopIdRef.current)).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
   }, [toast]);
 
   const [acking, setAcking] = useState(false);
@@ -644,7 +662,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   if (loadState === "failed") {
     return (
       <>
-        <OsPageHeader title="SOP" back={{ fallbackHref: "/sops", label: "SOPs" }} />
+        <OsPageHeader title="SOP" back={inWork && place ? { fallbackHref: place.back.href, label: place.back.label } : { fallbackHref: "/sops", label: "SOPs" }} />
         <OsEmptyView variant="error" title="Couldn't load this SOP" action={{ label: "Retry", onClick: () => { setLoadState("loading"); void load(); } }} />
       </>
     );
@@ -703,10 +721,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
 
   return (
     <>
-      <Breadcrumb items={crumbs} />
+      {/* In Work the WorkPlacementProvider declares the crumb (Work > SOP). */}
+      {!inWork ? <Breadcrumb items={crumbs} /> : null}
       <OsPageHeader
         title={headerTitle}
-        back={{ fallbackHref: "/sops", label: "SOPs" }}
+        back={inWork && place ? { fallbackHref: place.back.href, label: place.back.label } : { fallbackHref: "/sops", label: "SOPs" }}
         titleSlot={
           /* The title row per spec-process section 2: the title (an input with
              the same metrics in edit mode), then the pale StatusChip, the kind

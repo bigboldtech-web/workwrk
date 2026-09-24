@@ -35,6 +35,10 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { TARGET_NOUN, UNREADABLE_SENTENCE } from "@/lib/notification-target";
 import { inboxRowTime, type LocaleContext } from "@/lib/work-buckets";
 import { KindIcon, type InboxNotification } from "./inbox-row";
+// The Inbox is Work: a notification's doc, table, canvas, SOP or form opens
+// in Work. Its stored href is canonical and is mapped before returnTo is
+// appended; Copy link copies the share form (src/lib/nav/object-href.ts).
+import { shareHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
 
 export function InboxTargetPane({
   notification,
@@ -121,7 +125,9 @@ function PaneHeader({
   clearLabel: string;
 }) {
   const { toast } = useOsToast();
-  const href = notification.target.readable ? notification.target.href : null;
+  const { map: sectionLink } = useObjectHref();
+  const stored = notification.target.readable ? notification.target.href : null;
+  const href = stored ? sectionLink(stored) : null;
   const withReturn = href ? `${href}${href.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}` : null;
 
   return (
@@ -141,7 +147,7 @@ function PaneHeader({
           type="button"
           onClick={() => {
             try {
-              void navigator.clipboard.writeText(`${window.location.origin}${href}`);
+              void navigator.clipboard.writeText(shareHrefNow(href));
               toast("Link copied");
             } catch {
               toast("Couldn't copy that link", { tone: "danger" });
@@ -235,7 +241,8 @@ function MentionCard({
   now: Date;
   locale: LocaleContext;
 }) {
-  const href = notification.target.href;
+  const { map: sectionLink } = useObjectHref();
+  const href = notification.target.href ? sectionLink(notification.target.href) : notification.target.href;
   const withReturn = href ? `${href}${href.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}` : null;
   return (
     <div className="mx-auto w-full max-w-[760px]">
@@ -270,8 +277,9 @@ function SummaryCard({
   /** Present only when the target is readable: no Open button otherwise. */
   returnTo?: string;
 }) {
+  const { map: sectionLink } = useObjectHref();
   const readable = notification.target.readable;
-  const href = readable ? notification.target.href : null;
+  const href = readable && notification.target.href ? sectionLink(notification.target.href) : null;
   const withReturn =
     href && returnTo ? `${href}${href.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}` : href;
   const noun = TARGET_NOUN[notification.target.kind as keyof typeof TARGET_NOUN] ?? "";

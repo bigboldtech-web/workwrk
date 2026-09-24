@@ -33,6 +33,10 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { fileTypeBucket, fileTypeLabel } from "@/lib/files-list";
 import { MoveFileDialog } from "./move-file-dialog";
 import { dispatchFilesChanged, downloadFile, isSummarizable } from "./file-row-menu";
+// The drawer opens over Work and Docs pages alike, so the builders below
+// stay canonical and every link is mapped into the section it is followed
+// in (src/lib/nav/object-href.ts).
+import { sectionHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
 
 export interface PreviewFile {
   id: string;
@@ -88,6 +92,7 @@ export function FilePreviewDrawer({ fileId, initial, onClose, onChanged }: {
   onChanged?: () => void;
 }) {
   const router = useRouter();
+  const { map: sectionLink } = useObjectHref();
   const { toast } = useOsToast();
   const { railApps } = useOsShell();
   const { boot } = useBoot();
@@ -233,7 +238,9 @@ export function FilePreviewDrawer({ fileId, initial, onClose, onChanged }: {
               <Row label="Size">{fmt.bytes(file.size)}</Row>
               <Row label="Uploaded by">{file.uploadedBy ? <span className="inline-flex items-center gap-2"><PersonAvatar person={file.uploadedBy} size={20} />{file.uploadedBy.name ?? `${file.uploadedBy.firstName ?? ""} ${file.uploadedBy.lastName ?? ""}`.trim()}</span> : <span className="text-ink-3">Unknown</span>}</Row>
               <Row label="Uploaded"><span title={fmt.title(file.createdAt)}>{fmt.date(file.createdAt)}</span></Row>
-              <Row label="Location">{location ? <a href={location.href} className="text-brand-deep hover:underline" onClick={(e) => { e.preventDefault(); router.push(location.href); }}>{location.label}</a> : null}</Row>
+              {/* The mapped form on BOTH the href and the handler, so the shell's
+                  link interceptor sees nothing to map and never races it. */}
+              <Row label="Location">{location ? <a href={sectionLink(location.href)} className="text-brand-deep hover:underline" onClick={(e) => { e.preventDefault(); router.push(sectionHrefNow(location.href)); }}>{location.label}</a> : null}</Row>
               <Row label="Favorites"><Switch checked={!!file.favorite} onChange={(v) => void toggleStar(v)} aria-label="Add to favorites" /></Row>
             </dl>
 
@@ -263,7 +270,7 @@ export function FilePreviewDrawer({ fileId, initial, onClose, onChanged }: {
                     return (
                       <li key={l.id} className="flex h-9 items-center gap-2 text-base text-ink">
                         <span className="text-ink-2">{s.label}</span>
-                        {s.href ? <button type="button" onClick={() => router.push(s.href!)} className="font-medium text-brand-deep hover:underline">Open</button> : null}
+                        {s.href ? <button type="button" onClick={() => router.push(sectionHrefNow(s.href!))} className="font-medium text-brand-deep hover:underline">Open</button> : null}
                       </li>
                     );
                   })}

@@ -1663,6 +1663,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+          // A card's link is handed over CANONICAL (it is what the scene
+          // stores); the editor's onOpenEntity maps it into the section the
+          // canvas is open in (src/lib/nav/object-href.ts).
           if (readOnly) {
             // Following a card's link is a read; everything else double-click
             // does here is an edit.

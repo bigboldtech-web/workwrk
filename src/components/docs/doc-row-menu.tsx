@@ -16,9 +16,18 @@
 // which do that wiring once. The old `note-actions-menu.tsx` wrapper is gone:
 // the Docs sidebar tree, the doc pages panel and the Space tree doc rows all
 // mount this host directly.
+//
+// WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
+// object-href.ts). Open, Open in new tab, New doc inside and Duplicate build
+// the address of the section the person is in at the moment of the click
+// (the Space-scoped Work address when the host passes spaceSlug, the Work
+// door otherwise in Work, /docs/<id> elsewhere); Copy link copies the share
+// form; Open beside and the Trash exit ask the open object where it is
+// mounted, which is what pathname comparisons got wrong in Work and under
+// the task drawer.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Share2, Star, Trash2, LayoutTemplate,
 } from "lucide-react";
@@ -32,6 +41,9 @@ import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { createChildPage } from "@/components/docs/doc-pages-panel";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { apiFetch } from "@/lib/api-fetch";
+import { handOffDocTitle } from "@/lib/doc-title-handoff";
+import { currentOpenObject } from "@/components/layout/os/work-placement";
+import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
 export type DocMenuRole = "full" | "edit" | "comment" | "view";
 
@@ -54,6 +66,8 @@ export interface DocMenuTarget {
   role?: DocMenuRole;
   /** Created by the viewer: Move to Trash at Can edit. */
   own?: boolean;
+  /** The doc's Space slug when the host knows it (a Work tree row): its rows open the Space-scoped Work address. */
+  spaceSlug?: string | null;
 }
 
 export type DocMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "child-created" | "moved" | "templated";
@@ -81,7 +95,6 @@ export interface DocRowMenuProps {
 
 export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRows, onRenameInline }: DocRowMenuProps) {
   const router = useRouter();
-  const pathname = usePathname() || "";
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { boot } = useBoot();
@@ -122,18 +135,16 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   const done = (kind: DocMenuChange) => { onChanged?.(kind); dispatchDocsChanged(); };
 
   function copyLink() {
-    void navigator.clipboard?.writeText(`${window.location.origin}/docs/${doc.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy link"));
+    void navigator.clipboard?.writeText(copyObjectLink("doc", doc.id)).then(() => toast("Link copied"), () => toast("Couldn't copy link"));
     onClose();
   }
 
   function openBeside() {
-    // On a doc page (from any context, the tree included): add ?peek= to the
-    // current doc; on a list: open the doc.
-    if (pathname.startsWith("/docs/")) {
-      const current = pathname.slice("/docs/".length).split("/")[0];
-      if (current && current !== doc.id) { router.push(`/docs/${current}?peek=${doc.id}`); onClose(); return; }
-    }
-    router.push(`/docs/${doc.id}`);
+    // With a doc open (from any context, the tree included): add ?peek= to
+    // it at the address it is mounted at; otherwise open the doc.
+    const open = currentOpenObject();
+    if (open?.kind === "doc" && open.id !== doc.id) { router.push(`${open.self}?peek=${encodeURIComponent(doc.id)}`); onClose(); return; }
+    router.push(objectHrefNow("doc", doc.id, doc.spaceSlug));
     onClose();
   }
 
@@ -141,6 +152,27 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     const t = name.trim() || "Untitled doc";
     if (t === doc.title) { onClose(); return; }
     setBusy("rename");
+    // The doc open in an editor on screen takes the rename through its own
+    // writer, so its title, its crumb and its save conflict check stay true
+    // (lib/doc-title-handoff.ts). Otherwise the title-only PUT, as before.
+    const handed = await handOffDocTitle(doc.id, t);
+    if (handed === "conflict") {
+      // The open editor's save met a newer version from someone else. The
+      // new name waits in that editor behind its conflict strip, where the
+      // person chooses whose version wins; saving it from here would be the
+      // silent overwrite the handoff exists to prevent.
+      setBusy(null);
+      toast("Not renamed yet: someone else changed this doc. Resolve it in the open editor.", { tone: "danger" });
+      onClose();
+      return;
+    }
+    if (handed) {
+      setBusy(null);
+      toast("Renamed");
+      done("renamed");
+      onClose();
+      return;
+    }
     const r = await apiFetch(`/api/docs/${doc.id}`, { method: "PUT", json: { title: t } });
     setBusy(null);
     if (r.ok) { toast("Renamed"); done("renamed"); } else toast(r.error || "Couldn't rename");
@@ -149,7 +181,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
 
   async function newInside() {
     const id = await createChildPage(doc.id);
-    if (id) { done("child-created"); router.push(`/docs/${id}?new=1`); }
+    if (id) { done("child-created"); router.push(`${objectHrefNow("doc", id, doc.spaceSlug)}?new=1`); }
     else toast("Couldn't create the doc");
     onClose();
   }
@@ -161,7 +193,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     if (r.ok) {
       const id = r.data?.doc?.id ?? r.data?.data?.id ?? r.data?.id;
       toast("Duplicated"); done("duplicated");
-      if (id) router.push(`/docs/${id}`);
+      if (id) router.push(objectHrefNow("doc", id, doc.spaceSlug));
     } else toast(r.error || "Couldn't duplicate");
     onClose();
   }
@@ -221,7 +253,10 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     if (r.ok) {
       toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=doc") } });
       done("trashed");
-      if (pathname === `/docs/${doc.id}`) router.push("/docs");
+      // The open doc leaves for the list of its own section: /docs in the
+      // Docs hub, the nearest Work crumb in Work.
+      const open = currentOpenObject();
+      if (open?.kind === "doc" && open.id === doc.id) router.push(open.closeHref);
     } else toast(r.error || "Couldn't move to Trash");
   }
 
@@ -272,9 +307,9 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     <MenuList style={{ minWidth: 220 }}>
       {context !== "editor" ? (
         <>
-          <MenuItem icon={FileText} label="Open" onClick={() => { router.push(`/docs/${doc.id}`); onClose(); }} />
+          <MenuItem icon={FileText} label="Open" onClick={() => { router.push(objectHrefNow("doc", doc.id, doc.spaceSlug)); onClose(); }} />
           <MenuItem icon={Columns2} label="Open beside" onClick={openBeside} />
-          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(`/docs/${doc.id}`, "_blank", "noopener"); onClose(); }} />
+          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(objectHrefNow("doc", doc.id, doc.spaceSlug), "_blank", "noopener"); onClose(); }} />
         </>
       ) : null}
       <MenuItem icon={Link2} label="Copy link" shortcut="⌘L" onClick={copyLink} />

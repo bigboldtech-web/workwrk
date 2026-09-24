@@ -21,6 +21,7 @@ import {
   resolveHub,
   resolveHubPrefix,
 } from "./route-hub";
+import { WORK_ROWS } from "./work-rows";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const DASHBOARD_DIR = path.join(REPO_ROOT, "src", "app", "(dashboard)");
@@ -263,6 +264,66 @@ describe("ROUTE_HUB completeness", () => {
     expect(HUB_KEYS).toHaveLength(8);
     const used = new Set(Object.values(ROUTE_HUB));
     for (const hub of HUB_KEYS) expect(used.has(hub)).toBe(true);
+  });
+});
+
+describe("Work object addresses", () => {
+  // The founder's rule: an object opened from Work stays in Work. Its Work
+  // addresses must resolve to Work through the table alone, or the rail, the
+  // sidebar and the crumb would switch hubs exactly as before.
+  const SCOPED = ["/spaces/design-team/docs/d1", "/spaces/design-team/tables/t1", "/spaces/design-team/canvas/c1"];
+  const DOORS = ["/work/docs/d1", "/work/tables/t1", "/work/canvas/c1", "/work/sops/s1", "/work/forms/f1"];
+
+  it("resolves every Space-scoped address to Work through the existing /spaces row", () => {
+    for (const path of SCOPED) {
+      expect(resolveHub(path)).toBe("home");
+      expect(resolveHubPrefix(path)).toBe("/spaces");
+    }
+  });
+
+  it("resolves every door address to Work through the /work row", () => {
+    expect(ROUTE_HUB["/work"]).toBe("home");
+    expect(ROUTE_TITLES["/work"]).toBe("Work");
+    for (const path of DOORS) {
+      expect(resolveHub(path)).toBe("home");
+      expect(resolveHubPrefix(path)).toBe("/work");
+    }
+  });
+
+  it("finds the eight new route directories and covers each with a Work row", () => {
+    const routes = new Set(dashboardRoutes());
+    const added = [
+      "/spaces/[slug]/docs/[id]",
+      "/spaces/[slug]/tables/[id]",
+      "/spaces/[slug]/canvas/[id]",
+      "/work/docs/[id]",
+      "/work/tables/[id]",
+      "/work/canvas/[id]",
+      "/work/sops/[id]",
+      "/work/forms/[id]",
+    ];
+    for (const route of added) {
+      expect(routes.has(route), `${route} is missing from the (dashboard) tree`).toBe(true);
+      expect(resolveHub(route)).toBe("home");
+    }
+    // No page of its own: /work and its kind segments fall to the catch-all.
+    expect(routes.has("/work")).toBe(false);
+    expect(routes.has("/work/docs")).toBe(false);
+    expect(routes.has("/spaces/[slug]/docs")).toBe(false);
+  });
+
+  it("lights no static Work row on an object address or under the task drawer", () => {
+    for (const path of [...SCOPED, ...DOORS, "/item/i1"]) {
+      expect(resolveActiveRow(WORK_ROWS, path), path).toBeUndefined();
+    }
+  });
+
+  it("leaves the canonical addresses in their own hubs, unchanged", () => {
+    expect(resolveHub("/docs/d1")).toBe("docs");
+    expect(resolveHub("/canvas/c1")).toBe("docs");
+    expect(resolveHub("/sops/s1")).toBe("docs");
+    expect(resolveHub("/tables/t1")).toBe("tables");
+    expect(resolveHub("/forms/f1")).toBe("tables");
   });
 });
 

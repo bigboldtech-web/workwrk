@@ -12,8 +12,14 @@
  * persists the split ratio in localStorage so the writer's preferred
  * split survives reloads.
  *
- * Closing the right pane navigates to /docs/<primaryId> (peek param
- * dropped). Swapping flips primary/peek.
+ * Closing the right pane navigates to the primary doc's own address (peek
+ * param dropped). Swapping flips primary/peek.
+ *
+ * In Work (/spaces/[slug]/docs/[id]?peek=, /work/docs/[id]?peek=) the split
+ * stays in Work: Close stays at the address the primary doc is mounted at,
+ * and Open full and Swap build the peeked doc's address for the section the
+ * person is in (the door, which re-places it in its own Space with ?peek
+ * kept). In the Docs hub every one of them is /docs/<id>, as before.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,6 +27,9 @@ import { useRouter } from "next/navigation";
 import { X, ArrowLeftRight, Maximize2, FileText } from "lucide-react";
 import { BlockDocEditor } from "./block-doc-editor";
 import { apiFetch } from "@/lib/api-fetch";
+import { useWorkPlacement } from "@/components/layout/os/work-placement";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
+import { canonicalHref } from "@/lib/nav/object-href";
 
 const RATIO_KEY = "workwrk:docs:splitRatio";
 const MIN_RATIO = 0.2;
@@ -33,6 +42,8 @@ interface Props {
 
 export function DocSplitView({ primaryId, peekId }: Props) {
   const router = useRouter();
+  const place = useWorkPlacement();
+  const selfPath = place?.kind === "doc" && place.id === primaryId ? place.self : canonicalHref("doc", primaryId);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [ratio, setRatio] = useState<number>(0.5);
   const draggingRef = useRef(false);
@@ -108,13 +119,13 @@ export function DocSplitView({ primaryId, peekId }: Props) {
   }, [peekId]);
 
   function closePeek() {
-    router.push(`/docs/${primaryId}`);
+    router.push(selfPath);
   }
   function openFull() {
-    router.push(`/docs/${peekId}`);
+    router.push(objectHrefNow("doc", peekId));
   }
   function swap() {
-    router.push(`/docs/${peekId}?peek=${primaryId}`);
+    router.push(`${objectHrefNow("doc", peekId)}?peek=${encodeURIComponent(primaryId)}`);
   }
 
   const leftPct = `${(ratio * 100).toFixed(2)}%`;

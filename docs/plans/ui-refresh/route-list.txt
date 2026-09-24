@@ -121,6 +121,9 @@
 /(dashboard)/sops/new/text
 /(dashboard)/spaces
 /(dashboard)/spaces/[slug]
+/(dashboard)/spaces/[slug]/canvas/[id]
+/(dashboard)/spaces/[slug]/docs/[id]
+/(dashboard)/spaces/[slug]/tables/[id]
 /(dashboard)/store
 /(dashboard)/surveys
 /(dashboard)/surveys/[id]
@@ -150,6 +153,11 @@
 /(dashboard)/today
 /(dashboard)/tools
 /(dashboard)/trash
+/(dashboard)/work/canvas/[id]
+/(dashboard)/work/docs/[id]
+/(dashboard)/work/forms/[id]
+/(dashboard)/work/sops/[id]
+/(dashboard)/work/tables/[id]
 /(marketing)
 /(marketing)/about
 /(marketing)/blog

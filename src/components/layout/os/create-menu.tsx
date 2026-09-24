@@ -29,6 +29,7 @@ import { useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { refreshSidebar } from "./sidebar-refresh";
+import { objectHrefNow } from "./use-object-href";
 
 function hasSpeechRecognition(): boolean {
   if (typeof window === "undefined") return false;
@@ -76,7 +77,8 @@ export function CreateMenu({
       toast("Couldn't create doc. Try again");
       return;
     }
-    router.push(`/docs/${id}`);
+    // In the section the person is in: the Work door in Work, /docs elsewhere.
+    router.push(objectHrefNow("doc", id));
   };
 
   const tool = (detail: "reminder" | "notepad" | "voice") => {

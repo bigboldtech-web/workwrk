@@ -8,6 +8,7 @@
 // example K): Owners and Admins get the switch, Members "Ask an admin" with
 // the admins' avatars, Guests the in-shell 404.
 
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { requireSessionUser } from "@/lib/page-gates";
 import { isGuestViewer, isOrgAdminViewer } from "@/lib/route-guard";
@@ -20,9 +21,16 @@ import { ModuleOff } from "./denial-views";
 
 const MOD = MODULE_BY_SLUG["workwrk-tables"];
 
-export async function TablesModuleGate({ children }: { children: React.ReactNode }) {
-  const user = await requireSessionUser();
-  if (await isModuleActive(user.organizationId, MOD.productSlug)) return <>{children}</>;
+/**
+ * The module-off state on its own, for a caller that has already resolved
+ * the session: null when the module is on, <ModuleOff> for Owners, Admins
+ * and Members, and notFound() (the gate's one throw) for a Guest. The
+ * /tables layout and the Work table routes (src/components/access/
+ * work-object-gate.tsx) both answer through it, so a table opened from Work
+ * shows exactly the state /tables/[id] shows.
+ */
+export async function tablesModuleOffView(user: { organizationId: string }): Promise<ReactNode | null> {
+  if (await isModuleActive(user.organizationId, MOD.productSlug)) return null;
   // The tier reads live in route-guard (the one transcription), not here.
   if (await isGuestViewer()) notFound();
   const canEnable = await isOrgAdminViewer();
@@ -37,4 +45,9 @@ export async function TablesModuleGate({ children }: { children: React.ReactNode
       back={{ fallbackHref: WORK_HOME_HREF, label: HUB_LABELS.home }}
     />
   );
+}
+
+export async function TablesModuleGate({ children }: { children: ReactNode }) {
+  const user = await requireSessionUser();
+  return (await tablesModuleOffView(user)) ?? <>{children}</>;
 }

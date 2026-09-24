@@ -38,6 +38,9 @@ import { getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { hasModule } from "@/lib/space-modules";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
+// A Space page is Work, so its doc links are the docs' Work addresses:
+// they open in place, with this Space's tree beside them.
+import { objectHref } from "@/lib/nav/object-href";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
 
 export const dynamic = "force-dynamic";
@@ -759,7 +762,7 @@ export default async function SpacePage(props: {
           />
         ) : null}
         {view === "overview" && !hasContent ? (
-          <SpaceQuickStart spaceId={space.id} accent={accent} />
+          <SpaceQuickStart spaceId={space.id} spaceSlug={space.slug} accent={accent} />
         ) : view === "overview" ? (
           <div className="space-y-4">
             <OverviewCustomizeBanner />
@@ -800,7 +803,7 @@ export default async function SpacePage(props: {
                         {recentDocs.map((d) => (
                           <li key={d.id}>
                             <Link
-                              href={`/docs/${d.id}`}
+                              href={objectHref("doc", d.id, "home", space.slug)}
                               className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-base"
                             >
                               <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />

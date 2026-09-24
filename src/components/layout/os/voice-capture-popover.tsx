@@ -11,6 +11,7 @@ import { useSession } from "next-auth/react";
 import { Mic, X, Copy, RotateCcw, Square, StickyNote, CheckSquare } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useLayer, useOsShell } from "./shell-context";
+import { objectHrefNow } from "./use-object-href";
 
 /** ProseMirror-ish doc body from plain text — one paragraph per line.
  *  Mirrors NotepadPanel.textToContent so a voice note reads back exactly
@@ -118,7 +119,8 @@ export function VoiceCapturePopover() {
       const id = d?.doc?.id;
       toast("Saved as note");
       stop(); setOpen(false);
-      if (id) router.push(`/docs/${id}`);
+      // A NOTEPAD note has no Space, so from Work this is the Work door.
+      if (id) router.push(objectHrefNow("doc", id));
     } catch { toast("Couldn't save note"); }
     finally { setSaving(false); }
   }

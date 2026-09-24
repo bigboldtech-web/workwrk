@@ -42,6 +42,24 @@ The five hand-rolled `keydown` listeners in `my-work-panel.tsx`, `notepad-panel.
 | `/item/[id]` full page (hard load, search, notification, deep link, Expand) | first match wins: (1) a same-origin `?returnTo=`, labelled with that destination's name from the route table; (2) a subtask → the parent task `/item/<parentId>`, label = the parent title at 160px ellipsis; (3) the task's List `/boards/<listSlug>`, label = the List name; (4) a Personal list task → `/my-work/personal`, label **Personal list**; (5) an assignee-only viewer who cannot read the List → `/home`, label **Home** | n/a | nothing (pickers and menus close first; a focused inline editor commits on Esc) |
 | `/tasks/[id]` with no migrated Item | the in-shell 404, which carries `BackButton{fallbackHref: hub.defaultHref}` resolving to `/home` labelled **Work** | n/a | n/a |
 
+### Objects opened from Work (open in place, 2026-09-24)
+
+A doc, table, canvas, SOP or form opened from anywhere in Work stays in Work: the Work sidebar stays on the left, the object opens in the main area, and the rail never switches hub. Each object has a Work address as well as its canonical one (src/lib/nav/object-href.ts): `/spaces/[slug]/{docs,tables,canvas}/[id]` when its own Space is in the viewer's Work tree, and the Work door `/work/{docs,tables,canvas,sops,forms}/[id]` otherwise. The door moves a Space item to its Space-scoped address before any editor mounts, keeping the query and the hash, and a Space-scoped address naming the wrong Space is corrected the same way, so an object never renders under a wrong crumb. The crumb reads **Work › Space › (Folder) › Item** and is declared once, by the route's WorkPlacementProvider, from the first frame. The BackButton target is always the crumb immediately left of the item that has an href, else `/home` labelled **Work**; a Trash of the open item lands on that same crumb.
+
+| Surface | Back target | Close | Esc |
+|---|---|---|---|
+| `/spaces/[slug]/docs/[id]` | the nearest crumb with an href: a sub-doc's parent doc (at its Work address), else the task, the List, the Folder (a folder doc's own, or its List's), else the Space. Label = that crumb's name. For a folder-only grantee the Space crumb has no href, so Back lands on the granted Folder | n/a | as `/docs/[id]` |
+| `/spaces/[slug]/tables/[id]` | the Space (`/spaces/[slug]`), label = the Space name. A table carries no Folder crumb: the Work tree lists tables at the Space's top level | n/a | as `/tables/[id]`: **Esc never navigates away from a table** |
+| `/spaces/[slug]/canvas/[id]` | the Space, label = the Space name (no Folder crumb, as a table) | n/a | as `/canvas/[id]` |
+| `/work/docs/[id]` (a doc with no Space in the viewer's tree: standalone, NOTEPAD, a personal List's, a List reached only by a List grant) | the nearest readable crumb (a parent doc, the List, the task), else `/home`, label **Work** | n/a | as `/docs/[id]` |
+| `/work/tables/[id]`, `/work/canvas/[id]` (unscoped) | `/home`, label **Work** | n/a | as the canonical route |
+| `/work/sops/[id]` and `/work/sops/[id]?edit=1` | `/home`, label **Work**. Delete lands there too | n/a | as `/sops/[id]` |
+| `/work/forms/[id]` | the destination List or table at its Work address when the form has one, else `/home`, label **Work** | n/a | as `/forms/[id]` |
+| Any of the above, refused by the object's own gate or missing | the in-shell 404 in Work chrome, with the hub's BackButton (**Work**); nothing about the object is named | n/a | n/a |
+| Any of the above, the gate failed to answer | the error state "This page couldn't load" with Try again (a route refresh) and `BackButton{fallbackHref="/home"}` labelled **Work** | n/a | n/a |
+
+Query-only navigations (`?peek`, `?row`, `?new`, `?tab`, `?edit`, `?preview`) stay at the address the object is mounted at, never the task drawer's `/item/[id]`, and a Move while the object is open re-places its crumb and tree branch in place without remounting the editor. The canonical rows in sections 6 and 7 are unchanged and are what the Docs and Tables hubs open.
+
 ### Work drawers and modals
 
 | Surface | Close target | Esc |
@@ -150,9 +168,9 @@ No `router.back()` and no `window.location.reload()` anywhere in Talk: the self-
 | Surface | Back target | Close | Esc |
 |---|---|---|---|
 | `/docs`, `/canvas`, `/files`, `/notetaker`, `/sops`, `/sops/my-sops`, `/sops/compliance`, `/process-runs`, `/policies`, `/policies/compliance`, `/agreements` | none (list pages). `/files` carries the folder path in the top-bar breadcrumb (Docs › Files › Q4 › Contracts) | n/a | first Esc clears focus inside the Filter panel's search field, second closes the panel; any open picker closes first |
-| `/docs/[id]` | `fallbackHref`: `/docs/[parentId]` for a sub-doc, else the anchor page for an anchored doc (`/spaces/[slug]`, `/folders/[id]`, `/boards/[slug]`, `/item/[id]`), else `/docs`. Label = the parent's name ("Docs", the parent doc's title, or the Space name) | n/a | closes a right panel when focus is inside it; otherwise Esc in the editor blurs the current block |
-| `/canvas/[id]` | the anchor Space page when `spaceId` is set, else `/canvas`. Label = the Space name or **Canvases** | n/a | closes the AI panel, then a picker |
-| `/sops/[id]` and `/sops/[id]?edit=1` | `fallbackHref="/sops"`, label **SOPs** (history-aware: arriving from My SOPs, the browser history wins and the label still reads SOPs) | n/a | in edit mode with nothing dirty: leaves edit mode; dirty: confirm "Discard changes?"; in read mode: nothing |
+| `/docs/[id]` (opened from the Docs hub; from Work see section 1, Objects opened from Work) | `fallbackHref`: `/docs/[parentId]` for a sub-doc, else the anchor page for an anchored doc (`/spaces/[slug]`, `/folders/[id]`, `/boards/[slug]`, `/item/[id]`), else `/docs`. Label = the parent's name ("Docs", the parent doc's title, or the Space name) | n/a | closes a right panel when focus is inside it; otherwise Esc in the editor blurs the current block |
+| `/canvas/[id]` (opened from the Docs hub; from Work see section 1) | the anchor Space page when `spaceId` is set, else `/canvas`. Label = the Space name or **Canvases** | n/a | closes the AI panel, then a picker |
+| `/sops/[id]` and `/sops/[id]?edit=1` (opened from the Docs hub; from Work see section 1) | `fallbackHref="/sops"`, label **SOPs** (history-aware: arriving from My SOPs, the browser history wins and the label still reads SOPs) | n/a | in edit mode with nothing dirty: leaves edit mode; dirty: confirm "Discard changes?"; in read mode: nothing |
 | `/sops/new`, `/sops/new/{text,steps,checklist,record}` | `fallbackHref="/sops"`, label **SOPs** | n/a | on a blank editor: back to `/sops`; once the row exists: confirm if dirty |
 | `/sops/manage` (Organize) | `fallbackHref="/sops"`, label **SOPs** | n/a | nothing |
 | `/policies/[id]` | `fallbackHref="/policies"`, label **Policies** | n/a | as the SOP page |
@@ -175,8 +193,8 @@ No `router.back()` and no `window.location.reload()` anywhere in Talk: the self-
 | Surface | Back target | Close | Esc |
 |---|---|---|---|
 | `/tables`, `/forms` | none (list pages at the root of the hub); the top-bar breadcrumb is the location | n/a | closes the drawer, then the filter panel |
-| `/tables/[id]` | `fallbackHref`: the table's Space page (`/spaces/[slug]`) when `spaceId` is set, else `/tables`. Label = the Space name or **Tables**. The hand-rolled `frmb__back` that always pushed `/tables` is deleted | n/a | **inside the grid**: first Esc cancels the current cell edit, second collapses the selection to the active cell, third clears the search or filter highlight. **Esc never navigates away from a table** |
-| `/forms/[id]` | `fallbackHref`: the destination List's board (`/boards/[slug]`) when the form goes to a List, else the destination table (`/tables/[id]`), else `/forms`. Label = the destination name or **Forms**. The `ArrowLeft` push at `page.tsx:223` is deleted | n/a | closes the field picker, then a dialog |
+| `/tables/[id]` (opened from the Tables hub; from Work see section 1, Objects opened from Work) | `fallbackHref`: the table's Space page (`/spaces/[slug]`) when `spaceId` is set, else `/tables`. Label = the Space name or **Tables**. The hand-rolled `frmb__back` that always pushed `/tables` is deleted | n/a | **inside the grid**: first Esc cancels the current cell edit, second collapses the selection to the active cell, third clears the search or filter highlight. **Esc never navigates away from a table** |
+| `/forms/[id]` (opened from the Tables hub; from Work see section 1) | `fallbackHref`: the destination List's board (`/boards/[slug]`) when the form goes to a List, else the destination table (`/tables/[id]`), else `/forms`. Label = the destination name or **Forms**. The `ArrowLeft` push at `page.tsx:223` is deleted | n/a | closes the field picker, then a dialog |
 | Row detail drawer on `/tables/[id]` (`?row=`) | n/a | ✕ removes `?row=` and returns focus to the row's gutter cell. **No Expand**: a table row has no page | closes the drawer |
 | Response drawer on `/forms/[id]` (`?response=`) | n/a | ✕ removes `?response=` and returns focus to the response row | closes |
 | Dialogs here (CSV import, Conditional formatting, Data validation, Column type, Named ranges, Data › Trash, Ask your data, Pivot, Share, Move to Space, Delete confirm) | n/a | ✕, outside click; dirty forms confirm first; focus returns to the opener. Pickers inside are `position:absolute` children, never portalled | closes |

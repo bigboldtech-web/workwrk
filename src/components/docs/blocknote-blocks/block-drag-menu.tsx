@@ -27,6 +27,7 @@ import {
   useExtensionState,
 } from "@blocknote/react";
 import { SideMenuExtension } from "@blocknote/core/extensions";
+import { copyObjectLink } from "@/components/layout/os/use-object-href";
 import {
   Type, Heading1, Heading2, Heading3, List, ListOrdered, ListChecks,
   Quote, Code, Lightbulb, Repeat2, Link2, Copy, Trash2, MessageSquare, Sparkles, Paintbrush,
@@ -120,7 +121,12 @@ function DragMenuBody() {
     );
   };
   const copyLink = () => {
-    const url = `${window.location.origin}${cfg.linkBase}${cfg.docId}#${block.id}`;
+    // A doc's or an SOP's block link is the share form of the section it is
+    // copied from (the Work door in Work, canonical elsewhere); policy and
+    // agreement bases have no Work address and are copied as they are.
+    const url = cfg.linkBase === "/docs/" || cfg.linkBase === "/sops/"
+      ? `${copyObjectLink(cfg.linkBase === "/docs/" ? "doc" : "sop", cfg.docId)}#${block.id}`
+      : `${window.location.origin}${cfg.linkBase}${cfg.docId}#${block.id}`;
     navigator.clipboard?.writeText(url).catch(() => {});
   };
 

@@ -8,9 +8,17 @@
 //   Move to… (Space picker or No location; PATCH { spaceId }) · Share ·
 //   Duplicate · Save as template (Full access) · separator · Move to Trash
 //   (Full access; DELETE sets archivedAt, restorable from /trash?type=canvas)
+//
+// WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
+// object-href.ts). Open, Open in new tab and Duplicate build the address of
+// the section the person is in when they click (the Space-scoped Work
+// address when the host passes spaceSlug); Copy link copies the share form.
+// A Trash of the OPEN canvas always leaves it for its section's list: in
+// Work the pathname never equalled /canvas/<id>, so the trashed canvas stayed
+// mounted and its autosave kept writing to an archived board.
 
 import { useRef, useState, type RefObject } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Copy, ExternalLink, FolderInput, Frame, LayoutTemplate, Link2, Pencil, Share2, Star, Trash2 } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -21,11 +29,15 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { apiFetch } from "@/lib/api-fetch";
+import { currentOpenObject } from "@/components/layout/os/work-placement";
+import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
 export interface CanvasMenuTarget {
   id: string;
   name: string;
   spaceId?: string | null;
+  /** The canvas's Space slug when the host knows it (a Work tree row, the editor in Work). */
+  spaceSlug?: string | null;
   favorite?: boolean;
   /** Full access (owner or admin): Save as template and Move to Trash. */
   canManage?: boolean;
@@ -55,7 +67,6 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   extraRows?: React.ReactNode;
 }) {
   const router = useRouter();
-  const pathname = usePathname() || "";
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { boot } = useBoot();
@@ -71,7 +82,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   const done = (kind: CanvasMenuChange) => { onChanged?.(kind); dispatchCanvasesChanged(); };
 
   function copyLink() {
-    void navigator.clipboard?.writeText(`${window.location.origin}/canvas/${canvas.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy link"));
+    void navigator.clipboard?.writeText(copyObjectLink("canvas", canvas.id)).then(() => toast("Link copied"), () => toast("Couldn't copy link"));
     onClose();
   }
 
@@ -116,7 +127,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
     setBusy("duplicate");
     const r = await apiFetch<{ whiteboard: { id: string } }>(`/api/whiteboards/${canvas.id}/duplicate`, { method: "POST" });
     setBusy(null);
-    if (r.ok) { toast("Duplicated"); done("duplicated"); router.push(`/canvas/${r.data.whiteboard.id}`); }
+    if (r.ok) { toast("Duplicated"); done("duplicated"); router.push(objectHrefNow("canvas", r.data.whiteboard.id, canvas.spaceSlug)); }
     else toast(r.error || "Couldn't duplicate");
     onClose();
   }
@@ -138,7 +149,8 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
     if (r.ok) {
       toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=canvas") } });
       done("trashed");
-      if (pathname === `/canvas/${canvas.id}`) router.push("/canvas"); else router.refresh();
+      const open = currentOpenObject();
+      if (open?.kind === "canvas" && open.id === canvas.id) router.push(open.closeHref); else router.refresh();
     } else toast(r.error || "Couldn't move to Trash");
   }
 
@@ -182,8 +194,8 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
     <MenuList style={{ minWidth: 220 }}>
       {context !== "editor" ? (
         <>
-          <MenuItem icon={Frame} label="Open" onClick={() => { router.push(`/canvas/${canvas.id}`); onClose(); }} />
-          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(`/canvas/${canvas.id}`, "_blank", "noopener"); onClose(); }} />
+          <MenuItem icon={Frame} label="Open" onClick={() => { router.push(objectHrefNow("canvas", canvas.id, canvas.spaceSlug)); onClose(); }} />
+          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(objectHrefNow("canvas", canvas.id, canvas.spaceSlug), "_blank", "noopener"); onClose(); }} />
         </>
       ) : null}
       <MenuItem icon={Link2} label="Copy link" shortcut="⌘L" onClick={copyLink} />

@@ -11,6 +11,17 @@
  *
  * Doc content shape (additive — older docs without `meta` still work):
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
+ *
+ * ONE EDITOR, THREE ADDRESSES. /docs/[id] (the Docs hub), and the Work
+ * addresses /spaces/[slug]/docs/[id] and /work/docs/[id], which a doc opened
+ * from Work uses so the person stays in Work (src/lib/nav/object-href.ts).
+ * `inWork` is a value computed once at the top from the route's placement:
+ * in Work the WorkPlacementProvider declares the crumb, Back and the error
+ * states land on the Work crumb, a Move refreshes the route in place (the
+ * editor stays mounted), and ?peek and "Close the pane" stay at the address
+ * the doc is mounted at. Links to OTHER objects are built for the section
+ * the person is in. Save, load, autosave, drafts and the unload flush do not
+ * change with the address.
  */
 
 import { Dots } from "@/components/ui/dots";
@@ -69,6 +80,7 @@ import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 import type { AutosaveStatus } from "@/hooks/use-autosave";
 import { ConflictStrip } from "@/components/ui/conflict-strip";
 import { canSend, noConflict, onConflict, onDismissConflict } from "@/lib/save-conflict";
+import { registerDocTitleWriter } from "@/lib/doc-title-handoff";
 import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
@@ -79,6 +91,10 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { readDocsOutline } from "@/lib/docs-prefs";
 import { formatRelative } from "@/lib/format/date";
 import { apiFetch } from "@/lib/api-fetch";
+import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-placement";
+import { copyObjectLink, objectHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
+import { useHubBack } from "@/components/layout/os/use-hub-back";
+import { canonicalHref } from "@/lib/nav/object-href";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker — keeps the doc page light + fast.
@@ -172,6 +188,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const searchParams = useSearchParams();
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  // Work mode is a value, read here before any early return. Only the
+  // primary pane is the doc this Work address shows; a peek pane beside it
+  // (and the List view's embedded editor) keeps its own rules.
+  const place = useWorkPlacement();
+  const hubBack = useHubBack();
+  const inWork = pane === "primary" && place?.kind === "doc" && place.id === docId;
+  const selfPath = inWork && place ? place.self : canonicalHref("doc", docId);
   // Peek picker — popover state + fetched recent docs for the picker list.
   const [peekPickerOpen, setPeekPickerOpen] = useState(false);
   const [peekQuery, setPeekQuery] = useState("");
@@ -179,6 +202,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [doc, setDoc] = useState<DocPayload | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [title, setTitle] = useState("");
+  // The Work crumb's live title, once the doc has loaded (the gate's
+  // placement already names it until then).
+  useWorkTitle(inWork && doc ? (title || "Untitled doc") : null);
   // bnDoc is BlockNote's native JSON — the source of truth for editing.
   // `blocks` is a derived mirror (LegacyBlock[]) the surrounding chrome
   // reads for the outline / word count without rewriting those components.
@@ -251,9 +277,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const fmt = useFormat();
   const moreBtnRef = useRef<HTMLButtonElement | null>(null);
   const morePanelRef = useRef<HTMLDivElement | null>(null);
-  // Subpage tree data — used ONLY for the breadcrumb ancestor chain here.
-  // The page tree itself lives in the DOCS SIDEBAR (Notion-style nesting),
-  // not in a second in-editor panel. Peek panes (null) skip the fetch.
+  // Subpage tree data: the "Docs inside" list under the body reads it, so it
+  // loads in Work as well. The page tree itself lives in the DOCS SIDEBAR
+  // (Notion-style nesting), not in a second in-editor panel. Peek panes
+  // (null) skip the fetch.
   const tree = useDocTree(pane === "primary" ? docId : null);
   // Ref on the content column so the bottom word-count pill can pin
   // itself to the column's left edge.
@@ -312,9 +339,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   function openPeek(pickedId: string) {
     setPeekPickerOpen(false);
     setPeekQuery("");
-    // If we're already in a split, the current URL is /docs/<docId>?peek=<existingPeek>.
-    // Replacing peek with the picked id keeps us in split mode.
-    router.push(`/docs/${docId}?peek=${pickedId}`);
+    // If we're already in a split, the current URL is <selfPath>?peek=<existingPeek>.
+    // Replacing peek with the picked id keeps us in split mode, at the address
+    // the doc is mounted at (a Work address stays a Work address).
+    router.push(`${selfPath}?peek=${encodeURIComponent(pickedId)}`);
   }
 
   // Dismiss the More menu when clicking elsewhere or hitting Esc.
@@ -696,6 +724,30 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     }, 700);
   }
 
+  // A rename made from this doc's row somewhere else on screen (its Work tree
+  // row, a Docs sidebar row, a list row) arrives HERE instead of as a PUT
+  // behind this editor's back (lib/doc-title-handoff.ts has the whole why).
+  // The title input, the crumb and titleRef take the new name at once, so no
+  // later save or a conflict's Dismiss can send the old one. An editor that
+  // can write saves it through persist(), with its own updatedAt; one that
+  // cannot (view-only, or holding a real peer's conflict) answers false and
+  // the menu saves the title-only PUT itself, as it always did.
+  const docLoaded = doc !== null;
+  useEffect(() => {
+    if (!docLoaded) return;
+    return registerDocTitleWriter(docId, async (next) => {
+      setTitle(next);
+      titleRef.current = next;
+      if (myRoleRef.current !== "edit" || !canSend(conflictHoldRef.current)) return false;
+      if (titleTimer.current) { clearTimeout(titleTimer.current); titleTimer.current = null; }
+      await persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
+      // A 409 inside that save raised the hold: the peer's version won, the
+      // new title is only in this editor, and the menu must not toast
+      // "Renamed" over a server that kept the other person's title.
+      return canSend(conflictHoldRef.current) ? true : "conflict";
+    });
+  }, [docId, docLoaded, persist]);
+
   function convertLegacy() {
     if (!legacy) return;
     const converted = htmlToBlocks(legacy);
@@ -706,7 +758,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }
 
   function copyLink() {
-    const url = `${window.location.origin}/docs/${docId}`;
+    // The share form: the Work door from Work (never a Space's slug), the
+    // canonical /docs/<id> elsewhere.
+    const url = copyObjectLink("doc", docId);
     navigator.clipboard.writeText(url).then(() => toast("Link copied"));
   }
 
@@ -718,7 +772,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // ?new=1 → the destination editor focuses the title so the natural next
     // action is NAMING the page, not clicking Add subpage again (which
     // nested a child-of-a-child on every click).
-    if (id) router.push(`/docs/${id}?new=1`);
+    if (id) router.push(`${objectHrefNow("doc", id, place?.spaceSlug)}?new=1`);
     else toast("Couldn't create page");
   }
 
@@ -737,7 +791,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         e.preventDefault();
         void (async () => {
           const r = await apiFetch<{ doc?: { id: string } }>(`/api/docs/${docId}/duplicate`, { method: "POST" });
-          if (r.ok && r.data.doc?.id) router.push(`/docs/${r.data.doc.id}`); else toast("Couldn't duplicate", { tone: "danger" });
+          if (r.ok && r.data.doc?.id) router.push(objectHrefNow("doc", r.data.doc.id, place?.spaceSlug)); else toast("Couldn't duplicate", { tone: "danger" });
         })();
       }
       else if (k === "c" && e.shiftKey) { e.preventDefault(); setCommentOpen(true); }
@@ -794,7 +848,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       const d = await res.json();
       const r = d.data ?? d;
       toast(`Created table "${r.name}" with ${r.rowsCreated} row${r.rowsCreated === 1 ? "" : "s"}`);
-      router.push(`/tables/${r.tableId}`);
+      router.push(objectHrefNow("table", r.tableId));
     } catch { toast("Extract failed"); }
     finally { setExtracting(false); }
   }
@@ -802,10 +856,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // The BackButton target (spec-docs-knowledge section 1, Back / close):
   // /docs/[parentId] for a sub-doc, else the anchor page for an anchored
   // doc, else /docs. The label is the parent's name.
-  const backTarget = parentDoc
-    ? { href: `/docs/${parentDoc.id}`, label: parentDoc.title || "Untitled doc" }
-    : location?.href
-      ? { href: location.href, label: location.name }
+  // In Work it is the Work crumb's (the nearest crumb left of the doc).
+  const backTarget = inWork && place
+    ? place.back
+    : parentDoc
+      ? { href: `/docs/${parentDoc.id}`, label: parentDoc.title || "Untitled doc" }
+      : location?.href
+        ? { href: location.href, label: location.name }
+        : { href: "/docs", label: "Docs" };
+  // Where the load-error and trashed states lead: the Work crumb in Work;
+  // Work's landing when the editor is embedded in a Work page (a List's doc
+  // view) so it never ejects to Docs; the Docs list elsewhere.
+  const exitBack = inWork && place
+    ? place.back
+    : hubBack.hub === "home"
+      ? { href: hubBack.fallbackHref, label: hubBack.label }
       : { href: "/docs", label: "Docs" };
 
   if (loadError) {
@@ -813,7 +878,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       <div className="os-chrome mx-auto flex max-w-md flex-col items-center gap-3 px-6 pt-16 text-center">
         <p className="text-row text-ink-2">Couldn&apos;t open this doc</p>
         <button type="button" onClick={() => window.location.reload()} className="text-base font-medium text-brand-deep hover:underline">Retry</button>
-        <BackButton fallbackHref="/docs" label="Docs" />
+        <BackButton fallbackHref={exitBack.href} label={exitBack.label} />
       </div>
     );
   }
@@ -857,7 +922,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             {restoring ? <Dots variant="pending" /> : null}
             Restore
           </button>
-          <BackButton fallbackHref="/docs" label="Docs" />
+          <BackButton fallbackHref={exitBack.href} label={exitBack.label} />
         </div>
       </div>
     );
@@ -873,7 +938,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     {/* The bar's location row (spec-shell 2.1): "Docs › {anchor or parent
         doc} › {title}"; anchored docs read "Work › {Space} › {doc}" through
         the anchor's own href. The last crumb is the title, not clickable. */}
-    {pane === "primary" ? (
+    {pane === "primary" && !inWork ? (
       <Breadcrumb
         items={[
           // The bar prepends the hub crumb ("Docs") itself, so this declares
@@ -961,10 +1026,17 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           </button>
           <MorePortal anchorRef={moreBtnRef} panelRef={morePanelRef} width={260} open={moreOpen} placement="below">
             <DocRowMenu
-              doc={{ id: docId, title, parentId: doc.parentId ?? null, entityType: doc.entityType ?? null, entityId: doc.entityId ?? null, favorite: !!favorited, role: canManage ? "full" : myRole, own: !!doc.createdById && doc.createdById === me?.id }}
+              doc={{ id: docId, title, parentId: doc.parentId ?? null, entityType: doc.entityType ?? null, entityId: doc.entityId ?? null, favorite: !!favorited, role: canManage ? "full" : myRole, own: !!doc.createdById && doc.createdById === me?.id, spaceSlug: place?.spaceSlug ?? null }}
               context="editor"
               onClose={() => setMoreOpen(false)}
-              onChanged={(kind) => { if (kind === "favorited") setFavorited((f) => !(f ?? false)); if (kind === "renamed" || kind === "moved") window.location.reload(); }}
+              // A Move in Work refreshes the route: the gate re-places the doc
+              // (new crumb, new tree branch) and this editor stays mounted. In
+              // the Docs hub it reloads, as it always did; a rename reloads in both.
+              onChanged={(kind) => {
+                if (kind === "favorited") setFavorited((f) => !(f ?? false));
+                if (kind === "moved" && inWork) router.refresh();
+                else if (kind === "renamed" || kind === "moved") window.location.reload();
+              }}
               onShare={() => setShareOpen(true)}
               onRenameInline={() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); }}
               extraRows={
@@ -1035,7 +1107,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                   <button
                     type="button"
                     className="bdoc__peek-close-current"
-                    onClick={() => { setPeekPickerOpen(false); router.push(`/docs/${docId}`); }}
+                    onClick={() => { setPeekPickerOpen(false); router.push(selfPath); }}
                   >
                     <X /> Close the pane
                   </button>
@@ -1247,6 +1319,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             canEdit={myRole === "edit" && !readingMode}
             onNew={() => void addSubpage()}
             fmt={fmt}
+            spaceSlug={place?.spaceSlug ?? null}
           />
         ) : null}
 
@@ -1569,7 +1642,9 @@ function DocMetaStrip({ blocks, doc, ownerName }: { blocks: Block[]; doc: DocPay
 }
 
 // ───────── "Docs inside": the sub-docs list under the body ─────────
-function SubDocsList({ rows, canEdit, onNew, fmt }: { rows: { id: string; title: string; emoji: string | null; updatedAt: string }[]; canEdit: boolean; onNew: () => void; fmt: ReturnType<typeof useFormat> }) {
+function SubDocsList({ rows, canEdit, onNew, fmt, spaceSlug }: { rows: { id: string; title: string; emoji: string | null; updatedAt: string }[]; canEdit: boolean; onNew: () => void; fmt: ReturnType<typeof useFormat>; spaceSlug: string | null }) {
+  // A sub-page opens in the section this doc is in (its parent's Space in Work).
+  const { href } = useObjectHref();
   if (rows.length === 0 && !canEdit) return null;
   return (
     <section className="os-chrome mt-8" aria-label="Docs inside">
@@ -1577,7 +1652,7 @@ function SubDocsList({ rows, canEdit, onNew, fmt }: { rows: { id: string; title:
       <ul className="flex flex-col">
         {rows.map((r) => (
           <li key={r.id}>
-            <Link href={`/docs/${r.id}`} className="flex h-9 items-center gap-3 rounded-md px-2 text-row text-ink hover:bg-hover">
+            <Link href={href("doc", r.id, spaceSlug)} className="flex h-9 items-center gap-3 rounded-md px-2 text-row text-ink hover:bg-hover">
               <span className="grid h-5 w-5 shrink-0 place-items-center [&_svg]:h-4 [&_svg]:w-4">{r.emoji ? renderNoteIcon(r.emoji) : <EntityTile size="sm" name={r.title} fallback="doc" />}</span>
               <span className="min-w-0 flex-1 truncate">{r.title || "Untitled doc"}</span>
               {r.updatedAt ? <span className="shrink-0 text-xs text-ink-2" title={fmt.title(r.updatedAt)}>{fmt.date(r.updatedAt)}</span> : null}
@@ -2147,6 +2222,8 @@ type BacklinkHit = {
 };
 
 export function BacklinksPanel({ kind, id }: { kind: "doc" | "sop"; id: string }) {
+  // Each reference opens in the section this page is in.
+  const { href } = useObjectHref();
   const [docs, setDocs] = useState<BacklinkHit[] | null>(null);
   const [sops, setSops] = useState<BacklinkHit[] | null>(null);
 
@@ -2177,7 +2254,7 @@ export function BacklinksPanel({ kind, id }: { kind: "doc" | "sop"; id: string }
       </header>
       <div className="bdoc__backlinks-list">
         {docs.map((h) => (
-          <Link key={`d:${h.id}`} href={`/docs/${h.id}`} className="bdoc__backlink">
+          <Link key={`d:${h.id}`} href={href("doc", h.id)} className="bdoc__backlink">
             <span className="bdoc__backlink-icon bdoc__backlink-icon--doc">
               {h.icon ?? <FileText />}
             </span>
@@ -2193,7 +2270,7 @@ export function BacklinksPanel({ kind, id }: { kind: "doc" | "sop"; id: string }
           </Link>
         ))}
         {sops.map((h) => (
-          <Link key={`s:${h.id}`} href={`/sops/${h.id}`} className="bdoc__backlink">
+          <Link key={`s:${h.id}`} href={href("sop", h.id)} className="bdoc__backlink">
             <span className="bdoc__backlink-icon bdoc__backlink-icon--sop">
               <BookCopy />
             </span>

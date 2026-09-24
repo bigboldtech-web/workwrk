@@ -39,6 +39,28 @@ const putSchema = z.object({
   entityId: z.string().nullable().optional(),
 });
 
+/**
+ * The parent page the crumb and the Back link name, ONLY when this viewer can
+ * read it through the same two gates the parent's own GET applies
+ * (docAccessible, then the per-doc role). A sub-page carries no anchor of its
+ * own, so it can be readable while its parent is not; naming the parent then
+ * would hand its title to someone its own URL answers 404. Unreadable is null,
+ * exactly like a doc with no parent, so the page falls back to the anchor.
+ */
+async function readableParent(
+  ctx: Parameters<typeof requireDocRole>[0],
+  parentId: string,
+): Promise<{ id: string; title: string } | null> {
+  const p = await prisma.doc.findFirst({
+    where: { id: parentId, organizationId: ctx.orgId },
+    select: { id: true, title: true, entityType: true, entityId: true, createdById: true },
+  });
+  if (!p) return null;
+  if (!(await docAccessible(p, ctx.userId, ctx.accessLevel))) return null;
+  if (!(await requireDocRole(ctx, { id: p.id, createdById: p.createdById }))) return null;
+  return { id: p.id, title: p.title };
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
@@ -90,7 +112,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // doc, and the breadcrumb names it.
   const [location, parent, owner] = await Promise.all([
     resolveDocLocation(doc),
-    doc.parentId ? prisma.doc.findFirst({ where: { id: doc.parentId, organizationId: ctx.orgId }, select: { id: true, title: true } }) : Promise.resolve(null),
+    doc.parentId ? readableParent(ctx, doc.parentId) : Promise.resolve(null),
     doc.createdById ? prisma.user.findFirst({ where: { id: doc.createdById }, select: { id: true, firstName: true, lastName: true, avatar: true } }) : Promise.resolve(null),
   ]);
   return NextResponse.json({
