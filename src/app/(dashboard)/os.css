@@ -81,17 +81,35 @@
    keyboard focus (:focus-visible — accessibility kept, and now on-brand),
    nothing for pointer focus (:focus without :focus-visible). Outline
    follows border-radius in all modern engines. */
-.workwrk-os :is(a, button, input, select, textarea, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="separator"][tabindex], [role="slider"], [tabindex="0"]):focus-visible {
+.workwrk-os :is(a, button, select, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="separator"][tabindex], [role="slider"], [tabindex="0"], input:is([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="color"])):focus-visible:not([class*="outline-none"]):not([contenteditable]):not([role="textbox"]):not([role="grid"]) {
   outline: 2px solid var(--os-focus);
   outline-offset: 2px;
 }
 .workwrk-os :is(a, button, [role="button"], [role="tab"], summary):focus:not(:focus-visible) {
   outline: none;
 }
+/* ONE focus indicator per field, never two (founder, 2026-09-24: "double
+   double selections", on the Talk composer, a table cell and the doc
+   editor). The ring above used to include input, textarea and anything
+   with tabindex 0, and a text field matches :focus-visible on a mouse click
+   too, so every field wore a 2px ring 2px outside the focus its own
+   component already draws: the composer's focus-within border, the grid's
+   selection rectangle, the editor's caret. Text entry (text inputs,
+   textarea, contenteditable, role textbox) and a component that asks for
+   outline-none (the sheet grid) now keep only their own indicator. The
+   ring stays for everything a keyboard user tabs to that has no other one:
+   links, buttons, tabs, menu rows, checkboxes. This rule is unlayered, so a
+   Tailwind outline-none utility (layered) could never override it; the
+   :not() above is what honours it. */
+.workwrk-os :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]), textarea, [contenteditable], [role="textbox"]):focus-visible {
+  outline: none;
+}
 /* Design-system 4.7: a focused field is unmistakable on pointer focus too.
    Fields painted on their wrapper (bg-transparent inside a bordered box)
-   hand the halo to the wrapper through focus-within. */
-.workwrk-os :is(input, select, textarea):not(.bg-transparent):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus {
+   hand the halo to the wrapper through focus-within. A field drawn as
+   plain text (a title input with a transparent or no border) shows its own
+   focus border or none, as a page title does, and never a halo. */
+.workwrk-os :is(input, select, textarea):not(.bg-transparent):not([class*="border-transparent"]):not(.border-0):not(.border-none):not(.bdoc__title):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus {
   box-shadow: 0 0 0 3px var(--os-focus-halo);
 }
 .workwrk-os svg { display: block; }
