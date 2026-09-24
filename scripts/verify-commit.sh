@@ -81,10 +81,16 @@ node scripts/check-schema-sql.mjs
 
 # TYPE CHECK. NOTHING ELSE IN THE PIPELINE DOES ONE.
 #
-# CI runs prisma validate, the two guards and vitest. It does not run tsc.
-# And `next build` under Turbopack does not type check either, which is the
-# part that surprises people: a green build is not a green compile. So until
-# this line existed, a real type error could pass the gate, pass CI, and ship.
+# CORRECTED 2026-09-24. This used to say "`next build` under Turbopack does
+# not type check either". That was WRONG, and never tested: the evidence was
+# a build passing while the working tree had type errors, but the build ran
+# on the COMMITTED tree, which was clean. `next build` does type check ("Running
+# TypeScript ..."), and after Phase 5 that step ran out of heap at 3072 MB.
+#
+# So the type check now happens in exactly two places, both with room for it:
+# here, before a push, and in CI, which Deploy waits for. next.config.ts sets
+# typescript.ignoreBuildErrors so the production box, which has about 3 GB
+# free against a 3.5 GB check, does not repeat it.
 #
 # Found on 2026-09-22 while the Phase 4 deploy was in flight: four genuine
 # errors in a Talk component (a `export { X as Y } from` re-export, which
@@ -94,6 +100,26 @@ node scripts/check-schema-sql.mjs
 #
 # It runs BEFORE the tests because it is much faster and its failures are
 # more specific: a type error usually explains a test failure downstream.
+# CLEAR .next BEFORE THE TYPE CHECK, not before the build.
+#
+# tsconfig.json includes ".next/types/**/*.ts", the route types Next
+# GENERATES. This worktree is reused across runs, so .next still held the
+# route types of whatever commit was built here LAST. Phase 5 moved two
+# routes (the forms list into a route group, the responder into (public)),
+# and the gate failed its type check on validator.ts entries pointing at the
+# old paths: a stale generated file, not a fault in the commit.
+#
+# Clearing alone is NOT enough, and would have broken every run instead:
+# next-env.d.ts (untracked, so it survives `git clean`) imports
+# "./.next/types/routes.d.ts", so tsc against an empty .next fails on a
+# missing module. `next typegen` regenerates the route types for THIS commit
+# without a build, which is the pattern Next documents for exactly this:
+# "next typegen && tsc --noEmit".
+rm -rf .next
+npx next typegen > /tmp/verify-typegen.log 2>&1 || {
+  echo "TYPEGEN FAILED. Last 20 lines:"; tail -20 /tmp/verify-typegen.log; exit 1;
+}
+
 echo "==> type check"
 npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
   echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30; exit 1;
@@ -133,7 +159,6 @@ TZ=UTC npx vitest run > /tmp/verify-test.log 2>&1 || {
 sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-test.log | grep -E "^ *(Test Files|Tests) " || true
 
 echo "==> production build"
-rm -rf .next
 NODE_OPTIONS=--max-old-space-size=3072 npx next build > /tmp/verify-build.log 2>&1 || {
   echo "BUILD FAILED. Last 40 lines:"; sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-build.log | tail -40; exit 1;
 }

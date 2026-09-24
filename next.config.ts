@@ -4,6 +4,25 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const nextConfig: NextConfig = {
+  // THE PRODUCTION BUILD DOES NOT TYPE CHECK. CI DOES, AND DEPLOY WAITS FOR IT.
+  //
+  // This skips `next build`'s own TypeScript step entirely. It is safe only
+  // because the "Type check" step in .github/workflows/ci.yml runs
+  // `next typegen && tsc --noEmit` on every push, and the Deploy workflow
+  // runs only when CI succeeds. scripts/verify-commit.sh runs the same check
+  // before a push. DO NOT REMOVE THAT CI STEP WITHOUT REMOVING THIS LINE.
+  //
+  // Why: after Phase 5 a full type check needs about 3.5 GB resident
+  // (measured), and the production box has 3921 MB with roughly 3000 MB free.
+  // next build's TypeScript step ran out of heap at the 3072 MB cap on
+  // 2026-09-24, so every deploy would have failed deterministically. The box
+  // rebuilds what CI already proved; it does not need to prove it again.
+  //
+  // The one gap: a MANUAL workflow_dispatch deploy skips the CI check (see
+  // deploy.yml). That door exists for a CI run lost to a flaky runner, so run
+  // it only for a commit that has already passed CI.
+  typescript: { ignoreBuildErrors: true },
+
   // BUILD MEMORY. The production box has 3921 MB of RAM, and two deploys died
   // there without printing anything at all: not a build error, a kill. Next 16
   // builds with Turbopack, which runs the build across SEPARATE PROCESSES

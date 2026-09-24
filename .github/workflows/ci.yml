@@ -58,5 +58,24 @@ jobs:
       - name: Every schema column has a migration that creates it
         run: node scripts/check-schema-sql.mjs
 
+      # THE TYPE CHECK LIVES HERE, NOT IN THE PRODUCTION BUILD.
+      #
+      # next.config.ts sets typescript.ignoreBuildErrors, so `next build` on
+      # the box skips its own TypeScript step, and this is the ONLY type check
+      # between a push and production. Deploy runs only when this job
+      # succeeds, so an error here still stops a release.
+      #
+      # Why it moved: after Phase 5 a full type check needs about 3.5 GB of
+      # resident memory (measured: 3,509,469,184 bytes, 36s, no incremental
+      # cache). The production box has 3921 MB with roughly 3000 MB free
+      # after the OS, and next build's TypeScript step died there at its
+      # 3072 MB heap cap. This runner has several times that.
+      #
+      # `next typegen` first: Next generates route types into .next/types,
+      # and next-env.d.ts imports them, so tsc on a fresh checkout without
+      # them fails on a missing module. This is the pattern Next documents.
+      - name: Type check (the only one before production)
+        run: npx next typegen && npx tsc --noEmit -p tsconfig.json
+
       - name: Unit tests
         run: npx vitest run
