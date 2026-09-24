@@ -1,5 +1,13 @@
 // GET  /api/boards/[id]/items — list non-archived items
+//      ?links=1 (Phase 5b): the List's own rows UNION the rows linked into it
 // POST /api/boards/[id]/items — append a new item to the board
+//
+// Phase 5b. Every row is projected for the viewer (src/lib/board-items-view.ts):
+// the reserved "$" keys are never sent, a connect value is reduced to the
+// tasks the viewer can read, and connect and mirror columns come back as
+// `connections` and `mirrors`. WITHOUT ?links=1 the rows are exactly today's
+// home rows otherwise, so no existing client changes; the canvas asks for the
+// union only once LIST_LINK_CANVAS_LIVE flips (src/lib/list-links.ts).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -9,6 +17,12 @@ import { canContributeBoard, canReadBoard, getBoardForReader } from "@/lib/board
 import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { notifyItemAssigned } from "@/lib/notify-item";
 import { unknownUserIds } from "@/lib/assignable";
+import { prisma } from "@/lib/prisma";
+import { parseBoardSchema } from "@/lib/field-catalog";
+import { fieldKeySets } from "@/lib/list-connect";
+import { validateConnectWrites } from "@/lib/list-connect-server";
+import { applyMetadataPatch, checkHomeMetadataKeys, isReservedMetadataKey, routeMetadataPatch } from "@/lib/list-metadata";
+import { linkedListsOf } from "@/lib/list-links-server";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -30,7 +44,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!canRead) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const url = new URL(req.url);
   const includeArchived = url.searchParams.get("includeArchived") === "1";
-  const items = await listBoardItems(id, { includeArchived });
+  const items = await listBoardItems(id, {
+    includeArchived,
+    view: { viewer: c, contextBoardId: id },
+    includeLinked: url.searchParams.get("links") === "1",
+  });
   return NextResponse.json({ items });
 }
 
@@ -55,6 +73,9 @@ const createSchema = z.object({
   // Phase 72 — pass to create a subtask under the given parent.
   parentItemId: z.string().min(1).nullable().optional(),
 });
+
+/** The body keys List defaults may fill when the client did not send them. */
+const DEFAULTABLE_KEYS = ["status", "priority", "assigneeIds", "ownerId", "tagIds", "itemTypeId"] as const;
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
@@ -92,39 +113,115 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       );
     }
   }
-  try {
-    const item = await createBoardItem({
-      organizationId: c.organizationId,
-      boardId: id,
-      title: parsed.data.title,
-      status: parsed.data.status,
-      ownerId: parsed.data.ownerId ?? undefined,
-      assigneeIds: parsed.data.assigneeIds,
-      groupKey: parsed.data.groupKey,
-      metadata: parsed.data.metadata,
-      startAt: parsed.data.startAt ?? null,
-      dueAt: parsed.data.dueAt ?? null,
-      priority: parsed.data.priority ?? null,
-      itemTypeId: parsed.data.itemTypeId ?? null,
-      tagIds: parsed.data.tagIds,
-      parentItemId: parsed.data.parentItemId ?? null,
-      actorId: c.userId,
+
+  // ── Phase 5b: the metadata this create may carry ────────────────────
+  const submitted = parsed.data.metadata ?? {};
+  const reserved = Object.keys(submitted).find(isReservedMetadataKey);
+  if (reserved) return NextResponse.json({ error: "reserved_key", key: reserved }, { status: 400 });
+  const listRow = await prisma.board.findUnique({ where: { id }, select: { schema: true } });
+  const listFields = parseBoardSchema(listRow?.schema).fields;
+  const listKeys = fieldKeySets(listFields);
+
+  // A subtask under a task that is LINKED into this List is created on the
+  // parent's HOME List (a subtask belongs to its parent), and so it needs
+  // write access there as well; it appears here with its parent, because the
+  // subtree is part of the share, so there is no second write that can fail.
+  let homeBoardId = id;
+  let linkedParent = false;
+  if (parsed.data.parentItemId) {
+    const parent = await prisma.item.findFirst({
+      where: { id: parsed.data.parentItemId, organizationId: c.organizationId },
+      select: { id: true, boardId: true, parentItemId: true },
     });
+    if (parent && parent.boardId !== id) {
+      const { links } = await linkedListsOf(parent);
+      if (links.some((l) => l.boardId === id)) {
+        if (!(await canContributeBoard(parent.boardId, c.userId, c.accessLevel))) {
+          return NextResponse.json({ error: "no_access", reason: "parent_home_list_read_only" }, { status: 403 });
+        }
+        homeBoardId = parent.boardId;
+        linkedParent = true;
+      }
+    }
+  }
+
+  let metadata: Record<string, unknown> = submitted;
+  let validatedConnectKeys: string[] = [];
+  if (linkedParent) {
+    // This List's keys go to its namespace on the task, task-level keys to the
+    // top, anything else (a home-only field) is not this List's to write.
+    const routed = routeMetadataPatch(submitted, { definedKeys: listKeys.stored, mirrorKeys: listKeys.mirror });
+    if (!routed.ok) return NextResponse.json({ error: routed.error, key: routed.key }, { status: 400 });
+    const connect = await validateConnectWrites(c, listFields, routed.ns, {});
+    if (!connect.ok) return NextResponse.json({ error: connect.error, key: connect.key }, { status: 400 });
+    metadata = applyMetadataPatch({}, {
+      top: routed.top,
+      ns: { ...routed.ns, ...connect.values },
+      listId: id,
+      nsConnectKeys: new Set(connect.keys),
+    });
+  } else {
+    const refused = checkHomeMetadataKeys(Object.keys(submitted), listKeys.mirror);
+    if (refused) return NextResponse.json({ error: refused.error, key: refused.key }, { status: 400 });
+    const connect = await validateConnectWrites(c, listFields, submitted, {});
+    if (!connect.ok) return NextResponse.json({ error: connect.error, key: connect.key }, { status: 400 });
+    metadata = { ...submitted, ...connect.values };
+    validatedConnectKeys = connect.keys;
+  }
+
+  // The keys the client SENT, explicit nulls included: defaults never
+  // override one of them (list-comfort.ts planCreateDefaults).
+  const raw = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const sentKeys = new Set<string>(DEFAULTABLE_KEYS.filter((k) => k in raw));
+  const sentMetadataKeys = new Set<string>(Object.keys(submitted));
+
+  try {
+    const item = await createBoardItem(
+      {
+        organizationId: c.organizationId,
+        boardId: homeBoardId,
+        title: parsed.data.title,
+        status: parsed.data.status,
+        ownerId: parsed.data.ownerId ?? undefined,
+        assigneeIds: parsed.data.assigneeIds,
+        groupKey: parsed.data.groupKey,
+        metadata,
+        startAt: parsed.data.startAt ?? null,
+        dueAt: parsed.data.dueAt ?? null,
+        priority: parsed.data.priority ?? null,
+        itemTypeId: parsed.data.itemTypeId ?? null,
+        tagIds: parsed.data.tagIds,
+        parentItemId: parsed.data.parentItemId ?? null,
+        actorId: c.userId,
+      },
+      {
+        // The HOME List's defaults, which for a subtask under a linked parent
+        // is the parent's home, never this List's.
+        listDefaults: { sentKeys, sentMetadataKeys },
+        // A linked-parent blob was built above, namespace and all.
+        trustedMetadata: linkedParent,
+        validatedConnectKeys,
+      },
+    );
     // Inbox notification — a task created FOR someone else lands in their
     // bell. Routed through src/lib/notify-item.ts so the recipient's
     // /settings/notifications toggle is the only switch that matters; the
     // helper no-ops when the owner is the actor or the item is unassigned.
-    // Never throws (best effort) — the item is already saved.
+    // Never throws (best effort): the item is already saved. When the List's
+    // defaults chose the people (the client sent none), the person they chose
+    // hears about it exactly as if the creator had picked them.
+    const peopleSent = sentKeys.has("assigneeIds") || sentKeys.has("ownerId");
     await notifyItemAssigned({
       organizationId: c.organizationId,
       item: { id: item.id, title: item.title, dueAt: item.dueAt ?? null },
-      ownerId: parsed.data.ownerId ?? null,
+      ownerId: parsed.data.ownerId ?? (peopleSent ? null : item.ownerId ?? null),
       actorId: c.userId,
     });
     // Respond with the FULL enriched row (counts/links/time/creator — the
     // exact listBoardItems shape): clients append this straight into their
     // cached list, and a lean row there diverges from refetched rows.
-    return NextResponse.json({ item: (await getBoardItemRow(item.id)) ?? item }, { status: 201 });
+    const row = (await getBoardItemRow(item.id, { viewer: c, contextBoardId: id })) ?? item;
+    return NextResponse.json({ item: row, ...(linkedParent ? { homeBoardId } : {}) }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to create item" },

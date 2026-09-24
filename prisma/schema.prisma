@@ -115,6 +115,8 @@ model Organization {
   whiteboards          Whiteboard[]
   // 🆕 User-created dashboards (the "+" menu → Dashboard)
   dashboards           Dashboard[]
+  // Phase 5b: scheduled email reports of a dashboard or a saved view.
+  reportSchedules      ReportSchedule[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
   docs                 Doc[]
@@ -4532,6 +4534,10 @@ model Board {
   views   View[]
   items   Item[]
   members BoardMember[]
+  // Phase 5b: tasks whose HOME is another List that also appear in this one,
+  // each with its subtask tree. The tasks this List owns are still `items`
+  // (Item.boardId); nothing about them changes.
+  linkedItems ItemListLink[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, productSlug])
@@ -4584,6 +4590,32 @@ model View {
 
   @@index([boardId])
   @@index([ownerId])
+}
+
+/// One task shown in one ADDITIONAL List (ClickUp "tasks in multiple Lists",
+/// decision 7). The home List stays Item.boardId. Only a top-level task is
+/// linked, and its subtask tree appears with it. Reading List B returns B's
+/// own tasks UNION the tasks linked into B (src/lib/list-links-server.ts).
+/// Deleting the task or the List deletes this row; deleting this row never
+/// touches the task. Trash snapshots these rows and puts them back.
+model ItemListLink {
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  /// The task's order inside THIS List, in the same order space as the List's
+  /// own Item.position values (every append takes the larger of the two,
+  /// under the List's order lock). Item.position is the home order and is
+  /// never written through a link.
+  position  Float    @default(0)
+  /// Who shared it in. No relation on purpose, like archivedById: removing a
+  /// person must never remove what they shared.
+  addedById String?
+  createdAt DateTime @default(now())
+
+  // The primary key IS the decided unique on (itemId, boardId).
+  @@id([itemId, boardId])
+  @@index([boardId, position])
 }
 
 enum ViewType {
@@ -4667,6 +4699,10 @@ model Item {
   // now; the "most expensive ROUTINE work" report reads it later.
   workType       WorkType?
   timeEntries    TimeEntry[]
+  // Phase 5b: the ADDITIONAL Lists this task appears in. The home List is
+  // still `boardId`: a move changes the home, a link never does. Only a
+  // top-level task carries links; its subtasks appear wherever it does.
+  otherLists     ItemListLink[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -5963,7 +5999,12 @@ model Dashboard {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   description    String?      @db.Text
-  // Widget list — [{ id, type, config }] — opaque to the server.
+  // Widget list, parsed and normalised by src/lib/dashboards/widgets.ts,
+  // which also reads the 2026-06 shape (task-list, stat, notes, battery,
+  // chart; a source of "all" or "board") and carries any entry it does not
+  // recognise through untouched, so no saved card is ever dropped. A stored
+  // List id is never a grant: every card is computed under the VIEWER's own
+  // access (src/lib/dashboards/widget-data.ts).
   widgets        Json         @default("[]")
   // Owner is the creator. Org-wide visibility by default, mirroring
   // Whiteboard; granular sharing is a follow-up.
@@ -5977,6 +6018,55 @@ model Dashboard {
   @@index([organizationId, archivedAt])
   @@index([organizationId, ownerId])
   @@index([spaceId])
+}
+
+/// A dashboard or a saved view emailed on a cadence (gap 16). Recipients are
+/// org member ids, never free-text addresses. Each recipient's copy is
+/// computed at send time under THAT recipient's access. A recipient who can
+/// read none of the target, or who is deactivated, deleted or no longer in
+/// the organization, is skipped, and the skip is recorded as a COUNT in
+/// runLog and never by name, so a schedule cannot be used to learn another
+/// member's access.
+model ReportSchedule {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// No relation, like addedById: an offboarded creator must not take the
+  /// schedule with them, and no recipient's copy depends on the creator.
+  createdById      String
+  /// "dashboard" | "view". Text, not an enum: a new kind is a release.
+  targetKind       String
+  /// Dashboard.id or View.id. No relation: it names a row in one of two tables.
+  targetId         String
+  /// "daily" | "weekly" | "monthly".
+  cadence          String
+  /// ISO weekday, 1 = Monday to 7 = Sunday. Weekly only.
+  weekday          Int?
+  /// 1 to 31, clamped to the month's last day. Monthly only.
+  monthDay         Int?
+  /// "HH:mm", 24 hour, read in `timezone` (Intl with hourCycle "h23", never hour12).
+  timeOfDay        String
+  /// IANA zone, validated with Intl at write time.
+  timezone         String
+  recipientUserIds String[]     @default([])
+  active           Boolean      @default(true)
+  lastSentAt       DateTime?
+  /// The next due instant (UTC). The cron claims a run by compare-and-swap on
+  /// this exact value, under a row lock, in the transaction that queues the
+  /// emails, so a retried cron never queues the same instant twice. A target
+  /// that is archived or in Trash only records a skip and moves this forward;
+  /// only a target gone for good sets active false.
+  nextRunAt        DateTime?
+  /// The last 20 runs, newest first: { dueAt, ranAt, outcome, sent,
+  /// skippedNoAccess, skippedInactive }. Counts only, never recipient ids.
+  runLog           Json         @default("[]")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([active, nextRunAt])
+  @@index([organizationId, targetKind, targetId])
+  @@index([organizationId, createdById])
+  @@index([recipientUserIds], type: Gin)
 }
 
 // ==========================================

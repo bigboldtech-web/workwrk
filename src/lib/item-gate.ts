@@ -42,6 +42,7 @@ import { isOrgAdminAccessLevel } from "@/lib/space";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { readWatchers } from "@/lib/item-watchers";
+import { linkedListsOf, listReader } from "@/lib/list-links-server";
 import {
   allowsItemAction,
   decideItem,
@@ -124,6 +125,9 @@ const ITEM_INCLUDE = {
       // list owner" (spec-task-detail section 1, Access case 3).
       visibility: true,
       ownerId: true,
+      // Phase 5b: a task whose home List is archived drops out of every List
+      // it is linked into, so the linked-list rule below has to see this.
+      archivedAt: true,
     },
   },
 } as const;
@@ -158,6 +162,13 @@ export interface ItemGateOk {
   isCreator: boolean;
   watcherIds: string[];
   unwatcherIds: string[];
+  /**
+   * Phase 5b: the readable List the task is linked into that gave this
+   * viewer VIEW, when that is the only thing they hold on the task; null
+   * otherwise. It is resolved only when nothing else grants a role, so a home
+   * reader pays no extra query for it.
+   */
+  viaLinkedList: { id: string; name: string } | null;
 }
 
 export type ItemGateResult = { error: NextResponse } | ItemGateOk;
@@ -279,6 +290,24 @@ export async function gateItem(
   // viewers who hold FULL is how that line came back null for every org admin.
   const creatorId = await creatorIdOf(c.organizationId, itemId);
 
+  // Phase 5b, tasks in more than one List: a reader of a List the task (or
+  // its top-level ancestor on the same home) is linked into may READ it. Only
+  // asked when nothing above grants anything, and never while the home List is
+  // archived, because an archived List's tasks drop out of every union.
+  const holdsNothing = !orgAdmin && listRole === "none" && !assignee && !(creatorId && creatorId === c.userId);
+  let viaLinkedList: { id: string; name: string } | null = null;
+  if (holdsNothing && !item.board.archivedAt) {
+    const { links } = await linkedListsOf(item);
+    const reader = listReader(c);
+    for (const l of links) {
+      const b = await reader.row(l.boardId);
+      if (b) {
+        viaLinkedList = { id: b.id, name: b.name };
+        break;
+      }
+    }
+  }
+
   const decision = decideItem({
     orgAdmin,
     // There is no org-level GUEST rung in this product's AccessLevel enum; a
@@ -291,6 +320,7 @@ export async function gateItem(
     listRole,
     archived: !!item.archivedAt,
     list: { id: item.board.id, name: item.board.name },
+    linkedList: viaLinkedList,
   });
 
   const isCreator = !!creatorId && creatorId === c.userId;
@@ -299,7 +329,7 @@ export async function gateItem(
   }
 
   const { watchers, unwatchers } = readWatchers(item.metadata);
-  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers };
+  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers, viaLinkedList };
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────

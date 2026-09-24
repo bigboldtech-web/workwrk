@@ -540,6 +540,14 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // routes (duplicate, export, presence) share, on the item-gate precedent,
   // so none of them reads the legacy signal itself.
   "src/lib/table-gate.ts",
+  // Phase 5b (the data layer: tasks in more than one List, connected columns,
+  // dashboards, scheduled reports): ONE entry for the whole feature, on the
+  // item-gate precedent. The brief keeps the engine inert and names the
+  // existing helpers as the gate, and those read accessLevel, so every
+  // Phase 5b route and module reaches them through this file's wrappers
+  // (boardForViewer, canContributeFor, spaceForViewer, viewerIsOrgAdmin,
+  // memberViewer and the rest) and none of them reads the signal itself.
+  "src/lib/list-links-server.ts",
   "src/lib/rail-apps.test.ts",
   "src/lib/rail-apps.ts",
   "src/lib/role-defaults.ts",

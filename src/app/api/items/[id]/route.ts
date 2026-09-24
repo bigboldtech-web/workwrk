@@ -1,14 +1,29 @@
 // GET    /api/items/[id], one task, with the viewer's decision, the
 //                          breadcrumb, its watchers and its parent
+//                          ?list=<boardId> (Phase 5b): the task as it
+//                          appears in a List it is linked into
 // PATCH  /api/items/[id], update title / status / assignees / dates / …,
 //                          plus `boardId` (move) and `watcherIds`
+//                          `contextBoardId` (Phase 5b): the List the edit
+//                          is made in
 // DELETE /api/items/[id], archive (soft); ?hard=1 moves it to Trash
+//                          ?list=<boardId> (Phase 5b): refused inside a
+//                          secondary List unless ?everywhere=1
 //
 // Every branch gates through ONE door, `gateItem` on the ITEM ref
 // (src/lib/item-gate.ts). Before Phase 2, GET short-circuited to
 // `canEdit: true` for an assignee while PATCH had no assignee branch and 403'd
 // them, so the UI handed an assignee a fully editable task whose every save
 // failed. One gate is the whole fix.
+//
+// PHASE 5b, TASKS IN MORE THAN ONE LIST. A task has ONE home (its List) and
+// may appear in more Lists through links. What is shared is the TASK: title,
+// status (always the home's), dates, priority, people, tags, watchers, the
+// body. What each List owns is its own field values, kept in that List's
+// namespace on the task (src/lib/list-metadata.ts). So a request names its
+// context List, a context the caller cannot read is ONE answer whether or not
+// the task is in it (invalid_context), and a reader who reached the task only
+// through a linked List is never told anything about its home.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -22,10 +37,10 @@ import {
 import { moveToTrash } from "@/lib/trash";
 import { canContributeBoard, getBoardForReader } from "@/lib/board";
 import { unknownUserIds } from "@/lib/assignable";
-import { getBoardStatuses } from "@/lib/board-items-shared";
+import { getBoardStatuses, makeStatusLookup, type StatusOption } from "@/lib/board-items-shared";
 import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
-import { boardContext, gateItem, itemBreadcrumb, itemCtx, itemServerError, listIsReadable } from "@/lib/item-gate";
+import { boardContext, gateItem, itemBreadcrumb, itemCtx, itemServerError, listIsReadable, type ItemGateOk } from "@/lib/item-gate";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
@@ -33,8 +48,26 @@ import { hasModule } from "@/lib/space-modules";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
 import { publishItemChanged } from "@/lib/notify-realtime";
+import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
+import { fieldKeySets } from "@/lib/list-connect";
+import { validateConnectWrites } from "@/lib/list-connect-server";
+import {
+  applyMetadataPatch,
+  checkHomeMetadataKeys,
+  hiddenFromHomeProjection,
+  isReservedMetadataKey,
+  mergeWholesaleMetadata,
+  readNamespace,
+  routeMetadataPatch,
+  type Json,
+} from "@/lib/list-metadata";
+import { decideContext, validateLinkedStatus } from "@/lib/list-links";
+import { linkedListsOf, listReader, readableItemsVia, type LinkRow, type ReadableList } from "@/lib/list-links-server";
+import { projectItemForViewer, redactFieldsForViewer } from "@/lib/board-items-view";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
+
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await itemCtx();
   if ("error" in c) return c.error;
   const { id } = await params;
@@ -44,18 +77,56 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // App Router answers an empty 500, and the whole product's task surface
   // reads "Couldn't load" with no clue in it. Now the body carries the line.
   try {
-    return await readItem(id, c);
+    return await readItem(id, c, new URL(req.url).searchParams.get("list"));
   } catch (err) {
     return itemServerError(err, `GET /api/items/${id}`);
   }
 }
 
-async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>) {
+/**
+ * The linked context a request asked for, when it is one: a List the task
+ * (or its top-level ancestor on the same home) is linked into and the caller
+ * can read. Null for the home and for anything else, which the caller answers
+ * as it decides (GET: as if absent; PATCH: invalid_context).
+ */
+async function linkedContextFor(
+  gate: ItemGateOk,
+  requested: string | null | undefined,
+  c: Ctx,
+): Promise<{ list: ReadableList; link: LinkRow; rootId: string } | "home" | "invalid"> {
+  if (!requested || requested === gate.item.boardId) return "home";
+  const { rootId, links } = await linkedListsOf(gate.item);
+  const link = links.find((l) => l.boardId === requested) ?? null;
+  const list = link ? await listReader(c).row(requested) : null;
+  const kind = decideContext({
+    requested,
+    homeBoardId: gate.item.boardId,
+    linkedBoardIds: links.map((l) => l.boardId),
+    requestedReadable: !!list,
+  });
+  if (kind === "linked" && link && list) return { list, link, rootId };
+  return kind === "home" ? "home" : "invalid";
+}
+
+async function readItem(id: string, c: Ctx, requestedList: string | null) {
   const gate = await gateItem(id, c, "view");
   if ("error" in gate) return gate.error;
   const item = gate.item;
+  const linkedOnly = gate.decision.via === "linked-list";
+  const reader = listReader(c);
 
-  const [owner, assigneeUsers, tagAssignments, parent, listReadable] = await Promise.all([
+  // Which body. A linked-only reader ALWAYS gets the linked body: for the
+  // List they asked for when it is valid, else for the List that let them in.
+  let linked: { list: ReadableList; link: LinkRow; rootId: string } | null = null;
+  const asked = await linkedContextFor(gate, requestedList, c);
+  if (typeof asked === "object") linked = asked;
+  if (!linked && linkedOnly && gate.viaLinkedList) {
+    const fallback = await linkedContextFor(gate, gate.viaLinkedList.id, c);
+    if (typeof fallback === "object") linked = fallback;
+  }
+  if (linkedOnly && !linked) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const [owner, assigneeUsers, tagAssignments, parentRow, listReadable] = await Promise.all([
     item.ownerId
       ? prisma.user.findUnique({
           where: { id: item.ownerId },
@@ -78,18 +149,49 @@ async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx
     item.parentItemId
       ? prisma.item.findFirst({
           where: { id: item.parentItemId, organizationId: c.organizationId },
-          select: { id: true, title: true },
+          select: { id: true, title: true, boardId: true, organizationId: true, ownerId: true, assigneeIds: true, parentItemId: true },
         })
       : Promise.resolve(null),
-    listIsReadable(item, c),
+    linkedOnly ? Promise.resolve(false) : listIsReadable(item, c),
   ]);
-  const breadcrumb = await itemBreadcrumb(item, c, { listReadable });
+  // The parent, exactly as before Phase 5b for every reader the gate let in:
+  // a subtask's BackButton is labelled with it, and a reader who cannot open
+  // the parent reaches its request-access door through it (spec-task-detail,
+  // back-map rule 2). Only a reader who came in THROUGH A SHARED LIST is
+  // asked whether they can read it, because that route did not exist before
+  // and a shared List must not name anything its reader cannot see. (Their
+  // parent is normally the shared task itself, so it is readable.)
+  let parent: { id: string; title: string } | null = null;
+  if (parentRow) {
+    if (!linkedOnly) parent = { id: parentRow.id, title: parentRow.title };
+    else if ((await readableItemsVia(c, [parentRow], reader)).get(parentRow.id)?.readable) parent = { id: parentRow.id, title: parentRow.title };
+  }
+
+  const homeStatuses = getBoardStatuses(item.board);
+  const homeStatus: StatusOption | null = item.status
+    ? makeStatusLookup(homeStatuses)[item.status] ?? { value: item.status, label: item.status, color: "#98A2B3", group: "ACTIVE" }
+    : null;
+  // A personal role (assignee, creator) may see the home's status words, as
+  // it sees the home's name in the crumb; only a linked-only reader may not.
+  const mayReadHomeStatuses = !linkedOnly;
+
+  const projected = await projectItemForViewer(item, {
+    viewer: c,
+    context: linked ? linked.list : item.board,
+    linked: linked ? { rootId: linked.rootId, position: item.parentItemId ? null : linked.link.position } : null,
+    reader,
+  });
+
+  const breadcrumb = linkedOnly && linked
+    ? { space: null, folder: null, list: { id: linked.list.id, slug: linked.list.slug, name: linked.list.name, readable: true } }
+    : await itemBreadcrumb(item, c, { listReadable });
 
   // The Space, read ONLY for its module toggles (see moduleGating below). It
   // is not a gate and cannot become one: the gate already answered above, a
   // task with no Space reads `null` here, and `hasModule(null, ...)` is true,
   // so a space-less Personal List task gets every field rather than none.
-  const spaceId = item.board.spaceId;
+  // In a linked context the toggles are that List's Space's.
+  const spaceId = linked ? linked.list.spaceId : item.board.spaceId;
   const space = spaceId
     ? await prisma.space
         .findFirst({ where: { id: spaceId, organizationId: c.organizationId }, select: { settings: true } })
@@ -109,7 +211,7 @@ async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx
           })
           .catch(() => null)
       : Promise.resolve(null),
-    item.board.ownerId
+    !linkedOnly && item.board.ownerId
       ? prisma.user
           .findFirst({
             where: { id: item.board.ownerId, organizationId: c.organizationId },
@@ -119,17 +221,38 @@ async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx
       : Promise.resolve(null),
   ]);
 
+  const home = boardContext(item);
+  const board = linked
+    ? {
+        id: linked.list.id,
+        slug: linked.list.slug,
+        name: linked.list.name,
+        spaceId: linked.list.spaceId,
+        folderId: linked.list.folderId,
+        fields: await redactFieldsForViewer(parseBoardSchema(linked.list.schema).fields, reader),
+        // The status is always the HOME's. A reader who may see the home set
+        // gets it; anyone else a one-element set holding the current status,
+        // so an older client still renders the right pill.
+        statuses: mayReadHomeStatuses ? homeStatuses : homeStatus ? [homeStatus] : [],
+        visibility: linked.list.visibility,
+        ownerId: linked.list.ownerId,
+      }
+    : { ...home, fields: await redactFieldsForViewer(home.fields, reader) };
+
   return NextResponse.json({
     item: {
       id: item.id,
-      boardId: item.boardId,
-      spaceId: item.board.spaceId,
+      // A linked-only reader's task belongs to the List they are reading.
+      boardId: linkedOnly && linked ? linked.list.id : item.boardId,
+      spaceId: linked ? linked.list.spaceId : item.board.spaceId,
       title: item.title,
       status: item.status,
       ownerId: item.ownerId,
-      groupKey: item.groupKey,
-      position: item.position,
-      metadata: item.metadata,
+      groupKey: linked && !item.parentItemId ? null : item.groupKey,
+      position: projected.position,
+      metadata: projected.metadata,
+      ...(projected.connections ? { connections: projected.connections } : {}),
+      ...(projected.mirrors ? { mirrors: projected.mirrors } : {}),
       startAt: item.startAt,
       dueAt: item.dueAt,
       priority: item.priority,
@@ -150,7 +273,15 @@ async function readItem(id: string, c: Exclude<Awaited<ReturnType<typeof itemCtx
     },
     // Board context so a standalone detail page (no board host) can
     // render custom fields + the right status palette + breadcrumb.
-    board: boardContext(item),
+    board,
+    // Phase 5b: which List this body is for, and the home status indicator.
+    context: {
+      boardId: linked ? linked.list.id : item.boardId,
+      kind: linked ? "linked" : "home",
+      home: listReadable ? { id: item.board.id, slug: item.board.slug, name: item.board.name, readable: true } : { readable: false },
+      homeStatus,
+      ...(mayReadHomeStatuses ? { homeStatuses } : {}),
+    },
     // Phase 2 additions. `decision` is what the body renders from, so the
     // drawer's editability comes from the task's own gate and never from the
     // host page's `canEditSpace` (spaces-boards High #2).
@@ -192,11 +323,6 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     select: { dueAt: true, startAt: true, metadata: true },
   });
   if (!item) return null;
-  const md = item.metadata && typeof item.metadata === "object"
-    ? { ...(item.metadata as Record<string, unknown>) }
-    : {};
-  delete md.lastSpawnedKey;
-  delete md.skippedOccurrences;
   // Explicit time-of-day: a rule carrying atTime re-times the anchor's OWN due
   // date to that clock time on its existing calendar day (so "today's"
   // occurrence is corrected too) and recurNextAt is computed from the re-timed
@@ -208,6 +334,7 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     if (timed.getTime() !== new Date(item.dueAt).getTime()) retimedDue = timed;
   }
   let recurNextAt: Date | null = null;
+  let spawnKey: string | null = null;
   if (rule && (rule.trigger ?? "SCHEDULE") === "SCHEDULE") {
     const base = new Date(retimedDue ?? item.dueAt ?? item.startAt ?? new Date());
     // Step from the ANCHOR, not from now: an occurrence whose date already
@@ -215,13 +342,22 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     // backlog + records skips). max(now, …) here silently swallowed today's
     // instance when the rule was saved after its time-of-day had passed.
     recurNextAt = nextOccurrenceAfter(base, rule, base);
-    md.lastSpawnedKey = occurrenceKey(base);
+    spawnKey = occurrenceKey(base);
   }
+  // The bookkeeping keys are written over the LOCKED stored blob, so this
+  // write can never undo a field value written a moment earlier.
   return updateBoardItem(itemId, {
     recurNextAt,
-    metadata: md,
     ...(retimedDue ? { dueAt: retimedDue } : {}),
-  }, actorId);
+  }, actorId, {
+    metadataFn: (stored) => {
+      const md = { ...stored };
+      delete md.lastSpawnedKey;
+      delete md.skippedOccurrences;
+      if (spawnKey) md.lastSpawnedKey = spawnKey;
+      return md;
+    },
+  });
 }
 
 const recurRuleSchema = z.object({
@@ -287,7 +423,83 @@ const patchSchema = z.object({
   // whole `watchers` set as the picker sees it, applied through the rules in
   // src/lib/item-watchers.ts (only you can put your own id in `unwatchers`).
   watcherIds: z.array(z.string().min(1)).max(100).optional(),
+  // Phase 5b: the List this edit is made in. Absent or the home: the home.
+  contextBoardId: z.string().min(1).max(64).optional(),
 });
+
+/** A refusal decided inside the metadata write, carried out of its transaction. */
+class Refusal extends Error {
+  constructor(readonly status: number, readonly body: Record<string, unknown>) {
+    super(String(body.error ?? "refused"));
+  }
+}
+
+/**
+ * The metadata write as ONE function of the STORED value, so it can run on the
+ * locked row inside updateBoardItem's transaction (and once, first, as a dry
+ * run on the value the gate read, so a refusal is answered before anything
+ * is written).
+ */
+function metadataWriter(args: {
+  c: Ctx;
+  itemId: string;
+  linkedListId: string | null;
+  fields: readonly FieldDef[];
+  metadataPatch?: Json;
+  metadata?: Json;
+  watcherIds?: string[];
+}) {
+  const keys = fieldKeySets(args.fields);
+  return async (stored: Json): Promise<Json> => {
+    let next: Json = stored;
+    if (args.linkedListId) {
+      if (args.metadataPatch) {
+        const routed = routeMetadataPatch(args.metadataPatch, { definedKeys: keys.stored, mirrorKeys: keys.mirror });
+        if (!routed.ok) throw new Refusal(400, { error: routed.error, key: routed.key });
+        const connect = await validateConnectWrites(args.c, args.fields, routed.ns, {
+          stored: readNamespace(stored, args.linkedListId),
+          selfId: args.itemId,
+        });
+        if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
+        next = applyMetadataPatch(stored, {
+          top: routed.top,
+          ns: { ...routed.ns, ...connect.values },
+          listId: args.linkedListId,
+          nsConnectKeys: new Set(connect.keys),
+        });
+      }
+    } else if (args.metadataPatch) {
+      const refused = checkHomeMetadataKeys(Object.keys(args.metadataPatch), keys.mirror);
+      if (refused) throw new Refusal(400, { error: refused.error, key: refused.key });
+      const connect = await validateConnectWrites(args.c, args.fields, args.metadataPatch, { stored, selfId: args.itemId });
+      if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
+      next = applyMetadataPatch(stored, { top: { ...args.metadataPatch, ...connect.values }, topConnectKeys: new Set(connect.keys) });
+    } else if (args.metadata) {
+      const refused = checkHomeMetadataKeys(Object.keys(args.metadata), keys.mirror);
+      if (refused) throw new Refusal(400, { error: refused.error, key: refused.key });
+      const connect = await validateConnectWrites(args.c, args.fields, args.metadata, { stored, selfId: args.itemId });
+      if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
+      // The whole-blob save keeps what the writer never saw: every "$" key,
+      // and every connect value their projection hid.
+      next = mergeWholesaleMetadata(stored, { ...args.metadata, ...connect.values }, {
+        keepKeys: hiddenFromHomeProjection(stored, keys.connect),
+        topConnectKeys: new Set(connect.keys),
+      });
+    }
+    // The watcher lists are task-level and only `watcherIds` may change them;
+    // every other write re-merges the STORED lists, so an autosave can never
+    // re-subscribe somebody who pressed Unwatch.
+    const storedWatchers = readWatchers(stored);
+    return args.watcherIds
+      ? writeWatchers(next, applyWatcherIds(storedWatchers, args.watcherIds, args.c.userId))
+      : writeWatchers(next, storedWatchers);
+  };
+}
+
+async function fieldsOf(boardId: string): Promise<FieldDef[]> {
+  const b = await prisma.board.findUnique({ where: { id: boardId }, select: { schema: true } });
+  return parseBoardSchema(b?.schema).fields;
+}
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await itemCtx();
@@ -302,6 +514,43 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // "edit" and then checks the target separately below.
   const gate = await gateItem(id, c, parsed.data.boardId ? "move" : "edit");
   if ("error" in gate) return gate.error;
+
+  // Reserved keys are never written by a client, in either shape.
+  for (const blob of [parsed.data.metadata, parsed.data.metadataPatch]) {
+    const k = blob ? Object.keys(blob).find(isReservedMetadataKey) : undefined;
+    if (k) return NextResponse.json({ error: "reserved_key", key: k }, { status: 400 });
+  }
+
+  // ── Phase 5b: the context List ───────────────────────────────────
+  const contextAsked = await linkedContextFor(gate, parsed.data.contextBoardId, c);
+  if (contextAsked === "invalid") return NextResponse.json({ error: "invalid_context" }, { status: 400 });
+  const linkedCtx = typeof contextAsked === "object" ? contextAsked : null;
+  delete (parsed.data as { contextBoardId?: unknown }).contextBoardId;
+  if (linkedCtx) {
+    // Moving, reordering and regrouping belong to the link in a secondary
+    // List (PATCH /api/boards/[B]/links/[id]), so none of them can re-home
+    // the task or reorder its home from here.
+    if (parsed.data.boardId !== undefined || parsed.data.position !== undefined || parsed.data.groupKey !== undefined) {
+      return NextResponse.json({ error: "use_list_link" }, { status: 400 });
+    }
+    if (parsed.data.metadata !== undefined) {
+      return NextResponse.json({ error: "use_metadata_patch" }, { status: 400 });
+    }
+    // THE VALUES LIST B OWNS NEED WRITE ON LIST B. The gate above answered
+    // for the TASK (its home List, or being its assignee or creator), and that
+    // is what the shared body (title, status, dates, description) needs. A
+    // key this patch would write into B's own namespace is B's content, so it
+    // takes contribute on B, as every other link-side write does (reorder,
+    // move, add): a read-only guest of B edits none of B's columns, whatever
+    // they may do to the task at home.
+    if (parsed.data.metadataPatch) {
+      const bKeys = fieldKeySets(parseBoardSchema(linkedCtx.list.schema).fields);
+      const routed = routeMetadataPatch(parsed.data.metadataPatch, { definedKeys: bKeys.stored, mirrorKeys: bKeys.mirror });
+      if (routed.ok && Object.keys(routed.ns).length > 0 && !(await canContributeBoard(linkedCtx.list.id, c.userId, c.accessLevel))) {
+        return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
+      }
+    }
+  }
 
   // EVERY assignee id is a real, live person in THIS organization.
   //
@@ -326,17 +575,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  // ── Move to another List ────────────────────────────────────────
+  // ── Move to another List: every check, and no write yet ─────────
   //
   // The move does NOT return early. A body that carries `boardId` beside a
   // title, a status or a metadata blob used to answer 200 having written only
   // the move, silently discarding every other field the caller sent; now the
   // move runs first and the rest of the patch is applied straight after it, so
-  // nothing a user typed is thrown away under a success.
-  let moved: { toBoardId: string; toListName: string; status: string | null; reason: string } | null = null;
+  // nothing a user typed is thrown away under a success. Every refusal (the
+  // move's, the status rule's, the metadata's) is answered BEFORE the move is
+  // written, so a refused patch never leaves a half-applied one behind.
   const sourceBoardId = gate.item.boardId;
-  let currentBoardId = gate.item.boardId;
-  let currentStatuses = getBoardStatuses(gate.item.board);
+  let target: { id: string; name: string; statuses: unknown; productSlug: string | null } | null = null;
   if (parsed.data.boardId && parsed.data.boardId !== gate.item.boardId) {
     // BOTH Lists, not just the target. `gateItem(…, "move")` clears at EDIT,
     // which rule 9 grants on the task alone, so without this an assignee with
@@ -348,7 +597,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         { status: 403 },
       );
     }
-    const target = await prisma.board.findFirst({
+    target = await prisma.board.findFirst({
       where: { id: parsed.data.boardId, organizationId: c.organizationId, archivedAt: null },
       select: { id: true, name: true, statuses: true, productSlug: true },
     });
@@ -373,11 +622,54 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         { status: 403 },
       );
     }
-    const remap = remapStatusOnMove({
-      status: gate.item.status,
-      from: getBoardStatuses(gate.item.board),
-      to: getBoardStatuses(target),
-    });
+  }
+  delete (parsed.data as { boardId?: unknown }).boardId;
+  const remap = target
+    ? remapStatusOnMove({ status: gate.item.status, from: getBoardStatuses(gate.item.board), to: getBoardStatuses(target) })
+    : null;
+  const currentBoardId = target ? target.id : gate.item.boardId;
+  const currentStatuses = target ? getBoardStatuses(target) : getBoardStatuses(gate.item.board);
+
+  // ── Phase 5b: a linked task's status comes from its HOME set ─────
+  if (parsed.data.status !== undefined && parsed.data.status !== null) {
+    const { links } = await linkedListsOf(gate.item);
+    const stillLinked = links.filter((l) => l.boardId !== currentBoardId);
+    const verdict = validateLinkedStatus(parsed.data.status, currentStatuses, remap ? remap.status : gate.item.status, stillLinked.length > 0);
+    if (!verdict.ok) {
+      return NextResponse.json({ error: "invalid_status", reason: verdict.reason, homeStatuses: currentStatuses }, { status: 409 });
+    }
+  }
+
+  // ── Phase 5b: the metadata write, as a function of the stored value ──
+  const wantsMetadata = parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined;
+  const writer = wantsMetadata
+    ? metadataWriter({
+        c,
+        itemId: id,
+        linkedListId: linkedCtx ? linkedCtx.list.id : null,
+        fields: linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId),
+        metadataPatch: parsed.data.metadataPatch,
+        metadata: parsed.data.metadata,
+        watcherIds: parsed.data.watcherIds,
+      })
+    : null;
+  if (writer) {
+    try {
+      const pre = gate.item.metadata;
+      await writer(pre && typeof pre === "object" && !Array.isArray(pre) ? (pre as Json) : {});
+    } catch (err) {
+      if (err instanceof Refusal) return NextResponse.json(err.body, { status: err.status });
+      throw err;
+    }
+  }
+  delete (parsed.data as { metadataPatch?: unknown }).metadataPatch;
+  delete (parsed.data as { metadata?: unknown }).metadata;
+  delete (parsed.data as { watcherIds?: unknown }).watcherIds;
+  const responseContext = linkedCtx ? linkedCtx.list.id : currentBoardId;
+
+  // ── The move itself ──────────────────────────────────────────────
+  let moved: { toBoardId: string; toListName: string; status: string | null; reason: string } | null = null;
+  if (target && remap) {
     await moveBoardItem({
       itemId: id,
       toBoardId: target.id,
@@ -390,8 +682,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       toStatuses: getBoardStatuses(target),
     });
     moved = { toBoardId: target.id, toListName: target.name, status: remap.status, reason: remap.reason };
-    currentBoardId = target.id;
-    currentStatuses = getBoardStatuses(target);
     // BOTH Lists hear about it. Publishing only the target left every viewer
     // of the source List watching a row that had already vanished from it.
     void publishItemChanged({
@@ -405,50 +695,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       boardId: sourceBoardId,
       organizationId: c.organizationId,
       actorId: c.userId,
+      leftListIds: [sourceBoardId],
     });
-  }
-  delete (parsed.data as { boardId?: unknown }).boardId;
-
-  // ── Watchers ────────────────────────────────────────────────────
-  // `Item.metadata` is a JSON column that `updateBoardItem` replaces WHOLESALE,
-  // and the two watcher lists live inside it. Folding them in only when the
-  // same body carried `watcherIds` meant every OTHER metadata write, a
-  // description autosave, a checklist tick, a custom field, the create modal -
-  // deleted both lists, silently re-subscribing everyone who had pressed
-  // Unwatch. So the stored lists are re-merged into ANY incoming metadata
-  // blob, and `watcherIds` is the only thing that may change them.
-  // `metadataPatch` resolves against the STORED blob, here, in the same
-  // request that writes it, so nothing depends on how fresh the client's copy
-  // of `metadata` is. It never combines with a wholesale `metadata` write:
-  // whichever one the caller sent is the one that is applied.
-  if (parsed.data.metadataPatch !== undefined) {
-    const base = { ...((gate.item.metadata as Record<string, unknown> | null) ?? {}) };
-    for (const [k, v] of Object.entries(parsed.data.metadataPatch)) {
-      if (v === null) delete base[k];
-      else base[k] = v;
-    }
-    parsed.data.metadata = base;
-  }
-  delete (parsed.data as { metadataPatch?: unknown }).metadataPatch;
-
-  const storedWatchers = readWatchers(gate.item.metadata);
-  if (parsed.data.watcherIds) {
-    const next = applyWatcherIds(storedWatchers, parsed.data.watcherIds, c.userId);
-    const base = parsed.data.metadata ?? (gate.item.metadata as Record<string, unknown> | null) ?? {};
-    parsed.data.metadata = writeWatchers(base, next);
-    delete (parsed.data as { watcherIds?: unknown }).watcherIds;
-  } else if (parsed.data.metadata !== undefined) {
-    parsed.data.metadata = writeWatchers(parsed.data.metadata, storedWatchers);
   }
 
   // A move on its own, no other field in the body, is already written.
-  if (moved && Object.keys(parsed.data).length === 0) {
-    const row = await getBoardItemRow(id);
+  if (moved && Object.keys(parsed.data).length === 0 && !writer) {
+    const row = await getBoardItemRow(id, { viewer: c, contextBoardId: responseContext });
     return NextResponse.json({ ...(row ? { item: row } : {}), moved });
   }
 
   try {
-    const updated = await updateBoardItem(id, parsed.data, c.userId);
+    const updated = await updateBoardItem(id, parsed.data, c.userId, writer ? { metadataFn: writer } : {});
     // Event pipes ("lay pipes as you go"), flat payloads: ids + the
     // fields automation conditions test. Fire-and-forget, never throws.
     if (parsed.data.status !== undefined && gate.item.status !== updated.status) {
@@ -540,19 +798,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     // Repeat turned on/off/changed → (re)compute the anchor's spawn schedule.
     // Every return below responds with the FULL enriched row (counts/links/
-    // time/creator, the exact listBoardItems shape). The old lean writer
-    // shape silently stripped those fields when the client merged/replaced
-    // its cached row, which is how a saved task "disappeared" until refresh.
+    // time/creator, the exact listBoardItems shape), projected for this
+    // viewer in the List the edit was made in.
+    const rowFor = async () => getBoardItemRow(id, { viewer: c, contextBoardId: responseContext });
     if (parsed.data.recurRule !== undefined) {
       const rescheduled = await applyRecurrenceSchedule(id, parsed.data.recurRule ?? null, c.userId);
-      if (rescheduled) return NextResponse.json({ item: (await getBoardItemRow(id)) ?? rescheduled, ...(moved ? { moved } : {}) });
+      if (rescheduled) return NextResponse.json({ item: (await rowFor()) ?? rescheduled, ...(moved ? { moved } : {}) });
     } else if (parsed.data.dueAt !== undefined) {
       // The due date IS the series anchor, moving it re-anchors an active
       // SCHEDULE series (recurNextAt + lastSpawnedKey recomputed from it).
       const storedRule = parseRecurrence(gate.item.recurRule);
       if (storedRule && (storedRule.trigger ?? "SCHEDULE") === "SCHEDULE") {
         const rescheduled = await applyRecurrenceSchedule(id, gate.item.recurRule, c.userId);
-        if (rescheduled) return NextResponse.json({ item: (await getBoardItemRow(id)) ?? rescheduled, ...(moved ? { moved } : {}) });
+        if (rescheduled) return NextResponse.json({ item: (await rowFor()) ?? rescheduled, ...(moved ? { moved } : {}) });
       }
     }
     // Completing an ON_COMPLETE recurring task advances its series in place -
@@ -560,11 +818,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (parsed.data.status !== undefined) {
       const recur = await advanceSeriesOnComplete(id, updated.status, c.userId);
       if (recur.recurred && recur.item) {
-        return NextResponse.json({ item: (await getBoardItemRow(id)) ?? recur.item, recurred: true, ...(moved ? { moved } : {}) });
+        return NextResponse.json({ item: (await rowFor()) ?? recur.item, recurred: true, ...(moved ? { moved } : {}) });
       }
     }
-    return NextResponse.json({ item: (await getBoardItemRow(id)) ?? updated, ...(moved ? { moved } : {}) });
+    return NextResponse.json({ item: (await rowFor()) ?? updated, ...(moved ? { moved } : {}) });
   } catch (err) {
+    if (err instanceof Refusal) return NextResponse.json(err.body, { status: err.status });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to update item" },
       { status: 400 },
@@ -585,9 +844,20 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   // anyone's task in a List they could write to.
   const gate = await gateItem(id, c, hard ? "delete" : "archive");
   if ("error" in gate) return gate.error;
+  // Phase 5b: "Delete" pressed inside a SECONDARY List must never destroy the
+  // task in its home by accident. There it answers use_list_link, and the
+  // client offers "Remove from this List" or an explicit "Delete everywhere".
+  const listParam = url.searchParams.get("list");
+  if (listParam && url.searchParams.get("everywhere") !== "1") {
+    const ctx = await linkedContextFor(gate, listParam, c);
+    if (typeof ctx === "object") {
+      return NextResponse.json({ error: "use_list_link", hint: "remove_from_list" }, { status: 400 });
+    }
+  }
   const boardId = gate.item.boardId;
   if (hard) {
-    // Recoverable delete, snapshot to Trash, then remove (subtasks cascade).
+    // Recoverable delete, snapshot to Trash (with the task's links), then
+    // remove (subtasks and links cascade).
     await moveToTrash("item", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
     // An open drawer or board has to hear about this too: without the publish
     // a hard delete left every other viewer looking at a row that was gone.
@@ -597,5 +867,5 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const archived = await archiveBoardItem(id, c.userId);
   void publishItemChanged({ itemId: id, boardId, organizationId: c.organizationId, actorId: c.userId });
   // Full enriched row, same as PATCH, the client merges this into its cache.
-  return NextResponse.json({ item: (await getBoardItemRow(id)) ?? archived });
+  return NextResponse.json({ item: (await getBoardItemRow(id, { viewer: c })) ?? archived });
 }

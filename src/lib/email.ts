@@ -75,6 +75,32 @@ interface QueueEmailParams {
   category?: EmailCategory;
 }
 
+/**
+ * The EmailLog row queueEmail writes, for a caller that must queue inside
+ * its OWN transaction (the scheduled-report cron claims a run and queues its
+ * emails atomically, so a retried cron can never queue the same run twice).
+ * The row is exactly what queueEmail would write; processEmailQueue (the
+ * email-queue cron) sends it like any other.
+ */
+export function emailLogData(p: {
+  to: string;
+  subject: string;
+  html: string;
+  template: string;
+  variables?: Record<string, unknown>;
+  organizationId?: string;
+}) {
+  return {
+    to: p.to,
+    subject: p.subject,
+    template: p.template,
+    html: p.html,
+    variables: (p.variables || {}) as object,
+    organizationId: p.organizationId,
+    status: "QUEUED" as const,
+  };
+}
+
 export async function queueEmail({
   to,
   subject,

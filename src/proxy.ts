@@ -53,11 +53,15 @@ const MARKETING_PREFIXES = new Set([
 // product answered with the marketing page in production, and the old
 // bookmarks redirected straight into it.
 // scripts/check-app-prefixes.mjs fails CI if they drift apart again.
+// "dashboards" is here BEFORE its page (Phase 5b built the data layer first):
+// naming a segment early is harmless, and it means the change that adds the
+// pages cannot forget it. src/lib/nav/dashboards-route.guard.test.ts holds the
+// other half, the redirects in next.config.ts that must leave with the pages.
 const APP_PREFIXES = new Set([
   // (dashboard)
   "account", "activity", "agents", "agreements", "ai", "analytics", "announcements",
   "assets", "assigned-comments", "automation", "autopilot", "boards", "build",
-  "calendar", "candor", "canvas", "clock", "dashboard", "docs", "everything",
+  "calendar", "candor", "canvas", "clock", "dashboard", "dashboards", "docs", "everything",
   "favorites", "files", "folders", "forms", "home", "ideas", "imports", "inbox",
   "integrations", "item", "kra-kpi", "kudos", "library", "marketing", "me",
   "meetings", "my-work", "notetaker", "okrs", "organization", "people", "planner", "policies",
