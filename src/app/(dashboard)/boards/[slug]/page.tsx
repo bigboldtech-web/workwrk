@@ -164,24 +164,24 @@ export default async function BoardPage(props: {
           { label: board.name },
         ]}
       />
-      {/* Title row (48) per design-system section 4: back · tile · name · lock
+      {/* Title row (40) per design-system section 4: back · tile · name · lock
           · Share · "…". The generic "Automate" link and the bare
           AskSidekickButton are gone: Automations is a menu row scoped to THIS
           List, and AI is the one slot the shell owns. */}
-      <div className="flex h-12 items-center gap-2 px-6">
+      <div className="flex h-[40px] items-center gap-2 px-6">
         <BackButton
           fallbackHref={board.folder ? `/folders/${board.folder.id}` : `/spaces/${board.space.slug}`}
           label={board.folder?.name ?? board.space.name}
           className="me-0.5"
         />
         <EntityTile
-          size="lg"
+          size="md"
           icon={board.icon}
           color={board.color}
           name={board.name}
           fallback="list"
         />
-        <h1 className="inline-flex min-w-0 items-center gap-1.5 text-xl font-semibold text-ink">
+        <h1 className="inline-flex min-w-0 items-center gap-1.5 text-title font-semibold text-ink">
           <span className="truncate" title={board.name}>{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />
@@ -257,7 +257,7 @@ export default async function BoardPage(props: {
 
       {/* Renderer — its single toolbar row (filters + Statuses/Fields + the
           "+ Task" passed below) is the one concise ClickUp-style toolbar. */}
-      <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4">
+      <div className="flex-1 overflow-y-auto px-4 pt-1 pb-4">
         <BoardCanvas
           boardId={board.id}
           viewId={activeView?.id ?? null}

@@ -648,14 +648,14 @@ export default async function SpacePage(props: {
       {/* Title row: back-map line 38 and spec section 1 both say the Space page
           carries a BackButton to /spaces, always rendered. /folders/[id] and
           /boards/[slug] have had one since this stage; this page did not. */}
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-3">
+      <div className="px-6">
+        <div className="flex h-[40px] items-center gap-2">
           <BackButton fallbackHref="/spaces" label="Spaces" className="me-0.5" />
-          <EntityTile size="lg" icon={space.icon} color={space.color} name={space.name} />
-          <h1 className="text-[22px] font-semibold leading-tight text-zinc-900 flex items-center gap-1.5 min-w-0">
+          <EntityTile size="md" icon={space.icon} color={space.color} name={space.name} />
+          <h1 className="text-title font-semibold text-ink flex items-center gap-1.5 min-w-0">
             <span className="truncate" title={space.description || space.name}>{space.name}</span>
             {space.visibility === "PRIVATE" ? (
-              <Lock className="w-4 h-4 text-zinc-400" />
+              <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />
             ) : null}
             {/* Space-level filtering lives inside the List view's own toolbar
                 (sort / status / owner / due). The former title-row filter icon

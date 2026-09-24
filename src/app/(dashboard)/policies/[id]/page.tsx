@@ -404,9 +404,9 @@ export default function PolicyDetailPage() {
         titleSlot={
           <>
             {editing ? (
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled policy" aria-label="Policy title" className="h-9 min-w-0 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none" />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled policy" aria-label="Policy title" className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-1 text-title font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none" />
             ) : (
-              <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{headerTitle}</h1>
+              <h1 className="min-w-0 flex-1 truncate text-title font-semibold text-ink">{headerTitle}</h1>
             )}
             <StatusChip color={POLICY_STATUS_COLOR[status]} label={POLICY_STATUS_LABEL[status]} disabled />
             <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{policy.version}</span>

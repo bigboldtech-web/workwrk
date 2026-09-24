@@ -4,9 +4,13 @@
 // 4.4, spec-shell 1.15). Three thin rows on the white canvas, padding-inline
 // 24, always in this order:
 //
-//   title row 48   [Back] [tile] Title            ghost actions  [Ask AI]
+//   title row 40   [Back] [tile] Title            ghost actions  [Ask AI]
 //   views row 36   text-tab pills (only when a surface has more than one view)
 //   toolbar 44     Filter  Sort  Group | view switcher      [+ Primary] [...]
+//
+// The title row was 48 with a 22px title and a 36px tile until 2026-09-24,
+// when the founder read the header as too big; it is now 40 with an 18px
+// title (text-title) and a 20px tile, and the view pills are 28 / 14.
 //
 // Real props only. There is no description line (it lives in "..." > About),
 // no fake people, no inert Share / Invite trio, no filled star. The Ask AI
@@ -18,7 +22,7 @@
 // Sizing: the header is drawn on the 4px grid in px like the rest of the
 // frame. Its root carries `.os-chrome` (tokens.css), which rebinds the
 // spacing and radius variables the Tailwind utilities read, so under the
-// product's 14px root h-12 / h-9 / h-11 / px-6 render at 48 / 36 / 44 / 24
+// product's 14px root h-10 / h-9 / h-11 / px-6 render at 40 / 36 / 44 / 24
 // and not at 87.5% of that. Anything a page drops into `actions`, `left`
 // or `right` inherits the same scale.
 
@@ -117,7 +121,7 @@ export interface OsPageHeaderProps {
    * chips). `title` stays the accessible name and the document title.
    */
   titleSlot?: ReactNode;
-  /** `EntityTile size="lg"` before the title (Space and List pages). */
+  /** `EntityTile size="md"` before the title (Space and List pages). */
   tile?: EntityTileProps;
   /** Full pages reached from a list: the parent name and where to land with no history. */
   back?: { fallbackHref: string; label: string };
@@ -205,13 +209,13 @@ export function OsPageHeader({
     toolbar || primary || menu ? { ...(toolbar ?? {}), primary: toolbar?.primary ?? primary, menu: toolbar?.menu ?? menu } : null;
   return (
     <div id={id} className={cn("os-head os-chrome shrink-0 bg-app", className)}>
-      <div className="flex h-12 items-center gap-2 px-6">
+      <div className="flex h-10 items-center gap-2 px-6">
         {back ? <BackButton fallbackHref={back.fallbackHref} label={back.label} className="me-0.5" /> : null}
-        {tile ? <EntityTile size="lg" {...tile} /> : null}
+        {tile ? <EntityTile size="md" {...tile} /> : null}
         {titleSlot ? (
           <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={title}>{titleSlot}</div>
         ) : (
-          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{title}</h1>
+          <h1 className="min-w-0 flex-1 truncate text-title font-semibold text-ink">{title}</h1>
         )}
         {autosave ? <div className="shrink-0">{autosave}</div> : null}
         {actions ? <div className="os-head__actions flex shrink-0 items-center gap-1">{actions}</div> : null}
@@ -225,7 +229,7 @@ export function OsPageHeader({
 }
 
 /**
- * The header's pending state (spec-shell 2.2): a 22px bar 40% wide in a 48px
+ * The header's pending state (spec-shell 2.2): an 18px bar 40% wide in a 40px
  * title row, optionally the skeleton views row and toolbar. A page that
  * fetches its object before it can name it renders this instead of a
  * placeholder title that swaps once the fetch lands; `loading.tsx` renders
@@ -235,14 +239,14 @@ export function OsPageHeaderSkeleton({ views = false, toolbar = false, className
   const bar = "rounded bg-skeleton os-skeleton-pulse";
   return (
     <div className={cn("os-head os-chrome shrink-0 bg-app", className)} aria-busy="true" aria-label="Loading">
-      <div className="flex h-12 items-center px-6">
-        <span className={`${bar} h-[22px] w-[40%]`} />
+      <div className="flex h-10 items-center px-6">
+        <span className={`${bar} h-[18px] w-[40%]`} />
       </div>
       {views ? (
         <div className="os-row flex h-9 items-center gap-2 px-6">
-          <span className={`${bar} h-8 w-16`} />
-          <span className={`${bar} h-8 w-20`} />
-          <span className={`${bar} h-8 w-14`} />
+          <span className={`${bar} h-7 w-16`} />
+          <span className={`${bar} h-7 w-20`} />
+          <span className={`${bar} h-7 w-14`} />
         </div>
       ) : null}
       {toolbar ? (

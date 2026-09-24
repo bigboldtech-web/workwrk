@@ -160,7 +160,7 @@ export default async function RolePage(props: {
           ) : null}
         </div>
         <div className="flex items-center gap-3">
-          <EntityTile size="lg" color="#0073EA" name={role.title} />
+          <EntityTile size="md" color="#0073EA" name={role.title} />
           <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate" title={role.title}>{role.title}</span>
             <span className="text-xs font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>

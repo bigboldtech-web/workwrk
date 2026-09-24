@@ -232,11 +232,11 @@ export default async function FolderPage(props: {
         ]}
       />
 
-      {/* Title row (48): back · tile · name · lock · Share · "…" */}
-      <div className="flex h-12 items-center gap-2 px-6">
+      {/* Title row (40): back · tile · name · lock · Share · "…" */}
+      <div className="flex h-[40px] items-center gap-2 px-6">
         <BackButton fallbackHref={backHref} label={backLabel} className="me-0.5" />
-        <EntityTile size="lg" icon={folder.icon} color={folder.color} name={folder.name} fallback="folder" />
-        <h1 className="min-w-0 flex items-center gap-1.5 text-xl font-semibold text-ink">
+        <EntityTile size="md" icon={folder.icon} color={folder.color} name={folder.name} fallback="folder" />
+        <h1 className="min-w-0 flex items-center gap-1.5 text-title font-semibold text-ink">
           <span className="truncate" title={folder.name}>{folder.name}</span>
           {isRestricted ? (
             <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />

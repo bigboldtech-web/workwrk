@@ -1374,7 +1374,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Group-by selector — ClickUp parity (2026-06-07). Toolbar pill
           shows the active field; click → "Group by" popover with field +
           direction dropdowns + trash to clear. */}
-      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-2 flex items-center gap-0.5`}>
+      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-1 flex items-center gap-0.5`}>
         {/* 1 — Group by */}
         <GroupByPill
           groupBy={groupBy}

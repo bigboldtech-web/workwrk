@@ -335,7 +335,7 @@ Marketing only: display 48 to 72 / 600 / 1.05 on white. Doc editor body: 15 / 40
 
 ### 2.4 Hierarchy rule and enforcement
 
-Weight and grey before size. A page has at most three sizes on screen at once (page 22, rows 15, meta 12/13). Emphasis = 500; de-emphasis = `--os-ink-2`. 600 is the ceiling; never 700 in product UI. Never colour as emphasis except links. Tailwind `@theme` maps exactly: `text-xs` 12/16, `text-sm` 13/18, `text-base` 14/20, `text-lg` 16/22, `text-xl` 22/28, plus custom utilities `text-row` 15/22, `text-micro` 11/14, `text-rail` 10/12, `text-prose` 15/24. After the sweep, any arbitrary `text-[Npx]` is an ESLint error (`no-restricted-syntax` on the regex `text-\[\d+(\.\d+)?px\]` in `className`) with `rail.tsx` exempted for nothing (it uses `text-rail`).
+Weight and grey before size. A page has at most three sizes on screen at once (page title 18, rows 15, meta 12/13). Emphasis = 500; de-emphasis = `--os-ink-2`. 600 is the ceiling; never 700 in product UI. Never colour as emphasis except links. Tailwind `@theme` maps exactly: `text-xs` 12/16, `text-sm` 13/18, `text-base` 14/20, `text-lg` 16/22, `text-xl` 22/28, plus custom utilities `text-row` 15/22, `text-micro` 11/14, `text-rail` 10/12, `text-prose` 15/24. After the sweep, any arbitrary `text-[Npx]` is an ESLint error (`no-restricted-syntax` on the regex `text-\[\d+(\.\d+)?px\]` in `className`) with `rail.tsx` exempted for nothing (it uses `text-rail`).
 
 ---
 
@@ -380,7 +380,7 @@ Navy variant described; the light flip substitutes the chrome tokens from 1.2.1 
 ┌──────┬─────────────────┬──────────────────────────────────────────────────┐
 │ rail │ sidebar 264     │ top bar 48 (navy)  ‹ › Work › Sales › Q4 leads   │
 │ 64   │ N50             ├──────────────────────────────────────────────────┤
-│ navy │                 │ title row 48       Q4 leads         [Share] [⋯]  │
+│ navy │                 │ title row 40       Q4 leads         [Share] [⋯]  │
 │      │  ┌───────────┐  │ views row 36       All · Mine · Overdue · ••• +  │
 │ ●●●● │  │ Home      │  │ toolbar 44  [Filter][Sort] | ≡ ▦ ▤   [+ Create ▾][⋯]│
 │      │  │ My work   │  ├──────────────────────────────────────────────────┤
@@ -392,7 +392,7 @@ Navy variant described; the light flip substitutes the chrome tokens from 1.2.1 
 └──────┴─────────────────┴──────────────────────────────────────────────────┘
 ```
 
-Chrome above the first data pixel: 48 + 48 + 36 + 44 = 176 on a multi-view list page; 140 when the views row collapses; 96 on doc pages. Chrome left of content: 328 (today 320).
+Chrome above the first data pixel: 48 + 40 + 36 + 44 = 168 on a multi-view list page; 132 when the views row collapses; 88 on doc pages (title row 40 since the 2026-09-24 compact pass). Chrome left of content: 328 (today 320).
 
 ### 4.1 Rail (`--os-rail-w: 64px`)
 
@@ -428,8 +428,8 @@ One row, `--os-chrome-bg`, no bottom border in navy (the colour step is the edge
 
 Three thin rows on the white canvas, padding-inline 24, always in this order.
 
-1. **Title row (48px)**: page title 22/600 `--os-ink`, single line, ellipsis, optionally preceded by `EntityTile size="lg"` neutral (Space/List pages) and, on full pages reached from a list, `BackButton{fallbackHref}` as a 28px ghost with `ArrowLeft` 8px before the title. Right: ghost page actions only (Share, "…"). At most one **"Ask AI"** slot at the far right (28px ghost, `Sparkles`, label "Ask AI"), rendered only when the AI module is entitled for the org; otherwise the slot is empty, never a disabled button. No description line under the title (it lives in "…" › About).
-2. **Views row (36px)**: saved views as **text-tab pills** in `.os-row`: 15/400 `--os-ink-2`, 32px tall, padding-inline 12, radius 6; hover `--os-surface-hov`; active `--os-surface-2` pill with 15/500 `--os-ink`. No underline, no coloured icons (the existing `ViewTab` is restyled, not replaced). Overflow past the width goes into a "•••" menu; "+ View" is the last item, ghost, 13px. **The row does not render** when a surface has exactly one view and no "+ View" affordance, and never on doc, SOP, goal, review, people-detail or settings pages.
+1. **Title row (40px)**: page title 18/600 `--os-ink` (`text-title`), single line, ellipsis, optionally preceded by `EntityTile size="md"` (20px) (Space/List pages). Compact since 2026-09-24: the founder read the 48px row, 22px title and 36px tile as too big and, on full pages reached from a list, `BackButton{fallbackHref}` as a 28px ghost with `ArrowLeft` 8px before the title. Right: ghost page actions only (Share, "…"). At most one **"Ask AI"** slot at the far right (28px ghost, `Sparkles`, label "Ask AI"), rendered only when the AI module is entitled for the org; otherwise the slot is empty, never a disabled button. No description line under the title (it lives in "…" › About).
+2. **Views row (36px)**: saved views as **text-tab pills** in `.os-row`: 14/400 `--os-ink-2`, 28px tall, padding-inline 10, radius 6; hover `--os-surface-hov`; active `--os-surface-2` pill with 14/500 `--os-ink`. No underline, no coloured icons (the existing `ViewTab` is restyled, not replaced). Overflow past the width goes into a "•••" menu; "+ View" is the last item, ghost, 13px. **The row does not render** when a surface has exactly one view and no "+ View" affordance, and never on doc, SOP, goal, review, people-detail or settings pages.
 3. **Toolbar row (44px, gap 8, no bottom border)**: left = **Filter** (16px `Funnel` + "Filter", a 36px toggle chip that turns `--os-surface-2` and shows "Filter · 2" when the side panel is open), **Sort** (`ArrowUpDown` + "Sort"), **Group** (Board/List surfaces only), a 1px 20px `--os-line` divider, then the **view-type switcher**: a run of 32px icon buttons (list, board, calendar, gantt, table, …), the active one `--os-brand-deep` on `--os-brand-soft` radius 6 (5.47:1 (v)), others `--os-ink-2`, overflow chevron after 6. Right = **the one blue button**: "Create task" / "New doc" / "New table" (36px, `--os-brand`, white 14/500, 16px `Plus`, radius 6), optionally fused to a 36px split chevron (`1px rgba(255,255,255,.24)` divider) for "Create from template"; then a bordered "…" square (36px, `--os-line-strong` border) holding Display (fields shown, subtasks, closed tasks, Solid status column), Import, Export, Automations…, Settings.
 4. Below: 8px, then content. With Filter open, the **272px filter panel** sits at the left of the content with a 16px gap and the table/board narrows (a 220ms width tween).
 
@@ -547,7 +547,7 @@ Inputs per 5.4 with ring + halo. Checkbox 18px (16 at Compact), radius 4, `1px s
 
 ### 5.12 Tabs and the segmented control
 
-- **Text-tab pills** (saved views, settings sub-tabs, drawer Comments / Activity): 32px, 15/400 (14 in drawers and modals) `--os-ink-2`, radius 6, active `--os-surface-2` + 500 `--os-ink`. `ViewTab` is restyled to this; the zinc-900 underline and per-view coloured icon retire. **Underline tabs exist nowhere in the app**; the only underline is the marketing site nav.
+- **Text-tab pills** (saved views, settings sub-tabs, drawer Comments / Activity): 28px, 14/400 everywhere `--os-ink-2`, radius 6, active `--os-surface-2` + 500 `--os-ink` (was 32px and 15/400 until the 2026-09-24 compact pass). `ViewTab` is restyled to this; the zinc-900 underline and per-view coloured icon retire. **Underline tabs exist nowhere in the app**; the only underline is the marketing site nav.
 - **Segmented control** (2 to 4 exclusive options in Preferences and panels: Theme Light / Dark / System, Chrome Navy / Light, Density Comfortable / Cozy / Compact, view density toggles): 32px, `--os-surface-1` track radius 8 with 2px padding, segments 14/500 `--os-ink-2`, active segment `--os-surface` with `1px solid var(--os-line)` radius 6 and `--os-ink`. Keyboard: arrows move, no roving blue. It is the right primitive for a setting; the text-tab pill is the right primitive for a view.
 
 ### 5.13 Tooltips

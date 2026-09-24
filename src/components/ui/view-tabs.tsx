@@ -2,13 +2,15 @@
 
 // ViewTabs: the text-tab pill (design-system 5.12, 4.4 views row). One
 // primitive for saved views, settings sub-tabs and drawer Comments / Activity
-// tabs: 32px, 15/400 ink-2, radius 6, hover surface-hov, active surface-2
-// with 15/500 ink. No underline anywhere in the app, no coloured view icons;
+// tabs: 28px, 14/400 ink-2, radius 6, hover surface-hov, active surface-2
+// with 14/500 ink. No underline anywhere in the app, no coloured view icons;
 // an optional 16px Lucide glyph renders mono in ink-2 (ink when active).
+// Compact since 2026-09-24: the founder read the 32px / 15px pills as too
+// big next to the list, so the pill matches ClickUp's 28 / 14.
 //
 // `ViewTabStrip` is the 36px `.os-row` the pills sit in (the page's views
-// row when used under OsPageHeader; inside drawers the `dense` size gives
-// 14px labels).
+// row when used under OsPageHeader). `dense` is kept for callers and draws
+// the same 14px label.
 
 import { type ReactNode } from "react";
 import Link from "next/link";
@@ -32,11 +34,11 @@ export function ViewTabStrip({
   );
 }
 
-// .os-chrome on the pill itself: 32px tall and 12px padding in px wherever a
-// tab renders (page views row, settings sub-tabs, drawer tabs), not 28 / 10.5
-// under the product's 14px root.
+// .os-chrome on the pill itself: 28px tall and 10px padding in px wherever a
+// tab renders (page views row, settings sub-tabs, drawer tabs), not 24.5 /
+// 8.75 under the product's 14px root.
 const tabVariants = cva(
-  "group/view os-chrome inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 whitespace-nowrap transition-colors duration-[var(--os-dur-base)]",
+  "group/view os-chrome inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 whitespace-nowrap transition-colors duration-[var(--os-dur-base)]",
   {
     variants: {
       active: {
@@ -45,7 +47,7 @@ const tabVariants = cva(
       },
       dense: {
         true: "text-base",
-        false: "text-row",
+        false: "text-base",
       },
     },
     defaultVariants: { active: false, dense: false },

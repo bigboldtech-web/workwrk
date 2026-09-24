@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Type scale utilities (design-system 2.2, 8.3) ──────────────────
-   The nine sizes, bound exactly and in px: text-xs 12/16, text-sm 13/18,
-   text-base 14/20, text-lg 16/22, text-xl 22/28, text-row 15/22,
+   The sizes, bound exactly and in px: text-xs 12/16, text-sm 13/18,
+   text-base 14/20, text-lg 16/22, text-title 18/24, text-xl 22/28, text-row 15/22,
    text-micro 11/14 (600, +0.06em), text-rail 10/12 (500), text-prose
    15/24 (the doc-editor reading exception).
 
@@ -30,6 +30,12 @@
   --text-lg--line-height: 22px;
   --text-xl: 22px;
   --text-xl--line-height: 28px;
+  /* The page title (title row of OsPageHeader and every hand-drawn copy of
+     it). It was text-xl 22/28 in a 48px row with a 36px tile; the founder
+     read that header as too big (2026-09-24), so the title row is now 40px
+     with an 18/24 title and a 20px tile. text-xl stays for numbers. */
+  --text-title: 18px;
+  --text-title--line-height: 24px;
 
   --text-row: 15px;
   --text-row--line-height: 22px;

@@ -386,8 +386,8 @@ export default function AgreementEditorPage() {
         titleSlot={
           <>
             {editable ? (
-              <input value={title} onChange={(e) => saveTitle(e.target.value)} placeholder="Untitled contract" aria-label="Contract title" className="h-9 min-w-0 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none" />
-            ) : <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{ag.title}</h1>}
+              <input value={title} onChange={(e) => saveTitle(e.target.value)} placeholder="Untitled contract" aria-label="Contract title" className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-1 text-title font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none" />
+            ) : <h1 className="min-w-0 flex-1 truncate text-title font-semibold text-ink">{ag.title}</h1>}
             {ag.isTemplate ? <span className="inline-flex h-6 items-center rounded-md bg-active px-2 text-xs font-medium text-ink">Template</span> : <StatusChip color={CONTRACT_STATUS_COLOR[cStatus]} label={CONTRACT_STATUS_LABEL[cStatus]} disabled />}
           </>
         }
