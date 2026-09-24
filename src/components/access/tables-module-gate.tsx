@@ -1,5 +1,6 @@
-// The Tables module gate, shared by the two directories the module owns
-// (/tables and /forms; spec-shell 1.1 puts both in the tables hub). A
+// The Tables module gate for /tables (spec-shell 1.1). /forms used to mount
+// it too; Forms is core since founder decision D15 and has its own Guest-only
+// gate (forms-gate.tsx), so with the module off a Member still has Forms. A
 // server component, because there is no middleware and the dashboard layout
 // is a client component, so a bookmarked URL cannot bypass the
 // Settings > Apps & modules switch. With the module off the module's pages
@@ -32,7 +33,7 @@ export async function TablesModuleGate({ children }: { children: React.ReactNode
       productSlug={MOD.productSlug}
       canEnable={canEnable}
       admins={admins}
-      unlocks="tables and forms"
+      unlocks="tables"
       back={{ fallbackHref: WORK_HOME_HREF, label: HUB_LABELS.home }}
     />
   );

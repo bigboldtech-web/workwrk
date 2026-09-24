@@ -100,6 +100,16 @@ function Shape({ art }: { art: TemplateArt }) {
           <Box x={62} y={28} w={16} h={40} r={4} />
         </>
       );
+    // An intake form: two questions, each a label line over an answer box.
+    case "form":
+      return (
+        <>
+          <Line x1={26} y1={28} x2={50} y2={28} />
+          <Box x={26} y={34} w={44} h={12} r={4} />
+          <Line x1={26} y1={56} x2={44} y2={56} />
+          <Box x={26} y={62} w={44} h={12} r={4} />
+        </>
+      );
     // A starter kit: a row plus a page, because a kit makes several things.
     case "kit":
     default:

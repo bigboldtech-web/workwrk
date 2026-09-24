@@ -1,0 +1,34 @@
+-- 2026-09-23 - Phase 5, the form builder (spec-tables-forms section 4 step 6,
+-- data migration b): the form's own settings bucket.
+--
+-- ONE additive column, FormDefinition."settings" Json NOT NULL DEFAULT '{}'.
+-- Nothing is renamed, retyped, dropped or made required without a default,
+-- and no existing row changes behaviour: an empty bucket reads as the
+-- defaults through readFormSettings (src/lib/forms/settings.ts), which are
+-- exactly what every live form does today:
+--
+--   acceptingResponses   true   (a form keeps taking answers)
+--   closesAt             null   (it never closes on its own)
+--   oneResponsePerPerson false
+--   collectEmail         false
+--   confirmationMessage  "Thanks, your response has been recorded."
+--   redirectUrl          null
+--   allowAnother         true   (the responder always offered it)
+--   notifyUserIds        []     (nobody is notified, as today)
+--   dailySummary         false
+--   closedMessage        "This form is no longer accepting responses."
+--
+-- So there is no backfill: the column is created with '{}' on every row and
+-- the defaults live in code, where the tests pin them.
+--
+-- APPLY THIS FILE BEFORE THE CODE. Prisma selects every scalar on a
+-- findFirst or findMany with no `select`, so the moment the generated client
+-- knows about FormDefinition.settings, a database without the column 500s
+-- the /forms list, the builder and the form row menu. It is in the deploy
+-- manifest (scripts/deploy-migrations.mjs), which applies it inside
+-- `npm run build`, before `next build` and before pm2 reloads.
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS, and the default is only (re)set,
+-- which changes no stored value. Running it twice does nothing.
+
+ALTER TABLE "FormDefinition" ADD COLUMN IF NOT EXISTS "settings" JSONB NOT NULL DEFAULT '{}';

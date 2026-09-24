@@ -51,6 +51,18 @@ const nextConfig: NextConfig = {
     // Scale what workers there are by memory actually free at the time rather
     // than by core count, so a busier box builds with less rather than dying.
     memoryBasedWorkersCount: true,
+    // The dev server's filesystem cache is ON unless WORKWRK_DEV_FS_CACHE=0,
+    // which is Next 16's own default, so nobody's `next dev` changes.
+    //
+    // The opt-out exists for the long-running screenshot server that
+    // verification workflows drive (scripts/dev/, port 3007). Under hours of
+    // headless browsing that cache grew to 64 GB and then 82 GB, and twice the
+    // server sat at over 1000% CPU with no request in flight. A full tsc took
+    // more than ten minutes while it spun and five seconds once it stopped,
+    // and the agents sharing the machine stalled on commands as trivial as
+    // `cat`. A server that is restarted cold for every run gains nothing from
+    // the cache and pays for it in background work.
+    turbopackFileSystemCacheForDev: process.env.WORKWRK_DEV_FS_CACHE !== "0",
   },
 
   // Comms Hub was briefly shipped under /chat before the Room rename —

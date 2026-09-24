@@ -76,6 +76,8 @@ export interface HomePref {
   favoriteFolderIds?: string[];
   // Phase 84 — favorite (starred) Table ids.
   favoriteTableIds?: string[];
+  // Phase 5 (Data): favorite (starred) Form ids, the Tables hub FAVORITES rows.
+  favoriteFormIds?: string[];
   // Phase 89 — favorite (starred) Whiteboard + File ids.
   favoriteWhiteboardIds?: string[];
   favoriteFileIds?: string[];
@@ -142,6 +144,10 @@ export interface HomePref {
   notetaker?: { lastListId?: string | null };
   /** The SOP library's Display options (spec-process section 2 `/sops`). */
   sops?: { columns?: Record<string, boolean> };
+  /** The /tables list's Display columns and the sheet's View checks (spec-tables-forms section 2). */
+  tables?: { columns?: Record<string, boolean>; gridlines?: boolean; formulaBar?: boolean };
+  /** The /forms list's Display columns and the builder's Display options. */
+  forms?: { columns?: Record<string, boolean>; showHelpText?: boolean; showFieldNumbers?: boolean };
   // Planner hub per-surface display options (spec-planner section 2, Phase 4).
   // READ PER FIELD through src/lib/planner-prefs.ts, never by spreading:
   // getEffectivePreferences merges `home` with a shallow spread, so a stored

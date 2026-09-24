@@ -66,6 +66,31 @@ escalations pointed at work nobody could see.
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.
 
+## Form responses daily summary (NOT INSTALLED: the founder adds this row)
+
+`POST /api/cron/form-daily-summary` is the reader of the form builder's
+"Send a daily summary instead" switch (Settings tab, Notifications card,
+spec-tables-forms section 2 `/forms/[id]`). Once a day, for every form set to
+the summary, the people on its "Tell these people about each new response"
+list get ONE notification counting the last 24 hours of responses, instead of
+one notification per response. A form with no responses in the window sends
+nothing. Added in Phase 5 (2026-09-23).
+
+**Install it in two steps, together**: add the row below, AND set
+`FORM_DAILY_SUMMARY_CRON=on` in the app's `.env` (then reload pm2). The app
+cannot see the crontab, so that flag is how it knows the reader exists. Until
+the flag is on, the builder does not show "Send a daily summary instead", and
+a form already set to it keeps sending one notification per response, so
+nobody silently stops hearing about responses. Set the flag only once the row
+is in, or a summary form goes quiet.
+
+**It is fail-closed**: with `CRON_SECRET` unset it answers 503 and sends
+nothing, because it writes into people's inboxes.
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Form responses daily summary | `0 8 * * *` (8 AM daily) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/form-daily-summary` |
+
 ## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
 
 `POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people

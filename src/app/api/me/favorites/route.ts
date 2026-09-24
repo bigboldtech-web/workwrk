@@ -32,17 +32,20 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
+import { orgRoleOf } from "@/lib/access/org-role";
+import { unscopedTableReadable } from "@/lib/table-gate";
 import { getBoardForReader } from "@/lib/board";
 import { getSpaceForReader } from "@/lib/space";
 import { docAccessible } from "@/lib/doc-access";
 
-/** The seven kinds, and the preference key each one is stored under. */
+/** The eight kinds, and the preference key each one is stored under (form added in Phase 5). */
 export const FAVORITE_KINDS = [
   { kind: "space", key: "favoriteSpaceIds" },
   { kind: "folder", key: "favoriteFolderIds" },
   { kind: "list", key: "favoriteBoardIds" },
   { kind: "doc", key: "favoriteDocIds" },
   { kind: "table", key: "favoriteTableIds" },
+  { kind: "form", key: "favoriteFormIds" },
   { kind: "canvas", key: "favoriteWhiteboardIds" },
   { kind: "file", key: "favoriteFileIds" },
 ] as const;
@@ -82,7 +85,7 @@ export async function GET(req: Request) {
   const stored: Record<string, string[]> = {};
   for (const { key } of FAVORITE_KINDS) stored[key] = idsOf(home[key]);
 
-  const [spaces, folders, boards, docs, tables, canvases, files] = await Promise.all([
+  const [spaces, folders, boards, docs, tables, forms, canvases, files] = await Promise.all([
     stored.favoriteSpaceIds.length
       ? prisma.space.findMany({
           where: { organizationId, id: { in: stored.favoriteSpaceIds } },
@@ -114,7 +117,15 @@ export async function GET(req: Request) {
     stored.favoriteTableIds.length
       ? prisma.dataTable.findMany({
           where: { organizationId, id: { in: stored.favoriteTableIds } },
-          select: { id: true, name: true, spaceId: true },
+          select: { id: true, name: true, spaceId: true, createdById: true },
+        })
+      : Promise.resolve([]),
+    stored.favoriteFormIds.length
+      ? prisma.formDefinition.findMany({
+          // A Guest reaches only the forms they made (GET /api/forms scopes
+          // the same way), so a star on any other form is not readable.
+          where: { organizationId, id: { in: stored.favoriteFormIds }, ...(orgRoleOf({ accessLevel }) === "GUEST" ? { createdById: userId } : {}) },
+          select: { id: true, name: true },
         })
       : Promise.resolve([]),
     stored.favoriteWhiteboardIds.length
@@ -141,6 +152,7 @@ export async function GET(req: Request) {
     favoriteBoardIds: new Set(boards.map((r) => r.id)),
     favoriteDocIds: new Set(docs.map((r) => r.id)),
     favoriteTableIds: new Set(tables.map((r) => r.id)),
+    favoriteFormIds: new Set(forms.map((r) => r.id)),
     favoriteWhiteboardIds: new Set(canvases.map((r) => r.id)),
     favoriteFileIds: new Set(files.map((r) => r.id)),
   };
@@ -221,7 +233,8 @@ export async function GET(req: Request) {
     });
   }
   for (const t of tables) {
-    if (!(await readableSpace(t.spaceId))) continue;
+    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
+    if (t.spaceId ? !(await readableSpace(t.spaceId)) : !unscopedTableReadable(t.createdById, userId, accessLevel)) continue;
     rows.push({
       kind: "table",
       id: t.id,
@@ -231,6 +244,20 @@ export async function GET(req: Request) {
       color: null,
       spaceId: t.spaceId,
       order: orderOf("favoriteTableIds", t.id),
+    });
+  }
+  // A form has no Space of its own and every member of the org can open it
+  // while the access engine is inert, so an alive form is a readable one.
+  for (const f of forms) {
+    rows.push({
+      kind: "form",
+      id: f.id,
+      name: f.name,
+      href: `/forms/${f.id}`,
+      icon: null,
+      color: null,
+      spaceId: null,
+      order: orderOf("favoriteFormIds", f.id),
     });
   }
   for (const w of canvases) {

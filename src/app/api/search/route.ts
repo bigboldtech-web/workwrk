@@ -4,6 +4,9 @@ import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
 import { docAccessible } from "@/lib/doc-access";
 import { visibleSpaceIds, isOrgAdminAccessLevel } from "@/lib/space";
 import { accessibleFolderIds } from "@/lib/folder";
+import { unscopedTableReadable } from "@/lib/table-gate";
+import { isModuleActive } from "@/lib/entitlements";
+import { viewerFromSession } from "@/lib/access/viewer";
 import { getUserTagIds } from "@/lib/user-tags";
 import { announcementInFeed } from "@/lib/announcement-view";
 import {
@@ -28,7 +31,10 @@ import {
  * This searches the ACTUAL work graph — Item (tasks), Board (lists),
  * Space, Folder, Doc (notes), Whiteboard, and people — plus the alignment
  * + org surfaces that still have live routes (SOP, OKR, meeting,
- * department, idea, policy, announcement). It deliberately does NOT search
+ * department, idea, policy, announcement), and, while the Tables module is
+ * on, tables (DataTable) and forms (FormDefinition), which the palette shows
+ * as its Tables and Forms groups (spec-tables-forms section 2). It
+ * deliberately does NOT search
  * the legacy `Task` table, nor the amputated procurement / financials /
  * planning modules whose pages 404.
  */
@@ -54,6 +60,19 @@ export async function GET(req: NextRequest) {
   const myAccess = session2.user.accessLevel;
   const admin = isOrgAdminAccessLevel(myAccess);
 
+  // Tables ride the Tables module (workwrk-tables): with it off they are not
+  // searched, like every /api/tables* route. Forms are CORE (founder decision
+  // D15: forms-gate.tsx and /api/forms* carry no module check), so they are
+  // searched whether the module is on or off. A Guest finds only the forms
+  // they made, the one set the forms list gives them while the access engine
+  // is inert (api/forms GET), and only the unscoped tables they made
+  // (lib/table-visibility).
+  const [tablesOn, searchViewer] = await Promise.all([
+    isModuleActive(orgId, "workwrk-tables").catch(() => false),
+    viewerFromSession().catch(() => null),
+  ]);
+  const formScope = searchViewer?.orgRole === "GUEST" ? { createdById: me } : {};
+
   const [
     users,
     items,
@@ -69,6 +88,8 @@ export async function GET(req: NextRequest) {
     ideas,
     policies,
     announcements,
+    dataTables,
+    forms,
   ] = await Promise.all([
     prisma.user.findMany({
       where: {
@@ -177,6 +198,20 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
       take,
     }),
+    tablesOn
+      ? prisma.dataTable.findMany({
+          where: { organizationId: orgId, OR: [{ name: ci }, { description: ci }] },
+          select: { id: true, name: true, spaceId: true, createdById: true },
+          orderBy: { updatedAt: "desc" },
+          take: take * 3,
+        })
+      : Promise.resolve([] as { id: string; name: string; spaceId: string | null; createdById: string | null }[]),
+    prisma.formDefinition.findMany({
+      where: { organizationId: orgId, ...formScope, OR: [{ name: ci }, { description: ci }] },
+      select: { id: true, name: true },
+      orderBy: { updatedAt: "desc" },
+      take,
+    }),
   ]);
 
   // ── Visibility gating ─────────────────────────────────────────────
@@ -189,6 +224,7 @@ export async function GET(req: NextRequest) {
   for (const f of folders) if (f.spaceId) spaceIdSet.add(f.spaceId);
   for (const it of items) if (it.board?.spaceId) spaceIdSet.add(it.board.spaceId);
   for (const w of whiteboards) if (w.spaceId) spaceIdSet.add(w.spaceId);
+  for (const t of dataTables) if (t.spaceId) spaceIdSet.add(t.spaceId);
 
   const visible = admin ? null : await visibleSpaceIds([...spaceIdSet], me, myAccess);
 
@@ -282,6 +318,12 @@ export async function GET(req: NextRequest) {
     .filter((w) => admin || !w.spaceId || (!!visible && visible.has(w.spaceId)))
     .slice(0, take);
 
+  // A table follows its Space, like a canvas (lib/table-gate readableTable);
+  // an unscoped table is org-wide for Members and a Guest's own only.
+  const visibleTables = dataTables
+    .filter((t) => admin || (t.spaceId ? !!visible && visible.has(t.spaceId) : unscopedTableReadable(t.createdById, me, myAccess)))
+    .slice(0, take);
+
   const results = [
     ...visibleItems.map((it) => {
       const status = (it.status ?? "").replace(/_/g, " ").trim();
@@ -326,6 +368,20 @@ export async function GET(req: NextRequest) {
       title: w.name,
       subtitle: "Canvas",
       href: `/canvas/${w.id}`,
+    })),
+    ...visibleTables.map((t) => ({
+      type: "table" as const,
+      id: t.id,
+      title: t.name || "Untitled table",
+      subtitle: "Table",
+      href: `/tables/${t.id}`,
+    })),
+    ...forms.map((f) => ({
+      type: "form" as const,
+      id: f.id,
+      title: f.name || "Untitled form",
+      subtitle: "Form",
+      href: `/forms/${f.id}`,
     })),
     ...users.map((u) => ({
       type: "person" as const,

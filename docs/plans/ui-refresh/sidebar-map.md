@@ -230,7 +230,7 @@ Deleted from today's sidebar: the "Popular Wikis" stub card, the "Favorites: Sta
 
 ## 7. Tables hub (`tables`): owned by tables-forms
 
-`defaultHref: /tables`. The whole hub is gated on the spreadsheets module: with it off, the rail hub is **absent** for Members, Agents and Guests, and Owners and Admins keep a dim off-module tile that opens `ModuleOff` with the switch on it.
+`defaultHref: /tables` (`/forms` while the spreadsheets module is off). **Founder decision D15 made Forms core**, which overturns the original "whole hub is gated" wording. As built in Phase 5: with the module off, the rail hub **stays** because Forms lives in it (rail-apps `MODULE_HUB_SURVIVES_ON`), its default link falls back to `/forms` (route-hub `hubDefaultHref`), rows 1 and 4 (All tables, TABLES) and the "+" rows New table and Import a CSV… are hidden (apps-catalog `requiredModules: ["tables"]`), and `/tables` and `/tables/[id]` render `ModuleOff` (Owners and Admins get the switch, Members "Ask an admin", Guests the shell 404). `/forms`, `/forms/[id]`, the responder and form search in the command palette work with the module off.
 
 Header "+": **New table** · **New form** · separator · **Import a CSV…**. Guests never see it. Every create door calls the API first and lands on the new object's own URL with `?new=1`; `/tables?new=1` and `/forms?new=1` are not URLs this product produces.
 

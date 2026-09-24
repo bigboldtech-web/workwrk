@@ -1,13 +1,14 @@
 "use client";
 
-// RelationConfigModal — configures a DataTable relational column:
+// RelationConfigModal, configures a DataTable relational column:
 //   link   → pick the target table
 //   lookup → pick a link column on this table + a field in its target table
 //   rollup → pick a link column + a target field + an aggregate function
 // Pure UI: the page owns the columns + persistence and passes data in.
 
 import { useState } from "react";
-import { X, Link2, Search, Sigma, Check } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Link2, Search, Sigma, Check } from "lucide-react";
 
 export interface RelCol {
   id: string;
@@ -63,19 +64,18 @@ export function RelationConfigModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div role="dialog" aria-modal="true" aria-label={title} className="relative w-full max-w-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100">
-          <h3 className="inline-flex items-center gap-2 text-base font-semibold text-zinc-900"><Icon className="w-4 h-4 text-zinc-500" /> {title}</h3>
-          <button type="button" onClick={onClose} className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 inline-flex items-center justify-center text-zinc-500"><X className="w-4 h-4" /></button>
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="os-chrome max-w-[560px] gap-0 overflow-hidden border-line bg-raised p-0">
+        <div className="flex h-14 items-center border-b border-line px-5">
+          <DialogTitle className="inline-flex items-center gap-2 text-lg font-semibold text-ink"><Icon className="h-4 w-4 text-ink-2" /> {title}</DialogTitle>
         </div>
+        <DialogDescription className="sr-only">Where this column reads its values from.</DialogDescription>
 
         <div className="p-5 space-y-4">
           {column.type === "link" ? (
             <Field label="Target table">
-              <select value={linkTableId} onChange={(e) => setLinkTableId(e.target.value)} className="w-full h-9 px-2 rounded-lg border border-zinc-200 text-base bg-white">
-                <option value="">Select a table…</option>
+              <select value={linkTableId} onChange={(e) => setLinkTableId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-line-strong text-base bg-raised text-ink">
+                <option value="">Choose a table</option>
                 {allTables.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </Field>
@@ -83,49 +83,49 @@ export function RelationConfigModal({
             <>
               <Field label="Through link column">
                 {linkColumns.length === 0 ? (
-                  <p className="text-sm text-amber-600">Add a “Link to table” column first.</p>
+                  <p className="text-sm text-warning-text">Add a "Link to another table" column first.</p>
                 ) : (
-                  <select value={linkColumnId} onChange={(e) => { setLinkColumnId(e.target.value); setFieldId(""); }} className="w-full h-9 px-2 rounded-lg border border-zinc-200 text-base bg-white">
-                    <option value="">Select a link column…</option>
+                  <select value={linkColumnId} onChange={(e) => { setLinkColumnId(e.target.value); setFieldId(""); }} className="w-full h-9 px-2 rounded-md border border-line-strong text-base bg-raised text-ink">
+                    <option value="">Choose a link column</option>
                     {linkColumns.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                 )}
               </Field>
               {column.type === "rollup" ? (
                 <Field label="Aggregate">
-                  <select value={rollupFn} onChange={(e) => setRollupFn(e.target.value)} className="w-full h-9 px-2 rounded-lg border border-zinc-200 text-base bg-white">
+                  <select value={rollupFn} onChange={(e) => setRollupFn(e.target.value)} className="w-full h-9 px-2 rounded-md border border-line-strong text-base bg-raised text-ink">
                     {ROLLUP_FNS.map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </Field>
               ) : null}
               {linkColumnId && !(column.type === "rollup" && rollupFn === "COUNT") ? (
                 <Field label={column.type === "lookup" ? "Field to pull" : "Field to aggregate"}>
-                  <select value={fieldId} onChange={(e) => setFieldId(e.target.value)} className="w-full h-9 px-2 rounded-lg border border-zinc-200 text-base bg-white">
-                    <option value="">Select a field…</option>
+                  <select value={fieldId} onChange={(e) => setFieldId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-line-strong text-base bg-raised text-ink">
+                    <option value="">Choose a column</option>
                     {targetCols.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
-                  {targetCols.length === 0 ? <p className="text-xs text-zinc-400 mt-1">Target table’s fields load once the link is set.</p> : null}
+                  {targetCols.length === 0 ? <p className="text-xs text-ink-3 mt-1">The other table's columns appear once the link is set.</p> : null}
                 </Field>
               ) : null}
             </>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-zinc-100">
-          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-base text-zinc-600 hover:bg-zinc-100">Cancel</button>
+        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-line-soft">
+          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-base text-ink-2 hover:bg-hover">Cancel</button>
           <button type="button" onClick={save} disabled={!canSave} className="h-9 px-4 rounded-lg text-base text-white bg-[var(--os-brand)] inline-flex items-center gap-1.5 disabled:opacity-50">
             <Check className="w-3.5 h-3.5" /> Save
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="text-sm font-medium text-zinc-600">{label}</label>
+      <label className="text-sm font-medium text-ink-2">{label}</label>
       <div className="mt-1">{children}</div>
     </div>
   );

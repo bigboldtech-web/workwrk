@@ -7,7 +7,7 @@ import {
   clampRowHeight,
 } from "./sheet-row-geometry";
 
-const H = 33; // the kernel's SHEET_ROW_H
+const H = 33; // a row height (these geometry tests are independent of the kernel default)
 
 describe("clampRowHeight", () => {
   it("clamps into [MIN, MAX]", () => {

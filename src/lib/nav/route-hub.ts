@@ -440,6 +440,12 @@ export type HubHrefContext = {
    * module off. Undefined is read as "on", which is today's behaviour.
    */
   talkModuleOn?: boolean;
+  /**
+   * Whether the org has the spreadsheets (Tables) module on. Forms is core
+   * (founder decision D15), so with the module off the hub survives on Forms
+   * and a rail click lands there. Undefined is read as "on".
+   */
+  tablesModuleOn?: boolean;
   /** Owner or Admin: the only viewers whose Settings door is the workspace one. */
   canManageWorkspace?: boolean;
 };
@@ -467,7 +473,8 @@ export function hubDefaultHref(hub: HubKey, ctx: HubHrefContext = {}): string {
     case "docs":
       return "/docs";
     case "tables":
-      return "/tables";
+      // Module off: Forms is the hub's only content, so it is the door.
+      return ctx.tablesModuleOn === false ? "/forms" : "/tables";
     case "settings":
       return ctx.canManageWorkspace ? "/settings" : "/account/profile";
   }

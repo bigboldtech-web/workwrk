@@ -26,6 +26,7 @@ import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
 import { logActivity } from "@/lib/item-thread";
 import { visibleSpaceIds } from "@/lib/space";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
+import { filledRowCounts } from "@/lib/table-counts";
 
 const ENTITY_TYPES = [
   "TASK", "BOARD", "BOARD_ITEM", "SPACE", "FOLDER", "KRA", "KPI", "KPI_PROMPT",
@@ -189,13 +190,13 @@ async function hydrate(
       } else if (type === "TABLE") {
         const tables = await prisma.dataTable.findMany({
           where: { organizationId: orgId, id: { in: ids } },
-          select: {
-            id: true, name: true, description: true, spaceId: true,
-            _count: { select: { rows: { where: { deletedAt: null } } } },
-          },
+          select: { id: true, name: true, description: true, spaceId: true },
         });
+        // Filled rows only: a new table's 1,000 seeded blank rows are not
+        // rows anyone wrote (data.md 3.14, lib/table-counts).
+        const filled = await filledRowCounts(tables.map((t) => t.id));
         for (const t of tables) {
-          const rowCount = t._count.rows;
+          const rowCount = filled.get(t.id) ?? 0;
           titleByKey.set(`${type}:${t.id}`, {
             title: t.name,
             subtitle: t.description ?? `${rowCount} ${rowCount === 1 ? "row" : "rows"}`,

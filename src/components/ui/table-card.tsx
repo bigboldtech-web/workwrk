@@ -32,7 +32,7 @@
 // and always at Compact density on touch devices (os.css `.os-tc__more`).
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +103,9 @@ export interface TableCardProps<T> {
   highlightKey?: string | null;
   /** The right-click handler for a row (every item is also in the "..."). */
   onRowContextMenu?: (row: T, e: React.MouseEvent) => void;
+  /** Cmd/Ctrl+Backspace on a focused row (list pages: Move to Trash, behind
+   *  the page's own confirm). Absent = the key does nothing. */
+  onRowDeleteKey?: (row: T) => void;
   className?: string;
   ariaLabel?: string;
 }
@@ -133,9 +136,11 @@ export function TableCard<T>({
   skeletonRows = 8,
   highlightKey,
   onRowContextMenu,
+  onRowDeleteKey,
   className,
   ariaLabel,
 }: TableCardProps<T>) {
+  const bodyRef = useRef<HTMLDivElement>(null);
   const sel = selected ?? new Set<string>();
   const anySelected = sel.size > 0;
 
@@ -175,6 +180,42 @@ export function TableCard<T>({
     onSelectedChange(next);
   }
 
+  // The list keyboard (spec-tables-forms section 1: every right-click action
+  // has a keyboard path). On a focused row: j / ArrowDown and k / ArrowUp move
+  // between rows, Space selects it (when rows are selectable), "." opens its
+  // "..." menu, and Cmd/Ctrl+Backspace runs onRowDeleteKey. Typing in an
+  // input inside a row is never intercepted, and Space or "." on a button
+  // inside a row keeps that button's own meaning.
+  function onBodyKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const t = e.target as HTMLElement;
+    if (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
+    const rowEl = t.closest<HTMLElement>("[role=row][data-key]");
+    const body = bodyRef.current;
+    if (!rowEl || !body || !body.contains(rowEl) || !rows) return;
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    const list = Array.from(body.querySelectorAll<HTMLElement>("[role=row][data-key]"));
+    const idx = list.indexOf(rowEl);
+    if (plain && (e.key === "j" || e.key === "ArrowDown" || e.key === "k" || e.key === "ArrowUp")) {
+      const next = list[idx + (e.key === "j" || e.key === "ArrowDown" ? 1 : -1)];
+      if (next) { e.preventDefault(); next.focus(); }
+      return;
+    }
+    if (t !== rowEl) return;
+    const key = rowEl.dataset.key ?? "";
+    const row = rows.find((r) => rowKey(r) === key);
+    if (!row) return;
+    if (plain && e.key === " " && selectable) { e.preventDefault(); toggleOne(key); return; }
+    if (plain && e.key === ".") {
+      const more = rowEl.querySelector<HTMLElement>(".os-tc__more button, .os-tc__more [role=button]");
+      if (more) { e.preventDefault(); more.click(); }
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete") && onRowDeleteKey) {
+      e.preventDefault();
+      onRowDeleteKey(row);
+    }
+  }
+
   const minWidth = useMemo(() => {
     // Sum of the fixed tracks plus 120 per fluid column, so the card scrolls
     // sideways inside itself rather than squashing cells to nothing.
@@ -189,7 +230,7 @@ export function TableCard<T>({
   return (
     <div className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>
       <div className="min-h-0 flex-1 overflow-auto">
-        <div style={{ minWidth }}>
+        <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}
           <div
             role="row"
@@ -229,7 +270,7 @@ export function TableCard<T>({
                 </div>
               );
             })}
-            {rowMenu ? <div className={CELL} aria-hidden /> : null}
+            {rowMenu ? <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden /> : null}
           </div>
 
           {/* Body */}
@@ -262,6 +303,12 @@ export function TableCard<T>({
                 "hover:bg-hover focus-within:bg-hover",
                 isSel ? "bg-selected hover:bg-selected-hov" : "",
                 isHi ? "bg-selected" : "",
+                // The same state as a tint the sticky "..." cell paints over
+                // the card surface (see `more` below). Chosen here rather than
+                // stacked as classes, so two hover rules never race.
+                isSel
+                  ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-selected-hov)]"
+                  : cn(isHi ? "[--tc-tint:var(--os-selected)]" : "", "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]"),
               );
               const style = { gridTemplateColumns: template, height: "var(--os-row-h)" } as React.CSSProperties;
               const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -276,8 +323,21 @@ export function TableCard<T>({
                   />
                 </div>
               ) : null;
+              // The "..." column is pinned to the card's end edge. When the
+              // columns are wider than the card (a narrow window, the Filter
+              // panel open) the other cells scroll sideways under it, so the
+              // row menu is never parked behind a scroll nobody can see
+              // (overlay scrollbars draw nothing). It needs an opaque fill for
+              // that: the card surface with the row's state tint on top, since
+              // the selected tint is translucent in dark mode. Every row menu
+              // opens through MorePortal, so the stacking context sticky makes
+              // cannot clip a menu.
               const more = rowMenu ? (
-                <div className={cn(CELL, "os-tc__more justify-center")} onClick={stop}>
+                <div
+                  className={cn(CELL, "os-tc__more sticky end-0 justify-center bg-raised")}
+                  style={{ backgroundImage: "linear-gradient(var(--tc-tint, transparent), var(--tc-tint, transparent))" }}
+                  onClick={stop}
+                >
                   {rowMenu(row)}
                 </div>
               ) : null;

@@ -39,6 +39,8 @@ export interface SidebarRowProps {
   /** Opens in a new tab (plain <a>) instead of a client navigation. */
   external?: boolean;
   onClick?: (e: React.MouseEvent) => void;
+  /** Right click: a shortcut to the row's "..." menu (every item is also there). */
+  onContextMenu?: (e: React.MouseEvent) => void;
   className?: string;
   title?: string;
   /** A jump out of the hub: the row never goes active and shows an arrow. */
@@ -52,7 +54,7 @@ const ROW_REST = "hover:bg-hover";
 const ROW_ACTIVE = "bg-side-pill font-medium";
 
 export function SidebarRow({
-  href, label, icon, tile, active, count, dot, locked, depth = 0, trailing, external, onClick, className, title, jump,
+  href, label, icon, tile, active, count, dot, locked, depth = 0, trailing, external, onClick, onContextMenu, className, title, jump,
 }: SidebarRowProps) {
   const isActive = Boolean(active) && !jump;
   const glyph = tile ? (
@@ -64,25 +66,35 @@ export function SidebarRow({
       "aria-hidden": true,
     })
   ) : null;
+  // With a trailing control the count and the "..." share the row's end: on
+  // a pointer that hovers, the count gives way while the row is hovered or
+  // focused and the row reserves the button's slot, so neither the count nor
+  // a long name runs under the "..."; where nothing hovers (touch) the "..."
+  // is always shown, so the slot is always reserved and the count stays.
+  const endSwap = trailing ? "[@media(hover:hover)]:group-hover/row:invisible [@media(hover:hover)]:group-focus-within/row:invisible" : undefined;
   const inner = (
     <>
       {glyph}
       <span className={cn("min-w-0 flex-1 truncate", locked && "text-ink-3")}>{label}</span>
       {locked ? <Lock className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden /> : null}
       {typeof count === "number" && count > 0 ? (
-        <span className={cn("shrink-0 text-xs font-medium tabular-nums", isActive ? "text-ink-strong" : "text-ink-2")}>
+        <span className={cn("shrink-0 text-xs font-medium tabular-nums", isActive ? "text-ink-strong" : "text-ink-2", endSwap)}>
           {count > 99 ? "99+" : count}
         </span>
       ) : dot ? (
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-attention" aria-label="Unread" />
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-attention", endSwap)} aria-label="Unread" />
       ) : null}
       {jump ? <span className="inline-block text-ink-3 rtl:-scale-x-100" aria-hidden>↗</span> : null}
     </>
   );
-  const cls = cn(ROW_BASE, isActive ? ROW_ACTIVE : ROW_REST, className);
+  const cls = cn(
+    ROW_BASE, isActive ? ROW_ACTIVE : ROW_REST,
+    trailing && "[@media(hover:hover)]:group-hover/row:pe-9 [@media(hover:hover)]:group-focus-within/row:pe-9 [@media(hover:none)]:pe-9",
+    className,
+  );
   const style = depth > 0 ? { paddingInlineStart: 12 + depth * 20 } : undefined;
   return (
-    <li className="relative" {...{ [SIDEBAR_ROW_ATTR]: "" }}>
+    <li className="group/row relative" onContextMenu={onContextMenu} {...{ [SIDEBAR_ROW_ATTR]: "" }}>
       {external ? (
         <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style} onClick={onClick} title={title}>
           {inner}

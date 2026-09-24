@@ -1,19 +1,19 @@
 "use client";
 
-/* SheetGrid — the spreadsheet kernel (Tables Phase 1, docs/plans/tables.md).
+/* SheetGrid, the spreadsheet kernel (Tables Phase 1, docs/plans/tables.md).
  *
  * What it owns: virtualized rows, the selection model (active cell +
- * anchor + rectangular range — set by click, Shift+click, Shift/Cmd+
+ * anchor + rectangular range, set by click, Shift+click, Shift/Cmd+
  * arrows, and Sheets' click-hold-pull drag with edge auto-scroll, see the
  * cell-selection-drag section), full keyboard navigation, frozen first
  * column, and the Sheets-style row-number gutter: clicking a number
  * selects its row as a normal full-width range, dragging it reorders the
- * row (onRowMove). Sort UI and column operations live on the page —
+ * row (onRowMove). Sort UI and column operations live on the page,
  * headers here are pure content plus a right-click hook
  * (onHeaderContextMenu), exactly like Sheets.
  *
  * What it does NOT own: cell semantics. Display and editing are render
- * props — the page supplies them from its existing type-specific cells,
+ * props, the page supplies them from its existing type-specific cells,
  * so all 18 column types keep working unchanged. Cells render as cheap
  * display values; ONLY the active cell mounts a live editor. That's the
  * real-spreadsheet pattern, and it's what makes virtualization worth it.
@@ -45,13 +45,13 @@
  * Freeze panes (`freeze` prop) are display-only, like Sheets' View > Freeze:
  * the first N display rows render in a sticky band under the header and the
  * first N columns get sticky-left offsets after the gutter. Nothing about
- * the selection model, the engine or the data changes — a frozen row is
+ * the selection model, the engine or the data changes, a frozen row is
  * still display row r, a frozen cell still cell (rowId, colId). The layout
  * math is written down at the band/virtual-window code below.
  *
  * Row heights (Sheets' row resize): per-row custom heights arrive through
  * `rowHeight` and every vertical computation routes through ONE RowGeometry
- * (sheet-row-geometry.ts) — O(1) closed-form and formula-identical to the
+ * (sheet-row-geometry.ts), O(1) closed-form and formula-identical to the
  * old constant-height kernel when no custom height exists, prefix sums +
  * binary search when one does. The gutter grows a boundary hit-zone per row
  * (drag = guide line, release = onRowResize, double-click = autofit via
@@ -62,17 +62,37 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fillSeries, parseClipboard, toHTMLTable, toTSV, type Matrix } from "@/lib/sheet-clipboard";
-import { buildRowGeometry, clampRowHeight } from "@/lib/sheet-row-geometry";
+import { buildRowGeometry, clampRowHeight, type RowGeometry } from "@/lib/sheet-row-geometry";
+import { ChevronDown } from "lucide-react";
+import { headerKeyAction, headerStopsPropagation, isEditableKeyTarget, isRowMenuKey } from "@/lib/sheet-grid-keys";
 
-export const SHEET_ROW_H = 33;
+// Compact 32 (design-system 3.2, spec-tables-forms: the grid's own density).
+export const SHEET_ROW_H = 32;
+
+/** The number a row's gutter prints. Google Sheets keeps a row's own number
+ *  under a filter (rows 6 and 8 still read 6 and 8), and the name box and
+ *  every A1 reference use that number, so the page's rowNumberOf wins. Only
+ *  a row it has no number for falls back to its display position. */
+export function gutterRowNumber(rowId: string, displayIndex: number, rowNumberOf?: (rowId: string) => number | undefined): number {
+  return rowNumberOf?.(rowId) ?? displayIndex + 1;
+}
+
+/** Row id to its real (storage) row number, 1-based: the numbers
+ *  gutterRowNumber prints. Built from the UNFILTERED, UNSORTED rows, so a
+ *  filter that hides rows 1 to 5 still labels the next row 6. */
+export function rowNumbersById(rows: readonly { id: string }[]): Map<string, number> {
+  const m = new Map<string, number>();
+  rows.forEach((r, i) => m.set(r.id, i + 1));
+  return m;
+}
 
 /* Height of the row-resize hit-zone: a strip along the BOTTOM edge of each
  * gutter number (Sheets' between-two-numbers boundary). Kept fully inside
  * the upper row's gutter cell so it can never overlap the next row's
- * number body — see the disjointness note at the zone itself. */
+ * number body, see the disjointness note at the zone itself. */
 const ROW_RESIZE_ZONE_PX = 4;
 const OVERSCAN = 8;
-const GUTTER_W = 48; // row-number gutter, frozen (Sheets-sized: fits 4 digits)
+const GUTTER_W = 44; // row-number gutter, frozen (spec: 44, fits 4 digits beside the menu chevron)
 const COL_W = 180;   // default column width
 
 /* A pointer that travels further than this from its gutter pointerdown is a
@@ -81,17 +101,17 @@ const COL_W = 180;   // default column width
 const ROW_DRAG_THRESHOLD_PX = 4;
 
 /* Edge auto-scroll cap for the click-hold-pull selection drag, in layout px
- * per animation frame. The step ramps at overshoot/4 and tops out here —
+ * per animation frame. The step ramps at overshoot/4 and tops out here,
  * fast enough to cross a 1000-row grid in a few held seconds, slow enough
  * to release on the row you meant. */
 const CELL_DRAG_MAX_SCROLL_PX = 24;
 
-/* Every caret in the grid — a mounted cell editor, anything the page renders
- * into a header — sits INSIDE the grid div, so its keystrokes bubble to the
- * grid's handler. Grid shortcuts must never fire while the user is typing
- * into a field: Backspace would wipe the selected cells instead of deleting
- * a character. */
-const EDITABLE_SEL = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+/* Every caret in the grid (a mounted cell editor, the header rename input)
+ * sits INSIDE the grid div, so its keystrokes bubble to the grid's handler.
+ * Grid shortcuts must never fire while the user is typing into a field:
+ * Backspace would wipe the selected cells instead of deleting a character
+ * (the Phase 1 data-loss defect). The guard is lib/sheet-grid-keys.ts
+ * isEditableKeyTarget, pinned by the golden test beside it. */
 
 /** The active cell's page style minus its fill; see the gridcell `style`. */
 function withoutBackground(style: React.CSSProperties | undefined): React.CSSProperties | undefined {
@@ -106,13 +126,13 @@ function withoutBackground(style: React.CSSProperties | undefined): React.CSSPro
 const SEED_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "PageDown", "PageUp", "Home", "End"]);
 
 /** The page's sort state. The kernel renders NO sort UI (Sheets headers are
- *  pure letters; sorting lives in the page's header context menu) — the type
+ *  pure letters; sorting lives in the page's header context menu), the type
  *  stays exported from here so the page and any future surfaces share one
  *  shape. */
 export type SheetSort = { colId: string; dir: "asc" | "desc" } | null;
 
 /** A selection rectangle in CURRENT display coordinates. Only ever lives
- *  inside one interaction — every rectangle is resolved to rowIds against
+ *  inside one interaction, every rectangle is resolved to rowIds against
  *  the live `rowIds` prop before it reaches the page. */
 type Rect = { r1: number; r2: number; c1: number; c2: number };
 
@@ -120,7 +140,7 @@ type Rect = { r1: number; r2: number; c1: number; c2: number };
  * copy/cut event to write into: inside such an event `clipboardData.setData`
  * is synchronous and cannot half-fail after we have already suppressed the
  * browser's own copy, so it wins whenever it is available. Resolves false on
- * a denied permission rather than rejecting — a blocked clipboard must never
+ * a denied permission rather than rejecting, a blocked clipboard must never
  * throw into React, and a cut must be able to see that the copy failed. */
 async function writeClipboardAsync(tsv: string, html: string): Promise<boolean> {
   if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
@@ -134,7 +154,7 @@ async function writeClipboardAsync(tsv: string, html: string): Promise<boolean> 
       return true;
     } catch {
       // Permission denied, unsupported MIME type, or the document lost
-      // focus — fall through to the plain-text path.
+      // focus, fall through to the plain-text path.
     }
   }
   if (navigator.clipboard?.writeText) {
@@ -151,14 +171,14 @@ async function writeClipboardAsync(tsv: string, html: string): Promise<boolean> 
 /** Column overflow is clipped, never auto-creates columns. Rows are NOT
  *  clipped: overflowing the last row is an append, which the page performs.
  *  Short rows stay short (they write fewer cells) and empty rows stay in
- *  place — dropping one would shift every row below it up by one. */
+ *  place, dropping one would shift every row below it up by one. */
 function clipMatrix(m: string[][], c0: number, colCount: number): string[][] {
   const maxW = colCount - c0;
   if (maxW <= 0) return [];
   return m.map((row) => (Array.isArray(row) ? (row.length > maxW ? row.slice(0, maxW) : row) : []));
 }
 
-/** Where Cmd/Ctrl+Arrow lands along ONE axis — Sheets' data-edge rule.
+/** Where Cmd/Ctrl+Arrow lands along ONE axis, Sheets' data-edge rule.
  *  `cur` is the current index, `count` the axis length, `step` ±1, and
  *  `isEmpty(i)` the emptiness of cell i along the axis.
  *
@@ -197,7 +217,7 @@ function nowTimeStamp(): string {
 export type SheetGridProps = {
   columns: { id: string; label: string; width?: number }[];
   rowIds: string[];
-  /** Cheap display value for a cell — plain text/nodes, no live inputs. */
+  /** Cheap display value for a cell, plain text/nodes, no live inputs. */
   renderDisplay: (rowId: string, colId: string) => React.ReactNode;
   /** Live editor for the active cell. Call commit() (with the editor's
    *  blur) when done; the kernel moves focus back to the grid. */
@@ -213,12 +233,16 @@ export type SheetGridProps = {
    *  optimistic update + rollback. Grid awaits it and does nothing else. */
   applyMatrix: (topLeft: { rowId: string; c: number }, matrix: string[][]) => Promise<void>;
   onRowContextMenu?: (rowId: string, x: number, y: number) => void;
-  /** Right-click on a column header (Sheets' column-ops surface — the page
-   *  hangs sort/rename/formula/delete off it). Default menu suppressed. */
+  /** Open the column menu at a viewport point: right-click on a header, the
+   *  header chevron, or Alt+Down / the context-menu key on a focused header
+   *  (spec section 1, touch and keyboard parity). Default menu suppressed. */
   onHeaderContextMenu?: (colId: string, x: number, y: number) => void;
+  /** Enter or F2 on a focused header, or a double click on it: the page
+   *  swaps the label for its inline name input. */
+  onHeaderRename?: (colId: string) => void;
   /** Reorder a row by dragging its gutter number. Called ONCE per drop with
    *  the DISPLAY index the row should land at. Omit it and the gutter is
-   *  click-select only — the page withholds it while sorted/filtered/
+   *  click-select only, the page withholds it while sorted/filtered/
    *  streaming/read-only, where a display index is not a storage index. */
   onRowMove?: (rowId: string, toDisplayIndex: number) => void;
   /** The user walked off the bottom edge (ArrowDown / Enter-commit-move on
@@ -227,11 +251,11 @@ export type SheetGridProps = {
    *  floor doesn't spam appends. */
   onGrowRows?: () => void;
   /** Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z / Ctrl+Y (Tables Phase 4). The grid only
-   *  forwards the keystroke — the page owns the command stack. */
+   *  forwards the keystroke, the page owns the command stack. */
   onUndo?: () => void;
   onRedo?: () => void;
   /** Cmd/Ctrl+B / I / U while NOT editing (per-cell formatting). The grid
-   *  only forwards the keystroke — the page owns the selection-to-style
+   *  only forwards the keystroke, the page owns the selection-to-style
    *  write. An open editor keeps the browser's own shortcuts. */
   onFormatKey?: (key: "b" | "i" | "u") => void;
   /** Extra inline style for a cell (per-cell formatting + conditional-
@@ -260,7 +284,7 @@ export type SheetGridProps = {
   freeze?: { rows?: number; cols?: number };
   /** Emptiness signal for Cmd/Ctrl+Arrow data-edge jumps. The kernel has
    *  no other view of cell values (renderDisplay returns nodes, and
-   *  getRangeValues is the clipboard reader — formatted, and wrong to call
+   *  getRangeValues is the clipboard reader, formatted, and wrong to call
    *  per cell across a whole column). The page answers from its mirror:
    *  null / "" / undefined are empty; a formula cell is NOT. Omitted, every
    *  cell counts as data and Cmd/Ctrl+Arrow jumps straight to the sheet
@@ -269,7 +293,7 @@ export type SheetGridProps = {
   /** Per-row custom height in px (Sheets' row resize), answered from the
    *  page's mirror (row.values["$rh"]); undefined = the default
    *  SHEET_ROW_H. Sampled ONCE per geometry build, never per scroll frame
-   *  — see the geometry memo for the complexity story. Absent (or all-
+   *  see the geometry memo for the complexity story. Absent (or all-
    *  default) the kernel's vertical math is formula-identical to the
    *  constant-height kernel. */
   rowHeight?: (rowId: string) => number | undefined;
@@ -280,9 +304,9 @@ export type SheetGridProps = {
   rowHeightsVersion?: number;
   /** A gutter row-boundary drag ended: persist `height` px (already
    *  clamped 16..400) on the row. A double-click on the boundary fires
-   *  with SHEET_ROW_H, meaning "reset to default" — unless `onRowAutofit`
+   *  with SHEET_ROW_H, meaning "reset to default", unless `onRowAutofit`
    *  is provided, which then owns the double-click. Omit it and the gutter
-   *  renders no resize zones at all — rendering is byte-identical to the
+   *  renders no resize zones at all, rendering is byte-identical to the
    *  pre-resize kernel. */
   onRowResize?: (rowId: string, height: number) => void;
   /** Sheets' boundary DOUBLE-CLICK semantics: fit the row to its content.
@@ -295,32 +319,86 @@ export type SheetGridProps = {
   /** Column-resize guide line (the column GESTURE stays page-owned): while
    *  the page is dragging a width it passes the resizing column's id and
    *  the kernel draws a full-height 2px guide at that column's LIVE right
-   *  edge — the page's optimistic width updates flow through the `columns`
+   *  edge, the page's optimistic width updates flow through the `columns`
    *  prop every mousemove, so the line tracks the pointer with zero extra
    *  math and is immune to zoom and scroll by construction. null/absent
    *  renders nothing. */
   colResizeGuideId?: string | null;
   /** Externally drive the ACTIVE cell (find & replace navigation). The
    *  kernel owns selection state, so the page cannot set it directly; it
-   *  hands over one request and the NONCE is the trigger — a new nonce
+   *  hands over one request and the NONCE is the trigger, a new nonce
    *  applies the request exactly once (setAnchor(null) + setActive +
    *  scrollCellIntoView), even when { rowId, c } repeats (Enter on a
    *  single wrap-around match must still recentre it). A rowId no longer
    *  in the grid, or a c outside the columns, is a stale request (the data
-   *  changed between compute and click) and is ignored — the find bar
+   *  changed between compute and click) and is ignored, the find bar
    *  recomputes and re-requests. Absent, this costs nothing. */
-  activeRequest?: { rowId: string; c: number; nonce: number };
+  activeRequest?: { rowId: string; c: number; nonce: number; seed?: string | null };
+  /** A table with columns but NO rows (Sheets never has one: you click A1
+   *  and type). Provided, the kernel paints blank placeholder rows in the
+   *  body; a click on one, a navigation key or a typed character asks the
+   *  page to create the rows for real, with the cell the person aimed at
+   *  and the character they typed (seed), so the first keystroke is kept.
+   *  The page answers through activeRequest, whose `seed` opens the editor.
+   *  Absent (sorted, filtered, streaming), an empty grid stays empty. */
+  onEmptyStart?: (at: { r: number; c: number; seed: string | null }) => void;
+  /** The row's real number for the gutter label (Sheets keeps a filtered
+   *  row's own number: rows 6 and 8 still read 6 and 8), which is also what
+   *  the page's name box and A1 references use. Omitted, or undefined for a
+   *  row, the gutter prints the display position (r + 1). */
+  rowNumberOf?: (rowId: string) => number | undefined;
+  /** The active cell, every time it changes, whether or not its row is
+   *  mounted. The page's name box and formula bar used to scrape the one
+   *  outlined gridcell from the DOM, which is only there while the active
+   *  row sits inside the virtual window: a header-letter click made F1
+   *  active while the view showed row 314, the name box kept reading A25,
+   *  and the formula bar would have written into A25. */
+  onActiveChange?: (cell: { rowId: string; c: number }) => void;
 };
+
+/** Placeholder rows painted in an empty table (see onEmptyStart): enough to
+ *  fill a tall viewport, none of them real until the first click or key. */
+export const EMPTY_GHOST_ROWS = 30;
 
 type Cell = { rowId: string; c: number };
 
+/** Whole-column selection (a header-letter click): the same full-height
+ *  rectangle a drag down the column makes, with the ACTIVE cell on the top
+ *  row, as in Sheets (click F, the name box says F1, typing edits F1). The
+ *  anchor takes the bottom row, so the rectangle is unchanged. Before this
+ *  the active cell sat on the last row and a typed value landed in F1000.
+ *  `anchorC` is the column a Shift+click extends from. */
+export function columnSelectionCells(rowIds: readonly string[], c: number, anchorC: number): { active: Cell; anchor: Cell } | null {
+  if (rowIds.length === 0) return null;
+  return { active: { rowId: rowIds[0], c }, anchor: { rowId: rowIds[rowIds.length - 1], c: anchorC } };
+}
+
+/** Whole-row selection (a gutter-number click): active on the row's first
+ *  column, anchor at the last column of the anchor row (Shift+click keeps
+ *  the anchor row), so the full-width rectangle is unchanged. */
+export function rowSelectionCells(rowId: string, anchorRowId: string, lastC: number): { active: Cell; anchor: Cell } {
+  return { active: { rowId, c: 0 }, anchor: { rowId: anchorRowId, c: lastC } };
+}
+
+/** PageDown / PageUp (dir 1 / -1): how many rows the cursor travels and
+ *  how far the VIEW scrolls with it, so the active cell keeps its place on
+ *  screen as in Sheets. Rows per page is viewport ÷ the DEFAULT row height
+ *  minus two, an estimate kept on purpose with custom heights (a page jump
+ *  is coarse navigation). The scroll is the real pixel distance between the
+ *  two rows, so tall rows scroll further; the caller's scroller clamps it. */
+export function pageStep(geom: Pick<RowGeometry, "rowTop">, fromR: number, rowCount: number, viewportH: number, dir: 1 | -1): { dr: number; scrollBy: number } {
+  const dr = Math.max(1, Math.floor(viewportH / SHEET_ROW_H) - 2) * dir;
+  const target = Math.max(0, Math.min(rowCount - 1, fromR + dr));
+  return { dr, scrollBy: geom.rowTop(target) - geom.rowTop(fromR) };
+}
+
 export function SheetGrid({
   columns, rowIds, renderDisplay, renderEditor, onClearCells,
-  onRowContextMenu, onHeaderContextMenu, onRowMove, onGrowRows, renderHeader,
+  onRowContextMenu, onHeaderContextMenu, onHeaderRename, onRowMove, onGrowRows, renderHeader,
   headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
   onRedo, onFormatKey, cellStyle, onSelectionChange, freeze, isCellEmpty,
   rowHeight, rowHeightsVersion, onRowResize, onRowAutofit, colResizeGuideId,
-  activeRequest,
+  activeRequest, onEmptyStart, rowNumberOf, onActiveChange,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -348,12 +426,12 @@ export function SheetGrid({
    * (which can both fire for one release) commit at most once. `h` is the
    * live clamped height the guide previews; nothing is applied until
    * release (Sheets shows only the line while dragging). `zoom` is the CSS
-   * zoom captured at pointerdown — it cannot change mid-drag, and clientY
+   * zoom captured at pointerdown, it cannot change mid-drag, and clientY
    * deltas are visual px while heights are layout px. */
   /* No row INDEX in here on purpose: rows can reorder under a captured
    * drag (an instant-commit editor elsewhere, a concurrent sort), so the
    * guide resolves rowId → live index at render and the commit carries
-   * the rowId — the same id-not-index discipline as the selection model. */
+   * the rowId, the same id-not-index discipline as the selection model. */
   type RowResizeState = { rowId: string; pointerId: number; startY: number; startH: number; h: number; zoom: number };
   const [rowResize, setRowResize] = useState<RowResizeState | null>(null);
   const rowResizeRef = useRef<RowResizeState | null>(null);
@@ -377,13 +455,13 @@ export function SheetGrid({
    * heights, total body height, pointer→row, pointer→gap, the virtual
    * window and the freeze-band height all route through it, so the
    * constant SHEET_ROW_H appears below only as (a) the header height and
-   * (b) the PageUp/Down page-step estimate — both deliberate.
+   * (b) the PageUp/Down page-step estimate, both deliberate.
    *
    * Complexity (the 50k perf contract): with no `rowHeight` prop, or when
    * every answer is undefined/default, buildRowGeometry allocates NOTHING
    * and every query is the same O(1) closed-form arithmetic as the old
    * constant-height kernel (rowTop = r*H, rowAtY = floor(y/H), rowEndAtY =
-   * ceil(y/H), gapAtY = round(y/H)) — the fast-path proof lives with the
+   * ceil(y/H), gapAtY = round(y/H)), the fast-path proof lives with the
    * formulas in sheet-row-geometry.ts. Only when at least one custom
    * height exists does it build a prefix-sum array: O(n) once per
    * [rowIds, rowHeightsVersion] change (a DATA event, never a scroll
@@ -391,7 +469,7 @@ export function SheetGrid({
    *
    * `rowHeight` itself is deliberately NOT a dependency: pages pass inline
    * arrows, and re-deriving 50k heights per parent render would defeat the
-   * memo. rowHeightsVersion is the function's identity — the page bumps it
+   * memo. rowHeightsVersion is the function's identity, the page bumps it
    * whenever any stored height changes (same contract as a reducer's
    * version counter). */
   const geom = useMemo(
@@ -430,18 +508,18 @@ export function SheetGrid({
    *   frozen band   [ROW_H, ROW_H + bandH)          sticky top ROW_H
    *   body box      [ROW_H + bandH, ROW_H + geom.totalHeight)
    * Body row r (r >= fr) sits at geom.rowTop(r) - bandH inside the body
-   * box, so its scroll-space top is still ROW_H + geom.rowTop(r) — the
+   * box, so its scroll-space top is still ROW_H + geom.rowTop(r), the
    * same place it had with no freeze. What changes is what the viewport
    * SHOWS: the band is pinned at header-bottom whatever scrollTop is, so
    * the first bandH px of body content under it is always covered. The
    * virtual window therefore starts bandH px later for the same scrollTop
-   * (and never before row fr — rows below fr live in the band and are
+   * (and never before row fr, rows below fr live in the band and are
    * always mounted). With fr = 0 both lines reduce to the pre-freeze
    * formulas.
    *
    * Fast-path proof (all heights default): rowAtY(top + fr*H) =
    * floor(top/H) + fr and rowEndAtY(top + height) = ceil((top + height)/H)
-   * — exactly the constant-height window this grid always mounted, so a
+   * exactly the constant-height window this grid always mounted, so a
    * sheet with no custom heights renders byte-identical rows. */
   const first = Math.max(fr, geom.rowAtY(viewport.top + bandH) - OVERSCAN);
   const last = Math.min(rowCount, geom.rowEndAtY(viewport.top + viewport.height) + OVERSCAN);
@@ -492,7 +570,7 @@ export function SheetGrid({
     // One rAF per effect run, cancelled by the next run's cleanup: any
     // burst of selection changes (shift+arrow key-repeat, rows reordering
     // under a live range) collapses to at most one emission per animation
-    // frame, and the trailing schedule always sees the LATEST state — the
+    // frame, and the trailing schedule always sees the LATEST state, the
     // settle is never lost. Every path that moves the selection funnels
     // through setActive/setAnchor into the `range` memo above, so this one
     // effect covers click, shift+click, shift+arrows, Cmd/Ctrl+A, Escape,
@@ -528,7 +606,7 @@ export function SheetGrid({
       // frozen band the next bandH px: a body row is only visible once it
       // clears both, i.e. when its top minus the band height is at or past
       // scrollTop (fr = 0 gives the original header-only test; all-default
-      // heights give top = r * ROW_H, bottom = (r + 1) * ROW_H — the exact
+      // heights give top = r * ROW_H, bottom = (r + 1) * ROW_H, the exact
       // pre-variable-heights formulas). The ROW_H in the bottom test is
       // the HEADER's height, not a row's.
       if (top - bandH < el.scrollTop) el.scrollTop = top - bandH;
@@ -539,7 +617,7 @@ export function SheetGrid({
     const right = colOffsets[c + 1];
     if (left == null || right == null) return;
     // The number gutter is sticky-left, so it covers the first GUTTER_W px
-    // of the viewport — a cell isn't really visible until it clears that.
+    // of the viewport, a cell isn't really visible until it clears that.
     // Frozen columns extend that cover to their right edge: colOffsets[fc]
     // is exactly GUTTER_W when nothing is frozen.
     const inset = colOffsets[fc] ?? GUTTER_W;
@@ -549,6 +627,11 @@ export function SheetGrid({
 
   const activeRef = useRef<Cell | null>(null);
   useEffect(() => { activeRef.current = active; }, [active]);
+  const onActiveChangeRef = useRef(onActiveChange);
+  useEffect(() => { onActiveChangeRef.current = onActiveChange; });
+  useEffect(() => {
+    if (active) onActiveChangeRef.current?.({ rowId: active.rowId, c: active.c });
+  }, [active]);
 
   /** Activate the first cell. Used for keyboard-only entry (arrows before
    *  any click) and when the active row has been filtered away. */
@@ -562,7 +645,7 @@ export function SheetGrid({
   /* ── externally driven active cell (activeRequest) ──────────── */
   // The nonce is the trigger, guarded by a ref: parent re-renders that
   // merely recreate the request object (or rows reordering re-running this
-  // effect via rowIndex/scrollCellIntoView) must NOT re-apply it — one
+  // effect via rowIndex/scrollCellIntoView) must NOT re-apply it, one
   // nonce, one application. The ref-not-dep-array guard also means a
   // request that arrives while the same nonce is already recorded is
   // dropped by value, not by identity, matching the selection-emission
@@ -582,10 +665,15 @@ export function SheetGrid({
     setAnchor(null);
     setActive({ rowId: activeRequest.rowId, c });
     scrollCellIntoView(r, c);
-  }, [activeRequest, rowIndex, colCount, scrollCellIntoView]);
+    // A seeded request (the empty-table start) opens the editor with the
+    // character the person typed before the rows existed.
+    if (typeof activeRequest.seed === "string" && !readOnlyCols?.has(columns[c]?.id ?? "")) {
+      setEditing({ rowId: activeRequest.rowId, c, seed: activeRequest.seed });
+    }
+  }, [activeRequest, rowIndex, colCount, scrollCellIntoView, readOnlyCols, columns]);
 
   /* ── growth signal (onGrowRows) ─────────────────────────────── */
-  // Ref-read so move() — a dependency of the whole keyboard path — doesn't
+  // Ref-read so move(), a dependency of the whole keyboard path, doesn't
   // churn when the page passes a fresh arrow function every render.
   const onGrowRowsRef = useRef(onGrowRows);
   useEffect(() => { onGrowRowsRef.current = onGrowRows; });
@@ -605,7 +693,7 @@ export function SheetGrid({
     const curR = cur ? rowIndex.get(cur.rowId) : undefined;
     if (!cur || curR == null) { seedActive(); return; }
     // A single-step move off the bottom edge (ArrowDown or Enter-commit-move
-    // on the last row) asks the page to grow the sheet — Sheets' "the grid
+    // on the last row) asks the page to grow the sheet, Sheets' "the grid
     // never ends" feel. The move itself still clamps: appended rows arrive
     // asynchronously, and PageDown deliberately doesn't trigger growth (a
     // page-jump from mid-table is navigation, not an append request).
@@ -622,7 +710,7 @@ export function SheetGrid({
    *  the edge of its data block, see dataEdgeTarget. Never asks the page to
    *  grow: a jump that ends on the last row is a landing, not a step off
    *  the edge. The page's predicate is untrusted the same way
-   *  getRangeValues is — a throw reads as "not empty" instead of killing
+   *  getRangeValues is, a throw reads as "not empty" instead of killing
    *  the keystroke. */
   const jumpToEdge = useCallback((dr: 1 | -1 | 0, dc: 1 | -1 | 0, extend: boolean) => {
     if (rowCount === 0 || colCount === 0) return;
@@ -657,12 +745,12 @@ export function SheetGrid({
   const commitEdit = useCallback(() => setEditing(null), []);
   /** Tab/Enter inside an editor: the editor's own blur already wrote the
    *  draft (the host blurs before calling this); the kernel closes the
-   *  editor, takes focus back — so the next keystroke types into the grid,
-   *  not the void the browser's default Tab would have focused — and steps
+   *  editor, takes focus back, so the next keystroke types into the grid,
+   *  not the void the browser's default Tab would have focused, and steps
    *  the active cell (Sheets: Tab right, Shift+Tab left, Enter down). */
   const commitEditAndMove = useCallback((dr: number, dc: number) => {
     setEditing(null);
-    gridRef.current?.focus();
+    gridRef.current?.focus({ preventScroll: true });
     move(dr, dc, false);
   }, [move]);
   useEffect(() => {
@@ -675,11 +763,30 @@ export function SheetGrid({
         // input, a toolbar button), leave their caret where they put it.
         const ae = document.activeElement;
         if (ae && ae !== document.body && ae !== el) return;
-        el.focus();
+        // preventScroll: the grid div is the whole virtual canvas, so a plain
+        // focus() asks every scrolling ancestor to bring its top edge into
+        // view. The kernel reveals cells itself (scrollCellIntoView).
+        el.focus({ preventScroll: true });
       });
       return () => cancelAnimationFrame(t);
     }
   }, [editing]);
+  /* Opening an editor reveals its cell, as Sheets does when you type into
+   * an active cell that is scrolled away (a header-letter click leaves F1
+   * active wherever the view is; a gutter click leaves column A active
+   * even when the view sits at column Z). Keyed on the cell, not the seed,
+   * so it runs once per edit and never fights the person scrolling while
+   * the editor stays open. The editor's own focus only scrolls as far as
+   * "partly visible", which left a right-edge column clipped under it. */
+  const editingKey = editing ? `${editing.rowId}\u0000${editing.c}` : null;
+  useEffect(() => {
+    if (!editing) return;
+    const r = rowIndex.get(editing.rowId);
+    if (r != null) scrollCellIntoView(r, editing.c);
+    // editingKey alone is the trigger: rowIndex or geometry churn must not
+    // re-scroll an editor that is already open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingKey]);
 
   /* ── clipboard + fill (Phase 2) ─────────────────────────────── */
 
@@ -700,7 +807,7 @@ export function SheetGrid({
   }, [rowIds, colCount]);
 
   /** Values for a rectangle, normalised to a dense string matrix of exactly
-   *  the geometry we asked for — the page's reader is not trusted to be
+   *  the geometry we asked for, the page's reader is not trusted to be
    *  rectangular, and a hole must read as "" rather than reach toTSV or
    *  fillSeries as undefined. */
   const readRect = useCallback((rect: Rect): Matrix | null => {
@@ -732,7 +839,7 @@ export function SheetGrid({
   /** The single writer. Every block mutation funnels through here: one write
    *  in flight at a time (a second paste landing mid-flight would race the
    *  page's optimistic update), column overflow clipped, and a rejected
-   *  write reported back as false instead of thrown — the page owns the
+   *  write reported back as false instead of thrown, the page owns the
    *  rollback and the message, but a cut must not clear on a failed copy and
    *  a fill must not move the selection onto cells it never wrote. */
   const runApply = useCallback(async (topLeft: { rowId: string; c: number }, matrix: string[][]) => {
@@ -763,7 +870,7 @@ export function SheetGrid({
     if (!r) return;
     const rowsSpan = r.r2 - r.r1 + 1;
     const colsSpan = r.c2 - r.c1 + 1;
-    // Read-only columns (formula/lookup/rollup) are skipped — an empty
+    // Read-only columns (formula/lookup/rollup) are skipped, an empty
     // string in applyMatrix leaves a cell untouched.
     const matrix: string[][] = [];
     for (let rr = 0; rr < rowsSpan; rr++) {
@@ -775,7 +882,6 @@ export function SheetGrid({
       matrix.push(row);
     }
     await applyMatrix({ rowId: rowIds[r.r1], c: r.c1 }, matrix);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, active, rowIndex, columns, readOnlyCols, rowIds, applyMatrix]);
 
   /** Land the selection on a rectangle after a write. Clamped to rows that
@@ -863,7 +969,7 @@ export function SheetGrid({
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      return; // denied — the user sees nothing happen, which beats a throw
+      return; // denied, the user sees nothing happen, which beats a throw
     }
     if (!text) return;
     await applyPaste(parseClipboard({ text }), target);
@@ -871,14 +977,16 @@ export function SheetGrid({
 
   const onClipboardCopy = (e: React.ClipboardEvent, cut: boolean) => {
     // Same guard as the keyboard handler: a caret inside a cell editor or
-    // the column-rename input keeps the browser's own copy.
-    if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+    // the column-rename input keeps the browser's own copy, and a focused
+    // column header never cuts the cells under it.
+    if (isEditableKeyTarget(e.target as HTMLElement | null)) return;
+    if ((e.target as HTMLElement | null)?.closest?.('[role="columnheader"]')) return;
     if (editing || !range) return;
     // Same reason as asyncCopy: never half-perform a cut.
     if (cut && applyingRef.current) return;
     const payload = payloadFor(range);
     if (!payload) {
-      clipSeqRef.current += 1; // nothing to copy — don't let the fallback try
+      clipSeqRef.current += 1; // nothing to copy, don't let the fallback try
       return;
     }
     const dt = e.clipboardData;
@@ -891,14 +999,15 @@ export function SheetGrid({
   };
 
   const onClipboardPaste = (e: React.ClipboardEvent) => {
-    if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+    if (isEditableKeyTarget(e.target as HTMLElement | null)) return;
+    if ((e.target as HTMLElement | null)?.closest?.('[role="columnheader"]')) return;
     if (editing || !range) return;
     const dt = e.clipboardData;
     if (!dt) return;
     const text = dt.getData("text/plain");
     const html = dt.getData("text/html");
     clipSeqRef.current += 1;
-    if (!text && !html) return; // image or file paste — not ours
+    if (!text && !html) return; // image or file paste, not ours
     e.preventDefault();
     void applyPaste(parseClipboard({ text: text || undefined, html: html || undefined }), range);
   };
@@ -933,8 +1042,8 @@ export function SheetGrid({
     await runApply({ rowId, c: dstC }, src.map((row) => Array.from({ length: width }, () => row[0] ?? "")));
   }, [range, readRect, rowIds, runApply]);
 
-  /** The scroller's effective CSS zoom: clientX/Y are visual px — scaled
-   *  when an ancestor applies CSS zoom (the page's zoom control) — while
+  /** The scroller's effective CSS zoom: clientX/Y are visual px, scaled
+   *  when an ancestor applies CSS zoom (the page's zoom control), while
    *  scrollTop / row heights / column widths are unscaled layout px.
    *  Every pointer gesture divides by this before mixing the two, or a
    *  drag at 75%/150% lands on rows the user never touched. */
@@ -944,7 +1053,7 @@ export function SheetGrid({
     return z || 1;
   };
 
-  /** A pointer's y in BODY-SPACE px — the coordinate geom.rowAtY answers
+  /** A pointer's y in BODY-SPACE px, the coordinate geom.rowAtY answers
    *  in (0 = the top of row 0): geom.rowAtY of it is the display row under
    *  the pointer, geom.gapAtY the nearest insertion gap. Shared by the
    *  fill handle and the gutter row drag. Pre-variable-heights this
@@ -955,10 +1064,10 @@ export function SheetGrid({
    *  The header sits in normal flow at the top of the scrolled content, so
    *  body row r starts at scroll-space ROW_H + rowTop(r): subtract the
    *  header and add scrollTop. With a frozen band the first fr rows are
-   *  NOT in scroll space — the band is pinned at viewport y
+   *  NOT in scroll space, the band is pinned at viewport y
    *  ROW_H..ROW_H + bandH whatever scrollTop is, so a pointer inside it is
-   *  over band-local px (vy - ROW_H) — which IS body-space px, band rows
-   *  sit at rowTop 0..bandH — and scrollTop must not be added. Below the
+   *  over band-local px (vy - ROW_H), which IS body-space px, band rows
+   *  sit at rowTop 0..bandH, and scrollTop must not be added. Below the
    *  band the scroll-space formula still holds unchanged (body rows never
    *  moved, the band merely covers the first bandH px of them). At
    *  scrollTop 0 both formulas agree at the boundary, so the function is
@@ -969,7 +1078,7 @@ export function SheetGrid({
     const rect = el.getBoundingClientRect();
     const vy = (clientY - rect.top) / cssZoomOf(el) - el.clientTop;
     // Above the header (the pointer drifted out of the scroller) the band
-    // formula would snap to frozen row 0 — a fill drag that wandered up
+    // formula would snap to frozen row 0, a fill drag that wandered up
     // would then paint every row from the top. Fall through to the scroll-
     // space formula instead, which resolves to about the top visible body
     // row, exactly what the unfrozen grid does there.
@@ -985,7 +1094,7 @@ export function SheetGrid({
     return geom.rowAtY(y);
   }, [rowCount, bodyYFromClientY, geom]);
 
-  /** Which column a pointer is over, 0..colCount-1 — the horizontal mirror
+  /** Which column a pointer is over, 0..colCount-1, the horizontal mirror
    *  of bodyYFromClientY + rowFromClientY, collapsed into one function
    *  because columns need no band split (they are not virtualized and
    *  colOffsets already holds every edge).
@@ -994,12 +1103,12 @@ export function SheetGrid({
    *    vx = (clientX - rect.left) / zoom - clientLeft
    *  clientX is VISUAL px, colOffsets are LAYOUT px: divide by the
    *  effective CSS zoom first, then drop the scroller's left border
-   *  (clientLeft, the twin of clientTop above) — vx is now the pointer's
+   *  (clientLeft, the twin of clientTop above), vx is now the pointer's
    *  layout-px x inside the scroller's viewport.
    *
    *  The gutter + frozen columns are sticky-left: they sit pinned at
    *  viewport x 0..colOffsets[fc] whatever scrollLeft is (colOffsets[fc]
-   *  is exactly GUTTER_W when fc = 0 — the same identity the
+   *  is exactly GUTTER_W when fc = 0, the same identity the
    *  scroll-into-view inset uses). A pointer INSIDE that zone is over
    *  content whose layout x equals its viewport x (frozen cells never
    *  move), so it resolves WITHOUT scrollLeft; past the zone it is over
@@ -1020,7 +1129,7 @@ export function SheetGrid({
     const x = vx < frozenEdge ? vx : vx + el.scrollLeft;
     if (x < colOffsets[1]) return 0;                    // gutter / left overshoot / column 0
     if (x >= colOffsets[colCount]) return colCount - 1; // right overshoot
-    // Greatest c with colOffsets[c] <= x — the same invariant rowAtY keeps.
+    // Greatest c with colOffsets[c] <= x, the same invariant rowAtY keeps.
     let lo = 1;
     let hi = colCount - 1;
     while (lo < hi) {
@@ -1041,7 +1150,7 @@ export function SheetGrid({
     if (!seed) return;
     const width = Math.min(base.c2, colCount - 1) - base.c1 + 1;
     if (width <= 0) return;
-    // One series per column — a two-column seed extends each column
+    // One series per column, a two-column seed extends each column
     // independently, like Sheets.
     const series: string[][] = [];
     for (let ci = 0; ci < width; ci++) {
@@ -1068,13 +1177,13 @@ export function SheetGrid({
     try {
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
     } catch {
-      // Capture was never taken (or already lost) — nothing to release.
+      // Capture was never taken (or already lost), nothing to release.
     }
   };
 
   /** End of a fill drag. Browsers disagree on whether lostpointercapture
    *  lands before or after pointerup, so both end the drag; if they both
-   *  fire in one tick they see the same pre-batch state and both commit —
+   *  fire in one tick they see the same pre-batch state and both commit,
    *  harmless, because runApply is single-flight and refuses the second. */
   const endFillDrag = (commit: boolean) => {
     const drag = fillDrag;
@@ -1085,7 +1194,7 @@ export function SheetGrid({
 
   /* ── gutter row drag (Sheets row reorder) ───────────────────── */
 
-  /** Which INSERTION GAP a pointer is nearest — 0..rowCount inclusive, where
+  /** Which INSERTION GAP a pointer is nearest, 0..rowCount inclusive, where
    *  gap g is the boundary above display row g. Same zoom-normalized math as
    *  rowFromClientY, but snapped to the nearest boundary instead of floored:
    *  the top half of a row snaps to the gap above it, the bottom half to the
@@ -1100,7 +1209,7 @@ export function SheetGrid({
 
   /** End of a row drag. Same dual-exit story as endFillDrag (pointerup and
    *  lostpointercapture race), but a move is NOT idempotent the way the
-   *  single-flight fill is — so the REF is the commit token: whoever nulls
+   *  single-flight fill is, so the REF is the commit token: whoever nulls
    *  it performs the move, everyone after sees null and does nothing. */
   const endRowDrag = (commit: boolean) => {
     pendingRowDragRef.current = null;
@@ -1149,7 +1258,7 @@ export function SheetGrid({
    *  would push two undo entries), so whoever nulls the ref commits and
    *  everyone after sees null. A release whose height never actually
    *  changed (a plain click on the boundary, or a drag returned to its
-   *  start) fires nothing — Sheets treats that as a no-op too, and firing
+   *  start) fires nothing, Sheets treats that as a no-op too, and firing
    *  would litter the page's undo stack with zero-delta writes. */
   const endRowResize = (commit: boolean) => {
     const st = rowResizeRef.current;
@@ -1162,7 +1271,7 @@ export function SheetGrid({
     onRowResize(st.rowId, h);
   };
 
-  // Escape abandons a boundary drag without resizing — window-level and
+  // Escape abandons a boundary drag without resizing, window-level and
   // capture-phase for the same reason as the row-drag Escape above: the
   // pointer capture sits on the boundary zone and focus can be anywhere.
   useEffect(() => {
@@ -1185,7 +1294,7 @@ export function SheetGrid({
 
   /* ── cell selection drag (Sheets' click-hold-pull) ──────────── */
   /* Press a cell and pull: the selection grows to the rectangle between
-   * the mousedown cell and the cell under the pointer — Sheets' primary
+   * the mousedown cell and the cell under the pointer, Sheets' primary
    * selection gesture. Three deliberate structural choices:
    *
    * · ARM on cell pointerdown, but touch NO state: the selection itself
@@ -1195,22 +1304,22 @@ export function SheetGrid({
    *   below), so a micro-jitter click causes zero churn too.
    * · Document listeners, NOT pointer capture: the pressed cell is
    *   virtualized and WILL unmount when edge auto-scroll carries it out
-   *   of the mount window (capture on it would die mid-drag — the
+   *   of the mount window (capture on it would die mid-drag, the
    *   stranded-capture bug the gutter comments describe), and capture on
    *   the grid div would retarget the compat mouseup there, composing
    *   dblclick on the grid instead of the cell and killing double-click-
    *   to-edit. The listeners are created per drag and carried ON the drag
    *   object, so teardown removes exactly this drag's ears and can never
    *   detach a newer drag's.
-   * · The selection applies LIVE on every hit change — there is no commit
-   *   step — so ending the drag is pure teardown, idempotent by
+   * · The selection applies LIVE on every hit change, there is no commit
+   *   step, so ending the drag is pure teardown, idempotent by
    *   construction: every exit (pointerup, pointercancel, Escape, the
    *   missed-release self-heal, unmount) just calls endCellDrag, and a
    *   nulled ref can never hijack a later gesture. Escape ends the DRAG
    *   but keeps the range selected so far, like Sheets. */
   type CellDragState = {
     pointerId: number;
-    /** The mousedown cell — the anchor fallback (`anchor ?? origin`): a
+    /** The mousedown cell, the anchor fallback (`anchor ?? origin`): a
      *  plain press anchors here on its first extending move, while a
      *  Shift+press keeps extending from the anchor its own mousedown
      *  already set (the functional update never overwrites a non-null
@@ -1222,10 +1331,10 @@ export function SheetGrid({
     lastHit: { r: number; c: number };
     /** Last pointer position in client px. The auto-scroll loop
      *  re-hit-tests with THIS while the content slides underneath a
-     *  stationary pointer — hold-at-the-edge keeps selecting. */
+     *  stationary pointer, hold-at-the-edge keeps selecting. */
     lastClientX: number;
     lastClientY: number;
-    /** Press position — the engagement threshold measures from here. */
+    /** Press position, the engagement threshold measures from here. */
     startClientX: number;
     startClientY: number;
     /** True once the pointer actually dragged (left the press threshold).
@@ -1243,14 +1352,14 @@ export function SheetGrid({
   const cellDragRef = useRef<CellDragState | null>(null);
   /* The rAF loop and the per-drag document listeners outlive many renders
    * (auto-scroll itself re-renders through viewport state), so they reach
-   * the CURRENT render's hit-test/scroll logic through these refs — the
+   * the CURRENT render's hit-test/scroll logic through these refs, the
    * onSelectionChangeRef pattern. */
   const cellDragMoveRef = useRef<(clientX: number, clientY: number) => void>(() => {});
   const cellDragFrameRef = useRef<() => void>(() => {});
 
   /** End of the cell drag: pure teardown, nothing to commit (the
    *  selection was applied live). Whoever nulls the ref tears down;
-   *  every later exit sees null and does nothing — the endFillDrag/
+   *  every later exit sees null and does nothing, the endFillDrag/
    *  endRowDrag dual-exit safety, made trivial by having no commit.
    *  Stable and ref-only so the unmount cleanup below can BE it. */
   const endCellDrag = useCallback(() => {
@@ -1270,13 +1379,13 @@ export function SheetGrid({
   /** Hit-test the pointer and extend the selection to it. Row via the
    *  freeze/zoom-aware rowFromClientY (geom.rowAtY clamps into the
    *  sheet's rows), column via its mirror colFromClientX (gutter → 0,
-   *  right overshoot → last) — Sheets CLAMPS an out-of-grid pointer to
+   *  right overshoot → last), Sheets CLAMPS an out-of-grid pointer to
    *  the nearest cell, it never cancels the drag. The functional
    *  setAnchor is ordering-proof: even when the arming mousedown's
    *  setAnchor(null) and the first extending move land in one React
    *  batch, `a ?? origin` reads the queued null and anchors at the
    *  pressed cell. A vanished origin row leaves a stale anchor, which
-   *  the range memo already collapses to the active cell — the same
+   *  the range memo already collapses to the active cell, the same
    *  stale-anchor story as every other gesture. */
   const updateCellDragSel = (clientX: number, clientY: number) => {
     const drag = cellDragRef.current;
@@ -1297,8 +1406,8 @@ export function SheetGrid({
 
   /* One edge auto-scroll frame, run on a rAF loop that lives exactly as
    * long as the drag. While the pointer sits outside the scroller's BODY
-   * area — past the sticky header + frozen band on top, past the gutter +
-   * frozen columns on the left, past the client box's right/bottom — the
+   * area, past the sticky header + frozen band on top, past the gutter +
+   * frozen columns on the left, past the client box's right/bottom, the
    * scroller moves by a step proportional to the overshoot (capped at
    * CELL_DRAG_MAX_SCROLL_PX) and the selection is re-hit-tested with the
    * LAST pointer position: pointermove stops when the pointer stops, but
@@ -1306,7 +1415,7 @@ export function SheetGrid({
    * what makes hold-at-the-edge keep selecting like Sheets. Inside the
    * body area the frame is a cheap bounds check that does nothing.
    * Bounds are computed in VISUAL px (clientX/Y's space): layout offsets
-   * are multiplied by the effective CSS zoom — the exact inverse of the
+   * are multiplied by the effective CSS zoom, the exact inverse of the
    * division the hit-test helpers apply. */
   const cellDragFrame = () => {
     const drag = cellDragRef.current;
@@ -1342,7 +1451,7 @@ export function SheetGrid({
     const prevLeft = el.scrollLeft;
     if (overY !== 0) el.scrollTop = prevTop + step(overY);
     if (overX !== 0) el.scrollLeft = prevLeft + step(overX);
-    // At a scroll limit nothing moved and the hit cannot have changed —
+    // At a scroll limit nothing moved and the hit cannot have changed,
     // skip the re-test so a pinned drag idles instead of churning.
     if (el.scrollTop !== prevTop || el.scrollLeft !== prevLeft) cellDragMoveRef.current(x, y);
   };
@@ -1354,12 +1463,12 @@ export function SheetGrid({
     cellDragFrameRef.current = cellDragFrame;
   });
 
-  /** Arm the drag from a cell's pointerdown. State untouched here — see
+  /** Arm the drag from a cell's pointerdown. State untouched here, see
    *  the section comment. Mutual exclusion with the other three drag
    *  gestures is by construction: each arms from a disjoint DOM zone
    *  (cells here; the gutter, its resize strip and the fill handle each
    *  own theirs, and the handle additionally stops propagation), and
-   *  every arm site abandons any STALE sibling ref first — a gesture
+   *  every arm site abandons any STALE sibling ref first, a gesture
    *  whose release was missed (capture lost off-window, per the gutter's
    *  Chrome note) must never keep driving a later one. */
   const armCellDrag = (e: React.PointerEvent, origin: Cell, r: number, c: number) => {
@@ -1371,13 +1480,13 @@ export function SheetGrid({
     if (rowDragRef.current) endRowDrag(false);
     if (rowResizeRef.current) endRowResize(false);
     // A LIVE fill drag holds pointer capture, so a cell pointerdown from
-    // that pointer is impossible — this only ever clears a stale one.
+    // that pointer is impossible, this only ever clears a stale one.
     if (fillDrag) endFillDrag(false);
 
     const onMove = (ev: PointerEvent) => {
       if (cellDragRef.current !== drag || ev.pointerId !== drag.pointerId) return;
       // Button already up: the release happened where no listener heard
-      // it. Abandon on the next move — the row-drag self-heal rule.
+      // it. Abandon on the next move, the row-drag self-heal rule.
       if (ev.buttons === 0) { endCellDrag(); return; }
       if (!drag.engaged
         && (Math.abs(ev.clientX - drag.startClientX) > ROW_DRAG_THRESHOLD_PX
@@ -1431,8 +1540,8 @@ export function SheetGrid({
   };
 
   // A row can vanish under an open editor (deleted, or filtered out by a
-  // value the editor itself just changed). Close without committing —
-  // there is no longer a record to write to — so the grid isn't left
+  // value the editor itself just changed). Close without committing,
+  // there is no longer a record to write to, so the grid isn't left
   // keyboard-dead behind the `editing` guard below, and a stale seed can
   // never resurrect into a row that comes back. Adjusted during render,
   // not in an effect: an effect would commit a frame with a dead editor
@@ -1440,9 +1549,30 @@ export function SheetGrid({
   if (editing && !rowIndex.has(editing.rowId)) setEditing(null);
 
   /* ── keyboard ───────────────────────────────────────────────── */
+  /** Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z redo, and Ctrl+Y (the Windows
+   *  redo; Cmd+Y stays the browser's history). True when it acted. */
+  const runUndoRedoKey = (e: React.KeyboardEvent): boolean => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return false;
+    const k = e.key.toLowerCase();
+    if (k === "z") {
+      const fn = e.shiftKey ? onRedo : onUndo;
+      if (fn) { e.preventDefault(); fn(); return true; }
+    } else if (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey && onRedo) {
+      e.preventDefault();
+      onRedo();
+      return true;
+    }
+    return false;
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
-    if (target?.closest?.(EDITABLE_SEL)) return;
+    if (isEditableKeyTarget(target)) return;
+    // A focused column header answers its own keys (onHeaderKeyDown); none
+    // of them may fall through to a cell shortcut such as clear-cells. Undo
+    // and redo are the exception: history needs no cell, and a rename
+    // commit leaves focus on the header, where Cmd+Z must still undo it.
+    if (target?.closest?.('[role="columnheader"]')) { runUndoRedoKey(e); return; }
 
     if (editing) {
       // The editor owns keys while open; kernel only handles Escape as a
@@ -1453,29 +1583,38 @@ export function SheetGrid({
 
     /* Undo/redo (Tables Phase 4). Deliberately BEHIND the EDITABLE_SEL and
      * `editing` guards above, so a caret in a cell editor or the rename
-     * input keeps the browser's native text undo — and deliberately BEFORE
-     * the active-cell guard below, because history needs no selection.
-     * Ctrl+Y is the Windows redo; Cmd+Y stays the browser's (history). */
-    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
-      const k = e.key.toLowerCase();
-      if (k === "z") {
-        const fn = e.shiftKey ? onRedo : onUndo;
-        if (fn) { e.preventDefault(); fn(); return; }
-      } else if (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey && onRedo) {
-        e.preventDefault();
-        onRedo();
-        return;
-      }
-    }
+     * input keeps the browser's native text undo, and deliberately BEFORE
+     * the active-cell guard below, because history needs no selection. */
+    if (runUndoRedoKey(e)) return;
 
     const activeR = active ? rowIndex.get(active.rowId) : undefined;
     if (!active || activeR == null) {
       // Keyboard-only entry: nothing is selected (or the selected row is
       // gone), so a navigation key activates the first cell instead of
       // being swallowed.
+      if (rowCount === 0 && colCount > 0 && onEmptyStart) {
+        // No rows at all: the same keys (and typing) start the table at A1.
+        const typed = e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey ? e.key : null;
+        if (!typed && !SEED_KEYS.has(e.key) && e.key !== "Enter" && e.key !== "F2") return;
+        e.preventDefault();
+        onEmptyStart({ r: 0, c: 0, seed: typed });
+        return;
+      }
       if (!SEED_KEYS.has(e.key)) return;
       e.preventDefault();
       seedActive();
+      return;
+    }
+
+    // The context-menu key, Shift+F10 or Alt/Option+Down on the active cell
+    // opens the ROW menu for its row, anchored under the row's gutter number:
+    // the keyboard path to every row action (spec section 1, touch and
+    // keyboard parity), on a Mac keyboard too.
+    if (isRowMenuKey(e) && onRowContextMenu) {
+      e.preventDefault();
+      const cell = gridRef.current?.querySelector<HTMLElement>(`[data-gutter-row="${CSS.escape(active.rowId)}"]`);
+      const rect = cell?.getBoundingClientRect();
+      onRowContextMenu(active.rowId, rect ? rect.left : 0, rect ? rect.bottom : 0);
       return;
     }
 
@@ -1484,7 +1623,7 @@ export function SheetGrid({
      * input keeps the browser's own copy/cut/paste/select-all. Handled here
      * rather than as `case "c"` in the switch below, so the same letters
      * still reach type-to-replace when no modifier is held. Anything not
-     * listed falls through to the switch — Cmd+Arrow still navigates.
+     * listed falls through to the switch, Cmd+Arrow still navigates.
      *
      * Shift and Alt combinations are left to the browser: Cmd+Shift+R has to
      * stay a hard reload, and Cmd+Shift+V still pastes through the paste
@@ -1511,7 +1650,7 @@ export function SheetGrid({
           ifNoClipboardEvent(() => { void asyncPaste(rect); });
           return;
         }
-        // Cmd+D bookmarks and Cmd+R reloads — both have to be swallowed
+        // Cmd+D bookmarks and Cmd+R reloads, both have to be swallowed
         // once the grid owns them.
         case "d": e.preventDefault(); void fillFromEdge("down"); return;
         case "r": e.preventDefault(); void fillFromEdge("right"); return;
@@ -1555,12 +1694,23 @@ export function SheetGrid({
       case "ArrowUp": e.preventDefault(); step(-1, 0, extend); return;
       case "ArrowRight": e.preventDefault(); step(0, 1, extend); return;
       case "ArrowLeft": e.preventDefault(); step(0, -1, extend); return;
-      // PageUp/Down step by viewport ÷ the DEFAULT row height — an
+      // PageUp/Down step by viewport ÷ the DEFAULT row height, an
       // estimate, kept deliberately even with custom row heights (contract:
       // a page-jump is coarse navigation; an exact variable-height page
       // count would cost a scan and land somewhere equally arbitrary).
-      case "PageDown": e.preventDefault(); move(Math.max(1, Math.floor(viewport.height / SHEET_ROW_H) - 2), 0, extend); return;
-      case "PageUp": e.preventDefault(); move(-Math.max(1, Math.floor(viewport.height / SHEET_ROW_H) - 2), 0, extend); return;
+      // The VIEW turns the page too, by the same distance the cursor
+      // travels, so the active cell keeps its place on screen (Sheets).
+      // Moving only the cursor left the view still until the cursor fell
+      // off its bottom edge, then crept one row per press after that.
+      case "PageDown":
+      case "PageUp": {
+        e.preventDefault();
+        const { dr, scrollBy } = pageStep(geom, activeR, rowCount, viewport.height, e.key === "PageDown" ? 1 : -1);
+        const el = scrollRef.current;
+        if (el) el.scrollTop += scrollBy;
+        move(dr, 0, extend);
+        return;
+      }
       case "Home": e.preventDefault(); setAnchor(extend ? (anchor ?? active) : null); setActive({ rowId: active.rowId, c: 0 }); scrollCellIntoView(activeR, 0); return;
       case "End": e.preventDefault(); setAnchor(extend ? (anchor ?? active) : null); setActive({ rowId: active.rowId, c: colCount - 1 }); scrollCellIntoView(activeR, colCount - 1); return;
       case "Tab":
@@ -1569,6 +1719,11 @@ export function SheetGrid({
         move(0, e.shiftKey ? -1 : 1, false);
         return;
       case "Enter": {
+        // Cmd/Ctrl+Enter belongs to the page: it opens the row drawer
+        // (page.tsx's window listener). This case used to ignore modifiers,
+        // so the one keystroke opened the cell editor AND the drawer on top of
+        // it. Plain Enter still edits, as in Sheets.
+        if (e.metaKey || e.ctrlKey) return;
         e.preventDefault();
         const colId = columns[active.c]?.id;
         if (colId && !readOnlyCols?.has(colId)) setEditing({ rowId: active.rowId, c: active.c, seed: null });
@@ -1596,12 +1751,16 @@ export function SheetGrid({
         if (cells.length > 0) onClearCells(cells);
         return;
       }
-      case "Escape": setAnchor(null); return;
+      case "Escape":
+        // The first Escape collapses a range and is consumed; with nothing
+        // to collapse it bubbles, so the page can leave full screen.
+        if (anchor) { e.preventDefault(); setAnchor(null); }
+        return;
       default: {
         const colId = columns[active.c]?.id;
         if (!colId || readOnlyCols?.has(colId)) return;
         // IME composition starts arrive as "Process" (keyCode 229) and dead
-        // keys as "Dead" — never a 1-char key — so without this branch CJK
+        // keys as "Dead", never a 1-char key, so without this branch CJK
         // and accent users could never type into a cell. No preventDefault:
         // that would kill the composition before the editor mounts.
         if (e.key === "Process" || e.keyCode === 229 || e.key === "Dead") {
@@ -1620,17 +1779,74 @@ export function SheetGrid({
 
   /* ── gutter selection (Sheets row select) ───────────────────── */
   // A gutter click is nothing special to the selection model: it just sets
-  // an ordinary full-width rectangle (anchor at column 0, active at the last
-  // column), so stats, clipboard, Delete-to-clear and the context menu all
-  // behave exactly as if the user had dragged across the row.
+  // an ordinary full-width rectangle, so stats, clipboard, Delete-to-clear
+  // and the context menu all behave exactly as if the user had dragged
+  // across the row. The ACTIVE cell is the row's first column and the
+  // anchor its far end (Sheets: select row 9, the name box says A9): typing,
+  // Enter and the name box act on the active cell, so an active cell at the
+  // last column wrote the person's next keystroke into Z9.
   const selectRow = (rowId: string, extend: boolean) => {
     const lastC = colCount - 1;
     if (lastC < 0) return;
-    // Extending re-anchors at column 0 of the anchor ROW: a cell-range
-    // anchor mid-row must widen to the full row, like Sheets.
+    // Extending keeps the anchor ROW and widens to the full row: a
+    // cell-range anchor mid-row must widen to the full row, like Sheets.
     const anchorRowId = extend ? (anchor?.rowId ?? active?.rowId ?? rowId) : rowId;
-    setAnchor({ rowId: anchorRowId, c: 0 });
-    setActive({ rowId, c: lastC });
+    const sel = rowSelectionCells(rowId, anchorRowId, lastC);
+    setAnchor(sel.anchor);
+    setActive(sel.active);
+  };
+
+  /* ── column headers: select, keyboard, rename ────────────────── */
+  // A header click selects the whole column (Sheets: the header letter
+  // selects a column), shift extends from the anchor's column. The same
+  // full-height rectangle every other selection is, so stats, clipboard and
+  // the menus treat it exactly like a drag down the column.
+  const selectColumn = (c: number, extend: boolean) => {
+    if (rowCount === 0 || c < 0 || c >= colCount) return;
+    const anchorC = extend ? (anchor?.c ?? active?.c ?? c) : c;
+    const sel = columnSelectionCells(rowIds, c, anchorC);
+    if (!sel) return;
+    setAnchor(sel.anchor);
+    setActive(sel.active);
+  };
+  // Roving tab stop: one header is tabbable (the active column's), arrows
+  // move between headers, so Tab into the header row costs one stop, not 26.
+  const headerTabC = Math.min(Math.max(active?.c ?? 0, 0), Math.max(colCount - 1, 0));
+  const focusHeader = (c: number) => {
+    const el = gridRef.current?.querySelector<HTMLElement>(`[role="columnheader"][data-col-index="${c}"]`);
+    el?.focus();
+  };
+  const onHeaderKeyDown = (e: React.KeyboardEvent, colId: string, c: number) => {
+    // The rename input answers its own keys (and stops propagation itself).
+    if (isEditableKeyTarget(e.target as HTMLElement | null)) return;
+    const action = headerKeyAction(e);
+    // A key the header acts on, and Backspace or Delete, stops here: Backspace
+    // must never clear the column (the Phase 1 data-loss family). Other keys
+    // bubble so global shortcuts still work; the body's onKeyDown ignores any
+    // key whose target is a header, so none of them reaches a cell shortcut.
+    if (headerStopsPropagation(e)) e.stopPropagation();
+    switch (action) {
+      case "menu": {
+        e.preventDefault();
+        if (!onHeaderContextMenu) return;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        onHeaderContextMenu(colId, rect.left, rect.bottom);
+        return;
+      }
+      case "rename": e.preventDefault(); onHeaderRename?.(colId); return;
+      case "select": e.preventDefault(); selectColumn(c, !!e.shiftKey); return;
+      case "prev": e.preventDefault(); if (c > 0) focusHeader(c - 1); return;
+      case "next": e.preventDefault(); if (c < colCount - 1) focusHeader(c + 1); return;
+      case "into-grid": {
+        e.preventDefault();
+        if (rowCount === 0) return;
+        setAnchor(null);
+        setActive({ rowId: rowIds[0], c });
+        gridRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      default: return;
+    }
   };
 
   const gridWidth = colOffsets[colOffsets.length - 1] + 44;
@@ -1654,7 +1870,7 @@ export function SheetGrid({
 
   /* Fill handle: the bottom-right corner of the selection. Hidden while an
    * editor is open (it would sit on top of the editor's own corner) and
-   * while a write is in flight. Kept out of the tab order on purpose — it is
+   * while a write is in flight. Kept out of the tab order on purpose, it is
    * a pointer affordance; Cmd+D / Cmd+R are its keyboard equivalent. */
   const fillAnchor = range && rowCount > 0 && colCount > 0 && !editing
     ? { r: Math.min(range.r2, rowCount - 1), c: Math.min(range.c2, colCount - 1) }
@@ -1719,7 +1935,7 @@ export function SheetGrid({
     <div
       key={p.key}
       aria-hidden
-      className={`pointer-events-none absolute ${p.stuck ? "z-[16]" : "z-10"} border-2 border-dashed border-[#0073EA]`}
+      className={`pointer-events-none absolute ${p.stuck ? "z-[16]" : "z-10"} border-2 border-dashed border-brand`}
       style={{
         top: p.top, height: p.height, left: p.left, width: p.width,
         ...(p.cut.t ? { borderTopWidth: 0 } : null),
@@ -1770,13 +1986,13 @@ export function SheetGrid({
         onPointerCancel={(e) => { releasePointer(e); endFillDrag(false); }}
         onLostPointerCapture={() => endFillDrag(true)}
       >
-        <div className="h-[7px] w-[7px] rounded-[1px] border border-white bg-[#0073EA]" />
+        <div className="h-[7px] w-[7px] rounded-xs border border-[var(--os-surface)] bg-brand" />
       </div>
     );
   };
   /** Row-drag drop indicator: a 2px line centred on the candidate gap.
    *  z-30 so it rides above the sticky gutter cells (z-10) and frozen cells
-   *  (z-[15]) — the line must be visible across the numbers it is dropping
+   *  (z-[15]), the line must be visible across the numbers it is dropping
    *  between. Gap g is the boundary ABOVE display row g, so gaps 0..fr-1
    *  are inside the band and gap fr (the freeze line itself) is the body
    *  box's top edge. */
@@ -1785,8 +2001,8 @@ export function SheetGrid({
     return (
       <div
         aria-hidden
-        className="pointer-events-none absolute left-0 right-0 z-30 bg-[#0073EA]"
-        // Gap g's y is rowTop(g) — defined through g = rowCount (the gap
+        className="pointer-events-none absolute left-0 right-0 z-30 bg-brand"
+        // Gap g's y is rowTop(g), defined through g = rowCount (the gap
         // below the last row = totalHeight), band-local or body-local.
         style={{ top: (band ? geom.rowTop(rowDrag.gap) : geom.rowTop(rowDrag.gap) - bandH) - 1, height: 2 }}
       />
@@ -1809,7 +2025,7 @@ export function SheetGrid({
     return (
       <div
         aria-hidden
-        className="pointer-events-none absolute left-0 right-0 z-30 bg-[#0073EA]"
+        className="pointer-events-none absolute left-0 right-0 z-30 bg-brand"
         style={{ top: (band ? y : y - bandH) - 1, height: 2 }}
       />
     );
@@ -1826,7 +2042,7 @@ export function SheetGrid({
   const colResizeGuide = colGuideIndex >= 0 ? (
     <div
       aria-hidden
-      className="pointer-events-none absolute z-40 bg-[#0073EA]"
+      className="pointer-events-none absolute z-40 bg-brand"
       style={{
         top: 0,
         bottom: 0,
@@ -1839,14 +2055,14 @@ export function SheetGrid({
   /* Background of a frozen cell. Sticky cells slide over scrolling ones, so
    * they must be opaque: the page's own fill wins (it already beats the
    * selection tint via inline style), else the selection tint flattened
-   * onto white (#0073EA at 8% over #fff), else white. The active cell is
+   * onto the surface (the selected token), else the surface. The active cell is
    * white by the same rule that drops its page background. */
   const frozenBg = (isActive: boolean, selected: boolean, pageBg: React.CSSProperties["backgroundColor"]) =>
-    isActive ? "#fff" : (pageBg ?? (selected ? "#ebf4fd" : "#fff"));
+    isActive ? "var(--os-surface)" : (pageBg ?? (selected ? "var(--os-selected)" : "var(--os-surface)"));
 
   /** One display row. `top` is the row's offset inside whichever box holds
    *  it: r * ROW_H in the frozen band, (r - fr) * ROW_H in the body box.
-   *  Everything else — gutter, cells, selection, editor — is identical in
+   *  Everything else, gutter, cells, selection, editor, is identical in
    *  both, which is the whole point: a frozen row is an ordinary row that
    *  happens to be parented by a sticky element. */
   const renderRow = (rowId: string, r: number, top: number) => (
@@ -1854,7 +2070,7 @@ export function SheetGrid({
       key={rowId}
       role="row"
       aria-rowindex={r + 1}
-      className="absolute left-0 right-0 flex border-b border-zinc-200"
+      className="absolute left-0 right-0 flex border-b border-line-soft"
       style={{ top, height: geom.rowHeight(r) }}
       onContextMenu={(e) => {
         if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
@@ -1868,19 +2084,20 @@ export function SheetGrid({
         * reorders. Right-click bubbles to the row's context
         * menu above, like the rest of the row. */}
       <div
-        className={`sticky left-0 z-10 flex items-center justify-end border-r border-zinc-200 pr-2 text-xs tabular-nums select-none ${
-          range && r >= range.r1 && r <= range.r2 ? "bg-zinc-100 text-zinc-600" : "bg-white text-zinc-400"
+        data-gutter-row={rowId}
+        className={`group/gutter sticky left-0 z-10 flex items-center justify-end border-e border-line pr-2 text-xs tabular-nums select-none ${
+          range && r >= range.r1 && r <= range.r2 ? "bg-active text-ink" : "bg-[var(--os-surface-1)] text-ink-2"
         }`}
         style={{ width: GUTTER_W, minWidth: GUTTER_W, touchAction: "none" }}
         onPointerDown={(e) => {
           if (e.button !== 0) return; // right-click stays the context menu
           // Same as a cell mousedown: stealing focus from an open
           // editor blurs it, and blur is how editors commit.
-          gridRef.current?.focus();
+          gridRef.current?.focus({ preventScroll: true });
           e.preventDefault();
           // A scroll can unmount the captured gutter cell, and
           // Chrome then fires lostpointercapture at the document
-          // where React's delegated handler never hears it — the
+          // where React's delegated handler never hears it, the
           // ref survives. On touch there are no hover moves to
           // self-heal, so THIS gesture would drive the previous
           // drag: abandon any stale drag before arming a new one.
@@ -1925,10 +2142,39 @@ export function SheetGrid({
         onPointerCancel={(e) => { releasePointer(e); endRowDrag(false); }}
         onLostPointerCapture={() => endRowDrag(true)}
       >
-        {r + 1}
+        {/* The row menu's visible door (spec section 1, touch and keyboard
+          * parity): a 16px chevron at the gutter's left edge, shown on hover,
+          * on focus, and on a coarse pointer for the selected rows. Its pointerdown stops
+          * propagation so it never selects or drags the row. Right-click and
+          * the context-menu key reach the same menu. */}
+        {onRowContextMenu && (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={`Row ${gutterRowNumber(rowId, r, rowNumberOf)} menu`}
+            title="Row menu"
+            // bg-inherit: the chevron covers the digits under it instead of
+            // drawing over them (a 4 digit number reaches the left edge of a
+            // 44px gutter). On a coarse pointer it shows on the selected
+            // row only (a tap on the number selects it first), so a column
+            // of chevrons never sits over every row number.
+            className={`absolute left-0.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded bg-inherit text-ink-2 opacity-0 hover:bg-hover focus-visible:opacity-100 group-hover/gutter:opacity-100 ${
+              range && r >= range.r1 && r <= range.r2 ? "[@media(pointer:coarse)]:opacity-100" : ""
+            }`}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              onRowContextMenu(rowId, rect.left, rect.bottom + 2);
+            }}
+          >
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        )}
+        {gutterRowNumber(rowId, r, rowNumberOf)}
         {/* Row-resize boundary zone (Sheets: the seam between two row
           * numbers). A ROW_RESIZE_ZONE_PX strip along the number's BOTTOM
-          * edge, fully INSIDE this gutter cell — so it is disjoint from
+          * edge, fully INSIDE this gutter cell, so it is disjoint from
           * the drag-to-move surface by construction: move arms from the
           * gutter cell's own pointerdown, and this child's pointerdown
           * stops propagation, so a press in the strip can never arm a
@@ -1947,7 +2193,7 @@ export function SheetGrid({
               e.stopPropagation(); // never reach the gutter's move-arm handler
               // Same as the gutter/cell pointerdown: stealing focus from an
               // open editor blurs it, and blur is how editors commit.
-              gridRef.current?.focus();
+              gridRef.current?.focus({ preventScroll: true });
               // Same stale-capture self-heal as the row drag: a scroll can
               // unmount a captured zone and strand the ref.
               if (rowResizeRef.current) endRowResize(false);
@@ -1980,7 +2226,7 @@ export function SheetGrid({
             onLostPointerCapture={() => endRowResize(true)}
             onDoubleClick={(e) => {
               // Sheets: double-click the boundary FITS the row to its
-              // content — the page owns that measurement (onRowAutofit);
+              // content, the page owns that measurement (onRowAutofit);
               // without it the legacy reset-to-default stands. The two
               // clicks' own down/up pairs each committed nothing (height
               // unchanged), so this is the only write of the gesture.
@@ -2001,14 +2247,14 @@ export function SheetGrid({
             role="gridcell"
             aria-colindex={c + 1}
             aria-selected={selected || isActive}
-            className={`flex border-r border-zinc-200 px-2 text-sm leading-tight ${
+            className={`flex border-e border-line-soft px-2 text-base leading-tight tabular-nums text-ink ${
               // Editing: the cell un-clips and rises above frozen cells
               // (z-15/16) so a multi-line editor can grow past the row
               // height, Sheets' expanding-editor look. Display cells keep
               // the old clipped, centered layout to the letter.
               isEditing ? "items-start overflow-visible z-30" : "items-center overflow-hidden"
             } ${
-              isActive ? "outline outline-2 -outline-offset-1 outline-[#0073EA] bg-white" : selected ? "bg-[#0073EA]/8" : ""
+              isActive ? "outline outline-2 -outline-offset-1 outline-brand bg-[var(--os-surface)]" : selected ? "bg-selected" : ""
             }`}
             // Page-owned cell style (text styles + fill +
             // conditional-formatting background). The ACTIVE
@@ -2032,24 +2278,24 @@ export function SheetGrid({
                 zIndex: 15,
                 // A page-level `background` SHORTHAND (find's current-match
                 // green rides it exactly because the active cell strips the
-                // longhand) is an explicit opaque fill — keep it instead of
+                // longhand) is an explicit opaque fill, keep it instead of
                 // pinning white over it; it satisfies the frozen-column
                 // opacity requirement by itself.
                 backgroundColor: page?.background != null
                   ? (typeof page.background === "string" ? page.background : frozenBg(isActive, selected, page?.backgroundColor))
                   : frozenBg(isActive, selected, page?.backgroundColor),
-                ...(c === fc - 1 ? { borderRightColor: "#d4d4d8" } : null),
-                ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "white", zIndex: 30 } : null),
+                ...(c === fc - 1 ? { borderRightColor: "var(--os-line-strong)" } : null),
+                ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "var(--os-surface)", zIndex: 30 } : null),
               };
             })() : {
               width: col.width ?? COL_W,
               minWidth: col.width ?? COL_W,
               ...(isActive ? withoutBackground(cellStyle?.(rowId, col.id)) : cellStyle?.(rowId, col.id)),
               // Editing: the cell itself grows with the editor content (the
-              // outline wraps the grown box — Sheets' expanding editor).
+              // outline wraps the grown box, Sheets' expanding editor).
               // alignSelf breaks the flex stretch so height:auto can win;
               // the white ground covers the rows it overlaps.
-              ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "white" } : null),
+              ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "var(--os-surface)" } : null),
             }}
             onPointerDown={(e) => {
               /* Sheets' click-hold-pull: ARM the selection drag. The
@@ -2059,15 +2305,15 @@ export function SheetGrid({
                * a non-left press (right-click stays the context menu),
                * this cell's own open editor, or any editable the page
                * rendered into the cell. The gutter, header, resize strip
-               * and fill handle never reach here — disjoint DOM zones
+               * and fill handle never reach here, disjoint DOM zones
                * (the handle also stops propagation). */
               if (e.button !== 0 || isEditing) return;
-              if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+              if (isEditableKeyTarget(e.target as HTMLElement | null)) return;
               armCellDrag(e, { rowId, c }, r, c);
             }}
             onMouseDown={(e) => {
               if (isEditing) return;
-              gridRef.current?.focus();
+              gridRef.current?.focus({ preventScroll: true });
               e.preventDefault();
               if (e.shiftKey && active) { setAnchor((a) => a ?? active); setActive({ rowId, c }); }
               else { setAnchor(null); setActive({ rowId, c }); }
@@ -2092,11 +2338,12 @@ export function SheetGrid({
   );
 
   /* ── render ─────────────────────────────────────────────────── */
+  const ghostRows = rowCount === 0 && colCount > 0 && onEmptyStart ? EMPTY_GHOST_ROWS : 0;
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200 bg-white outline-none"
+        className="min-h-0 flex-1 overflow-auto bg-[var(--os-surface)] outline-none"
       >
         <div
           ref={gridRef}
@@ -2114,38 +2361,33 @@ export function SheetGrid({
           style={{ width: gridWidth, minWidth: "100%", cursor: rowDrag ? "grabbing" : undefined }}
         >
           {/* Header */}
-          <div className="sticky top-0 z-20 flex border-b border-zinc-200 bg-zinc-50/95 backdrop-blur" style={{ height: SHEET_ROW_H }}>
-            {/* Corner above the gutter: Sheets' select-all. Click performs
-              * EXACTLY the Cmd/Ctrl+A selection — the same guard and the
-              * same one setAnchor + one setActive pair, so the rAF-deduped
-              * onSelectionChange emission is shared, not duplicated. The
-              * grid is refocused first (clicking a non-focusable div would
-              * otherwise drop focus to body, killing follow-up keyboard
-              * shortcuts — and the focus steal is what commits any open
-              * editor, same as every other grid pointerdown). */}
+          <div className="sticky top-0 z-20 flex border-b border-line bg-[var(--os-table-head-bg)]" style={{ height: SHEET_ROW_H }}>
+            {/* The corner above the gutter is an inert cell. The corner
+              * "Select all" control is gone (spec-tables-forms section 0, the
+              * founder's Tables rule: no select-all, no checkboxes): Cmd/Ctrl+A
+              * selects the sheet, the gutter number selects a row and the
+              * header selects a column. */}
             <div
-              role="button"
-              aria-label="Select all"
-              className="sticky left-0 z-10 cursor-pointer border-r border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+              aria-hidden
+              className="sticky left-0 z-10 border-e border-line bg-[var(--os-table-head-bg)]"
               style={{ width: GUTTER_W, minWidth: GUTTER_W }}
-              onClick={() => {
-                gridRef.current?.focus();
-                if (rowCount > 0 && colCount > 0) { setAnchor({ rowId: rowIds[0], c: 0 }); setActive({ rowId: rowIds[rowCount - 1], c: colCount - 1 }); }
-              }}
             />
             {columns.map((col, c) => (
               <div
                 key={col.id}
                 role="columnheader"
-                className="flex items-center border-r border-zinc-200 px-1"
+                data-col-index={c}
+                tabIndex={c === headerTabC ? 0 : -1}
+                aria-colindex={c + 1}
+                className="group/colhead flex items-center border-e border-line px-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
                 // Frozen column headers stick like their cells. Opaque
-                // zinc-50 (the header's own ground is 95% + blur, which
-                // would let scrolled letters ghost through); the last one
+                // the header ground token (so scrolled letters never ghost
+                // through); the last one
                 // carries the vertical freeze line.
                 style={c < fc ? {
                   width: col.width ?? COL_W, minWidth: col.width ?? COL_W,
-                  position: "sticky", left: colOffsets[c], zIndex: 10, backgroundColor: "#fafafa",
-                  ...(c === fc - 1 ? { borderRightColor: "#d4d4d8" } : null),
+                  position: "sticky", left: colOffsets[c], zIndex: 10, backgroundColor: "var(--os-table-head-bg)",
+                  ...(c === fc - 1 ? { borderRightColor: "var(--os-line-strong)" } : null),
                 } : { width: col.width ?? COL_W, minWidth: col.width ?? COL_W }}
                 onContextMenu={(e) => {
                   // Right-click inside a page-rendered field keeps the
@@ -2154,6 +2396,20 @@ export function SheetGrid({
                   if (!onHeaderContextMenu) return;
                   e.preventDefault();
                   onHeaderContextMenu(col.id, e.clientX, e.clientY);
+                }}
+                onKeyDown={(e) => onHeaderKeyDown(e, col.id, c)}
+                onClick={(e) => {
+                  // The chevron, the name input and the resize grip are their
+                  // own controls; a click anywhere else selects the column.
+                  if ((e.target as HTMLElement).closest("button, input, textarea, [data-no-select]")) return;
+                  selectColumn(c, e.shiftKey);
+                  // Keys after a click act on the selection, as after a
+                  // gutter click (Delete clears the column, Cmd+C copies it).
+                  gridRef.current?.focus({ preventScroll: true });
+                }}
+                onDoubleClick={(e) => {
+                  if ((e.target as HTMLElement).closest("button, input, textarea, [data-no-select]")) return;
+                  onHeaderRename?.(col.id);
                 }}
               >
                 <div className="min-w-0 flex-1">{renderHeader(col.id)}</div>
@@ -2167,14 +2423,14 @@ export function SheetGrid({
             * position is header-bottom whatever scrollTop is. Opaque and
             * z-20 (the header's z) so the body rows scrolling under it
             * never show through; its own frozen cells/gutter stack inside
-            * it. The 1px zinc-300 line at its bottom is the horizontal
-            * freeze line — an absolute sibling after the rows rather than
+            * it. The 1px line-strong rule at its bottom is the horizontal
+            * freeze line, an absolute sibling after the rows rather than
             * a border, because the last row's own border-b would paint
             * over a band border. */}
           {fr > 0 && (
-            <div className="sticky z-20 bg-white" style={{ top: SHEET_ROW_H, height: bandH }}>
+            <div className="sticky z-20 bg-[var(--os-surface)]" style={{ top: SHEET_ROW_H, height: bandH }}>
               {rowIds.slice(0, fr).map((rowId, r) => renderRow(rowId, r, geom.rowTop(r)))}
-              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-px bg-zinc-300" />
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-px bg-line-strong" />
               {renderDropIndicator(true)}
               {renderRowResizeGuide(true)}
               {renderFillPreview(true)}
@@ -2186,9 +2442,35 @@ export function SheetGrid({
             * the band's rows, since they are laid out in the band, not
             * here; body row r sits at rowTop(r) - bandH (uniform:
             * (r - fr) * ROW_H, exactly the pre-variable-heights layout). */}
-          <div style={{ height: geom.totalHeight - bandH, position: "relative" }}>
-            {rowCount === 0 ? (
-              <div className="flex h-24 items-center justify-center text-sm text-zinc-400">No rows yet. Add one below.</div>
+          <div style={{ height: ghostRows ? ghostRows * SHEET_ROW_H : geom.totalHeight - bandH, position: "relative" }}>
+            {ghostRows ? (
+              // Blank placeholder rows for a table that has none (see
+              // onEmptyStart). aria-hidden: they are paint, not rows; the
+              // keyboard path (arrows, Enter, typing on the grid) starts the
+              // table the same way a click does.
+              <div aria-hidden data-empty-ghost>
+                {Array.from({ length: ghostRows }, (_, r) => (
+                  <div key={r} className="absolute left-0 right-0 flex border-b border-line-soft" style={{ top: r * SHEET_ROW_H, height: SHEET_ROW_H }}>
+                    <div className="sticky left-0 z-10 flex items-center justify-end border-e border-line bg-[var(--os-surface-1)] pr-2 text-xs tabular-nums text-ink-2 select-none" style={{ width: GUTTER_W, minWidth: GUTTER_W }}>{r + 1}</div>
+                    {columns.map((col, c) => (
+                      <div
+                        key={col.id}
+                        data-ghost-cell={`${r}:${c}`}
+                        className="cursor-cell border-e border-line-soft"
+                        style={{ width: col.width ?? COL_W, minWidth: col.width ?? COL_W }}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.preventDefault();
+                          gridRef.current?.focus({ preventScroll: true });
+                          onEmptyStart?.({ r, c, seed: null });
+                        }}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : rowCount === 0 ? (
+              <div className="flex h-24 items-center justify-center text-sm text-ink-2">No rows yet. Use the + under the row numbers to add some.</div>
             ) : (
               mounted.map(({ rowId, r }) => renderRow(rowId, r, geom.rowTop(r) - bandH))
             )}

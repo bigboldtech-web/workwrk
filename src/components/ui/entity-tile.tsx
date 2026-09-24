@@ -17,7 +17,7 @@
 
 import { createElement, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Folder, FileText, ListChecks, LayoutGrid, type LucideIcon } from "lucide-react";
+import { ClipboardList, Folder, FileText, ListChecks, LayoutGrid, Table2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
 
@@ -30,7 +30,16 @@ const FALLBACK_ICONS = {
   file: FileText,
   board: LayoutGrid,
   list: ListChecks,
+  table: Table2,
+  form: ClipboardList,
 } as const;
+
+/**
+ * The neutral object tile (spec-tables-forms: a Table or a Form is
+ * `EntityTile` "neutral": the --os-surface-hov ground with an --os-ink-2
+ * glyph, never a gradient or a hue). Spread onto EntityTile.
+ */
+export const NEUTRAL_TILE = { color: "var(--os-surface-hov)", className: "!text-ink-2" } as const;
 export type EntityTileFallback = keyof typeof FALLBACK_ICONS;
 
 /** Neutral zinc used when an entity has no color of its own. */

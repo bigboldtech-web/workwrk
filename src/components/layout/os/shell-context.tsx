@@ -206,9 +206,9 @@ type ShellState = {
   setMutedUntil: (iso: string | null) => Promise<boolean>;
 
   /**
-   * The LEGACY module-view drawer state (kanban.tsx, calendar.tsx,
-   * main-table.tsx: the demo surfaces of the removed verticals). It is NOT
-   * the task drawer.
+   * The LEGACY module-view drawer state (the demo surfaces of the removed
+   * verticals, kanban.tsx, calendar.tsx and main-table.tsx, all now deleted).
+   * It is NOT the task drawer.
    *
    * A task opens at its own URL: `router.push("/item/<id>")`, which the
    * (dashboard)/@drawer/(.)item/[id] intercept renders over the list. Wiring
@@ -218,15 +218,13 @@ type ShellState = {
    *
    * WHAT IT ACTUALLY IS TODAY: dead. `OsItemDrawer`, the only component that
    * ever rendered `openItem`, was deleted in Phase 1 (24aaf922), and the three
-   * callers of `openItemDrawer` (kanban.tsx, main-table.tsx, calendar.tsx) are
-   * themselves rendered by nothing: `OsModuleView` does not exist in this
-   * repo, and the only imports of those three files anywhere are `import
-   * type`. So this state has no writer that runs and no reader at all.
+   * files that called `openItemDrawer` were rendered by nothing and are gone
+   * (main-table.tsx and kanban.tsx in Phase 5; their demo types moved to
+   * catalog.ts). So this state has no writer and no reader at all.
    *
-   * It is left in place rather than deleted because deleting it means deleting
-   * those three files too, and that is a removal to make deliberately with the
-   * catalog, not a side effect of a task-detail stage. Nothing renders behind
-   * it, so nothing regresses either way.
+   * It is left in place because removing a shell-context field touches every
+   * consumer of the context value; nothing renders behind it, so nothing
+   * regresses either way.
    */
   openItem: OpenItem | null;
   openItemDrawer: (it: OpenItem) => void;
@@ -529,6 +527,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       if (isHubKey(appKey)) {
         return hubDefaultHref(appKey, {
           talkModuleOn: activeModuleKeys.includes("chat"),
+          tablesModuleOn: activeModuleKeys.includes("tables"),
           canManageWorkspace: accessLevel === undefined ? true : canAccessTier("org-admin", accessLevel),
         });
       }

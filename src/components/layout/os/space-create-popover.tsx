@@ -117,13 +117,15 @@ export function CreateInsideTrigger({ kind, spaceId, folderId, role, onCreated }
   };
 
   const createTable = async () => {
+    // The one create recipe: no columns sent, so the server applies the
+    // canonical seed (26 columns, 1,000 rows); the table opens with ?new=1.
     const d = await post("/api/tables", { name: "Untitled table", spaceId }, "table");
     const id = d?.id ?? d?.data?.id;
     if (!d || !id) return;
     refreshSidebar();
     treeChanged({ kind: "table", action: "created" });
     close();
-    router.push(`/tables/${id}`);
+    router.push(`/tables/${id}?new=1`);
   };
 
   if (!role || !roleAtLeast(role, "edit")) return null;

@@ -27,7 +27,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
 
-type FavoriteKind = "space" | "folder" | "list" | "doc" | "table" | "canvas" | "file";
+type FavoriteKind = "space" | "folder" | "list" | "doc" | "table" | "form" | "canvas" | "file";
 
 interface FavoriteRow {
   kind: FavoriteKind;
@@ -55,6 +55,7 @@ const KINDS: ReadonlyArray<{ key: FavoriteKind; label: string; plural: string; p
   { key: "list", label: "List", plural: "Lists", path: "boards", field: "boardId" },
   { key: "doc", label: "Doc", plural: "Docs", path: "docs", field: "docId" },
   { key: "table", label: "Table", plural: "Tables", path: "tables", field: "tableId" },
+  { key: "form", label: "Form", plural: "Forms", path: "forms", field: "formId" },
   { key: "canvas", label: "Canvas", plural: "Canvases", path: "whiteboards", field: "whiteboardId" },
   { key: "file", label: "File", plural: "Files", path: "files", field: "fileId" },
 ];

@@ -1564,13 +1564,13 @@ function rid() { return Math.random().toString(36).slice(2, 10); }
 const createForm: ToolDefinition = {
   name: "create_form",
   description:
-    "Create a Form (data-collection primitive) in WorkwrK. Use this when the user wants to collect structured data from people — feedback, applications, requests, signups. Returns the form id + URL to the responder.",
+    "Create a Form in WorkwrK. Use this when the user wants to collect structured answers from people, such as feedback, applications, requests or signups. Returns the form id and the responder URL.",
   input_schema: {
     type: "object",
     properties: {
       name: { type: "string", description: "Short name of the form (e.g. 'Customer feedback')" },
       description: { type: "string", description: "Optional one-liner shown to respondents" },
-      isPublic: { type: "boolean", description: "If true, anyone with the link can submit (no login). Default false." },
+      isPublic: { type: "boolean", description: "Ignored: a new form is always private. Its public link is turned on in the form's Share dialog by its maker or an admin, behind a confirm." },
       fields: {
         type: "array",
         description: "Form fields, 1-20 items. Each field has type, label, required.",
@@ -1608,7 +1608,10 @@ const createForm: ToolDefinition = {
         organizationId: ctx.orgId,
         name: String(input.name).slice(0, 200),
         description: input.description ? String(input.description).slice(0, 2000) : null,
-        isPublic: Boolean(input.isPublic),
+        // Never public from a tool call: publishing is a confirmed act by the
+        // form's maker or an admin (spec-tables-forms section 3 ask 1), and
+        // POST /api/forms ignores isPublic for the same reason.
+        isPublic: false,
         fields: safe,
         createdById: ctx.userId,
       },
@@ -1636,7 +1639,7 @@ const listForms: ToolDefinition = {
 const createDataTable: ToolDefinition = {
   name: "create_data_table",
   description:
-    "Create a flexible DataTable (Airtable-style) in WorkwrK. Use this when the user wants to track a list of things with shared attributes — vendors, competitors, leads, equipment. Returns the table id + URL.",
+    "Create a Table (a spreadsheet: named, typed columns and rows) in WorkwrK. Use this when the user wants to track a list of things with shared attributes, such as vendors, competitors, leads or equipment. Returns the table id and URL.",
   input_schema: {
     type: "object",
     properties: {
@@ -1688,7 +1691,7 @@ const createDataTable: ToolDefinition = {
 
 const listDataTables: ToolDefinition = {
   name: "list_data_tables",
-  description: "List DataTables in the user's org with row counts.",
+  description: "List the Tables in the user's org with row counts.",
   input_schema: { type: "object", properties: {} },
   handler: async (ctx) => {
     const tables = await prisma.dataTable.findMany({

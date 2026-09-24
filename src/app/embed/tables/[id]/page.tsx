@@ -1,186 +1,116 @@
 "use client";
 
-/* Public table embed — standalone, no auth, read-only.
- * Renders only when DataTable.isPublic is true (enforced server-side
- * by /api/public/tables/[id]).
+/* /embed/tables/[id] (spec-tables-forms section 2): a read-only view of a table
+ * for a page outside WorkwrK.
+ *
+ * The server computes everything (GET /api/public/tables/[id]): the engine
+ * evaluates every row, formula cells arrive as their values and never as
+ * "[object Object]", headers arrive as names with the letter as fallback, and
+ * rows arrive a page at a time instead of under a silent 5,000-row cap. This
+ * page only draws what it is given, in tokens, following the viewer's colour
+ * scheme. Denied (link off, public links off for the org, module off, deleted,
+ * wrong id) is one neutral line that names nothing.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Table as TableIcon, Loader2 } from "lucide-react";
+import "@/app/(dashboard)/tokens.css";
+import "@/app/(dashboard)/os.css";
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { TableEmbedTable, type EmbedTablePage } from "@/components/tables/table-embed-table";
 
-import { createTableEngine, type NamedRangeDef } from "@/lib/sheet-engine-host";
-import { formatCellValue, type ColumnFormat } from "@/lib/sheet-format";
+type Loaded = EmbedTablePage & { name: string; description: string | null; nextCursor: string | null };
 
-type Column = {
-  id: string;
-  type: string;
-  label: string;
-  options?: string[];
-  /** A whole-column formula; every cell in the column evaluates it. */
-  formula?: string;
-  /** Currency, percent, date and number display options. */
-  format?: ColumnFormat;
-};
-type Row = { id: string; values: Record<string, unknown>; position: number };
-type ApiTable = {
-  id: string;
-  name: string;
-  description?: string | null;
-  columns: Column[];
-  rows: Row[];
-  namedRanges?: NamedRangeDef[];
-};
+const PAGE = 200;
 
-export default function TableEmbed({ params }: { params: Promise<{ id: string }> }) {
-  const [id, setId] = useState<string | null>(null);
-  const [table, setTable] = useState<ApiTable | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+export default function TableEmbedPage() {
+  const { id } = useParams<{ id: string }>();
+  const [state, setState] = useState<"loading" | "ready" | "invalid" | "error">("loading");
+  const [data, setData] = useState<Loaded | null>(null);
+  const [busy, setBusy] = useState(false);
+  // A page turn that failed, and the offset it asked for. Kept apart from
+  // `state` so a failed Next leaves the page the viewer is reading on screen
+  // and Retry asks for the page they wanted, not page 1.
+  const [pageError, setPageError] = useState<{ start: number } | null>(null);
 
-  useEffect(() => { void params.then((p) => setId(p.id)); }, [params]);
-
-  const load = useCallback(async () => {
+  const load = useCallback(async (start: number, showBusy = true) => {
     if (!id) return;
+    // The first load renders the skeleton; paging marks the table busy.
+    if (showBusy) setBusy(true);
+    setPageError(null);
+    // Only a page turn has a table on screen to keep. The first load, and the
+    // full card's Retry (both showBusy=false), still fall to the error card.
+    const fail = () => { if (showBusy) setPageError({ start }); else setState("error"); };
     try {
-      const res = await fetch(`/api/public/tables/${id}`);
-      if (!res.ok) throw new Error(res.status === 404 ? "Table not found or not public" : `HTTP ${res.status}`);
+      const res = await fetch(`/api/public/tables/${encodeURIComponent(id)}?cursor=${start}&limit=${PAGE}`);
+      // A 404 is the link going off (or the table going away) mid-read, so it
+      // replaces the table on a page turn too: nothing may stay shown.
+      if (res.status === 404) { setState("invalid"); return; }
+      if (!res.ok) { console.warn(`table embed load failed: HTTP ${res.status}`); fail(); return; }
       const d = await res.json();
-      const t = d.data ?? d;
-      t.columns = Array.isArray(t.columns) ? t.columns : [];
-      t.rows = Array.isArray(t.rows) ? t.rows : [];
-      setTable(t);
+      setData({
+        name: typeof d.name === "string" ? d.name : "",
+        description: typeof d.description === "string" && d.description.trim() ? d.description : null,
+        columns: Array.isArray(d.columns) ? d.columns : [],
+        rows: Array.isArray(d.rows) ? d.rows : [],
+        start: typeof d.start === "number" ? d.start : 0,
+        total: typeof d.total === "number" ? d.total : 0,
+        updatedAt: typeof d.updatedAt === "string" ? d.updatedAt : null,
+        nextCursor: typeof d.nextCursor === "string" ? d.nextCursor : null,
+      });
+      setState("ready");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "load failed");
+      console.warn("table embed load failed", e);
+      fail();
+    } finally {
+      setBusy(false);
     }
   }, [id]);
-  useEffect(() => { void load(); }, [load]);
 
-  // THE SAME ENGINE THE GRID USES, SO THE EMBED SHOWS THE SAME NUMBERS.
-  //
-  // A formula is stored as an object, `{ "=": "SUM(A1:A5)" }`, and nothing
-  // caches its result (sheet-engine/types.ts: "extra keys are tolerated so a
-  // cached computed value can be added later"). This page used to render
-  // every cell with `String(v)`, so every formula cell in every public embed
-  // read literally "[object Object]" while the same table in the product
-  // showed the number.
-  //
-  // `engine.display(colId, rowId)` is the grid's own renderer: it evaluates
-  // per-cell formulas AND whole-column ones, and returns real error codes
-  // ("#REF!", "#DIV/0!") instead of an object or a blank.
-  //
-  // Rows MUST go in unsorted storage order, which is what the API returns
-  // (position asc, then id). Row anchoring is the engine's law: A1 row N is
-  // index N-1, so re-ordering here would silently change what every formula
-  // points at.
-  const engine = useMemo(() => {
-    if (!table) return null;
-    try {
-      return createTableEngine({
-        columns: table.columns.map((c) => ({ id: c.id, label: c.label, type: c.type, formula: c.formula })),
-        rows: table.rows.map((r) => ({ id: r.id, values: r.values })),
-        namedRanges: table.namedRanges ?? [],
-      });
-    } catch {
-      // A malformed table must not blank a public page. Falling back to null
-      // renders literals only, which is what this page did before.
-      return null;
-    }
-  }, [table]);
-
-  if (err) return <Wrap><div style={S.error}><TableIcon /><p>{err}</p></div></Wrap>;
-  if (!table) return <Wrap><div style={S.loading}><Loader2 style={{ animation: "spin 1s linear infinite" }} /> Loading…</div></Wrap>;
+  useEffect(() => { void load(0, false); }, [load]);
 
   return (
-    <Wrap>
-      <header style={S.head}>
-        <div style={S.icon}><TableIcon /></div>
-        <div>
-          <h1 style={S.title}>{table.name}</h1>
-          {table.description && <p style={S.desc}>{table.description}</p>}
+    <div className="os-chrome min-h-screen bg-app p-4 text-ink">
+      {state === "loading" ? (
+        <div className="overflow-hidden rounded-lg border border-line bg-raised" aria-busy="true" aria-label="Loading">
+          <div className="h-9 border-b border-line bg-subtle" />
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="flex h-8 items-center border-b border-line-soft px-3 last:border-b-0">
+              <span className="h-3 rounded bg-skeleton os-skeleton-pulse" style={{ width: ["60%", "40%", "80%"][i % 3] }} />
+            </div>
+          ))}
         </div>
-      </header>
-      <div style={S.scroll}>
-        <table style={S.table}>
-          <thead>
-            <tr>{table.columns.map((c) => <th key={c.id} style={S.th}>{c.label}</th>)}</tr>
-          </thead>
-          <tbody>
-            {table.rows.length === 0 ? (
-              <tr><td colSpan={table.columns.length} style={S.empty}>No rows yet.</td></tr>
-            ) : table.rows.map((r) => (
-              <tr key={r.id}>
-                {table.columns.map((c) => (
-                  <td key={c.id} style={S.td}>{cellText(c, r, engine)}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Wrap>
-  );
-}
-
-/**
- * One cell's text, by the same rules the product's grid uses.
- *
- * Order matters here:
- *   1. Checkbox first, because `false` is a real value that must render as
- *      an empty cell rather than as the word "false".
- *   2. The engine next, when there is one. It answers for formula cells and
- *      formula COLUMNS, and returns error codes as text.
- *   3. `formatCellValue` last, so a currency column reads "$1,240" and a date
- *      column reads in the table's date format, exactly as in the product.
- *      The embed used to skip this entirely and print raw stored values.
- *
- * An array (multi-select, people) still joins with commas, and anything else
- * that is somehow an object falls back to empty rather than "[object
- * Object]": on a public page a blank cell is honest and the literal string is
- * not.
- */
-function cellText(
-  column: Column,
-  row: Row,
-  engine: ReturnType<typeof createTableEngine> | null,
-): string {
-  const raw = row.values[column.id];
-
-  if (column.type === "checkbox") return raw ? "✓" : "";
-
-  if (engine) {
-    try {
-      return engine.display(column.id, row.id);
-    } catch {
-      // Fall through to the literal path rather than blanking the row.
-    }
-  }
-
-  if (raw === undefined || raw === null) return "";
-  if (Array.isArray(raw)) return raw.join(", ");
-  if (typeof raw === "object") return "";
-  return formatCellValue(raw, column.type, column.format);
-}
-
-function Wrap({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ minHeight: "100vh", padding: 20, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", background: "#f9fafb", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1000, margin: "0 auto", background: "white", borderRadius: 10, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,.05)" }}>
-        {children}
-      </div>
-      <style>{`@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }`}</style>
+      ) : state === "invalid" ? (
+        <div className="rounded-lg border border-line bg-raised px-6 py-12 text-center">
+          <p className="text-row text-ink">This link is invalid or has been turned off.</p>
+        </div>
+      ) : state === "error" || !data ? (
+        <div className="rounded-lg border border-line bg-raised px-6 py-12 text-center">
+          <p className="text-row text-ink">We could not load this table.</p>
+          <button type="button" onClick={() => { setState("loading"); void load(0, false); }} className="mt-3 text-sm font-medium text-brand-deep hover:underline">Retry</button>
+        </div>
+      ) : (
+        <>
+          <h1 className="text-lg font-semibold text-ink">{data.name}</h1>
+          {data.description ? <p className="mt-0.5 text-sm text-ink-2">{data.description}</p> : null}
+          <div className="mt-3">
+            <TableEmbedTable
+              page={data}
+              busy={busy}
+              onPrev={data.start > 0 ? () => void load(Math.max(0, data.start - PAGE)) : undefined}
+              onNext={data.nextCursor ? () => void load(Number(data.nextCursor)) : undefined}
+            />
+            {pageError ? (
+              <p role="alert" className="mt-2 flex items-center justify-end gap-2 text-sm text-ink-2">
+                Could not load rows.
+                <button type="button" onClick={() => void load(pageError.start)} disabled={busy} className="font-medium text-brand-deep hover:underline disabled:opacity-40">Retry</button>
+              </p>
+            ) : null}
+          </div>
+        </>
+      )}
+      <p className="mt-3 text-center text-xs text-ink-3">
+        <a href="https://workwrk.com" target="_blank" rel="noopener" className="hover:underline">Powered by WorkwrK</a>
+      </p>
     </div>
   );
 }
-
-const S = {
-  head: { display: "flex", gap: 14, alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #e5e7eb" } as React.CSSProperties,
-  icon: { width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg, #14787E, #66CCC2)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" } as React.CSSProperties,
-  title: { margin: 0, fontSize: 20, fontWeight: 600, color: "#1f2937" } as React.CSSProperties,
-  desc: { margin: "4px 0 0", fontSize: 13, color: "#6b7280" } as React.CSSProperties,
-  scroll: { overflowX: "auto" as const },
-  table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
-  th: { textAlign: "left" as const, padding: "8px 12px", borderBottom: "2px solid #e5e7eb", fontWeight: 500, color: "#374151", background: "#f9fafb" },
-  td: { padding: "8px 12px", borderBottom: "1px solid #f3f4f6", color: "#1f2937", verticalAlign: "top" as const },
-  empty: { padding: 30, textAlign: "center" as const, color: "#9ca3af", fontSize: 13 } as React.CSSProperties,
-  loading: { padding: 30, textAlign: "center" as const, color: "#6b7280", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 } as React.CSSProperties,
-  error: { padding: 30, textAlign: "center" as const, color: "#dc2626", fontSize: 13 } as React.CSSProperties,
-};

@@ -737,7 +737,9 @@ function ContainerMenuBody({
       refreshSidebar();
       treeChanged({ kind: "table", action: "created" });
       onClose();
-      router.push(`/tables/${id}`);
+      // The server seeded the canonical sheet (no columns were sent);
+      // ?new=1 selects the name so it can be typed.
+      router.push(`/tables/${id}?new=1`);
     } catch { toast("Couldn't create table"); } finally { setBusy(null); }
   }, [onClose, router, spaceId, toast]);
 

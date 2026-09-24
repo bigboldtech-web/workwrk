@@ -11,6 +11,9 @@ import { TRASH_ROW_HREF, trashRowHref, type TrashTypeKey } from "@/lib/trash-vie
 
 export type TrashType =
   | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
+  // A form with every response it has received, as one snapshot (Phase 5:
+  // DELETE /api/forms/[id] used to be a hard delete that cascaded responses).
+  | "form"
   // Project hierarchy — "board" is the ClickUp "List", "item" is a Task.
   | "space" | "folder" | "board" | "item"
   // A drive folder (FileFolder) with its subfolders and files as one snapshot.
@@ -51,7 +54,7 @@ export async function freeTrashStorage(entityType: string, snapshot: unknown): P
 }
 
 export const TRASH_LABEL: Record<TrashType, string> = {
-  note: "Note", sop: "SOP", whiteboard: "Canvas", table: "Table",
+  note: "Note", sop: "SOP", whiteboard: "Canvas", table: "Table", form: "Form",
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
   file_folder: "Folder", meeting: "Meeting",
@@ -78,6 +81,7 @@ const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
   sop: "sop",
   whiteboard: "canvas",
   table: "table",
+  form: "form",
   file: "file",
   policy: "policy",
   contract: "contract",
@@ -105,6 +109,7 @@ export function trashHref(entityType: TrashType, id: string | null | undefined):
 
 type Row = Record<string, unknown>;
 type Snapshot = { row: Row; children?: Record<string, Row[]> };
+type TrashDb = Pick<typeof prisma, "dataTable" | "dataTableRow" | "formDefinition" | "formSubmission">;
 
 // Snapshots are dynamic JSON; Prisma create inputs require statically-known
 // keys. This single cast bridges them (date strings are accepted by Prisma).
@@ -112,7 +117,9 @@ type Snapshot = { row: Row; children?: Record<string, Row[]> };
 const asData = (r: unknown): any => r;
 
 type Entry = {
-  capture: (id: string) => Promise<{ label: string; snapshot: Snapshot } | null>;
+  /** `db` is the client to read through: the transaction, for the types
+   *  moveToTrash captures under a row lock (table, form). */
+  capture: (id: string, db?: TrashDb) => Promise<{ label: string; snapshot: Snapshot } | null>;
   restore: (s: Snapshot) => Promise<void>;
 };
 
@@ -230,16 +237,36 @@ const REGISTRY: Record<TrashType, Entry> = {
     restore: async (s) => { await prisma.whiteboard.create({ data: asData(s.row) }); },
   },
   table: {
-    capture: async (id) => {
-      const row = await prisma.dataTable.findUnique({ where: { id } });
+    capture: async (id, db = prisma) => {
+      const row = await db.dataTable.findUnique({ where: { id } });
       if (!row) return null;
-      const rows = await prisma.dataTableRow.findMany({ where: { tableId: id } });
+      const rows = await db.dataTableRow.findMany({ where: { tableId: id } });
       return { label: row.name || "Untitled table", snapshot: { row, children: { rows } } };
     },
     restore: async (s) => {
       await prisma.dataTable.create({ data: asData(s.row) });
       const rows = s.children?.rows ?? [];
       if (rows.length) await prisma.dataTableRow.createMany({ data: asData(rows), skipDuplicates: true });
+    },
+  },
+  form: {
+    // The responses ride as children: a form restored from Trash comes back
+    // with every answer it had, which a hard delete used to lose for good.
+    capture: async (id, db = prisma) => {
+      const row = await db.formDefinition.findUnique({ where: { id } });
+      if (!row) return null;
+      const submissions = await db.formSubmission.findMany({ where: { formId: id } });
+      return { label: row.name || "Untitled form", snapshot: { row, children: { submissions } } };
+    },
+    restore: async (s) => {
+      // The form comes back PRIVATE. Turning a public link on needs its
+      // creator or an admin, a confirm and an access.public_link.on audit row
+      // (PATCH /api/forms/[id]); a restore is none of those, so it never
+      // revives a live link. The Share dialog turns it back on.
+      const row = { ...(s.row as Record<string, unknown>), isPublic: false };
+      await prisma.formDefinition.create({ data: asData(row) });
+      const submissions = s.children?.submissions ?? [];
+      if (submissions.length) await prisma.formSubmission.createMany({ data: asData(submissions), skipDuplicates: true });
     },
   },
   file: {
@@ -411,6 +438,36 @@ export async function moveToTrash(
   type: TrashType, id: string,
   ctx: { organizationId: string; userId?: string | null; userName?: string | null },
 ): Promise<boolean> {
+  // A table or a form keeps receiving children while it is being trashed (a
+  // cell edit, a form response from a live public link). Captured outside a
+  // lock, a child written between the snapshot and the delete would be
+  // removed by the cascade and be in no snapshot. So these two take the
+  // parent row FOR UPDATE first: a child insert needs a key-share lock on its
+  // parent and waits, then fails its foreign key once the parent is gone,
+  // which the writer surfaces (the responder keeps the answers on screen).
+  if (type === "table" || type === "form") {
+    return prisma.$transaction(async (tx) => {
+      if (type === "table") await tx.$queryRaw`SELECT id FROM "DataTable" WHERE id = ${id} FOR UPDATE`;
+      else await tx.$queryRaw`SELECT id FROM "FormDefinition" WHERE id = ${id} FOR UPDATE`;
+      const captured = await REGISTRY[type].capture(id, tx);
+      if (!captured) return false;
+      await tx.trashItem.create({
+        data: {
+          organizationId: ctx.organizationId,
+          entityType: type,
+          entityId: id,
+          label: captured.label,
+          snapshot: captured.snapshot as object,
+          deletedById: ctx.userId ?? null,
+          deletedByName: ctx.userName ?? null,
+        },
+      });
+      if (type === "table") await tx.dataTable.delete({ where: { id } });
+      else await tx.formDefinition.delete({ where: { id } });
+      return true;
+    }, { timeout: 60_000, maxWait: 10_000 });
+  }
+
   const captured = await REGISTRY[type].capture(id);
   if (!captured) return false;
   await prisma.trashItem.create({
@@ -429,7 +486,7 @@ export async function moveToTrash(
     case "note": await prisma.doc.delete({ where: { id } }); break;
     case "sop": await prisma.sOP.delete({ where: { id } }); break;
     case "whiteboard": await prisma.whiteboard.delete({ where: { id } }); break;
-    case "table": await prisma.dataTable.delete({ where: { id } }); break;
+    // "table" and "form" are handled above, under the row lock.
     case "file": await prisma.fileEntry.delete({ where: { id } }); break;
     case "policy": await prisma.policy.delete({ where: { id } }); break;
     case "contract": await prisma.agreement.delete({ where: { id } }); break;

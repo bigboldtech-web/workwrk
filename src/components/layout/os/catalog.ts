@@ -38,8 +38,56 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { Column, TableGroup } from "./main-table";
-import type { KColumn } from "./kanban";
+// ─── Demo catalog shapes ────────────────────────────────────
+// These types used to live beside OsMainTable (main-table.tsx) and OsKanban
+// (kanban.tsx), the table and kanban renderers of the removed verticals.
+// Neither renderer had a render importer left, so both files are gone; the
+// demo module catalog below still describes its sample data with these
+// shapes, so the types live here now.
+type Person = { initials: string; color: string };
+
+export type LabelColor = "green" | "orange" | "red" | "blue" | "purple" | "pink" | "indigo" | "teal" | "lime" | "brown" | "yellow" | "gray";
+
+export type Column =
+  | { id: string; label: string; type: "text"; width?: number }
+  | { id: string; label: string; type: "status"; width?: number }
+  | { id: string; label: string; type: "priority"; width?: number }
+  | { id: string; label: string; type: "person"; width?: number }
+  | { id: string; label: string; type: "date"; width?: number }
+  | { id: string; label: string; type: "tags"; width?: number }
+  | { id: string; label: string; type: "number"; width?: number; currency?: string }
+  | { id: string; label: string; type: "progress"; width?: number }
+  | { id: string; label: string; type: "updates"; width?: number };
+
+export type Row = {
+  id: string;
+  name: string;
+  done?: boolean;
+  cells: Record<string, unknown>;
+};
+
+export type TableGroup = {
+  id: string;
+  title: string;
+  color: string;
+  rows: Row[];
+};
+
+export type KCard = {
+  id: string;
+  title: string;
+  refId?: string;
+  labels?: { label: string; color: LabelColor }[];
+  people?: Person[];
+  date?: { iso: string; state?: "today" | "overdue" };
+};
+
+export type KColumn = {
+  id: string;
+  title: string;
+  color: string;
+  cards: KCard[];
+};
 
 // ─── Color helpers (Monday palette) ─────────────────────────
 // NOTE: purple/pink/indigo/lime are LEGACY ALIASES kept so existing call

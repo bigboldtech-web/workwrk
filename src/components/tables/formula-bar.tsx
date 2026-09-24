@@ -1,10 +1,10 @@
 "use client";
 
-/* FormulaBar — Tables Phase 3 (docs/plans/tables.md).
+/* FormulaBar, Tables Phase 3 (docs/plans/tables.md).
  *
  * Two exports:
  *
- *   FormulaTextInput — a single-line formula input with reference
+ *   FormulaTextInput, a single-line formula input with reference
  *   highlighting (an overlay renders the same text with each ref token
  *   coloured; the input's own text is transparent so the two never
  *   disagree) and optional function autocomplete fed by the engine's
@@ -13,7 +13,7 @@
  *   did not consume, so the page can wire it into the same
  *   cancel-ref/blur-commit contract its cell editors use.
  *
- *   FormulaBar — the fx bar above the sheet grid, laid out like Google
+ *   FormulaBar, the fx bar above the sheet grid, laid out like Google
  *   Sheets': a bordered cell-address box on the left, an italic "fx"
  *   glyph, then the formula input stretching the full width. Behaviour is
  *   unchanged from the pre-reskin bar: the cell's source is editable with
@@ -22,27 +22,30 @@
  *   fires in the same tick and must read it synchronously).
  *
  * The bar lives OUTSIDE the grid element, so its keystrokes never reach
- * the grid's keydown handler at all — no shortcut stealing in either
+ * the grid's keydown handler at all, no shortcut stealing in either
  * direction (the grid's EDITABLE_SEL guard is for editors inside it).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FUNCTIONS, tokenize } from "@/lib/sheet-engine";
 
-/* Distinct colour per distinct ref, cycling — how Sheets/Excel paint the
+/* Distinct colour per distinct ref, cycling, how Sheets/Excel paint the
  * refs of the formula being edited. First entry is the brand blue. */
-const REF_PALETTE = ["#0073EA", "#D83A52", "#007A5A", "#9D5BD2", "#B7791F"];
+// Distinct ref hues (brand blue first; no purple, the brand rule), through
+// the tokens so the highlight follows the theme.
+const REF_PALETTE = ["var(--os-brand)", "var(--os-danger-solid)", "var(--os-success-solid)", "var(--os-status-user-2)", "var(--os-status-user-4)"];
 
 /* Both layers of the highlight trick (coloured overlay + transparent-text
  * input) must render text with IDENTICAL metrics or the colours drift off
  * the characters, so the shared classes live in one place. */
-const TEXT_CLS = "font-mono text-xs";
+// JetBrains Mono at 14 (spec: the source input), through the mono token.
+const TEXT_CLS = "font-[family-name:var(--os-f-mono)] text-base";
 
 type Segment = { text: string; color: string | null };
 
 /** Split a formula source into coloured segments. Only text that IS a
  *  formula (leading "=") is tokenized; literals stay uncoloured. A source
- *  that fails to lex (half-typed string, stray bracket) renders plain —
+ *  that fails to lex (half-typed string, stray bracket) renders plain,
  *  the input keeps working, the colours simply pause. */
 function highlightSegments(text: string): Segment[] {
   if (!text.startsWith("=")) return [{ text, color: null }];
@@ -67,14 +70,16 @@ function highlightSegments(text: string): Segment[] {
 
 export type FunctionItem = { name: string; signature: string; summary: string };
 
-const FUNCTION_ITEMS: FunctionItem[] = [...FUNCTIONS.values()]
+/** Every engine function, by name: the autocomplete and the Insert >
+ *  Function > More functions reference (function-reference-drawer.tsx). */
+export const FUNCTION_ITEMS: FunctionItem[] = [...FUNCTIONS.values()]
   .map((f) => ({ name: f.name, signature: f.signature, summary: f.summary }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
 const MAX_MENU_ITEMS = 9;
 
 /** The partial function name under the caret, if the position can take a
- *  function: the word must follow "=", "(", a separator or an operator —
+ *  function: the word must follow "=", "(", a separator or an operator,
  *  never sit inside a [Header] ref or dangle after another value. */
 function functionWordAt(value: string, caret: number): { wordStart: number; word: string } | null {
   if (!value.startsWith("=")) return null;
@@ -109,7 +114,7 @@ export function FormulaTextInput({
   readOnly?: boolean;
   placeholder?: string;
   withAutocomplete?: boolean;
-  /** Sizing/padding for the whole control (height, px) — text metrics are fixed. */
+  /** Sizing/padding for the whole control (height, px), text metrics are fixed. */
   className?: string;
   ariaLabel?: string;
 }) {
@@ -199,7 +204,7 @@ export function FormulaTextInput({
         className={`pointer-events-none absolute inset-0 flex items-center overflow-hidden px-2 ${TEXT_CLS}`}
       >
         {segments.map((s, i) => (
-          <span key={i} className="whitespace-pre" style={s.color ? { color: s.color } : { color: "var(--os-ink, #3f3f46)" }}>
+          <span key={i} className="whitespace-pre" style={s.color ? { color: s.color } : { color: "var(--os-ink)" }}>
             {s.text}
           </span>
         ))}
@@ -216,7 +221,7 @@ export function FormulaTextInput({
         aria-expanded={withAutocomplete ? !!menu : undefined}
         spellCheck={false}
         autoComplete="off"
-        className={`relative h-full w-full bg-transparent px-2 text-transparent caret-zinc-800 outline-none placeholder:text-zinc-400 ${TEXT_CLS}`}
+        className={`relative h-full w-full bg-transparent px-2 text-transparent caret-[var(--os-ink)] outline-none placeholder:text-ink-3 ${TEXT_CLS}`}
         onChange={(e) => {
           onValueChange(e.target.value);
           refreshMenu(e.target.value, e.target.selectionStart);
@@ -239,7 +244,7 @@ export function FormulaTextInput({
         <div
           role="listbox"
           aria-label="Functions"
-          className="absolute left-0 top-full z-40 mt-1 max-h-72 w-[360px] overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="absolute start-0 top-full z-40 mt-1 max-h-72 w-[360px] overflow-y-auto rounded-lg border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]"
         >
           {menu.items.map((f, i) => (
             <button
@@ -247,7 +252,7 @@ export function FormulaTextInput({
               type="button"
               role="option"
               aria-selected={i === menu.sel}
-              className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left ${i === menu.sel ? "bg-[#0073EA]/8" : "hover:bg-zinc-50"}`}
+              className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left ${i === menu.sel ? "bg-brand/8" : "hover:bg-hover"}`}
               // mousedown, not click: click would blur the input first and
               // the blur-commit would fire before the insertion.
               onMouseDown={(e) => {
@@ -256,8 +261,8 @@ export function FormulaTextInput({
               }}
               onMouseEnter={() => setMenu((m) => (m ? { ...m, sel: i } : m))}
             >
-              <span className="font-mono text-xs font-medium text-zinc-800">{f.signature}</span>
-              <span className="text-xs leading-snug text-zinc-500">{f.summary}</span>
+              <span className="font-mono text-xs font-medium text-ink">{f.signature}</span>
+              <span className="text-xs leading-snug text-ink-2">{f.summary}</span>
             </button>
           ))}
         </div>
@@ -267,7 +272,7 @@ export function FormulaTextInput({
 }
 
 export type FormulaBarCell = {
-  /** A1-style address, spelled against the UNSORTED row order — the row
+  /** A1-style address, spelled against the UNSORTED row order, the row
    *  number a formula ref would actually resolve to. */
   address: string;
   /** Editable text: a formula cell's source, or the literal spelled the
@@ -287,7 +292,7 @@ interface FormulaBarProps {
 
 export function FormulaBar(props: FormulaBarProps) {
   // Keyed remount on cell change: a half-typed draft belongs to the cell
-  // the user just left and must never follow the selection to a new one —
+  // the user just left and must never follow the selection to a new one,
   // resetting by identity avoids a setState-in-effect cascade.
   return <FormulaBarRow key={props.cell?.address ?? ""} {...props} />;
 }
@@ -314,14 +319,14 @@ function FormulaBarRow({ cell, onCommit, onReadOnlyEdit }: FormulaBarProps) {
     // Sheets layout: square-edged full-width strip sitting flush between
     // the toolbar and the grid (border-b only), address box + "fx" glyph +
     // the input. overflow-visible stays: the autocomplete menu hangs below.
-    <div className="flex h-7 shrink-0 items-stretch overflow-visible border-b border-t border-zinc-200 bg-white">
+    <div className="flex h-9 shrink-0 items-stretch overflow-visible rounded-md border border-line bg-raised">
       <div
-        className="flex w-16 shrink-0 items-center justify-center border-r border-zinc-200 font-mono text-xs font-medium text-zinc-600"
+        className="flex w-[104px] shrink-0 items-center justify-center border-e border-line text-sm font-medium tabular-nums text-ink-2"
         title="Active cell"
       >
         {address}
       </div>
-      <div className="flex w-8 shrink-0 items-center justify-center border-r border-zinc-100 font-serif text-sm italic text-zinc-400 select-none" title="Formula" aria-hidden>
+      <div className="flex w-8 shrink-0 items-center justify-center border-e border-line-soft font-serif text-sm italic text-ink-3 select-none" title="Formula" aria-hidden>
         fx
       </div>
       <FormulaTextInput
@@ -337,7 +342,7 @@ function FormulaBarRow({ cell, onCommit, onReadOnlyEdit }: FormulaBarProps) {
         onKeyDown={(e) => {
           if (readOnly) {
             // The cell can't take text (column formula, computed or picker
-            // column) — say why instead of silently eating keystrokes.
+            // column), say why instead of silently eating keystrokes.
             if (e.key.length === 1 && cell?.readOnlyReason) onReadOnlyEdit?.(cell.readOnlyReason);
             return;
           }
@@ -346,7 +351,7 @@ function FormulaBarRow({ cell, onCommit, onReadOnlyEdit }: FormulaBarProps) {
             (e.target as HTMLInputElement).blur(); // blur runs the commit below
           } else if (e.key === "Escape") {
             e.preventDefault();
-            cancelRef.current = true; // before blur — blur reads it this tick
+            cancelRef.current = true; // before blur, blur reads it this tick
             setDraft(null);
             (e.target as HTMLInputElement).blur();
           }

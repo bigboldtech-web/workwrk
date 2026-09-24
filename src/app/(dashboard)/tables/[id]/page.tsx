@@ -1,50 +1,58 @@
 "use client";
 
-/* Tables · sheet editor — a Google-Sheets-style spreadsheet.
+/* Tables · the sheet (spec-tables-forms section 2 /tables/[id]): a
+ * spreadsheet measured against Google Sheets.
  *
- * Chrome, top to bottom (the Sheets layout the user asked for verbatim):
- * an inline-editable title row, ONE dense toolbar (undo/redo, print, zoom,
- * currency/percent/decimals, the "123" number-format menu, B/I/U/S, text
- * and fill colour, alignment, filter toggle, Σ, and a right-aligned File
- * menu carrying CSV import/export), the fx bar, the grid filling the rest
- * of the viewport, and a bottom bar of sheet tabs with a promptless "+".
- * Every toolbar control is real — no dead buttons.
+ * Chrome, top to bottom (SheetChrome in components/tables/sheet-chrome):
+ *   title row 48   BackButton (the Space, else Tables), the neutral Table2
+ *                  tile, the inline name (Enter or blur commits, Esc
+ *                  reverts), the AutosaveIndicator, the star, the
+ *                  co-presence chip, the public-link glyph, ShareOrRoleChip
+ *                  (the one Share dialog), the "..." (TableRowMenu)
+ *   menu bar 36    File · Edit · View · Insert · Format · Data (SheetMenuBar;
+ *                  one "Menu" button under 900px)
+ *   toolbar 44     undo, redo, zoom, number formats, B I U S, colours,
+ *                  alignment, Filter, Σ; right: Copy link (+ Copy embed code)
+ *                  and the "..." (Display, About)
+ *   formula bar 36 address, fx, the source input (View > Formula bar hides it)
+ *   grid           the card; its status bar pinned at the bottom (rows and
+ *                  columns or the stream progress, the selection statistics,
+ *                  the last-saved time)
+ * There is no bottom sheet tab bar: it listed every table in the org as if it
+ * were a sheet of this one. Switching tables is the Tables sidebar and
+ * /tables; rename and delete are the "..." and the File menu; the counts and
+ * statistics are the status bar. Every control is real: no dead buttons.
  *
  * Per-cell formatting (bold/italic/underline/strike/colour/fill/align)
  * rides a RESERVED key on each row's values Json, values["$fmt"] (see
  * lib/sheet-cell-style): no schema change, invisible to every
  * column-driven reader, and deliberately never handed to the formula
- * engine host — styles don't recalc.
+ * engine host, styles don't recalc.
  *
- * Columns are anonymous letters (A, B, C…) — nothing else in the header,
- * like Excel. "+" appends a generic text column instantly; number format
- * lives ONLY in the toolbar's 123/$/%/decimals cluster (Sheets' surface),
- * and column operations (sort, delete, formula, relation) live in the
- * header's right-click menu. Rows carry a Sheets-style numbered gutter:
- * click selects the row, drag reorders it. The sheet kernel (SheetGrid)
+ * A column with no name shows its letter (A, B, C...); a named one shows the
+ * name after its letter. "+" appends a text column instantly; the column
+ * menu (header chevron, right click, Alt+Down) names and types it. Rows
+ * carry a Sheets-style numbered gutter: click selects the row, shift
+ * extends, drag reorders; its chevron opens the row menu, and Open row (or
+ * Cmd+Enter) opens the row drawer at ?row=. The sheet kernel (SheetGrid)
  * renders the grid; this page owns data semantics, the formula engine
  * host, undo and CSV import/export.
  */
 
 import { Dots } from "@/components/ui/dots";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Table as TableIcon,
   Plus,
   Trash2,
-  Link as LinkIcon,
-  ChevronRight,
   Upload,
   Download,
   Search,
   Filter,
   Globe,
   Lock,
-  Unlock,
   Sigma,
   Star,
-  Link2,
   Check,
   Tag,
   Table2,
@@ -56,8 +64,6 @@ import {
   Percent,
   ChevronDown,
   ChevronUp,
-  ArrowDownAZ,
-  ArrowUpZA,
   X,
   Pencil,
   MoreVertical,
@@ -70,37 +76,77 @@ import {
   TextAlignStart,
   TextAlignCenter,
   TextAlignEnd,
-  ArrowUpFromLine,
+  Link2,
+  Code2,
+  MoreHorizontal,
+  Info,
+  Copy,
+  ClipboardPaste,
+  Scissors,
   ArrowDownToLine,
-  ArrowLeftToLine,
   ArrowRightToLine,
   Eraser,
-  Pin,
-  PinOff,
+  Columns3,
+  Rows3,
+  Snowflake,
+  Maximize2,
+  Minimize2,
+  Grid3x3,
+  PanelTop,
+  FolderInput,
+  ShieldCheck,
   Palette,
-  ListChecks,
+  ArrowUpDown,
+  Hash,
+  Type,
+  AlignLeft,
+  FileSpreadsheet,
+  ZoomIn,
+  FunctionSquare,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
-import { MenuList, MenuItem } from "@/components/ui/menu";
+import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { createTableEngine, columnLetter, type StructureResult, type TableEngine, type NamedRangeDef } from "@/lib/sheet-engine-host";
 import { createSerialQueue } from "@/lib/sheet-serial-queue";
+// Cell VALUE writes (updates, deletes, the single-cell PATCH) ride keepalive
+// plus a retry on a network failure or a 5xx; each is idempotent on a repeat.
+// Row INSERTS keep a plain fetch: a repeat after a lost response would add
+// the rows twice.
+import { fetchWithRetry } from "@/lib/fetch-retry";
+import { ledgerFail, ledgerRowId, ledgerSettle, overlayLedger, overlayTableEntry, rowLedgerKey, TABLE_LEDGER_KEY, type SaveLedger } from "@/lib/sheet-save-ledger";
+import { jsonEqual } from "@/lib/sheet-conflict";
 import { streamRows } from "@/lib/sheet-stream";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
+import { TEXT_SWATCHES, FILL_SWATCHES, RULE_COLORS, SCALE_DEFAULT, BAR_DEFAULT, FIND_MATCH_BG, FIND_CURRENT_BG } from "@/lib/sheet-palette";
 import { formatCellValue, isNegativeStyled, matchRule, numericRange, colorScaleColor, dataBarBackground, iconSetIcon, type ColumnFormat, type ConditionalRule, type CondFormatV2 } from "@/lib/sheet-format";
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
-import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
+import { createNewTable, newTableHref, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_TABLE_NAME } from "@/lib/sheet-new";
+import { readSheetFormulaBar, readSheetGridlines, readZoom, zoomKey, ZOOM_LEVELS, readPivotConfig, pivotPatch, type PivotConfig } from "@/lib/tables-prefs";
 import { autoTypeEntry, autoTypeEntryRich, isOpenColumnType } from "@/lib/sheet-entry";
 import { validateValue, isEmptyValidation, type DataValidation } from "@/lib/sheet-validation";
 import { matchesFindQuery, replaceAllOccurrences, REPLACE_SKIP_TYPES } from "@/lib/sheet-find";
-import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
+import { notifyTablesChanged } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
-import { SheetGrid, SHEET_ROW_H, type SheetSort } from "@/components/tables/sheet-grid";
+import { GridHeaderMenu } from "@/components/tables/grid-header-menu";
+import { GridRowMenu } from "@/components/tables/grid-row-menu";
+import { ColumnTypePicker, COLUMN_TYPE_ICON } from "@/components/tables/column-type-picker";
+import { Picker } from "@/components/ui/picker";
+import { DateField } from "@/components/ui/date-field";
+import { ColumnTypeChangeDialog } from "@/components/tables/column-type-change-dialog";
+import { SelectOptionsDialog } from "@/components/tables/select-options-dialog";
+import { HeaderRenameInput } from "@/components/tables/header-rename-input";
+import {
+  cleanColumnName, columnTypeLabel, COMPUTED_TYPES, countTypeChangeLosses, RELATION_TYPES,
+  typeChangePatch, type ColumnTypeValue,
+} from "@/lib/sheet-columns";
+import { columnDisplayName } from "@/lib/sheet-embed";
+import { SheetGrid, SHEET_ROW_H, rowNumbersById, type SheetSort } from "@/components/tables/sheet-grid";
 import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { NamedRangesDialog } from "@/components/tables/named-ranges-dialog";
@@ -110,11 +156,39 @@ import { AskDataDialog } from "@/components/tables/ask-data-dialog";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 import { BackButton } from "@/components/ui/back-button";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { confirmLeave, setLeaveConfirmer } from "@/lib/dirty-guard";
+import { Drawer } from "@/components/ui/drawer";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import {
+  activeFilterCount, cellPassesFilter, emptyFilterFor, filterIsActive, filtersToConfig, isDateFilterType,
+  readSavedFilters, type SheetColumnFilter,
+} from "@/lib/sheet-filters";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
+import { ObjectShareDialog, embedSnippet } from "@/components/tables/object-share-dialog";
+import { TableRowMenu } from "@/components/tables/table-row-menu";
+import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
+import { csvExportCell, csvFormulaSafe } from "@/lib/csv";
+import { SheetMenuBar, type SheetMenuSpec } from "@/components/tables/sheet-menu-bar";
+import { CoPresenceChip, SheetStatusBar, TableAboutDialog, useTablePresence } from "@/components/tables/sheet-parts";
+import { cn } from "@/lib/utils";
+import { FunctionReferenceDrawer } from "@/components/tables/function-reference-drawer";
+import { useSheetShortcutList } from "@/components/tables/sheet-shortcut-list";
 
-// The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
-// (not transform scale) so the layout REFLOWS: the kernel's virtualizer
-// keeps computing against real layout px and its math stays consistent.
-const ZOOM_LEVELS = [75, 90, 100, 125, 150];
+// The zoom steps (lib/tables-prefs ZOOM_LEVELS: 75 90 100 125 150). CSS
+// `zoom` (not transform scale) so the layout REFLOWS: the kernel's
+// virtualizer keeps computing against real layout px and its math stays
+// consistent.
+
+/* The toolbar's one button shape (tokens only): 32px square ghost, 16px
+ * glyph, the pressed state on aria-pressed rather than a hand-kept class. */
+const TB = "inline-flex h-8 min-w-8 shrink-0 items-center justify-center gap-0.5 rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 aria-pressed:bg-active aria-pressed:text-ink [&_svg]:h-4 [&_svg]:w-4";
+const TB_SEP = "mx-1 h-5 w-px shrink-0 bg-line";
 
 type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup" | "attachment" | "person";
 
@@ -129,24 +203,31 @@ type Column = {
   rollupColumnId?: string;// rollup → which target column to aggregate
   rollupFn?: RollupFn;    // rollup aggregate
   // Display-only (Tables Phase 4): both ride the existing columns Json.
-  // Raw cell values NEVER change shape — sort/formulas/clipboard read raw.
+  // Raw cell values NEVER change shape, sort/formulas/clipboard read raw.
   format?: ColumnFormat;      // column-level number/date formatting
   rules?: ConditionalRule[];  // conditional formatting v1 (value → cell bg)
   condFormat?: CondFormatV2;  // conditional formatting v2 (color scale / data bar)
-  protected?: boolean;        // 4f: a locked column — read-only, can't be edited/pasted/cleared
+  protected?: boolean;        // 4f: a locked column, read-only, can't be edited/pasted/cleared
   validation?: DataValidation; // data validation (reject-mode): list / number / text-length
 };
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
+/** Stored view types. Only "grid" is produced now (the bar is Google Sheets:
+ *  no view switcher). The other three are legacy values older rows may still
+ *  carry; they are kept in the type so a read of views[] never drops them. */
 type ViewType = "grid" | "kanban" | "calendar" | "gallery";
 /** Freeze panes (Sheets' View → Freeze): display-index COUNTS of leading
- *  rows/columns pinned while the rest scrolls. Display-only — the engine
+ *  rows/columns pinned while the rest scrolls. Display-only, the engine
  *  never sees it, and it makes no undo entry (Sheets doesn't undo a freeze
  *  either; the menu's Unfreeze is the way back). */
 type SheetFreeze = { rows?: number; cols?: number };
-type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; freeze?: SheetFreeze } };
+type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; filters?: SheetColumnFilter[]; freeze?: SheetFreeze } };
 type TableSettings = { namedRanges?: NamedRangeDef[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null };
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null;
+  /** Creator or admin (GET /api/tables/[id], lib/object-manage): may delete the table or change its public link. */
+  canManage?: boolean;
+  /** The org's toggle 10 (lib/public-links): whether the Share dialog's Public link row exists. */
+  publicLinksAllowed?: boolean };
 
 /** Named ranges out of a table's settings blob, defensively. */
 function readNamedRanges(settings: TableSettings | null | undefined): NamedRangeDef[] {
@@ -158,7 +239,7 @@ function readNamedRanges(settings: TableSettings | null | undefined): NamedRange
 }
 
 /** A freeze is only meaningful while at least ONE row and ONE column can
- *  still scroll — a sheet that is entirely frozen band is a sheet that
+ *  still scroll, a sheet that is entirely frozen band is a sheet that
  *  cannot be scrolled at all. So the saved counts clamp to rowCount-1 /
  *  colCount-1 against whatever exists NOW (rows deleted since the freeze
  *  was saved, a filter hiding most rows, a legacy view JSON with junk in
@@ -180,7 +261,7 @@ type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 type OrgUser = { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null };
 function userName(u: OrgUser | undefined): string {
-  if (!u) return "—";
+  if (!u) return "Unknown person";
   return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unnamed";
 }
 function userInitials(u: OrgUser | undefined): string {
@@ -188,17 +269,17 @@ function userInitials(u: OrgUser | undefined): string {
   return `${(u.firstName ?? "")[0] ?? ""}${(u.lastName ?? "")[0] ?? ""}`.toUpperCase() || "?";
 }
 
-/** The display/title column of a table — first short_text, else first column. */
+/** The display/title column of a table, first short_text, else first column. */
 function titleColumnId(columns: Column[]): string {
   return (columns.find((c) => c.type === "short_text") ?? columns[0])?.id ?? "";
 }
 
 /** Pull a single linked row's display title. */
 function rowTitle(row: ApiRow | undefined, titleColId: string): string {
-  if (!row) return "—";
+  if (!row) return "Unknown row";
   const v = row.values[titleColId];
   // A per-cell formula in another table can't be computed here (its engine
-  // would need that table's rows) — show its source rather than
+  // would need that table's rows), show its source rather than
   // "[object Object]".
   if (isFormulaCell(v)) return `=${v[FORMULA_KEY]}`;
   return v == null || v === "" ? "Untitled" : String(v);
@@ -208,19 +289,27 @@ function newId() { return Math.random().toString(36).slice(2, 10); }
 
 // The batch route 400s a whole request above MAX_OPS ops of one kind
 // (api/tables/[id]/rows/batch), and select-all happily spans thousands of
-// rows — so bulk work ships in slices this size.
+// rows, so bulk work ships in slices this size.
 const BATCH_MAX_OPS = 500;
+/** The corner "+" adds this many blank rows as one undoable step (spec: "Add 1,000 rows"). */
+const ADD_ROWS_BLOCK = 1000;
+/** One toast slot for every "this did not save" report on the sheet: a
+ *  second failure replaces the first instead of stacking, and the slot is
+ *  dismissed the moment the unsaved ledger empties (noteWriteSettled). */
+const SAVE_FAILED_TOAST = "table-save-failed";
+/** Column types whose numeric values right-align by default (cellStyleFor). */
+const NUMERIC_ALIGN_TYPES = new Set(["number", "currency", "percent"]);
 
 // Column types the format menu (and formatCellValue routing) applies to.
-// Rating keeps its stars, text stays text — formatting is opt-in per the
+// Rating keeps its stars, text stays text, formatting is opt-in per the
 // Phase 4 scope (column-level only; per-cell formats deferred).
 const FORMATTABLE_TYPES = new Set<ColType>(["number", "currency", "percent", "date"]);
 
 /* ── Per-row height (Sheets' row resize) ──────────────────────────
- * Storage: NO schema change — a custom height rides the row's values Json
+ * Storage: NO schema change, a custom height rides the row's values Json
  * under the RESERVED key "$rh" (lib/sheet-cell-style's ROW_HEIGHT_KEY), a
- * plain number of layout px. Absent — or null, the deletable spelling,
- * because the shallow PATCH/batch merge cannot drop keys — means the
+ * plain number of layout px. Absent, or null, the deletable spelling,
+ * because the shallow PATCH/batch merge cannot drop keys, means the
  * default SHEET_ROW_H. The key is invisible to every column-driven reader
  * (CSV export, stats, search, sort and the row drawer all iterate
  * table.columns), and isReservedKey keeps it out of the key-driven paths
@@ -236,7 +325,7 @@ const ROW_HEIGHT_MAX = 400;
 
 /** Stored "$rh" → a usable height. Junk (strings, NaN, null, arrays)
  *  reads as "no custom height" rather than crashing a 50k-row geometry
- *  build; out-of-range numbers clamp instead of dropping — like the dp
+ *  build; out-of-range numbers clamp instead of dropping, like the dp
  *  clamp, a persisted 1000 still carries the intent "very tall". */
 function readRowHeight(v: unknown): number | undefined {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -353,46 +442,9 @@ function resolveOpenEntry(
   return { value: rich.value, fmt: null };
 }
 
-// The red the grid already uses for formula errors — reused for
+// The red the grid already uses for formula errors, reused for
 // negative-styled numbers so "red negatives" match the existing token.
-const NEGATIVE_RED: React.CSSProperties = { color: "#dc2626" };
-
-/* Find & Replace highlight — Sheets' find green. Every matched cell tints
- * light green; the CURRENT match paints the full-strength swatch. Hex
- * literals like the formatting swatches above: the tint must look the same
- * in every theme (it marks data, not chrome). */
-const FIND_MATCH_BG = "rgba(183, 225, 205, 0.45)"; // #b7e1cd at ~45%
-const FIND_CURRENT_BG = "#b7e1cd";
-
-/* Toolbar colour swatches (Sheets' compact grid, reduced to the brand
- * YBRG + neutrals). Hex literals on purpose: a persisted style must look
- * the same in every theme and every client, so it can never reference a
- * CSS variable. Text swatches are saturated (legible on white); fill
- * swatches are tints (black text stays readable on top of them). */
-const TEXT_SWATCHES: { hex: string; name: string }[] = [
-  { hex: "#000000", name: "Black" },
-  { hex: "#5F6368", name: "Dark grey" },
-  { hex: "#9AA0A6", name: "Grey" },
-  { hex: "#FFFFFF", name: "White" },
-  { hex: "#E2445C", name: "Red" },
-  { hex: "#FF8A00", name: "Orange" },
-  { hex: "#B58A00", name: "Dark yellow" },
-  { hex: "#00A65B", name: "Green" },
-  { hex: "#0073EA", name: "Blue" },
-  { hex: "#0B3D91", name: "Navy" },
-];
-const FILL_SWATCHES: { hex: string; name: string }[] = [
-  { hex: "#FFFFFF", name: "White" },
-  { hex: "#F1F3F4", name: "Light grey" },
-  { hex: "#D9DCE0", name: "Grey" },
-  { hex: "#5F6368", name: "Dark grey" },
-  { hex: "#FBD9DE", name: "Light red" },
-  { hex: "#FFE4C2", name: "Light orange" },
-  { hex: "#FFF2B3", name: "Light yellow" },
-  { hex: "#CCF4E3", name: "Light green" },
-  { hex: "#D6E8FF", name: "Light blue" },
-  { hex: "#FFCB00", name: "Yellow" },
-];
+const NEGATIVE_RED: React.CSSProperties = { color: "var(--os-danger-text)" };
 
 /** Labels for the toggleable text flags, shared by the toolbar pills, the
  *  kernel's Cmd/Ctrl+B/I/U shortcut and the undo-stack labels. */
@@ -400,12 +452,12 @@ const STYLE_FLAG_NAMES: Record<"b" | "i" | "u" | "s", string> = { b: "bold", i: 
 
 /** Two stored "$fmt" maps hold the same styles. Key order is stable (the
  *  sanitiser rebuilds entries in one fixed order), so a JSON compare is an
- *  honest equality — and a spurious mismatch only costs a no-op write. */
+ *  honest equality, and a spurious mismatch only costs a no-op write. */
 function sameStyleMap(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** Fold the engine host's column-formula rewrites into a columns array —
+/** Fold the engine host's column-formula rewrites into a columns array,
  *  a structure change can retarget a COLUMN formula too ("=SUM(B1:B5)" after
  *  B moves), and losing that rewrite silently repoints the whole column. */
 function applyColumnRewrites(cols: Column[], rewrites: { colId: string; formula: string }[]): Column[] {
@@ -438,7 +490,7 @@ const NUMERIC_SORT_TYPES = new Set<ColType>(["number", "currency", "percent", "r
 /** Compare two cell values for the given column type. Dates are left to the
  *  collator on purpose: the date editor writes ISO "YYYY-MM-DD", which is
  *  fixed-width and so already chronological as text, and numeric collation
- *  also orders the un-padded dates a CSV import can leave behind — both
+ *  also orders the un-padded dates a CSV import can leave behind, both
  *  without Date()'s timezone shifts and NaN cliffs.
  *
  *  Stored NUMBERS compare as numbers in ANY column: an open (short_text)
@@ -482,7 +534,7 @@ function isEmptyCell(v: unknown): boolean {
 
 /** Excel and Sheets copy numbers with their formatting attached:
  *  "$1,234.50", "45%", "(120)" for a negative. Undo exactly those, and
- *  only where the grouping shape is unambiguous — "1,5" stays unparseable
+ *  only where the grouping shape is unambiguous, "1,5" stays unparseable
  *  rather than silently becoming fifteen for a user who meant 1.5. */
 function parseNumericCell(text: string): number | null {
   let s = text.replace(/[\s\u00a0]/g, "");
@@ -500,7 +552,7 @@ function parseNumericCell(text: string): number | null {
   return neg ? -Math.abs(n) : n;
 }
 
-/** Date columns store ISO "YYYY-MM-DD" — what the date editor writes and
+/** Date columns store ISO "YYYY-MM-DD", what the date editor writes and
  *  what compareCells sorts on. An ISO datetime is truncated to its day.
  *  Nothing else is guessed: "01/02/2026" is January 2nd to half the world
  *  and February 1st to the other half. */
@@ -520,7 +572,7 @@ function normalizeIsoDate(text: string): string | null {
 }
 
 /** One clipboard string → what to store in one cell.
- *  - write: store this (null clears the cell — pasting a blank over a
+ *  - write: store this (null clears the cell, pasting a blank over a
  *           value clears it, same as Sheets).
  *  - empty: the text has no reading in this column, so the cell is
  *           CLEARED and the count surfaced. The user aimed at this cell;
@@ -535,10 +587,6 @@ const RULE_LABELS: Record<ConditionalRule["when"], string> = {
   empty: "is empty", nonempty: "is not empty",
 };
 const RULE_ORDER: ConditionalRule["when"][] = ["gt", "lt", "gte", "lte", "eq", "neq", "contains", "empty", "nonempty"];
-const RULE_COLORS = ["#FBD9DE", "#FFE4C2", "#FFF2B3", "#CCF4E3", "#D6E8FF", "#E7DAF7"];
-
-const SCALE_DEFAULT = { min: "#F8696B", mid: "#FFEB84", max: "#63BE7B" };
-const BAR_DEFAULT = "#5B9BD5";
 
 /** Conditional formatting editor. Three modes, one active at a time:
  *  - Single color: per-cell value rules (v1, `column.rules`).
@@ -546,8 +594,11 @@ const BAR_DEFAULT = "#5B9BD5";
  *  - Data bar: an in-cell bar sized by the value (v2).
  *  Saving a v2 mode clears the v1 rules and vice-versa, so a column reads one
  *  way. Local draft; commits through one undo step. */
-function ConditionalRulesDialog({ column, onClose, onSave }: {
+function ConditionalRulesDialog({ column, columnName, onClose, onSave }: {
   column: Column;
+  /** The label, or the column letter for an unnamed column (every column
+   *  of a new table), as the header shows it. */
+  columnName: string;
   onClose: () => void;
   onSave: (patch: { rules: ConditionalRule[]; condFormat?: CondFormatV2 }) => void;
 }) {
@@ -593,8 +644,8 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
     { key: "icon_set", label: "Icon set" },
   ];
   const swatch = (val: string, set: (v: string) => void, label: string) => (
-    <label className="flex items-center gap-1.5 text-xs text-zinc-600">
-      <input type="color" value={val} onChange={(e) => set(e.target.value)} className="h-7 w-8 rounded border border-zinc-200 bg-white p-0.5" aria-label={label} />
+    <label className="flex items-center gap-1.5 text-xs text-ink-2">
+      <input type="color" value={val} onChange={(e) => set(e.target.value)} className="h-7 w-8 rounded border border-line bg-raised p-0.5" aria-label={label} />
       {label}
     </label>
   );
@@ -603,16 +654,16 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Conditional formatting — {column.label}</DialogTitle>
+          <DialogTitle>Conditional formatting: {columnName}</DialogTitle>
         </DialogHeader>
 
-        <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-sm mb-3">
+        <div className="inline-flex self-start overflow-hidden rounded-md border border-line text-sm mb-3">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setMode(t.key)}
-              className={`h-8 px-3 ${mode === t.key ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+              className={`h-8 px-3 ${mode === t.key ? "bg-brand text-white" : "bg-raised text-ink-2 hover:bg-hover"}`}
             >
               {t.label}
             </button>
@@ -621,16 +672,16 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "single" ? (
           <>
-            <p className="text-sm text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
+            <p className="text-sm text-ink-2 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
             <div className="flex flex-col gap-2 max-h-[42vh] overflow-y-auto">
               {rules.length === 0 ? (
-                <p className="py-4 text-center text-sm text-zinc-400">No rules yet.</p>
+                <p className="py-4 text-center text-sm text-ink-3">No rules yet.</p>
               ) : rules.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
+                <div key={i} className="flex items-center gap-2 rounded-lg border border-line p-2">
                   <select
                     value={r.when}
                     onChange={(e) => update(i, { when: e.target.value as ConditionalRule["when"] })}
-                    className="h-8 rounded-md border border-zinc-200 px-2 text-sm text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                    className="h-8 rounded-md border border-line px-2 text-sm text-ink outline-none focus:border-[var(--os-brand)]"
                   >
                     {RULE_ORDER.map((w) => <option key={w} value={w}>{RULE_LABELS[w]}</option>)}
                   </select>
@@ -640,7 +691,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
                       value={r.value == null ? "" : String(r.value)}
                       onChange={(e) => update(i, { value: e.target.value })}
                       placeholder="value"
-                      className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-sm text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                      className="h-8 w-24 rounded-md border border-line px-2 text-sm text-ink outline-none focus:border-[var(--os-brand)]"
                     />
                   )}
                   <div className="flex items-center gap-1">
@@ -650,18 +701,18 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
                         type="button"
                         onClick={() => update(i, { bg: hex })}
                         aria-label={`Colour ${hex}`}
-                        className={`h-5 w-5 rounded-full border ${r.bg === hex ? "ring-2 ring-[var(--os-brand)] ring-offset-1" : "border-zinc-300"}`}
+                        className={`h-5 w-5 rounded-full border ${r.bg === hex ? "ring-2 ring-[var(--os-brand)] ring-offset-1" : "border-line-strong"}`}
                         style={{ background: hex }}
                       />
                     ))}
                   </div>
-                  <button type="button" onClick={() => remove(i)} className="ml-auto text-zinc-400 hover:text-red-600" aria-label="Remove rule">
+                  <button type="button" onClick={() => remove(i)} className="ml-auto text-ink-3 hover:text-red-600" aria-label="Remove rule">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               ))}
             </div>
-            <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-sm text-zinc-600 hover:bg-zinc-50">
+            <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-line-strong px-3 text-sm text-ink-2 hover:bg-hover">
               <Plus className="h-3.5 w-3.5" /> Add rule
             </button>
           </>
@@ -669,17 +720,17 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "color_scale" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">A heat-map across this column&rsquo;s numbers — lowest gets the min colour, highest the max.</p>
+            <p className="text-sm text-ink-2">A heat-map across this column&rsquo;s numbers. The lowest gets the min colour, the highest the max.</p>
             <div className="flex items-center gap-4">
               {swatch(scaleMin, setScaleMin, "Min")}
-              <label className="flex items-center gap-1.5 text-xs text-zinc-600">
+              <label className="flex items-center gap-1.5 text-xs text-ink-2">
                 <input type="checkbox" checked={useMid} onChange={(e) => setUseMid(e.target.checked)} /> Midpoint
               </label>
               {useMid ? swatch(scaleMid, setScaleMid, "Mid") : null}
               {swatch(scaleMax, setScaleMax, "Max")}
             </div>
             <div
-              className="h-6 rounded-md border border-zinc-200"
+              className="h-6 rounded-md border border-line"
               style={{ background: `linear-gradient(to right, ${scaleMin}, ${useMid ? `${scaleMid}, ` : ""}${scaleMax})` }}
               aria-label="Colour scale preview"
             />
@@ -688,9 +739,9 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "data_bar" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">Each cell shows a bar sized by its value relative to the column.</p>
+            <p className="text-sm text-ink-2">Each cell shows a bar sized by its value relative to the column.</p>
             {swatch(barColor, setBarColor, "Bar colour")}
-            <div className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2" aria-label="Data bar preview">
+            <div className="flex flex-col gap-1 rounded-md border border-line p-2" aria-label="Data bar preview">
               {[0.9, 0.55, 0.3].map((w, i) => (
                 <div key={i} className="h-5 rounded-sm" style={{ background: `linear-gradient(to right, ${barColor}55 0%, ${barColor}55 ${w * 100}%, transparent ${w * 100}%)` }} />
               ))}
@@ -700,23 +751,23 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "icon_set" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">Each cell gets an icon by where its value sits in the column — top third, middle, bottom.</p>
-            <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-sm">
+            <p className="text-sm text-ink-2">Each cell gets an icon by where its value sits in the column: top third, middle or bottom.</p>
+            <div className="inline-flex self-start overflow-hidden rounded-md border border-line text-sm">
               {(["arrows", "traffic"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => setIconSet(s)}
-                  className={`h-8 px-3 ${iconSet === s ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                  className={`h-8 px-3 ${iconSet === s ? "bg-brand text-white" : "bg-raised text-ink-2 hover:bg-hover"}`}
                 >
                   {s === "arrows" ? "Arrows" : "Traffic light"}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-4 rounded-md border border-zinc-200 p-3">
-              {[{ t: "High", c: "#22c55e", a: "▲" }, { t: "Mid", c: "#f59e0b", a: "▬" }, { t: "Low", c: "#ef4444", a: "▼" }].map((x) => (
-                <span key={x.t} className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
-                  <span style={{ color: x.c, fontSize: 11 }}>{iconSet === "arrows" ? x.a : "●"}</span> {x.t}
+            <div className="flex items-center gap-4 rounded-md border border-line p-3">
+              {[{ t: "High", v: 9 }, { t: "Mid", v: 4.5 }, { t: "Low", v: 0 }].map((x) => ({ t: x.t, icon: iconSetIcon(x.v, 0, 9, iconSet) })).map((x) => (
+                <span key={x.t} className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+                  <span style={{ color: x.icon?.color, fontSize: 11 }}>{x.icon?.char}</span> {x.t}
                 </span>
               ))}
             </div>
@@ -724,7 +775,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
         ) : null}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-ink-2 hover:bg-hover border border-line">Cancel</button>
           <button
             type="button"
             onClick={save}
@@ -741,8 +792,10 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 /** Data validation editor (Zoho/Sheets). Restrict a column to a list
  *  (renders a dropdown), a number range, or a text length. v1 is
  *  reject-mode: invalid entries are refused. Commits via one undo step. */
-function DataValidationDialog({ column, onClose, onSave }: {
+function DataValidationDialog({ column, columnName, onClose, onSave }: {
   column: Column;
+  /** Label or letter, as ConditionalRulesDialog's. */
+  columnName: string;
   onClose: () => void;
   onSave: (validation: DataValidation | undefined) => void;
 }) {
@@ -772,14 +825,14 @@ function DataValidationDialog({ column, onClose, onSave }: {
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Data validation — {column.label}</DialogTitle>
+          <DialogTitle>Data validation: {columnName}</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-zinc-500 mb-3">Restrict what this column accepts. Invalid entries are refused.</p>
-        <label className="mb-1 block text-sm font-medium text-zinc-600">Criteria</label>
+        <p className="text-sm text-ink-2 mb-3">Restrict what this column accepts. Invalid entries are refused.</p>
+        <label className="mb-1 block text-sm font-medium text-ink-2">Criteria</label>
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as typeof kind)}
-          className="mb-3 h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+          className="mb-3 h-9 w-full rounded-lg border border-line px-2.5 text-base text-ink outline-none focus:border-[var(--os-brand)]"
         >
           <option value="none">No validation</option>
           <option value="list">List of items (dropdown)</option>
@@ -788,21 +841,21 @@ function DataValidationDialog({ column, onClose, onSave }: {
         </select>
         {kind === "list" && (
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-600">Allowed values (one per line)</label>
+            <label className="mb-1 block text-sm font-medium text-ink-2">Allowed values (one per line)</label>
             <textarea
               value={listText}
               onChange={(e) => setListText(e.target.value)}
               rows={5}
               placeholder={"Todo\nIn progress\nDone"}
-              className="w-full rounded-lg border border-zinc-200 px-2.5 py-2 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+              className="w-full rounded-lg border border-line px-2.5 py-2 text-base text-ink outline-none focus:border-[var(--os-brand)]"
             />
           </div>
         )}
         {(kind === "number" || kind === "textLength") && (
           <div className="flex items-center gap-2">
-            <input type="number" value={min} onChange={(e) => setMin(e.target.value)} placeholder="min" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
-            <span className="text-sm text-zinc-400">to</span>
-            <input type="number" value={max} onChange={(e) => setMax(e.target.value)} placeholder="max" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
+            <input type="number" value={min} onChange={(e) => setMin(e.target.value)} placeholder="min" className="h-9 w-full rounded-lg border border-line px-2.5 text-base text-ink outline-none focus:border-[var(--os-brand)]" />
+            <span className="text-sm text-ink-3">to</span>
+            <input type="number" value={max} onChange={(e) => setMax(e.target.value)} placeholder="max" className="h-9 w-full rounded-lg border border-line px-2.5 text-base text-ink outline-none focus:border-[var(--os-brand)]" />
           </div>
         )}
         <div className="mt-4 flex justify-between">
@@ -810,7 +863,7 @@ function DataValidationDialog({ column, onClose, onSave }: {
             <button type="button" onClick={() => onSave(undefined)} className="h-8 px-3 rounded-md text-base text-red-600 hover:bg-red-50">Remove</button>
           ) : <span />}
           <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+            <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-ink-2 hover:bg-hover border border-line">Cancel</button>
             <button type="button" onClick={() => onSave(kind === "none" ? undefined : build())} className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]">Save</button>
           </div>
         </div>
@@ -840,7 +893,7 @@ function coercePasteRaw(col: Column, raw: string): PasteCoercion {
     case "formula": case "lookup": case "rollup":
       return { kind: "skip" };
     // A row id, a user id and an uploaded file have no text encoding a
-    // paste could safely invent — "Acme Corp" is a title, not an id, and
+    // paste could safely invent, "Acme Corp" is a title, not an id, and
     // resolving it by guess would point the link at the wrong record.
     case "link": case "person": case "attachment":
       return { kind: "skip" };
@@ -864,7 +917,7 @@ function coercePasteRaw(col: Column, raw: string): PasteCoercion {
     case "date": {
       if (text === "") return { kind: "write", value: null };
       // Skip, never clear. An unreadable value is a gap in our parser, not
-      // a value the user asked to erase — "N/A" or a European "1.234,50" in
+      // a value the user asked to erase, "N/A" or a European "1.234,50" in
       // one row of a pasted report must not delete the good number already
       // in the cell. Only an explicitly empty source cell clears.
       const iso = normalizeIsoDate(text);
@@ -902,23 +955,127 @@ function coercePasteRaw(col: Column, raw: string): PasteCoercion {
 }
 
 /* Escape must cancel, never save. Blur is what commits every text-ish editor
- * in this file, and Escape has to blur to close the editor — so the host
+ * in this file, and Escape has to blur to close the editor, so the host
  * raises this flag first and each blur handler reads it synchronously (a ref,
  * not state: blur fires in the same tick). Null outside the sheet kernel,
  * where editors commit on blur exactly as before. */
 const CellEditCancel = createContext<{ current: boolean } | null>(null);
 
+/** True when any column formula or formula cell mentions [label] (header
+ *  references are case-insensitive). A plain text scan: a string literal that
+ *  happens to contain "[label]" also counts, which errs on the side of not
+ *  clearing a name. */
+function formulasReferToLabel(columns: { formula?: string | null }[], rows: { values: Record<string, unknown> }[], label: string): boolean {
+  const needle = `[${label.trim().toLowerCase()}]`;
+  const mentions = (src: unknown) => typeof src === "string" && src.toLowerCase().includes(needle);
+  if (columns.some((c) => mentions(c.formula))) return true;
+  for (const r of rows) {
+    for (const v of Object.values(r.values ?? {})) {
+      if (isFormulaCell(v) && mentions(v[FORMULA_KEY])) return true;
+    }
+  }
+  return false;
+}
+
 export default function TableEditorPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const { toast } = useOsToast();
+  const searchParams = useSearchParams();
+  const { toast, dismiss: dismissToast } = useOsToast();
   const confirm = useConfirm();
   const promptDialog = usePrompt();
+  const { prefs, patchPrefs, railApps, bumpRowVersion } = useOsShell();
+  const aiEntitled = railApps.some((a) => a.key === "ai");
   const [tableId, setTableId] = useState<string | null>(null);
+  // The Share dialog, About, the in-place CSV import, full screen.
+  const [shareMode, setShareMode] = useState<"share" | "who" | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+  const [sheetMoreOpen, setSheetMoreOpen] = useState(false);
+  // The title-row "..." opens at the menu; File > Move to Space... opens the
+  // same TableRowMenu straight at its Space picker.
+  const [sheetMenuMode, setSheetMenuMode] = useState<"menu" | "move">("menu");
+  const sheetMoreRef = useRef<HTMLButtonElement>(null);
+  const [toolbarMenu, setToolbarMenu] = useState<null | "zoom" | "numfmt" | "text" | "fill" | "more" | "link">(null);
+  const tbAnchor = useRef<Record<string, HTMLButtonElement | null>>({});
+  // A read-only edit attempt in the formula bar: the reason, inline under the
+  // bar in danger text (spec: not a toast), cleared on the next cell.
+  const [readOnlyNote, setReadOnlyNote] = useState<string | null>(null);
+  // The last server-confirmed save, for the status bar and the indicator.
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  // The writes the server has not accepted (lib/sheet-save-ledger): a save
+  // settles only the keys it wrote, the indicator reads Not saved while any
+  // entry is left, and Retry re-sends every entry.
+  const [failedWrites, setFailedWrites] = useState<SaveLedger>(() => new Map());
+  const failedWritesRef = useRef<SaveLedger>(failedWrites);
+  const saveFailed = failedWrites.size > 0;
+  // While a write is unsaved, leaving (reload, tab close, a guarded
+  // navigation) asks first; the guard's Save re-sends the ledger.
+  const retryFailedWritesRef = useRef<() => Promise<boolean>>(async () => true);
+  // load() is a stable callback; what it says after re-applying the ledger
+  // (lib/sheet-save-ledger overlayLedger) goes through this ref, so the
+  // toast function is not one of its dependencies.
+  const reportOrphanedRef = useRef<(cells: number) => void>(() => undefined);
+  const onGuardSave = useCallback(() => retryFailedWritesRef.current(), []);
+  useDirtyGuard(saveFailed, { onSave: onGuardSave });
+  // In-app navigation asks too (the form builder's pattern). useDirtyGuard
+  // covers reload and tab close; a click on any app link (the sidebar, the
+  // breadcrumb) or the title row's BackButton while a cell is Not saved goes
+  // through confirmLeave first, on the app's own dialog. "Retry and leave"
+  // re-sends the ledger and leaves only when it lands; when it fails again
+  // the second question says so, and "Leave anyway" is the honest way out
+  // (offline, signed out) because nothing unsaved is kept on this device.
+  useEffect(() => {
+    setLeaveConfirmer(async () => {
+      const retry = await confirm({
+        title: "Some cells are not saved",
+        description: "What you typed has not reached the server. Retry now and leave once it saves, or stay and keep editing.",
+        confirmLabel: "Retry and leave",
+        cancelLabel: "Keep editing",
+        destructive: false,
+      });
+      if (!retry) return "stay";
+      if (await retryFailedWritesRef.current()) return "discard"; // saved: nothing is discarded
+      const leave = await confirm({
+        title: "The cells still did not save",
+        description: "If you leave now, what you typed in them is lost. Stay to keep it on screen and press Retry when you are back online.",
+        confirmLabel: "Leave anyway",
+        cancelLabel: "Keep editing",
+        destructive: true,
+      });
+      return leave ? "discard" : "stay";
+    });
+    return () => setLeaveConfirmer(null);
+  }, [confirm]);
+  // The "didn't save" toast lives in the shell, not in this page, so it
+  // outlived the table: after "Leave anyway" it rode along onto the Tables
+  // list, still offering a Retry for cells the person had just chosen to
+  // drop. Leaving the table takes it down.
+  useEffect(() => () => dismissToast(SAVE_FAILED_TOAST), [dismissToast]);
+  useEffect(() => {
+    if (!saveFailed) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void confirmLeave().then((ok) => { if (ok) router.push(url.pathname + url.search + url.hash); });
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [saveFailed, router]);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  // View > Gridlines and View > Formula bar, remembered per person (home.tables).
+  const showGridlines = readSheetGridlines(prefs.home);
+  const showFormulaBar = readSheetFormulaBar(prefs.home);
   const [table, setTable] = useState<ApiTable | null>(null);
   const [rows, setRowsState] = useState<ApiRow[] | null>(null);
   /* Eagerly-updated mirror of `rows`. The persistent engine host (below) is
    * driven BEFORE each optimistic setState, and swap-rebuilds read the rows
-   * of record synchronously — React state only commits at the next render,
+   * of record synchronously, React state only commits at the next render,
    * so every rows write goes through commitRows, which updates the mirror
    * in call order and hands React the very same array. */
   const rowsRef = useRef<ApiRow[] | null>(null);
@@ -934,14 +1091,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * every value write flows through setCell/setCells and every row change
    * through rowInserted/rowDeleted BEFORE its optimistic setState, so the
    * dep-graph recalc replaces the old rebuild-per-edit (whose constructor
-   * ran a full pass — 560ms at 2k rows, 11.8s at 10k). The host still
+   * ran a full pass, 560ms at 2k rows, 11.8s at 10k). The host still
    * computes over the UNSORTED rows order: display sort never reaches it,
    * which is what keeps a sorted grid from changing any formula's value.
    *
    * A full SWAP (new instance) happens ONLY on bulk data arrival (initial
    * load, refetch, CSV import's reload) and on column structure/type
    * changes without an incremental host op (add, type change, column-op
-   * undo/redo replays) — a column's TYPE changes engine semantics (numeric
+   * undo/redo replays), a column's TYPE changes engine semantics (numeric
    * text only counts in aggregates in numeric-typed columns), so the
    * rebuild is the CORRECT lever there, and cheap now that structure
    * changes are rare events rather than every keystroke.
@@ -951,6 +1108,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const engineHostRef = useRef<TableEngine | null>(null);
   const [engineVersion, setEngineVersion] = useState(0);
   const [namedRangesOpen, setNamedRangesOpen] = useState(false);
+  // Insert > Function > More functions…: the function reference drawer.
+  const [functionsOpen, setFunctionsOpen] = useState(false);
+  // The sheet's chords in the "?" overlay, while the grid is on screen.
+  useSheetShortcutList(!!table);
   const [trashOpen, setTrashOpen] = useState(false);
   const [pivotOpen, setPivotOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
@@ -968,16 +1129,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /* Row-VALUE persistence (single-cell PATCH + batch value writes) is
    * serialized through one per-table promise chain, so persistence order =
-   * user action order — the recorded rapid-same-cell-edit race, where two
+   * user action order, the recorded rapid-same-cell-edit race, where two
    * quick commits could land their PATCHes inverted (last-write-loses).
    * Reads, row creates and column ops deliberately do NOT queue, and the
    * optimistic state updates stay synchronous: only the fetches wait. */
   const writeQueueRef = useRef(createSerialQueue());
   useEffect(() => { writeQueueRef.current = createSerialQueue(); }, [tableId]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   /* ── Phase 5a streaming transport (docs/plans/tables.md, amended
    * decision): rows arrive in keyset chunks until the WHOLE table is
-   * resident. loadGenRef guards every async effect of load() — a refetch
+   * resident. loadGenRef guards every async effect of load(), a refetch
    * started during a slow stream must never interleave rows into the newer
    * load. streamProgress is non-null ONLY while a MULTI-chunk stream is in
    * flight; it is both the tab-bar progress line's data and the honesty
@@ -989,12 +1151,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [savingCols, setSavingCols] = useState(false);
   const [search, setSearch] = useState("");
   const [sortState, setSortState] = useState<SheetSort>(null);
-  // Saved-view JSON still lives in DataTable.views server-side, but the
-  // only thing this surface reads or writes there is the first view's sort
-  // — the view-switching UI is gone (Excel-ify decision 1).
+  // Saved-view JSON still lives in DataTable.views server-side. views[0] is
+  // the persistence slot only: this surface reads and writes its sort,
+  // filter and freeze and leaves every other view untouched. The
+  // view-switching UI is gone (Excel-ify decision 1).
   const viewsRef = useRef<SavedView[]>([]);
-  const [filterCol, setFilterCol] = useState<string>("");
-  const [filterValue, setFilterValue] = useState<string>("");
+  // The column filters (lib/sheet-filters): every ticked column, including
+  // one ticked with nothing chosen yet (it shows its control and narrows
+  // nothing). Several at once, all must hold.
+  const [filters, setFilters] = useState<SheetColumnFilter[]>([]);
+  const filterActive = filters.some(filterIsActive);
   // Freeze panes, as PERSISTED (the render-time clamp against the live
   // display is gridFreeze below). Null = nothing frozen.
   const [freeze, setFreeze] = useState<SheetFreeze | null>(null);
@@ -1005,48 +1171,60 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Row ids are per-table: a payload from the previous sheet's kernel must
   // never feed stats over the next sheet's rows.
   useEffect(() => { setGridSelection(null); }, [tableId]);
-  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  // The row detail drawer lives at ?row=<id> (design 4.5), so Copy link on
+  // it works and Back closes it. replace, not push: opening a row is not a
+  // page in history.
+  const activeRowId = searchParams.get("row");
+  const setActiveRowId = useCallback((id: string | null) => {
+    const next = new URLSearchParams(window.location.search);
+    if (id) next.set("row", id); else next.delete("row");
+    const s = next.toString();
+    router.replace(`${window.location.pathname}${s ? `?${s}` : ""}`, { scroll: false });
+  }, [router]);
   // Relational: rows of every table this one links to (for pickers + lookup/rollup).
   const [linkedTables, setLinkedTables] = useState<Record<string, LinkedTable>>({});
   // All org tables (for the link-target picker in the relation config modal).
   const [allTables, setAllTables] = useState<{ id: string; name: string }[]>([]);
   // Column currently being configured in the relation modal (link/lookup/rollup).
   const [configColId, setConfigColId] = useState<string | null>(null);
+  /* Column naming and typing (Phase 5, spec-tables-forms "Naming a column",
+   * "Typing a column"). renamingColId swaps that header's label for the
+   * inline input; typePicker is the ColumnTypePicker's anchor; typeChange is
+   * a lossy change waiting on its confirm; optionsColId is the select
+   * options editor; pendingRelType is a Link / Lookup / Rollup choice waiting
+   * on the relation dialog (the type lands only when that dialog saves). */
+  const [renamingColId, setRenamingColId] = useState<string | null>(null);
+  const [typePicker, setTypePicker] = useState<{ colId: string; top: number; left: number } | null>(null);
+  const [typeChange, setTypeChange] = useState<{ colId: string; toType: ColumnTypeValue; cells: number } | null>(null);
+  const [optionsColId, setOptionsColId] = useState<string | null>(null);
+  const [pendingRelType, setPendingRelType] = useState<{ colId: string; type: ColumnTypeValue } | null>(null);
   // Toolbar filter toggle: the search/filter row hides behind the funnel
   // icon (Sheets keeps its toolbar dense; the row appears on demand).
   const [filterOpen, setFilterOpen] = useState(false);
-  // The toolbar's details dropdowns (123, File) close on outside click —
-  // with two menus side by side, leaving both open reads as broken.
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      document.querySelectorAll("details.shx__dd[open]").forEach((d) => {
-        if (!d.contains(e.target as Node)) d.removeAttribute("open");
-      });
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, []);
-  // Zoom (75..150), persisted per table in localStorage so a sheet reopens
-  // at the zoom it was left at. Applied as CSS `zoom` on the grid wrapper.
+  // Zoom (75..150), per device in localStorage `workwrk:tables:zoom:{id}`
+  // (settings 7.3 allows one sheet's zoom as ephemera). The old key
+  // `workwrk:sheet-zoom:{id}` is read as a fallback, so no saved zoom resets
+  // when the key changes. Applied as CSS `zoom` on the grid wrapper.
   const [zoom, setZoom] = useState(100);
   useEffect(() => {
     if (!tableId) return;
-    try {
-      const v = Number(window.localStorage.getItem(`workwrk:sheet-zoom:${tableId}`));
-      setZoom(ZOOM_LEVELS.includes(v) ? v : 100);
-    } catch { /* storage unavailable: stay at 100 */ }
+    let storage: Storage | null = null;
+    try { storage = window.localStorage; } catch { storage = null; }
+    const v = readZoom(storage, tableId);
+    const t = setTimeout(() => setZoom(v), 0);
+    return () => clearTimeout(t);
   }, [tableId]);
   const changeZoom = (v: number) => {
     setZoom(v);
     if (!tableId) return;
-    try { window.localStorage.setItem(`workwrk:sheet-zoom:${tableId}`, String(v)); } catch { /* best effort */ }
+    try { window.localStorage.setItem(zoomKey(tableId), String(v)); } catch { /* best effort */ }
   };
   // The toolbar Σ upgrade: while set, the very next "=" seed the kernel
   // opens an editor with becomes this string. See insertSumSeed below.
   const sigmaSeedRef = useRef<string | null>(null);
   // The Σ upgrade snapshotted for the WHOLE editing session (keyed by cell):
   // the host re-seeds its input whenever the seed prop CHANGES, and the
-  // kernel re-renders the editor on every scroll — so a seed that flapped
+  // kernel re-renders the editor on every scroll, so a seed that flapped
   // back to "=" after the one-tick sigmaSeedRef clear would wipe the draft
   // mid-edit. Cleared when the session commits/cancels.
   const sigmaSessionRef = useRef<{ rowId: string; colId: string; seed: string } | null>(null);
@@ -1066,7 +1244,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // While a header-grip drag is live the kernel draws its full-height
   // guide at this column's right edge (colResizeGuideId); null = no guide.
   const [resizingColId, setResizingColId] = useState<string | null>(null);
-  // Row right-click menu — open / delete (single or the whole selected
+  // Row right-click menu, open / delete (single or the whole selected
   // span), opened at the cursor via the shared MorePortal.
   const [rowMenu, setRowMenu] = useState<{ rowId: string; x: number; y: number } | null>(null);
   const rowMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
@@ -1085,7 +1263,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       window.removeEventListener("keydown", onKey);
     };
   }, [rowMenu]);
-  // Header right-click menu — the Sheets model: column operations (sort /
+  // Header right-click menu, the Sheets model: column operations (sort /
   // delete / formula / relation) live here now that the hover icon cluster
   // and the per-column "…" popover are gone. Same MorePortal point-mode
   // pattern as the row menu above.
@@ -1097,7 +1275,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Cmd/Ctrl+B/I/U anywhere on the sheet (capture phase): after clicking a
   // toolbar button the focus sits on that button, where the grid's own
   // keydown never hears the shortcut and the browser does its own thing
-  // with it. Grid-focused events are skipped — the kernel's handler owns
+  // with it. Grid-focused events are skipped, the kernel's handler owns
   // those (skipping prevents a double toggle). Ref-filled per render since
   // toggleStyleFlag is defined after the early returns below.
   const formatKeyRef = useRef<((k: "b" | "i" | "u") => void) | null>(null);
@@ -1119,10 +1297,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Cmd/Ctrl+F / Cmd/Ctrl+H anywhere on the sheet page (capture phase, same
   // shape as the B/I/U handler above): preventDefault so the browser's own
   // find bar never opens over the sheet. Unlike B/I/U, grid-focused events
-  // are NOT skipped — the kernel has no find handler, so this is the only
+  // are NOT skipped, the kernel has no find handler, so this is the only
   // door. v1 scope decision (Sheets diverges: it commits the edit first):
   // while the caret sits in any editor input the browser's native find
-  // stays reachable — EXCEPT inside the find card's own inputs, where
+  // stays reachable, EXCEPT inside the find card's own inputs, where
   // Cmd+F re-focuses the query and Cmd+H reveals the replace row instead
   // of stacking the native bar on top of ours. Ref-filled per render like
   // formatKeyRef, since openFind is defined after the early returns.
@@ -1133,7 +1311,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const k = e.key.toLowerCase();
       if (k !== "f" && k !== "h") return;
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !t?.closest?.(".shx__find")) return;
+      if (t?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !t?.closest?.("[data-sheet-find]")) return;
       if (!findKeyRef.current) return;
       e.preventDefault();
       findKeyRef.current(k === "h");
@@ -1165,6 +1343,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // starts during a slow stream can never interleave rows or rebuild the
     // engine over the newer load's world.
     const gen = ++loadGenRef.current;
+    setNotFound(false);
     try {
       // One page of the Phase 5a row stream. Tolerates the pre-stream
       // server shape (bare {data}, no nextCursor) as a single-chunk stream.
@@ -1183,19 +1362,36 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           total: typeof rd.total === "number" ? rd.total : undefined,
         };
       };
-      // The table fetch and the FIRST row page run in parallel — the same
-      // wire timing as the old Promise.all — and the stream helper then
+      // The table fetch and the FIRST row page run in parallel, the same
+      // wire timing as the old Promise.all, and the stream helper then
       // consumes the pre-started page as page one.
       let firstPage: ReturnType<typeof fetchRowPage> | null = fetchRowPage(null);
       // If the table fetch throws first, the abandoned page must not
       // surface as an unhandled rejection; awaiting it later still throws.
       firstPage.catch(() => undefined);
       const tRes = await fetch(`/api/tables/${tableId}`);
+      // The API hides existence (404 for an id the viewer holds nothing
+      // on, 400 for a malformed one): that is the in-shell 404, not an
+      // error with a Retry that can only fail again.
+      if (tRes.status === 404 || tRes.status === 400) {
+        if (gen === loadGenRef.current) setNotFound(true);
+        return;
+      }
       if (!tRes.ok) throw new Error(`HTTP ${tRes.status}`);
       const td = await tRes.json();
       const t: ApiTable = td.data ?? td;
       t.columns = Array.isArray(t.columns) ? t.columns : [];
       if (gen !== loadGenRef.current) return;
+      // A table field the server has not accepted yet (a column rename, a
+      // column config, the name) stays on screen through the reload: server
+      // truth plus the unsaved ledger, never server truth alone, or the
+      // grid would show the old value while the indicator reads Not saved.
+      // Columns merge by id (lib/sheet-save-ledger overlayTableEntry), so a
+      // column someone else added while this save was failing is kept.
+      if (failedWritesRef.current.has(TABLE_LEDGER_KEY)) {
+        Object.assign(t, overlayTableEntry(failedWritesRef.current, t));
+        t.columns = Array.isArray(t.columns) ? t.columns : [];
+      }
       if (t.spaceId) {
         void fetch(`/api/spaces/${t.spaceId}`)
           .then(async (r) => {
@@ -1211,10 +1407,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
 
       /* THE HONESTY RULE: rows appear progressively, but the engine host is
-       * rebuilt exactly ONCE, after the FINAL chunk — the formula engine is
+       * rebuilt exactly ONCE, after the FINAL chunk, the formula engine is
        * client-side and a value computed over a partial row set would be
-       * silently wrong (the one forbidden sin). A single-chunk stream —
-       * every table within the old 5k ceiling — buffers its one chunk and
+       * silently wrong (the one forbidden sin). A single-chunk stream,
+       * every table within the old 5k ceiling, buffers its one chunk and
        * applies it below in the exact pre-stream order, so today's tables
        * render identically, with no pending state ever shown. */
       let firstChunk: ApiRow[] | null = null;
@@ -1250,11 +1446,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       );
       if (gen !== loadGenRef.current) return; // a newer load owns every effect below
       if (!multi) {
-        // Single chunk: the pre-stream sequence, byte-for-byte — table,
+        // Single chunk: the pre-stream sequence, byte-for-byte, table,
         // rows and engine land together. (The progress clear is a no-op
         // here unless this load superseded a mid-stream one.)
         setStreamProgress(null);
-        const rowsArr = (firstChunk ?? allRows) as ApiRow[];
+        // The unsaved cells go back on top of the server's rows (the same
+        // re-apply as the table fields above).
+        const overlaid = overlayLedger(failedWritesRef.current, t, (firstChunk ?? allRows) as ApiRow[]);
+        const rowsArr = overlaid.rows;
+        if (overlaid.ledger !== failedWritesRef.current) {
+          failedWritesRef.current = overlaid.ledger;
+          setFailedWrites(overlaid.ledger);
+        }
+        if (overlaid.orphanedCells > 0) reportOrphanedRef.current(overlaid.orphanedCells);
         setTable(t);
         commitRows(rowsArr);
         // Bulk data arrival (initial load, refetch, CSV import's reload) is a
@@ -1264,9 +1468,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       } else {
         // Completion rebuild reads rowsRef, NOT allRows: value edits made
         // while streaming went through commitRows into the mirror, and
-        // commitRows is synchronous — every chunk append of this generation
+        // commitRows is synchronous, every chunk append of this generation
         // has already landed by the time the stream resolves.
         setStreamProgress(null);
+        if (failedWritesRef.current.size > 0) {
+          const overlaid = overlayLedger(failedWritesRef.current, t, rowsRef.current ?? []);
+          commitRows(overlaid.rows);
+          if (overlaid.ledger !== failedWritesRef.current) {
+            failedWritesRef.current = overlaid.ledger;
+            setFailedWrites(overlaid.ledger);
+          }
+          if (overlaid.orphanedCells > 0) reportOrphanedRef.current(overlaid.orphanedCells);
+        }
         rebuildEngine(t.columns, rowsRef.current ?? []);
       }
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
@@ -1275,21 +1488,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // Filter restores from the same first-view config sort does, but only
       // while its column still exists: applying a filter over a deleted
       // column would silently blank the whole sheet.
-      const savedFilter = savedViews[0]?.config?.filter;
-      // Restore only what the filter UI can SHOW: the column must still be a
-      // select/multi_select and the saved value still among its options —
-      // otherwise the filter would hide rows while both dropdowns render as
-      // "No filter"/"Any value", an invisible filter with no way to clear it.
-      const fcol = savedFilter ? t.columns.find((c) => c.id === savedFilter.colId) : undefined;
-      const liveFilter = savedFilter && fcol
-        && (fcol.type === "select" || fcol.type === "multi_select")
-        && (!savedFilter.value || (fcol.options ?? []).includes(savedFilter.value))
-        ? savedFilter : null;
-      setFilterCol(liveFilter?.colId ?? "");
-      setFilterValue(liveFilter?.value ?? "");
+      // readSavedFilters restores only what the panel can SHOW (the column
+      // still exists, its type still takes that control, a chosen option is
+      // still an option), otherwise the filter would hide rows while the
+      // panel shows nothing ticked: an invisible filter with no way to clear
+      // it. It also reads the previous release's single `filter`.
+      setFilters(readSavedFilters(savedViews[0]?.config, t.columns));
       // Freeze restores from the same first-view config, clamped against the
       // rows/columns that exist NOW (rowsRef is already the full table: both
-      // stream paths above commit synchronously before this line) — a freeze
+      // stream paths above commit synchronously before this line), a freeze
       // saved on a bigger sheet must not freeze everything that's left.
       setFreeze(clampFreeze(savedViews[0]?.config?.freeze, (rowsRef.current ?? []).length, t.columns.length));
       savedColumnsRef.current = t.columns;
@@ -1308,7 +1515,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * changes, so history can never replay into a different table. Every
    * mutating path below pushes a command AFTER its optimistic action
    * succeeded; the command's undo/redo run through the STRICT helpers,
-   * which throw on failure — a failed undo must never pretend it worked
+   * which throw on failure, a failed undo must never pretend it worked
    * (the stack re-pushes it, we toast + reload). */
   // eslint-disable-next-line react-hooks/exhaustive-deps -- tableId is the RESET trigger, not a read: a new table must start with empty history
   const undoStack = useMemo(() => createUndoStack(), [tableId]);
@@ -1324,7 +1531,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch {
       // The stack already re-pushed the command (state unknown → retryable);
       // the reload reconciles whatever the half-run left behind.
-      toast(`Couldn't undo ${undoStack.peekUndoLabel() ?? "the last action"} — reloading`);
+      toast(`Couldn't undo ${undoStack.peekUndoLabel() ?? "the last action"}. Reloading.`);
       void load();
     } finally { refreshUndoUi(); }
   }, [undoStack, toast, load, refreshUndoUi]);
@@ -1334,7 +1541,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     try {
       await op;
     } catch {
-      toast(`Couldn't redo ${undoStack.peekRedoLabel() ?? "the last action"} — reloading`);
+      toast(`Couldn't redo ${undoStack.peekRedoLabel() ?? "the last action"}. Reloading.`);
       void load();
     } finally { refreshUndoUi(); }
   }, [undoStack, toast, load, refreshUndoUi]);
@@ -1349,12 +1556,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const savedColumnsRef = useRef<Column[] | null>(null);
 
   /** Push value writes into the persistent host as ONE setCells pass (one
-   *  clock snapshot, one recalc — a 500-cell batch is one pass, not 500),
+   *  clock snapshot, one recalc, a 500-cell batch is one pass, not 500),
    *  ahead of the caller's optimistic setState. Writes to rows no longer in
    *  the mirror are dropped, matching the server merge's stale-id
    *  tolerance; unknown columns are dropped via the host's own column map.
-   *  If the host still refuses an id — drift, which would mean a missed
-   *  mutation site — the swap IS the recovery: rebuild from canonical
+   *  If the host still refuses an id, drift, which would mean a missed
+   *  mutation site, the swap IS the recovery: rebuild from canonical
    *  state on the next microtask, i.e. AFTER the caller's synchronous
    *  commitRows, so the value the user just typed is in the mirror the
    *  rebuild reads. */
@@ -1391,7 +1598,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Phase 5c: the batch route now NAMES the update ids it dropped because
    *  the row no longer exists (deleted by another client between our read
-   *  and this write) — missingIds in the response — instead of only
+   *  and this write), missingIds in the response, instead of only
    *  skipping them silently. Single-cell edits never ride the batch route
    *  (they PATCH /rows and get a 409 there instead), so the batch update
    *  paths below are the only places the client can learn a target row
@@ -1403,7 +1610,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
   /** missingIds out of an UNREAD batch Response. Callers that already
    *  parsed the body (the paste one-shot needs `inserted` from the same
-   *  response) use missingIdsOf on their parse — a Response body reads
+   *  response) use missingIdsOf on their parse, a Response body reads
    *  once. Parse failures read as “nothing missing”: surfacing is
    *  best-effort and must never fail a write that the server applied. */
   async function readBatchMissingIds(res: Response): Promise<string[]> {
@@ -1413,23 +1620,67 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Toast + reload when a batch write reported rows deleted elsewhere.
    *  A full load() rather than surgical eviction: the remote deletion also
    *  shifted every A1 row ref below it, and the reload rebuilds the engine
-   *  host from server truth — the one guaranteed-coherent recovery. */
+   *  host from server truth, the one guaranteed-coherent recovery. */
   function noteRowsDeletedElsewhere(ids: ReadonlySet<string>) {
     if (ids.size === 0) return;
-    toast(`${ids.size} row${ids.size === 1 ? " was" : "s were"} deleted elsewhere — reloading`);
+    toast(`${ids.size} row${ids.size === 1 ? " was" : "s were"} deleted elsewhere. Reloading.`);
     void load();
   }
 
+  function noteWriteFailed(key: string, values: Record<string, unknown>) {
+    const next = ledgerFail(failedWritesRef.current, key, values);
+    failedWritesRef.current = next;
+    setFailedWrites(next);
+  }
+
+  /** A save landed (or the server's value replaced ours): the keys it wrote
+   *  are no longer unsaved. Keys it did not write stay in the ledger. */
+  function noteWriteSettled(key: string, keys: readonly string[]) {
+    const next = ledgerSettle(failedWritesRef.current, key, keys);
+    if (next === failedWritesRef.current) return;
+    failedWritesRef.current = next;
+    setFailedWrites(next);
+    // Everything saved: the "didn't save" toasts are now false, so they go
+    // with the ledger, whichever Retry (toast, title indicator, dirty-guard
+    // Save) or later write did it.
+    if (next.size === 0) dismissToast(SAVE_FAILED_TOAST);
+  }
+
+  retryFailedWritesRef.current = retryFailedWrites;
+  reportOrphanedRef.current = (cells) => {
+    toast(`${cells} unsaved cell${cells === 1 ? " was" : "s were"} on rows deleted elsewhere, so ${cells === 1 ? "it" : "they"} could not be saved`, { tone: "danger" });
+  };
+
+  /** Re-send every write the server has not accepted. True when the ledger
+   *  is empty afterwards (the dirty guard's Save uses this). */
+  async function retryFailedWrites(): Promise<boolean> {
+    const entries = [...failedWritesRef.current];
+    await Promise.all(entries.map(async ([key, values]) => {
+      if (key === TABLE_LEDGER_KEY) {
+        // Columns re-send the CURRENT columns (later edits ride along);
+        // every other field re-sends the value that failed.
+        const { columns, ...rest } = values as Partial<ApiTable>;
+        const cur = tableRef.current;
+        if (columns !== undefined && cur) await persistColumns(cur.columns);
+        if (Object.keys(rest).length > 0) await patchTable(rest);
+        return;
+      }
+      const rowId = ledgerRowId(key);
+      if (rowId) await patchRow(rowId, { ...values }, { guard: false });
+    }));
+    return failedWritesRef.current.size === 0;
+  }
+
   /** Batch cell writes with optimistic local apply. THROWS on any refused
-   *  chunk — used by undo/redo bodies where honesty is the contract, and by
+   *  chunk, used by undo/redo bodies where honesty is the contract, and by
    *  callers that wrap their own catch. */
   async function writeValuesBatchStrict(updates: { id: string; values: Record<string, unknown> }[]) {
     if (!tableId || updates.length === 0) return;
     const byRow = new Map(updates.map((u) => [u.id, u.values]));
     // Host first, then the mirror. Rows deleted since the command was
     // captured are simply absent from state and skipped by the server merge
-    // — the documented v1 semantic: such a command may no-op, but it never
-    // corrupts — and driveHostWrites drops them the same way.
+    // the documented v1 semantic: such a command may no-op, but it never
+    // corrupts, and driveHostWrites drops them the same way.
     driveHostWrites(updates.flatMap((u) => Object.entries(u.values).map(([colId, raw]) => ({ colId, rowId: u.id, raw }))));
     commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     // All chunks ride ONE queued job so another value write can't
@@ -1437,7 +1688,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const missing = new Set<string>();
     await writeQueueRef.current.run(async () => {
       for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
         });
@@ -1446,16 +1697,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
     });
     // Surfaced AFTER the queued job so the reload can't interleave with a
-    // chunk still in flight — and NOT a throw: the route applied every
+    // chunk still in flight, and NOT a throw: the route applied every
     // still-live row, so an undo/redo body reporting failure here would
     // re-push a command that mostly landed.
     noteRowsDeletedElsewhere(missing);
+    setLastSavedAt(new Date());
+    for (const u of updates) noteWriteSettled(rowLedgerKey(u.id), Object.keys(u.values));
   }
 
   /** Batch row deletes (chunked), optimistic. Throws on a refused chunk;
    *  stale ids are tolerated by the route, which makes retries idempotent.
    *  Drives the host row by row (cumulative: later deletes see the shape
-   *  earlier ones left) and persists the SURVIVORS' ref rewrites — but only
+   *  earlier ones left) and persists the SURVIVORS' ref rewrites, but only
    *  after every delete chunk landed, so a refused delete never leaves
    *  rewritten sources on the server for a delete that didn't happen. */
   async function deleteRowsBatchStrict(ids: string[]) {
@@ -1469,7 +1722,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (host) {
       try {
         for (const id of ids) {
-          if (!live.has(id)) continue; // stale id — the route tolerates it, so does the host drive
+          if (!live.has(id)) continue; // stale id, the route tolerates it, so does the host drive
           const res = host.rowDeleted(id);
           for (const rw of res.rewritten.cells) {
             if (!doomed.has(rw.rowId)) cellRewrites.set(`${rw.rowId}:${rw.colId}`, rw);
@@ -1482,7 +1735,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (hostOk) bumpEngine();
     else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
-      const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+      const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deletes: ids.slice(i, i + BATCH_MAX_OPS) }),
       });
@@ -1495,7 +1748,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Fold server-created rows into the persistent host AND the local
    *  mirror at the index their POSITION dictates. Appends (auto-allocated
    *  position = max+1) land at the end; an undo restore's explicit
-   *  original positions land back in the middle — the engine's row
+   *  original positions land back in the middle, the engine's row
    *  indices, and therefore every A1 ref, then match what a reload would
    *  compute from the server's position-ordered list (row anchoring is
    *  the law: engine rows = original storage order, and storage order IS
@@ -1513,10 +1766,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return at;
     };
     // rowInserted is internally a full graph rebuild, so k of them cost k
-    // rebuilds — a LARGE batch (blank-sheet seed, bulk-undo restore, big
+    // rebuilds, a LARGE batch (blank-sheet seed, bulk-undo restore, big
     // paste) absorbs as ONE swap instead. No rewrite is lost that way:
-    // appends can't shift any ref, and the only mid-table bulk insert —
-    // bulk-delete undo — restores the survivors' sources itself right
+    // appends can't shift any ref, and the only mid-table bulk insert,
+    // bulk-delete undo, restores the survivors' sources itself right
     // after this returns.
     if (host === null || created.length > 16) {
       for (const row of sorted) next.splice(insertAt(row), 0, row);
@@ -1579,10 +1832,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return all;
   }
 
-  /** Persist a full columns array, optimistic, throwing on failure — the
+  /** Persist a full columns array, optimistic, throwing on failure, the
    *  strict sibling of persistColumns for undo/redo bodies. Column-op
    *  undo/redo replays arbitrary columns arrays (structure and type may
-   *  both differ), so by default this SWAPS the engine host — the correct
+   *  both differ), so by default this SWAPS the engine host, the correct
    *  lever for structure/type changes, and a cheap one now that they are
    *  rare events. Callers that already drove the host incrementally
    *  (rename/move/delete inverses) pass hostAlreadyCurrent to skip it. */
@@ -1594,7 +1847,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => prev ? { ...prev, columns: cols } : prev);
     if (!opts?.hostAlreadyCurrent) rebuildEngine(cols, rowsRef.current ?? []);
-    const res = await fetch(`/api/tables/${tableId}`, {
+    const res = await fetchWithRetry(`/api/tables/${tableId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ columns: cols }),
     });
@@ -1625,7 +1878,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (missing.length === 0) return;
     void Promise.all(missing.map(async (id) => {
       try {
-        // Rows stream to COMPLETION before the table enters linkedTables —
+        // Rows stream to COMPLETION before the table enters linkedTables,
         // a rollup aggregates these rows client-side, so a partial set here
         // would be the same silent-aggregate sin the main grid guards
         // against. Until then relationalValue keeps rendering its "…".
@@ -1676,17 +1929,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }).catch(() => {});
   }, [configColId, allTables.length]);
 
-  /** True when the server accepted the patch — the undo push sites need to
+  /** True when the server accepted the patch, the undo push sites need to
    *  know an action actually landed before recording how to reverse it. */
   async function patchTable(patch: Partial<ApiTable>): Promise<boolean> {
     if (!tableId) return false;
     try {
-      const res = await fetch(`/api/tables/${tableId}`, {
+      // A table PATCH sets fields, so a repeat is harmless: retried on a
+      // network failure or a 5xx, with keepalive, before it reports false.
+      const res = await fetchWithRetry(`/api/tables/${tableId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
+      // The title row's AutosaveIndicator and the status bar's last-saved
+      // time read these; a failure stays visible until a save lands.
+      if (res.ok) { setLastSavedAt(new Date()); noteWriteSettled(TABLE_LEDGER_KEY, Object.keys(patch)); }
+      else noteWriteFailed(TABLE_LEDGER_KEY, patch as Record<string, unknown>);
       return res.ok;
-    } catch { return false; }
+    } catch { noteWriteFailed(TABLE_LEDGER_KEY, patch as Record<string, unknown>); return false; }
   }
 
   async function persistColumns(cols: Column[]): Promise<boolean> {
@@ -1702,14 +1961,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * engineHostRef), not replayed from capture: undoing a rename re-rewrites
    * [New]→[Old] header refs exactly as the forward path rewrote [Old]→[New],
    * even if other edits landed in between. All of these THROW on persist
-   * failure — the undo stack needs the truth. */
+   * failure, the undo stack needs the truth. */
 
   async function performRenameStrict(colId: string, label: string) {
     const cur = tableRef.current;
     if (!cur) throw new Error("table gone");
-    if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since — no-op, never corrupt
+    if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since, no-op, never corrupt
     // An empty label is legal on this surface (anonymous Excel columns) but
-    // the engine can't rewrite refs INTO it — "[]" doesn't tokenize — so a
+    // the engine can't rewrite refs INTO it, "[]" doesn't tokenize, so a
     // clear skips the rewrite pass: [Old] refs stay and surface #NAME?,
     // which an undo (or re-labeling) cleanly repairs.
     let res: StructureResult | null = null;
@@ -1722,7 +1981,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // columnRenamed drove the host incrementally; an empty label (the
     // engine can't rewrite refs into "[]") or a thrown rewrite falls back
     // to the swap, so the in-session host always matches what a reload
-    // would compute — [Old] refs then show #NAME?, honestly.
+    // would compute, [Old] refs then show #NAME?, honestly.
     await saveColumnsStrict(cols, { hostAlreadyCurrent: res !== null });
     if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
   }
@@ -1754,7 +2013,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const apply = async (patch: Partial<Column>) => {
       const cur = tableRef.current;
       if (!cur) throw new Error("table gone");
-      if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since — no-op
+      if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since, no-op
       await saveColumnsStrict(cur.columns.map((c) => (c.id === colId ? { ...c, ...patch } : c)));
     };
     pushUndo({ label, undo: () => apply(before), redo: () => apply(after) });
@@ -1766,7 +2025,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * existing rules keep painting (cellStyleFor below reads col.rules unchanged). */
 
   /** Apply per-column before/after patches as ONE optimistic columns write
-   *  and ONE undo command — the multi-column sibling of pushColumnPatch, for
+   *  and ONE undo command, the multi-column sibling of pushColumnPatch, for
    *  toolbar buttons that act on every column the selection intersects. The
    *  undo/redo bodies re-read live columns through tableRef (a column
    *  deleted since is skipped, never corrupted), and tableRef is bumped
@@ -1780,13 +2039,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     tableRef.current = { ...cur, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
     // TYPE (numeric-text coercion in aggregates keys off it) and formula
-    // change what the engine computes — the swap is the correct lever for
+    // change what the engine computes, the swap is the correct lever for
     // those. format/rules are display-only: no host action at all.
     if (patches.some((p) => "type" in p.after || "formula" in p.after || "label" in p.after)) {
       rebuildEngine(cols, rowsRef.current ?? []);
     }
     void persistColumns(cols).then((ok) => {
-      if (!ok) return;
+      // Never a silent failure: the column on screen must be the column the
+      // server holds, so a refused write says so and reloads the truth.
+      if (!ok) { toast(`Couldn't save: ${label}. Reloading the table.`); void load(); return; }
       const apply = async (pick: "before" | "after") => {
         const live = tableRef.current;
         if (!live) throw new Error("table gone");
@@ -1801,7 +2062,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  sets col.type AND a starter col.format together, in a single write so
    *  a single undo restores both. The kind→patch mapping is shared with the
    *  column "…" popover via lib/sheet-format-actions, so the two menus
-   *  cannot drift. Legacy/relational columns are skipped — the popover
+   *  cannot drift. Legacy/relational columns are skipped, the popover
    *  shows them a read-only line instead. The toolbar reaches this only for
    *  the editor-changing kinds (Date / Checkbox); its number kinds route
    *  per cell on open columns, see routeNumberFormat. */
@@ -1824,7 +2085,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Sort rides in the SAME DataTable.views JSON the old saved-view UI
    *  wrote (first view's config.sort), so nothing changes server-side and
-   *  a legacy table's other views pass through untouched — they just never
+   *  a legacy table's other views pass through untouched, they just never
    *  render again on this surface. */
   const persistSort = (sn: SheetSort) => {
     setSortState(sn);
@@ -1835,24 +2096,29 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   };
 
   /** Filters ride the same first-view config JSON sort does, written just
-   *  as eagerly (persistSort above is the template). Only a FULLY set
-   *  filter persists: the apply path needs both colId and value, so a
-   *  half-picked filter (column chosen, no value yet) is a no-op that is
-   *  not worth resurrecting on reload. `undefined` drops the key in the
-   *  PATCH body's JSON, which is how clearing reaches the server. */
-  const persistFilter = (colId: string, value: string) => {
-    setFilterCol(colId);
-    setFilterValue(value);
-    const filter = colId && value ? { colId, value } : undefined;
+   *  as eagerly (persistSort above is the template). Only a filter that
+   *  NARROWS persists (lib/sheet-filters filtersToConfig): a ticked column
+   *  with nothing chosen yet is a no-op not worth resurrecting on reload.
+   *  `undefined` drops the key in the PATCH body's JSON, which is how
+   *  clearing reaches the server. The legacy single `filter` key is written
+   *  alongside for one release (the previous client reads only it). */
+  const persistFilters = (nextFilters: SheetColumnFilter[]) => {
+    setFilters(nextFilters);
+    const { filters: saved, filter } = filtersToConfig(nextFilters);
     const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
-    const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, filter } } : v));
+    const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, filters: saved, filter } } : v));
     viewsRef.current = next;
     void patchTable({ views: next });
+  };
+  /** Change one column's filter, keeping every other one. */
+  const setColumnFilter = (colId: string, next: SheetColumnFilter | null) => {
+    const others = filters.filter((f) => f.colId !== colId);
+    persistFilters(next ? [...others, next] : others);
   };
 
   /** Freeze rides the same first-view config JSON (persistSort is the
    *  template): written eagerly, `undefined` drops the key so an unfreeze
-   *  reaches the server as an absent slot. No undo entry on purpose —
+   *  reaches the server as an absent slot. No undo entry on purpose,
    *  Sheets doesn't undo freezes either, and a freeze touches no data.
    *  A null/empty freeze and an all-zero one both persist as absent. */
   const persistFreeze = (patch: Partial<SheetFreeze>) => {
@@ -1867,10 +2133,30 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     void patchTable({ views: next });
   };
 
-  /** "+" appends a generic text column INSTANTLY — no dialog, no type
+  /** "+" appends a generic text column INSTANTLY, no dialog, no type
    *  picker (Excel-ify decision 3). A column's type/format lives in its
    *  "…" menu now. tableRef is bumped eagerly so rapid clicks compose
    *  (each sees the column the previous click just appended). */
+  /** The one-click start of a columnless table (the old "Start sheet"):
+   *  the canonical 26 columns, then 1,000 blank rows when it has none. */
+  async function startTable() {
+    const cur = tableRef.current ?? table;
+    if (!cur || cur.columns.length > 0) return;
+    const cols: Column[] = Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: newId(), type: "short_text", label: "" }));
+    // Eager tableRef bump, same as addColumn: the guard above must see the
+    // new columns immediately, or a double click faster than the sync
+    // effect would seed the rows twice.
+    if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
+    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    rebuildEngine(cols, rowsRef.current ?? []);
+    const ok = await persistColumns(cols);
+    if (!ok) { toast("Couldn't start the table", { tone: "danger" }); void load(); return; }
+    if ((rowsRef.current ?? []).length > 0) return;
+    try {
+      await insertRowsBatchStrict(Array.from({ length: NEW_SHEET_ROWS }, () => ({ values: {} })));
+    } catch { toast("Couldn't add the starter rows", { tone: "danger" }); }
+  }
+
   async function addColumn() {
     const cur = tableRef.current ?? table;
     if (!cur) return;
@@ -1878,7 +2164,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols = [...cur.columns, def];
     tableRef.current = { ...cur, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: [...prev.columns, def] } : prev));
-    // Column structure changed with no incremental host op — swap. An
+    // Column structure changed with no incremental host op, swap. An
     // appended empty column can't change any existing value, so the
     // rebuild's pass is the cheap kind.
     rebuildEngine(cols, rowsRef.current ?? []);
@@ -1903,7 +2189,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   /** Delete a column through the live host (refs into it become #REF!,
-   *  refs past it shift) and persist — the strict inverse of an append,
+   *  refs past it shift) and persist, the strict inverse of an append,
    *  shared by the add-column and insert-column undo bodies. A column
    *  already gone is a no-op, never an error. */
   async function removeColumnStrict(colId: string) {
@@ -1920,7 +2206,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Header-menu "Insert 1 column left/right" (Sheets). Composed from the
    *  existing primitives, no new server code: append a blank text column
-   *  the way "+" does, then performMoveStrict it beside the anchor — the
+   *  the way "+" does, then performMoveStrict it beside the anchor, the
    *  move's host pass shifts every ref at/right of the slot by one, which
    *  is exactly what a Sheets insert does to "=C1". ONE undo command:
    *  undo deletes the column (removeColumnStrict), redo re-appends the
@@ -1936,7 +2222,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return where === "left" ? idx : idx + 1;
     };
     /** Append `def` at the end (the addColumn discipline: eager tableRef
-     *  bump, swap the host, persist — throwing, since what follows must
+     *  bump, swap the host, persist, throwing, since what follows must
      *  not move a column the server never got). */
     const appendStrict = async () => {
       const curT = tableRef.current;
@@ -1964,33 +2250,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           },
         });
       } catch {
-        toast("Couldn't insert column — reloading");
+        toast("Couldn't insert the column. Reloading.");
         void load();
       }
     })();
-  }
-
-  /** The blank-sheet seed for a table that has zero columns (legacy, or a
-   *  creation whose seeding failed): the SAME 26-column (A..Z) × 1000-row
-   *  shape lib/sheet-new seeds at creation time, so every sheet opens as
-   *  the sea of empty cells the user asked for. Not undoable on purpose —
-   *  it IS the blank sheet. */
-  async function startSheet() {
-    const cur = tableRef.current ?? table;
-    if (!cur || cur.columns.length > 0) return;
-    const cols: Column[] = Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: newId(), type: "short_text", label: "" }));
-    // Eager tableRef bump, same as addColumn: the guard above must see the
-    // new columns immediately, or a double-click faster than the sync
-    // effect fires the 1000-row seed twice (2000 blank rows).
-    if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
-    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
-    // 26 fresh columns on an empty table: swap (trivially cheap here).
-    rebuildEngine(cols, rowsRef.current ?? []);
-    const ok = await persistColumns(cols);
-    if (!ok) { toast("Couldn't start the sheet"); void load(); return; }
-    try {
-      await insertRowsBatchStrict(Array.from({ length: NEW_SHEET_ROWS }, () => ({ values: {} })));
-    } catch { toast("Couldn't add the starter rows"); }
   }
 
   function saveColumnConfig(colId: string, patch: Partial<Column>) {
@@ -2009,7 +2272,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       rebuildEngine(cols, rowsRef.current ?? []);
     }
     void persistColumns(cols).then((ok) => {
-      if (ok && before) pushColumnPatch(`configure "${col!.label}"`, colId, before, patch);
+      if (!ok) { toast("Couldn't save the column settings. Reloading the table."); void load(); return; }
+      if (before) pushColumnPatch(`configure "${col!.label}"`, colId, before, patch);
     });
     setConfigColId(null);
   }
@@ -2025,32 +2289,30 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (next === (prev ?? "")) return;
     const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: next } : c);
     setTable({ ...table, columns: cols });
-    // A column FORMULA change re-fills every cell of the column — engine
+    // A column FORMULA change re-fills every cell of the column, engine
     // semantics, no incremental op: swap.
     rebuildEngine(cols, rowsRef.current ?? []);
     const ok = await persistColumns(cols);
     if (ok) pushColumnPatch(`edit formula of "${col.label}"`, colId, { formula: prev }, { formula: next });
   }
 
-  /* NO UI reaches renameColumn since the header label input died (headers
-   * are pure letters now), but the rename machinery stays: undo replays
-   * still route through performRenameStrict, [Header] refs in stored
-   * formulas keep resolving against labels, and a future rename surface
-   * plugs straight back in. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept deliberately, see the note above
+  /* The header rename input (Phase 5) reaches this through commitRename. The
+   * input keeps its own local text and writes once, on Enter or blur, so the
+   * pre-edit label is still the live column's; the last SERVER-CONFIRMED
+   * columns are preferred when present because they are the truth a reload
+   * would show. Rewrites every stored [Old] formula reference through the
+   * engine's columnRenamed, persists, and pushes one undo command. */
   function renameColumn(colId: string, label: string) {
     if (!table) return;
-    // The header input is controlled and mutates column state per keystroke,
-    // so by blur time the pre-edit label survives only in the last
-    // SERVER-CONFIRMED columns — that is the honest "before" for undo.
-    const prevLabel = savedColumnsRef.current?.find((c) => c.id === colId)?.label;
+    const prevLabel = savedColumnsRef.current?.find((c) => c.id === colId)?.label
+      ?? table.columns.find((c) => c.id === colId)?.label;
     // Rewrites come from the PRE-rename host, same as deleteColumn: [Header]
     // refs must follow the rename, and without persisting the rewritten
     // sources a rename to a label another column already carries would
     // silently repoint refs via the leftmost-wins rule.
     // Empty labels never go through the engine: "[]" doesn't tokenize, so
     // rewriting [Old] refs to it would corrupt stored formulas. They keep
-    // [Old] and show #NAME? instead — honest and undoable.
+    // [Old] and show #NAME? instead, honest and undoable.
     let res: StructureResult | null = null;
     if (label !== "") { try { res = engineHostRef.current?.columnRenamed(colId, label) ?? null; } catch { /* a rewrite failure must never block the rename */ } }
     const cols = applyColumnRewrites(
@@ -2062,9 +2324,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     else rebuildEngine(cols, rowsRef.current ?? []);
     void (async () => {
       const ok = await persistColumns(cols);
+      // A failed write is never silent: say so and reload the truth, so the
+      // header never shows a name the server does not have.
+      if (!ok) { toast("Couldn't rename the column. Reloading the table."); void load(); return; }
       // Awaited so an immediate undo can't race the rewrite POST (it never throws).
       await persistCellRewrites(res?.rewritten.cells ?? []);
-      if (ok && prevLabel !== undefined && prevLabel !== label) {
+      if (prevLabel !== undefined && prevLabel !== label) {
         pushUndo({
           label: `rename column to "${label}"`,
           // Inverse rename through the live host, so [New]→[Old] header
@@ -2076,12 +2341,163 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     })();
   }
 
+  /** The rename input's commit: clean the name, skip a no-op, refuse a name
+   *  another column already carries (a [Name] formula reference would then
+   *  point at whichever column is leftmost), then rename. */
+  function commitRename(colId: string, raw: string) {
+    const cur = tableRef.current ?? table;
+    const col = cur?.columns.find((c) => c.id === colId);
+    if (!cur || !col) return;
+    const next = cleanColumnName(raw);
+    if (next === col.label) return;
+    // Mid-stream the engine host still holds the pre-stream world and the
+    // tail rows have not arrived, so the [Old] references in them could not
+    // be rewritten and would read #NAME? after the rename.
+    if (streamProgress) { toast("Wait for the rows to finish loading, then rename the column"); return; }
+    // Clearing a name cannot go through the engine ("[]" does not tokenize),
+    // so every formula that says [Old] would silently turn into #NAME?.
+    // Refuse while anything refers to it; a rename keeps them working.
+    if (next === "" && col.label.trim() !== "" && formulasReferToLabel(cur.columns, rowsRef.current ?? [], col.label)) {
+      toast(`Formulas use [${col.label}]. Give the column a new name instead of clearing it.`);
+      return;
+    }
+    if (next && cur.columns.some((c) => c.id !== colId && c.label.trim().toLowerCase() === next.toLowerCase())) {
+      toast(`Another column is already called "${next}"`);
+      return;
+    }
+    renameColumn(colId, next);
+  }
+
+  /** Put keyboard focus back on a column's header (after a rename or a menu). */
+  const focusHeaderCell = (colId: string) => {
+    const idx = (tableRef.current ?? table)?.columns.findIndex((c) => c.id === colId) ?? -1;
+    if (idx < 0) return;
+    window.requestAnimationFrame(() => {
+      gridWrapElRef.current?.querySelector<HTMLElement>(`[role="columnheader"][data-col-index="${idx}"]`)?.focus({ preventScroll: true });
+    });
+  };
+
+  /** The ColumnTypePicker's choice. A type change never rewrites a stored
+   *  cell; it changes how cells read, so the confirm below names how many
+   *  would read differently and offers to copy them into a Text column
+   *  first. Types that mean nothing without more input open their editor:
+   *  Formula asks for the formula, Link / Lookup / Rollup open the relation
+   *  dialog, and a select opens its options editor after the change. */
+  async function chooseColumnType(colId: string, toType: ColumnTypeValue) {
+    const cur = tableRef.current ?? table;
+    const col = cur?.columns.find((c) => c.id === colId);
+    if (!cur || !col || col.type === toType) return;
+    // Mid-stream the tail rows have not arrived: a count or a copy made now
+    // would silently miss them.
+    if (streamProgress) { toast("Wait for the rows to finish loading, then change the type"); return; }
+    const values = (rowsRef.current ?? []).map((r) => r.values[colId]);
+    const patch = typeChangePatch(col, toType, values);
+    // Leaving a computed type (Formula, Lookup, Rollup) hides every value the
+    // column was SHOWING, which lives nowhere in the stored cells, so those
+    // count too, and "keep the old values" copies what was on screen.
+    const losses = COMPUTED_TYPES.has(col.type)
+      ? (rowsRef.current ?? []).filter((r) => computedCellText(col, r) !== "").length
+      : countTypeChangeLosses(values, toType, patch.options ?? col.options);
+    if (losses > 0) { setTypeChange({ colId, toType, cells: losses }); return; }
+    await applyColumnType(colId, toType);
+  }
+
+  /** What a computed column shows in one row, as text. */
+  function computedCellText(col: Column, row: ApiRow): string {
+    try {
+      if (col.type === "formula") return String(engineHostRef.current?.display(col.id, row.id) ?? "");
+      if (col.type === "lookup" || col.type === "rollup") return String(relationalValue(col, row) ?? "");
+    } catch { /* fall through: nothing to show */ }
+    return "";
+  }
+
+  /** Write the type (and whatever it needs first). */
+  async function applyColumnType(colId: string, toType: ColumnTypeValue) {
+    const cur = tableRef.current ?? table;
+    const col = cur?.columns.find((c) => c.id === colId);
+    if (!cur || !col) return;
+    // Link / Lookup / Rollup mean nothing until configured: open the relation
+    // dialog with the type pending, and the type lands with its settings.
+    if (RELATION_TYPES.has(toType)) {
+      setPendingRelType({ colId, type: toType });
+      setConfigColId(colId);
+      return;
+    }
+    const values = (rowsRef.current ?? []).map((r) => r.values[colId]);
+    const patch: Partial<Column> = { ...typeChangePatch(col, toType, values) } as Partial<Column>;
+    if (toType === "formula") {
+      const f = await promptDialog({ title: "Formula for this column", defaultValue: col.formula ?? "=" });
+      if (f == null) return;
+      patch.formula = f.trim();
+    }
+    const before: Partial<Column> = {};
+    for (const k of Object.keys(patch)) (before as Record<string, unknown>)[k] = (col as unknown as Record<string, unknown>)[k];
+    applyColumnPatches([{ colId, before, after: patch }], `change ${columnDisplayName(col.label, cur.columns.indexOf(col))} to ${columnTypeLabel(toType)}`);
+    if (toType === "select" || toType === "multi_select") setOptionsColId(colId);
+  }
+
+  /** "Keep the old values in a new Text column": insert a Text column to the
+   *  right named "{name} (old)", copy every stored value into it, THEN change
+   *  the type. The copy is written before the type change so a failure stops
+   *  the change and loses nothing. */
+  async function keepOldValuesThenChange(colId: string, toType: ColumnTypeValue) {
+    const cur = tableRef.current ?? table;
+    const col = cur?.columns.find((c) => c.id === colId);
+    if (!cur || !col) return;
+    const idx = cur.columns.indexOf(col);
+    const baseName = columnDisplayName(col.label, idx);
+    let name = `${baseName} (old)`;
+    for (let n = 2; cur.columns.some((c) => c.label.trim().toLowerCase() === name.toLowerCase()); n++) name = `${baseName} (old ${n})`;
+    const def: Column = { id: newId(), type: "short_text", label: name };
+    try {
+      const withCopy = [...cur.columns, def];
+      tableRef.current = { ...cur, columns: withCopy };
+      setTable((prev) => (prev ? { ...prev, columns: withCopy } : prev));
+      rebuildEngine(withCopy, rowsRef.current ?? []);
+      if (!(await persistColumns(withCopy))) throw new Error("columns PATCH failed");
+      await performMoveStrict(def.id, idx + 1);
+      // A computed column's "old values" are what it showed, copied as text;
+      // any other column's are its stored cells, copied as they are.
+      const fromComputed = COMPUTED_TYPES.has(col.type);
+      const updates = (rowsRef.current ?? [])
+        .map((r) => ({ id: r.id, v: fromComputed ? computedCellText(col, r) : r.values[colId] }))
+        .filter((u) => u.v !== undefined && u.v !== null && u.v !== "")
+        .map((u) => ({ id: u.id, values: { [def.id]: u.v } }));
+      for (let i = 0; i < updates.length; i += 500) await writeValuesBatchStrict(updates.slice(i, i + 500));
+    } catch {
+      toast("Couldn't copy the old values, so the type was not changed. Reloading the table.");
+      void load();
+      return;
+    }
+    await applyColumnType(colId, toType);
+  }
+
+  /** Column width by number (the keyboard path next to the drag grip). */
+  async function promptColumnWidth(colId: string) {
+    const col = (tableRef.current ?? table)?.columns.find((c) => c.id === colId);
+    if (!col) return;
+    const raw = await promptDialog({ title: "Column width in pixels (40 to 800)", defaultValue: String(col.width ?? 180) });
+    if (raw == null) return;
+    const w = Math.round(Number(raw));
+    if (!Number.isFinite(w) || w < 40 || w > 800) { toast("Enter a width from 40 to 800"); return; }
+    applyColumnPatches([{ colId, before: { width: col.width }, after: { width: w } }], "column width");
+  }
+
+  /** Move column left or right by one (the keyboard path next to drag). */
+  function moveColumnBy(colId: string, dir: -1 | 1) {
+    const cols = (tableRef.current ?? table)?.columns ?? [];
+    const idx = cols.findIndex((c) => c.id === colId);
+    const target = cols[idx + dir];
+    if (idx < 0 || !target) return;
+    moveColumn(colId, target.id);
+  }
+
   async function deleteColumn(colId: string) {
     if (!table) return;
     if (!(await confirm({ title: "Delete column", description: "Delete this column? Existing cell values for it will be lost.", destructive: true, confirmLabel: "Delete" }))) return;
     // Undo capture BEFORE anything mutates: the column def and its index,
     // every row's stored value for it (stored formula objects included), and
-    // — once the host reports its rewrites — the PRE-delete sources those
+    // once the host reports its rewrites, the PRE-delete sources those
     // rewrites replaced, so an undo restores "=B1", never the "#REF!" the
     // delete wrote.
     // Re-resolve BOTH from the live refs: the confirm await spans user time,
@@ -2097,7 +2513,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       .filter((r) => r.values[colId] !== undefined)
       .map((r) => ({ id: r.id, v: r.values[colId] }));
     // Rewrites come from the PRE-delete host: refs right of the column shift
-    // left, refs into it become #REF! — without persisting these, every
+    // left, refs into it become #REF!, without persisting these, every
     // stored formula silently repoints (the bug this wave closes). The host
     // itself skips the dying column's own cells.
     let res: StructureResult | null = null;
@@ -2106,7 +2522,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     try { res = engineHostRef.current?.columnDeleted(colId) ?? null; } catch { /* a rewrite failure must never block the delete */ }
     const rewCells = res?.rewritten.cells ?? [];
     const rewCols = res?.rewritten.columns ?? [];
-    // Pre-delete stored sources of everything the delete rewrote — read
+    // Pre-delete stored sources of everything the delete rewrote, read
     // from React state, which the host's own mutation never touches.
     const liveRowById = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
     const priorCellSources = rewCells.map((rw) => ({
@@ -2122,7 +2538,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // must not have its restored sources overtaken by a still-in-flight
     // rewrite POST landing after them. persistCellRewrites never throws.
     await persistCellRewrites(rewCells);
-    if (!ok) return; // the delete never landed on the server — nothing to undo
+    if (!ok) return; // the delete never landed on the server, nothing to undo
     pushUndo({
       label: `delete column "${colSnapshot.label}"`,
       undo: async () => {
@@ -2153,7 +2569,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       redo: async () => {
         const cur = tableRef.current;
         if (!cur) throw new Error("table gone");
-        // Repeat the delete with the CAPTURED rewrites — after an undo the
+        // Repeat the delete with the CAPTURED rewrites, after an undo the
         // layout matches the original pre-delete state, so they still apply.
         const next = applyColumnRewrites(cur.columns.filter((c) => c.id !== colSnapshot.id), rewCols);
         await saveColumnsStrict(next);
@@ -2195,7 +2611,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     })();
   }
 
-  // Column resize — width persisted on the column (optimistic update while
+  // Column resize, width persisted on the column (optimistic update while
   // dragging; persist once on release).
   function setColumnWidthLocal(colId: string, width: number) {
     setTable((prev) => prev ? { ...prev, columns: prev.columns.map((c) => c.id === colId ? { ...c, width } : c) } : prev);
@@ -2225,7 +2641,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const moved = resizeRef.current?.moved ?? false;
       resizeRef.current = null;
       setResizingColId(null);
-      // Persist only when the drag actually changed a width — see the
+      // Persist only when the drag actually changed a width, see the
       // `moved` note on resizeRef. Queued: a dblclick-autofit lands right
       // after a sub-pixel jiggle's persist, and the queue keeps their
       // server order equal to their UI order (last write = what you see).
@@ -2239,8 +2655,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * footer button: rows now arrive in blocks (the corner "+" below, the
    * silent edge growth, paste overflow), all through insertRowsBatchStrict. */
 
-  /** The corner "+" (bottom-left, above the tab bar): 500 blank rows as
-   *  ONE undoable command — the manual sibling of the silent edge growth
+  /** The corner "+" (bottom-left, under the gutter): 1,000 blank rows as
+   *  ONE undoable command, the manual sibling of the silent edge growth
    *  below, for when that growth is gated off (sorted/filtered) or the
    *  user simply wants runway now. */
   const [addingRows, setAddingRows] = useState(false);
@@ -2248,13 +2664,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!tableId || addingRows) return;
     setAddingRows(true);
     try {
-      const created = await insertRowsBatchStrict(Array.from({ length: 500 }, () => ({ values: {} })));
+      const created = await insertRowsBatchStrict(Array.from({ length: ADD_ROWS_BLOCK }, () => ({ values: {} })));
       // The server hands re-added rows NEW ids on redo, so the command
-      // re-captures them — a second undo must aim at rows that exist.
+      // re-captures them, a second undo must aim at rows that exist.
       let ids = created.map((r) => r.id);
       let redoCreated: string[] = [];
       pushUndo({
-        label: "add 500 rows",
+        label: "add 1,000 rows",
         undo: async () => {
           await deleteRowsBatchStrict(ids);
         },
@@ -2266,7 +2682,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             redoCreated = [];
           }
           const again = await insertRowsBatchStrict(
-            Array.from({ length: 500 }, () => ({ values: {} })),
+            Array.from({ length: ADD_ROWS_BLOCK }, () => ({ values: {} })),
             (chunkIds) => redoCreated.push(...chunkIds),
           );
           ids = again.map((r) => r.id);
@@ -2278,7 +2694,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Silent growth at the bottom edge: the kernel signals (throttled) when
    *  ArrowDown / Enter-commit walks off the last row, and 100 blank rows
-   *  appear — Sheets' "keep typing, the sheet keeps up". Deliberately
+   *  appear, Sheets' "keep typing, the sheet keeps up". Deliberately
    *  NON-undoable (blank appends destroy nothing; Ctrl+Z should keep
    *  undoing the user's EDITS, not un-grow the sheet under them) and
    *  gated: never while a sort/filter/search reorders display (the new
@@ -2287,12 +2703,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const growRowsBusyRef = useRef(false);
   function growRows() {
     if (growRowsBusyRef.current) return;
-    if (sortState || filterCol || search.trim() || streamProgress) return;
+    if (sortState || filterActive || search.trim() || streamProgress) return;
     if ((rowsRef.current?.length ?? 0) >= 50_000) return;
     growRowsBusyRef.current = true;
     void (async () => {
       try {
-        // Strict insert path, but NO pushUndo — that is the whole
+        // Strict insert path, but NO pushUndo, that is the whole
         // difference from addRowsBlock. Absorbed via the standard
         // insert-absorb path (end-appends yield no rewrites).
         await insertRowsBatchStrict(Array.from({ length: 100 }, () => ({ values: {} })));
@@ -2304,13 +2720,60 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     })();
   }
 
-  /** Phase 5c: a guarded PATCH bounced (409) — another client changed the
+  /** A table with columns and NO rows (a template or an agent created it
+   *  with columns, or its starter rows never landed). Sheets never has one:
+   *  you click A1 and type. The kernel paints placeholder rows and, on the
+   *  first click, arrow or typed character, asks for the runway: the same
+   *  1,000 blank rows a new table opens with, non-undoable for the reason
+   *  growRows gives. The cell the person aimed at then becomes active, and
+   *  a typed character opens its editor (activeRequest.seed), so the
+   *  keystroke that started the table is not lost. Same gates as growth. */
+  const emptyStartBusyRef = useRef(false);
+  // EVERY KEY TYPED WHILE THE RUNWAY IS BEING CREATED, not just the first.
+  //
+  // The grid calls onEmptyStart once per keydown while the table still has
+  // no rows, and the 1,000-row batch takes a round trip (about 90ms on
+  // localhost, far more in production). This used to return early on the
+  // busy flag, so only the FIRST character reached the editor: typing
+  // "hello world" at speed saved "h", and even at a human pace of 150ms a
+  // key it saved "hllo world". That is typed data silently lost, the one
+  // thing a spreadsheet may never do. So the keys are appended here while
+  // busy, the editor opens holding all of them, and a failed batch hands the
+  // whole buffer to Retry rather than only the key that started it.
+  const emptyStartTypedRef = useRef("");
+  function startEmptyGrid(at: { r: number; c: number; seed: string | null }) {
+    if (emptyStartBusyRef.current) {
+      if (at.seed) emptyStartTypedRef.current += at.seed;
+      return;
+    }
+    if (!tableId) return;
+    if ((rowsRef.current?.length ?? 0) > 0) return;
+    if (sortState || filterActive || search.trim() || streamProgress) return;
+    emptyStartBusyRef.current = true;
+    emptyStartTypedRef.current = at.seed ?? "";
+    void (async () => {
+      try {
+        const created = await insertRowsBatchStrict(Array.from({ length: ADD_ROWS_BLOCK }, () => ({ values: {} })));
+        const target = created[Math.min(Math.max(at.r, 0), created.length - 1)];
+        const seed = emptyStartTypedRef.current || null;
+        if (target) setFindActiveRequest({ rowId: target.id, c: at.c, nonce: ++findNonceRef.current, seed });
+      } catch {
+        const kept = { ...at, seed: emptyStartTypedRef.current || null };
+        toast("Couldn't add rows", { tone: "danger", action: { label: "Retry", onClick: () => startEmptyGrid(kept) } });
+      } finally {
+        emptyStartBusyRef.current = false;
+        emptyStartTypedRef.current = "";
+      }
+    })();
+  }
+
+  /** Phase 5c: a guarded PATCH bounced (409), another client changed the
    *  cell(s) this edit vouched for. Fold ONLY the conflicted columns (where
    *  the server provably outran us) plus server keys we hold no local value
    *  for, through the same host-then-mirror order every optimistic write
    *  uses. Deliberately NOT the whole row: our own queued sibling-cell
    *  writes may still be in flight, and a wholesale absorb would clobber
-   *  their optimistic values with an older server snapshot — they land on
+   *  their optimistic values with an older server snapshot, they land on
    *  the server moments later, so keeping them IS the fresher truth. A
    *  conflicted cell absent from `current` recomputes as null (the other
    *  client cleared it). */
@@ -2344,16 +2807,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Optimistic single-row PATCH, undoable. Before-values are captured from
    *  local state ahead of the optimistic write; the formula path passes
-   *  `opts.before` instead — engine setCell's { previous } return, which is
+   *  `opts.before` instead, engine setCell's { previous } return, which is
    *  the authoritative overwritten value (built for exactly this wave).
    *
-   *  opts.guard — THE Phase 5c concurrency opt-in, and the one central spot
+   *  opts.guard, THE Phase 5c concurrency opt-in, and the one central spot
    *  deciding who sends `expect`. Only the single-cell commit paths
-   *  (commitEditorValue / commitCellText — they know the exact stored value
+   *  (commitEditorValue / commitCellText, they know the exact stored value
    *  the user saw and replaced) set it; `before` doubles as `expect`, so the
    *  server refuses the write (409) when another client changed that cell
-   *  first. Every other write path — paste, fill, clear, bulk ops, undo/redo
-   *  replay, the picker cells (link/person/attachment) and the row drawer —
+   *  first. Every other write path, paste, fill, clear, bulk ops, undo/redo
+   *  replay, the picker cells (link/person/attachment) and the row drawer,
    *  stays unconditional ON PURPOSE: overwriting a range is those gestures'
    *  explicit intent, and a per-cell refusal mid-gesture would shred it into
    *  a patchwork of applied and refused cells. */
@@ -2391,13 +2854,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const expect = opts?.guard
         ? Object.fromEntries(Object.entries(before).filter(([k]) => !isReservedKey(k)))
         : undefined;
-      const res = await writeQueueRef.current.run(() => fetch(`/api/tables/${tableId}/rows`, {
+      const res = await writeQueueRef.current.run(() => fetchWithRetry(`/api/tables/${tableId}/rows`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId, values, ...(expect ? { expect } : {}) }),
       }));
       // 409 = the guard refused the write: NOTHING landed on the server.
-      // Server truth replaces the optimistic value — the user's rejected
-      // input is dropped, the same outcome Sheets gives on refresh — and
+      // Server truth replaces the optimistic value, the user's rejected
+      // input is dropped, the same outcome Sheets gives on refresh, and
       // the early return keeps the rejected write out of history: pushUndo
       // below only ever runs after an APPLIED write, so no entry exists to
       // pop, and Ctrl+Z can never “restore” a value the server never left.
@@ -2410,6 +2873,26 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const conflictCols: string[] = Array.isArray(payload?.conflictCols)
           ? (payload.conflictCols as unknown[]).filter((c): c is string => typeof c === "string")
           : Object.keys(values); // body lacks the list: the vouched-for cells are the conflict set
+        // The conflict can be our OWN write: the first attempt landed, its
+        // answer was lost, and fetchWithRetry sent it again against a guard
+        // that now sees the new value. When the server already holds every
+        // value this edit wrote, it applied; record it like any other edit.
+        const ownWriteLanded = !!current && Object.keys(values).length > 0
+          && Object.entries(values).every(([k, v]) => isReservedKey(k) || jsonEqual(current[k], v));
+        if (ownWriteLanded) {
+          noteWriteSettled(rowLedgerKey(rowId), Object.keys(values));
+          if (prevRow) {
+            pushUndo({
+              label: opts?.label ?? "cell edit",
+              undo: () => writeValuesBatchStrict([{ id: rowId, values: before }]),
+              redo: () => writeValuesBatchStrict([{ id: rowId, values }]),
+            });
+          }
+          return;
+        }
+        // The server's value replaced ours on purpose (the concurrency
+        // guard): those cells are no longer waiting to be saved.
+        noteWriteSettled(rowLedgerKey(rowId), Object.keys(values));
         if (current) {
           absorbConflictRow(rowId, current, conflictCols);
           // A rich commit ("5%") carried the row's style map in the same
@@ -2421,11 +2904,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             const serverMap = Object.prototype.hasOwnProperty.call(current, CELL_STYLE_KEY) ? current[CELL_STYLE_KEY] : null;
             commitRows((prev) => prev ? prev.map((r) => r.id === rowId ? { ...r, values: { ...r.values, [CELL_STYLE_KEY]: serverMap ?? null } } : r) : prev);
           }
-        } else void load(); // conflict body unreadable — reload is the reconcile
-        toast("Cell updated by someone else — showing the latest value");
+        } else void load(); // conflict body unreadable: reload is the reconcile
+        // The concurrency guard's visible half (Tables Phase 5 backlog): the
+        // other person's value is on screen now, and Reload brings every row
+        // up to date, instead of a silent clobber either way.
+        toast("This row changed while you were editing", {
+          description: "Showing the latest value.",
+          action: { label: "Reload", onClick: () => void load() },
+        });
         return;
       }
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      setLastSavedAt(new Date());
+      noteWriteSettled(rowLedgerKey(rowId), Object.keys(values));
       if (prevRow) {
         pushUndo({
           label: opts?.label ?? "cell edit",
@@ -2433,12 +2924,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           redo: () => writeValuesBatchStrict([{ id: rowId, values }]),
         });
       }
-    } catch { toast("Cell didn't save"); }
+    } catch {
+      // A failed save never drops silently: the typed value stays in the
+      // grid, the indicator reads "Not saved", and Retry re-sends it.
+      noteWriteFailed(rowLedgerKey(rowId), values);
+      toast("Cell didn't save", { tone: "danger", key: SAVE_FAILED_TOAST, action: { label: "Retry", onClick: () => void retryFailedWrites() } });
+    }
   }
 
   /** Persist the engine host's per-cell rewrites after a structure change.
-   *  The stored value is the { "=": source } object the host built — the
-   *  same shape a formula edit stores — through the same batch path as every
+   *  The stored value is the { "=": source } object the host built, the
+   *  same shape a formula edit stores, through the same batch path as every
    *  other bulk write. Computed values are derived and are never persisted. */
   async function persistCellRewrites(cells: { colId: string; rowId: string; stored: unknown }[]) {
     if (!tableId || cells.length === 0) return;
@@ -2454,7 +2950,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const missing = new Set<string>();
       await writeQueueRef.current.run(async () => {
         for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
@@ -2463,14 +2959,27 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }
       });
       noteRowsDeletedElsewhere(missing);
-    } catch { toast("Couldn't rewrite formulas for the new layout"); void load(); }
+      for (const u of updates) noteWriteSettled(rowLedgerKey(u.id), Object.keys(u.values));
+    } catch {
+      // The layout change (a column rename, an insert) has already landed, so
+      // a reload here would bring back cells whose formulas still name the old
+      // layout and read #NAME?. Instead every rewrite goes into the unsaved
+      // ledger: the grid keeps the rewritten formulas, the indicator reads
+      // "Not saved", leaving asks first, and Retry re-sends them.
+      for (const u of updates) noteWriteFailed(rowLedgerKey(u.id), u.values);
+      toast("Couldn't save the formulas rewritten for the new layout", {
+        tone: "danger",
+        key: SAVE_FAILED_TOAST,
+        action: { label: "Retry", onClick: () => void retryFailedWrites() },
+      });
+    }
   }
 
   async function clearCells(cells: { rowId: string; colId: string }[]) {
     if (!tableId || cells.length === 0) return;
     const byRow = new Map<string, Record<string, unknown>>();
     // Before-values captured from pre-clear state, per cell actually cleared
-    // — an undo puts back EXACTLY what was there, stored formulas included.
+    // an undo puts back EXACTLY what was there, stored formulas included.
     const befores = new Map<string, Record<string, unknown>>();
     for (const c of cells) {
       const m = byRow.get(c.rowId) ?? {};
@@ -2480,20 +2989,20 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       b[c.colId] = rowById.get(c.rowId)?.values[c.colId] ?? null;
       befores.set(c.rowId, b);
     }
-    // ONE setCells pass clears every cell in the host before the paint —
+    // ONE setCells pass clears every cell in the host before the paint,
     // a select-all clear is one recalc, not one per cell.
     driveHostWrites(cells.map((c) => ({ colId: c.colId, rowId: c.rowId, raw: null })));
     commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     const updates = [...byRow].map(([id, values]) => ({ id, values }));
     try {
       // Sequential slices riding one queued job: a failure part-way stops
-      // the rest, the reload in the catch reconciles whatever did land —
-      // the UI never keeps an optimistic clear the server rejected — and
+      // the rest, the reload in the catch reconciles whatever did land,
+      // the UI never keeps an optimistic clear the server rejected, and
       // no other value write can interleave between the slices.
       const missing = new Set<string>();
       await writeQueueRef.current.run(async () => {
         for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
@@ -2514,13 +3023,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Per-cell formatting write (the B/I/U/S, colour, fill and align
    *  toolbar): apply one style patch to every cell of a rectangle.
    *
-   *  Each touched row is a READ-MODIFY-WRITE of its whole "$fmt" map —
+   *  Each touched row is a READ-MODIFY-WRITE of its whole "$fmt" map,
    *  the server merge is shallow, so the map is the unit of persistence,
    *  never a single cell's entry. The write is unconditional (no expect:
    *  a style is the user's explicit intent over the range, and a per-row
    *  409 mid-gesture would shred it), undoable as ONE command across all
    *  N rows (before = each row's old map, after = its new map), and rides
-   *  writeValuesBatchStrict so the mirror repaints at once — the engine
+   *  writeValuesBatchStrict so the mirror repaints at once, the engine
    *  host never sees it (driveHostWrites filters the reserved key; styles
    *  don't recalc, so no bump is needed). A fully-cleared map writes null
    *  rather than dropping the key: the shallow merge can't delete, and
@@ -2540,7 +3049,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const afters: { id: string; values: Record<string, unknown> }[] = [];
     for (const rowId of targets.rowIds) {
       const row = byId.get(rowId);
-      if (!row) continue; // deleted since the selection settled — skip, never invent a row
+      if (!row) continue; // deleted since the selection settled, skip, never invent a row
       let values = row.values;
       for (const colId of targets.colIds) {
         const cellPatch = typeof patch === "function" ? patch(row, colId) : patch;
@@ -2548,7 +3057,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
       const oldMap = row.values[CELL_STYLE_KEY] ?? null;
       const newMap = values[CELL_STYLE_KEY] ?? null;
-      if (sameStyleMap(oldMap, newMap)) continue; // already styled this way — no write, no history
+      if (sameStyleMap(oldMap, newMap)) continue; // already styled this way, no write, no history
       befores.push({ id: rowId, values: { [CELL_STYLE_KEY]: oldMap } });
       afters.push({ id: rowId, values: { [CELL_STYLE_KEY]: newMap } });
     }
@@ -2574,7 +3083,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // Rewrites for the SURVIVORS, computed before local state loses the rows:
     // refs below a deleted row shift up, refs into it become #REF!. Each
     // hook call mutates the host's model, so later calls see the shape the
-    // earlier ones left — the merged map (last write wins) is cumulative.
+    // earlier ones left, the merged map (last write wins) is cumulative.
     const cellRewrites = new Map<string, { colId: string; rowId: string; stored: unknown }>();
     const colRewrites = new Map<string, string>();
     let hostOk = true;
@@ -2587,8 +3096,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }
         for (const cw of res.rewritten.columns) colRewrites.set(cw.colId, cw.formula);
       }
-    } catch { hostOk = false; /* never block the delete — the rebuild below recovers */ }
-    // Full snapshots BEFORE the optimistic removal — plan 3a names undo as
+    } catch { hostOk = false; /* never block the delete, the rebuild below recovers */ }
+    // Full snapshots BEFORE the optimistic removal, plan 3a names undo as
     // the REQUIRED mitigation for this unrecoverable deleteMany. Positions
     // ride along and are sent as EXPLICIT insert positions on undo, so
     // restored rows land exactly where they were, not at the end.
@@ -2619,7 +3128,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     try {
       for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ deletes: ids.slice(i, i + BATCH_MAX_OPS) }),
         });
@@ -2628,7 +3137,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // The server hands restored rows NEW ids, so the command re-captures
       // them: a second undo/redo cycle acts on rows that actually exist.
       // Restored rows keep their ORIGINAL positions, so survivors' #REF!
-      // rewrites are reverted too — the refs point at the same rows again
+      // rewrites are reverted too, the refs point at the same rows again
       // and the table comes back byte-identical.
       let currentIds = ids.slice();
       let restoredIds: string[] = [];
@@ -2692,7 +3201,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   async function deleteRow(rowId: string) {
     if (!tableId) return;
     if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
-    // Snapshot before anything mutates — undo restores these exact values.
+    // Snapshot before anything mutates, undo restores these exact values.
     // rowsRef, not render-scope rows: the confirm await can span mutations.
     const snapshot = (rowsRef.current ?? []).find((r) => r.id === rowId);
     const snapValues = snapshot ? { ...snapshot.values } : null;
@@ -2709,11 +3218,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (res) bumpEngine();
     else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     try {
-      const delRes = await fetch(`/api/tables/${tableId}/rows`, {
+      // A delete is idempotent (a repeat after a lost answer finds the row
+      // already gone), so it rides the retry like the other value writes.
+      const delRes = await fetchWithRetry(`/api/tables/${tableId}/rows`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId }),
       });
-      if (!delRes.ok) throw new Error(`DELETE ${delRes.status}`);
+      // 404 means the row is already gone: a retry whose first attempt
+      // landed, or a delete from another tab. Either way the row is deleted.
+      if (!delRes.ok && delRes.status !== 404) throw new Error(`DELETE ${delRes.status}`);
       if (snapValues) {
         // Same shape as bulk delete: the restore appends with a NEW id, the
         // command re-captures it, and survivor rewrites stay as-is (v1).
@@ -2737,13 +3250,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch { toast("Couldn't delete row"); void load(); }
   }
 
-  /** Move a row to a new index — the gutter drag AND both undo bodies run
+  /** Move a row to a new index, the gutter drag AND both undo bodies run
    *  through this one path, so a move and its inverse rewrite formulas
    *  identically. STRICT: throws on persist failure (undo needs truth).
    *
    *  Ordering is the deleteColumn discipline: (1) drive the host FIRST so
    *  ref rewrites are computed against the pre-move layout ("=A5" must
-   *  keep meaning the row that moved, refs in between must shift by one —
+   *  keep meaning the row that moved, refs in between must shift by one,
    *  losing one silently is the catastrophic bug); (2) renumber + reorder
    *  the local mirror to match storage order; (3) persist positions;
    *  (4) persist the host's rewrites (cells via the strict batch value
@@ -2752,21 +3265,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  Position renumbering is a ROTATION of the positions the span already
    *  held: post-move row i of the span takes the i-th pre-move position.
    *  The moved row therefore lands on the target row's old position and
-   *  every in-between row shifts one slot toward the vacated one — no new
+   *  every in-between row shifts one slot toward the vacated one, no new
    *  numbers are minted, so uniqueness and any historical gaps (deleted
    *  rows) survive, and position order keeps matching display order.
    *
    *  Indices here are STORAGE indices (rowsRef order). The gesture may
    *  only translate a display index into one while display order == storage
-   *  order — that is why the page withholds onRowMove under sort/filter/
-   *  search/stream — but an undo replay is safe even if the user has since
+   *  order, that is why the page withholds onRowMove under sort/filter/
+   *  search/stream, but an undo replay is safe even if the user has since
    *  sorted: it re-runs in storage terms and the display just re-sorts. */
   async function performRowMoveStrict(rowId: string, toIndex: number) {
     if (!tableId) throw new Error("no table");
     const cur = rowsRef.current;
     if (!cur) throw new Error("rows gone");
     const from = cur.findIndex((r) => r.id === rowId);
-    if (from < 0) return; // row deleted since — no-op, never corrupt
+    if (from < 0) return; // row deleted since, no-op, never corrupt
     const to = Math.max(0, Math.min(cur.length - 1, toIndex));
     if (from === to) return;
 
@@ -2787,7 +3300,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const p = spanPositions[i - lo];
       if (next[i].position !== p) {
         next[i] = { ...next[i], position: p };
-        // values: {} — the batch route treats a keyless entry as
+        // values: {}, the batch route treats a keyless entry as
         // position-only and writes nothing else for it.
         posUpdates.push({ id: next[i].id, values: {}, position: p });
       }
@@ -2796,7 +3309,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (res) bumpEngine();
     else rebuildEngine(tableRef.current?.columns ?? [], next);
 
-    // (3) Positions AND cell rewrites merge into the SAME batch entries —
+    // (3) Positions AND cell rewrites merge into the SAME batch entries,
     // the route writes values+position per row in one transaction, so a
     // network drop can no longer land the new order while the old formula
     // text survives (the silent-repoint catastrophe an unpersisted rewrite
@@ -2816,7 +3329,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const moveOps = [...mergedOps.values()];
     await writeQueueRef.current.run(async () => {
       for (let i = 0; i < moveOps.length; i += BATCH_MAX_OPS) {
-        const r = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        const r = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ updates: moveOps.slice(i, i + BATCH_MAX_OPS) }),
         });
@@ -2825,7 +3338,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
 
     // (4) Column-formula rewrites live on the TABLE record, not the data
-    // rows, so they cannot join the batch transaction above — that narrow
+    // rows, so they cannot join the batch transaction above, that narrow
     // window (row-anchored ranges inside COLUMN formulas only) remains,
     // and a failed save still throws into the caller's toast+reload.
     if (res && res.rewritten.columns.length > 0) {
@@ -2837,10 +3350,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   /** The gutter-drag entry point. Undo moves the row back through the SAME
-   *  strict path — the live host then rewrites every ref back, and those
+   *  strict path, the live host then rewrites every ref back, and those
    *  reverted rewrites persist exactly like the forward ones did (the
    *  deleteColumn revert discipline, achieved by inversion rather than
-   *  snapshots, because a move — unlike a delete — loses nothing). */
+   *  snapshots, because a move, unlike a delete, loses nothing). */
   function moveRowByDrag(rowId: string, toDisplayIndex: number) {
     const cur = rowsRef.current ?? [];
     const from = cur.findIndex((r) => r.id === rowId);
@@ -2854,18 +3367,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           undo: () => performRowMoveStrict(rowId, from),
           redo: () => performRowMoveStrict(rowId, to),
         });
-      } catch { toast("Couldn't move row — reloading"); void load(); }
+      } catch { toast("Couldn't move the row. Reloading."); void load(); }
     })();
   }
 
-  /** The kernel's row-resize release — and the boundary double-click,
+  /** The kernel's row-resize release, and the boundary double-click,
    *  which arrives as the DEFAULT height meaning "reset". Persists through
    *  the normal UNCONDITIONAL row write (a resize is explicit intent over
    *  the row(s); no expect guard, the paste/fill policy) and lands ONE
    *  undo command whether it touched one row or the whole selected group:
    *  Sheets resizes every selected row together when the dragged boundary
    *  belongs to one of them, and single-row is the fallback. Heights never
-   *  reach the engine host — driveHostWrites drops the reserved key — so
+   *  reach the engine host, driveHostWrites drops the reserved key, so
    *  a resize costs no recalc and no engine bump. */
   function resizeRowsTo(rowId: string, height: number) {
     // The default height stores as null, not as the number 33: null and
@@ -2880,7 +3393,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const live = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
     // Already at the target height ⇒ no write, no history entry (the
     // formatCells no-op rule). Junk stored values read as default, so a
-    // reset over junk is ALSO a no-op — readers never saw the junk anyway.
+    // reset over junk is ALSO a no-op, readers never saw the junk anyway.
     const changed = targets.filter((id) => {
       const row = live.get(id);
       return !!row && (readRowHeight(row.values[ROW_HEIGHT_KEY]) ?? null) !== px;
@@ -2912,7 +3425,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Row-menu "Insert 1 row above/below" (Sheets). No new server code:
    *  append a blank row through the existing create path (the server
    *  allocates its position), then move it into place through
-   *  performRowMoveStrict — the SAME path the gutter drag uses, so refs
+   *  performRowMoveStrict, the SAME path the gutter drag uses, so refs
    *  at/below the slot shift by one exactly like a Sheets insert. ONE
    *  undo command: undo deletes that row (strict), redo re-inserts and
    *  re-targets against the anchor row as it sits THEN (ids, not indices,
@@ -2920,7 +3433,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  end rather than guessing). Gated like row moves: a storage index is
    *  only a display index while nothing reorders the display. */
   function insertRowNear(anchorRowId: string, where: "above" | "below") {
-    if (sortState || filterCol || search.trim() || streamProgress) {
+    if (sortState || filterActive || search.trim() || streamProgress) {
       toast("Clear the sort, filter and search to insert rows");
       return;
     }
@@ -2955,7 +3468,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         // A row may have been appended but not moved: the reload
         // reconciles (it renders at the end, honestly), and nothing
         // half-done enters history.
-        toast("Couldn't insert row — reloading");
+        toast("Couldn't insert the row. Reloading.");
         void load();
       }
     })();
@@ -2964,7 +3477,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Row-menu "Clear row(s)": null into every editable cell of the row(s)
    *  through the existing clear path (undoable, setCells so dependents
    *  recompute). Computed columns are skipped exactly as the kernel's
-   *  Delete key skips them. Formatting is left alone — Sheets' "Clear
+   *  Delete key skips them. Formatting is left alone, Sheets' "Clear
    *  row" clears contents, not styles. */
   function clearRows(rowIds: string[]) {
     const cur = tableRef.current ?? table;
@@ -2985,32 +3498,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const col = cur?.columns.find((c) => c.id === colId);
     if (!col) return;
     if (col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
-      toast("This column is computed — edit its formula or relation instead");
+      toast("This column is computed. Edit its formula or relation instead.");
       return;
     }
     const cells = (rowsRef.current ?? []).map((r) => ({ rowId: r.id, colId }));
     if (cells.length === 0) return;
     void clearCells(cells);
-  }
-
-  async function importCsv(file: File) {
-    if (!tableId) return;
-    try {
-      const csv = await file.text();
-      const res = await fetch(`/api/tables/${tableId}/import`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        toast(`Import failed: ${err.error}`);
-        return;
-      }
-      const d = await res.json();
-      const r = d.data ?? d;
-      toast(`Imported ${r.rowsCreated} row${r.rowsCreated === 1 ? "" : "s"}${r.columnsAdded ? `, added ${r.columnsAdded} column${r.columnsAdded === 1 ? "" : "s"}` : ""}`);
-      void load();
-    } catch { toast("Couldn't import CSV"); }
   }
 
   /** CSV export. `formatted` runs display values through formatCellValue
@@ -3022,9 +3515,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // partial table, and computed cells would read a stale engine. Refuse
     // out loud instead; the stream completes in seconds.
     if (streamProgress) { toast("Rows are still loading, try again in a moment"); return; }
-    // Anonymous columns export under their letter, like Excel would —
+    // Anonymous columns export under their letter, like Excel would,
     // an empty header cell would make the file unreadable elsewhere.
-    const headers = table.columns.map((c, i) => csvEscape(c.label || columnLetter(i))).join(",");
+    // CSV injection: a header or a text cell someone typed (or imported, or
+    // sent through a form) as =HYPERLINK(...) or +cmd would run as a formula
+    // when the file is opened in Excel or Sheets. It goes out through
+    // csvExportCell, the same function GET /api/tables/[id]/export uses, so
+    // the two exports cannot disagree. A cell that reads as a number (-42,
+    // -$42.00, 12%) goes out as a number; anything else is escaped.
+    const headers = table.columns.map((c, i) => csvEscape(csvFormulaSafe(c.label || columnLetter(i)))).join(",");
     const bodyRows = rows.map((r) =>
       table.columns.map((c) => {
         const v = r.values[c.id];
@@ -3051,7 +3550,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           if (formatted && isOpenColumnType(c.type)) return formatOpenCell(v, readCellStyle(r.values, c.id));
           return Array.isArray(v) ? v.join("; ") : String(v);
         })();
-        return csvEscape(str);
+        // Decided on the TEXT: see csvExportCell for why neither the column
+        // type nor the value's type is allowed to exempt a cell.
+        return csvEscape(csvExportCell(str));
       }).join(","),
     );
     const csv = [headers, ...bodyRows].join("\n");
@@ -3067,8 +3568,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   // The persistent host lives in engineHostRef (declared with the mutation
-  // helpers above). Lazy-created here so the very first render — before
-  // load() delivers data and swaps in the real one — still has a host to
+  // helpers above). Lazy-created here so the very first render, before
+  // load() delivers data and swaps in the real one, still has a host to
   // read from; writing a ref during render is React's sanctioned lazy-init
   // pattern, and it runs exactly once.
   if (engineHostRef.current === null) {
@@ -3116,7 +3617,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return out;
   }, [linkedTables]);
 
-  const configColumn = configColId ? (table?.columns ?? []).find((c) => c.id === configColId) ?? null : null;
+  const configColumnRaw = configColId ? (table?.columns ?? []).find((c) => c.id === configColId) ?? null : null;
+  // A Link / Lookup / Rollup chosen in the type picker opens this dialog
+  // BEFORE the type is written: the dialog reads the pending type, and the
+  // type lands together with its configuration in one saveColumnConfig write.
+  const configColumn = configColumnRaw && pendingRelType?.colId === configColumnRaw.id
+    ? { ...configColumnRaw, type: pendingRelType.type as ColType }
+    : configColumnRaw;
 
   // ── Sheet kernel derived state ──────────────────────────────────
   // Hooks, so they can sit above the early returns AND feed the active-cell
@@ -3125,8 +3632,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /* ── Per-row heights for the kernel (Sheets' row resize) ─────────
    * One Map of ONLY the rows carrying a custom "$rh". Rebuilt with a
-   * single-key O(n) scan whenever `rows` changes — the page already runs
-   * several O(n) passes per commit (rowById above, filteredRows below) —
+   * single-key O(n) scan whenever `rows` changes, the page already runs
+   * several O(n) passes per commit (rowById above, filteredRows below),
    * but the RETURNED identity only changes when some height actually
    * changed, so an ordinary cell edit keeps the previous map and the
    * version below stays put. That version is the kernel contract's
@@ -3189,15 +3696,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }),
       );
     }
-    if (filterCol && filterValue) {
-      list = list.filter((r) => {
-        const v = r.values[filterCol];
-        if (Array.isArray(v)) return v.includes(filterValue);
-        return String(v ?? "") === filterValue;
-      });
+    // Every column filter must hold (lib/sheet-filters cellPassesFilter). A
+    // select column matches a chosen option exactly; a number or date
+    // column its range; any other its shown text CONTAINS the needle. A
+    // formula cell is matched on what it SHOWS, dark mid-stream like search.
+    const live = filters.filter(filterIsActive);
+    if (live.length > 0) {
+      const typeOf = new Map(cols.map((c) => [c.id, c.type]));
+      list = list.filter((r) => live.every((f) => {
+        const v = r.values[f.colId];
+        const shown = isFormulaCell(v)
+          ? (streamProgress ? "" : String(engineHost.display(f.colId, r.id) ?? ""))
+          : String(Array.isArray(v) ? v.join(" ") : v ?? "");
+        return cellPassesFilter(f, v, shown, typeOf.get(f.colId));
+      }));
     }
     return list;
-  }, [rows, table?.columns, search, filterCol, filterValue, engineHost, engineVersion, streamProgress]);
+  }, [rows, table?.columns, search, filters, engineHost, engineVersion, streamProgress]);
 
   const sortedRows = useMemo(() => {
     void engineVersion; // computed sort keys change when the host mutates
@@ -3205,7 +3720,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols = table?.columns ?? [];
     const col = cols.find((c) => c.id === sortState.colId);
     if (!col) return filteredRows;
-    // Sorting reads COMPUTED values but reorders only the display list —
+    // Sorting reads COMPUTED values but reorders only the display list,
     // formulas keep evaluating against the unsorted `rows` order (the
     // Phase 1 row-anchoring rule).
     const sortValue = (r: ApiRow): unknown => {
@@ -3276,7 +3791,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (!r) continue; // stale id (row deleted after the payload fired): empty
       for (const c of cols) {
         values.push(
-          // Lookup/rollup are computed display-time from linked tables — the
+          // Lookup/rollup are computed display-time from linked tables, the
           // engine host has no relational awareness, so reading it here would
           // yield null for cells the grid shows as numbers.
           c.type === "lookup" || c.type === "rollup"
@@ -3301,6 +3816,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Identity-stable row-id list for the kernel: a fresh array per render
   // would re-run the kernel's geometry/index memos on every keystroke.
   const sortedRowIds = useMemo(() => sortedRows.map((r) => r.id), [sortedRows]);
+  // The gutter's row numbers are the STORAGE positions, the same numbers the
+  // name box and every A1 reference use (see barCell below). Under a filter
+  // or sort the gutter used to renumber the visible rows 1, 2, 3, so real
+  // rows 6 and 8 read "1" and "2" beside a name box that said D8.
+  const rowNumberById = useMemo(() => rowNumbersById(rows ?? []), [rows]);
+  const rowNumberOf = useCallback((rowId: string) => rowNumberById.get(rowId), [rowNumberById]);
 
   // ── Active-cell tracking for the formula bar ────────────────────
   // The sheet kernel owns selection internally (and this wave does not touch
@@ -3308,7 +3829,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // exactly one gridcell carries the active-outline class. A MutationObserver
   // follows it through clicks, keys, and post-paste selection moves. When the
   // active row scrolls out of the virtual window its node unmounts and the
-  // last known cell is kept — scrolling away is not deselection.
+  // last known cell is kept, scrolling away is not deselection.
   const [activeCell, setActiveCell] = useState<{ rowId: string; colId: string } | null>(null);
   const displayRowIdsRef = useRef<string[]>([]);
   const colIdsRef = useRef<string[]>([]);
@@ -3325,7 +3846,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!el) return;
     const read = () => {
       const cellEl = el.querySelector('[role="gridcell"][class*="outline"]');
-      if (!cellEl) return; // active cell unmounted (scrolled away) — keep the last one
+      if (!cellEl) return; // active cell unmounted (scrolled away), keep the last one
       const r = Number(cellEl.closest('[role="row"]')?.getAttribute("aria-rowindex")) - 1;
       const c = Number(cellEl.getAttribute("aria-colindex")) - 1;
       const rowId = displayRowIdsRef.current[r];
@@ -3338,6 +3859,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     gridObserverRef.current = mo;
     read();
   }, []);
+  // The kernel also REPORTS its active cell (onActiveChange), which is the
+  // source of truth when the active row is outside the virtual window and
+  // has no DOM node to observe (a header-letter click while scrolled down).
+  const onGridActiveChange = useCallback((cell: { rowId: string; c: number }) => {
+    const colId = colIdsRef.current[cell.c];
+    if (!colId) return;
+    setActiveCell((prev) => (prev && prev.rowId === cell.rowId && prev.colId === colId ? prev : { rowId: cell.rowId, colId }));
+  }, []);
 
   /* ── Find & Replace (Sheets' Cmd+F / Cmd+H) ──────────────────────
    * Page-local, never persisted: the card, its query and its highlights
@@ -3345,7 +3874,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * every tint (the match set below empties when findOpen drops).
    *
    * findQuery is the input's live value; findQueryDebounced is what the
-   * scan actually runs on, ~150ms behind — the scan is a full
+   * scan actually runs on, ~150ms behind, the scan is a full
    * sortedRows × columns pass (computed cells read the engine host), and
    * re-running it on every keystroke of a fast typist would burn frames
    * for match sets nobody sees. */
@@ -3354,18 +3883,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [findQuery, setFindQuery] = useState("");
   const [findQueryDebounced, setFindQueryDebounced] = useState("");
   const [findReplace, setFindReplace] = useState("");
-  // Index into findMatches of the CURRENT match (clamped at read time —
+  // Index into findMatches of the CURRENT match (clamped at read time,
   // the list can shrink under it after a replace or an edit elsewhere).
   const [findIndex, setFindIndex] = useState(0);
   // Whether the user has NAVIGATED yet for this query: the first Enter
   // activates match 1 (already shown as current) instead of skipping to 2.
   const [findActivated, setFindActivated] = useState(false);
-  // The honest replace note ("N skipped — …"), shown inside the card.
+  // The honest replace note ("N skipped, …"), shown inside the card.
   const [findNotice, setFindNotice] = useState<string | null>(null);
   // The kernel's activeRequest prop: bumping the nonce makes (rowId, c)
   // the active cell exactly once. The kernel owns the active cell; this is
   // the page's only handle on it.
-  const [findActiveRequest, setFindActiveRequest] = useState<{ rowId: string; c: number; nonce: number } | null>(null);
+  const [findActiveRequest, setFindActiveRequest] = useState<{ rowId: string; c: number; nonce: number; seed?: string | null } | null>(null);
   const findNonceRef = useRef(0);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const findDebounceRef = useRef<number | null>(null);
@@ -3379,10 +3908,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // A new query means a new match list: the cursor restarts at the first
   // match, un-navigated, and any stale replace note stops applying.
   useEffect(() => { setFindIndex(0); setFindActivated(false); setFindNotice(null); }, [findQueryDebounced]);
-  // Find state is per sheet — a query (and its rowId-keyed matches) from
+  // Find state is per sheet, a query (and its rowId-keyed matches) from
   // the previous table must never survive into the next one.
   useEffect(() => {
-    // The pending debounce timer must die too — firing after this reset
+    // The pending debounce timer must die too, firing after this reset
     // would resurrect the previous sheet's query into the fresh state.
     if (findDebounceRef.current !== null) { window.clearTimeout(findDebounceRef.current); findDebounceRef.current = null; }
     setFindOpen(false); setFindShowReplace(false); setFindQuery(""); setFindQueryDebounced("");
@@ -3390,15 +3919,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setFindActiveRequest(null);
   }, [tableId]);
 
-  /** The text find matches against for ONE cell — the page's single source
+  /** The text find matches against for ONE cell, the page's single source
    *  for the scan AND for replace (surgery must run on exactly the text
    *  that matched). Literals read the same projection the search filter
-   *  reads (raw stored text, arrays joined with a space — NOT the
+   *  reads (raw stored text, arrays joined with a space, NOT the
    *  formatted display: search has always matched "0.07", not "7%", and
    *  find keeps that contract); computed cells (a formula column, a
    *  per-cell "=…" anywhere, lookup/rollup) read their computed display.
    *  Mid-stream the host is empty or one world behind, so computed cells
-   *  go find-dark exactly as they go search-dark — but the whole scan is
+   *  go find-dark exactly as they go search-dark, but the whole scan is
    *  gated below anyway (a partial-set count is a lie). Reserved keys
    *  ($fmt/$rh) can never reach this function: callers iterate
    *  table.columns, and those keys are row-values riders, not columns. */
@@ -3416,11 +3945,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }, [engineHost, relationalValue, streamProgress]);
 
   /** Every matched cell in DISPLAY order (sortedRows × columns, so
-   *  next/prev walk the sheet the way the user reads it — left to right,
+   *  next/prev walk the sheet the way the user reads it, left to right,
    *  top to bottom, under whatever sort and filter are live). One entry
    *  per CELL, not per occurrence. Empty while the card is closed (no
    *  scan, no tint), while the query is empty, and mid-stream (the card
-   *  shows "Loading rows…" instead — counting matches over a partial row
+   *  shows "Loading rows…" instead, counting matches over a partial row
    *  set would be a lie). Recomputes whenever the data world moves:
    *  sortedRows (rows, sort, filter, search) and engineVersion (computed
    *  values) are both dependencies. */
@@ -3450,16 +3979,136 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     ? `${findMatches[findCurrentIdx].rowId}:${findMatches[findCurrentIdx].colId}`
     : null;
 
-  if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
-  if (!table || rows === null) return <SkeletonRows />;
+  /* ── Co-presence (the 20s heartbeat; the title row's chip) ── */
+  const presence = useTablePresence(tableId);
 
-  const filterColDef = table.columns.find((c) => c.id === filterCol);
+  /* ── ?new=1: a create door just made this table. Select the name so a
+   * person can type it, then strip the flag (the one create recipe, spec
+   * section 1 Naming canon). The latch sits inside the tick, so a StrictMode
+   * double effect cannot run it twice or not at all. ── */
+  const newLatchRef = useRef(false);
+  const tableLoaded = !!table && rows !== null;
+  useEffect(() => {
+    if (!tableLoaded || searchParams.get("new") !== "1") return;
+    const t = setTimeout(() => {
+      if (newLatchRef.current) return;
+      newLatchRef.current = true;
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+      const next = new URLSearchParams(window.location.search);
+      next.delete("new");
+      const s = next.toString();
+      router.replace(`${window.location.pathname}${s ? `?${s}` : ""}`, { scroll: false });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [tableLoaded, searchParams, router]);
+
+  /* ── Pivot CONFIGURATION, per person per table (settings 7.3):
+   * home.work.surface["table:{id}"].pivot, read on open, written 400ms
+   * after the last change. The result is never stored. ── */
+  const pivotInitial = useMemo<PivotConfig | null>(
+    () => (table ? readPivotConfig(prefs.home, table.id, new Set(table.columns.map((c) => c.id))) : null),
+    [prefs.home, table],
+  );
+  const pivotSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savePivotConfig = useCallback((config: PivotConfig) => {
+    if (!tableId) return;
+    if (pivotSaveTimer.current) clearTimeout(pivotSaveTimer.current);
+    pivotSaveTimer.current = setTimeout(() => {
+      void patchPrefs(pivotPatch(prefs.home, tableId, config) as Parameters<typeof patchPrefs>[0]);
+    }, 400);
+  }, [tableId, patchPrefs, prefs.home]);
+
+  /* ── Full screen (View > Full screen, Cmd+Shift+F; Esc restores) and
+   * Cmd+Enter (the row drawer for the active row). ── */
+  const activeRowForKeysRef = useRef<string | null>(null);
+  activeRowForKeysRef.current = activeCell?.rowId ?? null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFullScreen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape" && fullScreenRef.current) {
+        // The grid consumes the Escape that collapses a range (and the
+        // editor's Escape never bubbles); a bare Escape in the grid leaves
+        // full screen, as it does anywhere else outside a field or layer.
+        if (e.defaultPrevented) return;
+        const t = e.target as HTMLElement | null;
+        if (t?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="menu"]')) return;
+        setFullScreen(false);
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && e.key === "Enter") {
+        const t = e.target as HTMLElement | null;
+        if (t?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+        const rowId = activeRowForKeysRef.current;
+        if (!rowId) return;
+        e.preventDefault();
+        openRowDrawerRef.current?.(rowId);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const fullScreenRef = useRef(false);
+  fullScreenRef.current = fullScreen;
+  const openRowDrawerRef = useRef<((rowId: string) => void) | null>(null);
+  openRowDrawerRef.current = setActiveRowId;
+  // Entering or leaving full screen unmounts the menu bar (or the toolbar's
+  // Exit button) that held focus, which drops it on <body>, and the arrows
+  // stopped moving the cursor until the person clicked a cell. Hand focus
+  // back to the grid, without scrolling, unless something real has it.
+  //
+  // The same rescue runs after any menu bar item (SheetMenuBar's
+  // onAfterSelect): choosing an item unmounts the portal that held focus, so
+  // Insert > Row below and then typing did nothing until a click.
+  function refocusGridIfLost() {
+    requestAnimationFrame(() => {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body) return;
+      gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus({ preventScroll: true });
+    });
+  }
+  useEffect(() => {
+    const t = requestAnimationFrame(() => {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body) return;
+      gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(t);
+  }, [fullScreen]);
+
+  if (notFound) return <NotFoundView />;
+  if (loadError) {
+    return (
+      <div className="os-chrome flex flex-1 items-center justify-center">
+        <OsEmptyView variant="error" context="list" title="We could not load this table." action={{ label: "Retry", onClick: () => { setLoadError(null); void load(); } }} />
+      </div>
+    );
+  }
+  if (!table || rows === null) {
+    return (
+      <div className="os-chrome flex min-h-0 flex-1 flex-col gap-2 px-4 py-3" aria-busy="true">
+        <div className="flex h-12 items-center gap-3"><span className="h-7 w-7 rounded-md bg-skeleton os-skeleton-pulse" /><span className="h-5 w-56 rounded bg-skeleton os-skeleton-pulse" /></div>
+        <div className="flex-1 overflow-hidden rounded-lg border border-line bg-[var(--os-surface)]">
+          {/* The grid's own skeleton: a header row and 20 rows at the 32px grid row height. */}
+          <div className="h-8 border-b border-line bg-[var(--os-table-head-bg)]" aria-hidden />
+          <SkeletonRows rows={20} rowHeight={`${SHEET_ROW_H}px`} />
+        </div>
+        <p className="m-0 text-sm text-ink-2">Opening the table</p>
+      </div>
+    );
+  }
+
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
 
   // ── Toolbar plumbing (Sheets chrome) ────────────────────────────
 
   /** Column ids the kernel's current selection intersects, read from the
-   *  DOM the kernel renders (aria-selected on gridcells) — selection state
+   *  DOM the kernel renders (aria-selected on gridcells), selection state
    *  belongs to the kernel and this page deliberately doesn't mirror it.
    *  Falls back to the active cell's column. Virtualization caveat: only
    *  MOUNTED rows carry aria-selected, but every selection includes the
@@ -3567,8 +4216,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const v = row.values[col.id];
         const nf = style?.nf ?? (typeof v === "number" ? "number" : undefined);
         if (!nf) return null;
-        // A bare number (no nf yet) steps from the decimals it SHOWS —
-        // String(5) has 0, String(2.5) has 1 — not from the nf default of
+        // A bare number (no nf yet) steps from the decimals it SHOWS,
+        // String(5) has 0, String(2.5) has 1, not from the nf default of
         // 2, or "decrease" on a plain 5 would add a decimal (5.0).
         const shown = typeof v === "number" ? (String(v).split(".")[1]?.length ?? 0) : 0;
         const start = style?.dp ?? (style?.nf ? defaultDp(nf) : shown);
@@ -3583,7 +4232,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** The cells a per-cell format action targets: the kernel's settled
    *  range (ORDERED display rowIds × the inclusive column span, via
-   *  onSelectionChange), else the active cell — the kernel reports null
+   *  onSelectionChange), else the active cell, the kernel reports null
    *  for a single-cell selection, so the active cell IS that case. */
   const formatTargets = (): { rowIds: string[]; colIds: string[] } | null => {
     if (gridSelection && gridSelection.rowIds.length > 0) {
@@ -3596,7 +4245,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return null;
   };
 
-  /** Apply one style patch to the selection (colour, fill, align — the
+  /** Apply one style patch to the selection (colour, fill, align, the
    *  "set" actions). Mid-stream the toolbar pills are disabled, but the
    *  keyboard path lands here too, so the gate is repeated: a style write
    *  is a read-modify-write of rows the stream may not have delivered. */
@@ -3629,7 +4278,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     void formatCells(targets, every ? `remove ${name}` : name, { [flag]: every ? undefined : true });
   };
   // Window-level Cmd+B/I/U (declared in the hooks zone above) calls through
-  // this ref — filled here, after the function exists.
+  // this ref, filled here, after the function exists.
   formatKeyRef.current = toggleStyleFlag;
 
   // ── Find & Replace plumbing (state + scan in the hooks zone above) ──
@@ -3644,14 +4293,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     requestAnimationFrame(() => { findInputRef.current?.focus(); findInputRef.current?.select(); });
   };
   // Window Cmd+F/H calls through this ref. A columnless table renders the
-  // "Start sheet" branch, not the card — leave the browser's find alone
+  // "Start sheet" branch, not the card, leave the browser's find alone
   // there rather than swallowing the shortcut into an invisible state.
   // Null (native browser find) when the card can't render: a columnless
   // table shows the start branch, and the row-detail modal would hide the
   // card under its backdrop while autoFocus steals the modal's focus.
   findKeyRef.current = table.columns.length === 0 || activeRowId ? null : openFind;
 
-  /** Escape / the X. The GRID selection is untouched on purpose — the
+  /** Escape / the X. The GRID selection is untouched on purpose, the
    *  kernel's own Escape (which collapses the anchor) only runs while the
    *  grid has focus, and it never does while the card's input owns the
    *  key. Focus is handed back to the grid so arrows work immediately,
@@ -3659,7 +4308,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const closeFind = () => {
     setFindOpen(false);
     setFindNotice(null);
-    gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus();
+    gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus({ preventScroll: true });
   };
 
   /** Next (+1) / previous (-1) with wrap-around; the landed-on match
@@ -3676,21 +4325,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setFindActiveRequest({ rowId: m.rowId, c: m.c, nonce: ++findNonceRef.current });
   };
 
-  /** What Replace writes into ONE matched cell — or "skip", the honest
+  /** What Replace writes into ONE matched cell, or "skip", the honest
    *  outcome the card counts. Computed and relational cells and shapes
    *  with no text encoding (REPLACE_SKIP_TYPES) skip statically; a
    *  per-cell "=…" formula in an otherwise open column skips by its
    *  stored shape. The surgery runs on EXACTLY the text that matched
    *  (findCellText), then re-enters storage by column type:
    *   - open columns take the plain entry grammar (autoTypeEntry), the
-   *     same chokepoint paste and fill use — replacing the "x" out of
+   *     same chokepoint paste and fill use, replacing the "x" out of
    *     "5x" stores the NUMBER 5. Plain, not rich, deliberately: a
    *     replace result is mechanical surgery, not a symbol the user typed
    *     to format the cell, so "5%" landing here stays text exactly as a
    *     pasted "5%" does.
    *   - every other literal type rides coercePaste, so the stored shape
    *     stays honest (numbers parse, dates must be ISO, selects must name
-   *     an option) — an unreadable result SKIPS the cell rather than
+   *     an option), an unreadable result SKIPS the cell rather than
    *     planting a string a number column would silently missort. */
   const replacementFor = (col: Column, r: ApiRow): PasteCoercion => {
     if (REPLACE_SKIP_TYPES.has(col.type) || isFormulaCell(r.values[col.id])) return { kind: "skip" };
@@ -3706,16 +4355,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return coercePaste(col, replaced);
   };
 
-  const skippedNote = (n: number) => `${n} skipped — computed cells, or results that don't fit the column's type`;
+  const skippedNote = (n: number) => `${n} skipped: computed cells, or results that don't fit the column's type`;
 
   /** Replace the CURRENT match: one guarded row PATCH (the same write an
-   *  editor commit makes — one undoable command, 409-guarded because we
+   *  editor commit makes, one undoable command, 409-guarded because we
    *  know the exact stored value the user is looking at). A skipped
    *  current match steps forward so repeated presses walk the sheet.
    *  After the write lands the mirror changes, the scan re-runs, and the
    *  shrunken list leaves findIndex pointing at the next match. When the
    *  REPLACEMENT still contains the query ("x" → "xx") the cell keeps
-   *  matching and stays current — Sheets keeps finding it too. */
+   *  matching and stays current, Sheets keeps finding it too. */
   const runReplaceCurrent = () => {
     if (findMatches.length === 0) return;
     const m = findMatches[findCurrentIdx];
@@ -3735,7 +4384,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setFindNotice(null);
     void patchRow(m.rowId, { [m.colId]: res.value }, { label: "replace", guard: true });
     // When the REPLACEMENT still contains the query ("x" → "xx") the cell
-    // keeps matching and would stay current forever — repeated Enter would
+    // keeps matching and would stay current forever, repeated Enter would
     // grow it exponentially instead of walking the sheet. Advance past it
     // the way Sheets does; the rescan keeps indices aligned because the
     // still-matching cell keeps its slot.
@@ -3747,7 +4396,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** Replace ALL matches: ONE writeValuesBatchStrict (host + mirror +
    *  chunked batch route in one queued job) and ONE undo command over
-   *  every touched row — exactly the clearCells shape. Skipped cells are
+   *  every touched row, exactly the clearCells shape. Skipped cells are
    *  counted and reported in the card, never silently dropped. */
   const runReplaceAll = async () => {
     if (findMatches.length === 0) return;
@@ -3758,7 +4407,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     for (const m of findMatches) {
       const col = table.columns.find((c) => c.id === m.colId);
       const r = rowById.get(m.rowId);
-      if (!col || !r) continue; // a frame behind a delete — not a skip worth reporting
+      if (!col || !r) continue; // a frame behind a delete, not a skip worth reporting
       const res = replacementFor(col, r);
       if (res.kind === "skip") { skipped += 1; continue; }
       const values = byRow.get(m.rowId) ?? {};
@@ -3783,7 +4432,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         redo: () => writeValuesBatchStrict(updates),
       });
       setFindNotice(`Replaced ${replaced} cell${replaced === 1 ? "" : "s"}${skipped > 0 ? ` · ${skippedNote(skipped)}` : ""}`);
-    } catch { toast("Couldn't replace — reloading"); void load(); }
+    } catch { toast("Couldn't replace. Reloading."); void load(); }
   };
 
   // The card's counter line: mid-stream honesty beats a partial count.
@@ -3794,7 +4443,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       : `${findMatches.length === 0 ? 0 : findCurrentIdx + 1} of ${findMatches.length}`;
 
   /** Σ button: open the active cell's editor seeded with "=SUM(" through
-   *  the kernel's own type-to-replace path — a real "=" keydown dispatched
+   *  the kernel's own type-to-replace path, a real "=" keydown dispatched
    *  at the grid (the exact mechanism typing uses; React's root listener
    *  routes dispatched events like trusted ones), with sigmaSeedRef
    *  upgrading that one-char seed to "=SUM(" in kernelEditor. The formula
@@ -3804,27 +4453,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!gridEl || !activeCell) { toast("Select a cell first"); return; }
     const col = table.columns.find((c) => c.id === activeCell.colId);
     if (!col || col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
-      toast("This cell is computed by its column — pick another cell");
+      toast("This cell is computed by its column. Pick another cell.");
       return;
     }
     sigmaSeedRef.current = "=SUM(";
-    gridEl.focus();
+    gridEl.focus({ preventScroll: true });
     gridEl.dispatchEvent(new KeyboardEvent("keydown", { key: "=", bubbles: true, cancelable: true }));
     // The kernel consumed the seed synchronously (the dispatch re-rendered
     // the editor); anything later must never see a stale Σ seed.
     window.setTimeout(() => { sigmaSeedRef.current = null; }, 0);
   };
 
-  /** Close the nearest details dropdown after a menu item click. */
-  const closeDetails = (e: React.MouseEvent<HTMLElement>) => {
-    e.currentTarget.closest("details")?.removeAttribute("open");
-  };
-
   // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
 
-  // Conditional formatting v2 — icon set: a value's tertile prefixes the cell
+  // Conditional formatting v2, icon set: a value's tertile prefixes the cell
   // with a coloured glyph. Wraps renderCellContent (below) so it rides on top of
-  // every column type, and only the DISPLAY — never the copied/stored value.
+  // every column type, and only the DISPLAY, never the copied/stored value.
   const displayCell = (rowId: string, colId: string): React.ReactNode => {
     const content = renderCellContent(rowId, colId);
     const c = table.columns.find((x) => x.id === colId);
@@ -3868,7 +4512,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (fv.startsWith("#")) return <span style={NEGATIVE_RED}>{fv}</span>;
       // A formula cell formats by its COLUMN's format (Phase 4): numbers
       // through formatCellValue, date-typed strings through the date
-      // formats. Everything else keeps engine display verbatim — its
+      // formats. Everything else keeps engine display verbatim, its
       // float-noise trim and TRUE/FALSE are the shipped Phase 3 behaviour.
       if (FORMATTABLE_TYPES.has(c.type)) {
         const computed = engineHost.value(c.id, r.id);
@@ -3899,7 +4543,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         // Same pre-wrap rule as stored strings: autofit measures this text.
         return text.includes("\n") ? <span style={{ whiteSpace: "pre-wrap" }}>{text}</span> : text;
       }
-      case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null;
+      case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "var(--os-brand)" }} /> : null;
       case "rating": { const n = typeof v === "number" ? v : 0; return n ? "★".repeat(n) : null; }
       case "number": case "currency": case "percent": {
         if (v == null || v === "") return null;
@@ -3937,7 +4581,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         if (v == null || v === "") return null;
         // Multi-line text must carry its OWN white-space: the kernel's
         // display wrapper is truncate (nowrap), and a cell-level style
-        // cannot cascade past it — the span's wins for its text.
+        // cannot cascade past it, the span's wins for its text.
         if (typeof v === "string" && v.includes("\n")) {
           return <span style={{ whiteSpace: "pre-wrap" }}>{v}</span>;
         }
@@ -3951,7 +4595,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  conditional-formatting rule background (Phase 4) layered on top.
    *  Precedence is Sheets': a matching RULE background beats the cell's
    *  manual fill, text styles always apply. Rules read the RAW value
-   *  (computed for formula cells) — formatting never feeds back into
+   *  (computed for formula cells), formatting never feeds back into
    *  rules. The winning rule colour paints at ~18% alpha (hex "2E"), the
    *  same tint depth as the dept-chip pattern, so black text stays
    *  readable on any swatch. Both fills go out as backgroundColor (never
@@ -3970,6 +4614,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // explicit align style ("a") from the toolbar always wins, because the
     // user chose it.
     if (c && isOpenColumnType(c.type) && !style?.a && typeof r.values[colId] === "number") css.textAlign = "right";
+    // Numeric-typed columns and computed numbers right-align too (Sheets:
+    // every number sits flush right). Only a value that IS a number: a stray
+    // "abc" in a Number column keeps reading as text, and a formula that
+    // returns text stays left. Rating is excluded, its stars are not digits.
+    else if (c && !style?.a) {
+      const v = r.values[colId];
+      if (c.type === "formula" || isFormulaCell(v)) {
+        if (!streamProgress && typeof engineHost.value(c.id, rowId) === "number") css.textAlign = "right";
+      } else if (NUMERIC_ALIGN_TYPES.has(c.type) && (typeof v === "number" || (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))))) {
+        css.textAlign = "right";
+      }
+    }
     // Multi-line content (Shift/Cmd+Enter breaks): wrap and top-align so a
     // taller row (resizable) reveals the lines instead of center-clipping.
     if (typeof r.values[colId] === "string" && (r.values[colId] as string).includes("\n")) {
@@ -3986,7 +4642,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         if (bg) css.backgroundColor = /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg;
       }
     }
-    // Conditional formatting v2 — color scale (heat-map) or data bar, painted
+    // Conditional formatting v2, color scale (heat-map) or data bar, painted
     // relative to the column's numeric range. Wins over a v1 rule if both set.
     if (c?.condFormat) {
       const range = condRanges.get(c.id);
@@ -4010,13 +4666,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }
     // Find & Replace tint, merged LAST on purpose: find is a transient
     // MODE, and while its card is open the match highlight overrides both
-    // the cell's manual fill and any rule background — the whole point of
+    // the cell's manual fill and any rule background, the whole point of
     // the mode is seeing the matches; closing the card restores every
     // fill (findMatchKeys empties with it). The CURRENT match sets the
     // `background` SHORTHAND as well: the kernel deliberately drops
     // backgroundColor on the ACTIVE cell (its white ground keeps the
     // outline legible), but the navigated-to match IS the active cell and
-    // must stay visibly green under the cursor, as in Sheets — the
+    // must stay visibly green under the cursor, as in Sheets, the
     // shorthand is the one property that survives that drop. The specific
     // backgroundColor rides along (inserted after, so it wins wherever
     // both apply) for the frozen-column path, whose opaque-fill rule reads
@@ -4043,7 +4699,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** A cell as clipboard text. Deliberately NOT displayCell: that one
    *  renders "$12" / "20%" / "★★★" for humans and none of those survive a
    *  round trip back through paste. This is the stored value spelled the
-   *  way the editors read and write it — bare numbers, ISO dates, and
+   *  way the editors read and write it, bare numbers, ISO dates, and
    *  TRUE/FALSE for a checkbox (the token coercePaste takes back).
    *
    *  An open cell's per-cell nf/dp is NOT applied here either, for the same
@@ -4058,13 +4714,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const v = r.values[col.id];
     // A computed cell copies its DISPLAY value. Copying the SOURCE would be
     // the in-grid ideal, but "=A1+B2" pasted into Excel would resolve against
-    // EXCEL's A1 — cross-app source transfer is a later feature, and the
+    // EXCEL's A1, cross-app source transfer is a later feature, and the
     // display value at least round-trips as the literal the user saw.
     // A spilled cell (from =SEQUENCE/=UNIQUE/=SORT/=FILTER…) has an empty
     // store but a computed value the engine holds; render THAT, not "".
     if (col.type === "formula" || isFormulaCell(v) || engineHost.isSpilledCell(col.id, r.id)) {
       // Streaming honesty gate: copy copies what the user sees, and during
-      // a stream that is the pending mark — never a stale computed value.
+      // a stream that is the pending mark, never a stale computed value.
       if (streamProgress) return "…";
       return String(engineHost.display(col.id, r.id) ?? "");
     }
@@ -4103,15 +4759,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   /** The kernel's Ctrl/Cmd+Arrow data-edge jump asks "is this cell empty?"
    *  and the answer comes from the MIRROR, not the DOM: stored
-   *  null/undefined/"" (or an empty list) is empty; a formula cell — a
-   *  per-cell "=…" in any column, or any cell of a formula column — is
+   *  null/undefined/"" (or an empty list) is empty; a formula cell, a
+   *  per-cell "=…" in any column, or any cell of a formula column, is
    *  NON-empty even when it evaluates to "", because Sheets stops on a
    *  formula (the cell has content). Numbers and booleans are content
    *  (an unchecked checkbox is FALSE, not blank). Computed relational
    *  columns answer with the same text the clipboard reads, so what copies
    *  as "" also jumps as empty. */
   // Cmd+Arrow across a long column calls this per cell: O(1) column lookup.
-  // Plain Map, not useMemo — this sits after the component's early returns
+  // Plain Map, not useMemo, this sits after the component's early returns
   // where hooks are illegal; a few dozen columns per render is nothing.
   const colByIdForEmpty = new Map(table.columns.map((c) => [c.id, c]));
   const isCellEmpty = (rowId: string, colId: string): boolean => {
@@ -4129,13 +4785,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   };
 
   /** Write a matrix anchored at topLeft, walking DOWN the current display
-   *  order (sortedRows) — the grid may be sorted or filtered, and Phase 1
+   *  order (sortedRows), the grid may be sorted or filtered, and Phase 1
    *  keys everything by rowId for exactly this reason.
    *
    *  Column mapping: matrix column k targets display column topLeft.c + k
    *  INCLUDING read-only ones, so the pasted block keeps its shape; the
    *  read-only ones simply emit no write. Columns past the last one are
-   *  clipped — a paste never creates columns. Rows past the last one are
+   *  clipped, a paste never creates columns. Rows past the last one are
    *  appended, which is what Sheets does.
    *
    *  Optimistic in-place for existing rows; appended rows are added only
@@ -4173,7 +4829,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (target) {
         if (Object.keys(values).length > 0) {
           // Paste auto-grow: a multi-line string landing in this row rides
-          // its "$rh" growth in the SAME update — same batch write, same
+          // its "$rh" growth in the SAME update, same batch write, same
           // undo command (befores below key off these values, so the old
           // height is captured with the old cells). Growth-only, like the
           // editor commit: a paste never shrinks a taller row.
@@ -4192,7 +4848,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const updates = [...updatesByRow].map(([id, values]) => ({ id, values }));
     // A row carrying ONLY the "$rh" rider cannot exist (the rider is added
     // exactly when a pasted string landed), so this emptiness gate needs no
-    // reserved-key filter — but the CELL count below does: the height rider
+    // reserved-key filter, but the CELL count below does: the height rider
     // is geometry, not a pasted cell, and counting it would lie in the toast.
     const realInserts = inserts.some((i) => Object.keys(i.values).length > 0) ? inserts : [];
     const countCells = (values: Record<string, unknown>) => Object.keys(values).filter((k) => !isReservedKey(k)).length;
@@ -4217,7 +4873,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const createdRows: ApiRow[] = [];
 
     if (updates.length > 0) {
-      // ONE setCells pass for the whole paste/fill before the paint — this
+      // ONE setCells pass for the whole paste/fill before the paint, this
       // is the batch path the Phase 5 seam work exists for: a 500-cell
       // paste is one recalc, not 500 engine rebuilds.
       driveHostWrites(updates.flatMap((u) => Object.entries(u.values).map(([colId, raw]) => ({ colId, rowId: u.id, raw }))));
@@ -4242,7 +4898,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       await writeQueueRef.current.run(async () => {
         const oneShot = updates.length <= BATCH_MAX_OPS && realInserts.length <= BATCH_MAX_OPS;
         for (let i = 0; !oneShot && i < updates.length; i += BATCH_MAX_OPS) {
-          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          const res = await fetchWithRetry(`/api/tables/${tableId}/rows/batch`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
@@ -4250,7 +4906,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           for (const mid of await readBatchMissingIds(res)) missingRows.add(mid);
         }
         if (oneShot && (updates.length > 0 || realInserts.length > 0)) {
-          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          // Updates alone are idempotent and ride the retry (the common paste
+          // into existing rows); a call that also INSERTS rows keeps a plain
+          // fetch, because a repeat after a lost response would add them
+          // twice. Its failure is surfaced by the catch below either way.
+          const send = realInserts.length === 0 ? fetchWithRetry : fetch;
+          const res = await send(`/api/tables/${tableId}/rows/batch`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...(updates.length > 0 ? { updates } : {}),
@@ -4279,7 +4940,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           });
           if (!res.ok) throw new Error();
           // The route returns the rows it created, in payload order. Take the
-          // ids from there — a guessed id would break every rowId-keyed thing
+          // ids from there, a guessed id would break every rowId-keyed thing
           // in the kernel the moment the real row arrived.
           const d = await res.json();
           const payload = d?.data ?? d;
@@ -4294,7 +4955,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }
       });
     } catch {
-      toast("Couldn't paste — reloading the table");
+      // The pasted values into existing rows join the unsaved ledger, so the
+      // reload below (which reconciles whatever part of a split paste did
+      // commit) puts them back on screen, marked Not saved, with Retry.
+      // Setting a cell is idempotent, so a re-send is safe. Rows the paste
+      // would have ADDED past the end have no id to keep them under; the
+      // clipboard still holds them.
+      for (const u of updates) noteWriteFailed(rowLedgerKey(u.id), u.values);
+      toast(realInserts.length > 0
+        ? "Couldn't paste. The pasted cells are kept as Not saved; the rows past the end were not added."
+        : "Couldn't paste. The pasted cells are kept as Not saved.", {
+        tone: "danger",
+        // Unkeyed when rows were dropped: a later successful Retry saves the
+        // cells but never adds those rows, so that note must not vanish.
+        key: realInserts.length > 0 ? undefined : SAVE_FAILED_TOAST,
+        action: { label: "Retry", onClick: () => void retryFailedWrites() },
+      });
       void load();
       // Rethrow: the grid's runApply catches this and returns false, so it
       // won't move the selection as though the write had landed.
@@ -4346,16 +5022,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   };
 
   /** Double-click on the resize grip: fit the column to its widest MOUNTED
-   *  cell (Sheets' autofit, approximated over the virtual window — the
+   *  cell (Sheets' autofit, approximated over the virtual window, the
    *  unmounted tail cannot be measured without materializing it, and the
    *  480px cap bounds the error). DOM walk, not canvas measureText: each
    *  mounted cell's ".truncate" display node is already laid out in that
-   *  cell's OWN font — per-cell bold/italic/size from "$fmt" included —
+   *  cell's OWN font, per-cell bold/italic/size from "$fmt" included,
    *  so scrollWidth is the browser's own single-line measurement, where a
    *  canvas would have to re-derive every cell's font string and drift.
    *  scrollWidth reports local (pre-zoom) px, the same space col.width
    *  lives in. Persists through the SAME path the drag's release uses
-   *  (persistColumns; deliberately NO undo entry — width drags never made
+   *  (persistColumns; deliberately NO undo entry, width drags never made
    *  one, and autofit matches them). */
   const autoFitColumn = (colId: string) => {
     const wrap = gridWrapElRef.current;
@@ -4363,7 +5039,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!wrap || idx < 0) return;
     let widest = 0;
     // aria-colindex is 1-based over the data columns (the gutter carries
-    // none) — the same mapping the active-cell observer reads back.
+    // none), the same mapping the active-cell observer reads back.
     wrap.querySelectorAll<HTMLElement>(`[role="gridcell"][aria-colindex="${idx + 1}"] > div.truncate`)
       .forEach((el) => { widest = Math.max(widest, el.scrollWidth); });
     // + the cell's px-2 padding (16) + right border + a rounding px; then
@@ -4377,14 +5053,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   };
 
   /** Double-click on a ROW boundary (kernel onRowAutofit): Sheets' row
-   *  autofit — set each target row to EXACTLY the height its content
+   *  autofit, set each target row to EXACTLY the height its content
    *  needs. Measured from the mirror, not the DOM (autoFitColumn's DOM
    *  walk exists for fonts; height is pure line arithmetic, and unmounted
-   *  columns still count): per cell the DISPLAYED text's line count —
+   *  columns still count): per cell the DISPLAYED text's line count,
    *  breaks come only from explicit "\n", there is no soft wrap. A
    *  single-line row stores null, i.e. returns to the DEFAULT height:
    *  that IS Sheets' behavior, and it is why this is a different gesture
-   *  from the commit/paste auto-grow — a double-click is explicit intent
+   *  from the commit/paste auto-grow, a double-click is explicit intent
    *  to FIT, so it shrinks as readily as it grows. Selection-aware like
    *  resizeRowsTo (every selected row when the boundary belongs to the
    *  selection, each to ITS OWN content), ONE undo command. */
@@ -4402,13 +5078,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         if (c.type === "formula" || isFormulaCell(v)) {
           // Streaming honesty gate (displayCell's rule): mid-stream the
           // host still holds the pre-stream world, so this row's computed
-          // text cannot be measured — skip the row rather than fit it to
+          // text cannot be measured, skip the row rather than fit it to
           // a value the user isn't even shown.
           if (streamProgress) return undefined;
           lines = Math.max(lines, lineCountOf(String(engineHost.display(c.id, r.id) ?? "")));
         } else {
           // cellText preserves a string value's "\n" and renders every
-          // non-string type on one line — exactly the display's line count.
+          // non-string type on one line, exactly the display's line count.
           lines = Math.max(lines, lineCountOf(cellText(c, r)));
         }
       }
@@ -4416,7 +5092,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     };
     // Already at the fit ⇒ no write, no history entry (the formatCells
     // no-op rule); junk stored heights read as default, so fitting a
-    // single-line row over junk is also a no-op — readers never saw it.
+    // single-line row over junk is also a no-op, readers never saw it.
     const changed: { id: string; px: number | null }[] = [];
     for (const id of targets) {
       const row = live.get(id);
@@ -4447,38 +5123,72 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     })();
   };
 
-  /** Sheets-pure header: the column LETTER, centered, and nothing else —
-   *  no label line, no hover icon cluster ("We are building it like
-   *  Excel"). The letter doubles as the drag-to-reorder handle; the right
-   *  edge stays the resize grip. Every column OPERATION the old hover
-   *  icons carried (edit formula, configure relation, delete, plus sort)
-   *  moved to the header's right-click menu (onHeaderContextMenu). The
-   *  format/highlight-rules popover that used to open here is gone
-   *  entirely — the toolbar's 123/$/%/decimals cluster is the one
-   *  number-format surface, and existing highlight rules KEEP PAINTING
-   *  through cellStyleFor; only their editor died. */
+  /** The column header (Phase 5, spec-tables-forms "Column headers").
+   *  An UNNAMED column renders its letter, centred, exactly as before. A
+   *  NAMED column renders the name, left aligned, with the letter in small
+   *  type before it so A1 references stay readable. A type glyph precedes
+   *  the label when the type is not Text; a Lock follows it when the column
+   *  is protected. The 16px chevron (hover, keyboard focus, always on a
+   *  coarse pointer) opens the column menu, as do right click and Alt+Down
+   *  on the focused header. Double click, Enter or F2 swaps the label for the
+   *  inline name input. The label doubles as the drag-to-reorder handle and
+   *  the right edge stays the resize grip. */
   const kernelHeader = (colId: string) => {
     const c = table.columns.find((x) => x.id === colId);
     if (!c) return null;
     const colIndex = table.columns.findIndex((x) => x.id === colId);
+    const letter = columnLetter(colIndex);
+    const named = c.label.trim() !== "";
+    const TypeIcon = c.type !== "short_text" ? COLUMN_TYPE_ICON[c.type] : undefined;
+    if (renamingColId === c.id) {
+      return (
+        <div className="flex h-7 items-center px-0.5">
+          <HeaderRenameInput
+            initial={c.label}
+            placeholder={letter}
+            onCommit={(v) => { setRenamingColId(null); commitRename(c.id, v); focusHeaderCell(c.id); }}
+            onCancel={() => { setRenamingColId(null); focusHeaderCell(c.id); }}
+          />
+        </div>
+      );
+    }
     return (
       <div
-        className="dtbl__col-head"
-        style={{ position: "relative", flexDirection: "column", alignItems: "stretch", justifyContent: "center", gap: 0, padding: "1px 2px", opacity: dragColId === c.id ? 0.5 : 1 }}
+        className="relative flex h-7 items-center gap-1"
+        style={{ opacity: dragColId === c.id ? 0.5 : 1 }}
         onDragOver={(e) => { if (dragColId) e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
       >
         <span
-          title={`Column ${columnLetter(colIndex)}${c.protected ? " · protected (read-only)" : ""} · drag to reorder · right-click for options`}
+          title={`${named ? `${c.label} · ` : ""}Column ${letter}${c.protected ? " · protected (read-only)" : ""} · drag to reorder · double-click to rename`}
           draggable
           onDragStart={() => setDragColId(c.id)}
           onDragEnd={() => setDragColId(null)}
-          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "18px", color: "#3f3f46", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3 }}
+          className={`flex min-w-0 flex-1 cursor-grab items-center gap-1 ${named ? "justify-start pl-1" : "justify-center"}`}
         >
-          {columnLetter(colIndex)}
-          {c.protected ? <Lock style={{ width: 10, height: 10, color: "#a1a1aa" }} aria-label="Protected column" /> : null}
+          {named ? <span className="shrink-0 text-micro font-medium normal-case tracking-normal text-ink-3">{letter}</span> : null}
+          {TypeIcon ? <TypeIcon className="h-3 w-3 shrink-0 text-ink-3" aria-label={columnTypeLabel(c.type)} /> : null}
+          {named
+            ? <span className="min-w-0 truncate text-sm font-medium text-ink">{c.label}</span>
+            : <span className="text-xs font-medium text-ink-2">{letter}</span>}
+          {c.protected ? <Lock className="h-3 w-3 shrink-0 text-ink-3" aria-label="Protected column" /> : null}
         </span>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Column ${named ? c.label : letter} menu`}
+          title="Column menu"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink-2 opacity-0 hover:bg-hover group-hover/colhead:opacity-100 group-focus-visible/colhead:opacity-100 [@media(pointer:coarse)]:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setHeaderMenu({ colId: c.id, x: rect.left, y: rect.bottom + 2 });
+          }}
+        >
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+        </button>
         <span
+          data-no-select
           onMouseDown={(e) => startResize(e, c.id)}
           onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); autoFitColumn(c.id); }}
           title="Drag to resize · double-click to fit"
@@ -4498,21 +5208,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
       // Column-governed cells stay that way this wave: a per-cell formula
       // over a column formula would silently fork the column's meaning.
-      toast("This cell is computed by its column — edit the column instead");
+      toast("This cell is computed by its column. Edit the column instead.");
       return;
     }
     const trimmed = raw.trim();
     if (trimmed.startsWith("=")) {
       if (trimmed === "=") return; // a lone "=" is an abandoned edit, not a formula
       try {
-        // Trimmed, because the host classifies by FIRST character — " =A1"
+        // Trimmed, because the host classifies by FIRST character, " =A1"
         // would slip through as a literal.
         const res = (engineHostRef.current ?? engineHost).setCell(colId, rowId, trimmed);
-        // The setCell above IS the host drive — incremental, only the
-        // transitive dependents recomputed — so patchRow skips its own
+        // The setCell above IS the host drive, incremental, only the
+        // transitive dependents recomputed, so patchRow skips its own
         // pass (hostApplied). Computed values are never sent to the
-        // server. res.previous — the engine's authoritative overwritten
-        // value — seeds the undo command.
+        // server. res.previous, the engine's authoritative overwritten
+        // value, seeds the undo command.
         bumpEngine();
         void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit", hostApplied: true, guard: true });
       } catch {
@@ -4533,26 +5243,26 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // stored shape matches the column type.
     const res = coercePaste(col, raw);
     if (res.kind === "skip") {
-      toast("That value doesn't fit this column — nothing saved");
+      toast("That value doesn't fit this column. Nothing was saved.");
       return;
     }
     // Guarded (Phase 5c): this path knows the exact stored value it is
-    // replacing — see patchRow's guard note for the full opt-in policy.
+    // replacing, see patchRow's guard note for the full opt-in policy.
     void patchRow(rowId, { [colId]: res.value }, { guard: true });
   };
 
   /** Text editors commit through here so "=…" becomes a stored formula even
-   *  when the editor was opened plain (F2 first, "=" typed after) — the
+   *  when the editor was opened plain (F2 first, "=" typed after), the
    *  seed path below only catches type-to-replace. */
   /** Sheets auto-fit: a committed multi-line value grows its row to show
-   *  every line (never shrinks — other cells may need the height; manual
+   *  every line (never shrinks, other cells may need the height; manual
    *  taller resizes are respected). 17px per line tracks the display's
    *  13px/leading-tight; the first line rides the default row.
    *
    *  Split into pure pieces because THREE gestures share the arithmetic and
    *  must agree on it: the editor commit (below), the paste path's per-row
    *  growth rider (applyMatrix), and the boundary double-click's autofit
-   *  (autofitRows) — one drifting constant would make a typed row and a
+   *  (autofitRows), one drifting constant would make a typed row and a
    *  pasted row disagree about the same content's height. */
   // Display lines come ONLY from explicit "\n" breaks (there is no soft
   // wrap), so anything that isn't a string is one line by construction.
@@ -4562,7 +5272,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     Math.min(ROW_HEIGHT_MAX, SHEET_ROW_H + (lines - 1) * 17 + 4);
   /** Growth-only "$rh" rider for values landing on a row: the max line
    *  count across the landing cells decides the needed height, and the
-   *  patch is empty unless that BEATS the row's stored height — the guard
+   *  patch is empty unless that BEATS the row's stored height, the guard
    *  reads the stored "$rh" itself (not the values object: that read was a
    *  bug that always answered "default" and let a short multi-line commit
    *  shrink a manually-taller row). */
@@ -4588,7 +5298,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const vcol = table.columns.find((c) => c.id === colId);
     if (vcol?.validation) {
       // Validate the value that will actually be STORED. Open columns store
-      // the RICH parse (resolveOpenEntry) — validating the plain autoType
+      // the RICH parse (resolveOpenEntry), validating the plain autoType
       // answer could diverge (e.g. "5%" stores 0.05 but plainly reads 5).
       const candidate = isOpenColumnType(vcol.type) && typeof v === "string"
         ? resolveOpenEntry(v, readCellStyle((rowsRef.current ?? []).find((r) => r.id === rowId)?.values, colId)).value
@@ -4643,27 +5353,27 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const r = rowById.get(rowId);
     const c = table.columns.find((x) => x.id === colId);
     if (!r || !c) return null;
-    // A formula cell always edits as its SOURCE (never the computed value —
+    // A formula cell always edits as its SOURCE (never the computed value,
     // the user must see what their edit replaces), and a "=" seed opens the
     // formula editor in ANY editable cell: number/date/choice editors cannot
     // even type "=", so the formula editor takes over for them.
     // Raw stored shape FIRST: during a multi-chunk stream (or a refetch's
     // stale window) the host doesn't know this table's cells yet, and a
     // plain editor opened on an unrecognized formula cell would commit a
-    // literal over it — silent destruction. The {"=": ...} shape is
+    // literal over it, silent destruction. The {"=": ...} shape is
     // stream-independent truth; the host only ADDS formula-column fills.
     const rawStored = r.values[colId];
     const rawFormula = isFormulaCell(rawStored);
     const hasFormula = rawFormula || engineHost.isFormulaCell(colId, rowId);
     // A spilled cell borrows its value from a neighbouring array formula and
-    // has no content of its own — read-only, like Sheets/Excel. To change it,
+    // has no content of its own, read-only, like Sheets/Excel. To change it,
     // edit the array's anchor (top-left) cell.
     if (!hasFormula && engineHost.isSpilledCell(colId, rowId)) return null;
     const formulaSeed = opts.seed != null && opts.seed.trimStart().startsWith("=");
     if (hasFormula || formulaSeed) {
       // cellSource returns "=SRC" (with the "=") for any computed cell. ANY
-      // seed wins over the source — type-to-replace on a formula cell starts
-      // from what was typed, exactly like the plain editors — while the
+      // seed wins over the source, type-to-replace on a formula cell starts
+      // from what was typed, exactly like the plain editors, while the
       // commit baseline stays the ORIGINAL source, so a seeded value that is
       // left as-is still commits (and Escape still cancels via the ref).
       // The raw source outranks the host's: raw is current-world truth even
@@ -4674,7 +5384,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // The toolbar's Σ rides the kernel's own type-to-replace: it
       // dispatched the "=" keydown that opened this editor, and the ref
       // upgrades that one-char seed to "=SUM(". The upgrade is snapshotted
-      // per cell so every re-render of this session passes the SAME seed —
+      // per cell so every re-render of this session passes the SAME seed,
       // see sigmaSessionRef for why it must never flap back to "=".
       if (formulaSeed && sigmaSeedRef.current) sigmaSessionRef.current = { rowId, colId, seed: sigmaSeedRef.current };
       const sigma = sigmaSessionRef.current;
@@ -4726,7 +5436,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     activeDp === undefined ? base : `${base} (${activeDp} → ${Math.min(10, Math.max(0, activeDp + delta))})`;
   const fmtDisabled = streamProgress !== null;
   // One predicate for the gutter-drag gate AND the row-insert menu items.
-  const rowInsertBlocked = !!sortState || !!filterCol || !!search.trim() || streamProgress !== null;
+  const rowInsertBlocked = !!sortState || filterActive || !!search.trim() || streamProgress !== null;
+  // The "Filter · N" chip: every column filter that narrows, plus the search.
+  const filterCount = activeFilterCount(filters, search);
   // Right-click INSIDE a multi-row selection acts on the whole span
   // (Sheets): the row menu's delete and clear both read this.
   const rowMenuSpan = rowMenu && gridSelection && gridSelection.rowIds.length > 1 && gridSelection.rowIds.includes(rowMenu.rowId)
@@ -4743,12 +5455,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // kernel's own clamp so the menu never promises a freeze it can't make.
   const rowMenuDisplayIdx = rowMenu ? sortedRows.findIndex((r) => r.id === rowMenu.rowId) : -1;
   const rowMenuCanFreeze = rowMenuDisplayIdx >= 0 && rowMenuDisplayIdx + 1 <= sortedRows.length - 1;
-  const FMT_STREAM_TITLE = "Rows are still loading — formatting is available once they finish";
+  // The tooltip names what the disabled format controls wait for.
+  const FMT_STREAM_TITLE = streamProgress
+    ? `Loading rows, ${streamProgress.loaded.toLocaleString()}${streamProgress.total !== null ? ` of ${streamProgress.total.toLocaleString()}` : ""}`
+    : "";
   let barCell: FormulaBarCell | null = null;
   if (activeCell && activeColDef && activeCellRow) {
     const colIndex = table.columns.findIndex((c) => c.id === activeCell.colId);
-    // The address row number is the UNSORTED index — the row an A1 ref in a
-    // formula would actually resolve to — not the display-sorted position.
+    // The address row number is the UNSORTED index, the row an A1 ref in a
+    // formula would actually resolve to, not the display-sorted position.
     const rowNumber = rows.findIndex((r) => r.id === activeCell.rowId) + 1;
     if (colIndex >= 0 && rowNumber > 0) {
       const computedCol = activeColDef.type === "lookup" || activeColDef.type === "rollup";
@@ -4765,455 +5480,645 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         source: src ?? cellText(activeColDef, activeCellRow),
         readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
         readOnlyReason: activeColDef.type === "formula"
-          ? "This column computes its formula — edit it from the column header (Σ)"
+          ? "This column computes its formula. Edit it from the column menu (Edit formula)."
           : computedCol
-            ? "Computed column — configure it from the column header"
+            ? "This column is computed. Configure it from the column menu."
             : spilledCell
-              ? "Spilled from an array formula — edit the array's top-left cell"
+              ? "This cell is spilled from an array formula. Edit the array's top-left cell."
               : activeColDef.protected
-                ? "This column is protected — unprotect it from the column header to edit"
-                : "This column edits through its picker in the grid",
+                ? "This column is protected. Unprotect it from the column menu to edit."
+                : "This column edits through its picker in the grid.",
       };
     }
   }
 
-  return (
-    <div className="dtbl">
-      {/* ── Title row: small inline-editable name, Sheets-style ── */}
-      <header className="shx__titlebar">
-        <BackButton fallbackHref={spaceBack?.fallbackHref ?? "/tables"} label={spaceBack?.label ?? "Tables"} />
-        <TableIcon className="shx__title-icon" aria-hidden />
-        <input
-          className="shx__title-input"
-          type="text"
-          value={table.name}
-          onChange={(e) => setTable({ ...table, name: e.target.value })}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          onFocus={(e) => { titleBeforeEditRef.current = e.target.value; }}
-          onBlur={(e) => {
-            const name = e.target.value.trim() || UNTITLED_SHEET_NAME;
-            if (name !== e.target.value) setTable((prev) => (prev ? { ...prev, name } : prev));
-            // An untouched focus/blur must cost nothing: no PATCH, and no
-            // global notify (each fires a refetch in every mounted sidebar
-            // and the tab bar).
-            if (name === titleBeforeEditRef.current) return;
-            // Sidebar + the bottom sheet tabs both list this name — tell them.
-            void patchTable({ name }).then((ok) => { if (ok) notifyTablesChanged(); });
-          }}
-          placeholder={UNTITLED_SHEET_NAME}
-          aria-label="Spreadsheet name"
-        />
-        {savingCols && <em className="shx__saving">saving…</em>}
-        <span className="shx__title-actions shx__np">
-          {tableId ? <TableFavoriteButton tableId={tableId} /> : null}
-          <button
-            type="button"
-            className={`dtbl__head-btn ${table.isPublic ? "is-on" : ""}`}
-            onClick={() => { const next = !table.isPublic; setTable({ ...table, isPublic: next }); void patchTable({ isPublic: next }); }}
-            title={table.isPublic ? "Public — anyone with the link can view" : "Private — toggle to share publicly"}
-          >
-            {table.isPublic ? <Globe /> : <Lock />}
-          </button>
-          {table.isPublic && (
-            <button
-              type="button"
-              className="dtbl__head-btn"
-              onClick={() => {
-                const url = `${window.location.origin}/embed/tables/${tableId}`;
-                const snippet = `<iframe src="${url}" width="100%" height="500" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px"></iframe>`;
-                navigator.clipboard.writeText(snippet).then(() => toast("Embed snippet copied"));
-              }}
-              title="Copy public embed snippet"
-            >
-              <LinkIcon />
-            </button>
-          )}
-        </span>
-      </header>
+  /* ── The sheet's chrome: role, menus, toolbar popovers ─────────────── */
 
-      {/* ── The one dense toolbar. Honesty rule: every control here works
-          today — each pill is traced to a handler, nothing is decorative. ── */}
-      <div className="shx__toolbar shx__np" role="toolbar" aria-label="Sheet toolbar">
-        <button
-          type="button"
-          className="shx__tb-btn"
-          onClick={() => void runUndo()}
-          disabled={!undoStack.canUndo() || undoStack.busy()}
-          title={undoStack.canUndo() ? `Undo ${undoStack.peekUndoLabel()}` : "Nothing to undo"}
-          aria-label="Undo"
-        ><Undo2 /></button>
-        <button
-          type="button"
-          className="shx__tb-btn"
-          onClick={() => void runRedo()}
-          disabled={!undoStack.canRedo() || undoStack.busy()}
-          title={undoStack.canRedo() ? `Redo ${undoStack.peekRedoLabel()}` : "Nothing to redo"}
-          aria-label="Redo"
-        ><Redo2 /></button>
-        <button type="button" className="shx__tb-btn" onClick={() => window.print()} title="Print" aria-label="Print"><Printer /></button>
-        <select
-          className="shx__tb-zoom"
-          value={zoom}
-          onChange={(e) => changeZoom(Number(e.target.value))}
-          title="Zoom"
-          aria-label="Zoom"
-        >
-          {ZOOM_LEVELS.map((z) => <option key={z} value={z}>{z}%</option>)}
-        </select>
-        <span className="shx__tb-sep" aria-hidden />
-        {/* Number format (per cell on open columns, per column on legacy
-            typed ones, see routeNumberFormat). The $ / % pills light from
-            the active cell's format like the B/I/U pills do from its style. */}
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeKind === "currency" ? "is-on" : ""}`}
-          onClick={() => applyKindToSelection("currency")}
-          title="Format as currency"
-          aria-label="Format as currency"
-          aria-pressed={activeKind === "currency"}
-        ><DollarSign /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeKind === "percent" ? "is-on" : ""}`}
-          onClick={() => applyKindToSelection("percent")}
-          title="Format as percent"
-          aria-label="Format as percent"
-          aria-pressed={activeKind === "percent"}
-        ><Percent /></button>
-        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(-1)} title={stepTitle("Decrease decimal places", -1)} aria-label="Decrease decimal places">.0</button>
-        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(1)} title={stepTitle("Increase decimal places", 1)} aria-label="Increase decimal places">.00</button>
-        <details className="shx__dd">
-          <summary className="shx__tb-btn shx__tb-text" title="Number format" aria-label="Number format">123<ChevronDown /></summary>
-          <div className="shx__dd-menu" role="menu">
-            {NUMBER_FORMAT_CHOICES.map((t) => {
-              const current = activeKind === t.kind;
-              return (
-                <button
-                  key={t.kind}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={current}
-                  onClick={(e) => { applyKindToSelection(t.kind); closeDetails(e); }}
-                >
-                  {/* The check marks the active cell's current kind; the
-                      empty slot keeps the labels aligned below it. */}
-                  {current ? <Check aria-hidden /> : <span aria-hidden style={{ width: 13, flex: "0 0 auto" }} />}
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
-        </details>
-        <span className="shx__tb-sep" aria-hidden />
-        {/* Per-cell text styles (Sheets order: B I U S, colours, align).
-            The toggles light up from the ACTIVE cell's stored style, like
-            Sheets; each action is one undo entry across the whole range.
-            Mid-stream they sit disabled: a style write is a read-modify-
-            write of rows the stream may not have delivered yet. */}
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.b ? "is-on" : ""}`}
-          onClick={() => toggleStyleFlag("b")}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Bold (⌘B)"}
-          aria-label="Bold"
-          aria-pressed={!!activeStyle?.b}
-        ><Bold /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.i ? "is-on" : ""}`}
-          onClick={() => toggleStyleFlag("i")}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Italic (⌘I)"}
-          aria-label="Italic"
-          aria-pressed={!!activeStyle?.i}
-        ><Italic /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.u ? "is-on" : ""}`}
-          onClick={() => toggleStyleFlag("u")}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Underline (⌘U)"}
-          aria-label="Underline"
-          aria-pressed={!!activeStyle?.u}
-        ><Underline /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.s ? "is-on" : ""}`}
-          onClick={() => toggleStyleFlag("s")}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Strikethrough"}
-          aria-label="Strikethrough"
-          aria-pressed={!!activeStyle?.s}
-        ><Strikethrough /></button>
-        {/* Colour pills open a compact swatch grid (not a native colour
-            input — Sheets' palette is a grid of named chips). The bar
-            under each icon shows the active cell's current colour. */}
-        <details className="shx__dd">
-          <summary
-            className={`shx__tb-btn shx__tb-color ${fmtDisabled ? "is-disabled" : ""}`}
-            title={fmtDisabled ? FMT_STREAM_TITLE : "Text color"}
-            aria-label="Text color"
-            aria-disabled={fmtDisabled || undefined}
-            onClick={(e) => { if (fmtDisabled) e.preventDefault(); }}
+  // Read implies write on a table until the access engine lands Can view
+  // (docs/plans/tables.md 3a), so every reader is at least Can edit; the
+  // creator and Owners/Admins hold Full access (lib/object-manage).
+  const shareRole = table.canManage ? "FULL" : "EDIT";
+  const tableName = table.name || UNTITLED_TABLE_NAME;
+  const colIndexOf = (colId: string | undefined) => (colId ? table.columns.findIndex((c) => c.id === colId) : -1);
+  const activeColIdx = colIndexOf(activeCell?.colId);
+  const activeColumn = activeColIdx >= 0 ? table.columns[activeColIdx] : undefined;
+  const activeDisplayIdx = activeCell ? sortedRows.findIndex((r) => r.id === activeCell.rowId) : -1;
+  const needCell = "Select a cell first";
+
+  /** Run one of the kernel's own shortcuts (fill, clear, cut, copy, paste):
+   *  focus the grid and dispatch the keydown it already answers, so a menu
+   *  row and its shortcut can never do two different things. */
+  const sendGridKey = (key: string, mods: { meta?: boolean; shift?: boolean } = {}) => {
+    const gridEl = gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]');
+    if (!gridEl) return;
+    gridEl.focus({ preventScroll: true });
+    const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+    gridEl.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true, shiftKey: !!mods.shift,
+      metaKey: !!mods.meta && isMac, ctrlKey: !!mods.meta && !isMac,
+    }));
+  };
+
+  /** A function seed in the active cell (Insert > Function), the Σ path. */
+  const insertFunctionSeed = (fn: string) => {
+    const gridEl = gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]');
+    if (!gridEl || !activeCell) { toast(needCell); return; }
+    const col = table.columns.find((c) => c.id === activeCell.colId);
+    if (!col || COMPUTED_TYPES.has(col.type)) { toast("This cell is computed by its column. Pick another cell."); return; }
+    sigmaSeedRef.current = `=${fn}(`;
+    gridEl.focus({ preventScroll: true });
+    gridEl.dispatchEvent(new KeyboardEvent("keydown", { key: "=", bubbles: true, cancelable: true }));
+    window.setTimeout(() => { sigmaSeedRef.current = null; }, 0);
+  };
+
+  const copyText = (text: string, done: string) => {
+    void navigator.clipboard?.writeText(text).then(() => toast(done), () => toast("Couldn't copy", { tone: "danger" }));
+  };
+  const copySheetLink = () => copyText(`${window.location.origin}/tables/${table.id}`, "Link copied");
+
+  const makeCopy = async () => {
+    const r = await fetch(`/api/tables/${table.id}/duplicate`, { method: "POST" }).catch(() => null);
+    const d = r && r.ok ? await r.json().catch(() => null) : null;
+    const id = (d?.data ?? d)?.id as string | undefined;
+    if (!id) { toast("Couldn't copy the table", { tone: "danger" }); return; }
+    notifyTablesChanged();
+    router.push(`/tables/${id}`);
+  };
+  const newTable = async () => {
+    try {
+      const t = await createNewTable({ spaceId: table.spaceId ?? null });
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      router.push(newTableHref(t.id));
+    } catch { toast("Couldn't create the table", { tone: "danger" }); }
+  };
+  const trashTable = async () => {
+    const ok = await confirm({
+      title: `Move "${tableName}" to Trash?`,
+      description: "Its rows go with it. You can restore it from Trash.",
+      destructive: true,
+      confirmLabel: "Move to Trash",
+    });
+    if (!ok) return;
+    const r = await fetch(`/api/tables/${table.id}`, { method: "DELETE" }).catch(() => null);
+    if (!r || !r.ok) {
+      const d = r ? await r.json().catch(() => ({})) : {};
+      toast(r?.status === 403 && typeof d?.error === "string" ? d.error : "Couldn't move the table to Trash", { tone: "danger" });
+      return;
+    }
+    notifyTablesChanged();
+    toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=table") } });
+    router.push("/tables");
+  };
+  const deleteSelectedRows = () => {
+    const ids = gridSelection?.rowIds?.length ? gridSelection.rowIds : activeCell ? [activeCell.rowId] : [];
+    if (ids.length === 0) { toast(needCell); return; }
+    if (ids.length > 1) void bulkDeleteRows(ids); else void deleteRow(ids[0]);
+  };
+  const deleteSelectedColumns = async () => {
+    const ids = selectionColumnIds();
+    if (ids.length === 0) { toast(needCell); return; }
+    for (const id of ids) await deleteColumn(id);
+  };
+  const promptRowHeight = async () => {
+    if (!activeCell) { toast(needCell); return; }
+    const raw = await promptDialog({ title: "Row height", description: "In pixels, 16 to 400.", defaultValue: String(SHEET_ROW_H) });
+    if (raw == null) return;
+    const h = Math.round(Number(raw));
+    if (!Number.isFinite(h) || h < 16 || h > 400) { toast("Enter a height from 16 to 400"); return; }
+    resizeRowsTo(activeCell.rowId, h);
+  };
+  const setViewPref = (key: "gridlines" | "formulaBar", value: boolean) => {
+    void patchPrefs({ home: { tables: { [key]: value } } } as Parameters<typeof patchPrefs>[0]);
+  };
+  const openColumnTypeForActive = () => {
+    if (!activeColumn) { toast(needCell); return; }
+    const hdr = gridWrapElRef.current?.querySelector<HTMLElement>(`[role="columnheader"][data-col-index="${activeColIdx}"]`);
+    const rect = hdr?.getBoundingClientRect();
+    setTypePicker({ colId: activeColumn.id, top: rect ? rect.bottom + 4 : 160, left: rect ? rect.left : 160 });
+  };
+  const clearFormatting = () => formatSelection("clear formatting", { b: undefined, i: undefined, u: undefined, s: undefined, c: undefined, bg: undefined, a: undefined });
+  const swatchLeading = (hex: string) => <span className="h-4 w-4 rounded-sm border border-line" style={{ background: hex }} aria-hidden />;
+
+  /** Pivot > Insert as a new table: the result, written to a real table
+   *  (POST /api/tables with its columns, then the rows in batch chunks),
+   *  offered to open. The only way a pivot result is ever stored. */
+  const insertPivotAsTable = async (result: { headers: string[]; rows: (string | number)[][] }) => {
+    const cols = result.headers.map((h, i) => ({ id: `p${i}${newId()}`, type: i === 0 ? "short_text" : "number", label: h }));
+    const created = await fetch("/api/tables", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `${tableName} pivot`.slice(0, 200), columns: cols, ...(table.spaceId ? { spaceId: table.spaceId } : {}) }),
+    }).catch(() => null);
+    const d = created && created.ok ? await created.json().catch(() => null) : null;
+    const newTableId = (d?.data ?? d)?.id as string | undefined;
+    if (!newTableId) { toast("Couldn't create the table", { tone: "danger" }); return; }
+    const inserts = result.rows.map((r) => ({ values: Object.fromEntries(r.map((v, i) => [cols[i].id, v]).filter(([, v]) => v !== "")) }));
+    for (let i = 0; i < inserts.length; i += BATCH_MAX_OPS) {
+      const res = await fetch(`/api/tables/${newTableId}/rows/batch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inserts: inserts.slice(i, i + BATCH_MAX_OPS) }),
+      }).catch(() => null);
+      if (!res || !res.ok) { toast("The table was created but some rows did not save", { tone: "danger", action: { label: "Open table", onClick: () => router.push(`/tables/${newTableId}`) } }); notifyTablesChanged(); return; }
+    }
+    notifyTablesChanged();
+    toast("Pivot saved as a new table", { tone: "success", action: { label: "Open table", onClick: () => router.push(`/tables/${newTableId}`) } });
+  };
+
+  const menus: SheetMenuSpec[] = [
+    {
+      key: "file", label: "File", items: [
+        { label: "New table", icon: Plus, onSelect: () => void newTable() },
+        { label: "Make a copy", icon: Copy, onSelect: () => void makeCopy() },
+        { label: "Import a CSV…", icon: Upload, onSelect: () => setCsvOpen(true) },
+        { label: "Download", icon: Download, submenu: [
+          { label: "CSV, formatted values", onSelect: () => exportCsv(true) },
+          { label: "CSV, raw values", onSelect: () => exportCsv(false) },
+        ] },
+        { label: "Print", icon: Printer, shortcut: "⌘P", onSelect: () => window.print() },
+        { separator: true },
+        ...(table.canManage ? [{ label: "Move to Space…", icon: FolderInput, onSelect: () => { setSheetMenuMode("move"); setSheetMoreOpen(true); } }] : []),
+        { label: "Rename", icon: Pencil, onSelect: () => { titleInputRef.current?.focus(); titleInputRef.current?.select(); } },
+        { label: "About…", icon: Info, onSelect: () => setAboutOpen(true) },
+        ...(table.canManage ? [{ separator: true } as const, { label: "Move to Trash", icon: Trash2, destructive: true, onSelect: () => void trashTable() }] : []),
+      ],
+    },
+    {
+      key: "edit", label: "Edit", items: [
+        { label: "Undo", icon: Undo2, shortcut: "⌘Z", disabled: !undoStack.canUndo() || undoStack.busy(), onSelect: () => void runUndo() },
+        { label: "Redo", icon: Redo2, shortcut: "⇧⌘Z", disabled: !undoStack.canRedo() || undoStack.busy(), onSelect: () => void runRedo() },
+        { separator: true },
+        { label: "Cut", icon: Scissors, shortcut: "⌘X", onSelect: () => sendGridKey("x", { meta: true }) },
+        { label: "Copy", icon: Copy, shortcut: "⌘C", onSelect: () => sendGridKey("c", { meta: true }) },
+        { label: "Paste", icon: ClipboardPaste, shortcut: "⌘V", onSelect: () => sendGridKey("v", { meta: true }) },
+        { separator: true },
+        { label: "Fill down", icon: ArrowDownToLine, shortcut: "⌘D", onSelect: () => sendGridKey("d", { meta: true }) },
+        { label: "Fill right", icon: ArrowRightToLine, shortcut: "⌘R", onSelect: () => sendGridKey("r", { meta: true }) },
+        { separator: true },
+        { label: "Find and replace", icon: Search, shortcut: "⌘F", onSelect: () => openFind(true) },
+        { separator: true },
+        { label: "Clear cells", icon: Eraser, shortcut: "⌫", onSelect: () => sendGridKey("Delete") },
+        { label: "Delete rows", icon: Rows3, onSelect: deleteSelectedRows },
+        { label: "Delete columns", icon: Columns3, onSelect: () => void deleteSelectedColumns() },
+      ],
+    },
+    {
+      key: "view", label: "View", items: [
+        { label: "Freeze", icon: Snowflake, submenu: [
+          { label: "No rows", checked: !freeze?.rows, onSelect: () => persistFreeze({ rows: undefined }) },
+          { label: "1 row", checked: freeze?.rows === 1, onSelect: () => persistFreeze({ rows: 1 }) },
+          ...(activeDisplayIdx >= 1 && activeDisplayIdx + 1 < sortedRows.length ? [{ label: `Up to row ${activeDisplayIdx + 1}`, checked: freeze?.rows === activeDisplayIdx + 1, onSelect: () => persistFreeze({ rows: activeDisplayIdx + 1 }) }] : []),
+          { separator: true },
+          { label: "No columns", checked: !freeze?.cols, onSelect: () => persistFreeze({ cols: undefined }) },
+          { label: "1 column", checked: freeze?.cols === 1, onSelect: () => persistFreeze({ cols: 1 }) },
+          ...(activeColIdx >= 1 && activeColIdx + 1 < table.columns.length ? [{ label: `Up to column ${columnLetter(activeColIdx)}`, checked: freeze?.cols === activeColIdx + 1, onSelect: () => persistFreeze({ cols: activeColIdx + 1 }) }] : []),
+        ] },
+        { label: "Gridlines", icon: Grid3x3, checked: showGridlines, onSelect: () => setViewPref("gridlines", !showGridlines) },
+        { label: "Formula bar", icon: PanelTop, checked: showFormulaBar, onSelect: () => setViewPref("formulaBar", !showFormulaBar) },
+        { separator: true },
+        { label: "Zoom", icon: ZoomIn, submenu: ZOOM_LEVELS.map((z) => ({ label: `${z}%`, checked: zoom === z, onSelect: () => changeZoom(z) })) },
+        { label: fullScreen ? "Exit full screen" : "Full screen", icon: Maximize2, shortcut: "⇧⌘F", onSelect: () => setFullScreen((v) => !v) },
+      ],
+    },
+    {
+      key: "insert", label: "Insert", items: [
+        { label: "Row above", icon: Rows3, disabled: rowInsertBlocked, title: rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined, onSelect: () => { if (activeCell) insertRowNear(activeCell.rowId, "above"); else if (rows.length === 0) startEmptyGrid({ r: 0, c: 0, seed: null }); else toast(needCell); } },
+        { label: "Row below", icon: Rows3, disabled: rowInsertBlocked, title: rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined, onSelect: () => { if (activeCell) insertRowNear(activeCell.rowId, "below"); else if (rows.length === 0) startEmptyGrid({ r: 0, c: 0, seed: null }); else toast(needCell); } },
+        { separator: true },
+        { label: "Column left", icon: Columns3, onSelect: () => { if (activeColumn) insertColumnNear(activeColumn.id, "left"); else void addColumn(); } },
+        { label: "Column right", icon: Columns3, onSelect: () => { if (activeColumn) insertColumnNear(activeColumn.id, "right"); else void addColumn(); } },
+        { separator: true },
+        { label: "Function", icon: FunctionSquare, submenu: [
+          ...["SUM", "AVERAGE", "COUNT", "MAX", "MIN"].map((fn) => ({ label: fn, onSelect: () => insertFunctionSeed(fn) })),
+          { separator: true as const },
+          { label: "More functions…", onSelect: () => setFunctionsOpen(true) },
+        ] },
+        { separator: true },
+        { label: "Named range…", icon: Tag, onSelect: () => setNamedRangesOpen(true) },
+      ],
+    },
+    {
+      key: "format", label: "Format", items: [
+        { label: "Number", icon: Hash, submenu: NUMBER_FORMAT_CHOICES.map((t) => ({ label: t.label, checked: activeKind === t.kind, onSelect: () => applyKindToSelection(t.kind) })) },
+        { label: "Text", icon: Type, submenu: [
+          { label: "Bold", shortcut: "⌘B", checked: !!activeStyle?.b, disabled: fmtDisabled, title: FMT_STREAM_TITLE || undefined, onSelect: () => toggleStyleFlag("b") },
+          { label: "Italic", shortcut: "⌘I", checked: !!activeStyle?.i, disabled: fmtDisabled, title: FMT_STREAM_TITLE || undefined, onSelect: () => toggleStyleFlag("i") },
+          { label: "Underline", shortcut: "⌘U", checked: !!activeStyle?.u, disabled: fmtDisabled, title: FMT_STREAM_TITLE || undefined, onSelect: () => toggleStyleFlag("u") },
+          { label: "Strikethrough", checked: !!activeStyle?.s, disabled: fmtDisabled, title: FMT_STREAM_TITLE || undefined, onSelect: () => toggleStyleFlag("s") },
+        ] },
+        { label: "Alignment", icon: AlignLeft, submenu: [
+          { label: "Left", checked: activeStyle?.a === "l", disabled: fmtDisabled, onSelect: () => formatSelection("align left", { a: "l" }) },
+          { label: "Centre", checked: activeStyle?.a === "c", disabled: fmtDisabled, onSelect: () => formatSelection("align center", { a: "c" }) },
+          { label: "Right", checked: activeStyle?.a === "r", disabled: fmtDisabled, onSelect: () => formatSelection("align right", { a: "r" }) },
+        ] },
+        { label: "Text colour", icon: Baseline, submenu: [
+          ...TEXT_SWATCHES.map((sw) => ({ label: sw.name, leading: swatchLeading(sw.hex), checked: activeStyle?.c?.toUpperCase() === sw.hex, disabled: fmtDisabled, onSelect: () => formatSelection(`text color ${sw.name.toLowerCase()}`, { c: sw.hex }) })),
+          { separator: true },
+          { label: "Reset", disabled: fmtDisabled, onSelect: () => formatSelection("reset text color", { c: undefined }) },
+        ] },
+        { label: "Fill colour", icon: PaintBucket, submenu: [
+          ...FILL_SWATCHES.map((sw) => ({ label: sw.name, leading: swatchLeading(sw.hex), checked: activeStyle?.bg?.toUpperCase() === sw.hex, disabled: fmtDisabled, onSelect: () => formatSelection(`fill ${sw.name.toLowerCase()}`, { bg: sw.hex }) })),
+          { separator: true },
+          { label: "Reset", disabled: fmtDisabled, onSelect: () => formatSelection("reset fill", { bg: undefined }) },
+        ] },
+        { separator: true },
+        { label: "Conditional formatting…", icon: Palette, onSelect: () => { if (activeColumn) setRulesColId(activeColumn.id); else toast(needCell); } },
+        { label: "Data validation…", icon: ShieldCheck, onSelect: () => { if (activeColumn) setValidationColId(activeColumn.id); else toast(needCell); } },
+        { separator: true },
+        { label: "Column width…", icon: Columns3, onSelect: () => { if (activeColumn) void promptColumnWidth(activeColumn.id); else toast(needCell); } },
+        { label: "Row height…", icon: Rows3, onSelect: () => void promptRowHeight() },
+        { separator: true },
+        { label: "Clear formatting", icon: Eraser, disabled: fmtDisabled, title: FMT_STREAM_TITLE || undefined, onSelect: clearFormatting },
+      ],
+    },
+    {
+      key: "data", label: "Data", items: [
+        { label: "Sort table", icon: ArrowUpDown, submenu: activeColumn ? [
+          { label: `A to Z by ${columnDisplayName(activeColumn.label, activeColIdx)}`, onSelect: () => persistSort({ colId: activeColumn.id, dir: "asc" }) },
+          { label: `Z to A by ${columnDisplayName(activeColumn.label, activeColIdx)}`, onSelect: () => persistSort({ colId: activeColumn.id, dir: "desc" }) },
+        ] : [{ label: needCell, disabled: true, title: "Sorting sorts by the active cell's column" }] },
+        ...(sortState ? [{ label: "Clear sort", icon: X, onSelect: () => persistSort(null) }] : []),
+        { separator: true },
+        { label: "Filter", icon: Filter, checked: filterOpen, onSelect: () => setFilterOpen((o) => !o) },
+        { separator: true },
+        { label: "Column type", icon: FileSpreadsheet, onSelect: openColumnTypeForActive },
+        ...(activeColumn ? [activeColumn.protected
+          ? { label: "Unprotect column", icon: Lock, onSelect: () => applyColumnPatches([{ colId: activeColumn.id, before: { protected: true }, after: { protected: false } }], `unprotect "${activeColumn.label}"`) }
+          : { label: "Protect column", icon: Lock, onSelect: () => applyColumnPatches([{ colId: activeColumn.id, before: { protected: activeColumn.protected }, after: { protected: true } }], `protect "${activeColumn.label}"`) }] : []),
+        { separator: true },
+        { label: "Pivot table…", icon: Table2, onSelect: () => setPivotOpen(true) },
+        ...(aiEntitled ? [{ label: "Ask your data…", icon: Sparkles, onSelect: () => setAskOpen(true) }] : []),
+        { separator: true },
+        { label: "Trash…", icon: Trash2, onSelect: () => setTrashOpen(true) },
+      ],
+    },
+  ];
+
+  const tbButton = (key: "zoom" | "numfmt" | "text" | "fill" | "more" | "link") => (el: HTMLButtonElement | null) => { tbAnchor.current[key] = el; };
+  const tbAnchorRef = (key: string) => ({ current: tbAnchor.current[key] ?? null });
+  // A public link only opens while the workspace allows public links; a
+  // stale isPublic under an Off workspace offers no glyph and no embed code.
+  const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false;
+  const autosaveStatus = saveFailed ? "error" : savingCols ? "saving" : lastSavedAt ? "saved" : "idle";
+  const moveOpen = sheetMoreOpen;
+
+  return (
+    // h-full, not flex-1: the shell's <main> is a block scroller, not a flex
+    // column, so flex-1 is inert there and the root would grow to the whole
+    // grid's height (32,000px at 1,000 rows). Then <main> scrolls instead of
+    // the grid: the chrome and the column letters scroll away and every row
+    // mounts. A definite height (HEAD's .dtbl height:100%) keeps SheetGrid's
+    // own scroller bounded. Print unlocks it again (os.css print block).
+    <div className={cn("sheet-root os-chrome flex h-full min-h-0 flex-col bg-app", fullScreen && "sheet-root--full")}>
+      <Breadcrumb items={[...(spaceBack && spaceBack.fallbackHref !== "/tables" ? [{ label: spaceBack.label, href: spaceBack.fallbackHref }] : []), { label: tableName }]} />
+
+      {/* ── Title row 48 (SheetChrome title row; hidden in full screen) ── */}
+      {!fullScreen ? (
+        <header className="flex h-12 shrink-0 items-center gap-2 px-4 print:hidden">
+          <BackButton fallbackHref={spaceBack?.fallbackHref ?? "/tables"} label={spaceBack?.label ?? "Tables"} />
+          <EntityTile size="lg" name={tableName} fallback="table" {...NEUTRAL_TILE} />
+          <input
+            ref={titleInputRef}
+            className="h-8 min-w-[120px] max-w-[420px] flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 text-xl font-semibold text-ink hover:border-line focus:border-brand focus:outline-none"
+            type="text"
+            value={table.name}
+            onChange={(e) => setTable({ ...table, name: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              else if (e.key === "Escape") {
+                // Esc reverts to the name the field held when it took focus.
+                e.preventDefault();
+                const before = titleBeforeEditRef.current;
+                if (before !== null) setTable((prev) => (prev ? { ...prev, name: before } : prev));
+                titleBeforeEditRef.current = null;
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            onFocus={(e) => { titleBeforeEditRef.current = e.target.value; }}
+            onBlur={(e) => {
+              if (titleBeforeEditRef.current === null) return; // Esc already reverted
+              const name = e.target.value.trim() || UNTITLED_TABLE_NAME;
+              if (name !== e.target.value) setTable((prev) => (prev ? { ...prev, name } : prev));
+              // An untouched focus/blur costs nothing: no PATCH, no refetch.
+              if (name === titleBeforeEditRef.current) return;
+              // The sidebar and /tables both list this name: tell them.
+              void patchTable({ name }).then((ok) => { if (ok) notifyTablesChanged(); else toast("Couldn't rename the table", { tone: "danger" }); });
+            }}
+            placeholder={UNTITLED_TABLE_NAME}
+            aria-label="Table name"
+          />
+          <AutosaveIndicator
+            status={autosaveStatus}
+            lastSavedAt={lastSavedAt}
+            onRetry={saveFailed ? () => void retryFailedWrites() : undefined}
+          />
+          {tableId ? <TableFavoriteButton tableId={tableId} /> : null}
+          <span className="flex-1" />
+          <CoPresenceChip others={presence} />
+          {linkIsLive ? (
+            <span className="inline-flex text-ink-2" title="Public link is on"><Globe className="h-3 w-3" strokeWidth={1.5} aria-label="Public link is on" /></span>
+          ) : null}
+          {/* Under 900px Share moves into the title-row "..." (its Share… row). */}
+          <ShareOrRoleChip role={shareRole} onOpen={(mode) => setShareMode(mode)} className="max-[900px]:hidden" />
+          <button
+            ref={sheetMoreRef}
+            type="button"
+            onClick={() => { setSheetMenuMode("menu"); setSheetMoreOpen((o) => !o); }}
+            aria-label="Table actions"
+            aria-haspopup="menu"
+            aria-expanded={sheetMoreOpen}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong text-ink-2 hover:bg-hover hover:text-ink"
           >
-            <Baseline />
-            <span className="shx__tb-colorbar" style={{ background: activeStyle?.c ?? "transparent" }} aria-hidden />
-          </summary>
-          <div className="shx__dd-menu shx__dd-menu--swatches" role="group" aria-label="Text colors">
-            <div className="shx__swatches">
-              {TEXT_SWATCHES.map((sw) => (
-                <button
-                  key={sw.hex}
-                  type="button"
-                  className={`shx__swatch ${activeStyle?.c?.toUpperCase() === sw.hex ? "is-on" : ""}`}
-                  style={{ background: sw.hex }}
-                  title={sw.name}
-                  aria-label={`Text color ${sw.name}`}
-                  onClick={(e) => { formatSelection(`text color ${sw.name.toLowerCase()}`, { c: sw.hex }); closeDetails(e); }}
-                />
-              ))}
-            </div>
-            <button type="button" className="shx__swatch-reset" onClick={(e) => { formatSelection("reset text color", { c: undefined }); closeDetails(e); }}>
-              <X /> Reset
-            </button>
-          </div>
-        </details>
-        <details className="shx__dd">
-          <summary
-            className={`shx__tb-btn shx__tb-color ${fmtDisabled ? "is-disabled" : ""}`}
-            title={fmtDisabled ? FMT_STREAM_TITLE : "Fill color"}
-            aria-label="Fill color"
-            aria-disabled={fmtDisabled || undefined}
-            onClick={(e) => { if (fmtDisabled) e.preventDefault(); }}
-          >
-            <PaintBucket />
-            <span className="shx__tb-colorbar" style={{ background: activeStyle?.bg ?? "transparent" }} aria-hidden />
-          </summary>
-          <div className="shx__dd-menu shx__dd-menu--swatches" role="group" aria-label="Fill colors">
-            <div className="shx__swatches">
-              {FILL_SWATCHES.map((sw) => (
-                <button
-                  key={sw.hex}
-                  type="button"
-                  className={`shx__swatch ${activeStyle?.bg?.toUpperCase() === sw.hex ? "is-on" : ""}`}
-                  style={{ background: sw.hex }}
-                  title={sw.name}
-                  aria-label={`Fill color ${sw.name}`}
-                  onClick={(e) => { formatSelection(`fill ${sw.name.toLowerCase()}`, { bg: sw.hex }); closeDetails(e); }}
-                />
-              ))}
-            </div>
-            <button type="button" className="shx__swatch-reset" onClick={(e) => { formatSelection("reset fill", { bg: undefined }); closeDetails(e); }}>
-              <X /> Reset
-            </button>
-          </div>
-        </details>
-        <span className="shx__tb-sep" aria-hidden />
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </header>
+      ) : null}
+      {moveOpen ? (
+        <MorePortal anchorRef={sheetMoreRef} width={280} open placement="below" onClose={() => setSheetMoreOpen(false)}>
+          <TableRowMenu
+            key={sheetMenuMode}
+            table={{ id: table.id, name: table.name, spaceId: table.spaceId ?? null, spaceName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null, isPublic: !!table.isPublic, canManage: !!table.canManage, publicLinksAllowed: table.publicLinksAllowed !== false }}
+            context="sheet"
+            initialMode={sheetMenuMode}
+            onClose={() => setSheetMoreOpen(false)}
+            onShare={() => setShareMode(table.canManage ? "share" : "who")}
+            onRenameInline={() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); }}
+            onChanged={(kind) => { if (kind === "moved") void load(); }}
+          />
+        </MorePortal>
+      ) : null}
+
+      {/* ── Menu bar 36 (SheetMenuBar; one Menu button under 900px) ── */}
+      {!fullScreen ? <SheetMenuBar menus={menus} className="print:hidden" onAfterSelect={refocusGridIfLost} /> : null}
+
+      {/* ── Toolbar 44: every control is traced to a handler ── */}
+      {/* The toolbar is its own size container: its width is the sheet's,
+          not the window's, so with the rail and a 260px sidebar a 1280px
+          window leaves it 952px, and the last button (Display and About)
+          slid past the edge with no visible scrollbar. It sheds groups the
+          Format menu also carries, widest last: alignment under 980px, the
+          Copy link label under 870px, text styles and colours under 800px.
+          The hidden-scrollbar overflow stays as the last fallback. */}
+      <div className="@container flex h-11 shrink-0 items-center gap-0.5 overflow-x-auto px-4 os-no-scrollbar print:hidden" role="toolbar" aria-label="Table toolbar">
+        <button type="button" className={TB} onClick={() => void runUndo()} disabled={!undoStack.canUndo() || undoStack.busy()} title={undoStack.canUndo() ? `Undo ${undoStack.peekUndoLabel()}` : "Nothing to undo"} aria-label="Undo"><Undo2 /></button>
+        <button type="button" className={TB} onClick={() => void runRedo()} disabled={!undoStack.canRedo() || undoStack.busy()} title={undoStack.canRedo() ? `Redo ${undoStack.peekRedoLabel()}` : "Nothing to redo"} aria-label="Redo"><Redo2 /></button>
+        <span className={TB_SEP} aria-hidden />
+        <button ref={tbButton("zoom")} type="button" className={cn(TB, "px-2 tabular-nums")} onClick={() => setToolbarMenu((m) => (m === "zoom" ? null : "zoom"))} aria-haspopup="menu" aria-expanded={toolbarMenu === "zoom"} title="Zoom" aria-label={`Zoom ${zoom}%`}>
+          {zoom}%<ChevronDown className="!h-3 !w-3" />
+        </button>
+        <span className={cn(TB_SEP, "max-[900px]:hidden")} aria-hidden />
+        {/* Number formats: per cell on open columns, per column on typed ones. */}
+        <button type="button" className={TB} onClick={() => applyKindToSelection("currency")} title="Format as currency" aria-label="Format as currency" aria-pressed={activeKind === "currency"}><DollarSign /></button>
+        <button type="button" className={TB} onClick={() => applyKindToSelection("percent")} title="Format as percent" aria-label="Format as percent" aria-pressed={activeKind === "percent"}><Percent /></button>
+        <button type="button" className={TB} onClick={() => stepColumnDecimals(-1)} title={stepTitle("Decrease decimal places", -1)} aria-label="Decrease decimal places">.0</button>
+        <button type="button" className={TB} onClick={() => stepColumnDecimals(1)} title={stepTitle("Increase decimal places", 1)} aria-label="Increase decimal places">.00</button>
+        <button ref={tbButton("numfmt")} type="button" className={TB} onClick={() => setToolbarMenu((m) => (m === "numfmt" ? null : "numfmt"))} aria-haspopup="menu" aria-expanded={toolbarMenu === "numfmt"} title="Number format" aria-label="Number format">
+          123<ChevronDown className="!h-3 !w-3" />
+        </button>
+        <span className={cn(TB_SEP, "max-[900px]:hidden")} aria-hidden />
+        {/* Per-cell text styles: B I U S, colours, align. They light from the
+            ACTIVE cell's stored style; each action is one undo across the
+            range. Mid-stream they wait for the rows (a style write is a
+            read-modify-write of rows the stream may not have delivered). */}
+        <span className="contents max-[900px]:hidden @max-[800px]:hidden">
+          <button type="button" className={TB} onClick={() => toggleStyleFlag("b")} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Bold (⌘B)"} aria-label="Bold" aria-pressed={!!activeStyle?.b}><Bold /></button>
+          <button type="button" className={TB} onClick={() => toggleStyleFlag("i")} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Italic (⌘I)"} aria-label="Italic" aria-pressed={!!activeStyle?.i}><Italic /></button>
+          <button type="button" className={TB} onClick={() => toggleStyleFlag("u")} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Underline (⌘U)"} aria-label="Underline" aria-pressed={!!activeStyle?.u}><Underline /></button>
+          <button type="button" className={TB} onClick={() => toggleStyleFlag("s")} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Strikethrough"} aria-label="Strikethrough" aria-pressed={!!activeStyle?.s}><Strikethrough /></button>
+          <button ref={tbButton("text")} type="button" className={cn(TB, "flex-col gap-0")} onClick={() => setToolbarMenu((m) => (m === "text" ? null : "text"))} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Text colour"} aria-label="Text colour" aria-haspopup="menu" aria-expanded={toolbarMenu === "text"}>
+            <Baseline /><span className="-mt-0.5 h-[3px] w-4 rounded-sm" style={{ background: activeStyle?.c ?? "transparent" }} aria-hidden />
+          </button>
+          <button ref={tbButton("fill")} type="button" className={cn(TB, "flex-col gap-0")} onClick={() => setToolbarMenu((m) => (m === "fill" ? null : "fill"))} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Fill colour"} aria-label="Fill colour" aria-haspopup="menu" aria-expanded={toolbarMenu === "fill"}>
+            <PaintBucket /><span className="-mt-0.5 h-[3px] w-4 rounded-sm" style={{ background: activeStyle?.bg ?? "transparent" }} aria-hidden />
+          </button>
+          <span className="contents @max-[980px]:hidden">
+          <span className={TB_SEP} aria-hidden />
+          <button type="button" className={TB} onClick={() => formatSelection("align left", { a: "l" })} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Align left"} aria-label="Align left" aria-pressed={activeStyle?.a === "l"}><TextAlignStart /></button>
+          <button type="button" className={TB} onClick={() => formatSelection("align center", { a: "c" })} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Align centre"} aria-label="Align centre" aria-pressed={activeStyle?.a === "c"}><TextAlignCenter /></button>
+          <button type="button" className={TB} onClick={() => formatSelection("align right", { a: "r" })} disabled={fmtDisabled} title={fmtDisabled ? FMT_STREAM_TITLE : "Align right"} aria-label="Align right" aria-pressed={activeStyle?.a === "r"}><TextAlignEnd /></button>
+          </span>
+          <span className={TB_SEP} aria-hidden />
+        </span>
         <button
           type="button"
-          className={`shx__tb-btn ${activeStyle?.a === "l" ? "is-on" : ""}`}
-          onClick={() => formatSelection("align left", { a: "l" })}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Align left"}
-          aria-label="Align left"
-          aria-pressed={activeStyle?.a === "l"}
-        ><TextAlignStart /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.a === "c" ? "is-on" : ""}`}
-          onClick={() => formatSelection("align center", { a: "c" })}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Align center"}
-          aria-label="Align center"
-          aria-pressed={activeStyle?.a === "c"}
-        ><TextAlignCenter /></button>
-        <button
-          type="button"
-          className={`shx__tb-btn ${activeStyle?.a === "r" ? "is-on" : ""}`}
-          onClick={() => formatSelection("align right", { a: "r" })}
-          disabled={fmtDisabled}
-          title={fmtDisabled ? FMT_STREAM_TITLE : "Align right"}
-          aria-label="Align right"
-          aria-pressed={activeStyle?.a === "r"}
-        ><TextAlignEnd /></button>
-        <span className="shx__tb-sep" aria-hidden />
-        <button
-          type="button"
-          className={`shx__tb-btn ${filterOpen || search || filterValue ? "is-on" : ""}`}
           onClick={() => setFilterOpen((o) => !o)}
-          title="Search and filter rows"
-          aria-label="Toggle search and filter"
-        ><Filter /></button>
-        <button type="button" className="shx__tb-btn" onClick={insertSumSeed} title="Insert SUM in the active cell" aria-label="Functions"><Sigma /></button>
-        <span className="shx__tb-flex" aria-hidden />
-        <details className="shx__dd shx__dd--right">
-          <summary className="shx__tb-btn shx__tb-text" title="File">File<ChevronDown /></summary>
-          <div className="shx__dd-menu">
-            <label className="shx__dd-item">
-              <Upload /> Import CSV
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void importCsv(f);
-                  e.target.value = "";
-                  e.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              />
-            </label>
-            {/* Export offers formatted vs raw (plan Phase 4: "honest CSV of
-                formatted values + a raw-values option"). */}
-            <button type="button" onClick={(e) => { exportCsv(true); closeDetails(e); }}><Download /> Export CSV (formatted)</button>
-            <button type="button" onClick={(e) => { exportCsv(false); closeDetails(e); }}><Download /> Export CSV (raw values)</button>
-            <button type="button" onClick={(e) => { closeDetails(e); setAskOpen(true); }}><Sparkles /> Ask your data…</button>
-            <button type="button" onClick={(e) => { closeDetails(e); setPivotOpen(true); }}><Table2 /> Pivot table…</button>
-            <button type="button" onClick={(e) => { closeDetails(e); setNamedRangesOpen(true); }}><Tag /> Named ranges…</button>
-            <button type="button" onClick={(e) => { closeDetails(e); setTrashOpen(true); }}><Trash2 /> Trash…</button>
-          </div>
-        </details>
+          aria-pressed={filterOpen || !!search || filterActive}
+          title="Filter rows"
+          className={cn(TB, "gap-1.5 px-2.5")}
+        >
+          <Filter />
+          <span>{filterCount > 0 ? `Filter · ${filterCount}` : "Filter"}</span>
+        </button>
+        <button type="button" className={cn(TB, "max-[900px]:hidden")} onClick={insertSumSeed} title="Insert SUM in the active cell" aria-label="Insert SUM"><Sigma /></button>
+        <span className="min-w-2 flex-1" aria-hidden />
+        {/* Right end: Copy link, fused to Copy embed code when a public link is on. */}
+        {fullScreen ? (
+          // Full screen hides the menu bar (its View row is the usual way
+          // out), so the toolbar carries a visible exit for touch and for
+          // anyone who does not know Escape or the shortcut.
+          <button type="button" onClick={() => setFullScreen(false)} className="me-1 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink" title="Exit full screen (Esc)">
+            <Minimize2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Exit full screen
+          </button>
+        ) : null}
+        <span className="inline-flex h-9 shrink-0 items-stretch overflow-hidden rounded-md border border-line-strong">
+          <button type="button" onClick={copySheetLink} className="inline-flex items-center gap-1.5 px-2.5 text-sm font-medium text-ink hover:bg-hover" title="Copy a link to this table" aria-label="Copy link">
+            <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="@max-[870px]:hidden">Copy link</span>
+          </button>
+          {linkIsLive ? (
+            <button ref={tbButton("link")} type="button" onClick={() => setToolbarMenu((m) => (m === "link" ? null : "link"))} className="inline-flex w-7 items-center justify-center border-s border-line-strong text-ink-2 hover:bg-hover" aria-label="More link options" aria-haspopup="menu" aria-expanded={toolbarMenu === "link"}>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </span>
+        <button ref={tbButton("more")} type="button" onClick={() => setToolbarMenu((m) => (m === "more" ? null : "more"))} className="ms-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line-strong text-ink-2 hover:bg-hover hover:text-ink" aria-label="Display and About" aria-haspopup="menu" aria-expanded={toolbarMenu === "more"}>
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Search + filter row, shown on demand from the toolbar's funnel. */}
-      {filterOpen && (
-        <nav className="dtbl__viewtabs shx__np">
-          <div className="dtbl__filterbar">
-            <div className="dtbl__searchwrap">
-              <Search />
-              <input type="search" placeholder="Search rows…" value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-            <div className="dtbl__filterwrap">
-              <Filter />
-              <select value={filterCol} onChange={(e) => persistFilter(e.target.value, "")}>
-                <option value="">No filter</option>
-                {table.columns.filter((c) => c.type === "select" || c.type === "multi_select").map((c) => (
-                  <option key={c.id} value={c.id}>{c.label}</option>
-                ))}
-              </select>
-              {filterColDef && (
-                <select value={filterValue} onChange={(e) => persistFilter(filterCol, e.target.value)}>
-                  <option value="">Any value</option>
-                  {(filterColDef.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              )}
-            </div>
-            {(search || filterValue) && (
-              <span className="dtbl__filterhint">{filteredRows.length} of {rows.length}</span>
-            )}
-          </div>
-        </nav>
-      )}
+      {toolbarMenu ? (
+        <MorePortal anchorRef={tbAnchorRef(toolbarMenu)} width={toolbarMenu === "text" || toolbarMenu === "fill" ? 232 : 240} open placement="below" onClose={() => setToolbarMenu(null)}>
+          {toolbarMenu === "zoom" ? (
+            <MenuList aria-label="Zoom">
+              {ZOOM_LEVELS.map((z) => <MenuItem key={z} label={`${z}%`} selected={zoom === z} onClick={() => { changeZoom(z); setToolbarMenu(null); }} />)}
+            </MenuList>
+          ) : toolbarMenu === "numfmt" ? (
+            <MenuList aria-label="Number format">
+              {NUMBER_FORMAT_CHOICES.map((t) => <MenuItem key={t.kind} label={t.label} selected={activeKind === t.kind} role="menuitemradio" onClick={() => { applyKindToSelection(t.kind); setToolbarMenu(null); }} />)}
+            </MenuList>
+          ) : toolbarMenu === "text" || toolbarMenu === "fill" ? (
+            <MenuList aria-label={toolbarMenu === "text" ? "Text colours" : "Fill colours"} className="p-2">
+              <div className="grid grid-cols-5 gap-1.5 p-1">
+                {(toolbarMenu === "text" ? TEXT_SWATCHES : FILL_SWATCHES).map((sw) => {
+                  const on = (toolbarMenu === "text" ? activeStyle?.c : activeStyle?.bg)?.toUpperCase() === sw.hex;
+                  return (
+                    <button
+                      key={sw.hex}
+                      type="button"
+                      className={cn("h-7 w-7 rounded-md border border-line", on && "ring-2 ring-brand ring-offset-1")}
+                      style={{ background: sw.hex }}
+                      title={sw.name}
+                      aria-label={`${toolbarMenu === "text" ? "Text colour" : "Fill colour"} ${sw.name}`}
+                      aria-pressed={on}
+                      onClick={() => {
+                        if (toolbarMenu === "text") formatSelection(`text color ${sw.name.toLowerCase()}`, { c: sw.hex });
+                        else formatSelection(`fill ${sw.name.toLowerCase()}`, { bg: sw.hex });
+                        setToolbarMenu(null);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <MenuItem icon={X} label="Reset" onClick={() => { if (toolbarMenu === "text") formatSelection("reset text color", { c: undefined }); else formatSelection("reset fill", { bg: undefined }); setToolbarMenu(null); }} />
+            </MenuList>
+          ) : toolbarMenu === "link" ? (
+            <MenuList aria-label="Link options">
+              <MenuItem icon={Code2} label="Copy embed code" onClick={() => { copyText(embedSnippet("table", table.id, tableName), "Embed code copied"); setToolbarMenu(null); }} />
+            </MenuList>
+          ) : (
+            <MenuList aria-label="Display and About">
+              <MenuItem icon={Grid3x3} label="Gridlines" selected={showGridlines} role="menuitemcheckbox" onClick={() => setViewPref("gridlines", !showGridlines)} />
+              <MenuItem icon={PanelTop} label="Formula bar" selected={showFormulaBar} role="menuitemcheckbox" onClick={() => setViewPref("formulaBar", !showFormulaBar)} />
+              <MenuItem icon={Rows3} label="Row height…" onClick={() => { setToolbarMenu(null); void promptRowHeight(); }} />
+              <MenuItem icon={fullScreen ? Minimize2 : Maximize2} label={fullScreen ? "Exit full screen" : "Full screen"} shortcut="⇧⌘F" onClick={() => { setToolbarMenu(null); setFullScreen((v) => !v); }} />
+              <MenuSeparator />
+              <MenuItem icon={Info} label="About…" onClick={() => { setToolbarMenu(null); setAboutOpen(true); }} />
+            </MenuList>
+          )}
+        </MorePortal>
+      ) : null}
 
-      {table.columns.length === 0 ? (
-        /* A columnless table must still open as a spreadsheet, never a
-           card: one click applies the standard 26×100 blank-sheet seed. */
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <button type="button" className="dtbl__addrow" onClick={() => void startSheet()}><Plus /> Start sheet</button>
-        </div>
-      ) : (
-        <div className="shx__sheet">
-          {/* fx bar: address box, fx glyph, formula input (formula-bar.tsx). */}
-          <div className="shx__fx shx__np">
+      {/* ── Formula bar 36 (View > Formula bar hides it) ── */}
+      {table.columns.length > 0 && showFormulaBar ? (
+        <div className="shrink-0 px-4 print:hidden">
           <FormulaBar
             cell={barCell}
             onCommit={(raw) => {
               if (!activeCell) return;
+              setReadOnlyNote(null);
               commitCellText(activeCell.rowId, activeCell.colId, raw);
               // Hand the keyboard back to the grid, so Enter-commit flows
               // straight into navigation like an in-cell commit does.
-              gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus();
+              gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus({ preventScroll: true });
             }}
-            onReadOnlyEdit={(reason) => toast(reason)}
+            onReadOnlyEdit={(reason) => setReadOnlyNote(reason)}
           />
-          </div>
-          {/* CSS zoom, not transform: zoom reflows layout, so the kernel's
-              virtualizer math (row offsets, viewport height) stays true. */}
-          <div ref={attachGridWrap} className="shx__grid" style={{ zoom: zoom / 100 }}>
-          <SheetGrid
-            columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
-            rowIds={sortedRowIds}
-            renderDisplay={displayCell}
-            renderEditor={kernelEditor}
-            onClearCells={(cells) => void clearCells(cells)}
-            getRangeValues={getRangeValues}
-            applyMatrix={applyMatrix}
-            onUndo={() => void runUndo()}
-            onRedo={() => void runRedo()}
-            cellStyle={cellStyleFor}
-            onFormatKey={toggleStyleFlag}
-            onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
-            onHeaderContextMenu={(colId, x, y) => setHeaderMenu({ colId, x, y })}
-            // Freeze panes are display-only: the kernel pins the first N
-            // display rows/columns; nothing here reaches the engine.
-            freeze={gridFreeze ?? undefined}
-            isCellEmpty={isCellEmpty}
-            // Per-row heights (Sheets' row resize), answered from the
-            // mirror's "$rh". UNDEFINED while every row is default so the
-            // kernel keeps its constant-height fast path; the version is
-            // the geometry's re-sample signal — it bumps exactly when some
-            // stored height changed, never on a plain cell edit.
-            rowHeight={kernelRowHeight}
-            rowHeightsVersion={rowHeightsVersion}
-            onRowResize={resizeRowsTo}
-            // Boundary double-click fits the row to its content (Sheets);
-            // without this prop the kernel falls back to plain reset.
-            onRowAutofit={autofitRows}
-            // While a header-grip width drag is live, the kernel draws the
-            // Sheets guide line at this column's live right edge.
-            colResizeGuideId={resizingColId}
-            // Find & Replace navigation: each nonce bump makes the current
-            // match the active cell (the kernel scrolls it into view).
-            activeRequest={findActiveRequest ?? undefined}
-            // Row moving exists ONLY while display order IS storage order:
-            // under a sort/filter/search the gutter's display index names a
-            // different storage slot, and mid-stream the tail hasn't even
-            // arrived. Omitting the prop keeps the gutter click-select only.
-            onRowMove={rowInsertBlocked ? undefined : moveRowByDrag}
-            onGrowRows={growRows}
-            onSelectionChange={(sel) => setGridSelection(sel)}
-            renderHeader={kernelHeader}
-            headerTrailing={
-              <button
-                type="button"
-                onClick={() => void addColumn()}
-                title="Add column"
-                className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-              >
-                <Plus style={{ width: 15, height: 15 }} />
-              </button>
-            }
-            readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
-          />
-          </div>
-          {/* The corner "+": the one manual add-rows affordance left after
-              the "New row" footer button died. Compact square, Sheets'
-              bottom-left placement, one undoable 500-row block per press. */}
-          <button
-            type="button"
-            className="shx__addrows shx__np"
-            onClick={() => void addRowsBlock()}
-            disabled={addingRows}
-            title="Add 500 rows"
-            aria-label="Add 500 rows"
-          >
-            {addingRows ? <Dots variant="pending" /> : <Plus />}
-          </button>
-          {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): compact, floats
-              top-right over the grid, Sheets' quick-find shape. Lives
-              OUTSIDE the grid div on purpose — its Enter/Escape never
-              bubble into the kernel's keydown, so Enter can't open an
-              editor and Escape can't collapse the selection. */}
+          {readOnlyNote && barCell?.readOnly ? <p className="m-0 px-1 pt-1 text-sm text-danger-text" role="status">{readOnlyNote}</p> : null}
+        </div>
+      ) : null}
+
+      {/* ── Body: the Filter panel left of the card, then the card ── */}
+      <div className="flex min-h-0 flex-1 gap-4 px-4 pb-3 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="rows"
+          activeCount={filterCount}
+          onClearAll={() => { setSearch(""); persistFilters([]); }}
+          search={{ value: search, onChange: setSearch, placeholder: "Search rows" }}
+        >
+          <FilterGroup label="Columns">
+            {table.columns.map((c, ci) => {
+              const current = filters.find((f) => f.colId === c.id) ?? null;
+              const name = columnDisplayName(c.label, ci);
+              return (
+                <FilterRow
+                  key={c.id}
+                  label={name}
+                  checked={!!current}
+                  onCheckedChange={(next) => setColumnFilter(c.id, next ? emptyFilterFor(c.id, c.type) : null)}
+                >
+                  {current ? (
+                    <ColumnFilterControl
+                      name={name}
+                      column={c}
+                      filter={current}
+                      onChange={(f) => setColumnFilter(c.id, f)}
+                    />
+                  ) : null}
+                </FilterRow>
+              );
+            })}
+          </FilterGroup>
+          {search || filterActive ? <p className="m-0 px-1 pt-2 text-sm text-ink-2">{filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows</p> : null}
+        </FilterPanel>
+
+        <div className={cn("sheet-card relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-[var(--os-surface)]", !showGridlines && "sheet-card--nogrid")}>
+          {table.columns.length === 0 ? (
+            /* A columnless table still opens as a spreadsheet: the quiet
+               template and ONE text link (principle 11, spec section 2
+               "Start sheet ... stays"), which applies the canonical seed.
+               Single columns are the header "+" once the grid exists. The
+               action says what it does (it adds 26 columns, not one), and
+               the copy never says Sheet: the product word is Table. */
+            <div className="flex flex-1 items-center justify-center">
+              <OsEmptyView context="list" title="This table has no columns yet" hint="Starting it adds columns A to Z and 1,000 blank rows, the same as a new table." action={{ label: "Start the table", onClick: () => void startTable() }} />
+            </div>
+          ) : (
+            <>
+              {/* CSS zoom, not transform: zoom reflows layout, so the kernel's
+                  virtualizer math (row offsets, viewport height) stays true. */}
+              <div ref={attachGridWrap} className="sheet-grid-wrap flex min-h-0 flex-1 flex-col" style={{ zoom: zoom / 100 }}>
+                <SheetGrid
+                  columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
+                  rowIds={sortedRowIds}
+                  renderDisplay={displayCell}
+                  renderEditor={kernelEditor}
+                  onClearCells={(cells) => void clearCells(cells)}
+                  getRangeValues={getRangeValues}
+                  applyMatrix={applyMatrix}
+                  onUndo={() => void runUndo()}
+                  onRedo={() => void runRedo()}
+                  cellStyle={cellStyleFor}
+                  onFormatKey={toggleStyleFlag}
+                  onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
+                  onHeaderContextMenu={(colId, x, y) => setHeaderMenu({ colId, x, y })}
+                  onHeaderRename={(colId) => setRenamingColId(colId)}
+                  // Freeze panes are display-only: the kernel pins the first N
+                  // display rows/columns; nothing here reaches the engine.
+                  freeze={gridFreeze ?? undefined}
+                  isCellEmpty={isCellEmpty}
+                  // Per-row heights, answered from the mirror's "$rh". UNDEFINED
+                  // while every row is default so the kernel keeps its fast path.
+                  rowHeight={kernelRowHeight}
+                  rowHeightsVersion={rowHeightsVersion}
+                  onRowResize={resizeRowsTo}
+                  onRowAutofit={autofitRows}
+                  colResizeGuideId={resizingColId}
+                  activeRequest={findActiveRequest ?? undefined}
+                  // Row moving exists ONLY while display order IS storage order.
+                  onRowMove={rowInsertBlocked ? undefined : moveRowByDrag}
+                  onGrowRows={growRows}
+                  // An empty table is typed into like Sheets' A1 (startEmptyGrid).
+                  onEmptyStart={rows.length === 0 && !rowInsertBlocked ? startEmptyGrid : undefined}
+                  rowNumberOf={rowNumberOf}
+                  onSelectionChange={(sel) => setGridSelection(sel)}
+                  onActiveChange={onGridActiveChange}
+                  renderHeader={kernelHeader}
+                  headerTrailing={
+                    <button
+                      type="button"
+                      onClick={() => void addColumn()}
+                      title="Add column"
+                      aria-label="Add column"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink"
+                    >
+                      <Plus style={{ width: 15, height: 15 }} />
+                    </button>
+                  }
+                  readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
+                />
+              </div>
+              {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): floats top-right
+                  over the grid, OUTSIDE the grid div on purpose, so its Enter
+                  and Escape never reach the kernel. */}
           {findOpen && (
-            <div className="shx__find shx__np" role="dialog" aria-label="Find and replace">
-              <div className="shx__find-row">
+            <div data-sheet-find className="absolute right-[26px] top-[34px] z-30 flex w-80 max-w-[calc(100%-40px)] flex-col gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-2 shadow-[var(--os-shadow-pop)] print:hidden" role="dialog" aria-label="Find and replace">
+              <div className="flex items-center gap-1.5">
                 <input
                   ref={findInputRef}
-                  className="shx__find-input"
+                  className={FIND_INPUT}
                   type="text"
                   value={findQuery}
-                  placeholder="Find in sheet"
+                  placeholder="Find in table"
                   autoFocus
                   onChange={(e) => setFindQueryLive(e.target.value)}
                   onKeyDown={(e) => {
@@ -5221,16 +6126,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); }
                   }}
                 />
-                {findCounter !== null && <span className="shx__find-count">{findCounter}</span>}
-                <button type="button" className="shx__find-btn" onClick={() => findStep(-1)} disabled={findMatches.length === 0} title="Previous match (Shift+Enter)" aria-label="Previous match"><ChevronUp /></button>
-                <button type="button" className="shx__find-btn" onClick={() => findStep(1)} disabled={findMatches.length === 0} title="Next match (Enter)" aria-label="Next match"><ChevronDown /></button>
-                <button type="button" className={`shx__find-btn ${findShowReplace ? "is-on" : ""}`} onClick={() => setFindShowReplace((v) => !v)} title="More options" aria-label="More options"><MoreVertical /></button>
-                <button type="button" className="shx__find-btn" onClick={closeFind} title="Close (Esc)" aria-label="Close find"><X /></button>
+                {findCounter !== null && <span className="shrink-0 whitespace-nowrap px-0.5 text-xs tabular-nums text-ink-3">{findCounter}</span>}
+                <button type="button" className={FIND_BTN} onClick={() => findStep(-1)} disabled={findMatches.length === 0} title="Previous match (Shift+Enter)" aria-label="Previous match"><ChevronUp /></button>
+                <button type="button" className={FIND_BTN} onClick={() => findStep(1)} disabled={findMatches.length === 0} title="Next match (Enter)" aria-label="Next match"><ChevronDown /></button>
+                <button type="button" className={`${FIND_BTN} ${findShowReplace ? "bg-brand-soft text-brand" : ""}`} onClick={() => setFindShowReplace((v) => !v)} title="More options" aria-label="More options"><MoreVertical /></button>
+                <button type="button" className={FIND_BTN} onClick={closeFind} title="Close (Esc)" aria-label="Close find"><X /></button>
               </div>
               {findShowReplace && (
-                <div className="shx__find-row">
+                <div className="flex items-center gap-1.5">
                   <input
-                    className="shx__find-input"
+                    className={FIND_INPUT}
                     type="text"
                     value={findReplace}
                     placeholder="Replace with"
@@ -5240,116 +6145,70 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); }
                     }}
                   />
-                  <button type="button" className="shx__find-action" onClick={runReplaceCurrent} disabled={findMatches.length === 0}>Replace</button>
-                  <button type="button" className="shx__find-action" onClick={() => void runReplaceAll()} disabled={findMatches.length === 0}>Replace all</button>
+                  <button type="button" className={FIND_ACTION} onClick={runReplaceCurrent} disabled={findMatches.length === 0}>Replace</button>
+                  <button type="button" className={FIND_ACTION} onClick={() => void runReplaceAll()} disabled={findMatches.length === 0}>Replace all</button>
                 </div>
               )}
-              {findNotice && <div className="shx__find-note">{findNotice}</div>}
+              {findNotice && <div className="text-xs text-ink-3">{findNotice}</div>}
             </div>
           )}
+            </>
+          )}
+          <SheetStatusBar
+            rows={rows.length}
+            columns={table.columns.length}
+            stream={streamProgress}
+            stats={statsText}
+            lastSavedAt={lastSavedAt}
+            saveFailed={saveFailed}
+            leading={table.columns.length === 0 ? null : (
+              // The corner "+" under the gutter: one undoable block of
+              // 1,000 blank rows. It lives in the status bar so it never
+              // sits over the last visible row's number.
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50 print:hidden"
+                onClick={() => void addRowsBlock()}
+                disabled={addingRows}
+                title="Add 1,000 rows"
+                aria-label="Add 1,000 rows"
+              >
+                {addingRows ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
+              </button>
+            )}
+          />
         </div>
-      )}
+      </div>
 
-      <SheetTabsBar
-        currentId={tableId}
-        currentName={table.name}
-        stats={statsText}
-        meta={streamProgress
-          // Multi-chunk stream in flight: the muted meta span doubles as the
-          // Sheets-like progress line; the normal counts return on completion.
-          ? (streamProgress.total !== null
-            ? `Loading rows — ${streamProgress.loaded.toLocaleString()} of ${streamProgress.total.toLocaleString()}`
-            : `Loading rows — ${streamProgress.loaded.toLocaleString()}…`)
-          : `${rows.length} row${rows.length === 1 ? "" : "s"} · ${table.columns.length} col${table.columns.length === 1 ? "" : "s"}`}
-      />
-
-      {rowMenu ? (
-        <MorePortal
+      {/* A row that left the display while its menu was open (deleted, or
+        * filtered out from another surface) renders no menu, like a dead
+        * column's: a move or freeze computed from index -1 would land at
+        * the top. */}
+      {rowMenu && rowMenuDisplayIdx >= 0 ? (
+        <GridRowMenu
+          rowId={rowMenu.rowId}
+          displayIndex={rowMenuDisplayIdx}
+          rowCount={sortedRows.length}
+          spanCount={rowMenuSpan ? rowMenuSpan.length : null}
+          point={{ x: rowMenu.x, y: rowMenu.y }}
           anchorRef={rowMenuAnchorRef}
           panelRef={rowMenuPanelRef}
-          width={180}
-          open
-          placement="below"
-          point={{ x: rowMenu.x, y: rowMenu.y }}
-        >
-          <MenuList className="min-w-[180px]">
-            {/* The drawer's gutter chevron died with the checkbox gutter —
-                this menu entry is the drawer's remaining door. */}
-            <MenuItem
-              icon={ChevronRight}
-              label="Open row"
-              onClick={() => { setActiveRowId(rowMenu.rowId); setRowMenu(null); }}
-            />
-            {/* Sheets' inserts. Gated exactly like the gutter drag: a
-                storage slot is only a display slot while nothing reorders
-                the display (sort/filter/search) and the whole table is
-                resident (stream). Disabled, not hidden — the user learns
-                why from the title. */}
-            <MenuItem
-              icon={ArrowUpFromLine}
-              label="Insert 1 row above"
-              disabled={rowInsertBlocked}
-              title={rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined}
-              onClick={() => { setRowMenu(null); insertRowNear(rowMenu.rowId, "above"); }}
-            />
-            <MenuItem
-              icon={ArrowDownToLine}
-              label="Insert 1 row below"
-              disabled={rowInsertBlocked}
-              title={rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined}
-              onClick={() => { setRowMenu(null); insertRowNear(rowMenu.rowId, "below"); }}
-            />
-            {/* Sheets' freeze, from the row menu (we have no View menubar).
-                N is the clicked row's display number; hidden, not disabled,
-                when it would leave nothing scrollable. Unfreeze appears only
-                while rows are frozen. Neither touches data or undo. */}
-            {rowMenuCanFreeze ? (
-              <MenuItem
-                icon={Pin}
-                label={`Freeze up to row ${rowMenuDisplayIdx + 1}`}
-                onClick={() => { setRowMenu(null); persistFreeze({ rows: rowMenuDisplayIdx + 1 }); }}
-              />
-            ) : null}
-            {freeze?.rows ? (
-              <MenuItem
-                icon={PinOff}
-                label="Unfreeze rows"
-                onClick={() => { setRowMenu(null); persistFreeze({ rows: undefined }); }}
-              />
-            ) : null}
-            {rowMenuSpan ? (
-              // Sheets' "Clear rows 2-5": the whole span, one undo entry.
-              <MenuItem
-                icon={Eraser}
-                label={`Clear ${rowMenuSpan.length} rows`}
-                onClick={() => { setRowMenu(null); clearRows(rowMenuSpan); }}
-              />
-            ) : (
-              <MenuItem
-                icon={Eraser}
-                label="Clear row"
-                onClick={() => { setRowMenu(null); clearRows([rowMenu.rowId]); }}
-              />
-            )}
-            {rowMenuSpan ? (
-              // The whole span, through the same confirmed+undoable bulk
-              // path the old checkbox pill used.
-              <MenuItem
-                icon={Trash2}
-                label={`Delete ${rowMenuSpan.length} rows`}
-                destructive
-                onClick={() => { setRowMenu(null); void bulkDeleteRows(rowMenuSpan); }}
-              />
-            ) : (
-              <MenuItem
-                icon={Trash2}
-                label="Delete row"
-                destructive
-                onClick={() => { setRowMenu(null); void deleteRow(rowMenu.rowId); }}
-              />
-            )}
-          </MenuList>
-        </MorePortal>
+          // Insert and move are gated exactly like the gutter drag: a storage
+          // slot is only a display slot while nothing reorders the display
+          // (sort, filter, search) and the whole table is resident (stream).
+          structureBlocked={rowInsertBlocked}
+          blockedReason="Clear the sort, filter and search to insert or move rows"
+          canFreeze={rowMenuCanFreeze}
+          frozenRows={freeze?.rows}
+          onClose={() => setRowMenu(null)}
+          onOpen={() => setActiveRowId(rowMenu.rowId)}
+          onInsert={(where) => insertRowNear(rowMenu.rowId, where)}
+          onMove={(dir) => moveRowByDrag(rowMenu.rowId, rowMenuDisplayIdx + dir)}
+          onFreeze={() => persistFreeze({ rows: rowMenuDisplayIdx + 1 })}
+          onUnfreeze={() => persistFreeze({ rows: undefined })}
+          onClear={() => clearRows(rowMenuSpan ?? [rowMenu.rowId])}
+          onDelete={() => { if (rowMenuSpan) void bulkDeleteRows(rowMenuSpan); else void deleteRow(rowMenu.rowId); }}
+        />
       ) : null}
 
       {headerMenu ? (() => {
@@ -5359,131 +6218,109 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const hc = table.columns.find((c) => c.id === headerMenu.colId);
         if (!hc) return null;
         const colIdx = table.columns.findIndex((c) => c.id === headerMenu.colId);
-        const letter = columnLetter(colIdx);
-        // Same rule as rows: a freeze must leave at least one column scrolling.
-        const canFreezeCol = colIdx + 1 <= table.columns.length - 1;
+        const point = { x: headerMenu.x, y: headerMenu.y };
         return (
-          <MorePortal
+          <GridHeaderMenu
+            column={hc}
+            index={colIdx}
+            columnCount={table.columns.length}
+            letter={columnLetter(colIdx)}
+            point={point}
             anchorRef={headerMenuAnchorRef}
             panelRef={headerMenuPanelRef}
-            width={200}
+            sortActive={!!sortState}
+            frozenCols={freeze?.cols}
+            onClose={() => setHeaderMenu(null)}
+            onRename={() => setRenamingColId(hc.id)}
+            onType={() => setTypePicker({ colId: hc.id, top: point.y, left: point.x })}
+            // Sorting drives the SAME persisted sortState, written into the
+            // first saved view exactly as before.
+            onSort={(dir) => persistSort({ colId: hc.id, dir })}
+            onClearSort={() => persistSort(null)}
+            onInsert={(where) => insertColumnNear(hc.id, where)}
+            onMove={(dir) => moveColumnBy(hc.id, dir)}
+            onWidth={() => void promptColumnWidth(hc.id)}
+            onFreeze={() => persistFreeze({ cols: colIdx + 1 })}
+            onUnfreeze={() => persistFreeze({ cols: undefined })}
+            onValidation={() => setValidationColId(hc.id)}
+            onConditional={() => setRulesColId(hc.id)}
+            onEditFormula={() => void editFormula(hc.id)}
+            onConfigureRelation={() => setConfigColId(hc.id)}
+            onEditOptions={() => setOptionsColId(hc.id)}
+            onToggleProtect={() => applyColumnPatches(
+              [{ colId: hc.id, before: { protected: hc.protected }, after: { protected: !hc.protected } }],
+              hc.protected ? `unprotect "${hc.label}"` : `protect "${hc.label}"`,
+            )}
+            onClear={() => clearColumn(hc.id)}
+            onDelete={() => void deleteColumn(hc.id)}
+          />
+        );
+      })() : null}
+
+      {typePicker ? (() => {
+        const col = table.columns.find((c) => c.id === typePicker.colId);
+        if (!col) return null;
+        return (
+          <ColumnTypePicker
             open
-            placement="below"
-            point={{ x: headerMenu.x, y: headerMenu.y }}
-          >
-            <MenuList className="min-w-[200px]">
-              {/* Sorting drives the SAME persisted sortState the kernel's
-                  old header arrow cycled — persistSort writes it into the
-                  first saved view exactly as before. */}
-              <MenuItem
-                icon={ArrowDownAZ}
-                label={`Sort sheet A → Z by ${letter}`}
-                onClick={() => { setHeaderMenu(null); persistSort({ colId: hc.id, dir: "asc" }); }}
-              />
-              <MenuItem
-                icon={ArrowUpZA}
-                label={`Sort sheet Z → A by ${letter}`}
-                onClick={() => { setHeaderMenu(null); persistSort({ colId: hc.id, dir: "desc" }); }}
-              />
-              {sortState ? (
-                <MenuItem
-                  icon={X}
-                  label="Clear sort"
-                  onClick={() => { setHeaderMenu(null); persistSort(null); }}
-                />
-              ) : null}
-              {/* Sheets' column inserts + clear. Column order is never
-                  display-reordered (no column sort exists), so these need
-                  no gate; the clear of a computed column toasts instead. */}
-              <MenuItem
-                icon={ArrowLeftToLine}
-                label="Insert 1 column left"
-                onClick={() => { setHeaderMenu(null); insertColumnNear(hc.id, "left"); }}
-              />
-              <MenuItem
-                icon={ArrowRightToLine}
-                label="Insert 1 column right"
-                onClick={() => { setHeaderMenu(null); insertColumnNear(hc.id, "right"); }}
-              />
-              {/* Freeze columns, the header-menu twin of the row menu's
-                  freeze: display-only, no undo entry, hidden when it would
-                  pin every column. */}
-              {canFreezeCol ? (
-                <MenuItem
-                  icon={Pin}
-                  label={`Freeze up to column ${letter}`}
-                  onClick={() => { setHeaderMenu(null); persistFreeze({ cols: colIdx + 1 }); }}
-                />
-              ) : null}
-              {freeze?.cols ? (
-                <MenuItem
-                  icon={PinOff}
-                  label="Unfreeze columns"
-                  onClick={() => { setHeaderMenu(null); persistFreeze({ cols: undefined }); }}
-                />
-              ) : null}
-              <MenuItem
-                icon={Eraser}
-                label={`Clear column ${letter}`}
-                onClick={() => { setHeaderMenu(null); clearColumn(hc.id); }}
-              />
-              {hc.type === "formula" ? (
-                <MenuItem
-                  icon={Sigma}
-                  label="Edit formula"
-                  onClick={() => { setHeaderMenu(null); void editFormula(hc.id); }}
-                />
-              ) : null}
-              {hc.type === "link" || hc.type === "lookup" || hc.type === "rollup" ? (
-                <MenuItem
-                  icon={Link2}
-                  label="Configure relation"
-                  onClick={() => { setHeaderMenu(null); setConfigColId(hc.id); }}
-                />
-              ) : null}
-              <MenuItem
-                icon={ListChecks}
-                label="Data validation"
-                onClick={() => { setHeaderMenu(null); setValidationColId(hc.id); }}
-              />
-              <MenuItem
-                icon={Palette}
-                label="Conditional formatting"
-                onClick={() => { setHeaderMenu(null); setRulesColId(hc.id); }}
-              />
-              <MenuItem
-                icon={hc.protected ? Unlock : Lock}
-                label={hc.protected ? "Unprotect column" : "Protect column"}
-                onClick={() => {
-                  setHeaderMenu(null);
-                  applyColumnPatches(
-                    [{ colId: hc.id, before: { protected: hc.protected }, after: { protected: !hc.protected } }],
-                    hc.protected ? `unprotect "${hc.label}"` : `protect "${hc.label}"`,
-                  );
-                }}
-              />
-              <MenuItem
-                icon={Trash2}
-                label={`Delete column ${letter}`}
-                destructive
-                onClick={() => { setHeaderMenu(null); void deleteColumn(hc.id); }}
-              />
-            </MenuList>
-          </MorePortal>
+            value={col.type}
+            anchorPoint={{ top: typePicker.top, left: typePicker.left }}
+            onClose={() => setTypePicker(null)}
+            onChange={(t) => { setTypePicker(null); void chooseColumnType(col.id, t); }}
+          />
+        );
+      })() : null}
+
+      {typeChange ? (() => {
+        const col = table.columns.find((c) => c.id === typeChange.colId);
+        if (!col) return null;
+        const idx = table.columns.indexOf(col);
+        const tc = typeChange;
+        return (
+          <ColumnTypeChangeDialog
+            open
+            columnName={columnDisplayName(col.label, idx)}
+            fromLabel={columnTypeLabel(col.type)}
+            toLabel={columnTypeLabel(tc.toType)}
+            cells={tc.cells}
+            onCancel={() => setTypeChange(null)}
+            onChange={() => { setTypeChange(null); void applyColumnType(tc.colId, tc.toType); }}
+            onKeepAndChange={() => { setTypeChange(null); void keepOldValuesThenChange(tc.colId, tc.toType); }}
+          />
+        );
+      })() : null}
+
+      {optionsColId ? (() => {
+        const col = table.columns.find((c) => c.id === optionsColId);
+        if (!col) return null;
+        return (
+          <SelectOptionsDialog
+            open
+            columnName={columnDisplayName(col.label, table.columns.indexOf(col))}
+            initial={col.options ?? []}
+            onCancel={() => setOptionsColId(null)}
+            onSave={(options) => {
+              setOptionsColId(null);
+              applyColumnPatches([{ colId: col.id, before: { options: col.options }, after: { options } }], "edit options");
+            }}
+          />
         );
       })() : null}
 
       {rulesColId ? (() => {
-        const col = table.columns.find((c) => c.id === rulesColId);
+        const colIdx = table.columns.findIndex((c) => c.id === rulesColId);
+        const col = table.columns[colIdx];
         if (!col) return null;
+        const colName = columnDisplayName(col.label, colIdx);
         return (
           <ConditionalRulesDialog
             column={col}
+            columnName={colName}
             onClose={() => setRulesColId(null)}
             onSave={({ rules, condFormat }) => {
               applyColumnPatches(
                 [{ colId: col.id, before: { rules: col.rules, condFormat: col.condFormat }, after: { rules, condFormat } }],
-                `conditional formatting on "${col.label}"`,
+                `conditional formatting on "${colName}"`,
               );
               setRulesColId(null);
             }}
@@ -5492,44 +6329,52 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       })() : null}
 
       {validationColId ? (() => {
-        const col = table.columns.find((c) => c.id === validationColId);
+        const colIdx = table.columns.findIndex((c) => c.id === validationColId);
+        const col = table.columns[colIdx];
         if (!col) return null;
+        const colName = columnDisplayName(col.label, colIdx);
         return (
           <DataValidationDialog
             column={col}
+            columnName={colName}
             onClose={() => setValidationColId(null)}
             onSave={(validation) => {
-              applyColumnPatches([{ colId: col.id, before: { validation: col.validation }, after: { validation } }], `data validation on "${col.label}"`);
+              applyColumnPatches([{ colId: col.id, before: { validation: col.validation }, after: { validation } }], `data validation on "${colName}"`);
               setValidationColId(null);
             }}
           />
         );
       })() : null}
 
-      {activeRow && (
-        <RowDetailModal
-          table={table}
-          row={activeRow}
-          onClose={() => setActiveRowId(null)}
-          onChange={(values) => {
-            // "=…" typed into a modal field becomes a stored formula through
-            // the same path as the grid; an OPEN cell's text types on entry
-            // (value + nf, the grid editor's rule, so the modal's "5%" is
-            // the same 0.05-percent the grid would store); everything else
-            // stays a literal. Unguarded, as every drawer write is.
-            const literals: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(values)) {
-              const col = table.columns.find((c) => c.id === k);
-              if (typeof v === "string" && v.trimStart().startsWith("=")) commitCellText(activeRow.id, k, v);
-              else if (col && isOpenColumnType(col.type) && typeof v === "string") Object.assign(literals, openEntryValues(activeRow.id, k, v));
-              else literals[k] = v;
-            }
-            if (Object.keys(literals).length > 0) void patchRow(activeRow.id, literals);
-          }}
-          formulaDisplay={(colId) => streamProgress ? "…" : String(engineHost.display(colId, activeRow.id) ?? "")}
-          onDelete={() => { void deleteRow(activeRow.id); setActiveRowId(null); }}
-        />
-      )}
+      <RowDetailDrawer
+        table={table}
+        row={activeRow ?? null}
+        rowNumber={activeRow ? rows.findIndex((r) => r.id === activeRow.id) + 1 : 0}
+        onClose={() => {
+          const closing = activeRowId;
+          setActiveRowId(null);
+          // Focus goes back to the row's gutter number (spec: Back and close).
+          if (closing) window.setTimeout(() => gridWrapElRef.current?.querySelector<HTMLElement>(`[data-gutter-row="${CSS.escape(closing)}"]`)?.focus(), 0);
+        }}
+        onChange={(values) => {
+          if (!activeRow) return;
+          // "=..." typed into a drawer field becomes a stored formula through
+          // the same path as the grid; an OPEN cell's text types on entry
+          // (value + nf, the grid editor's rule); everything else is a literal.
+          const literals: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(values)) {
+            const col = table.columns.find((c) => c.id === k);
+            if (typeof v === "string" && v.trimStart().startsWith("=")) commitCellText(activeRow.id, k, v);
+            else if (col && isOpenColumnType(col.type) && typeof v === "string") Object.assign(literals, openEntryValues(activeRow.id, k, v));
+            else literals[k] = v;
+          }
+          if (Object.keys(literals).length > 0) void patchRow(activeRow.id, literals);
+        }}
+        formulaDisplay={(colId) => (activeRow ? (streamProgress ? "" : String(engineHost.display(colId, activeRow.id) ?? "")) : "")}
+        formulaSource={(colId) => (activeRow && engineHost.isFormulaCell(colId, activeRow.id) ? String(engineHost.cellSource(colId, activeRow.id) ?? "") : "")}
+        onCopyLink={() => { if (activeRow) copyText(`${window.location.origin}/tables/${table.id}?row=${activeRow.id}`, "Link copied"); }}
+        onDelete={() => { if (!activeRow) return; const id = activeRow.id; setActiveRowId(null); void deleteRow(id); }}
+      />
 
       {configColumn && (
         <RelationConfigModal
@@ -5537,8 +6382,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           tableColumns={table.columns}
           allTables={allTables.filter((t) => t.id !== tableId)}
           columnsByTable={columnsByTable}
-          onSave={(patch) => saveColumnConfig(configColumn.id, patch as Partial<Column>)}
-          onClose={() => setConfigColId(null)}
+          onSave={(patch) => {
+            // A type chosen in the picker lands WITH its configuration.
+            const typed = pendingRelType?.colId === configColumn.id ? { type: pendingRelType.type as ColType } : {};
+            setPendingRelType(null);
+            saveColumnConfig(configColumn.id, { ...(patch as Partial<Column>), ...typed });
+          }}
+          onClose={() => { setPendingRelType(null); setConfigColId(null); }}
         />
       )}
 
@@ -5546,15 +6396,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         open={trashOpen}
         onOpenChange={setTrashOpen}
         tableId={tableId}
-        columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
+        columns={table.columns.map((c, i) => ({ id: c.id, label: columnDisplayName(c.label, i) }))}
         onChanged={() => { void load(); }}
       />
 
-      <AskDataDialog
+      {/* Ask your data exists only where the AI hub is entitled (spec: the
+          row is absent, never disabled, otherwise). Headers are names with
+          the letter as the fallback, so a sheet-born table still reads. */}
+      {aiEntitled ? <AskDataDialog
         open={askOpen}
         onOpenChange={setAskOpen}
         tableId={tableId}
-        columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
+        columns={table.columns.map((c, i) => ({ id: c.id, label: columnDisplayName(c.label, i) }))}
         buildRows={() =>
           (rows ?? []).map((r) =>
             table.columns.map((c) => {
@@ -5563,12 +6416,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             }),
           )
         }
-      />
+      /> : null}
 
       <PivotDialog
         open={pivotOpen}
         onOpenChange={setPivotOpen}
-        columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
+        initialConfig={pivotInitial}
+        onConfigChange={savePivotConfig}
+        onInsertAsTable={insertPivotAsTable}
+        columns={table.columns.map((c, i) => ({ id: c.id, label: columnDisplayName(c.label, i) }))}
         buildRecords={() =>
           (rows ?? []).map((r) => {
             const rec: Record<string, unknown> = {};
@@ -5581,6 +6437,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }
       />
 
+      <FunctionReferenceDrawer
+        open={functionsOpen}
+        onClose={() => setFunctionsOpen(false)}
+        canInsert
+        onPick={(fn) => {
+          setFunctionsOpen(false);
+          // After the drawer has closed and handed focus back, so the seed
+          // lands in the grid's editor rather than on the closing drawer.
+          window.setTimeout(() => insertFunctionSeed(fn), 0);
+        }}
+      />
       <NamedRangesDialog
         open={namedRangesOpen}
         onOpenChange={setNamedRangesOpen}
@@ -5596,223 +6463,246 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           void patchTable({ settings: nextSettings });
         }}
       />
+
+      <ObjectShareDialog
+        open={shareMode !== null}
+        mode={shareMode ?? "who"}
+        onClose={() => setShareMode(null)}
+        object={{
+          kind: "table",
+          id: table.id,
+          name: tableName,
+          isPublic: !!table.isPublic,
+          canManage: !!table.canManage,
+          publicLinksAllowed: table.publicLinksAllowed !== false,
+          anchorName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null,
+        }}
+        onPublicChange={(isPublic) => { setTable((prev) => (prev ? { ...prev, isPublic } : prev)); notifyTablesChanged(); }}
+      />
+      <TableAboutDialog
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        name={table.name}
+        description={table.description ?? null}
+        canEdit
+        onSave={async (next) => {
+          const ok = await patchTable({ name: next.name, description: next.description });
+          if (ok) { setTable((prev) => (prev ? { ...prev, name: next.name, description: next.description } : prev)); notifyTablesChanged(); }
+          return ok;
+        }}
+      />
+      <CsvImportDialog
+        open={csvOpen}
+        onClose={() => setCsvOpen(false)}
+        table={{ id: table.id, name: tableName, columns: table.columns.map((c) => ({ id: c.id, label: c.label ?? "" })) }}
+        spaceId={table.spaceId ?? null}
+        onDone={({ tableId: written, created }) => { if (created) router.push(`/tables/${written}`); else void load(); }}
+      />
     </div>
   );
 }
 
-/** Sheets-style bottom tab bar: every sheet in the org as a tab — the same
- *  GET /api/tables the worksheet sidebar reads, kept fresh through the same
- *  tables-changed and sidebar-refresh events — with the current sheet
- *  highlighted and a promptless "+" that creates an Untitled spreadsheet
- *  (auto-suffixed against the fetched names) and navigates straight into
- *  it. Horizontal scroll on overflow; the row/column meta that used to sit
- *  in the old header lives at the bar's right end. */
-function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: string | null; currentName: string; meta: string; stats?: string | null }) {
-  const router = useRouter();
-  const { toast } = useOsToast();
-  const { bumpRowVersion } = useOsShell();
-  const confirm = useConfirm();
-  const promptDialog = usePrompt();
-  const [sheets, setSheets] = useState<{ id: string; name: string }[] | null>(null);
-  const [creating, setCreating] = useState(false);
-  // Right-click a tab (Sheets' own model): Rename / Delete. Before this
-  // menu existed there was NO way to delete a spreadsheet anywhere in the
-  // UI — the DELETE route sat unused.
-  const [tabMenu, setTabMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
-  const tabMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
-  const tabMenuPanelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!tabMenu) return;
-    const onDown = (e: MouseEvent) => {
-      if (tabMenuPanelRef.current?.contains(e.target as Node)) return;
-      setTabMenu(null);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTabMenu(null); };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [tabMenu]);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/tables", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      // jsonSuccess historically wrapped in {data}; accept both shapes like
-      // the sidebar and list page do.
-      const list = (d.data ?? (Array.isArray(d) ? d : [])) as { id: string; name: string }[];
-      setSheets(list.map((t) => ({ id: t.id, name: t.name })));
-    } catch {
-      // Keep whatever tabs are already showing; an empty bar helps nobody.
-      setSheets((prev) => prev ?? []);
+/** One ticked column's value control in the Filter panel (spec-tables-forms
+ *  section 2 /tables/[id]): the Picker (the one popover list, multi) for
+ *  select types, a from/to range for numbers and dates (the one DateField
+ *  for dates, never a native date input), a debounced contains for text. */
+function ColumnFilterControl({ name, column, filter, onChange }: {
+  name: string;
+  column: Column;
+  filter: SheetColumnFilter;
+  onChange: (next: SheetColumnFilter) => void;
+}) {
+  const [pickOpen, setPickOpen] = useState(false);
+  if (filter.kind === "value") {
+    const options = column.options ?? [];
+    const summary = filter.values.length === 0
+      ? "Any value"
+      : filter.values.length === 1 ? filter.values[0] : `${filter.values.length} values`;
+    return (
+      <span className="relative block">
+        <button
+          type="button"
+          onClick={() => setPickOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={pickOpen}
+          aria-label={`Values for ${name}`}
+          className="flex h-8 w-full items-center gap-1 rounded-md border border-line-strong bg-raised px-2 text-left text-sm text-ink hover:bg-hover"
+        >
+          <span className="min-w-0 flex-1 truncate">{summary}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-2" aria-hidden />
+        </button>
+        <Picker
+          open={pickOpen}
+          onClose={() => setPickOpen(false)}
+          sections={[{ options: options.map((o) => ({ value: o, label: o })) }]}
+          selected={filter.values}
+          multi
+          onSelect={(v) => onChange({
+            ...filter,
+            values: filter.values.includes(v) ? filter.values.filter((x) => x !== v) : [...filter.values, v],
+          })}
+          emptyLabel="This column has no options yet"
+          ariaLabel={`Values for ${name}`}
+          width={240}
+        />
+      </span>
+    );
+  }
+  if (filter.kind === "range") {
+    if (isDateFilterType(column.type)) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          <DateField size="sm" value={filter.min ?? null} placeholder="From" ariaLabel={`${name} from`} onChange={(v) => onChange({ ...filter, min: v ?? undefined })} />
+          <DateField size="sm" value={filter.max ?? null} placeholder="To" ariaLabel={`${name} to`} onChange={(v) => onChange({ ...filter, max: v ?? undefined })} />
+        </div>
+      );
     }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    const onChange = () => { void load(); };
-    window.addEventListener("workwrk:tables-changed", onChange);
-    const offRefresh = onSidebarRefresh(onChange);
-    return () => {
-      window.removeEventListener("workwrk:tables-changed", onChange);
-      offRefresh();
-    };
-  }, [load]);
-
-  // The current sheet always shows, and with the freshest LOCAL name — a
-  // rename mid-edit must not wait for the refetch, and a just-created sheet
-  // must not be missing from its own tab bar.
-  const tabs = useMemo(() => {
-    const list = (sheets ?? []).map((s) => (s.id === currentId ? { ...s, name: currentName } : s));
-    if (currentId && !list.some((s) => s.id === currentId)) list.unshift({ id: currentId, name: currentName });
-    return list;
-  }, [sheets, currentId, currentName]);
-
-  const renameSheet = async (id: string, name: string) => {
-    const next = await promptDialog({ title: "Rename sheet", defaultValue: name || UNTITLED_SHEET_NAME });
-    if (next == null) return;
-    const trimmed = next.trim() || UNTITLED_SHEET_NAME;
-    if (trimmed === name) return;
-    try {
-      const res = await fetch(`/api/tables/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
-      notifyTablesChanged();
-      bumpRowVersion("tables");
-      if (id === currentId) router.refresh();
-    } catch { toast("Couldn't rename sheet"); }
-  };
-
-  /** DELETE is a soft delete server-side (moveToTrash), so this is
-   *  recoverable — the confirm still names it as a deletion because that
-   *  is what the user sees. Deleting the OPEN sheet navigates to the next
-   *  tab (or the overview when it was the last one). */
-  const deleteSheet = async (id: string, name: string) => {
-    const label = name || UNTITLED_SHEET_NAME;
-    if (!(await confirm({ title: "Delete sheet", description: `Delete "${label}"? It moves to Trash.`, destructive: true, confirmLabel: "Delete" }))) return;
-    try {
-      const res = await fetch(`/api/tables/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`DELETE ${res.status}`);
-      const remaining = (sheets ?? []).filter((s) => s.id !== id);
-      setSheets(remaining);
-      notifyTablesChanged();
-      bumpRowVersion("tables");
-      if (id === currentId) router.push(remaining[0] ? `/tables/${remaining[0].id}` : "/tables");
-    } catch { toast("Couldn't delete sheet"); }
-  };
-
-  const addSheet = async () => {
-    if (creating) return; // double-click guard: one "+" press, one sheet
-    setCreating(true);
-    try {
-      const t = await createUntitledSheet((sheets ?? []).map((s) => s.name || ""));
-      notifyTablesChanged();
-      bumpRowVersion("tables");
-      router.push(`/tables/${t.id}`);
-    } catch {
-      toast("Couldn't create sheet");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  return (
-    <footer className="shx__tabbar shx__np">
-      <button type="button" className="shx__tab-add" onClick={() => void addSheet()} disabled={creating} title="New sheet" aria-label="New sheet">
-        {creating ? <Dots variant="pending" /> : <Plus />}
-      </button>
-      <div className="shx__tabs">
-        {tabs.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className={`shx__tab ${s.id === currentId ? "is-active" : ""}`}
-            onClick={() => { if (s.id !== currentId) router.push(`/tables/${s.id}`); }}
-            onContextMenu={(e) => { e.preventDefault(); setTabMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
-            title={s.name || UNTITLED_SHEET_NAME}
-          >
-            {s.name || UNTITLED_SHEET_NAME}
-          </button>
-        ))}
+    return (
+      <div className="flex items-center gap-1.5">
+        <DebouncedContains label={`${name} from`} placeholder="Min" inputMode="decimal" initial={filter.min ?? ""} onCommit={(v) => onChange({ ...filter, min: v || undefined })} />
+        <span className="text-sm text-ink-2" aria-hidden>to</span>
+        <DebouncedContains label={`${name} to`} placeholder="Max" inputMode="decimal" initial={filter.max ?? ""} onCommit={(v) => onChange({ ...filter, max: v || undefined })} />
       </div>
-      {tabMenu ? (
-        <MorePortal anchorRef={tabMenuAnchorRef} panelRef={tabMenuPanelRef} width={180} open placement="below" point={{ x: tabMenu.x, y: tabMenu.y }}>
-          <MenuList className="min-w-[180px]">
-            <MenuItem icon={Pencil} label="Rename" onClick={() => { const t = tabMenu; setTabMenu(null); void renameSheet(t.id, t.name); }} />
-            <MenuItem icon={Trash2} label="Delete sheet" destructive onClick={() => { const t = tabMenu; setTabMenu(null); void deleteSheet(t.id, t.name); }} />
-          </MenuList>
-        </MorePortal>
-      ) : null}
-      {stats ? (
-        /* Selection stats: reuses the meta span's class so the cluster
-           inherits the strip's flex push (tabs own all free space, so the
-           two spans sit adjacent at the right edge with zero new layout). */
-        <span className="shx__tabbar-meta">{stats}</span>
-      ) : null}
-      <span className="shx__tabbar-meta">{meta}</span>
-    </footer>
+    );
+  }
+  return (
+    <DebouncedContains
+      label={`${name} contains`}
+      initial={filter.value}
+      onCommit={(v) => onChange({ ...filter, value: v })}
+    />
   );
 }
 
-function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelete }: {
-  table: ApiTable; row: ApiRow;
+/** The Filter panel's "contains" input: typing filters after a 350ms pause,
+ *  so the saved filter (views[0], a table PATCH) is written once per pause
+ *  rather than once per keystroke. */
+function DebouncedContains({ label, initial, onCommit, placeholder = "Contains", inputMode }: {
+  label: string; initial: string; onCommit: (v: string) => void; placeholder?: string; inputMode?: "decimal";
+}) {
+  const [draft, setDraft] = useState(initial);
+  const commitRef = useRef(onCommit);
+  useEffect(() => { commitRef.current = onCommit; });
+  useEffect(() => {
+    if (draft === initial) return;
+    const t = setTimeout(() => commitRef.current(draft), 350);
+    return () => clearTimeout(t);
+  }, [draft, initial]);
+  return (
+    <input
+      type="search"
+      aria-label={label}
+      placeholder={placeholder}
+      inputMode={inputMode}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      className="h-8 w-full min-w-0 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink placeholder:text-ink-3"
+    />
+  );
+}
+
+/** The row detail drawer (spec-tables-forms section 2 /tables/[id]): 520
+ *  wide on the shared Drawer, at ?row=<id> so Copy link works; Esc and the
+ *  close button remove the param and return focus to the row's gutter. One
+ *  36px label and value row per column, the label the column NAME with the
+ *  letter as the fallback, the value the column's own editor. Formula cells
+ *  are read-only: the computed value, the source beneath. No Expand: a row
+ *  has no page. */
+function RowDetailDrawer({ table, row, rowNumber, onClose, onChange, formulaDisplay, formulaSource, onCopyLink, onDelete }: {
+  table: ApiTable;
+  row: ApiRow | null;
+  rowNumber: number;
   onClose: () => void;
   onChange: (values: Record<string, unknown>) => void;
-  /** Computed display for a per-cell formula (the modal has no engine). */
-  formulaDisplay?: (colId: string) => string;
+  formulaDisplay: (colId: string) => string;
+  formulaSource: (colId: string) => string;
+  onCopyLink: () => void;
   onDelete: () => void;
 }) {
-  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
-  const title = titleCol
-    ? (isFormulaCell(row.values[titleCol.id]) ? (formulaDisplay?.(titleCol.id) || rowTitle(row, titleCol.id)) : String(row.values[titleCol.id] ?? "Untitled"))
-    : "Untitled";
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
+  const open = !!row;
   return (
-    <div className="dtbl__modal-back" onClick={onClose}>
-      <aside className="dtbl__modal" onClick={(e) => e.stopPropagation()}>
-        <header>
-          <h2>{title}</h2>
-          <div>
-            <button type="button" onClick={onDelete} className="dtbl__modal-del" title="Delete row"><Trash2 /></button>
-            <button type="button" onClick={onClose}>×</button>
-          </div>
-        </header>
-        <div className="dtbl__modal-body">
-          {table.columns.map((c, ci) => (
-            <div key={c.id} className="dtbl__modal-field">
-              <label>{c.label || columnLetter(ci)}</label>
-              {isFormulaCell(row.values[c.id]) ? (
-                // The literal editor would show "[object Object]" and a blur
-                // would overwrite the formula with it — display-only here;
-                // the formula edits in the grid or the formula bar.
-                <FormulaCell value={formulaDisplay?.(c.id) ?? ""} />
-              ) : (
-                <CellEditor column={c} value={row.values[c.id]} cellStyle={readCellStyle(row.values, c.id)} onChange={(v) => onChange({ [c.id]: v })} />
-              )}
-            </div>
-          ))}
+    <Drawer
+      open={open}
+      onClose={onClose}
+      ariaLabel={row ? `Row ${rowNumber}` : "Row"}
+      layerId="table-row-drawer"
+      header={
+        <>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
+            {table.name || UNTITLED_TABLE_NAME} <span aria-hidden>›</span> <span className="text-ink">Row {rowNumber}</span>
+          </span>
+          <button type="button" onClick={onCopyLink} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink" aria-label="Copy link to this row" title="Copy link">
+            <Link2 className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button type="button" onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink" aria-label="Close" title="Close (Esc)">
+            <X className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </>
+      }
+      footer={row ? (
+        <div className="flex items-center px-4 py-2">
+          <button type="button" onClick={onDelete} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-danger-text hover:bg-hover">
+            <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Delete row
+          </button>
         </div>
-      </aside>
-    </div>
+      ) : null}
+    >
+      {row ? (
+        <div className="flex flex-col px-4 py-2">
+          {table.columns.map((c, ci) => {
+            const computed = isFormulaCell(row.values[c.id]) || c.type === "formula" || c.type === "lookup" || c.type === "rollup";
+            return (
+              <div key={c.id} className="flex min-h-9 items-start gap-3 border-b border-line-soft py-1.5">
+                <span className="w-36 shrink-0 truncate pt-1.5 text-sm text-ink-2" title={columnDisplayName(c.label, ci)}>
+                  {c.label ? <span className="me-1 text-xs text-ink-3">{columnLetter(ci)}</span> : null}
+                  {columnDisplayName(c.label, ci)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {computed ? (
+                    // The literal editor would show "[object Object]" and a blur
+                    // would overwrite the formula with it: display only here.
+                    <div className="pt-1.5">
+                      <FormulaCell value={formulaDisplay(c.id)} />
+                      {formulaSource(c.id) ? <div className="mt-0.5 truncate font-[family-name:var(--os-f-mono)] text-xs text-ink-2">{formulaSource(c.id)}</div> : null}
+                    </div>
+                  ) : (
+                    <CellEditor column={c} value={row.values[c.id]} cellStyle={readCellStyle(row.values, c.id)} onChange={(v) => onChange({ [c.id]: v })} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </Drawer>
   );
 }
+
+/** The in-cell and drawer editor input: flush with the cell, no frame of
+ *  its own (the cell outline is the frame). 14px with an inherited line
+ *  height so an open editor keeps the row geometry. */
+/** Find and replace card controls (Cmd/Ctrl+F, Cmd/Ctrl+H). */
+const FIND_INPUT = "h-7 min-w-0 flex-1 rounded-md border border-line bg-app px-2 text-sm text-ink outline-none focus:border-brand focus:bg-raised";
+const FIND_BTN = "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent [&>svg]:h-3.5 [&>svg]:w-3.5";
+const FIND_ACTION = "h-[26px] shrink-0 rounded-md border border-line bg-raised px-2.5 text-xs font-semibold text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-35";
+const CELL_INPUT = "box-border w-full border-0 bg-transparent px-2.5 py-2 font-[inherit] text-base leading-[inherit] text-ink outline-none focus:bg-raised";
+const CELL_INPUT_AREA = `${CELL_INPUT} min-h-8 resize-y`;
+
+/** Chip, add-button and popover classes shared by the link, attachment and
+ *  person cell editors. */
+const CELL_CHIP = "inline-flex items-center gap-1 rounded px-1.5 py-px text-xs";
+const CELL_CHIP_X = "border-0 bg-transparent p-0 leading-none text-ink-3 hover:text-ink";
+const CELL_ADD = "border border-dashed border-line-strong bg-transparent px-1.5 py-px text-xs text-ink-2 hover:text-ink disabled:opacity-50";
+const CELL_POP = "absolute left-0 top-full z-20 mt-1 overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop)]";
+const CELL_POP_SEARCH = "mb-1 h-7 w-full rounded-md border border-line bg-raised px-2 text-xs text-ink outline-none focus:border-brand";
+const CELL_POP_ROW = "flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-ink hover:bg-hover";
 
 function LinkCell({ value, linked, onChange }: { value: unknown; linked: LinkedTable | undefined; onChange: (v: string[]) => void }) {
   const ids = Array.isArray(value) ? (value as string[]) : [];
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   if (!linked) {
-    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{ids.length ? `${ids.length} linked` : "Set target →"}</span>;
+    return <span className={`${CELL_INPUT} inline-block opacity-50`}>{ids.length ? `${ids.length} linked` : "Set target"}</span>;
   }
   const chosen = ids.map((id) => linked.rows.find((r) => r.id === id)).filter((r): r is ApiRow => !!r);
   const candidates = q.trim()
@@ -5820,21 +6710,21 @@ function LinkCell({ value, linked, onChange }: { value: unknown; linked: LinkedT
     : linked.rows;
   const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   return (
-    <span style={{ position: "relative", display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+    <span className="relative inline-flex flex-wrap items-center gap-1">
       {chosen.map((r) => (
-        <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#E6F1FB", color: "#0073EA", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 500 }}>
+        <span key={r.id} className={`${CELL_CHIP} bg-brand-soft font-medium text-brand`}>
           {rowTitle(r, linked.titleColId)}
-          <button type="button" onClick={() => toggle(r.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#0073EA", lineHeight: 0, padding: 0 }}>×</button>
+          <button type="button" onClick={() => toggle(r.id)} className="border-0 bg-transparent p-0 leading-none text-brand" aria-label="Remove link">×</button>
         </span>
       ))}
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #A8CDF5", borderRadius: 4, color: "#0073EA", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>+ link</button>
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`${CELL_ADD} rounded border-brand text-brand hover:text-brand`}>+ link</button>
       {open ? (
-        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 20, minWidth: 240, maxHeight: 280, overflowY: "auto", background: "white", border: "1px solid #e4e4e7", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4 }} onMouseLeave={() => setOpen(false)}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${linked.name}…`} autoFocus style={{ width: "100%", height: 28, padding: "0 8px", border: "1px solid #e4e4e7", borderRadius: 6, fontSize: 12, marginBottom: 4 }} />
-          {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No records.</div> : candidates.slice(0, 100).map((r) => (
-            <button key={r.id} type="button" onClick={() => toggle(r.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }} onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")} onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
-              <span style={{ flex: 1 }}>{rowTitle(r, linked.titleColId)}</span>
-              {ids.includes(r.id) ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null}
+        <div className={`${CELL_POP} min-w-60 max-h-[280px]`} onMouseLeave={() => setOpen(false)}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${linked.name}…`} autoFocus className={CELL_POP_SEARCH} />
+          {candidates.length === 0 ? <div className="p-2 text-xs text-ink-3">No records.</div> : candidates.slice(0, 100).map((r) => (
+            <button key={r.id} type="button" onClick={() => toggle(r.id)} className={CELL_POP_ROW}>
+              <span className="flex-1">{rowTitle(r, linked.titleColId)}</span>
+              {ids.includes(r.id) ? <Check className="h-3.5 w-3.5 text-brand" /> : null}
             </button>
           ))}
         </div>
@@ -5863,15 +6753,15 @@ function AttachmentCell({ value, onChange }: { value: unknown; onChange: (v: Att
     setBusy(false);
   };
   return (
-    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-      <input ref={inputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { void upload(e.target.files); e.target.value = ""; }} />
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => { void upload(e.target.files); e.target.value = ""; }} />
       {files.map((f, i) => (
-        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#f4f4f5", borderRadius: 4, padding: "1px 6px", fontSize: 11 }}>
-          <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ color: "#3f3f46", textDecoration: "none", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</a>
-          <button type="button" onClick={() => onChange(files.filter((_, n) => n !== i))} style={{ background: "none", border: 0, cursor: "pointer", color: "#a1a1aa", lineHeight: 0, padding: 0 }}>×</button>
+        <span key={i} className={`${CELL_CHIP} bg-active`}>
+          <a href={f.url} target="_blank" rel="noopener noreferrer" className="max-w-[120px] truncate text-ink no-underline">{f.name}</a>
+          <button type="button" onClick={() => onChange(files.filter((_, n) => n !== i))} className={CELL_CHIP_X} aria-label={`Remove ${f.name}`}>×</button>
         </span>
       ))}
-      <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} style={{ background: "none", border: "1px dashed #d4d4d8", borderRadius: 4, color: "#71717a", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>{busy ? "…" : "+ file"}</button>
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} aria-busy={busy} className={`${CELL_ADD} inline-flex items-center gap-1 rounded`}>{busy ? <Dots variant="pending" /> : "+"} file</button>
     </span>
   );
 }
@@ -5884,25 +6774,25 @@ function PersonCell({ value, users, onChange }: { value: unknown; users: OrgUser
   const candidates = q.trim() ? users.filter((u) => userName(u).toLowerCase().includes(q.trim().toLowerCase())) : users;
   const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   return (
-    <span style={{ position: "relative", display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+    <span className="relative inline-flex flex-wrap items-center gap-1">
       {chosen.map((u) => (
-        <span key={u.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f4f4f5", borderRadius: 999, padding: "1px 8px 1px 2px", fontSize: 11 }}>
-          <span style={{ width: 16, height: 16, borderRadius: 999, background: "#e4e4e7", color: "#52525b", fontSize: 8, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        <span key={u.id} className="inline-flex items-center gap-1 rounded-full bg-active py-px pl-0.5 pr-2 text-xs">
+          <span className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full bg-line text-rail font-semibold text-ink-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            {u.avatar ? <img src={u.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : userInitials(u)}
+            {u.avatar ? <img src={u.avatar} alt="" className="h-full w-full object-cover" /> : userInitials(u)}
           </span>
           {userName(u)}
-          <button type="button" onClick={() => toggle(u.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#a1a1aa", lineHeight: 0, padding: 0 }}>×</button>
+          <button type="button" onClick={() => toggle(u.id)} className={CELL_CHIP_X} aria-label={`Remove ${userName(u)}`}>×</button>
         </span>
       ))}
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #d4d4d8", borderRadius: 999, color: "#71717a", cursor: "pointer", fontSize: 11, padding: "1px 8px" }}>+ person</button>
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`${CELL_ADD} rounded-full px-2`}>+ person</button>
       {open ? (
-        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 20, minWidth: 220, maxHeight: 260, overflowY: "auto", background: "white", border: "1px solid #e4e4e7", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4 }} onMouseLeave={() => setOpen(false)}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" autoFocus style={{ width: "100%", height: 28, padding: "0 8px", border: "1px solid #e4e4e7", borderRadius: 6, fontSize: 12, marginBottom: 4 }} />
-          {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No people.</div> : candidates.slice(0, 100).map((u) => (
-            <button key={u.id} type="button" onClick={() => toggle(u.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }}>
-              <span style={{ flex: 1 }}>{userName(u)}</span>
-              {ids.includes(u.id) ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null}
+        <div className={`${CELL_POP} min-w-[220px] max-h-[260px]`} onMouseLeave={() => setOpen(false)}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" autoFocus className={CELL_POP_SEARCH} />
+          {candidates.length === 0 ? <div className="p-2 text-xs text-ink-3">No people.</div> : candidates.slice(0, 100).map((u) => (
+            <button key={u.id} type="button" onClick={() => toggle(u.id)} className={CELL_POP_ROW}>
+              <span className="flex-1">{userName(u)}</span>
+              {ids.includes(u.id) ? <Check className="h-3.5 w-3.5 text-brand" /> : null}
             </button>
           ))}
         </div>
@@ -5914,8 +6804,8 @@ function PersonCell({ value, users, onChange }: { value: unknown; users: OrgUser
 function FormulaCell({ value }: { value: number | string }) {
   const isErr = typeof value === "string" && value.startsWith("#");
   return (
-    <span className="dtbl__input" style={{ display: "inline-block", color: isErr ? "#dc2626" : "#3f3f46", opacity: value === "" ? 0.4 : 1 }} title="Computed (read-only)">
-      {value === "" ? "—" : String(value)}
+    <span className={`${CELL_INPUT} inline-block ${isErr ? "text-danger-text" : "text-ink"} ${value === "" ? "opacity-40" : ""}`} title="Computed (read-only)">
+      {value === "" ? "" : String(value)}
     </span>
   );
 }
@@ -5923,7 +6813,7 @@ function FormulaCell({ value }: { value: number | string }) {
 /** Hosts an existing cell editor inside the sheet kernel: autofocuses
  *  the first input, applies the type-to-replace seed, and commits back
  *  to the kernel when focus leaves the editor subtree. Existing editors
- *  save on blur, so commit-on-focus-exit preserves their semantics — and
+ *  save on blur, so commit-on-focus-exit preserves their semantics, and
  *  Escape has to suppress that save (see CellEditCancel) rather than just
  *  close, or cancelling would write the in-progress value. */
 function SheetEditorHost({ children, seed, commit, move }: { children: React.ReactNode; seed: string | null; commit: () => void; move?: (dr: number, dc: number) => void }) {
@@ -5950,12 +6840,12 @@ function SheetEditorHost({ children, seed, commit, move }: { children: React.Rea
         if (!next || !ref.current?.contains(next)) commit();
       }}
       onKeyDown={(e) => {
-        // Any other keystroke means the user is still editing — a stale cancel
+        // Any other keystroke means the user is still editing, a stale cancel
         // must never swallow the commit that follows it.
         if (e.key !== "Escape") cancelRef.current = false;
         if (e.key === "Tab") {
           // Sheets: Tab commits the draft and moves right (Shift+Tab left).
-          // The browser default moved FOCUS out of the editor instead — the
+          // The browser default moved FOCUS out of the editor instead, the
           // grid never advanced and lost focus, which read as "my text
           // disappeared". Blur first: that is what makes editors write.
           e.preventDefault();
@@ -6014,7 +6904,7 @@ function SheetEditorHost({ children, seed, commit, move }: { children: React.Rea
 }
 
 /** In-cell formula editor: source text with ref highlighting, hosted inside
- *  SheetEditorHost like every other editor — the host's Enter blurs into the
+ *  SheetEditorHost like every other editor, the host's Enter blurs into the
  *  commit below, and its Escape raises the cancel ref BEFORE that blur, so a
  *  cancelled edit never overwrites the formula it was showing. Autocomplete
  *  stays off in-cell (the cell clips its own overflow, so a dropdown would
@@ -6022,7 +6912,7 @@ function SheetEditorHost({ children, seed, commit, move }: { children: React.Rea
 function SheetFormulaEditor({ initial, baseline, onCommit }: {
   /** What the editor opens showing (the seed, else the source). */
   initial: string;
-  /** The cell's pre-edit source — commit fires only when the draft differs
+  /** The cell's pre-edit source, commit fires only when the draft differs
    *  from THIS, so an untouched open cancels silently but an unedited SEED
    *  (type-to-replace) still commits. */
   baseline: string;
@@ -6056,7 +6946,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
   // really a cancel must leave the stored value alone.
   const cancelled = useContext(CellEditCancel);
   // A list validation turns ANY column into a dropdown of allowed values
-  // (Zoho/Sheets' data-validation pick-list) — the primary reason to add
+  // (Zoho/Sheets' data-validation pick-list), the primary reason to add
   // a list rule. multi_select keeps its own multi-checkbox editor.
   if (column.validation?.kind === "list" && t !== "multi_select") {
     const cur = value == null ? "" : String(value);
@@ -6066,9 +6956,9 @@ function CellEditor({ column, value, cellStyle, onChange }: {
         autoFocus
         defaultValue={cur}
         onChange={(e) => onChange(e.target.value || null)}
-        className="dtbl__input"
+        className={CELL_INPUT}
       >
-        <option value="">—</option>
+        <option value="">None</option>
         {/* Preserve an existing off-list value (imports/legacy) as a real
             option so the select never silently falls back to "" and wipes it. */}
         {offList ? <option value={cur}>{cur} (current)</option> : null}
@@ -6097,7 +6987,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
     const initial = open ? openCellEditText(value, cellStyle) : ((value as string | number) ?? "");
     if (t === "short_text") {
       // A textarea, not an input: open cells hold multi-line content
-      // (Shift/Cmd/Alt+Enter — the host inserts the break). Auto-grows to
+      // (Shift/Cmd/Alt+Enter, the host inserts the break). Auto-grows to
       // its content; the kernel un-clips the editing cell so the growth
       // shows, Sheets' expanding-editor look.
       const autosize = (el: HTMLTextAreaElement) => {
@@ -6111,9 +7001,9 @@ function CellEditor({ column, value, cellStyle, onChange }: {
           ref={(el) => { if (el) autosize(el); }}
           onInput={(e) => autosize(e.currentTarget)}
           onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
-          className="dtbl__input dtbl__input--area"
+          className={CELL_INPUT_AREA}
           // Flush with the cell: the grown cell (white ground + the active
-          // outline) IS the editor's frame — any shadow/border here read as
+          // outline) IS the editor's frame, any shadow/border here read as
           // a floating "note" pasted over the grid.
           style={{ background: "transparent", resize: "none", overflow: "hidden", lineHeight: "17px", padding: "2px 0" }}
         />
@@ -6124,7 +7014,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
         type={t}
         defaultValue={String(initial ?? "")}
         onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
-        className="dtbl__input"
+        className={CELL_INPUT}
       />
     );
   }
@@ -6134,7 +7024,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
         rows={1}
         defaultValue={(value as string) ?? ""}
         onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
-        className="dtbl__input dtbl__input--area"
+        className={CELL_INPUT_AREA}
       />
     );
   }
@@ -6144,7 +7034,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
         type="number"
         defaultValue={(value as number | "") ?? ""}
         onBlur={(e) => { if (cancelled?.current) return; const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
-        className="dtbl__input"
+        className={CELL_INPUT}
       />
     );
   }
@@ -6157,7 +7047,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
           step="any"
           defaultValue={(value as number | "") ?? ""}
           onBlur={(e) => { if (cancelled?.current) return; const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
-          className="dtbl__input"
+          className={CELL_INPUT}
         />
         {t === "percent" ? <span style={{ opacity: 0.5 }}>%</span> : null}
       </span>
@@ -6169,7 +7059,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
       <span style={{ display: "inline-flex", gap: 1 }}>
         {[1, 2, 3, 4, 5].map((i) => (
           <button key={i} type="button" onClick={() => onChange(i === n ? null : i)} style={{ background: "none", border: 0, cursor: "pointer", padding: 0, lineHeight: 0 }} aria-label={`Rate ${i}`}>
-            <Star style={{ width: 15, height: 15, fill: i <= n ? "#f59e0b" : "none", color: i <= n ? "#f59e0b" : "#d4d4d8" }} />
+            <Star style={{ width: 15, height: 15, fill: i <= n ? "var(--os-warning-solid)" : "none", color: i <= n ? "var(--os-warning-solid)" : "var(--os-line-strong)" }} />
           </button>
         ))}
       </span>
@@ -6181,7 +7071,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
         type="date"
         defaultValue={(value as string) ?? ""}
         onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
-        className="dtbl__input"
+        className={CELL_INPUT}
       />
     );
   }
@@ -6196,8 +7086,8 @@ function CellEditor({ column, value, cellStyle, onChange }: {
   }
   if (t === "select") {
     return (
-      <select value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || null)} className="dtbl__input">
-        <option value="">—</option>
+      <select value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || null)} className={CELL_INPUT}>
+        <option value="">None</option>
         {(column.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     );
@@ -6205,7 +7095,7 @@ function CellEditor({ column, value, cellStyle, onChange }: {
   if (t === "multi_select") {
     const arr = Array.isArray(value) ? (value as string[]) : [];
     return (
-      <div className="dtbl__multi">
+      <div className="flex flex-wrap gap-2 px-2.5 py-1.5 text-sm [&>label]:inline-flex [&>label]:items-center [&>label]:gap-1 [&>label]:text-ink-2">
         {(column.options ?? []).map((o) => (
           <label key={o}>
             <input
@@ -6219,11 +7109,11 @@ function CellEditor({ column, value, cellStyle, onChange }: {
     );
   }
   if (t === "formula" || t === "lookup" || t === "rollup") {
-    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }} title={column.formula}>computed (grid view)</span>;
+    return <span className={`${CELL_INPUT} inline-block opacity-50`} title={column.formula}>Computed in the grid</span>;
   }
   if (t === "link" || t === "attachment" || t === "person") {
     const n = Array.isArray(value) ? value.length : 0;
-    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{n ? `${n} item${n === 1 ? "" : "s"} (edit in grid)` : "edit in grid"}</span>;
+    return <span className={`${CELL_INPUT} inline-block opacity-50`}>{n ? `${n} item${n === 1 ? "" : "s"}, edit in the grid` : "Edit in the grid"}</span>;
   }
   return null;
 }

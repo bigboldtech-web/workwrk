@@ -536,6 +536,10 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/permissions.ts",
   "src/lib/platform-admin.ts",
   "src/lib/item-gate.ts",
+  // Phase 5 (Data): the ONE reader gate the three new /api/tables/[id]/*
+  // routes (duplicate, export, presence) share, on the item-gate precedent,
+  // so none of them reads the legacy signal itself.
+  "src/lib/table-gate.ts",
   "src/lib/rail-apps.test.ts",
   "src/lib/rail-apps.ts",
   "src/lib/role-defaults.ts",

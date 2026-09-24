@@ -261,16 +261,21 @@ export interface AdminOnlyProps {
   /** "Owners" for an Owner-only page, otherwise "Owners and Admins". */
   managedBy?: "Owners" | "Owners and Admins";
   back: BackTarget;
+  /** Under the sentence: the one thing a Member CAN do instead, so the card
+   *  is not a dead end (the /imports "Import a CSV into a table" link). */
+  children?: ReactNode;
 }
 
-export function AdminOnly({ page, managedBy = "Owners and Admins", back }: AdminOnlyProps) {
+export function AdminOnly({ page, managedBy = "Owners and Admins", back, children }: AdminOnlyProps) {
   return (
     <DenialBlock
       title={page}
       sentence={`${page} is managed by workspace ${managedBy}.`}
       locked
       back={back}
-    />
+    >
+      {children}
+    </DenialBlock>
   );
 }
 

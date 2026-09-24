@@ -1,4 +1,4 @@
-// POST /api/tables/[id]/rows/batch — one round-trip for many row ops.
+// POST /api/tables/[id]/rows/batch, one round-trip for many row ops.
 // Tables Phase 1 (docs/plans/tables.md): the sheet kernel's clears,
 // bulk deletes, pastes and fills all land here instead of a request
 // per cell. Body:
@@ -8,7 +8,7 @@
 //
 // An update entry's optional `position` renumbers the row in the same
 // transaction (the sheet's drag-to-move-row renumbers a whole span at
-// once). Position writes are UNCONDITIONAL — expect guards values only —
+// once). Position writes are UNCONDITIONAL, expect guards values only,
 // and a position-only entry ({ values: {} }) writes position and nothing
 // else. Uniqueness across the payload is the client's job: positions are
 // not unique-constrained in the schema, and the move gesture assigns a
@@ -27,8 +27,8 @@
 //
 // Paste / fill / clear / undo NEVER send expect, ON PURPOSE: overwriting a
 // range is those gestures' explicit intent. A per-cell 409 mid-paste would
-// shred the range into a patchwork of applied and refused cells — worse
-// than either full outcome — so bulk gestures stay last-write-wins and only
+// shred the range into a patchwork of applied and refused cells, worse
+// than either full outcome, so bulk gestures stay last-write-wins and only
 // the single-cell commit paths (which know the exact pre-edit value they
 // are replacing) opt in.
 
@@ -37,13 +37,14 @@ import { prisma } from "@/lib/prisma";
 import type { DataTableRow, Prisma } from "@/generated/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { unscopedTableReadable } from "@/lib/table-gate";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
 const MAX_OPS = 500;
 
 // Prisma's interactive-transaction defaults (maxWait 2s / timeout 5s) are
 // sized for a handful of statements. This body still needs one statement
-// per distinct updated row — up to MAX_OPS of them — plus four constant
+// per distinct updated row, up to MAX_OPS of them, plus four constant
 // queries. Budgeting ~50ms per statement at the cap gives ~25s, so 30s
 // leaves headroom: a worst-case paste must commit rather than die with
 // P2028 after having already burned the user's typing.
@@ -63,12 +64,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, spaceId: true },
+    select: { id: true, spaceId: true, createdById: true },
   });
   if (!table) return jsonError("not found", 404);
   // Gate: reader access, matching every sibling table route (rows POST/
   // PATCH/DELETE, import, tables/[id]). That is deliberately NOT a tight
-  // gate — getSpaceForReader returns every ORG-visibility Space to every
+  // gate, getSpaceForReader returns every ORG-visibility Space to every
   // org member, so any employee who can see a table can also write to it.
   //
   // KNOWN EXPOSURE, TRACKED DECISION: this route can clear or delete up to
@@ -86,6 +87,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (table.spaceId) {
     const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
     if (!space) return jsonError("not found", 404);
+  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
+    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
+    return jsonError("not found", 404);
   }
 
   const body = await req.json().catch(() => null);
@@ -99,12 +103,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           .map((u) => {
             // Malformed expect (array, primitive) is dropped rather than
             // 400'd: the entry then applies unconditionally, exactly as
-            // every entry did before the guard existed — matching the
+            // every entry did before the guard existed, matching the
             // single-row PATCH's treatment of its expect field.
             const rawExpect = (u as { expect?: unknown }).expect;
             // Optional explicit position: the sheet's row-move renumbers a
             // span of rows in the same transaction as its value writes.
-            // Integer-gated because DataTableRow.position is an Int — a
+            // Integer-gated because DataTableRow.position is an Int, a
             // float would throw inside the transaction, after other rows
             // already took writes. Malformed position drops like malformed
             // expect does: the entry still applies its values.
@@ -155,7 +159,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // rather than scoped to the table so the check can tell the two
   // shortfall causes apart: an id that resolves to a DIFFERENT table is a
   // genuine cross-table (or cross-org) reference and stays a hard reject,
-  // while an id that resolves nowhere is merely stale — someone deleted
+  // while an id that resolves nowhere is merely stale, someone deleted
   // that row between the client's read and this write. The transaction
   // body already tolerates stale ids (the merge skips them, deleteMany is
   // table-scoped and idempotent), and rejecting the whole request over
@@ -176,7 +180,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // otherwise hand out the same positions (Read Committed, and the
     // schema only has a non-unique @@index([tableId, position])).
     // Serialise allocation on a transaction-scoped advisory lock keyed on
-    // the table id — writers to other tables never queue behind this one,
+    // the table id, writers to other tables never queue behind this one,
     // and Postgres drops the lock at COMMIT/ROLLBACK so there is no
     // unlock path to miss. Taken up front, before any row locks, so the
     // lock order is the same for every batch and two of them can't
@@ -204,14 +208,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let missingIds: string[] = [];
     if (updates.length > 0) {
       const existing = await tx.dataTableRow.findMany({
-        // deletedAt: null — a trashed row is "missing" to an update, so the
+        // deletedAt: null, a trashed row is "missing" to an update, so the
         // client is told to evict it rather than silently reviving it.
         where: { tableId: id, id: { in: [...new Set(updates.map((u) => u.id))] }, deletedAt: null },
         select: { id: true, values: true },
       });
       // Immutable DB snapshot, separate from `merged`: every expect must be
       // judged against what is STORED, never against earlier entries of
-      // this same payload already folded in memory — the client formed its
+      // this same payload already folded in memory, the client formed its
       // expect from the store, not from ops it doesn't know about.
       const dbValues = new Map<string, Record<string, unknown>>();
       for (const row of existing) {
@@ -230,7 +234,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // the untouched DB value.
       for (const u of updates) {
         const base = merged.get(u.id);
-        if (!base) continue; // concurrently deleted — reported via missingIds
+        if (!base) continue; // concurrently deleted, reported via missingIds
         // Position rides OUTSIDE the expect gate, on purpose: a row move
         // renumbers rows the user never edited, and a stale cell guard on
         // one of them must not leave the table half-reordered. Later
@@ -294,7 +298,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const positionFor = (ins: { position?: number }) => ins.position !== undefined ? ins.position : pos++;
       // createManyAndReturn is a single INSERT … RETURNING instead of a
       // create() round trip per row. createdById matches every sibling
-      // insert path (rows, import, tables) — the column is nullable, so
+      // insert path (rows, import, tables), the column is nullable, so
       // omitting it loses the author silently and unrecoverably.
       inserted = await tx.dataTableRow.createManyAndReturn({
         data: inserts.map((ins) => ({
@@ -307,7 +311,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
       // RETURNING order isn't contractual; positions are. Auto-allocated
       // positions follow payload order; explicit ones are whatever the
-      // client sent (unique, enforced above) — so a client pairing rows
+      // client sent (unique, enforced above), so a client pairing rows
       // back to its payload must send ascending positions or match by
       // position, which the in-repo callers do.
       inserted.sort((a, b) => a.position - b.position);
@@ -315,7 +319,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // updated counts rows that took a write, so a fully-conflicted row is
     // not in it. Without expects, applied === every existing target row,
-    // which is exactly the old merged.size — no change for legacy callers.
+    // which is exactly the old merged.size, no change for legacy callers.
     return { updated: applied.size, deleted, inserted, conflicts, missingIds };
   }, { timeout: TX_TIMEOUT_MS, maxWait: TX_MAX_WAIT_MS });
 

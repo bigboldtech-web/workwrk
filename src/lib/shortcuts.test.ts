@@ -107,6 +107,21 @@ describe("ShortcutRegistry.dispatch", () => {
     expect(reg.dispatch(keyEvent({ key: "K", metaKey: true, shiftKey: true }), { typing: false })).toBe(true);
   });
 
+  it("lists an ownedByPage chord but never dispatches it (the page runs it itself)", () => {
+    const run = vi.fn();
+    reg.register(def("sheet-bold", "mod+b", run, { scope: "page", ownedByPage: true }));
+    const e = keyEvent({ key: "b", metaKey: true });
+    expect(reg.dispatch(e, { typing: false })).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+    expect(reg.visible().map((d) => d.id)).toContain("sheet-bold");
+  });
+
+  it("never arms a prefix for an ownedByPage sequence", () => {
+    reg.register(def("sheet-seq", "g t", vi.fn(), { scope: "page", ownedByPage: true }));
+    expect(reg.dispatch(keyEvent({ key: "g" }), { now: 1000, typing: false })).toBe(false);
+  });
+
   it("ignores events another handler already consumed", () => {
     const run = vi.fn();
     reg.register(def("close", "escape", run, { inInputs: true }));

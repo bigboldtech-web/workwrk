@@ -37,6 +37,8 @@ import { AlignLeft, LayoutGrid, MoreHorizontal, Pencil, Rows3, Search, Trash2 } 
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { apiFetch } from "@/lib/api-fetch";
+import { INTAKE_TEMPLATES, type IntakeTemplate } from "@/lib/forms/intake-templates";
+import { fieldTypeLabel } from "@/lib/forms/builder";
 import {
   COMPLEXITIES,
   COMPLEXITY_LABEL,
@@ -187,6 +189,7 @@ function TemplateCenterBody({
   const [me, setMe] = useState<{ userId: string | null; isOrgAdmin: boolean }>({ userId: null, isOrgAdmin: false });
   const [detail, setDetail] = useState<TemplateDetailRow | null>(null);
   const [detailKit, setDetailKit] = useState<KitRow | null>(null);
+  const [detailIntake, setDetailIntake] = useState<IntakeTemplate | null>(null);
   const [spaces, setSpaces] = useState<SpaceRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -312,6 +315,13 @@ function TemplateCenterBody({
         });
       }
     }
+    // Intake forms: built in, like the kits, so the same filters exclude them.
+    if ((!sources.length || sources.includes("builtin")) && showBuiltIn && !complexities.length && !categories.length && !createdBy.length) {
+      for (const t of INTAKE_TEMPLATES) {
+        if (q && !`${t.name} ${t.tagline}`.toLowerCase().includes(q)) continue;
+        out.push({ key: `f-${t.id}`, kindKey: "FORM", name: t.name, description: t.tagline, builtIn: true, usedCount: 0, updatedAt: "", intake: t });
+      }
+    }
     return out;
   }, [rows, kits, showBuiltIn, sources, complexities, categories, createdBy, query]);
 
@@ -338,6 +348,7 @@ function TemplateCenterBody({
 
   const openDetail = useCallback(async (card: CardModel) => {
     if (card.kit) { setDetailKit(card.kit); return; }
+    if (card.intake) { setDetailIntake(card.intake); return; }
     if (!card.template) return;
     const res = await apiFetch<{ template: TemplateDetailRow }>(`/api/template-center/${card.template.id}`, { cache: "no-store" });
     if (!res.ok) { toast("Couldn't open that template", { tone: "danger", description: res.error }); return; }
@@ -349,6 +360,7 @@ function TemplateCenterBody({
       const href = navigationFor(result);
       setDetail(null);
       setDetailKit(null);
+      setDetailIntake(null);
       if (mode === "modal") onClose?.();
       onApplied?.(result);
       if (href) { router.push(href); return; }
@@ -401,6 +413,19 @@ function TemplateCenterBody({
         made.table ? { label: made.table.name || kit.summary.table, href: `/tables/${made.table.id}` } : { label: kit.summary.table, href: "/tables" },
       ];
       finish({ kind: "KIT", created });
+    },
+    [finish, toast],
+  );
+
+  /** An intake template becomes an ordinary form, opened in the builder. */
+  const applyIntake = useCallback(
+    async (t: IntakeTemplate) => {
+      setBusy(true);
+      const res = await apiFetch<{ id: string }>("/api/forms", { method: "POST", json: { name: t.name, description: t.description, fields: t.fields } });
+      setBusy(false);
+      if (!res.ok) { toast("Couldn't create the form", { tone: "danger", description: res.error }); return; }
+      window.dispatchEvent(new CustomEvent("workwrk:forms-changed"));
+      finish({ kind: "FORM", formId: res.data.id, name: t.name });
     },
     [finish, toast],
   );
@@ -653,15 +678,17 @@ function TemplateCenterBody({
         <DetailModal
           // The form resets by REMOUNTING when the template changes, rather
           // than by an effect writing state after the first render.
-          key={`${detail?.id ?? detailKit?.id ?? "none"}:${target?.spaceId ?? ""}`}
+          key={`${detail?.id ?? detailKit?.id ?? detailIntake?.id ?? "none"}:${target?.spaceId ?? ""}`}
           detail={detail}
           kit={detailKit}
+          intake={detailIntake}
           busy={busy}
           target={target}
           spaces={spaces}
-          onClose={() => { setDetail(null); setDetailKit(null); }}
+          onClose={() => { setDetail(null); setDetailKit(null); setDetailIntake(null); }}
           onUse={applyTemplate}
           onUseKit={applyKit}
+          onUseIntake={applyIntake}
         />
         <NewTemplateModal open={newOpen} onClose={() => setNewOpen(false)} onSaved={() => void load()} />
       </>
@@ -687,15 +714,17 @@ function TemplateCenterBody({
         <DetailModal
           // The form resets by REMOUNTING when the template changes, rather
           // than by an effect writing state after the first render.
-          key={`${detail?.id ?? detailKit?.id ?? "none"}:${target?.spaceId ?? ""}`}
+          key={`${detail?.id ?? detailKit?.id ?? detailIntake?.id ?? "none"}:${target?.spaceId ?? ""}`}
           detail={detail}
           kit={detailKit}
+          intake={detailIntake}
           busy={busy}
           target={target}
           spaces={spaces}
-          onClose={() => { setDetail(null); setDetailKit(null); }}
+          onClose={() => { setDetail(null); setDetailKit(null); setDetailIntake(null); }}
           onUse={applyTemplate}
           onUseKit={applyKit}
+          onUseIntake={applyIntake}
         />
       </DialogContent>
     </Dialog>
@@ -714,6 +743,7 @@ interface CardModel {
   updatedAt: string;
   template?: TemplateRow;
   kit?: KitRow;
+  intake?: IntakeTemplate;
 }
 
 function TemplateGrid({
@@ -918,24 +948,60 @@ function TemplateRowMenu({
 function DetailModal({
   detail,
   kit,
+  intake,
   busy,
   target,
   spaces,
   onClose,
   onUse,
   onUseKit,
+  onUseIntake,
 }: {
   detail: TemplateDetailRow | null;
   kit: KitRow | null;
+  intake?: IntakeTemplate | null;
   busy: boolean;
   target: TemplateCenterProps["target"];
   spaces: SpaceRef[];
   onClose: () => void;
   onUse: (tpl: TemplateDetailRow, body: Record<string, unknown>) => void;
   onUseKit: (kit: KitRow) => void;
+  onUseIntake?: (t: IntakeTemplate) => void;
 }) {
   const [spaceId, setSpaceId] = useState<string>(target?.spaceId ?? "");
   const [includeSamples, setIncludeSamples] = useState(false);
+
+  if (intake) {
+    return (
+      <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+        <DialogContent className="max-w-[720px]">
+          <DialogHeader><DialogTitle>{intake.name}</DialogTitle></DialogHeader>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-[22px] items-center rounded-md bg-active px-1.5 text-xs font-medium text-ink-2">Intake form</span>
+          </div>
+          <p className="text-base text-ink-2">{intake.description}</p>
+          <div className="mt-2 space-y-1.5">
+            {intake.fields.map((fl) => (
+              <IncludeLine key={fl.id} label={fl.label || "Question"} value={`${fieldTypeLabel(fl.type)}${fl.required ? " · required" : ""}`} />
+            ))}
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onUseIntake?.(intake)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-4 text-base font-medium text-white disabled:opacity-60"
+            >
+              {busy ? <Dots variant="pending" /> : null} Use template
+            </button>
+            <button type="button" onClick={onClose} className="inline-flex h-9 items-center rounded-lg border border-line px-3 text-base text-ink hover:bg-hover">
+              Cancel
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   if (kit) {
     return (

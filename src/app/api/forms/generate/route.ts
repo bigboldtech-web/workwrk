@@ -2,7 +2,7 @@
 //
 // Ask Claude to design a form from a one-line description. Returns
 // `{ name, description, fields }` in the same shape as POST /api/forms
-// expects — caller can pipe straight through to create the form.
+// expects, caller can pipe straight through to create the form.
 
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");
 
-  const system = `You design forms for a SaaS work tool. Given a one-line description of what the form is for, you output ONLY a JSON object — no prose, no markdown fences — matching this shape:
+  const system = `You design forms for a SaaS work tool. Given a one-line description of what the form is for, you output ONLY a JSON object (no prose, no markdown fences) matching this shape:
 
 {
   "name": "string (≤80 chars)",
@@ -71,10 +71,10 @@ Design 3-8 fields appropriate for the purpose. Use specific, plain-language labe
     const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
     parsed = JSON.parse(cleaned);
   } catch {
-    return jsonError("AI returned malformed JSON — try a clearer prompt", 502);
+    return jsonError("The AI answer was not valid. Try a clearer description.", 502);
   }
 
-  // Sanitise — drop unknown types, clamp lengths, normalise options.
+  // Sanitise, drop unknown types, clamp lengths, normalise options.
   const safeFields: GeneratedField[] = (Array.isArray(parsed.fields) ? parsed.fields : [])
     .filter((f): f is GeneratedField => f && typeof f === "object" && FIELD_TYPES.includes(f.type as typeof FIELD_TYPES[number]))
     .slice(0, 20)

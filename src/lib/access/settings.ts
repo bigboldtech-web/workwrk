@@ -200,8 +200,11 @@ export const APP_RULES: Record<AppKey, AppRule> = {
   assets: { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
   // Talk
   announcements: { hub: "chat", audience: "member", guest: "none" },
-  // Tables
-  forms: { hub: "tables", audience: "member", guest: "shared", moduleKey: "tables" },
+  // Tables hub. Forms is CORE (founder decision D15, 2026-09): every Member
+  // gets forms whether or not the spreadsheets module is on, so this row
+  // carries no moduleKey. The hub survives module-off on it
+  // (rail-apps MODULE_HUB_SURVIVES_ON tables -> forms).
+  forms: { hub: "tables", audience: "member", guest: "shared" },
   // AI
   automation: { hub: "ai", audience: "member", guest: "none" },
   build: { hub: "ai", audience: "owner-admin", guest: "none" },
@@ -261,7 +264,7 @@ export const SETTINGS_PAGE_KEYS = Object.keys(SETTINGS_PAGE_GATES) as SettingsPa
 export const MODULE_BY_OBJECT_TYPE: Partial<Record<ObjectType, "chat" | "tables">> = {
   channel: "chat",
   table: "tables",
-  form: "tables",
+  // form: no module (D15, Forms is core).
 };
 
 // ── Object type -> app key (rule 2, the Apps-config half) ─────────

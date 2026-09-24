@@ -14,7 +14,7 @@
 // Pure: no React, no prisma, no next. The page, the modal, the apply route and
 // the tests all read the same table.
 
-/** The seven stored `TemplateKind` values, plus the one pseudo-kind. */
+/** The seven stored `TemplateKind` values, plus the two pseudo-kinds. */
 export type TemplateKind = "TASK" | "LIST" | "SPACE" | "FOLDER" | "DOC" | "VIEW" | "WHITEBOARD";
 
 /**
@@ -24,10 +24,10 @@ export type TemplateKind = "TASK" | "LIST" | "SPACE" | "FOLDER" | "DOC" | "VIEW"
  * gone, so the kit becomes a kind on this page rather than a destination that
  * disappears.
  */
-export type TemplateKindKey = TemplateKind | "KIT";
+export type TemplateKindKey = TemplateKind | "KIT" | "FORM";
 
 /** The line drawing a card of this kind shows: never one glyph for all eight. */
-export type TemplateArt = "dot" | "row" | "grid" | "page" | "cluster" | "shelf" | "column" | "kit";
+export type TemplateArt = "dot" | "row" | "grid" | "page" | "cluster" | "shelf" | "column" | "kit" | "form";
 
 /** What a kind needs before it can be applied. */
 export type TemplateTarget = "none" | "space" | "space-or-folder" | "list";
@@ -65,6 +65,10 @@ export const TEMPLATE_KINDS: readonly TemplateKindDef[] = [
   { key: "VIEW", label: "View", plural: "Views", art: "column", target: "list", emptyHint: "View templates ship with the product; saving your own is not built yet." },
   { key: "WHITEBOARD", label: "Canvas", plural: "Canvases", art: "cluster", target: "space", emptyHint: "Save one from a canvas's … menu." },
   { key: "KIT", label: "Starter kit", plural: "Starter kits", art: "kit", target: "none", emptyHint: "Starter kits ship with the product." },
+  // Intake forms (Phase 5 decided addition c) are, like Starter kits, not a
+  // stored TemplateKind: they ship with the product (src/lib/forms/intake-
+  // templates.ts) and using one creates an ordinary form.
+  { key: "FORM", label: "Intake form", plural: "Intake forms", art: "form", target: "none", emptyHint: "Intake forms ship with the product." },
 ] as const;
 
 export const TEMPLATE_KIND_BY_KEY: Readonly<Record<TemplateKindKey, TemplateKindDef>> =
@@ -72,7 +76,7 @@ export const TEMPLATE_KIND_BY_KEY: Readonly<Record<TemplateKindKey, TemplateKind
 
 /** The seven that are real `TemplateKind` rows in the database. */
 export const STORED_TEMPLATE_KINDS: readonly TemplateKind[] = TEMPLATE_KINDS
-  .filter((k): k is TemplateKindDef & { key: TemplateKind } => k.key !== "KIT")
+  .filter((k): k is TemplateKindDef & { key: TemplateKind } => k.key !== "KIT" && k.key !== "FORM")
   .map((k) => k.key);
 
 export function isStoredKind(value: string): value is TemplateKind {
@@ -91,6 +95,7 @@ export function kindFromParam(raw: string | null | undefined): TemplateKindKey |
   if (v === "ALL") return null;
   if (v === "CANVAS" || v === "WHITEBOARD") return "WHITEBOARD";
   if (v === "KIT" || v === "KITS" || v === "STARTER" || v === "STARTER_KIT") return "KIT";
+  if (v === "FORM" || v === "FORMS" || v === "INTAKE") return "FORM";
   if (v === "BOARD") return "LIST"; // the retired word, so old links still land
   return isStoredKind(v) ? v : null;
 }
@@ -127,6 +132,8 @@ export interface AppliedTemplate {
   viewId?: string | null;
   /** VIEW applies onto a List, so the navigation needs the host List's slug. */
   boardSlug?: string | null;
+  /** FORM only: the form the intake template created. */
+  formId?: string | null;
   /** A Starter kit creates three things and has no single page. */
   created?: Array<{ label: string; href: string }>;
   /** TASK only: the create-task modal's own config shape, so it opens filled. */
@@ -157,6 +164,8 @@ export function navigationFor(result: AppliedTemplate): string | null {
       return result.whiteboardId ? `/canvas/${result.whiteboardId}` : null;
     case "VIEW":
       return result.boardSlug && result.viewId ? `/boards/${result.boardSlug}?view=${result.viewId}` : null;
+    case "FORM":
+      return result.formId ? `/forms/${result.formId}?new=1` : null;
     case "TASK":
     case "KIT":
     default:

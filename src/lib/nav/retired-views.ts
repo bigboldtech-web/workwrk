@@ -25,6 +25,9 @@
 //                       card now carries All / Mine and reads ?view=my
 //                       (Mine = meeting notes the viewer attends), so the old
 //                       link lands on the list it always named.
+//   /forms?mine=1       the deleted FormsSidebar "My Forms" row (Phase 5). The
+//                       /forms page reads ?view=mine, so a stored link lands
+//                       on Mine instead of All.
 //
 // Pure: no React, no next/navigation. Every rule below is unit-tested.
 
@@ -46,6 +49,7 @@ export const RETIRED_VIEWS: readonly RetiredViewRule[] = [
   { path: "/docs", key: "view", from: "meeting", to: null },
   { path: "/docs", key: "view", from: "private", to: { key: "view", value: "my" } },
   { path: "/notetaker", key: "mine", from: "1", to: { key: "view", value: "my" } },
+  { path: "/forms", key: "mine", from: "1", to: { key: "view", value: "mine" } },
 ];
 
 /**

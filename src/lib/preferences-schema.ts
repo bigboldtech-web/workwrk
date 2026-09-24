@@ -364,6 +364,32 @@ export const timesheetsSurfaceSchema = z.strictObject({
   showSource: z.boolean().optional(),
 });
 
+// ── Tables hub surfaces (spec-tables-forms section 2, Phase 5) ──────
+//
+// Personal preferences, read per field with the default written beside the
+// reader in src/lib/tables-prefs.ts (never by spreading the namespace, the
+// shallow-merge rule above). The pivot CONFIGURATION is not here: it lives in
+// home.work.surface["table:{id}"].pivot, the per-surface key settings 7.3
+// names for it, which the loose record already accepts.
+
+export const tablesSurfaceSchema = z.strictObject({
+  /** /tables Display: Location, Rows, Owner, Last updated. Default all on. */
+  columns: boolRecord.optional(),
+  /** The sheet's View > Gridlines. Default on. */
+  gridlines: z.boolean().optional(),
+  /** The sheet's View > Formula bar. Default on. */
+  formulaBar: z.boolean().optional(),
+});
+
+export const formsSurfaceSchema = z.strictObject({
+  /** /forms Display: Goes to, Responses, Status, Owner, Last updated. Default all on. */
+  columns: boolRecord.optional(),
+  /** The builder's Display: Show help text. Default on. */
+  showHelpText: z.boolean().optional(),
+  /** The builder's Display: Show field numbers. Default off. */
+  showFieldNumbers: z.boolean().optional(),
+});
+
 export const homePatchSchema = z.strictObject({
   cards: stringList.optional(),
   order: stringList.optional(),
@@ -372,6 +398,7 @@ export const homePatchSchema = z.strictObject({
   favoriteDocIds: stringList.optional(),
   favoriteFolderIds: stringList.optional(),
   favoriteTableIds: stringList.optional(),
+  favoriteFormIds: stringList.optional(),
   favoriteWhiteboardIds: stringList.optional(),
   favoriteFileIds: stringList.optional(),
   taskCardLayout: gridLayout.optional(),
@@ -394,6 +421,9 @@ export const homePatchSchema = z.strictObject({
   // Planner hub surfaces (spec-planner.md section 2, Phase 4).
   planner: plannerSurfaceSchema.optional(),
   timesheets: timesheetsSurfaceSchema.optional(),
+  // Tables hub surfaces (spec-tables-forms section 2, Phase 5).
+  tables: tablesSurfaceSchema.optional(),
+  forms: formsSurfaceSchema.optional(),
 });
 
 // ── theme, density ────────────────────────────────────────────────

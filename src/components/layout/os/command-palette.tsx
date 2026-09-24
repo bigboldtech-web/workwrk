@@ -12,7 +12,8 @@
 //   app the viewer may open, in rail order: this is the launcher), CREATE
 //   (Task, Doc, List, Reminder, Notepad, Voice note; gated like the Create
 //   menu). Typing (2+ chars, 180ms): GET /api/search, grouped TASKS · DOCS ·
-//   PEOPLE · SPACES & LISTS · APPS (name match on the viewer's apps) ·
+//   PEOPLE · SPACES & LISTS · TABLES (Tables module on) · FORMS · APPS (name
+//   match on the viewer's apps) ·
 //   SETTINGS (registry, Workspace pages only for Owner and Admin) · ACTIONS
 //   ("Ask AI about …" when the AI hub is visible, "Create a task").
 //
@@ -39,6 +40,7 @@ import {
   CalendarDays,
   CheckSquare,
   ChevronDown,
+  ClipboardList,
   FileText,
   House,
   Inbox,
@@ -52,6 +54,7 @@ import {
   Settings2,
   Sparkles,
   Star,
+  Table2,
   Target,
   X,
   type LucideIcon,
@@ -145,10 +148,9 @@ type MessageHit = {
   inThread: boolean;
 };
 
-const SEARCH_TYPES: Record<
-  string,
-  "task" | "doc" | "person" | "space" | "more"
-> = {
+type LiveKind = "task" | "doc" | "person" | "space" | "table" | "form" | "more";
+
+const SEARCH_TYPES: Record<string, LiveKind> = {
   item: "task",
   task: "task",
   note: "doc",
@@ -159,6 +161,10 @@ const SEARCH_TYPES: Record<
   board: "space",
   space: "space",
   folder: "space",
+  // The Tables and Forms groups (spec-tables-forms section 2): searched by
+  // /api/search only while the Tables module is on.
+  table: "table",
+  form: "form",
   okr: "more",
   meeting: "more",
   department: "more",
@@ -576,8 +582,8 @@ function PaletteBody() {
       return out;
     }
     const lq = q.toLowerCase();
-    const groups: Record<"task" | "doc" | "person" | "space" | "more", Row[]> =
-      { task: [], doc: [], person: [], space: [], more: [] };
+    const groups: Record<LiveKind, Row[]> =
+      { task: [], doc: [], person: [], space: [], table: [], form: [], more: [] };
     const scoped = live.filter((h) => {
       const kind = SEARCH_TYPES[h.type];
       if (scope === "tasks") return kind === "task";
@@ -601,6 +607,10 @@ function PaletteBody() {
             <Glyph icon={CheckSquare} />
           ) : kind === "person" ? (
             <PersonGlyph name={h.title} />
+          ) : kind === "table" ? (
+            <Glyph icon={Table2} />
+          ) : kind === "form" ? (
+            <Glyph icon={ClipboardList} />
           ) : kind === "more" ? (
             <Glyph icon={MORE_ICON[h.type] ?? Search} />
           ) : (
@@ -666,6 +676,10 @@ function PaletteBody() {
         chip: "space",
         rows: groups.space,
       });
+    if (chip === "all" && groups.table.length > 0)
+      out.push({ key: "tables", label: "Tables", chip: "any", rows: groups.table });
+    if (chip === "all" && groups.form.length > 0)
+      out.push({ key: "forms", label: "Forms", chip: "any", rows: groups.form });
     if (chip === "all" && messageHits.length > 0)
       out.push({
         key: "messages",

@@ -26,7 +26,7 @@ import {
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
   Award, ThumbsUp, FileSpreadsheet, Star,
-  HardDrive, Boxes, Layers, Upload,
+  HardDrive, Boxes, Layers, Upload, ClipboardList, Import as ImportIcon,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   ListChecks,
@@ -49,7 +49,8 @@ import { SpaceTreeRow } from "./space-tree-row";
 import {
   hydrateSidebarState, hiddenSpaces, setAllExpanded, subscribeSidebarState,
 } from "@/lib/work/sidebar-expand";
-import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
+import { onSidebarRefresh, refreshSidebar, notifyTablesChanged } from "./sidebar-refresh";
+import { createNewTable, newTableHref } from "@/lib/sheet-new";
 import { apiFetch } from "@/lib/api-fetch";
 import { Dots } from "@/components/ui/dots";
 import { useSidebarSearch } from "./sidebar-search-context";
@@ -61,7 +62,7 @@ import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
 import { useActiveRowHref } from "./use-active-row";
 import { useFormat } from "@/lib/format/use-date-prefs";
-import { EntityTile } from "@/components/ui/entity-tile";
+import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import {
   SidebarEmptyLine, SidebarErrorLine, SidebarGhostRow, SidebarRow, SidebarSectionAction, SidebarSectionLabel,
@@ -113,6 +114,13 @@ export interface CreateAction {
    * whose page would answer AppOff is a door locked from the inside.
    */
   requiredApps?: string[];
+  /**
+   * Premium module app keys (lib/modules.ts) that must be ON for the org.
+   * The Tables hub stays on the rail with the spreadsheets module off (Forms
+   * is core, founder decision D15), so its "New table" and "Import a CSV..."
+   * rows cannot lean on requiredApps: the hub key is present either way.
+   */
+  requiredModules?: string[];
   /**
    * Draw a 1px rule ABOVE this row. Used where a menu carries two kinds of
    * thing: the Docs "+" separates the hub's own content creates from the
@@ -206,6 +214,15 @@ export const NEW_EVENT_PREFIX = "workwrk:os:new:";
 
 /* ── "+" onSelect helpers: mirror the create flows the pages themselves
  *    run, so the sidebar "+" is never a dead link. ─────────────────── */
+
+/** "New form": the promptless create every door shares, then /forms/[id]?new=1. */
+async function createUntitledForm(ctx: CreateActionContext): Promise<void> {
+  const r = await apiFetch<{ id: string }>("/api/forms", { method: "POST", json: { name: "Untitled form", fields: [] } });
+  if (!r.ok) { ctx.toast("Couldn't create the form"); return; }
+  ctx.bumpRowVersion("forms");
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("workwrk:forms-changed"));
+  ctx.push(`/forms/${r.data.id}?new=1`);
+}
 
 /* `createLibraryNote` and `createLibraryWhiteboard` are DELETED with the
  * Library "+" rows. Both were second copies of a create that already had a
@@ -427,7 +444,7 @@ function FavSubLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder" | "table" | "whiteboard" | "file"; id: string }) {
+function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder" | "table" | "form" | "whiteboard" | "file"; id: string }) {
   const onClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -438,6 +455,7 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
         : kind === "doc" ? { docId: id, on: false }
         : kind === "folder" ? { folderId: id, on: false }
         : kind === "table" ? { tableId: id, on: false }
+        : kind === "form" ? { formId: id, on: false }
         : kind === "whiteboard" ? { whiteboardId: id, on: false }
         : { fileId: id, on: false };
       const res = await fetch(`/api/me/favorites/${kind}s`, {
@@ -514,6 +532,8 @@ function HomeSidebar() {
   const [favoriteDocs, setFavoriteDocs] = useState<Array<{ id: string; title: string; excerpt: string | null }>>([]);
   const [favoriteFolders, setFavoriteFolders] = useState<Array<{ id: string; name: string; icon: string | null; color: string | null; space: { slug: string } }>>([]);
   const [favoriteTables, setFavoriteTables] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+  // Phase 5 (Data): starred Forms (home.favoriteFormIds, /api/me/favorites/forms).
+  const [favoriteForms, setFavoriteForms] = useState<Array<{ id: string; name: string }>>([]);
   const [favoriteWhiteboards, setFavoriteWhiteboards] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
   const [favoriteFiles, setFavoriteFiles] = useState<Array<{ id: string; name: string; url: string; mimeType: string }>>([]);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
@@ -725,7 +745,7 @@ function HomeSidebar() {
     let alive = true;
     const load = async () => {
       try {
-        const [boardsRes, spacesRes, docsRes, foldersRes, tablesRes, wbsRes, filesRes] = await Promise.all([
+        const [boardsRes, spacesRes, docsRes, foldersRes, tablesRes, wbsRes, filesRes, formsRes] = await Promise.all([
           fetch("/api/me/favorites/boards", { cache: "no-store" }),
           fetch("/api/me/favorites/spaces", { cache: "no-store" }),
           fetch("/api/me/favorites/docs", { cache: "no-store" }),
@@ -733,6 +753,7 @@ function HomeSidebar() {
           fetch("/api/me/favorites/tables", { cache: "no-store" }),
           fetch("/api/me/favorites/whiteboards", { cache: "no-store" }),
           fetch("/api/me/favorites/files", { cache: "no-store" }),
+          fetch("/api/me/favorites/forms", { cache: "no-store" }),
         ]);
         if (boardsRes.ok) {
           const data = await boardsRes.json();
@@ -762,6 +783,10 @@ function HomeSidebar() {
           const data = await filesRes.json();
           if (alive && Array.isArray(data?.files)) setFavoriteFiles(data.files);
         }
+        if (formsRes.ok) {
+          const data = await formsRes.json();
+          if (alive && Array.isArray(data?.forms)) setFavoriteForms(data.forms);
+        }
       } catch {}
     };
     void load();
@@ -776,7 +801,7 @@ function HomeSidebar() {
   const renderFavorites = () => {
     const total =
       favoriteBoards.length + favoriteSpaces.length + favoriteDocs.length
-      + favoriteFolders.length + favoriteTables.length
+      + favoriteFolders.length + favoriteTables.length + favoriteForms.length
       + favoriteWhiteboards.length + favoriteFiles.length;
     // FAVORITES renders only when non-empty (sidebar-map 1).
     if (total === 0) return null;
@@ -892,10 +917,30 @@ function HomeSidebar() {
                         active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
-                      <EntityTile size="sm" color="#0EA5E9" fallbackIcon={FileSpreadsheet} name={t.name} />
+                      <EntityTile size="sm" fallback="table" name={t.name} {...NEUTRAL_TILE} />
                       <span className="truncate flex-1">{t.name}</span>
                     </Link>
                     <UnstarButton kind="table" id={t.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteForms.length > 0 ? (
+                <FavSubLabel>Forms</FavSubLabel>
+              ) : null}
+              {favoriteForms.map((f) => {
+                const active = pathname === `/forms/${f.id}`;
+                return (
+                  <li key={`fm-${f.id}`} className="group/fav relative">
+                    <Link
+                      href={`/forms/${f.id}`}
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
+                      }`}
+                    >
+                      <EntityTile size="sm" fallback="form" name={f.name} {...NEUTRAL_TILE} />
+                      <span className="truncate flex-1">{f.name || "Untitled form"}</span>
+                    </Link>
+                    <UnstarButton kind="form" id={f.id} />
                   </li>
                 );
               })}
@@ -1533,27 +1578,15 @@ function TeamsSidebar() {
  * 5.2.1 gates /files on it, so deleting the entry would delete the gate.
  * ─────────────────────────────────────────────────────────────────────── */
 
-/* ───────────────────────── Forms sidebar ───────────────────────── */
-
-const FORMS_ROWS = [
-  { href: "/forms", label: "All Forms", Icon: ClipboardCheck },
-  { href: "/forms?mine=1", label: "My Forms", Icon: ClipboardCheck },
-];
-
-function FormsSidebar() {
-  const activeHref = useActiveRowHref(FORMS_ROWS);
-  return (
-    <>
-      <ul>
-        {FORMS_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Form to see it here" />
-    </>
-  );
-}
+/* ───────────────────────── Forms sidebar: DELETED ───────────────────────────
+ *
+ * `FormsSidebar` was unreachable (the hub sidebar resolves /forms to the
+ * Tables hub, route-hub.ts), and every row it had lives in the ONE Tables
+ * sidebar (tables-sidebar.tsx): "All Forms" is its "All forms" row; "My
+ * Forms" (/forms?mine=1, a param the page never read) is the /forms "Mine"
+ * view; the "Star a Form to see it here" card is a real FAVORITES section
+ * backed by /api/me/favorites/forms (spec-tables-forms section 0).
+ * ─────────────────────────────────────────────────────────────────────── */
 
 /* ───────────────────────── Clips sidebar: DELETED ───────────────────────────
  *
@@ -1746,16 +1779,30 @@ export const APPS: AppEntry[] = [
       { label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" },
     ] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables", category: "Core", defaultPinned: true,
-    // TablesSidebar lists every worksheet (like Docs lists docs); the old
-    // single "All tables" link survives as a secondary row inside it.
+    // TablesSidebar is the ONE Tables hub sidebar (sidebar-map section 7):
+    // All tables, All forms, FAVORITES, TABLES, FORMS.
     Sidebar: TablesSidebar,
-    // sidebar-map section 7: New table, New form, Import a CSV. ?new=1 is an
-    // armed latch on each list page: it opens the create flow once on
-    // arrival, so the "+" goes straight into creation.
+    // sidebar-map section 7: New table, New form, separator, Import a CSV...
+    // One create recipe (spec-tables-forms section 1): each door POSTS first
+    // and lands on the new object's own URL with ?new=1; no door navigates to
+    // a list page with a create flag. Import a CSV... opens the in-place
+    // dialog (hosted by TablesSidebar), which any Member may use.
     createActions: [
-      { label: "New table", icon: Table2, href: "/tables?new=1" },
-      { label: "New form", icon: ClipboardCheck, href: "/forms?new=1" },
-      { label: "Import a CSV", icon: Upload, href: "/imports" },
+      { label: "New table", icon: Table2, requiredModules: ["tables"], onSelect: async (ctx) => {
+        try {
+          const t = await createNewTable();
+          ctx.bumpRowVersion("tables");
+          notifyTablesChanged();
+          ctx.push(newTableHref(t.id));
+        } catch { ctx.toast("Couldn't create the table"); }
+      } },
+      { label: "New form", icon: ClipboardList, onSelect: createUntitledForm },
+      { label: "Import a CSV…", icon: Upload, requiredModules: ["tables"], event: "tables-import-csv", separatorBefore: true },
+      // The admin half of the import split (spec-tables-forms section 2
+      // /imports): workspace imports live behind the Owner and Admin door.
+      // It points at /imports, which keeps its URL inside the settings
+      // takeover until the settings unit's Data > Import tab lands and 308s it.
+      { label: "Import data", icon: ImportIcon, requiredAccess: "org-admin", href: "/imports" },
     ] },
   // "Library" is retired as a word (naming-canon 2.8); the key survives as
   // the gate for Files, and that is the label and door the palette prints.
@@ -1764,8 +1811,11 @@ export const APPS: AppEntry[] = [
   // the Docs hub and the Docs "+" carries the one "Upload file".
   { key: "library", label: "Files", Icon: LibraryIcon, defaultHref: "/files", Sidebar: DocsSidebar,
     category: "Core", defaultPinned: true },
-  { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms", Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
-    createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
+  // Folded into the Tables hub (FOLDED_APP_HUB forms: "tables"), so the hub
+  // sidebar on /forms* is TablesSidebar from every entry point; the entry's own
+  // Sidebar is the same component so no second sidebar can exist.
+  { key: "forms", label: "Forms", Icon: ClipboardList, defaultHref: "/forms", Sidebar: TablesSidebar, category: "Core", defaultPinned: true,
+    createActions: [{ label: "New form", icon: ClipboardList, onSelect: createUntitledForm }] },
   // Clips has no separate creatable object: /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
   { key: "clips", label: "Notetaker", Icon: Video, defaultHref: "/notetaker", Sidebar: DocsSidebar,

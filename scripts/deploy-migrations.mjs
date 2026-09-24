@@ -103,6 +103,12 @@ const SQL_MANIFEST = [
   // in the manifest so the switch stops being a control with no effect on
   // the same deploy that ships it.
   "2026-09-22-calendar-declined.sql",
+  // Phase 5, the form builder: FormDefinition."settings" (JSONB NOT NULL
+  // DEFAULT '{}'), the form's own settings bucket. One ADD COLUMN IF NOT
+  // EXISTS and no backfill: an empty bucket reads as today's behaviour. It
+  // must land before the code, because a findFirst with no select asks for
+  // every scalar and would 500 the builder and the /forms list.
+  "2026-09-23-form-settings.sql",
 ];
 
 /**

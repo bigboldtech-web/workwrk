@@ -20,6 +20,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { folderAccessForSpace, folderVisibleTo } from "@/lib/folder";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { viewerFromSession } from "@/lib/access/viewer";
+import { canManageObject } from "@/lib/object-manage";
 import {
   spaceContainerRole, listContainerRole, type ContainerRole,
 } from "@/lib/work/container-menu";
@@ -143,7 +145,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       : prisma.dataTable.findMany({
           where: { spaceId: id },
           orderBy: { name: "asc" },
-          select: { id: true, name: true, description: true },
+          select: { id: true, name: true, description: true, createdById: true },
         }),
     scoped
       ? Promise.resolve([] as never[])
@@ -259,6 +261,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }));
   }
 
+  const manageViewer = await viewerFromSession().catch(() => null);
   return NextResponse.json({
     spaceRole,
     folders: annotate(folders as FolderShape[]),
@@ -266,7 +269,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       ...b,
       role: roleForBoard(b),
     })),
-    tables: tablesR.status === "fulfilled" ? tablesR.value : [],
+    // canManage: may this viewer delete the table (its creator, or an Owner
+    // or Admin: lib/object-manage, the same rule DELETE /api/tables/[id]
+    // enforces), so the tree's row menu never offers a Delete that fails.
+    tables: (tablesR.status === "fulfilled" ? tablesR.value : []).map(({ createdById, ...t }) => ({
+      ...t,
+      canManage: canManageObject(manageViewer, createdById),
+    })),
     docs: docsR.status === "fulfilled" ? docsR.value : [],
     whiteboards: whiteboardsR.status === "fulfilled" ? whiteboardsR.value : [],
   });

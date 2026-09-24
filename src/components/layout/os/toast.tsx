@@ -8,6 +8,12 @@
 //   toast("Saved")
 //   toast("Task archived", { onUndo })
 //   toast("Couldn't save", { tone: "danger", action: { label: "Try again", onClick } })
+//   toast("Cell didn't save", { key: "cell-save" }); dismiss("cell-save")
+//
+// A `key` makes a toast a single slot: a second toast with the same key
+// replaces the first instead of stacking, and dismiss(key) takes it down
+// when the thing it reported is over (a save that failed and then landed
+// on Retry must not keep saying it failed).
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,6 +23,7 @@ type ToastTone = "info" | "success" | "danger";
 
 type Toast = {
   id: number;
+  key?: string;
   message: string;
   description?: string;
   tone: ToastTone;
@@ -29,16 +36,27 @@ export type ToastOptions = {
   action?: { label: string; onClick: () => void };
   description?: string;
   tone?: ToastTone;
+  /** One slot per key: replaces a live toast with the same key. */
+  key?: string;
 };
 
 type ToastCtx = {
   toast: (message: string, opts?: ToastOptions) => void;
+  /** Remove every live toast carrying this key. */
+  dismiss: (key: string) => void;
 };
 
 const Ctx = createContext<ToastCtx | null>(null);
 
 let _id = 0;
 const MAX_STACK = 3;
+
+/** The stack after pushing `next`: a keyed toast first drops any live toast
+ *  with the same key (replace, not stack), then the newest MAX_STACK stay. */
+export function pushToast<T extends { key?: string }>(items: readonly T[], next: T, max = MAX_STACK): T[] {
+  const kept = next.key ? items.filter((x) => x.key !== next.key) : items;
+  return [...kept, next].slice(-max);
+}
 
 export function OsToastProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
@@ -52,12 +70,16 @@ export function OsToastProvider({ children }: { children: React.ReactNode }) {
   const toast = useCallback<ToastCtx["toast"]>((message, opts) => {
     const id = ++_id;
     const tone: ToastTone = opts?.tone ?? (/couldn'?t|failed|not saved/i.test(message) ? "danger" : "info");
-    setItems((xs) => [...xs, { id, message, description: opts?.description, tone, onUndo: opts?.onUndo, action: opts?.action }].slice(-MAX_STACK));
+    setItems((xs) => pushToast(xs, { id, key: opts?.key, message, description: opts?.description, tone, onUndo: opts?.onUndo, action: opts?.action }));
     const ms = opts?.onUndo || opts?.action ? 8000 : 5000;
     setTimeout(() => remove(id), ms);
   }, [remove]);
 
-  const value = useMemo(() => ({ toast }), [toast]);
+  const dismiss = useCallback<ToastCtx["dismiss"]>((key) => {
+    setItems((xs) => (xs.some((x) => x.key === key) ? xs.filter((x) => x.key !== key) : xs));
+  }, []);
+
+  const value = useMemo(() => ({ toast, dismiss }), [toast, dismiss]);
 
   return (
     <Ctx.Provider value={value}>
@@ -101,7 +123,7 @@ export function useOsToast() {
   const ctx = useContext(Ctx);
   if (!ctx) {
     // Soft fallback for when components are imported outside the provider
-    return { toast: (_m: string, _o?: ToastOptions) => {} };
+    return { toast: (_m: string, _o?: ToastOptions) => {}, dismiss: () => {} };
   }
   return ctx;
 }

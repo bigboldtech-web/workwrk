@@ -214,3 +214,18 @@ These are not on any ClickUp or Monday screen, so the survey did not rank them, 
 ### What this changes in the phase scripts
 
 Each of Phases 4 to 9 now carries a "DECIDED ADDITIONS" block naming the items above that land in it, so the agents build them alongside the spec rather than after it. Nothing already built is removed to make room; the no-removal rule stands.
+
+### Phase 5 status (2026-09-23): what landed and what did not
+
+Recorded here so the gap is not lost between phases. Of the six DECIDED ADDITIONS in the Phase 5 script, one shipped and five did not:
+
+| Addition | Status | Why, and what it needs |
+| - | - | - |
+| (c) Form builder parity | SHIPPED | Dropdown, multi-select, file, people, rating, section block, required toggle, map-to-field (src/lib/forms/builder.ts), and FORM intake templates in the Template Center. |
+| (a) Dashboards page and Space Overview tab (decision 1) | NOT BUILT | No schema change needed (the Dashboard model with `widgets` and `spaceId` exists), but it is a new visible surface and no dev server was available to look at it, so it could not meet "a visual change you have not looked at is not done". `/dashboard`, `/dashboards` and `/dashboards/:id` still 308 to `/home` (next.config.ts). |
+| (b) Scheduled email reports (gap 16) | NOT BUILT | Waits on (a), and needs somewhere to store a schedule: a new column or model, which the Phase 5 brief forbade (its one schema addition was FormDefinition.settings). |
+| (d) Connect-boards and mirror columns on Lists (gap 13) | NOT BUILT | Can ride the existing RELATIONSHIP field config JSON, but it is a new visible column type; same verification blocker as (a). |
+| (e) Tasks in multiple Lists (decision 7) | NOT BUILT | Needs an additive join table. The Phase 5 brief also said FormDefinition.settings is the only schema addition, so the two rules conflict; the next phase that carries (e) must be allowed the join table explicitly. |
+| (f) List comfort: default values, conditional row colour, pinned columns, row height (gap 14) | NOT BUILT | Can live in Board settings JSON; same verification blocker as (a). |
+
+Nothing was removed to make room, and none of the five is partly built.

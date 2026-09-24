@@ -1,5 +1,5 @@
-// GET  /api/tables/[id]/trash   — list this table's soft-deleted rows
-// POST /api/tables/[id]/trash   — { action: "restore" | "purge", ids: [...] }
+// GET  /api/tables/[id]/trash, list this table's soft-deleted rows
+// POST /api/tables/[id]/trash, { action: "restore" | "purge", ids: [...] }
 //                                  | { action: "empty" }
 //
 // Row trash: a deleted row is soft-deleted (deletedAt stamped) and hidden from
@@ -12,16 +12,20 @@ import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { unscopedTableReadable } from "@/lib/table-gate";
 
 async function resolveTable(id: string, orgId: string, userId: string, accessLevel: string | null | undefined) {
   const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, organizationId: true, spaceId: true },
+    select: { id: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
   if (table.spaceId) {
     const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
     if (!space) return null;
+  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
+    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
+    return null;
   }
   return table;
 }
@@ -61,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (action === "restore") {
     if (ids.length === 0) return jsonError("ids required", 400);
-    // Only trashed rows of THIS table are eligible — a caller can't revive a
+    // Only trashed rows of THIS table are eligible, a caller can't revive a
     // row from another table or one that was never deleted.
     const res = await prisma.dataTableRow.updateMany({
       where: { tableId: id, id: { in: ids }, deletedAt: { not: null } },

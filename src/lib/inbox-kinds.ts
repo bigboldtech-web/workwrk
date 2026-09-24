@@ -162,6 +162,10 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   contract_completed: k("contract_completed", "Contract completed", "FileSignature", "other", "announcements"),
   /** An internal party's own signing link (lib/contract-notify.ts). */
   contract_sent: k("contract_sent", "Contract to sign", "FileSignature", "primary", "tasks"),
+  /** Form "Tell these people about each new response" and its daily summary
+   *  (api/forms/[id]/responses, api/cron/form-daily-summary). */
+  form_response: k("form_response", "New form response", "ClipboardList", "other", "requests"),
+  form_daily_summary: k("form_daily_summary", "Form responses today", "ClipboardList", "other", "requests"),
   task_status_changed: k("task_status_changed", "Task status changed", "CircleDot", "other", "tasks"),
   kudos: k("kudos", "Kudos", "Heart", "other", "kudos"),
   /** The fifth contract kind (see the block in Primary above). */
@@ -223,6 +227,8 @@ export const TYPE_ALIASES: Readonly<Record<string, string>> = {
   "contract.declined": "contract_declined",
   "contract.completed": "contract_completed",
   "contract.sent": "contract_sent",
+  "form.response": "form_response",
+  "form.daily_summary": "form_daily_summary",
 };
 
 /** The stored type in its canonical, lowercase, underscore form. */

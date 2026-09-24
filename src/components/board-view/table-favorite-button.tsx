@@ -1,6 +1,6 @@
 "use client";
 
-// TableFavoriteButton — per-DataTable star toggle (Phase 84).
+// TableFavoriteButton, per-DataTable star toggle (Phase 84).
 // Self-loads initial state when `initiallyStarred` is omitted, since
 // the table page is a pure client component without server prefs.
 
@@ -62,9 +62,9 @@ export function TableFavoriteButton({ tableId, initiallyStarred }: Props) {
       disabled={busy}
       aria-pressed={starred}
       title={starred ? "Unstar this table" : "Star this table"}
-      className="inline-flex items-center justify-center w-7 h-7 rounded text-zinc-400 hover:text-amber-500 hover:bg-zinc-50 transition-colors"
+      className="inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-3 hover:text-ink hover:bg-hover transition-colors"
     >
-      <Star className={`w-4 h-4 ${starred ? "text-amber-400 fill-amber-400" : ""}`} />
+      <Star className={`w-4 h-4 ${starred ? "text-ink fill-current" : ""}`} />
     </button>
   );
 }

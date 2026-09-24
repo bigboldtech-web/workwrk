@@ -10,6 +10,13 @@
 // that sentence. Reads GET /api/settings (settings.access.publicLinks) and
 // writes PATCH /api/settings { section: "access", data: { publicLinks } }.
 // The row autosaves with the inline "Saved" tick and reverts on failure.
+//
+// The stored key can also be ABSENT (an org that never saved this page). The
+// public docs, tables and forms routes treat absent as "keep what is live"
+// (lib/public-links.ts), while a SOP link needs an explicit View only, so an
+// absent key is shown as its own honest line under the switch instead of a
+// flat "Off" that the live links would contradict. Either choice then stores
+// an explicit value and every reader agrees.
 
 import { useEffect, useState } from "react";
 import { Globe } from "lucide-react";
@@ -21,13 +28,16 @@ type PublicLinks = "off" | "view";
 
 export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
   const [value, setValue] = useState<PublicLinks | null>(null);
+  const [unset, setUnset] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
 
   useEffect(() => {
     let live = true;
     void apiFetch<{ settings?: { access?: { publicLinks?: PublicLinks } } }>("/api/settings", { cache: "no-store" }).then((r) => {
       if (!live) return;
-      setValue(r.ok && r.data.settings?.access?.publicLinks === "view" ? "view" : "off");
+      const stored = r.ok ? r.data.settings?.access?.publicLinks : undefined;
+      setUnset(r.ok && stored !== "view" && stored !== "off");
+      setValue(stored === "view" ? "view" : "off");
     });
     return () => { live = false; };
   }, []);
@@ -45,6 +55,7 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
     setState("saving");
     const r = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: { publicLinks: next } } });
     if (!r.ok) { setValue(prev); setState("failed"); return; }
+    setUnset(false);
     setState("saved");
   }
 
@@ -56,8 +67,13 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
       </header>
       <div className="flex min-h-14 items-center gap-4 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <p className="text-base text-ink">Let people share SOPs and docs with a link that works without signing in</p>
+          <p className="text-base text-ink">Let people share SOPs, docs, tables and forms with a link that works without signing in</p>
           <p className="text-sm text-ink-2">Off turns every existing public link off as well. Signing links and run links are separate and always work.</p>
+          {unset ? (
+            <p className="mt-1 text-sm text-ink-2">
+              Not chosen yet: docs, tables and forms already made public keep working, and new SOP links stay off until you choose.
+            </p>
+          ) : null}
         </div>
         <span className="inline-flex shrink-0 items-center gap-2 text-sm text-ink-2">
           {state === "saving" ? <Dots variant="pending" label="Saving" /> : null}

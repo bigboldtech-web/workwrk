@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { isSignedOutAppPath } from "@/lib/nav/public-app-paths";
 
 /**
  * Host routing for WorkwrK's three surfaces:
@@ -82,7 +83,9 @@ const AUTH_PUBLIC_PREFIXES = new Set([
   "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
 ]);
 function isAuthPublicPath(path: string): boolean {
-  return AUTH_PUBLIC_PREFIXES.has(firstSeg(path));
+  // The public form responder (/forms/[id]/respond) is an app route a
+  // stranger with the link must reach: see lib/nav/public-app-paths.ts.
+  return AUTH_PUBLIC_PREFIXES.has(firstSeg(path)) || isSignedOutAppPath(path);
 }
 
 // Does the request carry a NextAuth session cookie? We check PRESENCE only —

@@ -1,263 +1,380 @@
 "use client";
 
-// TablesSidebar — the left panel for the Tables (spreadsheets) app.
+// TablesSidebar: the ONE sidebar of the Tables hub (sidebar-map section 7,
+// spec-tables-forms section 1 "Hub sidebar contents"). It renders on /tables,
+// /tables/[id], /forms and /forms/[id], resolved from the URL, so the sidebar
+// never depends on how a person arrived (the deleted FormsSidebar was that
+// second sidebar, and was unreachable). Five row groups, in order:
 //
-// Modeled on DocsSidebar: the header ("Tables" + create button) is rendered
-// by ClickSidebarBody; this is the scrolling body. It lists every worksheet
-// the viewer can see (GET /api/tables, already updatedAt-desc) so clicking
-// one opens the spreadsheet directly — the card overview at /tables stays
-// reachable via a small secondary "All tables" row.
+//   1  All tables          /tables   (only while the spreadsheets module is on)
+//   2  All forms           /forms    (Forms is core, founder decision D15)
+//   3  FAVORITES           starred tables and forms, most recently starred
+//                          first; hover "...": Remove from favorites, Copy link
+//   4  TABLES              every table the viewer can open, updatedAt desc;
+//                          hover and focus "..." = TableRowMenu; "+ New table"
+//                          ghost last; past 20 rows "Show all (N)" -> /tables
+//   5  FORMS               every form (for a Guest, only the ones they
+//                          made: GET /api/forms scopes it), updatedAt desc, response count; hover
+//                          and focus "..." = FormRowMenu; "+ New form" ghost
+//                          last; past 20 rows "Show all (N)" -> /forms
+//
+// There is no Trash row here: the one Trash lives in the Work hub, and the
+// /tables and /forms "..." menus link it pre-filtered (?type=table, ?type=form).
+// A section that fails to load says so with a wired Try again, never an empty
+// list. Right click on a row still opens its menu, as a shortcut to the "...".
+//
+// The hub "+" row "Import a CSV..." dispatches workwrk:os:new:tables-import-csv;
+// this sidebar is mounted on every Tables hub route, so it hosts the dialog.
 
-import { createUntitledSheet } from "@/lib/sheet-new";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ClipboardCheck, LayoutGrid, Pencil, Plus, Table2, Trash2 } from "lucide-react";
+import { ClipboardList, LayoutGrid, Link2, MoreHorizontal, Plus, Star, Table2 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useActiveRowHref } from "./use-active-row";
 import { onSidebarRefresh, notifyTablesChanged } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
-import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
-import { MenuList, MenuItem } from "@/components/ui/menu";
+import { useBoot } from "./boot-context";
 import { MorePortal } from "./more-portal";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import {
+  SidebarRow, SidebarGhostRow, SidebarSectionLabel, SidebarErrorLine, SidebarSkeletonRows, SidebarEmptyLine,
+} from "./sidebar-primitives";
+import { TableRowMenuHost, useTableRowMenu } from "@/components/tables/table-row-menu";
+import { FormRowMenuHost, dispatchFormsChanged, useFormRowMenu } from "@/components/forms/form-row-menu";
+import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
+import { createNewTable, newTableHref } from "@/lib/sheet-new";
+import { isSectionCollapsed, toggleSectionCollapsed } from "@/lib/docs-prefs";
+import { apiFetch } from "@/lib/api-fetch";
 
-type SheetRow = {
-  id: string;
-  name: string;
-  updatedAt: string;
-  rowCount?: number;
-};
+type TableRow = { id: string; name: string; updatedAt: string; spaceId?: string | null; canManage?: boolean; isPublic?: boolean };
+type FormRow = { id: string; name: string; updatedAt: string; submissionCount?: number; canManage?: boolean; isPublic?: boolean };
+type FavoriteRow = { kind: string; id: string; name: string; href: string };
 
-// The hub's static rows (the sheet list above them is dynamic and carries its
-// own active state). Resolved as one set so exactly one lights, which is what
-// the "My Forms" row never did: it declared a query string and no active prop.
-const TABLES_HUB_ROWS = [
-  { href: "/tables", label: "All tables", Icon: LayoutGrid, match: "exact" as const },
-  { href: "/forms", label: "All Forms", Icon: ClipboardCheck, match: "exact" as const },
-  { href: "/forms?mine=1", label: "My Forms", Icon: ClipboardCheck },
+/** The Tables hub "+" row's event (apps-catalog createActions). */
+export const TABLES_IMPORT_CSV_EVENT = "tables-import-csv";
+
+const HUB_ROWS = [
+  { href: "/tables", match: "exact" as const },
+  { href: "/forms", match: "exact" as const },
 ];
+const COLLAPSE_AT = 20;
+const FAV_KEY = "tables.favorites";
+const TABLES_KEY = "tables.tables";
+const FORMS_KEY = "tables.forms";
 
 export function TablesSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
-  const activeHubHref = useActiveRowHref(TABLES_HUB_ROWS);
+  const activeHubHref = useActiveRowHref(HUB_ROWS);
   const { query } = useSidebarSearch();
-  const { rowVersion, bumpRowVersion } = useOsShell();
+  const { rowVersion, bumpRowVersion, prefs, patchPrefs } = useOsShell();
+  const { boot } = useBoot();
   const { toast } = useOsToast();
+  const isGuest = boot.viewer.orgRole === "GUEST";
+  const tablesOn = Array.isArray(prefs.modules?.activeAppKeys) && prefs.modules.activeAppKeys.includes("tables");
 
-  const [sheets, setSheets] = useState<SheetRow[] | null>(null);
+  const [tables, setTables] = useState<TableRow[] | null>(null);
+  const [tablesError, setTablesError] = useState(false);
+  const [forms, setForms] = useState<FormRow[] | null>(null);
+  // A Guest has no /forms list to "Show all" on (FormsListGate 404s it), so
+  // for them "Show all (N)" expands the section in place instead.
+  const [guestFormsExpanded, setGuestFormsExpanded] = useState(false);
+  const [formsError, setFormsError] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteRow[] | null>(null);
+  const [favError, setFavError] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/tables", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      // jsonSuccess historically wrapped in {data}; today it returns the raw
-      // array — accept both shapes like the list page does.
-      setSheets((d.data ?? (Array.isArray(d) ? d : [])) as SheetRow[]);
-    } catch {
-      setSheets([]);
-    }
+  // No setState before the first await (react-hooks/set-state-in-effect).
+  const loadTables = useCallback(async () => {
+    if (!tablesOn) return;
+    const r = await apiFetch<TableRow[] | { data?: TableRow[] }>("/api/tables", { cache: "no-store" });
+    if (!r.ok) { setTablesError(true); return; }
+    setTablesError(false);
+    setTables(Array.isArray(r.data) ? r.data : r.data.data ?? []);
+  }, [tablesOn]);
+  const loadForms = useCallback(async () => {
+    const r = await apiFetch<FormRow[] | { data?: FormRow[] }>("/api/forms", { cache: "no-store" });
+    if (!r.ok) { setFormsError(true); return; }
+    setFormsError(false);
+    setForms(Array.isArray(r.data) ? r.data : r.data.data ?? []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  // FAVORITES comes from the ONE aggregate, which drops a starred object the
+  // viewer lost access to rather than showing it locked.
+  const loadFavorites = useCallback(async () => {
+    const r = await apiFetch<{ favorites?: FavoriteRow[] }>("/api/me/favorites", { cache: "no-store" });
+    if (!r.ok) { setFavError(true); return; }
+    setFavError(false);
+    setFavorites((r.data.favorites ?? []).filter((f) => f.kind === "form" || (f.kind === "table" && tablesOn)));
+  }, [tablesOn]);
 
-  // Refresh triggers: the tables-specific event (notifyTablesChanged), the
-  // generic sidebar-refresh bus, and the shell's rowVersion("tables") bump
-  // that the list page also honours — any mutation path lands on one of them.
   useEffect(() => {
-    const onChange = () => { void load(); };
-    window.addEventListener("workwrk:tables-changed", onChange);
-    const offRefresh = onSidebarRefresh(onChange);
+    const t = setTimeout(() => { void loadTables(); void loadForms(); void loadFavorites(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadTables, loadForms, loadFavorites]);
+
+  // Refresh triggers: the tables and forms buses, the generic sidebar bus,
+  // the favorites bus, and the shell's rowVersion bumps.
+  useEffect(() => {
+    const onTables = () => { void loadTables(); void loadFavorites(); };
+    const onForms = () => { void loadForms(); void loadFavorites(); };
+    const onFavs = () => { void loadFavorites(); };
+    window.addEventListener("workwrk:tables-changed", onTables);
+    window.addEventListener("workwrk:forms-changed", onForms);
+    window.addEventListener("workwrk:favs-changed", onFavs);
+    const offRefresh = onSidebarRefresh(() => { onTables(); onForms(); });
     return () => {
-      window.removeEventListener("workwrk:tables-changed", onChange);
+      window.removeEventListener("workwrk:tables-changed", onTables);
+      window.removeEventListener("workwrk:forms-changed", onForms);
+      window.removeEventListener("workwrk:favs-changed", onFavs);
       offRefresh();
     };
-  }, [load]);
-  const v = rowVersion("tables");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  }, [loadTables, loadForms, loadFavorites]);
+  const tv = rowVersion("tables");
+  useEffect(() => { if (tv > 0) void loadTables(); }, [tv, loadTables]);
+  const fv = rowVersion("forms");
+  useEffect(() => { if (fv > 0) void loadForms(); }, [fv, loadForms]);
 
-  // Self-heal: a sheet created elsewhere (list page's ?new=1 latch, CSV
-  // import) routes to /tables/<id> without firing any notify — if that id
-  // isn't in our list yet, refetch once. The attempted-set stops a refetch
-  // loop when the id genuinely doesn't exist (deleted / no access).
+  // Self-heal: an object opened by URL that is not in the list yet (created
+  // elsewhere, or a CSV import) refetches once; the attempted set stops a
+  // loop when the id genuinely does not exist.
   const attemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!sheets) return;
-    const m = pathname.match(/^\/tables\/([^/?#]+)/);
+    const m = pathname.match(/^\/(tables|forms)\/([^/?#]+)/);
     if (!m) return;
-    const id = m[1];
-    if (sheets.some((s) => s.id === id) || attemptedRef.current.has(id)) return;
+    const [, kind, id] = m;
+    const list = kind === "tables" ? tables : forms;
+    if (!list || list.some((x) => x.id === id) || attemptedRef.current.has(id)) return;
     attemptedRef.current.add(id);
-    void load();
-  }, [pathname, sheets, load]);
+    void (kind === "tables" ? loadTables() : loadForms());
+  }, [pathname, tables, forms, loadTables, loadForms]);
 
-  // Right-click a worksheet row: Rename / Delete (Sheets' tab menu, mirrored
-  // here so the sidebar can manage sheets without opening them). DELETE is
-  // a soft delete (Trash) server-side.
-  const confirm = useConfirm();
-  const promptDialog = usePrompt();
-  const [rowMenu, setRowMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
-  const rowMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
-  const rowMenuPanelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!rowMenu) return;
-    const onDown = (e: MouseEvent) => {
-      if (rowMenuPanelRef.current?.contains(e.target as Node)) return;
-      setRowMenu(null);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRowMenu(null); };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [rowMenu]);
-
-  const renameSheet = useCallback(async (id: string, name: string) => {
-    const next = await promptDialog({ title: "Rename sheet", defaultValue: name || "Untitled spreadsheet" });
-    if (next == null) return;
-    const trimmed = next.trim() || "Untitled spreadsheet";
-    if (trimmed === name) return;
+  /* ── create ── */
+  const createBusy = useRef(false);
+  const newTable = useCallback(async () => {
+    if (createBusy.current) return;
+    createBusy.current = true;
     try {
-      const res = await fetch(`/api/tables/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      const t = await createNewTable();
       notifyTablesChanged();
       bumpRowVersion("tables");
-      if (pathname === `/tables/${id}`) router.refresh();
-    } catch { toast("Couldn't rename sheet"); }
-  }, [promptDialog, bumpRowVersion, pathname, router, toast]);
-
-  const deleteSheet = useCallback(async (id: string, name: string) => {
-    const label = name || "Untitled spreadsheet";
-    if (!(await confirm({ title: "Delete sheet", description: `Delete "${label}"? It moves to Trash.`, destructive: true, confirmLabel: "Delete" }))) return;
-    try {
-      const res = await fetch(`/api/tables/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`DELETE ${res.status}`);
-      const remaining = (sheets ?? []).filter((s) => s.id !== id);
-      setSheets(remaining);
-      notifyTablesChanged();
-      bumpRowVersion("tables");
-      // Deleting the OPEN sheet: land on the next one, or the overview.
-      if (pathname === `/tables/${id}`) router.push(remaining[0] ? `/tables/${remaining[0].id}` : "/tables");
-    } catch { toast("Couldn't delete sheet"); }
-  }, [confirm, sheets, bumpRowVersion, pathname, router, toast]);
-
-  const createSheetBusyRef = useRef(false);
-  const createSheet = useCallback(async () => {
-    // Promptless create means a double-click would fire two POSTs and mint
-    // two identical "Untitled spreadsheet"s — latch until the first lands.
-    if (createSheetBusyRef.current) return;
-    createSheetBusyRef.current = true;
-    try {
-      // No name prompt (Sheets model): born "Untitled spreadsheet", the
-      // loaded list only feeds the cosmetic " 2"/" 3" suffix.
-      const t = await createUntitledSheet((sheets ?? []).map((s) => s.name));
-      // Both notify channels: the event keeps other mounted sidebars in
-      // sync (each listener refetches), the rowVersion bump refreshes the
-      // /tables card overview. No explicit load() on top — three fetches
-      // for one create was a refetch storm.
-      notifyTablesChanged();
-      bumpRowVersion("tables");
-      router.push(`/tables/${t.id}`);
+      router.push(newTableHref(t.id));
     } catch {
-      toast("Couldn't create sheet");
-    } finally {
-      createSheetBusyRef.current = false;
-    }
-  }, [sheets, bumpRowVersion, router, toast]);
+      toast("Couldn't create the table", { tone: "danger" });
+    } finally { createBusy.current = false; }
+  }, [bumpRowVersion, router, toast]);
+  const newForm = useCallback(async () => {
+    if (createBusy.current) return;
+    createBusy.current = true;
+    const r = await apiFetch<{ id: string }>("/api/forms", { method: "POST", json: { name: "Untitled form", fields: [] } });
+    createBusy.current = false;
+    if (!r.ok) { toast("Couldn't create the form", { tone: "danger" }); return; }
+    dispatchFormsChanged();
+    router.push(`/forms/${r.data.id}?new=1`);
+  }, [router, toast]);
 
+  /* ── the hub "+" Import a CSV... ── */
+  const [importOpen, setImportOpen] = useState(false);
+  useEffect(() => {
+    const onImport = () => setImportOpen(true);
+    const name = `workwrk:os:new:${TABLES_IMPORT_CSV_EVENT}`;
+    window.addEventListener(name, onImport);
+    return () => window.removeEventListener(name, onImport);
+  }, []);
+
+  /* ── collapse ── */
+  const favCollapsed = isSectionCollapsed(prefs.sidebar, FAV_KEY);
+  const tablesCollapsed = isSectionCollapsed(prefs.sidebar, TABLES_KEY);
+  const formsCollapsed = isSectionCollapsed(prefs.sidebar, FORMS_KEY);
+  const toggleSection = useCallback((key: string) => {
+    void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, key) } });
+  }, [prefs.sidebar, patchPrefs]);
+
+  /* ── search ── */
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(
-    () => (sheets ?? []).filter((s) => !q || (s.name || "Untitled").toLowerCase().includes(q)),
-    [sheets, q],
+  const match = useCallback((name: string) => !q || (name || "Untitled").toLowerCase().includes(q), [q]);
+  const tableRows = useMemo(() => (tables ?? []).filter((t) => match(t.name)), [tables, match]);
+  const formRows = useMemo(() => (forms ?? []).filter((f) => match(f.name)), [forms, match]);
+  const favRows = useMemo(() => (favorites ?? []).filter((f) => match(f.name)), [favorites, match]);
+  // Searching shows every match; at rest a long section collapses at 20. The
+  // object open right now always keeps its row (appended past the 20), so
+  // the route's active row exists in its section (spec section 1: the
+  // table's row in TABLES, the form's row in FORMS).
+  const withActive = <T extends { id: string }>(all: T[], shown: T[], prefix: string): T[] => {
+    const open = all.find((x) => pathname === `${prefix}${x.id}`);
+    return open && !shown.includes(open) ? [...shown, open] : shown;
+  };
+  const tableShown = q ? tableRows : withActive(tableRows, tableRows.slice(0, COLLAPSE_AT), "/tables/");
+  const formShown = q || (isGuest && guestFormsExpanded)
+    ? formRows
+    : withActive(formRows, formRows.slice(0, COLLAPSE_AT), "/forms/");
+  // /forms/[id] (and its respond page) with no FORMS row for the form: the
+  // fallback active row is "All forms" (spec section 2 /forms/[id]).
+  const formPathId = pathname.match(/^\/forms\/([^/?#]+)/)?.[1] ?? null;
+  const formRowListed = !!formPathId && formShown.some((f) => f.id === formPathId);
+  const allFormsActive = activeHubHref === "/forms" || (!!formPathId && !formRowListed);
+
+  const tableMenu = useTableRowMenu();
+  const formMenu = useFormRowMenu();
+  const [favMenu, setFavMenu] = useState<{ row: FavoriteRow; anchor: RefObject<HTMLElement | null> } | null>(null);
+
+  const moreButton = (label: string, onOpen: (e: React.MouseEvent) => void) => (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpen(e); }}
+      aria-label={label}
+      aria-haspopup="menu"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+    >
+      <MoreHorizontal className="h-4 w-4" />
+    </button>
   );
 
   return (
     <div className="flex flex-col">
-      <button
-        type="button"
-        onClick={() => void createSheet()}
-        className="flex w-full items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
-      >
-        <Plus className="w-3.5 h-3.5 shrink-0" />
-        <span>New sheet</span>
-      </button>
+      {/* Rows 1 and 2: no section label (sidebar-map 1.2 rule 2). */}
+      <ul className="flex flex-col gap-0.5">
+        {/* A Guest sees "All tables" only while a table is shared with them:
+            with none, /tables is the shell 404 for them (spec 1 Access). */}
+        {tablesOn && (!isGuest || (tables?.length ?? 0) > 0) && match("All tables") ? <SidebarRow href="/tables" label="All tables" icon={LayoutGrid} active={activeHubHref === "/tables"} /> : null}
+        {/* A Guest has no /forms list (FormsListGate 404s it); their own
+            forms, the only ones they hold, are still listed under FORMS. */}
+        {!isGuest && match("All forms") ? <SidebarRow href="/forms" label="All forms" icon={ClipboardList} active={allFormsActive} /> : null}
+      </ul>
 
-      <SectionLabel>Sheets</SectionLabel>
-      {sheets === null ? (
-        <ul aria-hidden>{["60%","40%","80%"].map((w, i) => (<li key={i} className="flex h-9 items-center gap-3 px-3"><span className="h-5 w-5 shrink-0 rounded-md bg-skeleton os-skeleton-pulse" /><span className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} /></li>))}</ul>
-      ) : filtered.length === 0 ? (
-        <EmptyCard text={q ? "No sheets match" : "Create your first sheet"} />
-      ) : (
-        <ul className="flex flex-col gap-0.5">
-          {filtered.map((s) => {
-            const active = pathname === `/tables/${s.id}`;
-            return (
-              <li key={s.id}>
-                <Link
-                  href={`/tables/${s.id}`}
-                  className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
-                    active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                  }`}
-                  onContextMenu={(e) => { e.preventDefault(); setRowMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
-                >
-                  <Table2 className="w-5 h-5 shrink-0 text-ink-2" strokeWidth={1.5} />
-                  <span className="truncate flex-1">{s.name || "Untitled"}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {rowMenu ? (
-        <MorePortal anchorRef={rowMenuAnchorRef} panelRef={rowMenuPanelRef} width={180} open placement="below" point={{ x: rowMenu.x, y: rowMenu.y }}>
-          <MenuList className="min-w-[180px]">
-            <MenuItem icon={Pencil} label="Rename" onClick={() => { const m = rowMenu; setRowMenu(null); void renameSheet(m.id, m.name); }} />
-            <MenuItem icon={Trash2} label="Delete sheet" destructive onClick={() => { const m = rowMenu; setRowMenu(null); void deleteSheet(m.id, m.name); }} />
-          </MenuList>
-        </MorePortal>
+      {/* FAVORITES renders only when it has rows (design 4.2). A starred
+          object's row is active here too while it is open (spec section 2
+          /tables/[id]: "in TABLES (and in FAVORITES when starred)"). */}
+      {favError ? (
+        <>
+          <SidebarSectionLabel collapsed={favCollapsed} onToggle={() => toggleSection(FAV_KEY)}>Favorites</SidebarSectionLabel>
+          {!favCollapsed ? <ul><SidebarErrorLine what="favorites" onRetry={() => void loadFavorites()} /></ul> : null}
+        </>
+      ) : favRows.length > 0 ? (
+        <>
+          <SidebarSectionLabel collapsed={favCollapsed} onToggle={() => toggleSection(FAV_KEY)}>Favorites</SidebarSectionLabel>
+          {!favCollapsed ? (
+            <ul className="flex flex-col gap-0.5">
+              {favRows.map((f) => (
+                <SidebarRow
+                  key={`${f.kind}-${f.id}`}
+                  href={f.href}
+                  label={f.name || (f.kind === "form" ? "Untitled form" : "Untitled table")}
+                  icon={f.kind === "form" ? ClipboardList : Table2}
+                  active={pathname === f.href}
+                  trailing={moreButton(`Actions for ${f.name || "Untitled"}`, (e) => setFavMenu({ row: f, anchor: { current: e.currentTarget as HTMLElement } }))}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </>
       ) : null}
 
-      {/* Secondary escape hatch back to the card overview + folded Forms. */}
-      <div className="mt-3 border-t border-line pt-2">
-        {TABLES_HUB_ROWS.map((r) => (
-          <Link
-            key={r.href}
-            href={r.href}
-            className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
-              r.href === activeHubHref
-                ? "bg-side-pill text-ink font-medium"
-                : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-            }`}
-          >
-            <r.Icon className="w-5 h-5 shrink-0 text-ink-2" strokeWidth={1.5} />
-            <span>{r.label}</span>
-          </Link>
-        ))}
-      </div>
+      {tablesOn ? (
+        <>
+          <SidebarSectionLabel collapsed={tablesCollapsed} onToggle={() => toggleSection(TABLES_KEY)}>Tables</SidebarSectionLabel>
+          {!tablesCollapsed ? (
+            <ul className="flex flex-col gap-0.5">
+              {tablesError ? (
+                <SidebarErrorLine what="tables" onRetry={() => void loadTables()} />
+              ) : tables === null ? (
+                <SidebarSkeletonRows />
+              ) : tableRows.length === 0 && q ? (
+                <SidebarEmptyLine>No tables match</SidebarEmptyLine>
+              ) : (
+                <>
+                  {tableShown.map((t) => (
+                      <SidebarRow
+                        key={t.id}
+                        onContextMenu={(e) => tableMenu.open(e, { id: t.id, name: t.name, spaceId: t.spaceId ?? null, isPublic: t.isPublic, canManage: t.canManage })}
+                        href={`/tables/${t.id}`}
+                        label={t.name || "Untitled table"}
+                        icon={Table2}
+                        active={pathname === `/tables/${t.id}`}
+                        trailing={moreButton(`Actions for ${t.name || "Untitled table"}`, (e) => tableMenu.open(e, { id: t.id, name: t.name, spaceId: t.spaceId ?? null, isPublic: t.isPublic, canManage: t.canManage }))}
+                      />
+                  ))}
+                  {!q && tableRows.length > COLLAPSE_AT ? <SidebarGhostRow href="/tables" label={`Show all (${tableRows.length})`} /> : null}
+                  {!isGuest && !q ? <SidebarGhostRow label="New table" icon={Plus} onClick={() => void newTable()} /> : null}
+                </>
+              )}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      <SidebarSectionLabel collapsed={formsCollapsed} onToggle={() => toggleSection(FORMS_KEY)}>Forms</SidebarSectionLabel>
+      {!formsCollapsed ? (
+        <ul className="flex flex-col gap-0.5">
+          {formsError ? (
+            <SidebarErrorLine what="forms" onRetry={() => void loadForms()} />
+          ) : forms === null ? (
+            <SidebarSkeletonRows />
+          ) : formRows.length === 0 && q ? (
+            <SidebarEmptyLine>No forms match</SidebarEmptyLine>
+          ) : (
+            <>
+              {formShown.map((f) => (
+                  <SidebarRow
+                    key={f.id}
+                    onContextMenu={(e) => formMenu.open(e, { id: f.id, name: f.name, isPublic: f.isPublic, canManage: f.canManage, responseCount: f.submissionCount })}
+                    href={`/forms/${f.id}`}
+                    label={f.name || "Untitled form"}
+                    icon={ClipboardList}
+                    active={pathname === `/forms/${f.id}`}
+                    count={f.submissionCount ?? null}
+                    trailing={moreButton(`Actions for ${f.name || "Untitled form"}`, (e) => formMenu.open(e, { id: f.id, name: f.name, isPublic: f.isPublic, canManage: f.canManage, responseCount: f.submissionCount }))}
+                  />
+              ))}
+              {!isGuest && !q && formRows.length > COLLAPSE_AT ? <SidebarGhostRow href="/forms" label={`Show all (${formRows.length})`} /> : null}
+              {isGuest && !q && formRows.length > COLLAPSE_AT ? (
+                <SidebarGhostRow
+                  label={guestFormsExpanded ? "Show fewer" : `Show all (${formRows.length})`}
+                  onClick={() => setGuestFormsExpanded((v) => !v)}
+                />
+              ) : null}
+              {!isGuest && !q ? <SidebarGhostRow label="New form" icon={Plus} onClick={() => void newForm()} /> : null}
+            </>
+          )}
+        </ul>
+      ) : null}
+
+      <TableRowMenuHost menu={tableMenu} context="tree" onChanged={() => { void loadTables(); void loadFavorites(); }} />
+      <FormRowMenuHost menu={formMenu} context="tree" onChanged={() => { void loadForms(); void loadFavorites(); }} />
+      {favMenu ? <FavoriteMenu row={favMenu.row} anchor={favMenu.anchor} onClose={() => setFavMenu(null)} onChanged={() => void loadFavorites()} /> : null}
+      {tablesOn ? <CsvImportDialog open={importOpen} onClose={() => setImportOpen(false)} onDone={({ tableId, created }) => { void loadTables(); if (created) router.push(`/tables/${tableId}`); }} /> : null}
     </div>
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+/** The FAVORITES row "...": Remove from favorites, Copy link (sidebar-map 7 row 3). */
+function FavoriteMenu({ row, anchor, onClose, onChanged }: {
+  row: FavoriteRow;
+  anchor: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { toast } = useOsToast();
+  async function unstar() {
+    const r = row.kind === "form"
+      ? await apiFetch("/api/me/favorites/forms", { method: "POST", json: { formId: row.id, on: false } })
+      : await apiFetch("/api/me/favorites/tables", { method: "POST", json: { tableId: row.id, on: false } });
+    if (r.ok) {
+      window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+      onChanged();
+      toast("Removed from favorites");
+    } else toast("Couldn't update favorites", { tone: "danger" });
+    onClose();
+  }
+  function copyLink() {
+    void navigator.clipboard?.writeText(`${window.location.origin}${row.href}`).then(() => toast("Link copied"), () => toast("Couldn't copy link", { tone: "danger" }));
+    onClose();
+  }
   return (
-    <div className="mb-2 mt-6 flex h-5 items-center gap-2 ps-3 pe-1 first:mt-2">
-      <span className="text-micro uppercase tracking-[0.06em] text-ink-2">{children}</span>
-      <span className="h-px flex-1 bg-line" aria-hidden />
-    </div>
-  );
-}
-
-function EmptyCard({ text }: { text: string }) {
-  return (
-    <div className="flex h-9 items-center px-3 text-sm text-ink-2">
-      <p className="m-0 truncate">{text}</p>
-    </div>
+    <MorePortal anchorRef={anchor} width={220} open placement="below" onClose={onClose}>
+      <MenuList aria-label={`Actions for ${row.name || "Untitled"}`}>
+        <MenuItem icon={Star} iconFilled label="Remove from favorites" onClick={() => void unstar()} />
+        <MenuItem icon={Link2} label="Copy link" onClick={copyLink} />
+      </MenuList>
+    </MorePortal>
   );
 }

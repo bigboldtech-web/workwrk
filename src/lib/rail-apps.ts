@@ -153,6 +153,9 @@ function orderApps<T extends AppLike>(apps: T[], order: string[] | undefined): T
  */
 const MODULE_HUB_SURVIVES_ON: Readonly<Record<string, string>> = {
   chat: "announcements",
+  // Forms is core (founder decision D15): with the spreadsheets module off the
+  // Tables hub still holds Forms, the same shape as Talk and Announcements.
+  tables: "forms",
 };
 
 /** The org floor for one app, or undefined when unset/invalid/alwaysPinned. */

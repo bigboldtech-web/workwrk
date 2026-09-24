@@ -7,7 +7,7 @@
 //              second dialog are retired, spec-spaces-lists section 0)
 //   Folder   → opens NewFolderDialog
 //   Doc      → POST /api/docs { entityType: SPACE, entityId } → /docs/[id]
-//   Database → POST /api/tables { spaceId } → /tables/[id]
+//   Table → POST /api/tables { spaceId } (the canonical seed) → /tables/[id]?new=1
 //
 // Each tile sits on the Space's accent color (left border + tinted icon)
 // so the empty state feels like part of THIS Space, not a generic CTA.
@@ -15,7 +15,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Database, FileText, FolderPlus, LayoutGrid,
+  Table2, FileText, FolderPlus, LayoutGrid,
 } from "lucide-react";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { useOsShell } from "./shell-context";
@@ -72,7 +72,8 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
         return;
       }
       const table = await res.json();
-      if (table?.id) router.push(`/tables/${table.id}`);
+      const t = table?.data ?? table;
+      if (t?.id) router.push(`/tables/${t.id}?new=1`);
       else router.refresh();
     } finally {
       setBusy(null);
@@ -111,7 +112,7 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
           busy={busy === "doc"}
         />
         <Tile
-          Icon={Database}
+          Icon={Table2}
           label="Table"
           blurb="Rows, columns and formulas"
           accent={accent}

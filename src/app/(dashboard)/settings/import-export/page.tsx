@@ -13,7 +13,7 @@ const SECTIONS = [
         href: "/imports",
         icon: Upload,
         title: "Import data",
-        desc: "Bring in CSV data (Database, People) and more",
+        desc: "Bring a CSV file into a new table or one you already have",
       },
     ],
   },

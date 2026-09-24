@@ -1,15 +1,16 @@
-// POST /api/tables/[id]/ask — ask a natural-language question about the sheet.
+// POST /api/tables/[id]/ask, ask a natural-language question about the sheet.
 //
 // The formula engine is client-side, so the CLIENT resolves the visible rows
 // into plain records and sends them with the question; this route builds a
 // compact markdown table and asks the org's model for a concise answer. Same
 // gate + BYOK model resolution as the other AI features. The data never leaves
-// the org's configured AI — the user is querying their own table.
+// the org's configured AI, the user is querying their own table.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { unscopedTableReadable } from "@/lib/table-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 const MAX_ROWS = 300;
@@ -19,12 +20,15 @@ const MAX_CELL = 200;
 async function resolveTable(id: string, orgId: string, userId: string, accessLevel: string | null | undefined) {
   const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, name: true, organizationId: true, spaceId: true },
+    select: { id: true, name: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
   if (table.spaceId) {
     const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
     if (!space) return null;
+  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
+    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
+    return null;
   }
   return table;
 }
@@ -53,7 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const rawRows: unknown[][] = Array.isArray(body?.rows) ? (body.rows as unknown[][]) : [];
   if (!question) return jsonError("A question is required", 400);
   if (headers.length === 0 || rawRows.length === 0) {
-    return jsonSuccess({ answer: "This sheet has no data to analyse yet." });
+    return jsonSuccess({ answer: "This table has no data to analyse yet." });
   }
 
   const truncated = rawRows.length > MAX_ROWS;

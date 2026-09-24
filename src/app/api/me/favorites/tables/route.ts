@@ -1,8 +1,9 @@
-// GET  /api/me/favorites/tables — hydrated starred DataTable list
-// POST /api/me/favorites/tables { tableId, on } — toggle
+// GET  /api/me/favorites/tables, hydrated starred DataTable list
+// POST /api/me/favorites/tables { tableId, on }, toggle
+// DELETE /api/me/favorites/tables?tableId=, un-star (the same write as on:false)
 //
 // Phase 84. Mirrors /api/me/favorites/boards. DataTable visibility
-// gates via its optional Space anchor (Phase 32b — null spaceId means
+// gates via its optional Space anchor (Phase 32b, null spaceId means
 // org-wide and is always visible).
 
 import { NextResponse } from "next/server";
@@ -12,6 +13,7 @@ import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { getSpaceForReader } from "@/lib/space";
+import { unscopedTableReadable } from "@/lib/table-gate";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -27,12 +29,13 @@ export async function GET() {
 
   const rows = await prisma.dataTable.findMany({
     where: { organizationId: u.organizationId, id: { in: ids } },
-    select: { id: true, name: true, description: true, spaceId: true },
+    select: { id: true, name: true, description: true, spaceId: true, createdById: true },
   });
   const accessLevel = u.accessLevel ?? "EMPLOYEE";
   const visible = (await Promise.all(
     rows.map(async (t) => {
-      if (!t.spaceId) return t; // org-wide, no gate
+      // No Space: org-wide for Members, a Guest's own only.
+      if (!t.spaceId) return unscopedTableReadable(t.createdById, u.id!, accessLevel) ? t : null;
       const space = await getSpaceForReader(t.spaceId, u.id!, accessLevel);
       return space ? t : null;
     }),
@@ -40,7 +43,8 @@ export async function GET() {
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  return NextResponse.json({ tables: visible });
+  // createdById is read for the Guest rule only; the response keeps its shape.
+  return NextResponse.json({ tables: visible.map((t) => ({ id: t.id, name: t.name, description: t.description, spaceId: t.spaceId })) });
 }
 
 const bodySchema = z.object({
@@ -68,4 +72,21 @@ export async function POST(req: Request) {
   else set.delete(parsed.data.tableId);
   await setUserHomeKey(u.id, "favoriteTableIds", Array.from(set));
   return NextResponse.json({ favoriteTableIds: Array.from(set) });
+}
+
+export async function DELETE(req: Request) {
+  const session = await getServerSession(authOptions);
+  const u = session?.user as { id?: string; organizationId?: string } | undefined;
+  if (!u?.id || !u.organizationId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tableId = new URL(req.url).searchParams.get("tableId")?.trim();
+  if (!tableId) return NextResponse.json({ error: "tableId required" }, { status: 400 });
+  const effective = await getEffectivePreferences(u.id, u.organizationId);
+  const current: string[] = Array.isArray(effective?.home?.favoriteTableIds)
+    ? (effective.home!.favoriteTableIds as string[])
+    : [];
+  const next = current.filter((id) => id !== tableId);
+  await setUserHomeKey(u.id, "favoriteTableIds", next);
+  return NextResponse.json({ favoriteTableIds: next });
 }

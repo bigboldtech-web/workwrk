@@ -4,8 +4,8 @@
 // from the shell's effective preferences, and a bound `formatDate` so a list
 // row writes `fmt(row.updatedAt)` and never reads `home.locale` itself.
 
-import { useCallback, useMemo } from "react";
-import { useOsShell } from "@/components/layout/os/shell-context";
+import { useCallback, useContext, useMemo } from "react";
+import { OsShellContext } from "@/components/layout/os/shell-context";
 import {
   formatBytes,
   formatCount,
@@ -21,8 +21,11 @@ import {
 } from "./date";
 
 export function useDatePrefs(): DateFormatPrefs {
-  const { prefs } = useOsShell();
-  const locale = prefs.home.locale;
+  // Outside the shell (the public responder and the embed, which mount the
+  // one DateField through FormRenderer) there are no saved preferences: the
+  // browser's own locale and zone apply, which is what those visitors expect.
+  const shell = useContext(OsShellContext);
+  const locale = shell?.prefs.home.locale;
   return useMemo<DateFormatPrefs>(
     () => ({
       timezone: locale?.timezone ?? null,

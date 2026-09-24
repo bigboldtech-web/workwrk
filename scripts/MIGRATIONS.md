@@ -920,3 +920,99 @@ deploy, because each one changes what somebody sees:
    department-targeted must-acknowledge post reported the whole company as
    Pending. Existing `AnnouncementAcknowledgment` rows are untouched; only the
    denominator changes.
+
+## Phase 5 (Data), stage A: `scripts/report-access-grants-tables-forms.ts` (DRY RUN ONLY)
+
+**What it is.** The report half of spec-tables-forms section 4 step 1 and data
+migration (a): per org, every table that becomes "Everyone at {org} · Can edit"
+(standalone tables, org-wide today), every table that inherits its Space instead,
+every form's resolved anchor under access change request T2 (the List it feeds,
+else the Table, else none, with a destination that no longer exists named), every
+creator who gains an explicit Full access row, every live public link with the
+org's toggle 10 value, and every creator who is missing or inactive.
+
+**What it is not.** It never writes, and `--write` is refused with exit code 2.
+There is no grants store yet (no `AccessGrant` model; access step 4), and the
+access engine stays inert until Phase 8. The write is a separate script that ships
+with the engine flip, run from this report after the founder approves it. Rules
+1, 2 and 7 above are satisfied by the report itself; rules 3 to 6 bind the write.
+
+**Production run (read only, safe to run any time):**
+
+```
+DIRECT_URL= DATABASE_URL="<production url>" \
+  npx tsx scripts/report-access-grants-tables-forms.ts --report /tmp/phase5-grants-report.md
+```
+
+Read the "Totals" block first. Resolve every "missing or inactive" creator (make an
+Owner the holder) before the Phase 8 write. The local run of 2026-09-23 (Acme Corp):
+4 standalone tables (4 Everyone · Can edit rows), 4 forms with no destination,
+8 creator Full rows, 0 ghosts, 2 live public forms, toggle 10 stored as `view`.
+
+## Phase 5 (Data), stage A: behaviour changes with no data step
+
+- **`/api/forms/[id]/submissions` is now a one-release alias** of
+  `/api/forms/[id]/responses`. It answers in place by calling the new handlers (no
+  redirect, so no http/https hop can turn a POST into a GET), and its GET keeps the
+  old bare-array shape. Delete `src/app/api/forms/[id]/submissions/route.ts` in the
+  release after Phase 5.
+- **A form Submit is idempotent.** The responder sends a `submissionKey` (32 hex
+  characters) with every Submit and retries it on a network error or a 5xx; the
+  response is stored with that key as its `FormSubmission.id`, so a retry whose first
+  attempt landed returns the first response instead of writing a second response, a
+  second task and a second row. No schema change: the id column already takes any
+  string. A body without a key is written as before.
+- **Answers are coerced to their field's type** before they are stored or pushed to a
+  List or a Table (text, number, checkbox, list of options), so an object such as a
+  formula cell can no longer be planted in a destination through a form.
+- **Reading a form's responses** (`GET /api/forms/[id]/responses`) now needs the
+  form's creator, an Owner or Admin, or a person who reaches the form's anchor; a
+  Guest never reads them unless they made the form. It used to answer any session in
+  the org.
+- **Sending a form answer needs a session.** The old submit route wrote anonymous
+  responses whenever `isPublic` was on. The decided access model caps a public link
+  at Can view (access invariant 19), and the per-form "Accept responses from people
+  without an account" switch (founder decision D16) needs the additive
+  `FormDefinition.settings` column (build step 6), so it is not built in stage A.
+  No product surface lost anything: the responder and the embed both 401ed for
+  anonymous visitors on the READ, so no anonymous answer could be sent from the UI
+  before this change. An external integration POSTing anonymously now gets 401
+  `sign_in_required`.
+  **Before deploy, list the forms this can affect** (public forms that took an
+  answer with no signed-in sender in the last 90 days; read only, run on the box):
+
+  ```sql
+  SELECT f.id, f.name, f."organizationId", COUNT(s.id) AS anonymous_answers_90d, MAX(s."submittedAt") AS last_anonymous
+  FROM "FormDefinition" f
+  JOIN "FormSubmission" s ON s."formId" = f.id AND s."submittedById" IS NULL
+  WHERE f."isPublic" = true AND s."submittedAt" > now() - interval '90 days'
+  GROUP BY f.id, f.name, f."organizationId"
+  ORDER BY last_anonymous DESC;
+  ```
+
+  An empty result means nothing in the wild depends on anonymous sending. A row
+  means an integration posts to that form; name it to the founder, because it stops
+  landing on deploy day until D16 ships (the answers are refused with 401, not lost
+  silently: the caller sees the refusal).
+- **Deleting a form moves it to the one Trash with every response** (TrashType
+  `form`, children `submissions`); it used to be a hard delete. Deleting a table or a
+  form, and changing either's public link, now needs its creator or an Owner or
+  Admin; a public link change writes an `access.public_link.on` / `.off` audit row.
+- **Toggle 10 is now read by `/api/public/tables/[id]` and `/api/public/forms/[id]`**
+  the way `/api/public/docs` reads it: only an explicit `"off"` closes the links;
+  an org that never stored the key keeps today's behaviour. The public table route
+  also answers 404 while the Tables module is off. Settings > Access shows an org
+  that never stored the key as "Not chosen yet" under the switch, instead of a flat
+  Off the live links would contradict; choosing either way stores an explicit value.
+- **The public table route memoises its evaluated snapshot per process** (8 tables,
+  60 seconds, keyed on the table's and its rows' updatedAt and the row count) and
+  limits each IP to 300 requests a minute, so paging or hammering an embed no longer
+  re-runs the engine over the whole table on every request.
+
+## Phase 5 (Data), stage C: the form builder's settings column, and nothing to backfill
+
+- **Schema**: `prisma/sql/2026-09-23-form-settings.sql` adds `FormDefinition.settings` (JSONB, NOT NULL, default `'{}'`). It is in the deploy manifest (`scripts/deploy-migrations.mjs`), so `npm run build` applies it before `next build`. To apply it by hand on the box: `npx prisma db execute --file prisma/sql/2026-09-23-form-settings.sql`, then `npx prisma generate`. Apply it **before** the code: a form query with no `select` asks for every column.
+- **No data script.** Every existing form gets `{}`, which `readFormSettings` reads as today's behaviour: accepting responses, never closing on its own, the canon confirmation message ("Thanks, your response has been recorded."), "Submit another response" offered, nobody notified. So no live form changes on deploy day, and there is nothing to dry-run.
+- **Where a response went** is recorded on new responses only, under the reserved `$went` key of `FormSubmission.data` (a task id on the List, a row id on the table, or the reason it was not sent). Responses written before this release show "Not sent" in the Went to column with no reason; nothing rewrites them.
+- **Deleting responses** (one, or all behind a typed confirm) is new and is a hard delete by the form's creator or an admin. A single deleted response is written in full to the audit log first (`form.response.deleted`, `oldValue.data`), so an admin can read it back; "Delete all" records the count (`form.responses.deleted`).
+- **New cron row, NOT installed**: "Form responses daily summary", `POST /api/cron/form-daily-summary`, 8 AM daily, in `scripts/CRON-SETUP.md`. It is fail-closed (503 with no `CRON_SECRET`). Until the founder adds it, a form set to "Send a daily summary instead" is quiet.

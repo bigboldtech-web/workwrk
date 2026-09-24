@@ -79,16 +79,20 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
     const employee = visibleRailApps({ ...asEmployee, activeModules: new Set(["chat"]) });
     // No Teams for a Member: the hub's default href /people is a manager
     // page (requireManagerPage), so the pill would land on the in-shell 404.
-    expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "settings"]);
+    // Tables module off: the Tables hub stays on the rail for a Member because
+    // Forms does (D15, Forms is core; the hub renders the FORMS section alone).
+    expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "tables", "settings"]);
     // Talk off: the hub stays on the rail for a Member because Announcements does.
     const employeeTalkOff = visibleRailApps({ ...asEmployee, activeModules: new Set() });
-    expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "settings"]);
+    expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "tables", "settings"]);
     const admin = visibleRailApps({ config: { order: ["settings", "home"] }, accessLevel: "COMPANY_ADMIN", apps: APP_ACCESS, activeModules: new Set(["chat", "tables"]) });
     expect(admin.map((a) => a.key)).toEqual(["settings", "home", "planner", "ai", "chat", "teams", "docs", "tables"]);
     const launcher = visibleRailApps({ ...asEmployee, activeModules: new Set(), includeFolded: true });
     expect(launcher.map((a) => a.key)).toContain("goals");
-    expect(launcher.map((a) => a.key)).not.toContain("tables"); // module off
-    expect(launcher.map((a) => a.key)).not.toContain("forms"); // folded into Tables: goes with the module
+    // Tables module off: Forms is core (founder decision D15), so the Tables
+    // hub survives on it, exactly like Talk survives on Announcements.
+    expect(launcher.map((a) => a.key)).toContain("tables");
+    expect(launcher.map((a) => a.key)).toContain("forms");
     // Module off, but Announcements is read by every Member (sidebar-map 4
     // row 4), so the Talk hub survives on it and the row stays reachable.
     expect(launcher.map((a) => a.key)).toContain("chat");

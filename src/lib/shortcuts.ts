@@ -42,6 +42,15 @@ export interface ShortcutDef {
   run: (e: KeyboardEvent) => void;
   /** Registered for dispatch but never listed (an alias chord). */
   hidden?: boolean;
+  /**
+   * Listed but never dispatched here: the page's own key handling already
+   * runs this chord (the sheet grid's kernel and its capture-phase window
+   * listeners), and dispatching it a second time from the shell listener
+   * would run it twice. The page registers it only while that handler is
+   * mounted, so "advertised equals working" still holds: the overlay lists
+   * it exactly while the page that owns it is open.
+   */
+  ownedByPage?: boolean;
 }
 
 export interface Chord {
@@ -279,7 +288,7 @@ export class ShortcutRegistry {
       if (now - at <= PREFIX_WINDOW_MS && !typing) {
         for (const def of defs) {
           const seq = parseKeys(def.keys);
-          if (seq.length === 2 && chordEquals(seq[0], first) && chordEquals(seq[1], chord) && this.applicable(def, typing)) {
+          if (!def.ownedByPage && seq.length === 2 && chordEquals(seq[0], first) && chordEquals(seq[1], chord) && this.applicable(def, typing)) {
             e.preventDefault();
             def.run(e);
             return true;
@@ -290,6 +299,7 @@ export class ShortcutRegistry {
     }
 
     for (const def of defs) {
+      if (def.ownedByPage) continue;
       const seq = parseKeys(def.keys);
       if (seq.length === 1 && chordEquals(seq[0], chord) && this.applicable(def, typing)) {
         e.preventDefault();
@@ -302,7 +312,7 @@ export class ShortcutRegistry {
     if (!typing && !chord.mod && !chord.alt) {
       for (const def of defs) {
         const seq = parseKeys(def.keys);
-        if (seq.length === 2 && chordEquals(seq[0], chord) && this.applicable(def, typing)) {
+        if (!def.ownedByPage && seq.length === 2 && chordEquals(seq[0], chord) && this.applicable(def, typing)) {
           this.pending = { chord, at: now };
           return true;
         }
@@ -332,7 +342,7 @@ export function useShortcut(def: ShortcutDef, enabled: boolean = true): void {
     runRef.current = def.run;
     whenRef.current = def.when;
   });
-  const { id, keys, label, scope, group, inInputs, hidden } = def;
+  const { id, keys, label, scope, group, inInputs, hidden, ownedByPage } = def;
   useEffect(() => {
     if (!enabled) return;
     return shortcuts.register({
@@ -343,10 +353,11 @@ export function useShortcut(def: ShortcutDef, enabled: boolean = true): void {
       group,
       inInputs,
       hidden,
+      ownedByPage,
       when: () => (whenRef.current ? whenRef.current() : true),
       run: (e) => runRef.current(e),
     });
-  }, [enabled, id, keys, label, scope, group, inInputs, hidden]);
+  }, [enabled, id, keys, label, scope, group, inInputs, hidden, ownedByPage]);
 }
 
 const EMPTY: ShortcutDef[] = [];

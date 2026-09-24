@@ -194,7 +194,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         Icon={Database}
         items={tables}
         canEdit={canEdit}
-        emptyHint="Attach a data table: a vendor list, a CRM, anything spreadsheet-shaped."
+        emptyHint="Attach a table: a vendor list, a CRM, anything that is rows and columns."
         sourceType={sourceType}
         sourceId={sourceId}
         onReload={load}
@@ -205,12 +205,14 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
             const res = await fetch("/api/tables");
             const data = await res.json().catch(() => ({}));
             // /api/tables returns either an array directly or {data: [...]} via jsonSuccess
-            const list: Array<{ id: string; name: string; description?: string | null; rowCount?: number }> =
+            // filledRowCount, not rowCount: a new table carries 1,000 seeded
+            // blank rows, and those are not rows a person wrote.
+            const list: Array<{ id: string; name: string; description?: string | null; filledRowCount?: number }> =
               Array.isArray(data) ? data : (data?.data ?? []);
             return list.map((t) => ({
               id: t.id,
               title: t.name,
-              subtitle: t.description ?? (typeof t.rowCount === "number" ? `${t.rowCount} ${t.rowCount === 1 ? "row" : "rows"}` : null),
+              subtitle: t.description ?? (typeof t.filledRowCount === "number" ? `${t.filledRowCount} ${t.filledRowCount === 1 ? "row" : "rows"}` : null),
             }));
           },
         }}

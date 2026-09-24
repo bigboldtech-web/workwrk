@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Search } from "lucide-react";
 import { useLayer } from "@/components/layout/os/shell-context";
+import { SkeletonLines } from "@/components/ui/skeleton";
 
 // Which open Picker owns the arrow keys. Two can be mounted at once (a Picker
 // inside a drawer whose host list also has one open behind it), and only the
@@ -75,6 +76,8 @@ export interface PickerProps {
   footer?: ReactNode;
   /** Shown in place of the rows when everything is filtered away. */
   emptyLabel?: string;
+  /** Options are still arriving: skeleton lines under the rows, never a "Loading" string. */
+  loading?: boolean;
   /** Accessible name for the listbox. */
   ariaLabel?: string;
   className?: string;
@@ -147,6 +150,7 @@ export function Picker({
   side = "bottom",
   footer,
   emptyLabel = "No matches",
+  loading = false,
   ariaLabel,
   className = "",
   activeValue = null,
@@ -355,7 +359,7 @@ export function Picker({
           className="max-h-[280px] overflow-y-auto"
         >
           {rows.length === 0 ? (
-            <p className="px-2 py-2 text-sm text-ink-2">{emptyLabel}</p>
+            loading ? null : <p className="px-2 py-2 text-sm text-ink-2">{emptyLabel}</p>
           ) : (
             filtered.map((section, si) => (
               <div key={section.label ?? `s${si}`}>
@@ -402,6 +406,7 @@ export function Picker({
               </div>
             ))
           )}
+          {loading ? <SkeletonLines lines={3} className="px-2" /> : null}
         </div>
 
         {footer ? <div className="mt-1 border-t border-line pt-1">{footer}</div> : null}

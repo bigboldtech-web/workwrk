@@ -69,6 +69,11 @@ describe("normaliseRetiredView", () => {
     expect(normaliseRetiredView("/notetaker", "?mine=1")).toBe("/notetaker?view=my");
   });
 
+  it("maps /forms?mine=1 (the old My Forms row) to ?view=mine", () => {
+    expect(normaliseRetiredView("/forms", "?mine=1")).toBe("/forms?view=mine");
+    expect(normaliseRetiredView("/forms", "?view=mine")).toBeNull();
+  });
+
   it("answers null when nothing on the URL is retired", () => {
     expect(normaliseRetiredView("/docs", "")).toBeNull();
     expect(normaliseRetiredView("/docs", "?view=my")).toBeNull();

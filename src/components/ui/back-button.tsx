@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { navStackHasBack } from "@/components/layout/os/top-bar/nav-history";
+import { confirmLeave } from "@/lib/dirty-guard";
 
 interface BackButtonProps {
   /** The page's natural parent (e.g. /docs, /sops, /people/roles). */
@@ -41,14 +42,19 @@ export function goBackOr(
 
 export function BackButton({ fallbackHref, label, className }: BackButtonProps) {
   const router = useRouter();
-  const goBack = () => {
+  // A button, not a link, so no page's anchor-click leave guard sees it: it
+  // asks the dirty registry itself. confirmLeave answers true at once when
+  // nothing is dirty; with a Not saved cell or an unsaved form it shows that
+  // page's own question, and "stay" keeps the person (and their input) here.
+  const goBack = async () => {
+    if (!(await confirmLeave())) return;
     if (navStackHasBack()) router.back();
     else router.push(fallbackHref);
   };
   return (
     <button
       type="button"
-      onClick={goBack}
+      onClick={() => void goBack()}
       aria-label={label ? `Back to ${label}` : "Back"}
       title={label ? `Back to ${label}` : "Back"}
       // .os-chrome: the 28px ghost is drawn in px (h-7 = 28, not 24.5 under

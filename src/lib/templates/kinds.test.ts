@@ -14,12 +14,13 @@ import {
 } from "./kinds";
 
 describe("the template kind table", () => {
-  it("covers every stored TemplateKind plus the one pseudo-kind", () => {
+  it("covers every stored TemplateKind plus the two pseudo-kinds", () => {
     // If prisma gains a TemplateKind value this list is what has to grow, and
     // the API's own enum is asserted against it in template-center.test.ts.
     expect(STORED_TEMPLATE_KINDS).toEqual(["TASK", "LIST", "FOLDER", "SPACE", "DOC", "VIEW", "WHITEBOARD"]);
-    expect(TEMPLATE_KINDS).toHaveLength(8);
+    expect(TEMPLATE_KINDS).toHaveLength(9);
     expect(TEMPLATE_KIND_BY_KEY.KIT.label).toBe("Starter kit");
+    expect(TEMPLATE_KIND_BY_KEY.FORM.label).toBe("Intake form");
   });
 
   it("gives every kind its own line drawing, so no two cards look alike", () => {
@@ -70,8 +71,10 @@ describe("kindFromParam", () => {
     }
   });
 
-  it("isStoredKind rejects the pseudo-kind", () => {
+  it("isStoredKind rejects the pseudo-kinds", () => {
     expect(isStoredKind("KIT")).toBe(false);
+    expect(isStoredKind("FORM")).toBe(false);
+    expect(kindFromParam("intake")).toBe("FORM");
     expect(isStoredKind("LIST")).toBe(true);
   });
 });
@@ -86,6 +89,7 @@ describe("navigationFor: every kind arrives somewhere", () => {
     ["VIEW", { kind: "VIEW", boardSlug: "q4-leads", viewId: "v1" }, "/boards/q4-leads?view=v1"],
     ["TASK", { kind: "TASK", config: {} }, null],
     ["KIT", { kind: "KIT", created: [] }, null],
+    ["FORM", { kind: "FORM", formId: "f9" }, "/forms/f9?new=1"],
   ];
 
   for (const [name, result, expected] of cases) {

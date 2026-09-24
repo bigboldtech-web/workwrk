@@ -1,6 +1,6 @@
 // GET    /api/tables/[id]/rows         list rows (keyset chunks; ?cursor=)
 // POST   /api/tables/[id]/rows         create a row { values?: Record<string, unknown> }
-// PATCH  /api/tables/[id]/rows         patch row { id, values, expect? } — shallow-merge;
+// PATCH  /api/tables/[id]/rows         patch row { id, values, expect? }, shallow-merge;
 //                                      expect makes the merge conditional (409 on drift)
 // DELETE /api/tables/[id]/rows         delete by id
 
@@ -11,20 +11,24 @@ import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { unscopedTableReadable } from "@/lib/table-gate";
 import { decodeRowCursor, encodeRowCursor, type RowCursor } from "@/lib/table-row-cursor";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
-// Phase 32b — gate by parent Space visibility. Returns null when the
+// Phase 32b, gate by parent Space visibility. Returns null when the
 // table doesn't exist OR is scoped to a Space the viewer can't read.
 async function resolveTable(id: string, orgId: string, userId: string, accessLevel: string | null | undefined) {
   const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, organizationId: true, spaceId: true },
+    select: { id: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
   if (table.spaceId) {
     const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
     if (!space) return null;
+  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
+    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
+    return null;
   }
   return table;
 }
@@ -58,7 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // and letting it reach Prisma's Int filter would throw a 500 instead of
     // this 400.
     // Int bounds too: 2^31 passes isInteger but blows Prisma's Int filter
-    // at runtime — the exact 500 this guard exists to prevent.
+    // at runtime, the exact 500 this guard exists to prevent.
     if (!decoded || !Number.isInteger(decoded.position) || Math.abs(decoded.position) > 2147483647) {
       return jsonError("invalid cursor", 400);
     }
@@ -67,7 +71,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Keyset WHERE resumes strictly after (position, id) in the same composite
   // order the query sorts by, so chunks never skip or repeat rows.
-  // deletedAt: null EVERYWHERE a row is read — a trashed row is invisible to
+  // deletedAt: null EVERYWHERE a row is read, a trashed row is invisible to
   // the grid until it is restored.
   const where: Prisma.DataTableRowWhereInput = cursor
     ? {
@@ -164,14 +168,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Phase 5c cross-client guard. An optional `expect` map ({ colId:
   // previousStoredValue }) makes this PATCH conditional: it is compared
-  // against the row read above — the SAME read the merge below uses, so the
+  // against the row read above, the SAME read the merge below uses, so the
   // check costs no extra query and check+merge see one snapshot. On any
   // mismatch NOTHING is written (not even body.position) and the 409 hands
   // back the row's live values so the losing client absorbs them instead of
   // silently overwriting the other author's cell. No expect = today's
   // unconditional merge, which paste/fill/undo rely on: overwriting a range
   // is intentional there. A concurrent write can still land in the
-  // microseconds between this read and the update below — the guard shrinks
+  // microseconds between this read and the update below, the guard shrinks
   // the silent-loss window, it does not (and cannot, without row locks this
   // path doesn't otherwise need) close it; realtime sync is SSE-gated
   // future work.

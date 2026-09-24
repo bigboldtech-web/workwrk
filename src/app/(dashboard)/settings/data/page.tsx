@@ -111,7 +111,9 @@ const GOVERNANCE = [
     href: "/imports",
     icon: Upload,
     title: "Import data",
-    desc: "Bring existing work in via CSV (Database, People) and more.",
+    // People import is Phase 8 (Settings > Data > Import); until it lands
+    // /imports brings a CSV into a table and nothing else, so it says only that.
+    desc: "Bring a CSV file into a new table or one you already have.",
   },
   {
     href: "/trash",

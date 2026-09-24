@@ -43,7 +43,7 @@ import { ContainerMenuTrigger } from "./container-menu";
 import { CreateInsideTrigger } from "./space-create-popover";
 import type { ContainerRole } from "@/lib/work/container-menu";
 import { DocRowMenuHost, useDocRowMenu } from "@/components/docs/doc-row-menu";
-import { TableMoreTrigger } from "./table-more-menu";
+import { TableRowMenuHost, useTableRowMenu } from "@/components/tables/table-row-menu";
 import { type ContextMenuHandle } from "./more-portal";
 import { CanvasMoreTrigger } from "./canvas-more-menu";
 import { useOsToast } from "./toast";
@@ -219,6 +219,9 @@ interface TableChild {
   id: string;
   name: string;
   description: string | null;
+  /** May this viewer delete it (absent from an older server: treated as yes,
+   *  and the server still refuses anyone else). */
+  canManage?: boolean;
 }
 
 interface DocChild {
@@ -760,12 +763,15 @@ function TableTreeRow({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const moreRef = useRef<ContextMenuHandle>(null);
+  // The ONE table menu (spec-tables-forms section 3 TableRowMenu, placement
+  // tree), shared with the Tables sidebar, /tables and the sheet's "...".
+  const menu = useTableRowMenu();
+  const target = { id: table.id, name: table.name, canManage: table.canManage };
   const isActive = pathname === `/tables/${table.id}`;
   return (
     <li className="group/tablerow relative">
       <div
-        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
+        onContextMenu={(e) => menu.open(e, target)}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
@@ -778,9 +784,19 @@ function TableTreeRow({
         </button>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="table" id={table.id} />
-          <TableMoreTrigger ref={moreRef} table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
+          <button
+            type="button"
+            onClick={(e) => menu.open(e, target)}
+            className="rounded p-1 text-ink-2 hover:bg-hover hover:text-ink"
+            aria-label={`Actions for ${table.name || "Untitled table"}`}
+            aria-haspopup="menu"
+            title="More"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
         </span>
       </div>
+      <TableRowMenuHost menu={menu} context="tree" onChanged={() => onChanged()} />
     </li>
   );
 }

@@ -13,7 +13,7 @@
 // (`.workwrk-os`) a global reset strips button border/padding/bg, so always
 // render menus through a portal (MorePortal / Radix) as every call site does.
 
-import { createElement, useRef, useState, type ReactNode } from "react";
+import { createElement, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Check, ChevronRight, type LucideIcon } from "lucide-react";
@@ -44,11 +44,34 @@ export function MenuSubmenu({
   // left. Measured on open, so it follows the menu wherever it is anchored.
   const [flip, setFlip] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Vertical room too: a long list opened from a row low on the screen is
+  // lifted so its bottom stays 8px inside the viewport, and a list taller
+  // than the viewport scrolls inside itself, so every row stays reachable.
+  const [lift, setLift] = useState(0);
+  const [maxH, setMaxH] = useState<number | undefined>(undefined);
   const show = () => {
     const rect = hostRef.current?.getBoundingClientRect();
     if (rect && typeof window !== "undefined") setFlip(rect.right + width + 8 > window.innerWidth);
+    setLift(0);
     setOpen(true);
   };
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel || typeof window === "undefined") return;
+    const vh = window.innerHeight;
+    const room = vh - 16;
+    const list = panel.firstElementChild as HTMLElement | null;
+    const full = list ? list.scrollHeight : panel.getBoundingClientRect().height;
+    const h = Math.min(full, room);
+    // The panel's top as if it were not lifted, then the smallest lift that
+    // keeps its bottom 8px inside the viewport without pushing its top out.
+    const baseTop = panel.getBoundingClientRect().top + lift;
+    const next = Math.max(0, Math.min(baseTop - 8, baseTop + h - (vh - 8)));
+    if (next !== lift) setLift(next);
+    const nextMax = full > room ? room : undefined;
+    if (nextMax !== maxH) setMaxH(nextMax);
+  }, [open, lift, maxH]);
   return (
     <div
       ref={hostRef}
@@ -58,8 +81,8 @@ export function MenuSubmenu({
     >
       <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => (open ? setOpen(false) : show())} aria-expanded={open} />
       {open ? (
-        <div className={cn("absolute top-[-6px] z-[120]", flip ? "end-full pe-1" : "start-full ps-1")}>
-          <MenuList style={{ minWidth: width }}>{children}</MenuList>
+        <div ref={panelRef} className={cn("absolute z-[120]", flip ? "end-full pe-1" : "start-full ps-1")} style={{ top: -6 - lift }}>
+          <MenuList style={{ minWidth: width, maxHeight: maxH, overflowY: maxH ? "auto" : undefined }}>{children}</MenuList>
         </div>
       ) : null}
     </div>
