@@ -29,6 +29,8 @@ import { bucketFor, type LocaleContext } from "./work-buckets";
 import { getEffectivePreferences } from "./preferences";
 import type { MyWorkRow, WorkGroupKey, WorkSortKey } from "./my-work";
 import type { Prisma } from "@/generated/prisma";
+import { buildListScopeWhere, contextBoardFor, mergeListFacetCounts } from "./list-links";
+import { linkedTreeRows } from "./list-links-server";
 
 /** A row plus what this viewer may do with it. */
 export interface EverythingRow extends MyWorkRow {
@@ -230,14 +232,24 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   if (scopeError) return empty;
   if (allowedBoardIds.length === 0) return empty;
 
+  // Phase 5b, tasks in more than one List: the readable Lists' own tasks
+  // UNION the tasks linked into them. With no link (or no link table) the
+  // clause is exactly the one this read has always made.
+  const linkRows = await linkedTreeRows(allowedBoardIds, { organizationId: orgId });
+  const listsByItem = new Map<string, string[]>();
+  for (const r of [...linkRows].sort((a, b) => new Date(a.linkedAt).getTime() - new Date(b.linkedAt).getTime())) {
+    listsByItem.set(r.itemId, [...(listsByItem.get(r.itemId) ?? []), r.listId]);
+  }
+  const scopeWhere = buildListScopeWhere(allowedBoardIds, linkRows.length ? [...listsByItem.keys()] : null);
+  const scopeSet = new Set(allowedBoardIds);
+
   const where: Prisma.ItemWhereInput = {
     organizationId: orgId,
-    boardId: { in: allowedBoardIds },
     archivedAt: null,
   };
   if (!query.includeSubtasks) where.parentItemId = null;
 
-  const and: Prisma.ItemWhereInput[] = [];
+  const and: Prisma.ItemWhereInput[] = [scopeWhere];
   if (query.statuses.length) and.push({ status: { in: query.statuses } });
   if (query.priorities.length) and.push({ priority: { in: query.priorities } });
   if (query.assigneeIds.length) {
@@ -250,7 +262,7 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     const delegated = await delegatedWhere(orgId, viewer.userId);
     and.push({ id: delegated.id, NOT: delegated.NOT, OR: delegated.OR });
   }
-  if (and.length) where.AND = and;
+  where.AND = and;
 
   const select = {
     id: true, title: true, status: true, priority: true, startAt: true, dueAt: true,
@@ -301,7 +313,12 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   let consumed = 0;
   for (const it of window) {
     consumed++;
-    if (keeps(it.status)) {
+    // A row no List in scope holds (its home is not readable here and no
+    // link in scope names it) is never shown, not even without a label:
+    // title, status, dates and people are all things its reader may not
+    // know. The where clause and the labels are built from the same linked
+    // rows, so this only ever drops a row that raced a change.
+    if (keeps(it.status) && contextBoardFor(it.boardId, listsByItem.get(it.id) ?? [], scopeSet)) {
       page.push(it);
       if (page.length === query.limit) break;
     }
@@ -309,7 +326,30 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   const hasMore = hasSentinel || consumed < window.length;
   const nextCursor = hasMore && consumed > 0 ? window[consumed - 1].id : null;
 
-  const spaceIdSet = [...new Set(page.map((r) => r.board?.spaceId).filter((v): v is string => !!v))];
+  // Each row is labelled with a List in scope: its home when the home is in
+  // scope, else the oldest List it is linked into that is. A home the viewer
+  // cannot read is never the label, never a facet and never a status
+  // vocabulary on this page.
+  const labelOf = new Map<string, { boardId: string; via: "home" | "linked" }>();
+  for (const it of page) {
+    const ctx = contextBoardFor(it.boardId, listsByItem.get(it.id) ?? [], scopeSet);
+    if (ctx) labelOf.set(it.id, ctx);
+  }
+  const linkedLabelIds = [...new Set([...labelOf.values()].filter((l) => l.via === "linked").map((l) => l.boardId))];
+  const labelBoards = linkedLabelIds.length
+    ? await prisma.board.findMany({ where: { id: { in: linkedLabelIds } }, select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true } })
+    : [];
+  const labelBoardById = new Map(labelBoards.map((b) => [b.id, b] as const));
+  const boardFor = (it: (typeof page)[number]) => {
+    const l = labelOf.get(it.id);
+    // No label means no List in scope holds the row, so nothing is shown
+    // rather than its home.
+    if (!l) return null;
+    if (l.via === "home") return it.board;
+    return labelBoardById.get(l.boardId) ?? null;
+  };
+
+  const spaceIdSet = [...new Set(page.map((r) => boardFor(r)?.spaceId).filter((v): v is string => !!v))];
   const personIdSet = [...new Set(page.flatMap((r) => [r.ownerId, ...(r.assigneeIds ?? [])]).filter((v): v is string => !!v))];
   const [spaces, people] = await Promise.all([
     spaceIdSet.length
@@ -331,7 +371,8 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     statusesByBoard.set(it.board.id, makeStatusLookup(options));
     const done = options.find((o) => o.group === "DONE") ?? options.find((o) => isDoneStatusName(o.value));
     doneByBoard.set(it.board.id, done?.value ?? null);
-    listStatuses[it.board.id] = options.map((o) => ({ value: o.value, label: o.label, color: o.color }));
+    // The inline picker's words, only for a List this viewer reads.
+    if (roles.has(it.board.id)) listStatuses[it.board.id] = options.map((o) => ({ value: o.value, label: o.label, color: o.color }));
   }
 
   const now = new Date();
@@ -344,7 +385,13 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   };
 
   const rows: EverythingRow[] = page.map((it) => {
-    const role = roles.get(it.boardId) ?? "VIEW";
+    const label = labelOf.get(it.id);
+    const shown = boardFor(it);
+    // A row shown through a link renders read-only here: its status words are
+    // its HOME's, which this page's picker for that List does not hold. The
+    // task page edits it with the right vocabulary.
+    const linkedLabel = label?.via === "linked";
+    const role = linkedLabel ? "VIEW" : roles.get(it.boardId) ?? "VIEW";
     return {
       id: it.id,
       title: it.title,
@@ -365,10 +412,10 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
       statusLabel: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.label ?? humaniseStatus(it.status) : null,
       statusColor: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.color ?? null : null,
       doneStatus: doneByBoard.get(it.boardId) ?? null,
-      board: it.board
-        ? { id: it.board.id, slug: it.board.slug, name: it.board.name, icon: it.board.icon, color: it.board.color, spaceId: it.board.spaceId }
+      board: shown
+        ? { id: shown.id, slug: shown.slug, name: shown.name, icon: shown.icon, color: shown.color, spaceId: shown.spaceId }
         : null,
-      space: it.board?.spaceId ? spaceById.get(it.board.spaceId) ?? null : null,
+      space: shown?.spaceId ? spaceById.get(shown.spaceId) ?? null : null,
       // Every row here comes from a readable List by construction.
       listReadable: true,
       role,
@@ -376,7 +423,7 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     };
   });
 
-  const facets = await everythingFacets(orgId, allowedBoardIds, query.includeSubtasks);
+  const facets = await everythingFacets(orgId, allowedBoardIds, query.includeSubtasks, scopeWhere, linkRows);
   // The Create-task primary needs somewhere to write; with every readable List
   // at Can view the modal's picker would be empty, so the button is absent and
   // the empty state says so instead.
@@ -397,12 +444,18 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
 }
 
 /** The values the Filter panel may offer, over the readable set, not the page. */
-async function everythingFacets(organizationId: string, boardIds: string[], includeSubtasks: boolean): Promise<EverythingFacets> {
+async function everythingFacets(
+  organizationId: string,
+  boardIds: string[],
+  includeSubtasks: boolean,
+  scopeWhere: Prisma.ItemWhereInput,
+  linkRows: ReadonlyArray<{ listId: string; itemId: string; rootId: string }>,
+): Promise<EverythingFacets> {
   const base: Prisma.ItemWhereInput = {
     organizationId,
-    boardId: { in: boardIds },
     archivedAt: null,
     ...(includeSubtasks ? {} : { parentItemId: null }),
+    AND: [scopeWhere],
   };
   const [byBoard, byStatus, byPriority, byOwner, boards] = await Promise.all([
     prisma.item.groupBy({ by: ["boardId"], where: base, _count: { _all: true } }),
@@ -411,6 +464,20 @@ async function everythingFacets(organizationId: string, boardIds: string[], incl
     prisma.item.groupBy({ by: ["ownerId"], where: base, _count: { _all: true } }),
     prisma.board.findMany({ where: { id: { in: boardIds } }, select: { id: true, name: true, spaceId: true, space: { select: { id: true, slug: true, name: true } } } }),
   ]);
+  // The List facet over the union: grouped by HOME it could name a List the
+  // viewer cannot read, so only readable Lists survive, and the tasks linked
+  // into each readable List are added onto it.
+  const readable = new Set(boardIds);
+  const linkGroupMap = new Map<string, number>();
+  for (const r of linkRows) {
+    if (!includeSubtasks && r.itemId !== r.rootId) continue;
+    linkGroupMap.set(r.listId, (linkGroupMap.get(r.listId) ?? 0) + 1);
+  }
+  const listCounts = mergeListFacetCounts(
+    byBoard.map((g) => ({ boardId: g.boardId, count: g._count._all })),
+    [...linkGroupMap.entries()].map(([boardId, count]) => ({ boardId, count })),
+    readable,
+  );
   const ownerIds = byOwner.map((r) => r.ownerId).filter((v): v is string => Boolean(v));
   const owners = ownerIds.length
     ? await prisma.user.findMany({
@@ -421,17 +488,17 @@ async function everythingFacets(organizationId: string, boardIds: string[], incl
   const ownerById = new Map(owners.map((o) => [o.id, o]));
   const boardById = new Map(boards.map((b) => [b.id, b]));
   const spaceCount = new Map<string, { id: string; slug: string; name: string; count: number }>();
-  for (const row of byBoard) {
+  for (const row of listCounts) {
     const b = boardById.get(row.boardId);
     if (!b?.space) continue;
     const prev = spaceCount.get(b.space.id) ?? { ...b.space, count: 0 };
-    prev.count += row._count._all;
+    prev.count += row.count;
     spaceCount.set(b.space.id, prev);
   }
   return {
     spaces: [...spaceCount.values()].sort((a, b) => b.count - a.count),
-    lists: byBoard
-      .map((r) => ({ id: r.boardId, name: boardById.get(r.boardId)?.name ?? "List", count: r._count._all }))
+    lists: listCounts
+      .map((r) => ({ id: r.boardId, name: boardById.get(r.boardId)?.name ?? "List", count: r.count }))
       .sort((a, b) => b.count - a.count),
     statuses: byStatus
       .filter((r): r is typeof r & { status: string } => Boolean(r.status))

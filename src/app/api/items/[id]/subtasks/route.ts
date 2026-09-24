@@ -13,6 +13,8 @@ import { NextResponse } from "next/server";
 import { gateItem, itemCtx } from "@/lib/item-gate";
 import { listBoardItemRows } from "@/lib/board-items";
 import { prisma } from "@/lib/prisma";
+import { decideContext } from "@/lib/list-links";
+import { linkedListsOf, listReader } from "@/lib/list-links-server";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await itemCtx();
@@ -21,7 +23,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const gate = await gateItem(id, c, "view");
   if ("error" in gate) return gate.error;
 
-  const includeArchived = new URL(req.url).searchParams.get("includeArchived") === "1";
+  const url = new URL(req.url);
+  const includeArchived = url.searchParams.get("includeArchived") === "1";
   const rows = await prisma.item.findMany({
     where: {
       parentItemId: id,
@@ -37,8 +40,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
+  // Phase 5b. A task's children are part of its share (a subtask belongs to
+  // its parent), so a reader who can open a linked parent may list them. What
+  // changes is the projection: in a List the parent is linked into, each child
+  // shows THAT List's values. The List is the one that let a linked-only reader
+  // in, or a valid ?list= (any other value is ignored); else the home.
+  let contextBoardId: string | null = gate.decision.via === "linked-list" && gate.viaLinkedList ? gate.viaLinkedList.id : null;
+  const { rootId, links } = await linkedListsOf(gate.item);
+  const asked = url.searchParams.get("list");
+  if (asked && asked !== gate.item.boardId) {
+    const readable = links.some((l) => l.boardId === asked) ? !!(await listReader(c).row(asked)) : false;
+    const kind = decideContext({ requested: asked, homeBoardId: gate.item.boardId, linkedBoardIds: links.map((l) => l.boardId), requestedReadable: readable });
+    if (kind === "linked") contextBoardId = asked;
+  }
   // The enriched row shape every list renderer already speaks, so a subtask
   // row and a List row can never drift apart.
-  const subtasks = await listBoardItemRows(rows);
+  const subtasks = await listBoardItemRows(rows, { viewer: c, contextBoardId, rootId });
   return NextResponse.json({ subtasks });
 }

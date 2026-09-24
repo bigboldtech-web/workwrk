@@ -26,6 +26,8 @@
 import { prisma } from "@/lib/prisma";
 import { createBoardItem, updateBoardItem, type BoardItemRow } from "@/lib/board-items";
 import { getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import { keepNamespacesFor } from "@/lib/list-metadata";
+import { carryListLinks, recurrenceLinkLists } from "@/lib/list-links-server";
 import {
   parseRecurrence, advanceDate, seriesEnded, occurrenceKey, occurrencesSince,
   nextOccurrenceAfter, type RecurrenceRule,
@@ -108,9 +110,16 @@ export async function cloneItemTree(
   const delta = anchor ? cycleDue.getTime() - anchor.getTime() : 0;
   const shift = (d: Date | null): Date | null => (d ? new Date(d.getTime() + delta) : null);
 
+  // Phase 5b: a series shared into other Lists keeps appearing there. The new
+  // root joins the Lists the source root is in (recurrenceLinkLists), and
+  // every copy keeps those Lists' own field values (their namespaces), which
+  // a copy of a stored task carries verbatim, connect markers included.
+  const carried = await recurrenceLinkLists({ id: root.id, boardId: root.boardId, organizationId: root.organizationId });
+  const carriedIds = carried.map((l) => l.boardId);
+
   const cloneOne = async (src: CloneSrc, newParentId: string | null): Promise<string> => {
     const isRoot = newParentId === null;
-    const metadata = cloneMetadata(src.metadata);
+    const metadata = keepNamespacesFor(cloneMetadata(src.metadata), carriedIds);
     if (isRoot && occurrence) {
       metadata.recurrenceSourceId = occurrence.sourceId;
       metadata.recurrenceKey = occurrence.key;
@@ -131,7 +140,14 @@ export async function cloneItemTree(
       parentItemId: newParentId,
       tagIds: await tagIdsFor(src.id),
       actorId,
+    }, {
+      // A copy of a STORED task: its "$" keys (the connect marker, the shared
+      // Lists' namespaces) were written by this code and are kept as they
+      // are. Stripping them left connect ids unmarked, so once their field
+      // was deleted they went out raw, naming tasks the viewer cannot read.
+      trustedMetadata: true,
     });
+    if (isRoot && carried.length) await carryListLinks(created.id, carried);
     if (isRoot && carryRule) {
       // The fresh copy becomes the anchor (ON_COMPLETE series hop). recurNextAt
       // stays null — a completion, not the cron, fires the next occurrence.

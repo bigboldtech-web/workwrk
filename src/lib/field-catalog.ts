@@ -54,7 +54,13 @@ export type FieldType =
   // WorkwrK AI-OS gating fields (Phase 4)
   | "KRA"
   // connection-as-field — link a Doc / SOP / Canvas to the row (mirror KRA)
-  | "LINKED_DOC" | "LINKED_SOP" | "LINKED_CANVAS";
+  | "LINKED_DOC" | "LINKED_SOP" | "LINKED_CANVAS"
+  // Phase 5b: a value computed at read time from a connect column's tasks
+  // (src/lib/list-connect.ts). Deliberately NOT in FIELD_CATALOG yet: the
+  // field shelf offers only what it can build, and the builder for this is
+  // the client run's. Every renderer already falls back to "-" for a type it
+  // has no case for, so a mirror created through the API renders safely.
+  | "MIRROR";
 
 export interface FieldCatalogEntry {
   type: FieldType;
@@ -208,6 +214,12 @@ export interface FieldOptions {
   formula?: string;             // FORMULA  (Phase 4)
   ratingMax?: number;           // RATING  (default 5)
   prompt?: string;              // AI fields  (Phase 4)
+  // Phase 5b connect columns (a RELATIONSHIP in connect mode) and mirrors,
+  // validated and read by src/lib/list-connect.ts.
+  targetBoardIds?: string[];
+  linkFieldKey?: string;
+  lookupFieldKeys?: Record<string, string>;
+  rollupFn?: string;
 }
 
 export interface FieldDef {

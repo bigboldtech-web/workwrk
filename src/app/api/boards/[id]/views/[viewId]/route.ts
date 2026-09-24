@@ -10,6 +10,8 @@ import { getSpaceForReader } from "@/lib/space";
 import { canContributeBoard, canEditBoard } from "@/lib/board";
 import { canSaveView, canManageView } from "@/lib/work/view-visibility";
 import { prisma } from "@/lib/prisma";
+import { mergeJsonObject, parseViewComfort } from "@/lib/list-comfort";
+import type { Prisma } from "@/generated/prisma";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -77,6 +79,11 @@ const patchSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   displayOrder: z.number().int().min(0).max(1_000_000).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
+  // Phase 5b: a shallow merge over the STORED config (null deletes a key), on
+  // the row read FOR UPDATE, so two tabs saving different keys (a filter here,
+  // a pinned column there) stop clobbering each other. Wholesale `config`
+  // keeps working unchanged.
+  configPatch: z.record(z.string(), z.unknown()).optional(),
   isDefault: z.boolean().optional(),
   /** The view-type switcher: a view is a named filter, its type is how it draws. */
   type: z.enum(VIEW_TYPES).optional(),
@@ -98,15 +105,50 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
+  // Pinned (frozen) columns and row height, per view, wherever they arrive:
+  // normalised, and a wrong value is refused by name.
+  const comfort: Record<string, unknown> = {};
+  for (const blob of [parsed.data.config, parsed.data.configPatch]) {
+    if (!blob) continue;
+    const v = parseViewComfort(blob);
+    if (!v.ok) return NextResponse.json({ error: "invalid_view_config", key: v.key }, { status: 400 });
+    Object.assign(comfort, v.value);
+  }
+  // A whole config drops a nulled key; a patch keeps the null, which is how
+  // mergeJsonObject knows to delete the stored one.
+  const normalise = (cfg: Record<string, unknown>, keepNull = false) => {
+    const out = { ...cfg };
+    for (const [k, v] of Object.entries(comfort)) {
+      if (!(k in cfg)) continue;
+      if (v === null && !keepNull) delete out[k];
+      else out[k] = v;
+    }
+    return out;
+  };
   // Promoting a view to default? Demote the previous default in the same tx.
   const data: Record<string, unknown> = { ...parsed.data };
-  if (parsed.data.config !== undefined) data.config = parsed.data.config as object;
+  // configPatch is not a column: it is merged into config on the locked row.
+  delete data.configPatch;
+  if (parsed.data.config !== undefined) data.config = normalise(parsed.data.config) as object;
+  const configPatch = parsed.data.configPatch;
+  const mergeConfigPatch = async (tx: Prisma.TransactionClient) => {
+    if (!configPatch) return;
+    const rows = await tx.$queryRaw<Array<{ config: unknown }>>`SELECT config FROM "View" WHERE id = ${viewId} FOR UPDATE`;
+    const base = parsed.data.config !== undefined ? data.config : rows[0]?.config;
+    data.config = mergeJsonObject(base, normalise(configPatch, true)) as object;
+  };
   if (parsed.data.isDefault) {
     await prisma.$transaction(async (tx) => {
+      await mergeConfigPatch(tx);
       await tx.view.updateMany({
         where: { boardId: id, isDefault: true, NOT: { id: viewId } },
         data: { isDefault: false },
       });
+      await tx.view.update({ where: { id: viewId }, data });
+    });
+  } else if (configPatch) {
+    await prisma.$transaction(async (tx) => {
+      await mergeConfigPatch(tx);
       await tx.view.update({ where: { id: viewId }, data });
     });
   } else {

@@ -15,7 +15,9 @@
 // call this route now.
 
 import { NextResponse } from "next/server";
-import { createBoardItem } from "@/lib/board-items";
+import { createBoardItem, getBoardItemRow } from "@/lib/board-items";
+import { keepNamespacesFor } from "@/lib/list-metadata";
+import { copyListLinks, eligibleCopyLists } from "@/lib/list-links-server";
 import { canContributeBoard } from "@/lib/board";
 import { gateItem, itemCtx } from "@/lib/item-gate";
 import { publishItemChanged } from "@/lib/notify-realtime";
@@ -71,6 +73,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       : {};
   for (const key of DROPPED_METADATA_KEYS) delete md[key];
 
+  // Phase 5b: the copy joins the Lists its original is in ONLY where the
+  // duplicator may write, and keeps only those Lists' own values. Nothing is
+  // counted, so a duplicate teaches nobody about Lists they cannot write.
+  // Only a top-level original carries links.
+  const joinLists = item.parentItemId ? [] : await eligibleCopyLists(item.id, c);
+  const copiedMetadata = keepNamespacesFor(md, joinLists);
+
   const tagRows = await prisma.tagAssignment.findMany({
     where: { entityType: "BOARD_ITEM", entityId: item.id },
     select: { tagId: true },
@@ -89,7 +98,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     priority: item.priority ?? undefined,
     itemTypeId: item.itemTypeId ?? undefined,
     tagIds: tagRows.map((t) => t.tagId),
-    metadata: md,
+    metadata: copiedMetadata,
     // A copy of a SUBTASK is a sibling subtask: it keeps the original's parent
     // so it lands beside the row it was copied from rather than at the top
     // level of the List, where nobody would look for it. (A copy of a top-level
@@ -97,7 +106,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // bookkeeping IS dropped, above: a copy is never the next occurrence.
     parentItemId: item.parentItemId ?? undefined,
     actorId: c.userId,
+  }, {
+    // A copy keeps its connect values and markers verbatim, and takes NO List
+    // defaults: an unprioritised task's copy stays unprioritised, as today.
+    trustedMetadata: true,
   });
+  await copyListLinks(created.id, joinLists, c);
 
   void publishItemChanged({
     itemId: created.id,
@@ -105,5 +119,5 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     organizationId: c.organizationId,
     actorId: c.userId,
   });
-  return NextResponse.json({ item: created }, { status: 201 });
+  return NextResponse.json({ item: (await getBoardItemRow(created.id, { viewer: c })) ?? created }, { status: 201 });
 }

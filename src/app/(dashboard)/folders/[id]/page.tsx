@@ -46,6 +46,8 @@ import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-i
 // A Folder page is Work, so what is on the shelf opens at its Work address
 // (src/lib/nav/object-href.ts), with the Work tree beside it.
 import { objectHref } from "@/lib/nav/object-href";
+import { mergeListTaskCounts } from "@/lib/list-links";
+import { linkedTreeCountGroups } from "@/lib/list-links-server";
 
 export const dynamic = "force-dynamic";
 
@@ -210,13 +212,23 @@ export default async function FolderPage(props: {
     ownerRows.map((o) => [o.id, `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || "Unknown"]),
   );
   const tasksByList = new Map<string, { open: number; done: number }>();
-  for (const row of statusCounts) {
-    const bucket = tasksByList.get(row.boardId) ?? { open: 0, done: 0 };
-    const opts = boards.find((b) => b.id === row.boardId);
-    if (isDoneStatus(opts ? getBoardStatuses(opts) : fallbackStatuses, row.status)) bucket.done += row._count._all;
-    else bucket.open += row._count._all;
-    tasksByList.set(row.boardId, bucket);
+  // Phase 5b: each List's count includes the tasks linked into it, done or
+  // open by their HOME status set. Data only; nothing on the page changes
+  // until a task is actually shared into one of these Lists.
+  // Grouped in Postgres, so the count is exact however many tasks are shared.
+  const linkRows = await linkedTreeCountGroups(boardIds, { organizationId: u.organizationId });
+  const homeStatuses = new Map(boards.map((b) => [b.id, getBoardStatuses(b)] as const));
+  const otherHomes = [...new Set(linkRows.map((r) => r.homeBoardId))].filter((h) => !homeStatuses.has(h));
+  if (otherHomes.length) {
+    const homes = await prisma.board.findMany({ where: { id: { in: otherHomes } }, select: { id: true, statuses: true } });
+    for (const h of homes) homeStatuses.set(h.id, getBoardStatuses(h));
   }
+  const merged = mergeListTaskCounts(
+    statusCounts.map((r) => ({ boardId: r.boardId, status: r.status, count: r._count._all })),
+    linkRows,
+    (home, status) => isDoneStatus(homeStatuses.get(home) ?? fallbackStatuses, status),
+  );
+  for (const [listId, count] of merged) tasksByList.set(listId, { open: count.open, done: count.done });
 
   const space = folder.space!;
   // back-map: the crumb immediately to the left, so a nested Folder goes to its

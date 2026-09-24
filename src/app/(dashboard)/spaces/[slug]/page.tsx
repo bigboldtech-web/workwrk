@@ -34,7 +34,7 @@ import { folderVisibleTo } from "@/lib/folder";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
-import { getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 import { hasModule } from "@/lib/space-modules";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
@@ -42,6 +42,8 @@ import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 // they open in place, with this Space's tree beside them.
 import { objectHref } from "@/lib/nav/object-href";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
+import { mergeListTaskCounts } from "@/lib/list-links";
+import { linkedTreeCountGroups } from "@/lib/list-links-server";
 
 export const dynamic = "force-dynamic";
 
@@ -390,6 +392,23 @@ export default async function SpacePage(props: {
 
   const listTotalMap = new Map(listTotals.map((r) => [r.boardId, r._count._all]));
   const listDoneMap = new Map(listDone.map((r) => [r.boardId, r._count._all]));
+  // Phase 5b: a List's progress includes the tasks linked into it from other
+  // Lists, each done or open by its HOME status set. The page's own rule for
+  // its own tasks is unchanged; nothing moves until a task is shared in.
+  // Grouped in Postgres, so the count is exact however many tasks are shared.
+  const spaceLinkRows = await linkedTreeCountGroups(boardIds, { organizationId: u.organizationId });
+  if (spaceLinkRows.length) {
+    const homes = await prisma.board.findMany({
+      where: { id: { in: [...new Set(spaceLinkRows.map((r) => r.homeBoardId))] } },
+      select: { id: true, statuses: true },
+    });
+    const homeSets = new Map(homes.map((h) => [h.id, getBoardStatuses(h)] as const));
+    const linked = mergeListTaskCounts([], spaceLinkRows, (home, status) => isDoneStatus(homeSets.get(home) ?? getBoardStatuses(null), status));
+    for (const [listId, count] of linked) {
+      listTotalMap.set(listId, (listTotalMap.get(listId) ?? 0) + count.total);
+      listDoneMap.set(listId, (listDoneMap.get(listId) ?? 0) + count.done);
+    }
+  }
   const listOwnerMap = new Map(
     listOwners.map((o) => [o.id, `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || "Unknown"]),
   );

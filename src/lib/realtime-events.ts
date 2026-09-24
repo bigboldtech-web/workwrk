@@ -62,7 +62,19 @@ export type SessionIdleEvent = { type: "session.idle"; idleUntil: string | null 
  * `GET /api/items/[id]` and its thread, so a mis-scoped emit leaks nothing.
  * `boardId` lets a host list decide whether the change is even on screen.
  */
-export type ItemChangedEvent = { type: "item"; itemId: string; boardId: string | null };
+export type ItemChangedEvent = {
+  type: "item";
+  itemId: string;
+  boardId: string | null;
+  /**
+   * Phase 5b: every List the task appears in (its home and the Lists it is
+   * linked into), so a host List that shows it through a link knows the event
+   * is on screen. Optional: a client that predates it keys on boardId alone.
+   */
+  listIds?: string[];
+  /** Phase 5b: Lists the task has just left (a link removed), so they drop the row. */
+  leftListIds?: string[];
+};
 
 /**
  * The same event dispatched by THIS tab about its own write (see

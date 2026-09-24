@@ -733,7 +733,6 @@ export async function restoreTrashRow(
   });
   if (!snap) return { ok: false, status: 404, message: "Not found" };
 
-  let toRestore = snap;
   const targetBoardId = target?.targetBoardId ?? null;
   if (targetBoardId) {
     if (snap.entityType !== "item") {
@@ -745,11 +744,13 @@ export async function restoreTrashRow(
     if (!writable.readable.has(targetBoardId)) {
       return { ok: false, status: 403, message: "You need edit access on that list." };
     }
-    toRestore = { ...snap, snapshot: retargetSnapshot(snap.snapshot, targetBoardId) as typeof snap.snapshot };
   }
 
   try {
-    await restoreFromTrash(toRestore);
+    // The snapshot is pointed at the new List INSIDE the restore's
+    // transaction, on the row it locks (trash-retarget.ts), so a link parked
+    // into it a moment ago is part of what is restored.
+    await restoreFromTrash(snap, { targetBoardId });
     return { ok: true };
   } catch {
     // The usual cause is a parent that is itself gone; the page prints the
@@ -858,17 +859,4 @@ async function liveChildrenOf(
   if (!parts.length) return null;
   const noun = type === "list" ? "list" : type;
   return `This ${noun} still holds ${parts.join(" and ")} that are not archived. Archive or move them first.`;
-}
-
-/** Point a task snapshot (and its subtasks) at a different List. */
-function retargetSnapshot(snapshot: unknown, boardId: string): unknown {
-  if (!snapshot || typeof snapshot !== "object") return snapshot;
-  const s = snapshot as { row?: Record<string, unknown>; children?: { subtasks?: Array<Record<string, unknown>> } };
-  return {
-    ...s,
-    ...(s.row ? { row: { ...s.row, boardId } } : {}),
-    ...(s.children?.subtasks
-      ? { children: { ...s.children, subtasks: s.children.subtasks.map((t) => ({ ...t, boardId })) } }
-      : {}),
-  };
 }

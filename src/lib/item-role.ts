@@ -34,8 +34,16 @@
 
 export type ItemRole = "none" | "VIEW" | "COMMENT" | "EDIT" | "FULL";
 
-/** Why the viewer holds the role they hold, for the header chip and support. */
-export type ItemVia = "org-admin" | "creator" | "assignee" | "list" | "none";
+/**
+ * Why the viewer holds the role they hold, for the header chip and support.
+ *
+ * "linked-list" (Phase 5b, tasks in more than one List): the viewer reads a
+ * List the task, or its top-level ancestor on the same home, is linked into.
+ * Adding a task to a List is an explicit share, so that List's readers may
+ * READ it; it never grants more than VIEW, because writing to a task is still
+ * decided by its home List, its assignees and its creator.
+ */
+export type ItemVia = "org-admin" | "creator" | "assignee" | "list" | "linked-list" | "none";
 
 export interface ItemDecision {
   /** What the viewer may do NOW, with every rule-12 cap applied. */
@@ -118,6 +126,14 @@ export interface ItemSignals {
   archived: boolean;
   /** The List, for `viaObject`. */
   list?: { id: string; name: string | null };
+  /**
+   * A readable List the task is linked into (Phase 5b). Grants VIEW and
+   * nothing more. It is considered right after the home List, so a home
+   * reader keeps `via: "list"` (rule 11 keeps the first source to reach a
+   * rank) and every other source outranks it: "linked-list" is the answer
+   * only when that List is the one thing the viewer has.
+   */
+  linkedList?: { id: string; name: string | null } | null;
 }
 
 /**
@@ -141,6 +157,7 @@ export function decideItem(s: ItemSignals): ItemDecision {
   if (s.listRole !== "none") {
     consider(s.listRole, "list", s.list ? { type: "list", id: s.list.id, name: s.list.name } : undefined);
   }
+  if (s.linkedList) consider("VIEW", "linked-list", { type: "list", id: s.linkedList.id, name: s.linkedList.name });
   if (s.assignee) consider("EDIT", "assignee");
   if (s.creator) consider("FULL", "creator");
   if (s.orgAdmin) consider("FULL", "org-admin");

@@ -109,6 +109,14 @@ const SQL_MANIFEST = [
   // must land before the code, because a findFirst with no select asks for
   // every scalar and would 500 the builder and the /forms list.
   "2026-09-23-form-settings.sql",
+  // Phase 5b, the data layer: "ItemListLink" (tasks in more than one List)
+  // and "ReportSchedule" (scheduled email reports). Two CREATE TABLE IF NOT
+  // EXISTS, five indexes, three guarded foreign keys, nothing else. Deploy
+  // order is free: no existing model gains a column, every link reader
+  // falls back to today's home-only read while the table is absent, and the
+  // report routes answer a named 503 (the cron a no-op) until it lands. It
+  // is here so the release that ships the code is the release that can use it.
+  "2026-09-24-phase5b-data.sql",
 ];
 
 /**

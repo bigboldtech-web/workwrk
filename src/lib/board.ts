@@ -21,6 +21,7 @@ import { loadBoardInputs } from "@/lib/access/legacy-facts";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { withArchivedBy } from "@/lib/archived-by";
 import { accessibleFolderIds } from "@/lib/folder";
+import { mergeJsonObject, type ListDefaultsInput, type RowColorRule } from "@/lib/list-comfort";
 import {
   parseSprintMeta,
   sprintBoardName,
@@ -455,6 +456,10 @@ export interface UpdateBoardInput {
   /** The List's default task type (`settings.defaultItemTypeId`), written by
    *  the container menu's "Default task type" submenu. Read-merge-write. */
   defaultItemTypeId?: string | null;
+  /** Phase 5b, List comfort: default values for NEW tasks (settings.defaults). null clears. */
+  defaults?: ListDefaultsInput | null;
+  /** Phase 5b, List comfort: conditional row colouring (settings.rowColorRules). null clears. */
+  rowColorRules?: RowColorRule[] | null;
 }
 
 export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
@@ -472,45 +477,40 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
   // SQL NULL (DbNull) means "use the default set" — distinct from a
   // stored JSON null, which parseBoardStatuses would also reject.
   if (patch.statuses !== undefined) data.statuses = patch.statuses === null ? Prisma.DbNull : patch.statuses;
-  if (patch.sprint !== undefined) {
-    const existing = await prisma.board.findUnique({
-      where: { id: boardId },
-      select: { settings: true, name: true },
-    });
+  // EVERY settings writer (the sprint dates, the default task type, the List
+  // defaults and the row colour rules) runs in ONE transaction on the row read
+  // FOR UPDATE, and merges over what is STORED (mergeJsonObject; null deletes a
+  // key). Two writers used to read the blob, change their key and write the
+  // whole thing back, so whichever saved second erased the other's key.
+  const settingsWrite =
+    patch.sprint !== undefined ||
+    patch.defaultItemTypeId !== undefined ||
+    patch.defaults !== undefined ||
+    patch.rowColorRules !== undefined;
+  if (!settingsWrite) return prisma.board.update({ where: { id: boardId }, data });
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ settings: unknown; name: string }>>`SELECT settings, name FROM "Board" WHERE id = ${boardId} FOR UPDATE`;
+    const existing = rows[0];
     if (!existing) throw new Error("Board not found");
-    const meta = parseSprintMeta(existing.settings);
-    if (!meta) throw new Error("Not a sprint List");
-    // Read-merge-write: never clobber unrelated settings keys.
-    const base =
-      existing.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
-        ? (existing.settings as Record<string, unknown>)
-        : {};
-    data.settings = {
-      ...base,
-      sprint: { ...meta, startDate: patch.sprint.startDate, endDate: patch.sprint.endDate },
-    } as Prisma.InputJsonValue;
-    // Keep the dates-in-name convention true — but only while the name still
-    // matches "Sprint N (…"; a user-customized name is left alone.
-    if (data.name === undefined && /^Sprint \d+ \(/.test(existing.name)) {
-      data.name = sprintBoardName(meta.sprintNumber, patch.sprint.startDate, patch.sprint.endDate);
+    const settingsPatch: Record<string, unknown> = {};
+    if (patch.sprint !== undefined) {
+      // Evaluated on the LOCKED row, so the sprint rule and the name rule see
+      // the same state the write is based on.
+      const meta = parseSprintMeta(existing.settings);
+      if (!meta) throw new Error("Not a sprint List");
+      settingsPatch.sprint = { ...meta, startDate: patch.sprint.startDate, endDate: patch.sprint.endDate };
+      // Keep the dates-in-name convention true, but only while the name still
+      // matches "Sprint N (…"; a user-customized name is left alone.
+      if (data.name === undefined && /^Sprint \d+ \(/.test(existing.name)) {
+        data.name = sprintBoardName(meta.sprintNumber, patch.sprint.startDate, patch.sprint.endDate);
+      }
     }
-  }
-  if (patch.defaultItemTypeId !== undefined) {
-    // Merge onto whatever the sprint branch above may already have staged, so
-    // the two never clobber each other's settings keys.
-    let base: Record<string, unknown>;
-    if (data.settings && typeof data.settings === "object") {
-      base = data.settings as Record<string, unknown>;
-    } else {
-      const existing = await prisma.board.findUnique({ where: { id: boardId }, select: { settings: true } });
-      base =
-        existing?.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
-          ? (existing.settings as Record<string, unknown>)
-          : {};
-    }
-    data.settings = { ...base, defaultItemTypeId: patch.defaultItemTypeId } as Prisma.InputJsonValue;
-  }
-  return prisma.board.update({ where: { id: boardId }, data });
+    if (patch.defaultItemTypeId !== undefined) settingsPatch.defaultItemTypeId = patch.defaultItemTypeId;
+    if (patch.defaults !== undefined) settingsPatch.defaults = patch.defaults;
+    if (patch.rowColorRules !== undefined) settingsPatch.rowColorRules = patch.rowColorRules;
+    data.settings = mergeJsonObject(existing.settings, settingsPatch) as Prisma.InputJsonValue;
+    return tx.board.update({ where: { id: boardId }, data });
+  });
 }
 
 export async function archiveBoard(boardId: string, actorId: string | null = null) {
