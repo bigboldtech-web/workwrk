@@ -2,10 +2,19 @@
 //
 // A dashboard is ORG-VISIBLE, like a Whiteboard (the model comment says so),
 // and editable by its owner and by an org Owner or Admin. One pinned to a
-// Space (a Space Overview) is visible where the Space is readable; one whose
-// Space no longer exists is treated as unpinned (`spaceMissing`), so deleting
-// a Space never makes a dashboard vanish. What any card SHOWS is decided per
-// viewer, per card (widget-data.ts), never by this gate.
+// Space is visible where the Space is readable; one whose Space no longer
+// exists is treated as unpinned (`spaceMissing`), so deleting a Space never
+// makes a dashboard vanish. What any card SHOWS is decided per viewer, per
+// card (widget-data.ts), never by this gate.
+//
+// A Space's OVERVIEW widgets are the one row whose id is spaceOverviewId
+// (dashboard-access.ts). While its Space exists it is edited by that Space's
+// managers (canEditSpace: an org admin, the Space's OWNER or ADMIN) whoever
+// created it; its ownerId grants nothing. A legacy row pinned to a Space
+// under any other id is an ordinary dashboard.
+//
+// Guests are refused here, once, for every dashboard and report route
+// (requireWorkApp): the same 404 as a missing object.
 //
 // Server-only: prisma.
 
@@ -16,8 +25,9 @@ import type { Viewer } from "@/lib/access/types";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { isValidTimeZone } from "@/lib/reports/schedule";
-import { spaceForViewer, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
+import { canEditSpaceFor, spaceForViewer, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
 import type { WidgetReader } from "./widget-data";
+import { dashboardsAllowedFor, spaceOverviewId } from "./dashboard-access";
 
 export type DashboardRow = {
   id: string;
@@ -32,10 +42,15 @@ export type DashboardRow = {
   updatedAt: Date;
 };
 
-/** The Work-hub app key every dashboard route checks, as /api/me/everything does. */
+/**
+ * The Work-hub app key every dashboard and report route checks, as
+ * /api/me/everything does, plus the member rule: a Guest gets the plain 404
+ * a missing object gets, so no route confirms that dashboards exist for them.
+ */
 export async function requireWorkApp(): Promise<{ viewer: Viewer } | { error: NextResponse }> {
   try {
     const { viewer } = await requireCan("view", { type: "app", key: "home" });
+    if (!dashboardsAllowedFor(viewer.orgRole)) return { error: notFound() };
     return { viewer };
   } catch (e) {
     if (e instanceof AccessError) return { error: NextResponse.json(e.body, { status: e.status }) };
@@ -67,9 +82,25 @@ export async function readDashboard(
   return (await spaceForViewer(c, row.spaceId)) ? { row, spaceMissing: false } : null;
 }
 
-/** Owner or org admin. (The 2026-08 route had no owner check; it is not restored.) */
-export function canEditDashboard(row: Pick<DashboardRow, "ownerId">, c: LinkViewer): boolean {
-  return row.ownerId === c.userId || viewerIsOrgAdmin(c);
+/** Is this row a Space's Overview (its id is that Space's overview id)? */
+export function isOverviewRow(row: Pick<DashboardRow, "id" | "spaceId">): boolean {
+  return !!row.spaceId && row.id === spaceOverviewId(row.spaceId);
+}
+
+/**
+ * Who may change a dashboard. An org Owner or Admin always. A Space's
+ * Overview whose Space exists: that Space's managers (canEditSpace), whoever
+ * created it. Every other row, a spaceMissing Overview included: its owner.
+ * (The 2026-08 route had no owner check; it is not restored.)
+ */
+export async function canEditDashboard(
+  row: Pick<DashboardRow, "id" | "ownerId" | "spaceId">,
+  c: LinkViewer,
+  spaceMissing = false,
+): Promise<boolean> {
+  if (viewerIsOrgAdmin(c)) return true;
+  if (isOverviewRow(row) && !spaceMissing) return canEditSpaceFor(c, row.spaceId as string);
+  return row.ownerId === c.userId;
 }
 
 /**

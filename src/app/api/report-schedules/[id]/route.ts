@@ -5,14 +5,16 @@
 // Its creator or an org admin; anyone else gets a 404, which never confirms
 // the schedule exists. A PATCH is a compare-and-swap on updatedAt
 // (expectedUpdatedAt is required), so a stale recipient list can never re-add
-// someone who just removed themselves. The target never changes.
+// someone who just removed themselves. The target never changes. Recipients
+// are re-validated as on POST (reportRecipientProblems over recipientRows). A
+// Guest caller is answered 404 by requireWorkApp.
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
 import { requireWorkApp } from "@/lib/dashboards/dashboard-server";
-import { nextReportRunAt, parseRunLog, recipientProblems, runLogForViewer, validateSchedulePatch } from "@/lib/reports/schedule";
-import { viewerIsOrgAdmin } from "@/lib/list-links-server";
+import { nextReportRunAt, parseRunLog, reportRecipientProblems, runLogForViewer, validateSchedulePatch } from "@/lib/reports/schedule";
+import { recipientRows, viewerIsOrgAdmin } from "@/lib/list-links-server";
 import { canEditSchedule, readableTarget, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
@@ -58,11 +60,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: v.error, ...(v.issues ? { issues: v.issues } : {}) }, { status: 400 });
     }
     if (v.patch.recipientUserIds) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: v.recipientUserIds } },
-        select: { id: true, organizationId: true, deletedAt: true, status: true },
-      });
-      if (recipientProblems(v.recipientUserIds, users, c.organizationId).length) {
+      // Eligible members only (this org, live, not INACTIVE, not a Guest), one
+      // answer that echoes no id.
+      const users = await recipientRows(v.recipientUserIds, c.organizationId);
+      if (reportRecipientProblems(v.recipientUserIds, users, c.organizationId).length) {
         return NextResponse.json({ error: "invalid_recipients" }, { status: 400 });
       }
     }

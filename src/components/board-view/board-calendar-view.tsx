@@ -14,6 +14,8 @@ import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/bo
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { FieldDef } from "@/lib/field-catalog";
 import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
+import { accessMessage } from "@/lib/access-message";
+import { linkedRowEditable, writeContext } from "@/lib/list-link-rows";
 
 interface BoardCalendarViewProps {
   boardId: string;
@@ -139,7 +141,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Failed to add item");
+        setError(accessMessage(data, "Couldn't add a task on that day."));
         return;
       }
       onItemCreated?.(data.item as BoardItemRow);
@@ -159,6 +161,9 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     if (!canEdit) return;
     const current = initialItems.find((it) => it.id === itemId);
     if (!current) return;
+    // A task shown here through a link moves only as far as its task role
+    // allows, and its write names this List (list-link-rows.ts).
+    if (!linkedRowEditable(current, canEdit)) return;
     const nextDue = localMidnightIso(dayKey);
     if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
     setError(null);
@@ -166,18 +171,20 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       const res = await fetch(`/api/items/${itemId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dueAt: nextDue }),
+        body: JSON.stringify({ dueAt: nextDue, ...writeContext(current, boardId) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Failed to reschedule");
+        setError(accessMessage(data, "Couldn't reschedule this task."));
         return;
       }
+      // The answer is the row as THIS List shows it (the write named the
+      // List), which the canvas merges or drops by the linked-row rule.
       onItemChanged?.(data.item as BoardItemRow);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reschedule");
     }
-  }, [canEdit, initialItems, onItemChanged]);
+  }, [canEdit, initialItems, onItemChanged, boardId]);
 
   // 6-week grid starting Sunday. Lead/trail cells carry the adjacent
   // month's real greyed day numbers (ClickUp), but stay inert.
@@ -338,13 +345,15 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                 ) : null}
                 <ul className="space-y-0.5">
                   {dayItems.slice(0, 4).map((it) => {
-                    const dot = (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
+                    // A linked task shows its HOME status colour.
+                    const dot = it.listLink?.homeStatus?.color ?? (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
+                    const chipEditable = linkedRowEditable(it, canEdit);
                     return (
                       <li key={it.id}>
                         {/* ClickUp chip: status-tinted wash + saturated left edge. */}
                         <button
                           type="button"
-                          draggable={canEdit}
+                          draggable={chipEditable}
                           onDragStart={(e) => {
                             e.dataTransfer.effectAllowed = "move";
                             try { e.dataTransfer.setData("text/plain", it.id); } catch {}
@@ -354,10 +363,10 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           onClick={() => onOpenItem?.(it.id)}
                           onContextMenu={(e) => menu.openItemMenu(e, it)}
                           className={`flex w-full items-center gap-1.5 rounded-[4px] border-l-2 px-1.5 py-[3px] text-left text-xs font-medium leading-4 text-zinc-700 transition-[filter] hover:brightness-[0.96] ${
-                            canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                            chipEditable ? "cursor-grab active:cursor-grabbing" : ""
                           } ${dragId === it.id ? "opacity-40" : ""}`}
                           style={{ borderLeftColor: dot, backgroundColor: `${dot}14` }}
-                          title={canEdit ? "Drag to another day to reschedule" : undefined}
+                          title={chipEditable ? "Drag to another day to reschedule" : undefined}
                         >
                           <span className="truncate">{it.title}</span>
                           {it.owner ? (

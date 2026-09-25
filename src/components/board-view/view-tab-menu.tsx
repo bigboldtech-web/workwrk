@@ -6,16 +6,24 @@
 //   Set default  — PATCH isDefault=true (server demotes the previous default in the same tx)
 //   Duplicate    — POST a new view with the source's type + config + " (copy)" suffix
 //   Delete       — DELETE; blocked server-side if it's the last view on the board
+//
+// Phase 5b adds Schedule report (before Delete): the one ScheduleReportDialog,
+// for a view whose content is the task set, where the host says the viewer
+// may schedule one.
+//
+// Opened by a right-click on any tab, or by the active tab's trailing "..."
+// (the host calls the opener this component hands its children).
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Copy, Trash2, Star, } from "lucide-react";
+  MoreHorizontal, Edit2, Copy, Trash2, Star, CalendarClock, } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Dots } from "@/components/ui/dots";
+import { ScheduleReportDialog, SCHEDULABLE_VIEW_TYPES } from "@/components/reports/schedule-report-dialog";
 
 interface ViewLike {
   id: string;
@@ -23,18 +31,35 @@ interface ViewLike {
   type: ViewType;
   isDefault: boolean;
   config: unknown;
+  /** A private view (false, with an owner) is scheduled only to its owner. */
+  isShared?: boolean;
+  ownerId?: string | null;
 }
 
 interface Props {
   boardId: string;
   view: ViewLike;
-  children?: React.ReactNode;
+  /**
+   * The host decided the viewer may schedule reports of this List's views
+   * (the strict List read, and a member). Absent: no Schedule report row.
+   */
+  scheduleReports?: boolean;
+  /** Plain children, or a render function handed the menu's opener. */
+  children?: ReactNode | ((openAt: (x: number, y: number) => void) => ReactNode);
 }
 
-export function ViewTabContextMenu({ boardId, view, children }: Props) {
+export function ViewTabContextMenu({ boardId, view, scheduleReports = false, children }: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  // The dialog lives HERE, outside the menu panel: closing the menu (which
+  // unmounts the panel) must never unmount the dialog it just opened.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const openAt = useCallback((x: number, y: number) => {
+    setPos({ x, y });
+    setOpen(true);
+  }, []);
+  const canSchedule = scheduleReports && SCHEDULABLE_VIEW_TYPES.has(view.type);
 
   useEffect(() => {
     if (!open) return;
@@ -58,11 +83,10 @@ export function ViewTabContextMenu({ boardId, view, children }: Props) {
         className="inline-flex h-full items-stretch"
         onContextMenu={(e) => {
           e.preventDefault();
-          setPos({ x: e.clientX, y: e.clientY });
-          setOpen(true);
+          openAt(e.clientX, e.clientY);
         }}
       >
-        {children}
+        {typeof children === "function" ? children(openAt) : children}
       </div>
       {open ? (
         <div 
@@ -73,10 +97,62 @@ export function ViewTabContextMenu({ boardId, view, children }: Props) {
             top: Math.min(pos.y, typeof window !== 'undefined' ? window.innerHeight - 300 : pos.y) 
           }}
         >
-          <ViewMenuPanel boardId={boardId} view={view} onClose={() => setOpen(false)} />
+          <ViewMenuPanel
+            boardId={boardId}
+            view={view}
+            onClose={() => setOpen(false)}
+            onSchedule={canSchedule ? () => { setOpen(false); setScheduleOpen(true); } : undefined}
+          />
         </div>
       ) : null}
+      {canSchedule ? (
+        <ScheduleReportDialog
+          open={scheduleOpen}
+          onOpenChange={setScheduleOpen}
+          target={{
+            kind: "view",
+            id: view.id,
+            name: view.name,
+            privateOwnerId: view.isShared === false && view.ownerId ? view.ownerId : null,
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+/**
+ * The active tab's trailing "...": the same menu a right-click opens, for a
+ * pointer that cannot right-click and for the keyboard. It sits inside the
+ * tab's link, so it stops the click from navigating.
+ */
+export function ViewTabMoreTrigger({ onOpen, label = "View options" }: { onOpen: (x: number, y: number) => void; label?: string }) {
+  const openFrom = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    onOpen(r.left, r.bottom + 4);
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      title={label}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openFrom(e.currentTarget);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        openFrom(e.currentTarget);
+      }}
+      className="-me-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-3 opacity-0 transition-opacity hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/view:opacity-100 group-focus-visible/view:opacity-100"
+    >
+      <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+    </span>
   );
 }
 
@@ -86,10 +162,13 @@ function ViewMenuPanel({
   boardId,
   view,
   onClose,
+  onSchedule,
 }: {
   boardId: string;
   view: ViewLike;
   onClose: () => void;
+  /** Absent: this view cannot be scheduled here, so there is no row. */
+  onSchedule?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -230,6 +309,7 @@ function ViewMenuPanel({
         />
       ) : null}
       <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
+      {onSchedule ? <MenuItem icon={CalendarClock} label="Schedule report" onClick={onSchedule} /> : null}
       <MenuSeparator />
       <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
     </MenuList>

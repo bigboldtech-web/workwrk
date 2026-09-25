@@ -46,6 +46,21 @@ import type { SprintMeta } from "@/lib/sprint";
 import { useOsToast } from "@/components/layout/os/toast";
 import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
+import {
+  boardStatusFor,
+  itemEventAction,
+  itemsUrl,
+  linkedRowKind,
+  mergeRefetchedRow,
+  reconcilePoll,
+  refetchedFromRow,
+  type RefetchedTask,
+} from "@/lib/list-link-rows";
+import { viewConfigQueue } from "@/lib/view-config-queue";
+import { LIST_SETTINGS_CHANGED } from "@/lib/table-comfort";
+import type { RowColorRule } from "@/lib/list-comfort";
+import type { LoadedListSettings } from "@/lib/list-defaults-client";
+import { LinkedRowIndicator } from "./linked-row-indicator";
 
 // View types that render the (filterable) item list — only these get the
 // toolbar FilterMenu; content views (FORM / DOC / WHITEBOARD / …) don't.
@@ -112,9 +127,26 @@ interface BoardCanvasProps {
   /** Sprint identity (settings.sprint) — non-null renders the sprint header
    *  strip (dates + countdown + points) above every view. */
   sprint?: SprintMeta | null;
+  /**
+   * Phase 5b, List comfort: the List's Conditional colors rules, for the first
+   * paint. The canvas re-reads them (with the List's defaults) from
+   * GET /api/boards/[id]/settings, and again whenever they are saved.
+   */
+  initialRowColorRules?: RowColorRule[];
+  /**
+   * May this viewer SAVE this view (the gate PATCH /views/[viewId] applies,
+   * computed on the page)? Only then are Pin column and Row height offered;
+   * everyone else sees the view as it was saved.
+   */
+  canSaveView?: boolean;
+  /**
+   * Is this the viewer's Personal List? Its tasks are private to one person,
+   * so the row menu never offers Add to another List for them.
+   */
+  personalList?: boolean;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, addTaskSlot, moduleGating, sprint }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, addTaskSlot, moduleGating, sprint, initialRowColorRules, canSaveView = false, personalList = false }: BoardCanvasProps) {
   // Below this line the renderers each take a `canEdit` prop, and at THAT
   // level the word is unambiguous: it is content write on a row, which is
   // exactly what `canContribute` answers. The board-level confusion the
@@ -130,13 +162,21 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const [shelfOpen, setShelfOpen] = useState(false);
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
 
+  // The held rows, readable from the event and click handlers below without
+  // re-subscribing them on every change.
+  const itemsRef = useRef<BoardItemRow[]>(initialItems);
+
   // A task now opens at its OWN url: `router.push("/item/<id>")`, which the
   // (dashboard)/@drawer/(.)item/[id] intercept renders as a drawer over this
   // list, so Copy link works and a refresh gives the full page
-  // (spec-task-detail section 4 step 4).
+  // (spec-task-detail section 4 step 4). A row shown here THROUGH A LINK opens
+  // in this List's context (`?list=`), so the drawer shows this List's own
+  // fields and its link menu; every other row opens exactly as before.
   const openItem = useCallback((id: string) => {
-    openTask(router, id);
-  }, [router]);
+    const row = itemsRef.current.find((r) => r.id === id);
+    if (row && linkedRowKind(row, boardId) !== "home") openTask(router, id, { listId: boardId });
+    else openTask(router, id);
+  }, [router, boardId]);
 
   // `?item=<id>` is the OLD mechanism. It is kept for ONE release as a
   // redirect, so a bookmark, a pasted link or a server payload written before
@@ -194,7 +234,42 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // Local mirrors so drawer/shelf edits sync into the active renderer
   // without a full router.refresh().
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
+  useEffect(() => { itemsRef.current = items; }, [items]);
   const [fields, setFields] = useState<FieldDef[]>(initialFields);
+
+  // ── List comfort (Phase 5b, gap 14) ────────────────────────────────
+  // The List's default values and Conditional colors, read once on mount and
+  // again when a List settings panel saves them. `loadedSettings` is keyed by
+  // the List it was read for: until it answers (or if it fails) a create sends
+  // today's body, and the server's own defaults still apply to what is absent.
+  const [rowColorRules, setRowColorRules] = useState<RowColorRule[]>(initialRowColorRules ?? []);
+  const [loadedSettings, setLoadedSettings] = useState<LoadedListSettings | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch(`/api/boards/${boardId}/settings`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!alive || !d) return;
+          setLoadedSettings({
+            boardId,
+            defaults: d.defaults && typeof d.defaults === "object" ? d.defaults : {},
+            statuses: Array.isArray(d.statuses) ? d.statuses : [],
+          });
+          setRowColorRules(Array.isArray(d.rowColorRules) ? d.rowColorRules : []);
+        })
+        .catch(() => { /* colours stay as first painted; creates send today's body */ });
+    void load();
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<{ boardId?: string }>).detail?.boardId === boardId) void load();
+    };
+    window.addEventListener(LIST_SETTINGS_CHANGED, onChanged);
+    return () => { alive = false; window.removeEventListener(LIST_SETTINGS_CHANGED, onChanged); };
+  }, [boardId]);
+
+  // The status a row has IN THIS LIST: a row shown through a link stores its
+  // home status, remapped here for filters, grouping and colour rules.
+  const statusOf = useCallback((row: BoardItemRow) => boardStatusFor(row, boardId, statuses), [boardId, statuses]);
 
   // Per-view column visibility (View.config.hiddenFields). The table
   // gets only visible fields; the drawer always shows all (ClickUp
@@ -210,21 +285,32 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     const raw = viewConfig?.extraColumns;
     return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
   });
-  // Persist a partial config patch. The server PATCH replaces the whole
-  // config blob, so we merge into the SAME viewConfig object every
-  // persist path spreads from — otherwise the table's groupBy/colWidths
-  // saves and these column/filter saves would clobber each other's keys.
-  const persistViewConfig = useCallback((patch: Record<string, unknown>, label: string) => {
-    if (!viewId) return;
+  // Persist a partial config patch through the view's ONE save queue
+  // (src/lib/view-config-queue.ts): patches merge, one request is in flight
+  // at a time, and a failed key stays dirty until it lands, so two quick
+  // changes can no longer race and a failure can no longer lose one. The
+  // local Object.assign mirror stays: renderers that still write the WHOLE
+  // config (calendar, gantt, chart) spread this object, so they carry every
+  // key saved here.
+  const viewQueue = useMemo(() => (viewId ? viewConfigQueue(boardId, viewId) : null), [boardId, viewId]);
+  const persistViewConfig = useCallback((patch: Record<string, unknown>, _label: string) => {
+    if (!viewQueue) return;
     Object.assign(viewConfig, patch);
-    void fetch(`/api/boards/${boardId}/views/${viewId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ config: { ...viewConfig } }),
-    })
-      .then((res) => { if (!res.ok) toast(`Couldn't save ${label}`); })
-      .catch(() => toast(`Couldn't save ${label}`));
-  }, [boardId, viewId, viewConfig, toast]);
+    viewQueue.enqueue(patch);
+  }, [viewQueue, viewConfig]);
+  // One place says a view save failed, with a real Try again: the table's
+  // saves go through the same queue, so they surface here too.
+  useEffect(() => {
+    if (!viewQueue) return;
+    return viewQueue.subscribe((st) => {
+      if (st.status !== "error") return;
+      toast(st.message ?? "Couldn't save the view settings.", {
+        tone: "danger",
+        key: `view-config:${viewId}`,
+        action: { label: "Try again", onClick: () => void viewQueue.flush() },
+      });
+    });
+  }, [viewQueue, viewId, toast]);
   const persistCols = useCallback((hiddenNext: string[], extraNext: string[]) => {
     persistViewConfig({ hiddenFields: hiddenNext, extraColumns: extraNext }, "column layout");
   }, [persistViewConfig]);
@@ -297,7 +383,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     persistViewConfig({ savedFilters: next }, "saved filters");
   }, [persistViewConfig]);
 
-  const filteredItems = useMemo(() => applyFilters(items, filters, statuses), [items, filters, statuses]);
+  const filteredItems = useMemo(() => applyFilters(items, filters, statuses, { statusOf }), [items, filters, statuses, statusOf]);
 
   const filterMenu = FILTERABLE_VIEWS.has(viewType) ? (
     <FilterMenu
@@ -312,9 +398,25 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     />
   ) : null;
 
+  // A row a renderer or the drawer just wrote. A row held here THROUGH A LINK
+  // is merged by the linked-row rule (it keeps this List's boardId, link and
+  // position), and dropped when the answer is no longer this List's: a
+  // Calendar drag or a Gantt resize can never swap the home projection in.
   const handleItemChanged = useCallback((updated: BoardItemRow) => {
-    setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
-  }, []);
+    setItems((prev) => {
+      const at = prev.findIndex((r) => r.id === updated.id);
+      if (at === -1) return prev;
+      const held = prev[at];
+      if (linkedRowKind(held, boardId) === "home") return prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
+      if (updated.listLink?.boardId !== boardId) return prev.filter((r) => r.id !== updated.id);
+      const out = mergeRefetchedRow(held, refetchedFromRow(updated), boardId);
+      if (out.action === "drop") return prev.filter((r) => r.id !== updated.id);
+      if (out.action !== "merge") return prev;
+      const next = [...prev];
+      next[at] = out.row;
+      return next;
+    });
+  }, [boardId]);
 
   // Item-state ownership (2026-08-12): the table/kanban renderers keep their
   // own optimistic copy of the list and re-seed it from `filteredItems`
@@ -350,38 +452,33 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // optimistic add that hasn't reached the server yet can't be dropped. Also
   // fires immediately when you switch back to the tab. (SSE can replace this
   // later for instant push.)
+  //
+  // Phase 5b: the poll asks for the List's linked rows too (itemsUrl), and
+  // folds the answer in by reconcilePoll: today's rule for home rows, plus a
+  // held LINKED row that the answer no longer names has left this List and
+  // goes, and one whose link position or home status moved is replaced even
+  // at an equal updatedAt (a link change does not touch the task).
+  const reloadList = useCallback(async () => {
+    try {
+      const res = await fetch(itemsUrl(boardId), { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const fresh: BoardItemRow[] = Array.isArray(data?.items) ? data.items : [];
+      setItems((prev) => reconcilePoll(prev, fresh) ?? prev);
+    } catch { /* transient: the next tick retries */ }
+  }, [boardId]);
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      try {
-        const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const fresh: BoardItemRow[] = Array.isArray(data?.items) ? data.items : [];
-        if (cancelled) return;
-        setItems((prev) => {
-          const freshById = new Map(fresh.map((r) => [r.id, r]));
-          const prevIds = new Set(prev.map((r) => r.id));
-          const ts = (r: BoardItemRow) => (r.updatedAt ? new Date(r.updatedAt).getTime() : 0);
-          let changed = false;
-          const next = prev.map((r) => {
-            const f = freshById.get(r.id);
-            if (f && ts(f) > ts(r)) { changed = true; return f; }
-            return r;
-          });
-          for (const f of fresh) {
-            if (!prevIds.has(f.id)) { next.push(f); changed = true; }
-          }
-          return changed ? next : prev;
-        });
-      } catch { /* transient — next tick retries */ }
+      if (cancelled) return;
+      await reloadList();
     };
     const id = setInterval(() => void poll(), 12000);
     const onVis = () => { if (document.visibilityState === "visible") void poll(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { cancelled = true; clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
-  }, [boardId]);
+  }, [reloadList]);
 
   const dropItem = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
@@ -392,37 +489,63 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // what the SSE stream fans out, so a colleague's change and this tab's own
   // land through the same door and the row under the drawer is never stale for
   // the twelve seconds the poll would otherwise take.
+  //
+  // Phase 5b: what the event means for THIS List is itemEventAction's
+  // (list-link-rows.ts), which reads `listIds` (every List the task appears
+  // in) and `leftListIds` (the Lists it just left) as well as `boardId`, its
+  // home. A row shown here through a link is never dropped because the event
+  // names its home, and the re-read asks for the task IN this List
+  // (`?list=`), so the answer is projected for this List and merged by the
+  // linked-row rule, or dropped when it is no longer this List's.
   useEffect(() => {
     const onEvent = (e: Event) => {
-      const ev = (e as CustomEvent<RealtimeEvent & { gone?: boolean }>).detail;
+      const ev = (e as CustomEvent<RealtimeEvent & { gone?: boolean; listIds?: string[]; leftListIds?: string[] }>).detail;
       if (!ev || ev.type !== "item") return;
-      if (ev.boardId && ev.boardId !== boardId) {
-        // It moved somewhere else: it is no longer one of ours.
-        dropItem(ev.itemId);
-        return;
-      }
-      if (ev.gone) {
-        dropItem(ev.itemId);
-        return;
-      }
-      void fetch(`/api/items/${ev.itemId}`, { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          const fresh = d?.item as BoardItemRow | undefined;
-          if (!fresh) return;
+      const held = itemsRef.current.find((r) => r.id === ev.itemId);
+      const action = itemEventAction(
+        { gone: ev.gone, boardId: ev.boardId, listIds: ev.listIds, leftListIds: ev.leftListIds },
+        boardId,
+        held,
+      );
+      if (action === "ignore") return;
+      if (action === "drop") { dropItem(ev.itemId); return; }
+      if (action === "reload") { void reloadList(); return; }
+      void fetch(`/api/items/${ev.itemId}?list=${encodeURIComponent(boardId)}`, { cache: "no-store" })
+        .then(async (r) => {
+          // Only a 404 means "it is gone from here"; any other failure keeps
+          // the row and lets the poll catch up.
+          if (r.status === 404) return { gone: true as const };
+          if (!r.ok) return null;
+          return { body: (await r.json()) as Partial<RefetchedTask> & { item?: BoardItemRow } };
+        })
+        .then((got) => {
+          if (!got) return;
+          if ("gone" in got) { dropItem(ev.itemId); return; }
+          const d = got.body;
+          if (!d?.item) return;
+          const fresh: RefetchedTask = {
+            item: d.item,
+            context: d.context ?? { boardId: d.item.boardId ?? boardId, kind: "home" },
+            decision: d.decision ?? null,
+          };
+          let reload = false;
           setItems((prev) => {
-            const at = prev.findIndex((r) => r.id === fresh.id);
+            const at = prev.findIndex((r) => r.id === ev.itemId);
             if (at === -1) return prev;
+            const out = mergeRefetchedRow(prev[at], fresh, boardId);
+            if (out.action === "drop") return prev.filter((r) => r.id !== ev.itemId);
+            if (out.action === "reload") { reload = true; return prev; }
             const next = [...prev];
-            next[at] = { ...next[at], ...fresh };
+            next[at] = out.row;
             return next;
           });
+          if (reload) void reloadList();
         })
         .catch(() => { /* the 12s poll is the backstop */ });
     };
     window.addEventListener(WINDOW_EVENTS.realtime, onEvent as EventListener);
     return () => window.removeEventListener(WINDOW_EVENTS.realtime, onEvent as EventListener);
-  }, [boardId, dropItem]);
+  }, [boardId, dropItem, reloadList]);
 
   // Right-side toolbar actions. For the TABLE view these ride on the same row as
   // the group/subtask/columns icons (just below the tabs); other views keep the
@@ -501,6 +624,12 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           onItemsRefreshed={handleItemsRefreshed}
           timeTrackingEnabled={timeTrackingOn}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
+          renderTitleSuffix={(row) => <LinkedRowIndicator row={row} boardId={boardId} />}
+          rowColorRules={rowColorRules}
+          loadedSettings={loadedSettings}
+          canSaveView={canSaveView && !!viewId}
+          statusOf={statusOf}
+          personalList={personalList}
         />
       ) : viewType === "KANBAN" ? (
         <BoardKanbanView
@@ -519,6 +648,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           priorityEnabled={priorityOn}
           tagsEnabled={tagsOn}
           timeTrackingEnabled={timeTrackingOn}
+          loadedSettings={loadedSettings}
+          statusOf={statusOf}
+          personalList={personalList}
         />
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView

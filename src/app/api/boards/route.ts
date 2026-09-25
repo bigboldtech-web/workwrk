@@ -1,11 +1,14 @@
 // GET  /api/boards?spaceId=... | /api/boards?folderId=...  — list
+// GET  /api/boards?readable=1&q=&ids=&spaceId=&targets=1&writable=1&limit=
+//      every task List the viewer can read (or write, with writable=1), for
+//      pickers: { boards, spaces, truncated }. See readableLists below.
 // POST /api/boards — create a Board with a default View
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canContributeBoard, createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
+import { canContributeBoard, createBoard, getBoardForReader, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
 import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { canRead, type ViewerContext } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
@@ -35,6 +38,13 @@ export async function GET(req: Request) {
   const spaceId = url.searchParams.get("spaceId");
   const folderId = url.searchParams.get("folderId");
   const includeArchived = url.searchParams.get("includeArchived") === "1";
+
+  // ?readable=1: every task List the viewer can READ, for pickers (Phase 5b).
+  // It is answered before ?editable=1; the two older branches below are
+  // untouched.
+  if (url.searchParams.get("readable") === "1") {
+    return readableLists(url, c);
+  }
 
   // ?editable=1: every List the viewer may WRITE to, grouped by Space.
   //
@@ -133,6 +143,154 @@ export async function GET(req: Request) {
     return NextResponse.json({ boards });
   }
   return NextResponse.json({ error: "spaceId or folderId required" }, { status: 400 });
+}
+
+// GET /api/boards?readable=1&q=&ids=&spaceId=&targets=1&writable=1&limit=
+//
+// The one source every List and Space picker in Phase 5b reads (dashboard card
+// sources, Add to another List, the link Move, connect column targets),
+// through readableListsUrl in src/lib/readable-lists.ts.
+//
+// Why not ?all=1: it answers "every List in a Space I can read", which leaves
+// out a List shared with me directly and an ORG-visible List in someone else's
+// Space, and it names a PRIVATE List inside a readable Space that I cannot
+// open. Here the candidates come from four doors (a Space read in full, an
+// ORG-visible List, a direct List grant, my own Personal List) and each is then
+// checked with getBoardForReader, the predicate the List page itself uses, so
+// no row names a List the viewer cannot open. writable=1 checks
+// canContributeBoard instead, which implies read.
+//
+// Spaces come from listSpacesForUser WITHOUT includeFolderContainers: a Space
+// reached only through a folder grant is a container, not something the
+// viewer reads in full, so it is never offered as a card's "A Space" source.
+//
+// Search-driven: at most `limit` search rows are checked (8 at a time) and
+// `truncated` says more existed, so a person with thousands of Lists types to
+// narrow instead of the server checking every one. `ids` names Lists a host
+// already holds, checked first and returned first in the given order, so a
+// chip is always nameable whatever page of results is loaded.
+const READABLE_TAKE = 300;
+const READABLE_CHECK_BATCH = 8;
+
+async function readableLists(
+  url: URL,
+  c: { userId: string; accessLevel: string; organizationId: string },
+) {
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+  const ids = [
+    ...new Set(
+      (url.searchParams.get("ids") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 50);
+  const spaceParam = url.searchParams.get("spaceId")?.trim() || null;
+  const targets = url.searchParams.get("targets") === "1";
+  const writable = url.searchParams.get("writable") === "1";
+  const rawLimit = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(100, Math.floor(rawLimit)) : 50;
+
+  const readSpaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+  const readSpaceIds = readSpaces.map((s) => s.id);
+
+  const baseWhere = {
+    organizationId: c.organizationId,
+    archivedAt: null,
+    itemType: "studio-item",
+    ...(spaceParam ? { spaceId: spaceParam } : {}),
+    OR: [
+      ...(readSpaceIds.length ? [{ spaceId: { in: readSpaceIds } }] : []),
+      { visibility: "ORG" as const },
+      { members: { some: { userId: c.userId } } },
+      { spaceId: null, ownerId: c.userId },
+    ],
+  };
+  const select = {
+    id: true,
+    slug: true,
+    name: true,
+    icon: true,
+    color: true,
+    spaceId: true,
+    folderId: true,
+    productSlug: true,
+    settings: true,
+  } as const;
+
+  const [searchRows, idRows] = await Promise.all([
+    prisma.board.findMany({
+      where: q ? { ...baseWhere, name: { contains: q, mode: "insensitive" as const } } : baseWhere,
+      select,
+      orderBy: { name: "asc" },
+      take: READABLE_TAKE,
+    }),
+    ids.length ? prisma.board.findMany({ where: { ...baseWhere, id: { in: ids } }, select }) : Promise.resolve([]),
+  ]);
+
+  type Row = (typeof searchRows)[number];
+  const eligible = (b: Row) => {
+    const settings =
+      b.settings && typeof b.settings === "object" && !Array.isArray(b.settings)
+        ? (b.settings as Record<string, unknown>)
+        : {};
+    if (settings.system === true) return false;
+    if (targets && b.productSlug === "personal-list") return false;
+    return true;
+  };
+  const allowed = async (b: Row): Promise<boolean> => {
+    if (writable) return canContributeBoard(b.id, c.userId, c.accessLevel);
+    const row = await getBoardForReader(b.id, c.userId, c.accessLevel);
+    return Boolean(row && row.organizationId === c.organizationId);
+  };
+  // `settings` is read for the system check only and never leaves the server.
+  const toRow = (b: Row) => ({
+    id: b.id,
+    slug: b.slug,
+    name: b.name,
+    icon: b.icon ?? null,
+    color: b.color ?? null,
+    spaceId: b.spaceId ?? null,
+    folderId: b.folderId ?? null,
+    productSlug: b.productSlug ?? null,
+  });
+
+  const idById = new Map(idRows.map((b) => [b.id, b] as const));
+  const idCandidates = ids.map((id) => idById.get(id)).filter((b): b is Row => !!b && eligible(b));
+  const idResults: Row[] = [];
+  for (let i = 0; i < idCandidates.length; i += READABLE_CHECK_BATCH) {
+    const batch = idCandidates.slice(i, i + READABLE_CHECK_BATCH);
+    const ok = await Promise.all(batch.map(allowed));
+    batch.forEach((b, j) => {
+      if (ok[j]) idResults.push(b);
+    });
+  }
+
+  const taken = new Set(idResults.map((b) => b.id));
+  const searchCandidates = searchRows.filter((b) => !taken.has(b.id) && eligible(b));
+  const found: Row[] = [];
+  let checked = 0;
+  let overflow = false;
+  while (checked < searchCandidates.length && found.length < limit) {
+    const batch = searchCandidates.slice(checked, checked + READABLE_CHECK_BATCH);
+    checked += batch.length;
+    const ok = await Promise.all(batch.map(allowed));
+    batch.forEach((b, j) => {
+      if (!ok[j]) return;
+      if (found.length < limit) found.push(b);
+      else overflow = true;
+    });
+  }
+  const truncated = overflow || checked < searchCandidates.length || searchRows.length >= READABLE_TAKE;
+
+  return NextResponse.json(
+    {
+      boards: [...idResults, ...found].map(toRow),
+      spaces: readSpaces.map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })),
+      truncated,
+    },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

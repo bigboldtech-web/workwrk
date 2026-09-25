@@ -52,6 +52,7 @@ import {
   Settings, CircleDot, Tag, Shapes, Info, Files, Save, Zap, BellOff, Bell,
   EyeOff, ArrowRightLeft, ArrowUp, ArrowDown, Copy, Archive, Trash2,
   ListChecks, FolderPlus, FileText, Brush, IterationCw, Blocks, Table2,
+  ListPlus, PaintBucket, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
@@ -65,6 +66,9 @@ import { MoveTargetDialog } from "./move-target-dialog";
 import { ContainerAboutModal, type AboutObject } from "./container-about-modal";
 import { DuplicateContainerDialog } from "./duplicate-container-dialog";
 import { ShareDialog } from "@/components/access/share-dialog";
+import { Drawer } from "@/components/ui/drawer";
+import { ListDefaultsPanel } from "@/components/board-view/list-settings/list-defaults-panel";
+import { RowColorRulesPanel } from "@/components/board-view/list-settings/row-color-rules-panel";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
@@ -153,6 +157,8 @@ const ROW_ICON: Record<ContainerAction, LucideIcon> = {
   statuses: CircleDot,
   fields: Tag,
   "default-type": Shapes,
+  "default-values": ListPlus,
+  "row-colors": PaintBucket,
   about: Info,
   templates: Files,
   automations: Zap,
@@ -175,6 +181,12 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
     const [modulesOpen, setModulesOpen] = useState(false);
     const [duplicateOpen, setDuplicateOpen] = useState(false);
     const [duplicating, setDuplicating] = useState(false);
+    // Phase 5b, List comfort: the List's own settings. They open in the Drawer
+    // primitive, never in ui/dialog: their field editors position their menus
+    // with position: fixed, which a dialog's transformed box would break.
+    const [settingsPanel, setSettingsPanel] = useState<"defaults" | "colors" | null>(null);
+    const [panelDirty, setPanelDirty] = useState(false);
+    const confirmClose = useConfirm();
     const btnRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
@@ -301,8 +313,51 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
             onRequestAbout={() => setAboutOpen(true)}
             onRequestModules={() => setModulesOpen(true)}
             onRequestDuplicate={() => setDuplicateOpen(true)}
+            onRequestSettings={(panel) => { setPanelDirty(false); setSettingsPanel(panel); }}
           />
         </MorePortal>
+
+        {settingsPanel && container.kind === "list" ? (
+          <Drawer
+            open
+            layerId={`list-settings-${container.id}`}
+            ariaLabel={settingsPanel === "defaults" ? "Default values" : "Conditional colors"}
+            // Esc never closes over unsaved changes; the X asks first.
+            canClose={() => !panelDirty}
+            onClose={() => setSettingsPanel(null)}
+            header={
+              <>
+                <span className="min-w-0 flex-1 truncate text-base font-semibold text-ink">
+                  {settingsPanel === "defaults" ? "Default values" : "Conditional colors"}
+                  <span className="ms-2 font-normal text-ink-2">{container.name}</span>
+                </span>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={async () => {
+                    if (panelDirty && !(await confirmClose({
+                      title: "Discard your changes?",
+                      description: "You have changes that are not saved yet.",
+                      confirmLabel: "Discard",
+                      destructive: true,
+                    }))) return;
+                    setSettingsPanel(null);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+                >
+                  <X className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+              </>
+            }
+          >
+            {settingsPanel === "defaults" ? (
+              <ListDefaultsPanel boardId={container.id} onDone={() => setSettingsPanel(null)} onDirtyChange={setPanelDirty} />
+            ) : (
+              <RowColorRulesPanel boardId={container.id} onDone={() => setSettingsPanel(null)} onDirtyChange={setPanelDirty} />
+            )}
+          </Drawer>
+        ) : null}
 
         {moveOpen ? (
           // A Folder is moved with the FOLDER flavour. It used to take the
@@ -378,6 +433,7 @@ function ContainerMenuBody({
   onRequestAbout,
   onRequestModules,
   onRequestDuplicate,
+  onRequestSettings,
 }: ContainerMenuProps & {
   onClose: () => void;
   onRequestMove: () => void;
@@ -385,6 +441,7 @@ function ContainerMenuBody({
   onRequestAbout: () => void;
   onRequestModules: () => void;
   onRequestDuplicate: () => void;
+  onRequestSettings: (panel: "defaults" | "colors") => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -622,10 +679,32 @@ function ContainerMenuBody({
   // and restores them in place through POST /api/trash/bulk. Leaving the older
   // sentence in place talked people out of a shipped feature, which is the
   // same defect the other way round.
+  // Phase 5b: a List may show tasks from other Lists and have its own tasks
+  // shown in others. Archiving or deleting it takes those out of view too,
+  // so the confirm says how many (GET /api/boards/[id]/links counts only
+  // Lists the viewer can read) and that they come back with it.
+  const linkCountLine = useCallback(async (): Promise<string> => {
+    if (container.kind !== "list") return "";
+    try {
+      const r = await fetch(`/api/boards/${container.id}/links`, { cache: "no-store" });
+      if (!r.ok) return "";
+      const d = (await r.json()) as { sharedIn?: number; sharedOut?: number };
+      const inN = Number(d.sharedIn) || 0;
+      const outN = Number(d.sharedOut) || 0;
+      if (inN === 0 && outN === 0) return "";
+      const inPart = inN > 0 ? `${inN} task${inN === 1 ? "" : "s"} from other Lists ${inN === 1 ? "is" : "are"} shown here` : "";
+      const outPart = outN > 0 ? `${outN} of its tasks ${outN === 1 ? "is" : "are"} shown in other Lists` : "";
+      return ` ${[inPart, outPart].filter(Boolean).join(" and ")}; they come back when it is restored.`;
+    } catch {
+      return "";
+    }
+  }, [container.id, container.kind]);
+
   const archive = useCallback(async () => {
+    const links = await linkCountLine();
     if (!(await confirm({
       title: `Archive ${noun.toLowerCase()}`,
-      description: `Archive "${container.name}"? It leaves your sidebar, search and every list. Nothing is deleted: you can restore it from Trash, on the Archived tab.`,
+      description: `Archive "${container.name}"? It leaves your sidebar, search and every list. Nothing is deleted: you can restore it from Trash, on the Archived tab.${links}`,
       destructive: true, confirmLabel: "Archive",
     }))) return;
     setBusy("archive");
@@ -645,15 +724,16 @@ function ContainerMenuBody({
     } finally {
       setBusy(null);
     }
-  }, [base, confirm, container.id, container.kind, container.name, noun, onClose, onUpdated, router, toast]);
+  }, [base, confirm, container.id, container.kind, container.name, noun, onClose, onUpdated, router, toast, linkCountLine]);
 
   const del = useCallback(async () => {
+    const links = await linkCountLine();
     if (!(await confirm({
       title: `Move ${container.name} to Trash?`,
       // The retention window is org config this component does not read, and
       // /trash is manager-gated, so neither a day count nor a plain "you can
       // restore it" is honest here.
-      description: "Everything inside goes with it. It lands in Trash, which a manager can restore it from.",
+      description: `Everything inside goes with it. It lands in Trash, which a manager can restore it from.${links}`,
       destructive: true, confirmLabel: "Delete",
     }))) return;
     setBusy("delete");
@@ -674,7 +754,7 @@ function ContainerMenuBody({
     } finally {
       setBusy(null);
     }
-  }, [base, confirm, container.id, container.kind, container.name, onClose, onUpdated, router, toast]);
+  }, [base, confirm, container.id, container.kind, container.name, onClose, onUpdated, router, toast, linkCountLine]);
 
   // ── New submenu targets ───────────────────────────────────────────
   const createDoc = useCallback(async () => {
@@ -949,6 +1029,12 @@ function ContainerMenuBody({
                 <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); router.push("/settings/task-types"); }} />
               </MenuSubmenu>
             );
+
+          case "default-values":
+            return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestSettings("defaults"); }} />;
+
+          case "row-colors":
+            return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestSettings("colors"); }} />;
 
           case "about":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestAbout(); }} />;

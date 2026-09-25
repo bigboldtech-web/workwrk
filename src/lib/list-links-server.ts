@@ -18,7 +18,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { canContributeBoard, canEditBoard, getBoardForReader, getBoardForReaderOrFolderGrantee } from "@/lib/board";
-import { canContributeSpace, getSpaceForReader, isOrgAdminAccessLevel, visibleSpaceIds } from "@/lib/space";
+import { canContributeSpace, canEditSpace, getSpaceForReader, isOrgAdminAccessLevel, visibleSpaceIds } from "@/lib/space";
+import { orgRoleOf } from "@/lib/access/org-role";
 import {
   buildListScopeWhere,
   decideAddLink,
@@ -940,6 +941,15 @@ export function canContributeSpaceFor(v: LinkViewer, spaceId: string): Promise<b
   return canContributeSpace(spaceId, v.userId, v.accessLevel);
 }
 
+/**
+ * canEditSpace for this viewer: an org admin, or the Space's OWNER or ADMIN.
+ * The ladder the Space page's Bookmarks and the Folders and Lists "+" already
+ * use, and the one that decides who edits a Space's Overview widgets.
+ */
+export function canEditSpaceFor(v: LinkViewer, spaceId: string): Promise<boolean> {
+  return canEditSpace(spaceId, v.userId, v.accessLevel);
+}
+
 /** visibleSpaceIds for this viewer: full-read only, never widened by a folder grant. */
 export function visibleSpacesFor(v: LinkViewer, spaceIds: string[]): Promise<Set<string>> {
   return visibleSpaceIds(spaceIds, v.userId, v.accessLevel);
@@ -947,8 +957,10 @@ export function visibleSpacesFor(v: LinkViewer, spaceIds: string[]): Promise<Set
 
 /**
  * A member as a LinkViewer, read from their row, or null when they are not a
- * live member of this org (deleted, deactivated or elsewhere). The report cron
- * builds each recipient's copy under this and nothing else.
+ * live member of this org (deleted, deactivated or elsewhere) or are a Guest.
+ * The report cron builds each recipient's copy under this and nothing else,
+ * and counts a null as skippedInactive: a Guest is shown a 404 for every
+ * dashboard page, so no report is ever mailed to one.
  */
 export async function memberViewer(userId: string, organizationId: string): Promise<(LinkViewer & { email: string }) | null> {
   const u = await prisma.user.findFirst({
@@ -956,5 +968,117 @@ export async function memberViewer(userId: string, organizationId: string): Prom
     select: { id: true, email: true, accessLevel: true },
   });
   if (!u || !u.email) return null;
+  if (orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST") return null;
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId, email: u.email };
+}
+
+// ── Report recipients ───────────────────────────────────────────────
+//
+// Eligible = a member of THIS org, not deleted, status not INACTIVE (ON_LEAVE,
+// PROBATION, PIP and NOTICE_PERIOD still sign in, so they still receive), and
+// not a Guest. The org role is read here with orgRoleOf over the legacy access
+// level, the one predicate the access engine's step 4 moves onto
+// User.orgRole; the access level itself never leaves this file.
+
+export interface RecipientRow {
+  id: string;
+  organizationId: string;
+  deletedAt: Date | null;
+  status: string;
+  guest: boolean;
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+}
+
+function isEligibleRecipient(r: { deletedAt: Date | null; status: string | null; guest: boolean }): boolean {
+  return !r.deletedAt && r.status !== "INACTIVE" && !r.guest;
+}
+
+/** The org's user rows for these ids (any other org's are simply absent). */
+export async function recipientRows(ids: string[], organizationId: string): Promise<RecipientRow[]> {
+  const unique = Array.from(new Set(ids.filter((id) => typeof id === "string" && id.length > 0))).slice(0, 500);
+  if (unique.length === 0) return [];
+  const rows = await prisma.user.findMany({
+    where: { id: { in: unique }, organizationId },
+    select: { id: true, organizationId: true, deletedAt: true, status: true, accessLevel: true, firstName: true, lastName: true, avatar: true },
+  });
+  return rows.map((u) => ({
+    id: u.id,
+    organizationId: u.organizationId,
+    deletedAt: u.deletedAt,
+    status: String(u.status),
+    guest: orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST",
+    firstName: u.firstName ?? "",
+    lastName: u.lastName ?? "",
+    avatar: u.avatar ?? null,
+  }));
+}
+
+export interface RecipientOption {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+  email: string | null;
+  eligible: boolean;
+}
+
+/**
+ * The recipient picker's rows: the people named by `ids` (the chips already
+ * on a schedule, eligible or not, so a colleague who went inactive still
+ * shows as a greyed chip) plus, for `q`, the ELIGIBLE members whose first
+ * name, last name or email matches. Ordered by name.
+ */
+export async function recipientOptions(i: { organizationId: string; q?: string; ids?: string[]; limit?: number }): Promise<RecipientOption[]> {
+  const limit = Math.min(50, Math.max(1, Math.floor(i.limit ?? 20)));
+  const q = (i.q ?? "").trim().slice(0, 80);
+  const ids = Array.from(new Set((i.ids ?? []).filter((id) => typeof id === "string" && id.length > 0))).slice(0, 100);
+  const select = { id: true, organizationId: true, deletedAt: true, status: true, accessLevel: true, firstName: true, lastName: true, avatar: true, email: true } as const;
+  const [named, found] = await Promise.all([
+    ids.length ? prisma.user.findMany({ where: { id: { in: ids }, organizationId: i.organizationId }, select }) : Promise.resolve([]),
+    prisma.user.findMany({
+      where: {
+        organizationId: i.organizationId,
+        deletedAt: null,
+        status: { not: "INACTIVE" },
+        ...(q
+          ? {
+              OR: [
+                { firstName: { contains: q, mode: "insensitive" as const } },
+                { lastName: { contains: q, mode: "insensitive" as const } },
+                { email: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      },
+      select,
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      // A little over the limit, because the Guest check runs after the read.
+      take: limit + 10,
+    }),
+  ]);
+  const toOption = (u: (typeof found)[number]): RecipientOption => {
+    const guest = orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST";
+    return {
+      id: u.id,
+      firstName: u.firstName ?? "",
+      lastName: u.lastName ?? "",
+      avatar: u.avatar ?? null,
+      email: u.email ?? null,
+      eligible: isEligibleRecipient({ deletedAt: u.deletedAt, status: String(u.status), guest }),
+    };
+  };
+  const out = new Map<string, RecipientOption>();
+  for (const u of named) out.set(u.id, toOption(u));
+  let taken = 0;
+  for (const u of found) {
+    if (taken >= limit) break;
+    const o = toOption(u);
+    if (!o.eligible) continue;
+    taken += 1;
+    if (!out.has(o.id)) out.set(o.id, o);
+  }
+  const name = (o: RecipientOption) => `${o.firstName} ${o.lastName}`.trim().toLowerCase() || (o.email ?? "");
+  return [...out.values()].sort((a, b) => name(a).localeCompare(name(b)));
 }

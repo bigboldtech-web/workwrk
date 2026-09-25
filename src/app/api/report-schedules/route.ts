@@ -9,14 +9,21 @@
 //
 // Org admins see every schedule in the org, everyone else the ones they made;
 // ?received=1 answers the schedules the caller is ON, without the recipient
-// list or the run log.
+// list or the run log: { id, targetKind, targetId (only when the caller can
+// read the target now), targetName, cadence, weekday, monthDay, timeOfDay,
+// timezone, cadenceText, nextRunAt, createdBy }.
+//
+// Recipients must be ELIGIBLE members (reportRecipientProblems over
+// recipientRows): this org, not deleted, not INACTIVE, not a Guest. One
+// invalid_recipients answer, echoing no id. A Guest caller is answered 404 by
+// requireWorkApp.
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
-import { viewerIsOrgAdmin } from "@/lib/list-links-server";
+import { recipientRows, viewerIsOrgAdmin } from "@/lib/list-links-server";
 import { requireWorkApp } from "@/lib/dashboards/dashboard-server";
-import { cadenceText, nextReportRunAt, recipientProblems, validateScheduleInput } from "@/lib/reports/schedule";
+import { cadenceText, nextReportRunAt, reportRecipientProblems, validateScheduleInput } from "@/lib/reports/schedule";
 import { cronInstalled, readableTarget, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +53,15 @@ export async function GET(req: Request) {
         schedules.push({
           id: r.id,
           targetKind: r.targetKind,
+          // Only when the caller can read the target now, so a row never
+          // confirms which dashboard or view an unreadable schedule is about.
+          targetId: target ? r.targetId : null,
           targetName: target?.name ?? null,
+          cadence: r.cadence,
+          weekday: r.weekday,
+          monthDay: r.monthDay,
+          timeOfDay: r.timeOfDay,
+          timezone: r.timezone,
           cadenceText: cadenceText(specOf(r)),
           nextRunAt: r.nextRunAt,
           createdBy: who ? { firstName: who.firstName, lastName: who.lastName } : null,
@@ -86,12 +101,9 @@ export async function POST(req: Request) {
     // The caller must be able to read the target NOW.
     const target = await readableTarget(s.targetKind, s.targetId, c);
     if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const users = await prisma.user.findMany({
-      where: { id: { in: s.recipientUserIds } },
-      select: { id: true, organizationId: true, deletedAt: true, status: true },
-    });
+    const users = await recipientRows(s.recipientUserIds, c.organizationId);
     // One answer, echoing no id, so this cannot be used to test who exists.
-    if (recipientProblems(s.recipientUserIds, users, c.organizationId).length) {
+    if (reportRecipientProblems(s.recipientUserIds, users, c.organizationId).length) {
       return NextResponse.json({ error: "invalid_recipients" }, { status: 400 });
     }
     if (target.privateOwnerId && s.recipientUserIds.some((id) => id !== target.privateOwnerId)) {

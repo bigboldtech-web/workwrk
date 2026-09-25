@@ -29,9 +29,13 @@ import { projectRowMetadata } from "@/lib/list-metadata";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { applyWidgetFilter, distribution, ruleActive, sortListRows, statValue, type Bucket, type WidgetRow } from "./widget-math";
 import {
+  cardVisibility,
+  redactWidgetForEditor,
   redactWidgetsForReader,
+  type CardVisibility,
   type ChartDisplay,
   type ChartGroupBy,
+  type EditorWidget,
   type HiddenWidget,
   type StatMetric,
   type StatScope,
@@ -68,6 +72,8 @@ export type WidgetResult =
         priority: string | null;
         list: { id: string; name: string };
         assigneeIds: string[];
+        /** The same people, named, for the card's avatars (org members only). */
+        assignees: Array<{ id: string; firstName: string; lastName: string; avatar: string | null }>;
       }>;
       total: number;
       truncated?: boolean;
@@ -160,6 +166,23 @@ export async function redactionFor(widgets: readonly Widget[], r: WidgetReader, 
 export async function redactForViewer(widgets: readonly Widget[], r: WidgetReader, reader?: ListReader): Promise<Array<Widget | HiddenWidget>> {
   const { ctx } = await redactionFor(widgets, r, reader);
   return redactWidgetsForReader(widgets, ctx);
+}
+
+/**
+ * Cards as an EDITOR of the dashboard may see them: whole where they can read
+ * everything, the readable part flagged `partial` where they can read some,
+ * hidden where they can read none. What they cannot read never leaves the
+ * server; the PATCH route puts it back with restoreHiddenParts.
+ */
+export async function redactForEditor(widgets: readonly Widget[], r: WidgetReader, reader?: ListReader): Promise<EditorWidget[]> {
+  const { ctx } = await redactionFor(widgets, r, reader);
+  return widgets.map((w) => redactWidgetForEditor(w, ctx));
+}
+
+/** cardVisibility for this editor over the STORED cards, for restoreHiddenParts. */
+export async function editorVisibility(widgets: readonly Widget[], r: WidgetReader, reader?: ListReader): Promise<Map<string, CardVisibility>> {
+  const { ctx } = await redactionFor(widgets, r, reader);
+  return new Map(widgets.map((w) => [w.id, cardVisibility(w, ctx)] as const));
 }
 
 const PRIORITY_BY_VALUE = new Map<string, { label: string; color: string }>(PRIORITY_OPTIONS.map((p) => [p.value, { label: p.label, color: p.color }]));
@@ -288,11 +311,23 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
     }
 
     const page = sortListRows(kept, w.sort, w.limit);
+    const peopleOf = (row: WidgetRow) => Array.from(new Set([row.ownerId, ...row.assigneeIds].filter((v): v is string => !!v)));
+    // One org-scoped read for the avatars of the whole page; an id with no
+    // member row in this org is left out rather than named.
+    const pagePeople = Array.from(new Set(page.flatMap(peopleOf)));
+    const people = pagePeople.length
+      ? await prisma.user.findMany({
+          where: { id: { in: pagePeople }, organizationId: r.ctx.organizationId },
+          select: { id: true, firstName: true, lastName: true, avatar: true },
+        })
+      : [];
+    const personById = new Map(people.map((u) => [u.id, { id: u.id, firstName: u.firstName ?? "", lastName: u.lastName ?? "", avatar: u.avatar ?? null }] as const));
     return {
       kind: "list",
       total: kept.length,
       rows: page.map((row) => {
         const s = statusLabel(row);
+        const ids = peopleOf(row);
         return {
           id: row.id,
           title: row.title,
@@ -303,7 +338,8 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
           dueAt: row.dueAt ? row.dueAt.toISOString() : null,
           priority: row.priority,
           list: { id: row.listId, name: nameOf.get(row.listId) ?? "" },
-          assigneeIds: Array.from(new Set([row.ownerId, ...row.assigneeIds].filter((v): v is string => !!v))),
+          assigneeIds: ids,
+          assignees: ids.map((id) => personById.get(id)).filter((p): p is NonNullable<typeof p> => !!p),
         };
       }),
       ...(truncated ? { truncated } : {}),

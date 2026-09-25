@@ -10,6 +10,7 @@ import {
   nextReportRunAt,
   parseRunLog,
   recipientProblems,
+  reportRecipientProblems,
   runLogForViewer,
   validateScheduleInput,
   validateSchedulePatch,
@@ -148,6 +149,27 @@ describe("recipientProblems", () => {
       { id: "leave", organizationId: "org", deletedAt: null, status: "ON_LEAVE" },
     ];
     expect(recipientProblems(["ok", "gone", "off", "other", "leave", "missing"], rows, "org")).toEqual(["gone", "off", "other", "missing"]);
+  });
+});
+
+describe("reportRecipientProblems", () => {
+  const rows = [
+    { id: "ok", organizationId: "org", deletedAt: null, status: "ACTIVE", guest: false },
+    { id: "leave", organizationId: "org", deletedAt: null, status: "ON_LEAVE", guest: false },
+    { id: "pip", organizationId: "org", deletedAt: null, status: "PIP", guest: false },
+    { id: "notice", organizationId: "org", deletedAt: null, status: "NOTICE_PERIOD", guest: false },
+    { id: "probation", organizationId: "org", deletedAt: null, status: "PROBATION", guest: false },
+    { id: "guest", organizationId: "org", deletedAt: null, status: "ACTIVE", guest: true },
+    { id: "off", organizationId: "org", deletedAt: null, status: "INACTIVE", guest: false },
+    { id: "gone", organizationId: "org", deletedAt: "2026-09-01T00:00:00Z", status: "ACTIVE", guest: false },
+    { id: "other", organizationId: "org2", deletedAt: null, status: "ACTIVE", guest: false },
+  ];
+  it("keeps every member who can sign in, and refuses a Guest on top of recipientProblems", () => {
+    expect(reportRecipientProblems(["ok", "leave", "pip", "notice", "probation"], rows, "org")).toEqual([]);
+    expect(reportRecipientProblems(["ok", "guest", "off", "gone", "other", "missing", "guest"], rows, "org")).toEqual(["guest", "off", "gone", "other", "missing"]);
+  });
+  it("leaves recipientProblems accepting a Guest, for default assignees", () => {
+    expect(recipientProblems(["guest"], rows, "org")).toEqual([]);
   });
 });
 

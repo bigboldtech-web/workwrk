@@ -18,9 +18,10 @@ import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
-import { ItemMoreMenu } from "./item-more-menu";
+import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
 import { accessMessage } from "@/lib/access-message";
 import { emitItemChanged } from "@/lib/realtime-events";
+import { linkedMenuFlags, linkedRowKind, writeContext } from "@/lib/list-link-rows";
 
 export interface ItemContextMenu {
   menuRef: React.RefObject<ContextMenuHandle | null>;
@@ -97,7 +98,8 @@ export function ItemContextMenuHost({
         const res = await fetch(`/api/items/${id}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
+          // A task shown here through a link names this List on its write.
+          body: JSON.stringify({ ...body, ...writeContext(target, boardId ?? "") }),
         });
         if (!res.ok) {
           const d = await res.json().catch(() => ({}));
@@ -111,7 +113,7 @@ export function ItemContextMenuHost({
         toast("Couldn't update this task.");
       }
     },
-    [target?.id, boardId, onItemRemoved, toast],
+    [target, boardId, onItemRemoved, toast],
   );
 
   // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate), so
@@ -143,6 +145,26 @@ export function ItemContextMenuHost({
     } catch { toast("Couldn't archive"); }
   }, [confirm, onItemRemoved, toast]);
 
+  // A task shown here THROUGH A LINK: its menu is the link's (Remove from
+  // this List, the link Move, Delete everywhere) and its role the task's.
+  const kind = target && boardId ? linkedRowKind(target, boardId) : "home";
+  const flags = target && boardId ? linkedMenuFlags(target, boardId, canEdit, currentUserId) : null;
+  const listContext: ItemMenuListContext | undefined = target && boardId && flags
+    ? kind === "home"
+      ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+      : {
+          boardId,
+          kind: "linked",
+          homeBoardId: target.listLink?.homeList?.id ?? null,
+          homeStatuses: target.listLink?.homeStatuses,
+          canRemoveFromList: flags.canRemoveFromList,
+          canLinkMove: flags.canLinkMove,
+          canAddToList: flags.canAddToList,
+          linkedSubtask: flags.linkedSubtask,
+        }
+    : undefined;
+  const role = kind !== "home" && flags?.role ? flags.role : canEdit && target ? "EDIT" : "VIEW";
+
   return (
     <ItemMoreMenu
       ref={menuRef}
@@ -150,8 +172,11 @@ export function ItemContextMenuHost({
       // only at the right-click point.
       triggerless
       host="row"
-      role={canEdit && target ? "EDIT" : "VIEW"}
-      item={{ id: target?.id ?? "", boardId, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null }}
+      role={role}
+      item={{ id: target?.id ?? "", boardId: kind !== "home" ? target?.listLink?.homeList?.id ?? null : boardId, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null, parentItemId: target?.parentItemId ?? null }}
+      isCreator={kind !== "home" ? flags?.isCreator : undefined}
+      listContext={listContext}
+      onRemovedFromList={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       currentUserId={currentUserId}
       statuses={statuses}
       watcherIds={watcherIdsOf(target)}

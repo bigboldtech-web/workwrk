@@ -39,7 +39,8 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { TaskDetailBody } from "@/components/board-view/task-detail-body";
-import { ItemMoreMenu } from "@/components/board-view/item-more-menu";
+import { ItemMoreMenu, type ItemMenuListContext } from "@/components/board-view/item-more-menu";
+import { TaskListsChip, useTaskLists } from "@/components/board-view/task-lists-chip";
 import { ShareBoardDialog } from "@/components/layout/os/share-board-dialog";
 import { emitItemChanged } from "@/lib/realtime-events";
 import { openTask } from "@/lib/nav/open-task";
@@ -65,8 +66,12 @@ export default function ItemDetailPage() {
   const { toast } = useOsToast();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
-  const task = useTask(id, { poll: true });
-  const { item, board, decision, breadcrumb, watcherIds, createdById, missing, denied } = task;
+  // Phase 5b: `?list=` opens the task IN a List it is shown in through a
+  // link (its own fields and values, every write naming it).
+  const listParam = searchParams?.get("list") ?? null;
+  const task = useTask(id, { poll: true, listId: listParam });
+  const taskLists = useTaskLists(id);
+  const { item, board, decision, breadcrumb, watcherIds, createdById, missing, denied, context } = task;
 
   const [comment, setComment] = useState<string | null>(() => searchParams?.get("comment") ?? null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -127,9 +132,33 @@ export default function ItemDetailPage() {
 
   const onDeepLinkResolved = useCallback(() => {
     setComment(null);
-    const keep = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
-    router.replace(`/item/${id}${keep}`, { scroll: false });
-  }, [router, id, returnTo]);
+    const params = new URLSearchParams();
+    if (returnTo) params.set("returnTo", returnTo);
+    // Which List the task is open in stays; only the comment anchor goes.
+    if (listParam) params.set("list", listParam);
+    const qs = params.toString();
+    router.replace(`/item/${id}${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [router, id, returnTo, listParam]);
+
+  // THE ONE PATH for "it just left the List it is open in" (the menu's Remove
+  // from this List, and the Lists chip's Remove on the Here row): every host
+  // List hears it, then the page leaves when the viewer reached the task only
+  // through that List, else shows it in its home.
+  const linkedHere = context?.kind === "linked" ? context : null;
+  const homeId = context && context.home.readable ? context.home.id : null;
+  const onRemovedFromList = useCallback(() => {
+    if (!linkedHere || !id) return;
+    emitItemChanged(id, homeId, false, { leftListIds: [linkedHere.boardId] });
+    if (!linkedHere.home.readable) {
+      router.push(back.href);
+      return;
+    }
+    router.replace(`/item/${id}`, { scroll: false });
+  }, [linkedHere, homeId, id, router, back.href]);
+  const onLinkMoved = useCallback((targetId: string) => {
+    if (!linkedHere || !id) return;
+    router.replace(`/item/${id}?list=${encodeURIComponent(targetId)}`, { scroll: false });
+  }, [linkedHere, id, router]);
 
   // The two doors say two different things, in the user's words, because they
   // ARE two different things and the server has always answered them
@@ -196,11 +225,44 @@ export default function ItemDetailPage() {
   const aiOn = Boolean(boot.prefs?.modules?.activeAppKeys?.includes("ai"));
   const isWatching = Boolean(currentUserId && watcherIds.includes(currentUserId));
 
+  // The menu's link flags come from the task's own Lists answer.
+  const pageListContext = ((): ItemMenuListContext | undefined => {
+    if (!context || !item) return undefined;
+    const lists = taskLists.data;
+    if (linkedHere) {
+      const entry = lists?.linked.find((l) => l.boardId === linkedHere.boardId);
+      const canShare = Boolean(lists?.canShare);
+      return {
+        boardId: linkedHere.boardId,
+        kind: "linked",
+        homeBoardId: homeId,
+        homeStatuses: linkedHere.homeStatuses,
+        canRemoveFromList: Boolean(entry?.canRemove),
+        canLinkMove: Boolean(entry?.canRemove) && canShare,
+        canAddToList: canShare,
+        linkedSubtask: Boolean(item.parentItemId),
+      };
+    }
+    return lists?.canShare && board?.spaceId && !item.parentItemId
+      ? { boardId: context.boardId, kind: "home", canAddToList: true }
+      : undefined;
+  })();
+
   return (
     <div ref={scrollerRef} className="os-chrome h-full overflow-y-auto bg-app">
       {crumbs ? <Breadcrumb items={crumbs} /> : null}
       <div className="sticky top-0 z-10 flex h-12 items-center gap-3 bg-app px-6">
         <BackButton fallbackHref={back.href} label={back.label} />
+        {/* Where else it is (Phase 5b); nothing for a task in no other List. */}
+        {item ? (
+          <TaskListsChip
+            itemId={item.id}
+            lists={taskLists}
+            contextBoardId={linkedHere?.boardId ?? null}
+            onRemovedHere={onRemovedFromList}
+            homeBoardId={homeId}
+          />
+        ) : null}
         <span
           className="min-w-0 max-w-[320px] flex-1 truncate text-base font-medium text-ink transition-opacity"
           style={{ opacity: scrolled && item ? 1 : 0, transitionDuration: "var(--os-dur-base)", transitionTimingFunction: "var(--os-ease-out)" }}
@@ -251,9 +313,12 @@ export default function ItemDetailPage() {
           ) : null}
           {item && decision ? (
             <ItemMoreMenu
-              item={{ id: item.id, boardId: item.boardId, title: item.title, status: item.status, assigneeIds: item.assigneeIds, itemTypeId: item.itemTypeId }}
+              item={{ id: item.id, boardId: item.boardId, title: item.title, status: item.status, assigneeIds: item.assigneeIds, itemTypeId: item.itemTypeId, parentItemId: item.parentItemId ?? null }}
               role={decision.role}
               host="page"
+              listContext={pageListContext}
+              onRemovedFromList={onRemovedFromList}
+              onMoved={linkedHere ? onLinkMoved : undefined}
               currentUserId={currentUserId}
               statuses={statuses}
               watcherIds={watcherIds}

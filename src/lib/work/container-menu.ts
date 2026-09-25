@@ -43,6 +43,8 @@ export type ContainerAction =
   | "statuses"
   | "fields"
   | "default-type"
+  | "default-values"
+  | "row-colors"
   | "about"
   | "templates"
   | "automations"
@@ -161,6 +163,11 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
       out.push(row("statuses", "Statuses"));
       out.push(row("fields", "Fields"));
       out.push(row("default-type", "Default task type", { submenu: true }));
+      // Phase 5b, List comfort (gap 14): what a new task starts with, and
+      // which rows are coloured by which rule. Both write Board.settings, the
+      // same Full-access door as the rows above.
+      out.push(row("default-values", "Default values"));
+      out.push(row("row-colors", "Conditional colors"));
     }
     out.push(row("about", "About"));
   }

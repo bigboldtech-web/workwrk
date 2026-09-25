@@ -48,7 +48,8 @@ import { emitItemChanged } from "@/lib/realtime-events";
 import { BackButton, goBackOr } from "@/components/ui/back-button";
 import { ShareBoardDialog } from "@/components/layout/os/share-board-dialog";
 import { TaskDetailBody } from "./task-detail-body";
-import { ItemMoreMenu } from "./item-more-menu";
+import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
+import { TaskListsChip, useTaskLists } from "./task-lists-chip";
 import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items-shared";
 
 /** The intent is read once per mount and never changes under us. */
@@ -82,7 +83,12 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   const { toast } = useOsToast();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
-  const task = useTask(hardLoad ? null : itemId, { poll: true });
+  // Phase 5b: a task opened from a List it is shown in THROUGH A LINK carries
+  // `?list=<that List>`, so the body is that List's (its own fields and
+  // values) and every write names it. Copy link stays the bare /item/<id>.
+  const listParam = searchParams?.get("list") ?? null;
+  const task = useTask(hardLoad ? null : itemId, { poll: true, listId: listParam });
+  const taskLists = useTaskLists(hardLoad ? null : itemId);
   const [expanded, setExpanded] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [width, setWidth] = useState<number>(() => clampDrawerWidth(boot.prefs?.home?.work?.drawerWidth ?? DRAWER_DEFAULT_W));
@@ -94,7 +100,7 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
     clearTaskDrawer();
   }, [itemId]);
 
-  const { item, board, decision, breadcrumb, watcherIds, createdById } = task;
+  const { item, board, decision, breadcrumb, watcherIds, createdById, context } = task;
 
   // Close lands on the recorded host URL, else on the task's own List, else on
   // the one place every task is reachable from. The history check itself lives
@@ -121,11 +127,36 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   }, []);
 
   // Strip ?comment= once the thread has landed on it, so a refresh does not
-  // pulse again and Copy link copies the clean task URL.
+  // pulse again and Copy link copies the clean task URL. The List context
+  // (?list=) stays: it is which List the task is open in.
   const onDeepLinkResolved = useCallback(() => {
     setComment(null);
+    router.replace(`/item/${itemId}${listParam ? `?list=${encodeURIComponent(listParam)}` : ""}`, { scroll: false });
+  }, [router, itemId, listParam]);
+
+  // THE ONE PATH for "the task just left the List it is open in", whether the
+  // "…" menu's Remove from this List or the Lists chip's Remove on the Here
+  // row did it: every host List hears that it left, then the drawer either
+  // closes (the viewer reached it only through that List) or reopens it in
+  // its home, so it never keeps showing a context the task is no longer in.
+  const linkedHere = context?.kind === "linked" ? context : null;
+  const homeId = context && context.home.readable ? context.home.id : null;
+  const onRemovedFromList = useCallback(() => {
+    if (!linkedHere) return;
+    emitItemChanged(itemId, homeId, false, { leftListIds: [linkedHere.boardId] });
+    if (!linkedHere.home.readable) {
+      close();
+      return;
+    }
     router.replace(`/item/${itemId}`, { scroll: false });
-  }, [router, itemId]);
+  }, [linkedHere, homeId, itemId, router, close]);
+
+  // A Move pressed inside a List the task is only shown in moves the LINK: the
+  // drawer follows it to the List it went to.
+  const onLinkMoved = useCallback((targetId: string) => {
+    if (!linkedHere) return;
+    router.replace(`/item/${itemId}?list=${encodeURIComponent(targetId)}`, { scroll: false });
+  }, [linkedHere, itemId, router]);
 
   // A click on the dimmed list closes the drawer (a click on another ROW
   // navigates, which swaps the task, and that click never reaches here).
@@ -158,6 +189,32 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   // falls back to ALL_ON when the prop is absent.
   const gating = task.moduleGating;
 
+  // The menu's link flags come from the task's own Lists answer (the server's
+  // removal and share rules), never from the List page behind the drawer.
+  const drawerListContext = (parentItemId: string | null): ItemMenuListContext | undefined => {
+    if (!context) return undefined;
+    const lists = taskLists.data;
+    if (linkedHere) {
+      const entry = lists?.linked.find((l) => l.boardId === linkedHere.boardId);
+      const canShare = Boolean(lists?.canShare);
+      return {
+        boardId: linkedHere.boardId,
+        kind: "linked",
+        homeBoardId: homeId,
+        homeStatuses: linkedHere.homeStatuses,
+        canRemoveFromList: Boolean(entry?.canRemove),
+        canLinkMove: Boolean(entry?.canRemove) && canShare,
+        canAddToList: canShare,
+        linkedSubtask: Boolean(parentItemId),
+      };
+    }
+    // At home: Add to another List when its home may share it, never for a
+    // Personal List task (its owner's alone).
+    return lists?.canShare && board?.spaceId && !parentItemId
+      ? { boardId: context.boardId, kind: "home", canAddToList: true }
+      : undefined;
+  };
+
   if (hardLoad) return null;
 
   const crumb = (
@@ -168,6 +225,17 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         ) : (
           <span className="max-w-[160px] truncate">{breadcrumb.list.name}</span>
         )
+      ) : null}
+      {/* Where else it is (Phase 5b): renders nothing for a task that is in
+          no other List, so such a task's header is exactly as it was. */}
+      {item ? (
+        <TaskListsChip
+          itemId={item.id}
+          lists={taskLists}
+          contextBoardId={linkedHere?.boardId ?? null}
+          onRemovedHere={onRemovedFromList}
+          homeBoardId={homeId}
+        />
       ) : null}
       {item ? (
         <>
@@ -235,7 +303,7 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         ) : null}
         {item && decision ? (
           <ItemMoreMenu
-            item={{ id: item.id, boardId: item.boardId, title: item.title, status: item.status, assigneeIds: item.assigneeIds, itemTypeId: item.itemTypeId }}
+            item={{ id: item.id, boardId: item.boardId, title: item.title, status: item.status, assigneeIds: item.assigneeIds, itemTypeId: item.itemTypeId, parentItemId: item.parentItemId ?? null }}
             role={decision.role}
             host="drawer"
             currentUserId={currentUserId}
@@ -248,6 +316,9 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
             isGuest={boot.viewer.orgRole === "GUEST"}
             archived={Boolean(item.archivedAt)}
             timeTrackingOn={gating?.timeTracking ?? true}
+            listContext={drawerListContext(item.parentItemId ?? null)}
+            onRemovedFromList={onRemovedFromList}
+            onMoved={linkedHere ? onLinkMoved : undefined}
             onPatch={(body) => void task.patch(body)}
             onRenameRequested={() => document.querySelector<HTMLElement>("[data-task-title]")?.click()}
             onShare={board?.spaceId ? () => setShareOpen(true) : undefined}

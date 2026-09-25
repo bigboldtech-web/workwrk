@@ -140,6 +140,16 @@ interface BoardItemDetailProps {
   descriptionDraft?: string | null;
   commentDraft?: string;
   onDraftChange?: (patch: { title?: string; description?: string; comment?: string }) => void;
+  /**
+   * Phase 5b: the List the task is open in THROUGH A LINK, when it is. Its
+   * subtasks are read and created through it.
+   */
+  linkedContextBoardId?: string | null;
+  /**
+   * Phase 5b: a Connect field's commit, which must hear the answer (the cell
+   * keeps its selection and offers Retry on a failure).
+   */
+  onCommitField?: (key: string, next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -188,6 +198,8 @@ export function BoardItemDetail({
   descriptionDraft = null,
   commentDraft,
   onDraftChange,
+  linkedContextBoardId = null,
+  onCommitField,
 }: BoardItemDetailProps) {
   const canEdit = rankOf(role) >= rankOf("EDIT");
   const canComment = rankOf(role) >= rankOf("COMMENT");
@@ -394,7 +406,16 @@ export function BoardItemDetail({
                 mode="edit"
                 disabled={!canEdit}
                 currentUserId={currentUserId}
-                boardId={item.boardId ?? null}
+                // The List whose schema defines these fields (the body's own
+                // board: its home, or the List it is open in through a link).
+                // It scopes a USER / PEOPLE field and a Connect field's picker.
+                boardId={listContext?.id ?? item.boardId ?? null}
+                fieldListId={listContext?.id ?? item.boardId ?? null}
+                itemId={item.id}
+                connections={item.connections?.[f.key]}
+                mirror={item.mirrors?.[f.key]}
+                popover="absolute"
+                onCommit={onCommitField ? (next) => onCommitField(f.key, next) : undefined}
                 onChange={(next) => onPatch({ metadataPatch: metadataPatch({ [f.key]: next }) })}
               />
             </FieldRow>
@@ -411,6 +432,7 @@ export function BoardItemDetail({
           onOpenItem={onOpenItem}
           onCountChange={setSubtaskCount}
           autoFocus={revealed.has("subtasks")}
+          contextBoardId={linkedContextBoardId}
         />
       </div>
 

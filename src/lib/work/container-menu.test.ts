@@ -29,9 +29,34 @@ describe("containerMenuRows", () => {
     const list = actions(containerMenuRows({ kind: "list", role: "full" }));
     expect(list).toEqual([
       "favorite", "pin-top", "rename", "copy-link", "color", "share", "statuses", "fields",
-      "default-type", "about", "templates", "automations", "mute",
+      "default-type", "default-values", "row-colors", "about", "templates", "automations", "mute",
       "move", "duplicate", "archive", "delete",
     ]);
+  });
+
+  // Phase 5b, List comfort: the List's own settings sit with the other List
+  // settings, right after Default task type, and only for Full access.
+  it("puts Default values and Conditional colors right after Default task type on a Full access List", () => {
+    const rows = containerMenuRows({ kind: "list", role: "full" });
+    const a = actions(rows);
+    const at = a.indexOf("default-type");
+    expect(a.slice(at, at + 3)).toEqual(["default-type", "default-values", "row-colors"]);
+    const label = (action: string) => rows.find((r) => r.kind === "row" && r.action === action);
+    expect(label("default-values")).toMatchObject({ label: "Default values" });
+    expect(label("row-colors")).toMatchObject({ label: "Conditional colors" });
+  });
+
+  it("never gives Default values or Conditional colors below Full access, nor to a Space or a Folder", () => {
+    for (const role of ["edit", "comment", "view"] as const) {
+      const a = actions(containerMenuRows({ kind: "list", role }));
+      expect(a).not.toContain("default-values");
+      expect(a).not.toContain("row-colors");
+    }
+    for (const kind of ["space", "folder"] as const) {
+      const a = actions(containerMenuRows({ kind, role: "full" }));
+      expect(a).not.toContain("default-values");
+      expect(a).not.toContain("row-colors");
+    }
   });
 
   // The default used to be "full", and three of the five hosts passed nothing,

@@ -3,12 +3,20 @@
 // ItemSubtasks — inline subtask mini-table in the task detail. Subtasks
 // are real Items with parentItemId = this item. Lists the children, shows
 // a status pill + owner per row, lets you add a new subtask and open one.
+//
+// The children come from GET /api/items/[id]/subtasks (the same children in
+// the same order, position then createdAt), not from a read of the whole
+// List filtered in the browser. In a List the task is shown in through a
+// link (Phase 5b) the read names that List, so each child is projected for
+// it, and a new subtask is POSTed to that List, which creates it in the
+// parent's home with its parent: it appears wherever its parent does.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, ChevronRight } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { isDoneStatus } from "@/lib/board-items-shared";
+import { accessMessage } from "@/lib/access-message";
 import { PersonAvatar } from "./assignee-picker";
 
 export function ItemSubtasks({
@@ -18,6 +26,7 @@ export function ItemSubtasks({
   onOpenItem,
   onCountChange,
   autoFocus = false,
+  contextBoardId = null,
 }: {
   item: BoardItemRow;
   canEdit: boolean;
@@ -28,8 +37,13 @@ export function ItemSubtasks({
   onCountChange?: (n: number) => void;
   /** Focus the add-input on mount (used when revealed from an action row). */
   autoFocus?: boolean;
+  /**
+   * Phase 5b: the List the task is open in THROUGH A LINK, when it is. The
+   * read and the create name it; in the home the body is today's exactly.
+   */
+  contextBoardId?: string | null;
 }) {
-  const boardId = item.boardId ?? null;
+  const boardId = contextBoardId ?? item.boardId ?? null;
   const [rows, setRows] = useState<BoardItemRow[] | null>(null);
   const [draft, setDraft] = useState("");
   const [adding, setAdding] = useState(false);
@@ -42,15 +56,16 @@ export function ItemSubtasks({
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
 
   const load = useCallback(async () => {
-    if (!boardId) { setRows([]); return; }
     try {
-      const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/items/${item.id}/subtasks${contextBoardId ? `?list=${encodeURIComponent(contextBoardId)}` : ""}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) { setRows([]); return; }
       const data = await res.json();
-      const all: BoardItemRow[] = Array.isArray(data.items) ? data.items : [];
-      setRows(all.filter((r) => r.parentItemId === item.id));
+      setRows(Array.isArray(data.subtasks) ? (data.subtasks as BoardItemRow[]) : []);
     } catch { setRows([]); }
-  }, [boardId, item.id]);
+  }, [item.id, contextBoardId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -71,7 +86,7 @@ export function ItemSubtasks({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Couldn't add subtask");
+        setError(accessMessage(data, "Couldn't add subtask"));
         return;
       }
       if (data?.item) setRows((prev) => [...(prev ?? []), data.item as BoardItemRow]);

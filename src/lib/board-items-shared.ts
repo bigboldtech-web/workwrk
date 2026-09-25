@@ -334,6 +334,17 @@ export interface BoardItemRow {
     homeStatus?: StatusOption | null;
     /** The home set, only when the viewer can read the home List. */
     homeStatuses?: StatusOption[];
+    /**
+     * The viewer's role on the TASK (gateItem's ladder: the home List's role,
+     * assignment, creation, org admin, and VIEW through this List), on every
+     * linked row. A List page edits a linked row only when the viewer
+     * contributes to the List shown AND this is at least EDIT.
+     */
+    role?: "VIEW" | "COMMENT" | "EDIT" | "FULL";
+    /** Linked roots: may the viewer take it out of this List (contribute here or on the home)? */
+    canRemove?: boolean;
+    /** Linked roots: may the viewer add it to more Lists (contribute on the home)? */
+    canShare?: boolean;
   };
 }
 

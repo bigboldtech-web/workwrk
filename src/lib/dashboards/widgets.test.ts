@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  cardVisibility,
   checkWidgetRemovals,
   parseWidgets,
+  redactWidgetForEditor,
   redactWidgetsForReader,
   resolvePassthrough,
+  restoreHiddenParts,
   serializeWidgets,
   widgetInputSchema,
+  type CardVisibility,
   type RedactContext,
   type Widget,
   type WidgetInput,
@@ -75,9 +79,12 @@ describe("writing widgets", () => {
     const submitted = [{ id: "odd", kind: "passthrough" }] as WidgetInput[];
     const r = resolvePassthrough(submitted, stored);
     expect(r.ok && r.widgets[0]).toEqual(stored[1]);
-    const forged = resolvePassthrough([{ id: "keep", kind: "passthrough" }] as WidgetInput[], stored);
-    expect(forged).toEqual({ ok: false, error: "unknown_widget", id: "keep" });
+    // Any stored card may be kept by naming it: that is how an editor keeps a
+    // card they are not shown. The value is still the stored one, verbatim.
+    const kept = resolvePassthrough([{ id: "keep", kind: "passthrough" }] as WidgetInput[], stored);
+    expect(kept).toEqual({ ok: true, widgets: [stored[0]] });
     expect(resolvePassthrough([{ id: "new", kind: "passthrough" }] as WidgetInput[], stored)).toEqual({ ok: false, error: "unknown_widget", id: "new" });
+    expect(resolvePassthrough([{ id: "odd", kind: "passthrough" }] as WidgetInput[], [])).toEqual({ ok: false, error: "unknown_widget", id: "odd" });
   });
   it("fills the defaults of a data card", () => {
     const r = resolvePassthrough([{ id: "c", kind: "chart", title: "T", source: { kind: "lists", listIds: ["A", "A"] }, groupBy: "status", layout }] as WidgetInput[], []);
@@ -118,6 +125,85 @@ describe("redactWidgetsForReader", () => {
     expect(out[4]).toEqual({ id: "bygroup", kind: "hidden", layout });
     expect(out[6]).toEqual({ id: "sum", kind: "hidden", layout });
     expect(JSON.stringify(out)).not.toContain('"P"');
+  });
+});
+
+describe("editors see only what they can read, and a save keeps the rest", () => {
+  const cards = parseWidgets([
+    { id: "notes", kind: "notes", title: "N", text: "t", layout },
+    { id: "odd", type: "hologram", secret: "P" },
+    { id: "private", kind: "stat", title: "Secret revenue", source: { kind: "lists", listIds: ["P"] }, layout },
+    { id: "mixed", kind: "list", title: "Mixed", source: { kind: "lists", listIds: ["A", "P"] }, filter: { rules: [{ field: "status", operator: "is", value: "DONE" }, { field: "revenue", operator: "isSet", value: "" }, { field: "points", operator: "isSet", value: "" }] }, layout },
+    { id: "space", kind: "stat", title: "Space", source: { kind: "space", spaceId: "S-private" }, layout },
+    { id: "open", kind: "chart", title: "Readable", source: { kind: "lists", listIds: ["A"] }, groupBy: "status", layout },
+    { id: "bygroup", kind: "chart", title: "By revenue", source: { kind: "lists", listIds: ["A", "P"] }, groupBy: { field: "revenue" }, layout },
+  ]);
+  const ctx: RedactContext = {
+    readableListsFor: (s) => (s.kind === "space" ? (s.spaceId === "S-private" ? null : []) : s.kind === "lists" ? s.listIds.filter((id) => id === "A") : ["A"]),
+    fieldKeysByList: new Map([["A", new Set(["points"])], ["P", new Set(["revenue"])]]),
+  };
+  const byId = (id: string) => cards.find((w) => w.id === id) as Widget;
+  const visibility = new Map<string, CardVisibility>(cards.map((w) => [w.id, cardVisibility(w, ctx)] as const));
+
+  it("classifies each card for the editor", () => {
+    expect(cardVisibility(byId("notes"), ctx)).toEqual({ kind: "full" });
+    expect(cardVisibility(byId("odd"), ctx)).toEqual({ kind: "full" });
+    expect(cardVisibility(byId("private"), ctx)).toEqual({ kind: "hidden" });
+    expect(cardVisibility(byId("space"), ctx)).toEqual({ kind: "hidden" });
+    expect(cardVisibility(byId("bygroup"), ctx)).toEqual({ kind: "hidden" });
+    expect(cardVisibility(byId("open"), ctx)).toEqual({ kind: "full" });
+    expect(cardVisibility(byId("mixed"), ctx)).toEqual({ kind: "partial", hiddenListIds: ["P"], hiddenRules: [{ field: "revenue", operator: "isSet", value: "" }] });
+  });
+
+  it("gives the editor no title, config or raw value of what they cannot read", () => {
+    const out = cards.map((w) => redactWidgetForEditor(w, ctx));
+    expect(out[1]).toEqual({ id: "odd", kind: "passthrough", raw: null });
+    expect(out[2]).toEqual({ id: "private", kind: "hidden", layout });
+    expect(out[4]).toEqual({ id: "space", kind: "hidden", layout });
+    expect(out[3]).toMatchObject({ kind: "list", partial: true, source: { kind: "lists", listIds: ["A"] } });
+    expect((out[3] as { filter: { rules: Array<{ field: string }> } }).filter.rules.map((r) => r.field)).toEqual(["status", "points"]);
+    expect(out[5]).toEqual(byId("open"));
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('"P"');
+    expect(text).not.toContain("Secret");
+    expect(text).not.toContain("revenue");
+  });
+
+  it("keeps a hidden card only verbatim, and refuses any other value for it", () => {
+    const kept = restoreHiddenParts(cards, [byId("private")], visibility);
+    expect(kept).toEqual({ ok: true, widgets: [byId("private")] });
+    const forged = { ...(byId("private") as Extract<Widget, { kind: "stat" }>), title: "Mine now" };
+    expect(restoreHiddenParts(cards, [forged], visibility)).toEqual({ ok: false, error: "widget_locked", id: "private" });
+  });
+
+  it("appends the Lists and rules the editor could not see to their edit of a partial card", () => {
+    const edited = { ...(byId("mixed") as Extract<Widget, { kind: "list" }>), title: "Renamed", source: { kind: "lists" as const, listIds: ["A", "B"] }, filter: { connector: "AND" as const, rules: [{ field: "points", operator: "isSet" as const, value: "" }], hideDone: true } };
+    const r = restoreHiddenParts(cards, [edited], visibility);
+    expect(r.ok).toBe(true);
+    const w = r.ok ? (r.widgets[0] as Extract<Widget, { kind: "list" }>) : null;
+    expect(w?.title).toBe("Renamed");
+    expect(w?.source).toEqual({ kind: "lists", listIds: ["A", "B", "P"] });
+    expect(w?.filter.rules.map((x) => x.field)).toEqual(["points", "revenue"]);
+    expect(w?.filter.hideDone).toBe(true);
+  });
+
+  it("locks a partial card's source to a List set and refuses to cut past the limits", () => {
+    const toAll = { ...(byId("mixed") as Extract<Widget, { kind: "list" }>), source: { kind: "all" as const } };
+    expect(restoreHiddenParts(cards, [toAll], visibility)).toEqual({ ok: false, error: "source_locked", id: "mixed" });
+    const many = { ...(byId("mixed") as Extract<Widget, { kind: "list" }>), source: { kind: "lists" as const, listIds: Array.from({ length: 50 }, (_, i) => `L${i}`) } };
+    expect(restoreHiddenParts(cards, [many], visibility)).toEqual({ ok: false, error: "too_many_lists", id: "mixed" });
+    const rules = Array.from({ length: 20 }, () => ({ field: "status", operator: "is" as const, value: "x" }));
+    const lotsOfRules = { ...(byId("mixed") as Extract<Widget, { kind: "list" }>), filter: { connector: "AND" as const, rules, hideDone: false } };
+    expect(restoreHiddenParts(cards, [lotsOfRules], visibility)).toEqual({ ok: false, error: "too_many_rules", id: "mixed" });
+  });
+
+  it("takes a new card and a fully readable card as sent, and fails closed on a stored card it was told nothing about", () => {
+    const fresh: Widget = { id: "fresh", kind: "notes", title: "New", text: "", layout };
+    const changedOpen = { ...(byId("open") as Extract<Widget, { kind: "chart" }>), display: "donut" as const };
+    const r = restoreHiddenParts(cards, [fresh, changedOpen], visibility);
+    expect(r).toEqual({ ok: true, widgets: [fresh, changedOpen] });
+    const blind = restoreHiddenParts(cards, [changedOpen], new Map());
+    expect(blind).toEqual({ ok: false, error: "widget_locked", id: "open" });
   });
 });
 

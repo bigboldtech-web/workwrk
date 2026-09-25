@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
-import { ViewTabContextMenu } from "@/components/board-view/view-tab-menu";
+import { ViewTabContextMenu, ViewTabMoreTrigger } from "@/components/board-view/view-tab-menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import type { ViewType } from "@/generated/prisma";
 
@@ -67,6 +67,9 @@ export interface BoardViewItem {
   type: ViewType;
   isDefault: boolean;
   config: unknown;
+  /** Phase 5b: a private view is scheduled only to its owner. */
+  isShared?: boolean;
+  ownerId?: string | null;
 }
 
 export function BoardViewTabs({
@@ -77,6 +80,7 @@ export function BoardViewTabs({
   defaultViewId,
   basePath,
   canManage = true,
+  scheduleReports = false,
 }: {
   views: BoardViewItem[];
   boardId: string;
@@ -92,6 +96,11 @@ export function BoardViewTabs({
    * write, and both answered 403 while still being rendered.
    */
   canManage?: boolean;
+  /**
+   * The viewer may schedule email reports of this List's views (the List
+   * page's strict read, and a member). The Personal List never passes it.
+   */
+  scheduleReports?: boolean;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -176,14 +185,20 @@ export function BoardViewTabs({
             onDragEnd={endDrag}
             className={`inline-flex items-stretch transition-[opacity] ${canManage ? "cursor-grab active:cursor-grabbing" : ""} ${dragId === v.id ? "opacity-40" : ""}`}
           >
-            <ViewTabContextMenu boardId={boardId} view={v}>
-              <ViewTab
-                icon={VIcon}
-                iconTileColor={tileColor}
-                label={v.name}
-                active={active}
-                href={href}
-              />
+            <ViewTabContextMenu boardId={boardId} view={v} scheduleReports={scheduleReports}>
+              {(openMenu) => (
+                <ViewTab
+                  icon={VIcon}
+                  iconTileColor={tileColor}
+                  label={v.name}
+                  active={active}
+                  href={href}
+                  // The active tab's own "...", on hover and focus: the same
+                  // menu a right-click opens, for a pointer or a keyboard
+                  // that cannot right-click.
+                  trailing={active ? <ViewTabMoreTrigger onOpen={openMenu} label={`${v.name} options`} /> : undefined}
+                />
+              )}
             </ViewTabContextMenu>
           </span>
         );

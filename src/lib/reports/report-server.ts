@@ -29,7 +29,7 @@ import { readDashboard, viewerZone } from "@/lib/dashboards/dashboard-server";
 import { computeWidget, redactForViewer, type WidgetReader, type WidgetResult } from "@/lib/dashboards/widget-data";
 import { parseWidgets, type Widget } from "@/lib/dashboards/widgets";
 import { FILTER_OPERATORS, type FilterOperatorName } from "@/lib/list-comfort";
-import { boardForViewer, listReader, memberViewer, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
+import { boardForViewer, listReader, memberViewer, recipientRows, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
 import {
   appendRunLog,
   buildReportEmail,
@@ -288,12 +288,9 @@ export function canEditSchedule(row: Pick<Row, "createdById">, c: LinkViewer): b
 
 export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<ScheduleDTO[]> {
   const userIds = Array.from(new Set(rows.flatMap((r) => r.recipientUserIds)));
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds }, organizationId: c.organizationId },
-        select: { id: true, firstName: true, lastName: true, avatar: true, deletedAt: true, status: true },
-      })
-    : [];
+  // The org's rows only, with the same eligibility the write and the cron
+  // apply, so `active` is exactly "this person still receives it".
+  const users = userIds.length ? await recipientRows(userIds, c.organizationId) : [];
   const byId = new Map(users.map((u) => [u.id, u] as const));
   const admin = viewerIsOrgAdmin(c);
   const out: ScheduleDTO[] = [];
@@ -314,7 +311,7 @@ export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<Schedu
       recipients: r.recipientUserIds
         .map((id) => byId.get(id))
         .filter((u): u is NonNullable<typeof u> => !!u)
-        .map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar, active: !u.deletedAt && u.status !== "INACTIVE" })),
+        .map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar, active: !u.deletedAt && u.status !== "INACTIVE" && !u.guest })),
       active: r.active,
       // Whether a copy went out is, with one recipient, whether they can read
       // the target; only an admin is told.

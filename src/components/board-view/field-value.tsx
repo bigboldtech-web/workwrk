@@ -17,6 +17,8 @@ import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker"
 import { useAnchorPos } from "./use-anchor-pos";
 import Link from "next/link";
 import { useObjectHref } from "@/components/layout/os/use-object-href";
+import { isConnectField, isMirrorField, type ConnectionRef, type MirrorValue as MirrorData } from "@/lib/list-connect";
+import { ConnectValue, MirrorValue, type CommitResult } from "./connect-field-value";
 
 // Cell-picker dropdown. Uses position:fixed (via useAnchorPos) so it escapes the
 // table's horizontal-scroll container — otherwise the menu is clipped at the
@@ -240,11 +242,54 @@ interface FieldValueProps {
    *  scope; without it these fields fall back to /api/users, which answers a
    *  non-exec caller with their own report tree and nobody else. */
   boardId?: string | null;
+  // ── Phase 5b, Connect and Mirror columns (list-connect.ts) ──────────
+  /** A Connect cell: the connected tasks THIS viewer can read. */
+  connections?: ConnectionRef[];
+  /** A Mirror cell: its computed values, or its roll-up. */
+  mirror?: MirrorData;
+  /** The List whose schema defines the field (a Connect cell's candidates route). */
+  fieldListId?: string | null;
+  /** The task the cell belongs to, never offered as its own connection. */
+  itemId?: string | null;
+  /**
+   * A Connect cell commits through this and hears the answer, so it can keep
+   * its selection and offer Retry. Every other type keeps onChange.
+   */
+  onCommit?: (next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Where a Connect cell's panel opens: over a table ("fixed") or inside the drawer ("absolute"). */
+  popover?: "fixed" | "absolute";
 }
 
 export function FieldValue(props: FieldValueProps) {
   const { field, value, mode, onChange, disabled, currentUserId, boardId = null } = props;
   const readOnly = mode === "display" || disabled || !onChange;
+
+  // Checked BEFORE the type switch: a Connect column is stored as a
+  // RELATIONSHIP (with target Lists) and a Mirror is computed, so neither may
+  // fall into the doc-link Relationship editor. A RELATIONSHIP without target
+  // Lists is not a connect field and renders exactly as it always has.
+  if (isConnectField(field)) {
+    return (
+      <ConnectValue
+        field={field}
+        connections={props.connections ?? []}
+        readOnly={readOnly || !props.onCommit}
+        fieldListId={props.fieldListId ?? boardId}
+        itemId={props.itemId ?? null}
+        onCommit={props.onCommit ? (next) => props.onCommit!(next) as Promise<CommitResult> : undefined}
+        popover={props.popover ?? "fixed"}
+      />
+    );
+  }
+  if (isMirrorField(field)) {
+    return (
+      <MirrorValue
+        field={field}
+        mirror={props.mirror}
+        renderField={(def, v, listId) => <FieldValue field={def} value={v} mode="display" boardId={listId || null} />}
+      />
+    );
+  }
 
   switch (field.type) {
     case "TEXT":

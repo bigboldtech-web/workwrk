@@ -18,15 +18,16 @@ import type { StatusOption } from "@/lib/board-items-shared";
 import { isSystemItemType } from "@/lib/system-items";
 
 /**
- * THE ONE SWITCH the client run flips. While it is false no List page asks
- * for `?links=1`, so no client ever holds a linked row it would write back
- * without a context List. It flips in the same change that makes
- * board-canvas.tsx honour the item event's `listIds`, makes
- * board-table-view.tsx and board-kanban-view.tsx send `contextBoardId`, and
- * makes the poll ask for `?links=1`. list-links.client-contract.test.ts holds
- * both halves of that promise.
+ * THE ONE SWITCH, now on. A List page asks for `?links=1` (list-link-rows.ts
+ * itemsUrl) and draws the tasks linked into it. It was flipped in the same
+ * change that made board-canvas.tsx honour the item event's `listIds`, made
+ * board-table-view.tsx and board-kanban-view.tsx send `contextBoardId` on
+ * every write from a linked row, and made the poll ask for `?links=1`, so no
+ * client holds a linked row it would write back without its context List.
+ * list-links.client-contract.test.ts holds both halves of that promise; turn
+ * it off again and the same test demands that no client asks for the union.
  */
-export const LIST_LINK_CANVAS_LIVE = false;
+export const LIST_LINK_CANVAS_LIVE = true;
 
 /**
  * The most linked ids one multi-List read carries, inline, in its where

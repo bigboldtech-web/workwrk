@@ -322,8 +322,14 @@ function normalizeSource(s: z.infer<typeof sourceSchema>): WidgetSource {
 
 /**
  * Submitted cards, as stored cards. A passthrough is resolved against the
- * STORED list: it must name a stored passthrough, and it becomes that stored
- * value, so no client can write arbitrary JSON through one.
+ * STORED list: it must name a stored card, and it becomes that stored value
+ * verbatim, so no client can write arbitrary JSON through one.
+ *
+ * It may name ANY stored card, not only a stored passthrough: that is how an
+ * editor keeps a card they are not shown (a hidden card, whose Lists they
+ * cannot read, travels to them as `{ id, kind: "hidden" }` and comes back as
+ * `{ id, kind: "passthrough" }`). The value written is still the stored one,
+ * byte for byte, so the relaxation lets nobody write anything new.
  */
 export function resolvePassthrough(
   submitted: readonly WidgetInput[],
@@ -337,7 +343,7 @@ export function resolvePassthrough(
     seen.add(w.id);
     if (w.kind === "passthrough") {
       const s = storedById.get(w.id);
-      if (!s || s.kind !== "passthrough") return { ok: false, error: "unknown_widget", id: w.id };
+      if (!s) return { ok: false, error: "unknown_widget", id: w.id };
       out.push(s);
       continue;
     }
@@ -413,4 +419,122 @@ export function redactWidgetForReader(w: Widget, ctx: RedactContext): Widget | H
 
 export function redactWidgetsForReader(widgets: readonly Widget[], ctx: RedactContext): Array<Widget | HiddenWidget> {
   return widgets.map((w) => redactWidgetForReader(w, ctx));
+}
+
+// ── Redaction for editors ────────────────────────────────────────────
+//
+// An editor (the owner, an org Owner or Admin, a Space manager on the Space
+// Overview) may change a dashboard, but a stored List id is still not a grant:
+// what an editor is SHOWN of a card is exactly what they can read, like any
+// reader. The difference is that their save has to keep what they were not
+// shown. So the editor's copy says how much of each card they saw
+// (cardVisibility), and the PATCH puts the unseen parts back
+// (restoreHiddenParts) before anything is written.
+//
+//   full     every List and every filter rule of the card is readable
+//   hidden   none of its Lists is (or its Space is not, or it groups or sums a
+//            field only an unreadable List defines): the editor gets
+//            { id, kind: "hidden" } and can only keep it or remove it
+//   partial  some Lists or some rules are not readable: the editor sees the
+//            rest, and the save appends the unseen ones after theirs
+
+export type CardVisibility =
+  | { kind: "full" }
+  | { kind: "hidden" }
+  | { kind: "partial"; hiddenListIds: string[]; hiddenRules: WidgetRule[] };
+
+/** A card as an editor holds it: whole, hidden, or the visible part of a partial one. */
+export type EditorWidget = Widget | HiddenWidget | (DataWidget & { partial: true });
+
+/** How much of one stored card this viewer can read. */
+export function cardVisibility(w: Widget, ctx: RedactContext): CardVisibility {
+  // A notes card holds no List data. A passthrough is a card this release
+  // cannot interpret; an editor is shown that it exists (so they can remove
+  // it) and never its raw value (redactWidgetForEditor), and it can only
+  // round-trip untouched.
+  if (w.kind === "notes" || w.kind === "passthrough") return { kind: "full" };
+  const lists = ctx.readableListsFor(w.source);
+  if (lists === null) return { kind: "hidden" };
+  if (w.source.kind === "lists" && lists.length === 0) return { kind: "hidden" };
+  const keys = new Set<string>();
+  for (const id of lists) for (const k of ctx.fieldKeysByList.get(id) ?? []) keys.add(k);
+  if (w.kind === "chart" && typeof w.groupBy === "object" && !keys.has(w.groupBy.field)) return { kind: "hidden" };
+  if (w.kind === "stat" && w.metric.op === "sum" && !keys.has(w.metric.fieldKey)) return { kind: "hidden" };
+  const readable = new Set(lists);
+  const hiddenListIds = w.source.kind === "lists" ? w.source.listIds.filter((id) => !readable.has(id)) : [];
+  const hiddenRules = w.filter.rules.filter((r) => !BUILTIN_FIELDS.has(r.field) && !keys.has(r.field)).map((r) => ({ ...r }));
+  if (hiddenListIds.length === 0 && hiddenRules.length === 0) return { kind: "full" };
+  return { kind: "partial", hiddenListIds, hiddenRules };
+}
+
+/** One stored card as an EDITOR may see it. */
+export function redactWidgetForEditor(w: Widget, ctx: RedactContext): EditorWidget {
+  // A passthrough's raw value is unknown JSON that may name Lists this editor
+  // cannot read; the client only ever needs its id and place.
+  if (w.kind === "passthrough") return { id: w.id, kind: "passthrough", raw: null, ...(w.layout ? { layout: w.layout } : {}) };
+  const v = cardVisibility(w, ctx);
+  if (v.kind === "hidden") return hidden(w);
+  if (v.kind === "full" || w.kind === "notes") return w;
+  const hiddenLists = new Set(v.hiddenListIds);
+  const hiddenRuleSet = new Set(v.hiddenRules.map((r) => r.field));
+  const source: WidgetSource =
+    w.source.kind === "lists" ? { kind: "lists", listIds: w.source.listIds.filter((id) => !hiddenLists.has(id)) } : w.source;
+  const filter: WidgetFilter = { ...w.filter, rules: w.filter.rules.filter((r) => !hiddenRuleSet.has(r.field)) };
+  return { ...w, source, filter, partial: true };
+}
+
+function sameCard(a: Widget, b: Widget): boolean {
+  return JSON.stringify(serializeWidgets([a])) === JSON.stringify(serializeWidgets([b]));
+}
+
+/**
+ * The submitted cards (already through resolvePassthrough), with every part
+ * the editor could not see put back, or the reason the save is refused.
+ *
+ * `visibility` is cardVisibility for THIS editor over the STORED cards. A new
+ * card (no stored id) is taken as sent. A hidden card may only come back as
+ * the stored value itself (it was sent as a passthrough) or be left out and
+ * named as removed; anything else is widget_locked. A partial card keeps its
+ * stored List ids and rules the editor cannot see, appended after the
+ * submitted ones; when it had unseen Lists its source must still be a List
+ * set (source_locked), and the appended totals must stay inside the limits
+ * (too_many_lists, too_many_rules) rather than be cut.
+ */
+export function restoreHiddenParts(
+  stored: readonly Widget[],
+  submitted: readonly Widget[],
+  visibility: ReadonlyMap<string, CardVisibility>,
+):
+  | { ok: true; widgets: Widget[] }
+  | { ok: false; error: "widget_locked" | "source_locked" | "too_many_lists" | "too_many_rules"; id: string } {
+  const storedById = new Map(stored.map((w) => [w.id, w] as const));
+  const out: Widget[] = [];
+  for (const w of submitted) {
+    const s = storedById.get(w.id);
+    // A stored card with no visibility entry is treated as unseen: failing
+    // closed keeps it, where failing open would let the save replace it.
+    const v: CardVisibility = s ? visibility.get(w.id) ?? { kind: "hidden" } : { kind: "full" };
+    if (!s || v.kind === "full") {
+      out.push(w);
+      continue;
+    }
+    if (sameCard(w, s)) {
+      out.push(s);
+      continue;
+    }
+    if (v.kind === "hidden") return { ok: false, error: "widget_locked", id: w.id };
+    // Partial: the submission is the visible part, possibly edited.
+    if (w.kind === "notes" || w.kind === "passthrough") return { ok: false, error: "source_locked", id: w.id };
+    let source = w.source;
+    if (v.hiddenListIds.length > 0) {
+      if (w.source.kind !== "lists") return { ok: false, error: "source_locked", id: w.id };
+      const ids = Array.from(new Set([...w.source.listIds, ...v.hiddenListIds]));
+      if (ids.length > MAX_WIDGET_LISTS) return { ok: false, error: "too_many_lists", id: w.id };
+      source = { kind: "lists", listIds: ids };
+    }
+    const rules = [...w.filter.rules, ...v.hiddenRules.map((r) => ({ ...r }))];
+    if (rules.length > MAX_WIDGET_RULES) return { ok: false, error: "too_many_rules", id: w.id };
+    out.push({ ...w, source, filter: { ...w.filter, rules } });
+  }
+  return { ok: true, widgets: out };
 }

@@ -84,10 +84,20 @@ export function clearTaskDrawer(): void {
  *
  * `router` is Next's `useRouter()` return value, narrowed to what is used here
  * so this module stays importable from a test without React.
+ *
+ * `opts.listId` (Phase 5b) opens the task IN a List it is shown in through a
+ * link: `/item/<id>?list=<listId>`, so the drawer shows that List's own fields
+ * and its link menu. Only a row shown through a link passes it; Copy link
+ * stays the bare `/item/<id>`.
  */
-export function openTask(router: { push: (href: string) => void }, itemId: string): void {
+export function openTask(
+  router: { push: (href: string) => void },
+  itemId: string,
+  opts?: { listId?: string | null },
+): void {
   if (typeof window !== "undefined") {
     armTaskDrawer(itemId, `${window.location.pathname}${window.location.search}`);
   }
-  router.push(`/item/${itemId}`);
+  const listId = opts?.listId;
+  router.push(listId ? `/item/${itemId}?list=${encodeURIComponent(listId)}` : `/item/${itemId}`);
 }

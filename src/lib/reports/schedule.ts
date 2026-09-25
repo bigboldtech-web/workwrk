@@ -298,6 +298,28 @@ export function recipientProblems(
   return Array.from(new Set(requested)).filter((id) => !ok.has(id));
 }
 
+/**
+ * recipientProblems for a REPORT, which also refuses a Guest.
+ *
+ * A report carries card titles, notes text and task titles computed under
+ * the recipient's access, and links back into pages a Guest is shown a 404
+ * for, so a Guest is never an eligible recipient (the cron skips one too).
+ * `guest` is the org role read from the member's row (orgRoleOf, in
+ * list-links-server.ts recipientRows), never the raw access level.
+ * recipientProblems itself is unchanged because PATCH /api/boards/[id] uses
+ * it for default assignees, where a Guest is a valid assignee.
+ */
+export function reportRecipientProblems(
+  requested: readonly string[],
+  rows: ReadonlyArray<{ id: string; organizationId: string; deletedAt: Date | string | null; status: string | null; guest: boolean }>,
+  organizationId: string,
+): string[] {
+  const guests = new Set(rows.filter((r) => r.guest).map((r) => r.id));
+  const problems = new Set(recipientProblems(requested, rows, organizationId));
+  for (const id of new Set(requested)) if (guests.has(id)) problems.add(id);
+  return Array.from(new Set(requested)).filter((id) => problems.has(id));
+}
+
 // ── The run log ──────────────────────────────────────────────────────
 
 export type RunOutcome = "sent" | "nothing_sent" | "target_unavailable" | "deactivated";

@@ -150,6 +150,22 @@ export function TaskDetailBody({
     [board?.statuses],
   );
 
+  // A Connect field's commit answers its cell, which keeps the person's
+  // selection and offers Retry when the write is refused.
+  const commitField = useCallback(
+    async (key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
+      const r = await patch({ metadataPatch: { [key]: next === undefined ? null : next } });
+      if (r.ok) return { ok: true };
+      return {
+        ok: false,
+        message: r.status === 0
+          ? "Couldn't reach the server. Your selection is kept; try again."
+          : accessMessage(r.payload, "Couldn't save those connected tasks."),
+      };
+    },
+    [patch],
+  );
+
   if (missing) return <>{missingView}</>;
 
   if (loading && !item) return <TaskSkeleton host={host} />;
@@ -276,6 +292,8 @@ export function TaskDetailBody({
         descriptionDraft={drafts.description ?? null}
         commentDraft={drafts.comment}
         onDraftChange={onDraftChange}
+        linkedContextBoardId={task.context?.kind === "linked" ? task.context.boardId : null}
+        onCommitField={commitField}
       />
     </div>
   );
