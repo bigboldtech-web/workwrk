@@ -237,7 +237,11 @@ export function BirdseyeFocus({
   const statuses = list.statuses.filter((s) => !hideClosed || !isClosedStatus(list.statuses, s.value));
   const canWrite = list.canContribute;
 
+  // A column is two drop targets (its sticky header and its body), both
+  // tagged with the column's status, so moving from one into the other is
+  // not a leave: the highlight stays on for the whole column.
   const dropProps = (value: string) => ({
+    "data-drop-col": value,
     onDragOver: (e: DragEvent<HTMLElement>) => {
       const card = dragging.current;
       if (!card || !e.dataTransfer.types.includes(CARD_DRAG_TYPE)) return;
@@ -247,7 +251,10 @@ export function BirdseyeFocus({
       if (over !== value) setOver(value);
     },
     onDragLeave: (e: DragEvent<HTMLElement>) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((cur) => (cur === value ? null : cur));
+      const to = e.relatedTarget as Element | null;
+      if (e.currentTarget.contains(to)) return;
+      if (to instanceof Element && to.closest("[data-drop-col]")?.getAttribute("data-drop-col") === value) return;
+      setOver((cur) => (cur === value ? null : cur));
     },
     onDrop: (e: DragEvent<HTMLElement>) => {
       const card = dragging.current;

@@ -40,19 +40,32 @@ export const BirdseyeGrid = forwardRef<HTMLDivElement, { columns: GridColumn[]; 
       aria-label={label}
     >
       <div className="inline-flex min-w-full flex-col px-6 pb-6">
-        <div className="sticky top-0 z-10 flex gap-3 border-b border-line-soft bg-app pb-2 pt-1">
+        {/* A column is a drop target from its header to the foot of the
+            tallest column, like the List's Board. The header cell carries the
+            same drop handlers as the section: it is the one part of a column
+            that is always on screen, so a card dragged from deep in a long
+            column can still land in a short one scrolled out of view. The
+            body row stretches, so the blank space under a short column
+            accepts a drop too. The vertical padding sits on the cells, not the
+            rows, so header and section meet at the 1px border and a drag
+            passing from one to the other never crosses a dead gap. */}
+        <div className="sticky top-0 z-10 flex gap-3 border-b border-line-soft bg-app">
           {columns.map((c) => (
-            <div key={c.key} className={`${COLUMN_WIDTH} shrink-0 snap-start`}>
+            <div
+              key={c.key}
+              className={`${COLUMN_WIDTH} shrink-0 snap-start rounded-t-lg pb-2 pt-1 transition-colors ${c.highlighted ? "bg-hover" : ""}`}
+              {...c.dropProps}
+            >
               {c.header}
             </div>
           ))}
         </div>
-        <div className="flex items-start gap-3 pt-2">
+        <div className="flex items-stretch gap-3">
           {columns.map((c) => (
             <section
               key={c.key}
               aria-label={c.label}
-              className={`${COLUMN_WIDTH} shrink-0 snap-start rounded-lg transition-colors ${c.highlighted ? "bg-hover" : ""}`}
+              className={`${COLUMN_WIDTH} shrink-0 snap-start rounded-b-lg pt-2 transition-colors ${c.highlighted ? "bg-hover" : ""}`}
               {...c.dropProps}
             >
               {c.body}

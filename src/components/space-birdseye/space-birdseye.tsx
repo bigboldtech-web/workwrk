@@ -71,6 +71,30 @@ export function overviewErrorHint(message: string | null | undefined, what: stri
   return m;
 }
 
+/**
+ * The focus Bird's eye opens with when it MOUNTS (review walk2 #1). Browser
+ * Back to an entry the app reached on the client hands back the tree the
+ * router last rendered for it, so the page's focus prop is that render's
+ * focus, not the entry's: Back to a focus pushed from the overview remounts
+ * with no focus, and Back to a List switched with a chip remounts with the
+ * List before the switch. The URL is the truth a person shares or reloads,
+ * so while it is this Space's own it wins. Under the task drawer the
+ * pathname and search are the drawer's (review #13), so there the prop is
+ * all there is. An absent focus param in this Space's own URL is the
+ * overview, whatever the prop says.
+ */
+export function mountFocusId(
+  pathname: string | null,
+  basePath: string,
+  urlFocus: string | null,
+  initialFocusId: string | null,
+): string | null {
+  if (pathname !== basePath) return initialFocusId;
+  // Exactly the param, as the server read it, so a cold load hydrates with
+  // the very focus it rendered.
+  return urlFocus;
+}
+
 function historyFocusFrom(): string | null {
   try {
     const from = (window.history.state as { beFocusFrom?: unknown } | null)?.beFocusFrom;
@@ -101,7 +125,11 @@ export function SpaceBirdseye({
   const basePath = `/spaces/${encodeURIComponent(spaceSlug)}`;
 
   // ── Focus, latched ────────────────────────────────────────────────
-  const [focusId, setFocusId] = useState<string | null>(initialFocusId);
+  const searchParams = useSearchParams();
+  // Seeded from the live URL, not the prop alone: see mountFocusId.
+  const [focusId, setFocusId] = useState<string | null>(() =>
+    mountFocusId(pathname, basePath, searchParams.get("focus"), initialFocusId),
+  );
   const [seenInitial, setSeenInitial] = useState(initialFocusId);
   if (seenInitial !== initialFocusId) {
     // A soft navigation brought a different focus link: follow it.
@@ -116,7 +144,6 @@ export function SpaceBirdseye({
   // CHANGES, and only while the URL is this page's own: under the task drawer
   // the pathname and search are the drawer's (review #13), and during the
   // one render after a same-path push the router's URL still lags behind.
-  const searchParams = useSearchParams();
   const urlFocus = pathname === basePath ? searchParams.get("focus") : undefined;
   const [seenUrlFocus, setSeenUrlFocus] = useState(urlFocus);
   if (urlFocus !== undefined && urlFocus !== seenUrlFocus) {

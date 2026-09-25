@@ -98,8 +98,22 @@ export function ShowMore({
   );
 }
 
-export function EmptyColumnLine({ searching }: { searching: boolean }) {
-  return <p className="px-1 py-2 text-xs text-ink-3">{searching ? "No matching tasks" : "No tasks yet"}</p>;
+/**
+ * What an empty column says. Hide closed is a filter just as the search is:
+ * an overview column whose tasks are all closed is not empty, its tasks are
+ * only hidden, so it must never read "No tasks yet" (walk 2, finding 1). The
+ * header count is filtered too, so the client cannot tell a List with only
+ * closed tasks from a truly empty one, and "No open tasks" is true of both.
+ * Focus mode leaves `hideClosed` off: it drops the closed status columns
+ * outright, so an empty column there really holds no tasks.
+ */
+export function emptyColumnCopy(searching: boolean, hideClosed = false): string {
+  if (searching) return hideClosed ? "No matching open tasks" : "No matching tasks";
+  return hideClosed ? "No open tasks" : "No tasks yet";
+}
+
+export function EmptyColumnLine({ searching, hideClosed = false }: { searching: boolean; hideClosed?: boolean }) {
+  return <p className="px-1 py-2 text-xs text-ink-3">{emptyColumnCopy(searching, hideClosed)}</p>;
 }
 
 export const BirdseyeOverview = forwardRef<
@@ -170,7 +184,7 @@ export const BirdseyeOverview = forwardRef<
             />
           ))}
         </ul>
-        {cards.length === 0 && added.length === 0 ? <EmptyColumnLine searching={!!q} /> : null}
+        {cards.length === 0 && added.length === 0 ? <EmptyColumnLine searching={!!q} hideClosed={hideClosed} /> : null}
         {col?.nextCursor ? (
           <ShowMore
             loading={col.loadingMore}
