@@ -40,10 +40,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const anchor = original.entityType && original.entityId ? { entityType: original.entityType, entityId: original.entityId } : null;
   if (!(await canCreateDocAt(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), anchor, original.parentId))) {
-    return NextResponse.json(
-      { error: "forbidden", message: "You can't add docs where this one lives, so it can't be copied there." },
-      { status: 403 },
-    );
+    // The sentence rides in `error` because apiFetch, and so every toast
+    // built on r.error, reads `error` first: as "forbidden" it reached the
+    // person as that one bare word. The code moves to `code`.
+    const message = "You can't add docs where this one lives, so it can't be copied there.";
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
   }
 
   // Re-key every block so the clone's comment-storage namespace (which

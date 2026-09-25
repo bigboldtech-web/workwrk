@@ -25,7 +25,9 @@
 //       Can view for everyone on an org-wide List. A List grant or ownership
 //       opens the List under any Folder: grants never cut.
 //   R6  Doc: a note (NOTEPAD) is its owner's alone. Anchored docs follow the
-//       anchor and everyone who reaches an unrestricted doc edits it; a
+//       anchor: a reach from the org-wide rule or from a row written before
+//       the cutoff edits an unrestricted doc (today's rule), a row written
+//       after it gives its own role (R6b, anchoredDocRole); a
 //       sub-page follows its parent page exactly (A6); a root doc is the
 //       whole org's. A listing pierces reach; restricted keeps only the
 //       listed people; a listing made before this release is a cap.
@@ -44,7 +46,7 @@
 
 import type { ObjectRole } from "./types";
 import { PANEL_ROLE_RANK, type AccessGrantSource, type AccessNodeKind, type PanelRole } from "./access-panel";
-import { floorFor, legacySpaceManages } from "./legacy-floor";
+import { floorFor, legacyGrantsOf, legacySpaceManages } from "./legacy-floor";
 import { legacyIsAdminLevel } from "./legacy-levels";
 import { orgRoleOf } from "./org-role";
 
@@ -901,8 +903,8 @@ export class NodeEvaluator {
       const reach = this.anchorReach(d);
       reaches = reach.role !== "none";
       if (reaches) {
-        const role: NodeRole = roleAtLeast(reach.role, "FULL") ? "FULL" : "EDIT";
-        base = { role, via: inheritVia(reach.via), prio: reach.via.type === "everyone" ? P_EVERYONE : P_INHERITED };
+        const got = this.anchoredDocRole(d, reach);
+        base = { role: got.role, via: inheritVia(got.via), prio: got.via.type === "everyone" ? P_EVERYONE : P_INHERITED };
       }
     } else if (shape === "subpage") {
       const parent = subpageParent(this.rows, d);
@@ -930,6 +932,43 @@ export class NodeEvaluator {
         ? [cap, creator]
         : [base, grant, creator];
     return pick(cands.filter((c): c is Candidate => c !== null));
+  }
+
+  private legacyEvaluator: NodeEvaluator | null | undefined;
+
+  /**
+   * The same world over the viewer's rows from before the workspace's cutoff
+   * only (legacyGrantsOf), or null when no row is new: then every reach is
+   * today's.
+   */
+  private legacyEv(): NodeEvaluator | null {
+    if (this.legacyEvaluator !== undefined) return this.legacyEvaluator;
+    const old = legacyGrantsOf(this.rows, this.grants);
+    this.legacyEvaluator = old === this.grants ? null : new NodeEvaluator(this.rows, old);
+    return this.legacyEvaluator;
+  }
+
+  /**
+   * R6b, the role an anchored doc's reach gives. Today everyone who reaches
+   * an unrestricted doc edits it (and Can edit shares a doc, MANAGE_BAR), so
+   * a Can view role on its Space, Folder or List gave Can edit and sharing on
+   * every doc inside. A8 keeps that for the rows that gave it: rows written
+   * before the cutoff and the org-wide "everyone" reach. A grant this release
+   * writes follows A5 instead: the ancestor's role is the doc's role, so the
+   * dialog's "Can view: Read only." holds for the docs inside too. The answer
+   * is the higher of the two, so a person holding both an older row and a new
+   * one keeps the older reach.
+   */
+  private anchoredDocRole(d: DocFact, reach: Res): Res {
+    const lift = (r: Res): Res => ({ role: roleAtLeast(r.role, "FULL") ? "FULL" : "EDIT", via: r.via });
+    if (reach.via.type === "everyone") return lift(reach);
+    const old = this.legacyEv();
+    if (!old) return lift(reach);
+    const capped: Res = { role: inheritRole(reach.role), via: reach.via };
+    const oldReach = old.anchorReach(d);
+    if (oldReach.role === "none") return capped;
+    const legacy = lift(oldReach);
+    return rankOf(legacy.role) > rankOf(capped.role) ? legacy : capped;
   }
 
   /** R6c for an anchored doc: what the anchor gives. */
@@ -1138,7 +1177,10 @@ export class NodeEvaluator {
  *
  *   Folder, List  Full access on itself, and Full access on the destination
  *                 (a Folder, or the Space at its root), or today's
- *                 canEditSpace on the destination Folder's Space (A8).
+ *                 canEditSpace on the destination Folder's Space (A8); and,
+ *                 when it leaves its container, the source gate
+ *                 (sourceReleases): a role on the node never acts on the
+ *                 Space or Folder it leaves (A4).
  *   Canvas        the role its container gives (never its own grant, M3) at
  *                 Can edit or better; into a Space only with Full access
  *                 there; out of every Space (which opens it to the whole
@@ -1158,10 +1200,11 @@ export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef,
   const destRole = destRef ? ev.effective(destRef).role : "none";
   switch (ref.kind) {
     case "folder":
-    case "list":
+    case "list": {
       if (!roleAtLeast(ev.effective(ref).role, "FULL") || !destRef) return false;
-      if (roleAtLeast(destRole, "FULL")) return true;
-      return destRef.kind === "folder" && ev.legacyManagesSpace(rows.folders.get(destRef.id)?.spaceId);
+      const destOk = roleAtLeast(destRole, "FULL") || (destRef.kind === "folder" && ev.legacyManagesSpace(rows.folders.get(destRef.id)?.spaceId));
+      return destOk && sourceReleases(rows, ev, ref, destRef);
+    }
     case "canvas": {
       const bare: ViewerGrants = { ...grants, object: new Map([...grants.object].filter(([k]) => k !== objectGrantKey("canvas", ref.id))) };
       const moveRole = new NodeEvaluator(rows, bare).effective(ref).role;
@@ -1187,6 +1230,46 @@ export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef,
 }
 
 /**
+ * The source half of a Folder or List move (A4, roles never climb). Full
+ * access on a Folder or List manages that node, never the container it sits
+ * in: taking it out of its parent changes the parent's tree for everyone who
+ * reads it. So a move that changes the container also needs, on the side it
+ * leaves:
+ *   - Full access on the current parent (the parent Folder, or the Space for
+ *     a node at the Space's root), or today's canEditSpace on the source
+ *     Space (A8, a Space editor moves as before);
+ *   - and, when the Space changes, Full access on the source Space (or that
+ *     same canEditSpace): a Full holder of a parent Folder may reparent
+ *     within the Space, never carry the branch into another one.
+ * A "move" to the container it already sits in releases nothing and needs
+ * nothing here. A List with no Space leaves no Space tree behind.
+ */
+function sourceReleases(rows: NodeRows, ev: NodeEvaluator, ref: NodeRef, destRef: NodeRef): boolean {
+  let parent: NodeRef | null;
+  let spaceId: string | null;
+  if (ref.kind === "folder") {
+    const f = rows.folders.get(ref.id);
+    if (!f) return false;
+    const pf = folderParentOf(rows, f);
+    spaceId = f.spaceId;
+    parent = pf ? { kind: "folder", id: pf.id } : { kind: "space", id: f.spaceId };
+  } else {
+    const l = rows.lists.get(ref.id);
+    if (!l) return false;
+    const lf = listFolderOf(rows, l);
+    spaceId = l.spaceId;
+    parent = lf ? { kind: "folder", id: lf.id } : l.spaceId ? { kind: "space", id: l.spaceId } : null;
+  }
+  if (!parent || !spaceId) return true;
+  if (sameRef(parent, destRef)) return true;
+  if (ev.legacyManagesSpace(spaceId)) return true;
+  if (!roleAtLeast(ev.effective(parent).role, "FULL")) return false;
+  const destSpaceId = destRef.kind === "space" ? destRef.id : rows.folders.get(destRef.id)?.spaceId ?? null;
+  if (destSpaceId === spaceId) return true;
+  return roleAtLeast(ev.effective({ kind: "space", id: spaceId }).role, "FULL");
+}
+
+/**
  * Does this move take a doc out of every place? A doc with an anchor or a
  * parent page that ends with neither becomes a root doc, which the whole org
  * opens (R6): a change to who can open it, so the route asks for Full access
@@ -1199,6 +1282,56 @@ export function docLeavesEveryPlace(
   const placedBefore = !!(before.entityType && before.entityId) || !!before.parentId;
   const placedAfter = !!(after.entityType && after.entityId) || !!after.parentId;
   return placedBefore && !placedAfter;
+}
+
+/**
+ * Where a page chain lives: the anchor of the first anchored page on it (the
+ * doc itself when anchored), "root" for a chain that ends at a page with no
+ * anchor, or "closed" for a chain R6 reads as reaching nobody (a missing or
+ * foreign parent, a loop, deeper than eight pages).
+ */
+export type DocHome =
+  | { kind: "anchor"; entityType: string; entityId: string }
+  | { kind: "root" }
+  | { kind: "closed" };
+
+/** The anchors whose reach is a set of people (anchorReach); every other anchor type is today's open fallback. */
+const CONFINING_ANCHORS = new Set(["SPACE", "FOLDER", "BOARD", "BOARD_ITEM", "NOTEPAD"]);
+
+/**
+ * Does a doc living at this home reach only a set of people, never the whole
+ * org by default? A root chain is the org's unless a restricted page on it
+ * keeps it to the people listed.
+ */
+export function docHomeConfines(home: DocHome, restrictedAbove: boolean): boolean {
+  if (home.kind === "closed") return true;
+  if (home.kind === "anchor") return CONFINING_ANCHORS.has(home.entityType);
+  return restrictedAbove;
+}
+
+/**
+ * Does this tree move need Full access on the doc (or today's answer, A8)?
+ * Anything that can open the doc to the whole org does:
+ *   - dropping its own anchor, with or without a new parent page: under the
+ *     legacy rule a page made before the cutoff with no anchor keeps today's
+ *     org-wide floor (R11), so even a sub-page of a page in the same Folder
+ *     would open to everyone;
+ *   - leaving every place (a root doc);
+ *   - nesting under a page whose chain is the org's while the doc lived in a
+ *     Space, Folder, List or restricted page tree.
+ * A Can edit holder still moves a doc between places they reach, and still
+ * reorders or nests it while it keeps its own anchor.
+ */
+export function docMoveNeedsFull(
+  before: { entityType: string | null; entityId: string | null; parentId: string | null },
+  after: { entityType: string | null; entityId: string | null; parentId: string | null },
+  confined: { before: boolean; after: boolean },
+): boolean {
+  const anchoredBefore = !!(before.entityType && before.entityId);
+  const anchoredAfter = !!(after.entityType && after.entityId);
+  if (anchoredBefore && !anchoredAfter) return true;
+  if (docLeavesEveryPlace(before, after)) return true;
+  return confined.before && !confined.after;
 }
 
 /** THE decision for one node. */
@@ -1342,6 +1475,13 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     kind: "information",
     text: "Grants made by this release follow the new rules alone: a Space, Folder or List row written at or after the workspace's cutoff gets no older-rule reach, so a Folder grant never reaches a Private item inside it that does not name the person (A2). Rows written before the cutoff keep theirs (A8).",
     legacySource: "Every FolderMember row reached every List under its Folder (board.ts:700-716), a Private one included.",
+  },
+  {
+    id: "C2",
+    mode: "always",
+    kind: "information",
+    text: "A Can view role on a Space, Folder or List written at or after the workspace's cutoff gives Can view on the docs inside and their sub-pages, so it never edits or shares them (A5). Rows from before the cutoff and the org-wide reach keep today's Can edit (A8).",
+    legacySource: "doc-access.ts resolveDocRole gave every reader of an unrestricted doc Can edit, and Can edit changes its sharing.",
   },
   {
     id: "W1",

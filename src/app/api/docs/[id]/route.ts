@@ -12,13 +12,14 @@ import { z } from "zod";
 import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { legacyFloorRole, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { docLeavesEveryPlace, roleAtLeast } from "@/lib/access/node-rules";
+import { docHomeConfines, docMoveNeedsFull, roleAtLeast, type DocHome } from "@/lib/access/node-rules";
 import { docSharingEntries } from "@/lib/access/access-grant-store";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
 import { resolveDocLocation } from "@/lib/doc-location";
 import { readDocLock } from "@/lib/doc-lock";
+import { listSpacesForUser } from "@/lib/space";
 
 const putSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -81,6 +82,143 @@ async function underRestrictedPage(orgId: string, parentId: string | null): Prom
   return [...entries.values()].some((e) => e.restricted === true);
 }
 
+/**
+ * Where a page chain lives (node-rules DocHome): the first anchor on it, the
+ * org's root, or closed when R6 reads it as reaching nobody (a missing or
+ * foreign parent, a loop, deeper than eight pages above the start).
+ */
+async function docHomeOf(
+  orgId: string,
+  start: { entityType: string | null; entityId: string | null; parentId: string | null },
+): Promise<DocHome> {
+  if (start.entityType && start.entityId) return { kind: "anchor", entityType: start.entityType, entityId: start.entityId };
+  const seen = new Set<string>();
+  let cursor = start.parentId;
+  for (let hops = 0; cursor; hops += 1) {
+    if (hops >= 8 || seen.has(cursor)) return { kind: "closed" };
+    seen.add(cursor);
+    const row: { entityType: string | null; entityId: string | null; parentId: string | null } | null = await prisma.doc.findFirst({
+      where: { id: cursor, organizationId: orgId },
+      select: { entityType: true, entityId: true, parentId: true },
+    });
+    if (!row) return { kind: "closed" };
+    if (row.entityType && row.entityId) return { kind: "anchor", entityType: row.entityType, entityId: row.entityId };
+    cursor = row.parentId;
+  }
+  return { kind: "root" };
+}
+
+function sameHome(a: DocHome, b: DocHome): boolean {
+  if (a.kind !== "anchor" || b.kind !== "anchor") return a.kind === b.kind;
+  return a.entityType === b.entityType && a.entityId === b.entityId;
+}
+
+type TreeRow = { entityType: string | null; entityId: string | null; parentId: string | null };
+type Refusal = { status: number; body: { error: string; code: string; message: string } };
+
+/**
+ * A refusal the person reads. `error` carries the sentence because apiFetch
+ * (and so every toast built on r.error) shows `error` before `message`: the
+ * row menu used to toast the bare word "forbidden" while the explanation sat
+ * unread in `message`. The machine code rides in `code`; `message` keeps the
+ * sentence for any caller that reads it.
+ */
+function refusal(status: number, code: string, message: string): Refusal {
+  return { status, body: { error: message, code, message } };
+}
+
+/** The anchor or page a move names is out of the viewer's reach. Still a 404, so nothing about that place is confirmed. */
+const MOVE_OUT_OF_REACH = "You can't move this doc there: you can't add docs to that place.";
+
+/**
+ * The tree gates of a move that changes the doc's anchor or parent page, from
+ * the doc's home before to its home after (M2, M3 and the Full access rule).
+ * The one copy: PUT refuses with it, and GET ?menu=1 asks it before the row
+ * menu offers "No location" or a Space, so the menu never offers a move the
+ * write would refuse. The reach check for a named anchor stays in PUT; the
+ * menu answers it by listing only the Spaces the viewer holds a role on.
+ */
+async function treeMoveRefusal(
+  ctx: { orgId: string },
+  nodeCtx: ReturnType<typeof nodeCtxFromLevel>,
+  id: string,
+  existing: TreeRow,
+  access: { canManage: boolean },
+  after: TreeRow,
+  parentChanges: boolean,
+): Promise<Refusal | null> {
+  const [homeBefore, homeAfter] = await Promise.all([docHomeOf(ctx.orgId, existing), docHomeOf(ctx.orgId, after)]);
+  const confined = {
+    before: docHomeConfines(homeBefore, homeBefore.kind === "root" && (await underRestrictedPage(ctx.orgId, existing.parentId))),
+    after: docHomeConfines(homeAfter, homeAfter.kind === "root" && (await underRestrictedPage(ctx.orgId, after.parentId))),
+  };
+  if (!access.canManage && docMoveNeedsFull(existing, after, confined)) {
+    if (!roleAtLeast(await legacyFloorRole(nodeCtx, { kind: "doc", id }), "EDIT")) {
+      return refusal(403, "forbidden", "You need Full access to take this doc out of its place: it could open to everyone.");
+    }
+  }
+  // Nesting under a page moves the doc into that page's container: the
+  // same rule as an anchor move, so the viewer must reach the container
+  // itself, not only the one page they were shared.
+  if (parentChanges && after.parentId && !after.entityType && homeAfter.kind === "anchor" && !sameHome(homeBefore, homeAfter)) {
+    if (!(await canCreateDocAt(nodeCtx, { entityType: homeAfter.entityType, entityId: homeAfter.entityId }, null))) {
+      return refusal(404, "not found", MOVE_OUT_OF_REACH);
+    }
+  }
+  // A sub-page inside a restricted page tree leaves it only with Full
+  // access: moving it out would open it to everyone the new place reaches.
+  if (!existing.entityType && existing.parentId && !access.canManage) {
+    if (await underRestrictedPage(ctx.orgId, existing.parentId)) {
+      return refusal(403, "forbidden", "You need Full access to move this page out of a restricted page.");
+    }
+  }
+  return null;
+}
+
+type MenuSpace = { id: string; name: string; slug: string; icon: string | null; color: string | null };
+
+/**
+ * GET ?menu=1: what the doc's row menu may offer, from the rules the writes
+ * apply, so it never shows a control that can only fail (a Can edit grant on
+ * one doc was offered Duplicate, "No location" and every Space, and each was
+ * refused). Duplicate asks canCreateDocAt for the place the copy lands,
+ * exactly as POST /duplicate does. A move needs PUT's own tree gates first;
+ * then "No location" is offered when treeMoveRefusal passes it, and a Space
+ * when the viewer holds a role on it (a Space seen only as a path fails
+ * canCreateDocAt) and a Space anchor passes treeMoveRefusal. That last answer
+ * is the same for every Space, since every Space confines.
+ */
+async function menuCaps(
+  ctx: { orgId: string; userId: string; accessLevel: string | null | undefined },
+  doc: TreeRow & { id: string; archivedAt: Date | null },
+  access: { unlockedRole: Parameters<typeof roleAtLeast>[0]; canManage: boolean; locked: boolean },
+): Promise<{ canDuplicate: boolean; move: { none: boolean; spaces: MenuSpace[] } }> {
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const nothing = { none: false, spaces: [] as MenuSpace[] };
+  if (doc.archivedAt) return { canDuplicate: false, move: nothing };
+  const anchor = doc.entityType && doc.entityId ? { entityType: doc.entityType, entityId: doc.entityId } : null;
+  const canDuplicate = await canCreateDocAt(nodeCtx, anchor, doc.parentId);
+  // PUT's gates before any tree edit: Can edit (unlocked), not locked below
+  // Full access, and a notepad note never re-anchors.
+  const movable = roleAtLeast(access.unlockedRole, "EDIT") && !(access.locked && !access.canManage) && doc.entityType !== "NOTEPAD";
+  if (!movable) return { canDuplicate, move: nothing };
+  const [noneRefused, spaceRefused, spaces] = await Promise.all([
+    treeMoveRefusal(ctx, nodeCtx, doc.id, doc, access, { entityType: null, entityId: null, parentId: doc.parentId }, false),
+    // Any Space id reads the same here: docHomeOf takes an anchor as it is.
+    treeMoveRefusal(ctx, nodeCtx, doc.id, doc, access, { entityType: "SPACE", entityId: "space", parentId: doc.parentId }, false),
+    listSpacesForUser(ctx.userId, ctx.orgId, { accessLevel: ctx.accessLevel ?? undefined, paths: false, counts: false }),
+  ]);
+  return {
+    canDuplicate,
+    move: {
+      none: noneRefused === null,
+      spaces: spaceRefused === null
+        ? spaces.filter((s) => s.role !== null).map((s) => ({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color }))
+        : [],
+    },
+  };
+}
+
 /** Would nesting `docId` under `parentId` put the doc inside its own subtree? */
 async function nestsUnderItself(orgId: string, docId: string, parentId: string): Promise<boolean> {
   let cursor: string | null = parentId;
@@ -92,7 +230,7 @@ async function nestsUnderItself(orgId: string, docId: string, parentId: string):
   return false;
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
   const { id } = await params;
@@ -113,6 +251,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // invisible anchor.
   const access = await docAccess(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), doc.id);
   if (!access) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // The row menu's read: the role fields it has always read, plus what it
+  // may offer (menuCaps). Lean, because a menu opening needs no content,
+  // signed URLs, lock owner, location or versions.
+  if (new URL(req.url).searchParams.get("menu") === "1") {
+    const caps = await menuCaps(ctx, doc, access);
+    return NextResponse.json({
+      doc: { id: doc.id, createdById: doc.createdById },
+      myRole: roleAtLeast(access.role, "EDIT") ? "edit" : access.role === "COMMENT" ? "comment" : "view",
+      canManage: access.canManage,
+      canShare: access.canShare,
+      canComment: access.canComment,
+      ...caps,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
 
   // Refresh presigned URLs for image / file blocks backed by S3. The
   // stored URL is a 1-hour signature; re-signing per read keeps doc
@@ -218,8 +371,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
     // The tree rules of the one access model (M2, M3). A doc moves only onto
     // an anchor type the model knows, only to an anchor the viewer reaches
-    // and only under a page the viewer can read, in the same org. Leaving
-    // every place is gated below: it opens the doc to the whole org.
+    // and only under a page the viewer can read, in the same org. A move
+    // that could open the doc to the whole org is gated below.
     const nextType = parsed.data.entityType !== undefined ? parsed.data.entityType : existing.entityType;
     const nextId = parsed.data.entityId !== undefined ? parsed.data.entityId : existing.entityId;
     const anchorChanges = parsed.data.entityType !== undefined || parsed.data.entityId !== undefined;
@@ -228,34 +381,34 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       return NextResponse.json({ error: "invalid_anchor", message: "A doc can move to a Space, a Folder, a List or a task." }, { status: 400 });
     }
     if (anchorChanges && nextType && nextId && !(await canCreateDocAt(nodeCtx, { entityType: nextType, entityId: nextId }, null))) {
-      return NextResponse.json({ error: "not found" }, { status: 404 });
+      const r = refusal(404, "not found", MOVE_OUT_OF_REACH);
+      return NextResponse.json(r.body, { status: r.status });
     }
     if (parentChanges && parsed.data.parentId) {
       if (await nestsUnderItself(ctx.orgId, id, parsed.data.parentId)) {
         return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
       }
       if (!(await canCreateDocAt(nodeCtx, null, parsed.data.parentId))) {
-        return NextResponse.json({ error: "not found" }, { status: 404 });
+        const r = refusal(404, "not found", MOVE_OUT_OF_REACH);
+        return NextResponse.json(r.body, { status: r.status });
       }
     }
-    // Leaving every place makes a root doc, which the whole org opens: that
-    // changes who can open it, so it takes Full access on the doc (its own
-    // grant or one on its container), or today's answer (a reader who could
-    // move it before this release, A8). A Can edit grant on one doc or one
-    // Folder never publishes it to the org.
+    // Anything that can open the doc to the whole org changes who can open
+    // it, so it takes Full access on the doc (its own grant or one on its
+    // container), or today's answer (a reader who could move it before this
+    // release, A8): dropping its own anchor (with or without a new parent
+    // page, since a page from before the cutoff with no anchor keeps today's
+    // org-wide floor), leaving every place, or nesting under a page tree the
+    // whole org opens. A Can edit grant on one doc or one Folder never
+    // publishes it to the org.
     const nextParent = parsed.data.parentId !== undefined ? parsed.data.parentId : existing.parentId;
-    const leaves = docLeavesEveryPlace(existing, { entityType: nextType ?? null, entityId: nextId ?? null, parentId: nextParent ?? null });
-    if ((anchorChanges || parentChanges) && leaves && !access.canManage) {
-      if (!roleAtLeast(await legacyFloorRole(nodeCtx, { kind: "doc", id }), "EDIT")) {
-        return NextResponse.json({ error: "forbidden", message: "You need Full access to take this doc out of its place: it would open to everyone." }, { status: 403 });
-      }
-    }
-    // A sub-page inside a restricted page tree leaves it only with Full
-    // access: moving it out would open it to everyone the new place reaches.
-    if ((anchorChanges || parentChanges) && !existing.entityType && existing.parentId && !access.canManage) {
-      if (await underRestrictedPage(ctx.orgId, existing.parentId)) {
-        return NextResponse.json({ error: "forbidden", message: "You need Full access to move this page out of a restricted page." }, { status: 403 });
-      }
+    const after = { entityType: nextType ?? null, entityId: nextId ?? null, parentId: nextParent ?? null };
+    if (anchorChanges || parentChanges) {
+      // treeMoveRefusal holds the rest of the tree rules: the Full access
+      // gate above, the page container a nest lands in, and a sub-page
+      // leaving a restricted page tree.
+      const refused = await treeMoveRefusal(ctx, nodeCtx, id, existing, access, after, parentChanges);
+      if (refused) return NextResponse.json(refused.body, { status: refused.status });
     }
     const doc = await prisma.doc.update({
       where: { id },

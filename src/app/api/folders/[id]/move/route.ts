@@ -80,13 +80,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     targetSpaceId = parent.spaceId;
   }
 
-  // The destination: Full access on the Folder it goes into, or on the
-  // Space at its root, in this org.
+  // Both ends (node-rules moveDecision): Full access on the Folder it goes
+  // into, or on the Space at its root, in this org; and, when it leaves its
+  // parent, Full access on the place it leaves (a Folder role never acts on
+  // the Space or Folder around it, A4), or today's edit on the source Space.
   const destSpace = await prisma.space.findFirst({ where: { id: targetSpaceId, organizationId: u.organizationId }, select: { id: true } });
   if (!destSpace) return NextResponse.json({ error: "That Space no longer exists" }, { status: 404 });
   const dest = parentFolderId ? { kind: "folder" as const, id: parentFolderId } : { kind: "space" as const, id: targetSpaceId };
   if (!(await moveAllowed(ctx, { kind: "folder", id }, dest))) {
-    return NextResponse.json({ error: "You need Full access where this folder is going." }, { status: 403 });
+    return NextResponse.json({ error: "You need Full access both where this folder is now and where it is going." }, { status: 403 });
   }
 
   // The folder, its descendant folders and every List in the branch move

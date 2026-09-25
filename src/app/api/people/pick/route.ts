@@ -35,6 +35,7 @@ import { orgRoleOf } from "@/lib/access/org-role";
 // picker lists ACTIVE people, as every other picker always has.
 
 const LIMIT = 20;
+const MAX_WORDS = 6;
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -66,10 +67,28 @@ export async function GET(req: NextRequest) {
   // The id conditions COMBINE: a Guest's shared-conversation set AND the
   // self exclusion AND the picker's own exclusions. (Spread into one object
   // they overwrote each other, and a Guest's picker listed the whole staff.)
+  //
+  // The search text is matched WORD BY WORD, and every word joins the same AND
+  // list. A person types the name they know, "Verify Bot", and the name lives
+  // in two columns: one `contains "Verify Bot"` over firstName, lastName and
+  // email can never match any single column, so the Manage access dialog said
+  // "No one matches" for a colleague who was right there (the dialogs it
+  // replaced filtered the full display name on the client). Each word must
+  // match SOME column, so "Verify Bot", "bot verify", "Verify" and an email
+  // all find the same person. The words are capped so a pasted paragraph
+  // cannot fan out into an unbounded query.
+  const words = q.split(/\s+/).filter(Boolean).slice(0, MAX_WORDS);
   const idRules = [
     ...(visibleIds ? [{ id: { in: visibleIds } }] : []),
     ...(includeSelf ? [] : [{ id: { not: userId } }]),
     ...(exclude.length > 0 ? [{ NOT: { id: { in: exclude } } }] : []),
+    ...words.map((word) => ({
+      OR: [
+        { firstName: { contains: word, mode: "insensitive" as const } },
+        { lastName: { contains: word, mode: "insensitive" as const } },
+        { email: { contains: word, mode: "insensitive" as const } },
+      ],
+    })),
   ];
   const people = await prisma.user.findMany({
     where: {
@@ -77,15 +96,6 @@ export async function GET(req: NextRequest) {
       deletedAt: null,
       ...(signIn ? { status: { not: "INACTIVE" as const } } : { status: "ACTIVE" as const }),
       ...(idRules.length > 0 ? { AND: idRules } : {}),
-      ...(q
-        ? {
-            OR: [
-              { firstName: { contains: q, mode: "insensitive" as const } },
-              { lastName: { contains: q, mode: "insensitive" as const } },
-              { email: { contains: q, mode: "insensitive" as const } },
-            ],
-          }
-        : {}),
     },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     take: limit,

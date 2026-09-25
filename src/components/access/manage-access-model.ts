@@ -280,6 +280,21 @@ export function restrictedAboveLine(panel: Pick<AccessPanel, "node" | "general">
   return `${above.name} is Restricted, so only people who can open it inherit access to this ${sentenceNoun(panel.node.kind)}.`;
 }
 
+type RestrictPanel = Pick<AccessPanel, "general" | "direct" | "inherited" | "inheritedMore" | "everyone" | "orgName">;
+type RestrictConfirmText = { title: string; description: string; confirmLabel: string };
+
+/**
+ * The people on the panel who reach the node only through where it lives:
+ * inherited, not listed on the node itself, not the viewer. What the doc
+ * confirm counts, and the Folder and List fallback for a panel that carries
+ * no restrictLoses.
+ */
+function inheritedOnlyCount(panel: RestrictPanel, meId: string | null): number {
+  const listed = new Set(panel.direct.map((d) => d.person.id));
+  return new Set(panel.inherited.map((e) => e.person.id).filter((id) => !listed.has(id) && id !== meId)).size
+    + panel.inheritedMore.reduce((n, m) => n + m.more, 0);
+}
+
 /**
  * The confirm before a doc is made Restricted, when that locks anyone out: the
  * viewer themselves (they reach it only through its place) and everyone else
@@ -287,15 +302,10 @@ export function restrictedAboveLine(panel: Pick<AccessPanel, "node" | "general">
  * the people listed on the doc, the person who made it and Admins. Null when
  * nobody on the panel loses it.
  */
-export function restrictDocConfirm(
-  panel: Pick<AccessPanel, "general" | "direct" | "inherited" | "inheritedMore" | "everyone" | "orgName">,
-  meId: string | null,
-): { title: string; description: string; confirmLabel: string } | null {
+export function restrictDocConfirm(panel: RestrictPanel, meId: string | null): RestrictConfirmText | null {
   if (panel.general.restricted) return null;
-  const listed = new Set(panel.direct.map((d) => d.person.id));
   const self = panel.general.viewerKeepsIfRestricted === false;
-  const others = new Set(panel.inherited.map((e) => e.person.id).filter((id) => !listed.has(id) && id !== meId)).size
-    + panel.inheritedMore.reduce((n, m) => n + m.more, 0);
+  const others = inheritedOnlyCount(panel, meId);
   const everyone = !!panel.everyone;
   if (!self && others === 0 && !everyone) return null;
   const lose: string[] = [];
@@ -305,6 +315,55 @@ export function restrictDocConfirm(
   return {
     title: self ? "Restrict this doc and lose your access?" : "Restrict this doc?",
     description: `${lose.join(" ")} Only the people listed here, the person who made it and Admins keep it.`,
+    confirmLabel: self ? "Restrict and lose access" : "Restrict",
+  };
+}
+
+/**
+ * What the server worked out restricting a Folder or List would cut
+ * (restrictPreview in src/lib/access/node-access.ts): the people other than
+ * the viewer who lose it, and whether everyone at the org does. Read
+ * defensively because access-panel.ts does not declare it yet; null when the
+ * panel does not carry it.
+ */
+export function restrictLosesOf(general: AccessPanel["general"]): { others: number; everyone: boolean } | null {
+  const v = (general as { restrictLoses?: unknown }).restrictLoses;
+  if (!v || typeof v !== "object") return null;
+  const { others, everyone } = v as { others?: unknown; everyone?: unknown };
+  return typeof others === "number" && typeof everyone === "boolean" ? { others, everyone } : null;
+}
+
+/**
+ * The confirm before Restricted goes on, for every kind that has the switch:
+ * a doc (restrictDocConfirm, word for word), a Folder or a List. Restricting
+ * a Folder or List cuts everyone who reaches it through its parent, and what
+ * is inside it with it, so the same dialog asks first, and says so plainly
+ * when the viewer is about to lock themselves out: after that only someone
+ * who keeps it can switch it back. Null when nobody loses it, when it is
+ * already Restricted, and for the kinds with no switch.
+ */
+export function restrictConfirm(panel: RestrictPanel & Pick<AccessPanel, "node">, meId: string | null): RestrictConfirmText | null {
+  const kind = panel.node.kind;
+  if (kind === "doc") return restrictDocConfirm(panel, meId);
+  if (kind !== "folder" && kind !== "list") return null;
+  if (panel.general.visibility === "PRIVATE") return null;
+  const noun = sentenceNoun(kind);
+  const counted = restrictLosesOf(panel.general);
+  const self = panel.general.viewerKeepsIfRestricted === false;
+  const others = counted ? counted.others : inheritedOnlyCount(panel, meId);
+  const everyone = counted ? counted.everyone : !!panel.everyone;
+  if (!self && others === 0 && !everyone) return null;
+  const through = panel.general.inheritsFrom?.name ?? "where it lives";
+  const lose: string[] = [];
+  if (everyone) lose.push(`Everyone at ${panel.orgName} who is not listed here will lose access to it and everything inside it.`);
+  else if (others > 0) lose.push(`${others} ${others === 1 ? "person who reaches" : "people who reach"} it through ${through} will lose access to it and everything inside it.`);
+  if (self) lose.push(`You reach it only through ${through}, so you will lose access${lose.length ? " too" : ""}, and you will not be able to turn this back.`);
+  const keep = kind === "list"
+    ? "Only the people listed here, the person who made it, the Space owner and Admins keep it."
+    : "Only the people listed here, the person who made it and Admins keep it.";
+  return {
+    title: self ? `Restrict this ${noun} and lose your access?` : `Restrict this ${noun}?`,
+    description: `${lose.join(" ")} ${keep}`,
     confirmLabel: self ? "Restrict and lose access" : "Restrict",
   };
 }

@@ -27,7 +27,7 @@ import { parsePaginationParams, skipTake } from "@/lib/pagination";
 import { loadOrgFacts } from "@/lib/access/facts";
 import { getTeamUserIds } from "@/lib/team";
 import { parseActivityScope, scopeAllowed, viewerScopeFacts } from "@/lib/activity-scope";
-import { activityTargetsReadable, nodeCtxFromViewer } from "@/lib/access/node-access";
+import { activityTargets, nodeCtxFromViewer } from "@/lib/access/node-access";
 import type { Viewer } from "@/lib/access/types";
 import type { Prisma } from "@/generated/prisma";
 
@@ -127,12 +127,25 @@ export async function GET(req: NextRequest) {
  * for, over ONE world for the whole page of rows. Every other type is left
  * readable: this narrows links that would 404, it is not a second access
  * gate.
+ *
+ * And per-row `targetName`: the node's name as it is now, for a node the
+ * viewer can open, null otherwise. The access rows (access.granted and the
+ * rest) are name-free by design, since the Everyone feed is read by people
+ * who may not open the node, so without this a row read "VerifyAdmin Bot
+ * granted" with no chip and no link. The name is resolved here, per viewer,
+ * and never stored. `targetHref` is the node's page for the same readers:
+ * a Space chip had no link at all, because its address takes a slug.
  */
 async function withReadability<T extends { targetType: string | null; targetId: string | null }>(
   viewer: Viewer,
   rows: T[],
-): Promise<Array<T & { targetReadable: boolean }>> {
+): Promise<Array<T & { targetReadable: boolean; targetName: string | null; targetHref: string | null }>> {
   // An answer we could not compute must not turn every chip into plain text.
-  const flags = await activityTargetsReadable(nodeCtxFromViewer(viewer), rows).catch(() => rows.map(() => null));
-  return rows.map((r, i) => ({ ...r, targetReadable: flags[i] ?? true }));
+  const targets = await activityTargets(nodeCtxFromViewer(viewer), rows).catch(() => rows.map(() => ({ readable: null, name: null, href: null })));
+  return rows.map((r, i) => ({
+    ...r,
+    targetReadable: targets[i]?.readable ?? true,
+    targetName: targets[i]?.name ?? null,
+    targetHref: targets[i]?.href ?? null,
+  }));
 }

@@ -362,11 +362,55 @@ export async function activityTargetsReadable<T extends { targetType: string | n
   ctx: NodeCtx,
   rows: readonly T[],
 ): Promise<Array<boolean | null>> {
+  return (await activityTargets(ctx, rows)).map((t) => t.readable);
+}
+
+export interface ActivityTarget {
+  /** As activityTargetsReadable: true or false for a node target, null for any other. */
+  readable: boolean | null;
+  /** The node's name as it is now, only when the viewer can open it; null otherwise. */
+  name: string | null;
+  /**
+   * The node's page, only when the viewer can open it: a Space's address
+   * takes its slug, which the row does not hold, so the feed cannot build it.
+   */
+  href: string | null;
+}
+
+/** A node's stored name, or null when this world does not hold the row (deleted, another org) or it is blank. */
+export function presentNodeName(rows: NodeRows, ref: NodeRef): string | null {
+  const held = {
+    space: rows.spaces, folder: rows.folders, list: rows.lists, doc: rows.docs,
+    table: rows.tables, canvas: rows.canvases, form: rows.forms,
+  }[ref.kind].has(ref.id);
+  if (!held) return null;
+  return nodeName(rows, ref).trim() || null;
+}
+
+/**
+ * activityTargetsReadable plus the name, over the same one world. The access
+ * rows grants.ts writes are name-free on purpose (access-activity.ts: feeds
+ * are read by other people), so a feed that wants to say WHICH Folder was
+ * shared resolves the name here, per viewer, and only for a node that viewer
+ * can open. An unreadable node gets no name, so nothing the viewer cannot
+ * open is named to them.
+ */
+export async function activityTargets<T extends { targetType: string | null; targetId: string | null }>(
+  ctx: NodeCtx,
+  rows: readonly T[],
+): Promise<ActivityTarget[]> {
   const refs = rows.map((r) => activityNodeRef(r.targetType, r.targetId));
   const wanted = refs.filter((r): r is NodeRef => r !== null);
-  if (wanted.length === 0) return refs.map(() => null);
-  const decisions = await nodeRoles(ctx, wanted);
-  return refs.map((r) => (r ? roleAtLeast(decisions.get(refKey(r))?.role ?? "none", "VIEW") : null));
+  if (wanted.length === 0) return refs.map(() => ({ readable: null, name: null, href: null }));
+  if (ctx.denied) return refs.map((r) => ({ readable: r ? false : null, name: null, href: null }));
+  const { rows: world, grants } = await loadWorld(ctx, wanted);
+  const decided = decideAll(world, grants, wanted);
+  return refs.map((r) => {
+    if (!r) return { readable: null, name: null, href: null };
+    const readable = roleAtLeast(decided.get(refKey(r))?.role ?? "none", "VIEW");
+    const name = readable ? presentNodeName(world, r) : null;
+    return { readable, name, href: name ? nodeHref(world, r) : null };
+  });
 }
 
 // ── crumbs ───────────────────────────────────────────────────────────
@@ -671,7 +715,58 @@ function spaceOfNode(rows: NodeRows, ref: NodeRef) {
   return top?.kind === "space" ? rows.spaces.get(top.id) ?? null : null;
 }
 
-async function generalOf(rows: NodeRows, ref: NodeRef, canShare: boolean, viewerId: string): Promise<AccessGeneral> {
+/**
+ * What turning Restricted on for a Folder or List would cut: does the viewer
+ * keep it, how many other people lose it, and does everyone at the org lose
+ * it. The Manage access dialog asks before the switch with these numbers
+ * (the doc confirm's twin), so nobody is cut off, the viewer included,
+ * without being told first.
+ *
+ * Answered by EVALUATING the world with the node set to PRIVATE, not by
+ * guessing from the panel's rows: a Restricted Folder still opens for its
+ * owner, for a Space manager named on it and, under the legacy rule, for
+ * older rows the legacy floor keeps; a Restricted List still opens for the
+ * Space OWNER. Only the resolver knows all of that, so only it counts.
+ * Null for other kinds and for a node that is already Restricted. People who
+ * cannot sign in are not counted, and org admins always keep it.
+ */
+export interface RestrictPreview { viewerKeeps: boolean; others: number; everyone: boolean }
+
+export function restrictPreview(
+  rows: NodeRows,
+  ref: NodeRef,
+  viewer: ViewerGrants,
+  people: ReadonlyArray<{ id: string; active: boolean; grants: ViewerGrants }>,
+): RestrictPreview | null {
+  let after: NodeRows;
+  if (ref.kind === "folder") {
+    const f = rows.folders.get(ref.id);
+    if (!f || f.visibility === "PRIVATE") return null;
+    after = { ...rows, folders: new Map(rows.folders).set(ref.id, { ...f, visibility: "PRIVATE" }) };
+  } else if (ref.kind === "list") {
+    const l = rows.lists.get(ref.id);
+    if (!l || l.visibility === "PRIVATE") return null;
+    after = { ...rows, lists: new Map(rows.lists).set(ref.id, { ...l, visibility: "PRIVATE" }) };
+  } else {
+    return null;
+  }
+  const opens = (world: NodeRows, g: ViewerGrants) => roleAtLeast(new NodeEvaluator(world, g).effective(ref).role, "VIEW");
+  const loses = (g: ViewerGrants) => opens(rows, g) && !opens(after, g);
+  const me = viewer.viewer.userId;
+  let others = 0;
+  for (const p of people) {
+    if (p.id === me || !p.active || rows.orgAdmins.has(p.id)) continue;
+    if (loses(p.grants)) others++;
+  }
+  // A Member with no rows of their own: the panel's everyone line.
+  const anyone: ViewerGrants = {
+    viewer: { userId: "\u0000everyone", orgAdmin: false, orgGuest: false, isAgent: false, denied: false },
+    space: new Map(), folder: new Map(), list: new Map(), object: new Map(),
+  };
+  return { viewerKeeps: !loses(viewer), others, everyone: loses(anyone) };
+}
+
+async function generalOf(rows: NodeRows, ref: NodeRef, canShare: boolean, viewerId: string, preview: RestrictPreview | null = null): Promise<AccessGeneral> {
   const space = spaceOfNode(rows, ref);
   const orgWideSpace = ref.kind !== "space" && space && space.visibility === "ORG" ? { id: space.id, name: space.name } : null;
   let visibility: AccessGeneral["visibility"] = null;
@@ -698,6 +793,13 @@ async function generalOf(rows: NodeRows, ref: NodeRef, canShare: boolean, viewer
   const { inheritsFrom, restrictedAbove } = inheritanceOf(rows, ref);
   const out: AccessGeneral = { visibility, restricted, publicLink, orgWideSpace, privateRule: rows.privateRule, inheritsFrom, restrictedAbove };
   if (ref.kind === "doc") out.viewerKeepsIfRestricted = keepsRestrictedDoc(rows, ref.id, viewerId);
+  if (preview) {
+    // restrictLoses rides beside the declared fields: the dialog's model
+    // (restrictConfirm in manage-access-model.ts) reads it defensively, so a
+    // panel without it still gets a confirm.
+    out.viewerKeepsIfRestricted = preview.viewerKeeps;
+    (out as AccessGeneral & { restrictLoses?: { others: number; everyone: boolean } }).restrictLoses = { others: preview.others, everyone: preview.everyone };
+  }
   return out;
 }
 
@@ -748,7 +850,11 @@ export async function accessPanel(ctx: NodeCtx, ref: NodeRef): Promise<AccessPan
       ? { role: entries.viewer.role, canManage: false, maxGrant: null, isAgent: entries.viewer.isAgent }
       : { role: entries.viewer.role, canManage: entries.viewer.canManage, maxGrant: entries.viewer.maxGrant, isAgent: entries.viewer.isAgent },
     roles: ROLES_BY_KIND[ref.kind],
-    general: await generalOf(rows, ref, ref.kind === "doc" ? canShareDoc : entries.viewer.canManage, ctx.userId),
+    general: await generalOf(
+      rows, ref, ref.kind === "doc" ? canShareDoc : entries.viewer.canManage, ctx.userId,
+      // Only a viewer who can flip the switch is asked first, so only they need it.
+      entries.viewer.canManage ? restrictPreview(rows, ref, actorGrants, people.map((p) => ({ id: p.person.id, active: p.person.active, grants: p.grants }))) : null,
+    ),
     direct: entries.direct,
     inherited: entries.inherited,
     inheritedMore: entries.inheritedMore,

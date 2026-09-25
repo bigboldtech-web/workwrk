@@ -445,9 +445,14 @@ export function listVisibilityOptions(spaceName: string | null | undefined, orgN
  * written through PATCH /api/boards/[id] { visibility }. Not optimistic: the
  * card changes when the server agrees, and a failure keeps the choice on
  * screen with a Retry that sends it again.
+ *
+ * Choosing Restricted cuts everyone who reaches the List through its Folder
+ * or Space, and can cut the person choosing it. With `restrictConfirm`
+ * (restrictConfirm in manage-access-model.ts) that is asked first; Cancel
+ * sends nothing. The Retry after a failed write does not ask again.
  */
 export function ListVisibilityControl({
-  boardId, value, spaceName, parentFolderName, orgName, readOnly = false, onChanged,
+  boardId, value, spaceName, parentFolderName, orgName, readOnly = false, onChanged, restrictConfirm = null,
 }: {
   boardId: string;
   value: Visibility;
@@ -457,7 +462,10 @@ export function ListVisibilityControl({
   orgName: string;
   readOnly?: boolean;
   onChanged?: (next: Visibility) => void;
+  /** Asked before Restricted is chosen when that locks anyone out. Null: nobody loses it. */
+  restrictConfirm?: { title: string; description: string; confirmLabel: string } | null;
 }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState<Visibility | null>(null);
   const [failed, setFailed] = useState<{ message: string; next: Visibility } | null>(null);
   const options = listVisibilityOptions(spaceName, orgName, parentFolderName);
@@ -485,10 +493,16 @@ export function ListVisibilityControl({
     }
   };
 
+  const pick = async (next: Visibility) => {
+    if (next === value || busy) return;
+    if (next === "PRIVATE" && restrictConfirm && !(await confirm({ ...restrictConfirm, destructive: true }))) return;
+    await choose(next);
+  };
+
   if (readOnly) return <VisibilityReadout option={options.find((o) => o.value === value)} />;
   return (
     <div>
-      <VisibilityCards label="Who can open this List" options={options} value={value} busy={busy} onChoose={(v) => void choose(v)} />
+      <VisibilityCards label="Who can open this List" options={options} value={value} busy={busy} onChoose={(v) => void pick(v)} />
       {failed ? <InlineRetry message={failed.message} onRetry={() => void choose(failed.next)} /> : null}
     </div>
   );

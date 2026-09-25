@@ -20,7 +20,9 @@ import {
   NODE_ACCESS_DELTAS,
   applyDocLock,
   decide,
+  docHomeConfines,
   docLeavesEveryPlace,
+  docMoveNeedsFull,
   moveDecision,
   decideAll,
   emptyGrants,
@@ -975,6 +977,40 @@ describe("a doc leaving every place (docLeavesEveryPlace)", () => {
     expect(docLeavesEveryPlace(at("FOLDER", "F", null), at("SPACE", "S", null))).toBe(false);
     expect(docLeavesEveryPlace(at("FOLDER", "F", null), at(null, null, "P"))).toBe(false);
     expect(docLeavesEveryPlace(at(null, null, null), at(null, null, null))).toBe(false);
+  });
+});
+
+describe("a doc move that can open it to the org (docMoveNeedsFull)", () => {
+  const at = (entityType: string | null, entityId: string | null, parentId: string | null) => ({ entityType, entityId, parentId });
+  const confinedBoth = { before: true, after: true };
+  it("dropping its own anchor needs Full, even nested under a page in the same Folder", () => {
+    expect(docMoveNeedsFull(at("FOLDER", "F", null), at(null, null, "P"), confinedBoth)).toBe(true);
+    expect(docMoveNeedsFull(at("FOLDER", "F", null), at(null, null, "P"), { before: true, after: false })).toBe(true);
+    expect(docMoveNeedsFull(at("SPACE", "S", null), at(null, null, null), { before: true, after: false })).toBe(true);
+  });
+  it("a sub-page nesting under a page the whole org opens needs Full", () => {
+    expect(docMoveNeedsFull(at(null, null, "P1"), at(null, null, "ROOT"), { before: true, after: false })).toBe(true);
+  });
+  it("moves between places, reorders and nesting inside a confined tree stay a Can edit move", () => {
+    expect(docMoveNeedsFull(at("FOLDER", "F", null), at("SPACE", "S", null), confinedBoth)).toBe(false);
+    expect(docMoveNeedsFull(at("FOLDER", "F", null), at("FOLDER", "F", "P"), confinedBoth)).toBe(false);
+    expect(docMoveNeedsFull(at(null, null, "P1"), at(null, null, "P2"), confinedBoth)).toBe(false);
+    expect(docMoveNeedsFull(at(null, null, "P1"), at(null, null, "P2"), { before: false, after: false })).toBe(false);
+    expect(docMoveNeedsFull(at(null, null, null), at(null, null, "P"), { before: false, after: false })).toBe(false);
+  });
+});
+
+describe("where a page chain lives (docHomeConfines)", () => {
+  it("a Space, Folder, List, task or note anchor confines; an unknown anchor type is open", () => {
+    for (const t of ["SPACE", "FOLDER", "BOARD", "BOARD_ITEM", "NOTEPAD"]) {
+      expect(docHomeConfines({ kind: "anchor", entityType: t, entityId: "x" }, false)).toBe(true);
+    }
+    expect(docHomeConfines({ kind: "anchor", entityType: "PROJECT", entityId: "x" }, false)).toBe(false);
+  });
+  it("a root chain is the org's unless a restricted page is on it; a broken chain reaches nobody", () => {
+    expect(docHomeConfines({ kind: "root" }, false)).toBe(false);
+    expect(docHomeConfines({ kind: "root" }, true)).toBe(true);
+    expect(docHomeConfines({ kind: "closed" }, false)).toBe(true);
   });
 });
 

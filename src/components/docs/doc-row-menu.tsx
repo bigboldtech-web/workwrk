@@ -9,6 +9,10 @@
 //   Rename (inline) · New doc inside · Move to… · Manage access · Duplicate
 //   (cmd D) · separator · Move to Trash (destructive; Full access, or own
 //   creation at Can edit; Agents never)
+// Duplicate and Move to… also need their write to be able to pass: the
+// menu reads GET /api/docs/[id]?menu=1 on open (docMenuOffers below), so a
+// person granted one doc is not offered a copy or a destination the server
+// refuses, and a refusal toasts the server's sentence, never a bare code.
 // A Can view viewer's menu is Open, Open beside, Copy link, Add to favorites
 // and Who has access.
 //
@@ -66,6 +70,40 @@ export type DocMenuRole = "full" | "edit" | "comment" | "view";
  * manage its sharing, so the role alone would mislabel the access row.
  */
 type ResolvedRole = { role: DocMenuRole; own: boolean; canShare?: boolean };
+
+/**
+ * GET /api/docs/[id]?menu=1's answer to "what can this viewer do from here",
+ * built on the rules the writes apply (menuCaps in the route). Duplicate
+ * needs the right to add a doc where this one lives; a move offers "No
+ * location" and each Space only when the PUT would take it.
+ */
+export interface DocMenuCaps {
+  canDuplicate: boolean;
+  move: { none: boolean; spaces: SpaceRow[] };
+}
+
+export interface DocMenuOffers {
+  duplicate: boolean;
+  move: boolean;
+  moveNone: boolean;
+  /** The Spaces the picker lists; null = not known, so openMove reads /api/spaces. */
+  moveSpaces: SpaceRow[] | null;
+}
+
+/**
+ * Which of Duplicate and Move to… the menu offers. A Can edit role alone used
+ * to show both, so a person granted one doc was offered a copy, "No location"
+ * and every Space, and each could only fail. With the caps, a row shows only
+ * when its write can pass, and Move to… hides when no destination can.
+ * "pending" (the caps are loading) offers neither yet; "unknown" (the read
+ * failed) keeps the rows the role gave before, and the write stays the gate.
+ */
+export function docMenuOffers(canEdit: boolean, caps: DocMenuCaps | "pending" | "unknown"): DocMenuOffers {
+  if (!canEdit || caps === "pending") return { duplicate: false, move: false, moveNone: false, moveSpaces: [] };
+  if (caps === "unknown") return { duplicate: true, move: true, moveNone: true, moveSpaces: null };
+  const spaces = caps.move.spaces;
+  return { duplicate: caps.canDuplicate, move: caps.move.none || spaces.length > 0, moveNone: caps.move.none, moveSpaces: spaces };
+}
 
 export interface DocMenuTarget {
   id: string;
@@ -135,33 +173,50 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   // A host that knows the role passes it; otherwise it is resolved on open.
   // Until it lands, only the rows every role holds are rendered.
   const [resolved, setResolved] = useState<ResolvedRole | null>(null);
+  // What Duplicate and Move may offer. Read on every open, a host that
+  // passes the role included, since no host knows where the viewer may add
+  // docs; one lean read (?menu=1) answers both questions.
+  const [caps, setCaps] = useState<DocMenuCaps | "pending" | "unknown">("pending");
   const roleKnown = doc.role !== undefined;
   useEffect(() => {
-    if (roleKnown) return;
     let alive = true;
     void (async () => {
-      const r = await apiFetch<{ myRole?: string; canManage?: boolean; canShare?: boolean; doc?: { createdById?: string | null } }>(`/api/docs/${doc.id}`, { cache: "no-store" });
+      const r = await apiFetch<{ myRole?: string; canManage?: boolean; canShare?: boolean; doc?: { createdById?: string | null } } & Partial<DocMenuCaps>>(`/api/docs/${doc.id}?menu=1`, { cache: "no-store" });
       if (!alive) return;
-      if (!r.ok) { setResolved({ role: "view", own: false }); return; }
-      const myRole = r.data.myRole === "view" ? "view" : r.data.myRole === "comment" ? "comment" : "edit";
-      setResolved({
-        role: r.data.canManage ? "full" : myRole,
-        own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id,
-        canShare: typeof r.data.canShare === "boolean" ? r.data.canShare : undefined,
-      });
+      if (!r.ok) {
+        if (!roleKnown) setResolved({ role: "view", own: false });
+        setCaps("unknown");
+        return;
+      }
+      if (!roleKnown) {
+        const myRole = r.data.myRole === "view" ? "view" : r.data.myRole === "comment" ? "comment" : "edit";
+        setResolved({
+          role: r.data.canManage ? "full" : myRole,
+          own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id,
+          canShare: typeof r.data.canShare === "boolean" ? r.data.canShare : undefined,
+        });
+      }
+      const move = r.data.move;
+      setCaps(typeof r.data.canDuplicate === "boolean" && move && Array.isArray(move.spaces)
+        ? { canDuplicate: r.data.canDuplicate, move: { none: !!move.none, spaces: move.spaces } }
+        : "unknown");
     })();
     return () => { alive = false; };
   }, [roleKnown, doc.id, boot.viewer.id]);
   const role: DocMenuRole = doc.role ?? resolved?.role ?? "view";
   const own = doc.own ?? resolved?.own ?? false;
-  const pending = !roleKnown && resolved === null;
   const canEdit = role === "full" || role === "edit";
+  const offers = docMenuOffers(canEdit, caps);
+  const rolePending = !roleKnown && resolved === null;
+  // The skeleton holds the place of rows still to come: the role's, or at
+  // Can edit the Duplicate and Move rows the caps decide.
+  const pending = rolePending || (canEdit && caps === "pending");
   const canTrash = role === "full" || (role === "edit" && own);
   // The same rule the header's chip and the server's canShare use, so the
   // two doors never disagree. Until the role lands the row waits behind the
   // skeleton rather than reading one label and then the other.
   const managesAccess = resolved?.canShare ?? docRoleManagesAccess(role);
-  const showAccessRow = !!onShare && !pending;
+  const showAccessRow = !!onShare && !rolePending;
   const title = doc.title || "Untitled doc";
   const trashDays = boot.org.trashDays;
 
@@ -245,8 +300,12 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
 
   async function openMove() {
     setMode("move");
+    if (offers.moveSpaces) { setSpaces(offers.moveSpaces); return; }
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces", { cache: "no-store" });
+      // The caps could not be read: list the Spaces the viewer can open
+      // (paths=0 leaves out the ones seen only on the way to a grant, where
+      // no move can land); the PUT stays the gate.
+      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces?paths=0&counts=0", { cache: "no-store" });
       const list = r.ok ? (Array.isArray(r.data) ? r.data : r.data.spaces ?? r.data.data ?? []) : [];
       setSpaces(list.map((s) => ({ id: s.id, name: s.name, slug: s.slug, icon: s.icon ?? null, color: s.color ?? null })));
     }
@@ -324,11 +383,14 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
           ariaLabel={`Move ${title}`}
           searchPlaceholder="Find a Space"
           backdrop={false}
-          selected={doc.entityType === "SPACE" ? doc.entityId ?? null : !doc.entityType ? "none" : null}
+          // A host that passes no anchor (undefined: the Space tree) does not
+          // know where the doc lives, so nothing is ticked. Reading undefined
+          // as "none" ticked No location on a doc inside a Folder.
+          selected={doc.entityType === "SPACE" ? doc.entityId ?? null : doc.entityType === null ? "none" : null}
           onSelect={(v) => void moveTo(v)}
           emptyLabel="No Spaces"
           sections={[
-            { options: [{ value: "none", label: "No location", description: "A standalone doc" }] },
+            ...(offers.moveNone ? [{ options: [{ value: "none", label: "No location", description: "A standalone doc" }] }] : []),
             { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
           ]}
         />
@@ -352,7 +414,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
         <>
           <MenuItem icon={Pencil} label="Rename" onClick={() => { if (onRenameInline) { onClose(); onRenameInline(); } else { setName(doc.title); setMode("rename"); } }} />
           <MenuItem icon={Plus} label="New doc inside" onClick={() => void newInside()} />
-          <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} />
+          {offers.move ? <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} /> : null}
         </>
       ) : null}
       {showAccessRow ? (
@@ -364,7 +426,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
       ) : null}
       {canEdit ? (
         <>
-          <MenuItem icon={Copy} label="Duplicate" shortcut="⌘D" busy={busy === "duplicate"} onClick={() => void duplicate()} />
+          {offers.duplicate ? <MenuItem icon={Copy} label="Duplicate" shortcut="⌘D" busy={busy === "duplicate"} onClick={() => void duplicate()} /> : null}
           {role === "full" ? <MenuItem icon={LayoutTemplate} label="Save as template" busy={busy === "template"} onClick={() => void saveAsTemplate()} /> : null}
         </>
       ) : null}

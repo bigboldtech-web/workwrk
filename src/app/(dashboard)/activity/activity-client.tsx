@@ -48,6 +48,10 @@ interface ActivityRow {
   targetId: string | null;
   /** Server-computed: false when the viewer can no longer read the target. */
   targetReadable?: boolean;
+  /** Server-computed: the node's name as it is now, only when the viewer can open it. */
+  targetName?: string | null;
+  /** Server-computed: the node's page for the same readers (a Space's address takes its slug). */
+  targetHref?: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
   actor?: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null } | null;
@@ -353,14 +357,20 @@ function ActivityFeedRow({ row }: { row: ActivityRow }) {
   // The third argument is the whole point of the guard: the server says
   // whether this viewer can still read the target, so a chip whose object has
   // been moved out from under them renders as text rather than a link that 404s.
-  const canonicalTarget = targetHref(row.targetType, row.targetId, row.targetReadable !== false);
+  // A Space has no id door, so its chip links only when the server sent its address.
+  const canonicalTarget = targetHref(row.targetType, row.targetId, row.targetReadable !== false)
+    ?? (row.targetReadable !== false ? row.targetHref ?? null : null);
   const href = canonicalTarget ? sectionLink(canonicalTarget) : null;
   const name = targetName(row);
   const actor = row.actor
     ? { id: row.actor.id, firstName: row.actor.firstName, lastName: row.actor.lastName, avatar: row.actor.avatar }
     : null;
 
-  const verb = verbFor(row.type);
+  // An access row's verb is its own name-free sentence (accessRowPhrase):
+  // "granted" alone said nothing about what was shared. With no name the
+  // viewer may see, the sentence keeps its noun and reads whole.
+  const access = row.type.startsWith("access.") && Boolean(row.targetType || row.targetId);
+  const verb = access ? accessRowPhrase(row.description, name) ?? verbFor(row.type) : verbFor(row.type);
   // A row with no target has nothing to chip. Its description IS the sentence
   // ("signed in"), so drawing it as a chip beside the same verb printed the
   // words twice: "VerifyAdmin Bot signed in [Signed in]".
@@ -413,6 +423,9 @@ function ActivityFeedRow({ row }: { row: ActivityRow }) {
  * which is the honest answer. Nothing is invented and no id goes in a chip.
  */
 function targetName(row: ActivityRow): string | null {
+  // The server's answer first: the name as it is now, for a node this viewer
+  // can open (null for one they cannot, which is never named to them).
+  if (typeof row.targetName === "string" && row.targetName.trim()) return row.targetName.trim();
   const m = row.metadata ?? {};
   for (const key of ["name", "title", "label", "targetName"]) {
     const v = m[key];
@@ -421,11 +434,39 @@ function targetName(row: ActivityRow): string | null {
   return quotedName(row.description);
 }
 
+const QUOTED_NAME = /["\u201c\u2018']([^"\u201d\u2019']{1,160})["\u201d\u2019']/;
+const ACCESS_NOUN_TAIL = /\s+an?\s+(?:Space|Folder|List|Doc|Table|Canvas|Form|node)$/;
+
+/**
+ * The words after the actor on an access row. grants.ts writes a name-free
+ * sentence that ends in its noun, "Gave someone access to a Folder"; the row
+ * reads it in lower case after the actor, and when the node has a name the
+ * viewer may see, the noun gives way to the chip:
+ *
+ *   with a name     VerifyAdmin Bot gave someone access to [G4 Folder A]
+ *   without one     VerifyAdmin Bot gave someone access to a Folder
+ *
+ * An older writer's sentence that quotes the name ("Turned on the public link
+ * for form "RG2 Form"") stops before the quote when the chip carries it, so
+ * the name is never printed twice. Null when there is no sentence.
+ */
+export function accessRowPhrase(description: string | null | undefined, name: string | null): string | null {
+  const text = description?.trim();
+  if (!text) return null;
+  const lower = text.charAt(0).toLowerCase() + text.slice(1);
+  if (!name) return lower;
+  // The quoted name, found as quotedName finds it: a whole quoted run, so the
+  // apostrophe in "someone's" is never read as an opening quote.
+  const quoted = lower.match(QUOTED_NAME);
+  if (quoted?.index) return lower.slice(0, quoted.index).trim() || lower;
+  return lower.replace(ACCESS_NOUN_TAIL, "") || lower;
+}
+
 /** The quoted fragment of a writer's sentence, in any of the quote styles they use. */
 function quotedName(description: string | null | undefined): string | null {
   const text = description?.trim();
   if (!text) return null;
-  const quoted = text.match(/["\u201c\u2018']([^"\u201d\u2019']{1,160})["\u201d\u2019']/);
+  const quoted = text.match(QUOTED_NAME);
   return quoted?.[1]?.trim() || null;
 }
 

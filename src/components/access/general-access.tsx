@@ -18,6 +18,11 @@
 // goes through that kind's own route; after one the dialog refetches the
 // panel, so what this shows is always what the server holds.
 //
+// Restricted asks first on every kind that has it: the doc through
+// restrictDocConfirm, a Folder and a List through restrictConfirm, with the
+// counts the server worked out, so nobody is cut off (the viewer included)
+// by one click with no warning.
+//
 // Inside an org-wide Space a share can only ADD rights: everyone at the org
 // already opens everything in it (problem 16). That is said here, once, with
 // the door to the Space when the viewer can change it.
@@ -30,7 +35,7 @@ import { FolderRestrictedSwitch } from "@/components/layout/os/share-folder-dial
 import { ListVisibilityControl } from "@/components/layout/os/share-board-dialog";
 import { PublicLinkSection } from "@/components/tables/object-share-dialog";
 import { DocGeneralAccess } from "@/components/docs/doc-share-modal";
-import { managesViaNode, orgWideLine, panelUrl, restrictDocConfirm, restrictedAboveLine, spaceOrgLine } from "./manage-access-model";
+import { managesViaNode, orgWideLine, panelUrl, restrictConfirm, restrictDocConfirm, restrictedAboveLine, spaceOrgLine } from "./manage-access-model";
 import { AccessSectionHeading, type ManageInTarget } from "./who-has-access";
 
 /**
@@ -62,7 +67,7 @@ export function GeneralAccess({
   panel, meId = null, canChange, onChanged, onManageIn,
 }: {
   panel: AccessPanel;
-  /** The signed-in person, for the doc's Restricted confirm. */
+  /** The signed-in person, for the Restricted confirm (doc, Folder and List). */
   meId?: string | null;
   /** The dialog manages this node: the controls render. Otherwise the state reads as text. */
   canChange: boolean;
@@ -93,6 +98,7 @@ export function GeneralAccess({
           parentFolderName={general.inheritsFrom?.kind === "folder" ? general.inheritsFrom.name : null}
           readOnly={!canChange}
           onChanged={onChanged}
+          restrictConfirm={restrictConfirm(panel, meId)}
         />
       );
       break;
@@ -106,6 +112,7 @@ export function GeneralAccess({
           orgName={orgName}
           readOnly={!canChange}
           onChanged={onChanged}
+          restrictConfirm={restrictConfirm(panel, meId)}
         />
       );
       break;

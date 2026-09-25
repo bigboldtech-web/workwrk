@@ -23,9 +23,9 @@ function block(src: string, marker: string): string {
 
 describe("the doc move gate (finding 1)", () => {
   const route = read("src/app/api/docs/[id]/route.ts");
-  it("asks Full access, or today's answer, before a doc leaves every place", () => {
-    expect(route).toMatch(/docLeavesEveryPlace\(existing,/);
-    expect(route).toMatch(/leaves && !access\.canManage/);
+  it("asks Full access, or today's answer, before a move that could open a doc to the org", () => {
+    expect(route).toMatch(/!access\.canManage && docMoveNeedsFull\(existing, after, confined\)/);
+    expect(route).toMatch(/docHomeOf\(ctx\.orgId, existing\), docHomeOf\(ctx\.orgId, after\)/);
     expect(route).toMatch(/legacyFloorRole\(nodeCtx, \{ kind: "doc", id \}\)/);
   });
 });

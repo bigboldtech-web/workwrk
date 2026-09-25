@@ -410,9 +410,14 @@ export function ShareFolderDialog({
  * directions), written through PATCH /api/folders/[id] { visibility }. Not
  * optimistic: the switch moves when the server agrees, and a failure keeps
  * the person's choice on screen with a Retry that sends it again.
+ *
+ * Turning it ON cuts everyone who reaches the Folder through its parent, and
+ * can cut the person flipping it. With `restrictConfirm` (restrictConfirm in
+ * manage-access-model.ts) that is asked first; Cancel sends nothing. The
+ * Retry after a failed write does not ask again: the person already agreed.
  */
 export function FolderRestrictedSwitch({
-  folderId, restricted, parentSpaceName, parentFolderName, readOnly = false, onChanged,
+  folderId, restricted, parentSpaceName, parentFolderName, readOnly = false, onChanged, restrictConfirm = null,
 }: {
   folderId: string;
   restricted: boolean;
@@ -422,7 +427,10 @@ export function FolderRestrictedSwitch({
   parentFolderName?: string | null;
   readOnly?: boolean;
   onChanged?: (restricted: boolean) => void;
+  /** Asked before Restricted goes on when that locks anyone out. Null: nobody loses it. */
+  restrictConfirm?: { title: string; description: string; confirmLabel: string } | null;
 }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<{ message: string; next: boolean } | null>(null);
 
@@ -449,6 +457,12 @@ export function FolderRestrictedSwitch({
     }
   };
 
+  const toggle = async (next: boolean) => {
+    if (busy) return;
+    if (next && restrictConfirm && !(await confirm({ ...restrictConfirm, destructive: true }))) return;
+    await set(next);
+  };
+
   // A reader sees the state, never an instruction for a switch they do not have.
   const parentName = parentFolderName || parentSpaceName;
   const inherits = parentName ? `Inherits from ${parentName}.` : "Inherits from its Space.";
@@ -469,7 +483,7 @@ export function FolderRestrictedSwitch({
         {readOnly ? null : (
           <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
             {busy ? <Dots variant="pending" /> : null}
-            <Switch checked={restricted} disabled={busy} onChange={(next) => void set(next)} aria-label="Restricted" />
+            <Switch checked={restricted} disabled={busy} onChange={(next) => void toggle(next)} aria-label="Restricted" />
           </span>
         )}
       </div>

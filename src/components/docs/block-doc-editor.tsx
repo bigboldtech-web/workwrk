@@ -84,6 +84,8 @@ import { registerDocTitleWriter } from "@/lib/doc-title-handoff";
 import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { DocRowMenu } from "./doc-row-menu";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -140,6 +142,34 @@ type DraftPayload = { title: string; bnDoc: PartialBlock[] | null; blocks: Block
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
+
+// GET /api/docs/[id] hides existence: 404 for a doc the viewer holds nothing
+// on (or no doc at all), 400 for a malformed id. Both are the in-shell
+// not-found, the same as table-editor's, never "Couldn't open this doc" with
+// a Retry that reloads into the same refusal. Only a real failure (network,
+// 5xx) keeps that error and its Retry.
+export function docLoadHidden(status: number): boolean {
+  return status === 404 || status === 400;
+}
+
+// A PUT the server refused for good, as against one worth resending. 404 is
+// the route's answer once the viewer's access is gone (removed while this
+// tab was open: access ends at once, and the route never says whether the
+// doc exists); 410 is the doc archived under them. A resend gets the same
+// answer every time, so these are final, like the 403 branch, and must not
+// fall into the network retry loop that tells the person to check a
+// connection that is fine. Everything else not ok keeps that loop.
+export type DocSaveRefusal = "no-access" | "archived";
+export function docSaveRefusal(status: number): DocSaveRefusal | null {
+  if (status === 404) return "no-access";
+  if (status === 410) return "archived";
+  return null;
+}
+
+export const DOC_SAVE_REFUSAL_COPY: Record<DocSaveRefusal, string> = {
+  "no-access": "You no longer have access to this doc. Your changes are kept in this tab: copy them or ask the owner to share it again.",
+  archived: "This doc was moved to Trash, so your changes were not saved. They are kept in this tab: copy them before you leave.",
+};
 
 // Convert legacy HTML into a one-shot paragraph-per-line block array.
 function htmlToBlocks(html: string): Block[] {
@@ -223,6 +253,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // the restored content instead of holding the previous in-memory doc.
   const [restoreNonce, setRestoreNonce] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The load answered 404/400 (docLoadHidden): the in-shell not-found.
+  const [notFound, setNotFound] = useState(false);
+  // A save refused for good (docSaveRefusal) while the doc was open. The
+  // editor turns read only and keeps what was typed on screen and in the
+  // draft mirror, so the person can copy it; nothing more is sent.
+  const [lostAccess, setLostAccess] = useState<DocSaveRefusal | null>(null);
+  const lostAccessRef = useRef<DocSaveRefusal | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const [commentOpen, setCommentOpen] = useState(false);
@@ -422,6 +459,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     (async () => {
       try {
         const res = await fetch(`/api/docs/${docId}`);
+        if (docLoadHidden(res.status)) {
+          if (!cancelled) setNotFound(true);
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
@@ -547,6 +588,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // attempt and the retry loop would burn 4 tries + a scary save toast.
     // Ref read (not a closure) so the guard is never stale.
     if (myRoleRef.current !== "edit") return;
+    // The server refused a save for good (no access any more, or archived):
+    // keep mirroring to the draft so nothing typed is lost, send nothing.
+    if (lostAccessRef.current) {
+      draftRef.current.write({ title: titleRef.current, bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta });
+      return;
+    }
     // A 409 nobody has answered yet: keep mirroring to the local draft so not
     // one keystroke is lost, but do not overwrite the version that beat us.
     // The ConflictStrip is on screen and the indicator reads unsaved, so this
@@ -624,6 +671,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         toast(err?.message ?? "You need Can edit for that. Ask the owner.", { tone: "danger" });
         return;
       }
+      const refusal = docSaveRefusal(res.status);
+      if (refusal) {
+        // Final, like 403, but with no Retry: the same PUT only ever gets the
+        // same answer, and "check your connection" would be untrue. The draft
+        // mirror was written above (attempt 0), the editor goes read only
+        // with the reason in a strip. A save queued behind this one still
+        // drains in `finally`: the guard at the top writes its newer text to
+        // the draft and sends nothing.
+        lostAccessRef.current = refusal;
+        setLostAccess(refusal);
+        setSaveStatus("error");
+        setSaveStuck(null);
+        toast(DOC_SAVE_REFUSAL_COPY[refusal], { tone: "danger" });
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => null);
       if (data?.doc?.updatedAt) { lastUpdatedAtRef.current = data.doc.updatedAt; setServerUpdatedAt(data.doc.updatedAt); }
@@ -665,7 +727,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   useEffect(() => {
     if (pane !== "primary" || !doc) return;
     const iv = setInterval(async () => {
-      if (document.visibilityState !== "visible" || saveInFlightRef.current || !lastUpdatedAtRef.current) return;
+      if (document.visibilityState !== "visible" || saveInFlightRef.current || !lastUpdatedAtRef.current || lostAccessRef.current) return;
       const r = await apiFetch<{ doc?: { updatedAt?: string } }>(`/api/docs/${docId}`, { cache: "no-store" });
       if (!r.ok) return;
       const live = r.data.doc?.updatedAt;
@@ -746,7 +808,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return registerDocTitleWriter(docId, async (next) => {
       setTitle(next);
       titleRef.current = next;
-      if (myRoleRef.current !== "edit" || !canSend(conflictHoldRef.current)) return false;
+      if (myRoleRef.current !== "edit" || lostAccessRef.current || !canSend(conflictHoldRef.current)) return false;
       if (titleTimer.current) { clearTimeout(titleTimer.current); titleTimer.current = null; }
       await persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
       // A 409 inside that save raised the hold: the peer's version won, the
@@ -881,6 +943,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       ? { href: hubBack.fallbackHref, label: hubBack.label }
       : { href: "/docs", label: "Docs" };
 
+  if (notFound) {
+    // The primary pane is the page, so it is the in-shell 404 with its
+    // "Not found" crumb. A peek pane (DocSplitView's right side, a List's
+    // embedded doc) must not replace the crumb of the page around it, so it
+    // shows the same sentence without one; its container owns close and back.
+    return pane === "primary" ? <NotFoundView /> : <OsEmptyView title="We couldn't find that page" />;
+  }
   if (loadError) {
     return (
       <div className="os-chrome mx-auto flex max-w-md flex-col items-center gap-3 px-6 pt-16 text-center">
@@ -978,7 +1047,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             indicator only; DocSplitView owns their header. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} /> : null}
-          <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} />
+          {/* After a final refusal there is no retry in hand, and the default
+              error word would read "Not saved, retrying": it is not. */}
+          <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} labels={lostAccess ? { error: "Not saved" } : undefined} />
         </div>
 
         <div className="bdoc__head-actions">
@@ -1131,7 +1202,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
       {/* Read-only (access 5.4) and the lock (change request A4): one slim
           strip under the title row instead of a silently read-only editor. */}
-      {pane !== "peek" && lock && !canManage ? (
+      {lostAccess ? (
+        // First, and in a peek pane too: it is why the editor just stopped
+        // taking keystrokes, and the only place the reason stays on screen.
+        <ReadOnlyBanner message={DOC_SAVE_REFUSAL_COPY[lostAccess]} />
+      ) : pane !== "peek" && lock && !canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byName ?? "someone"}. Ask them to unlock.`} />
       ) : pane !== "peek" && lock && canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byId === me?.id ? "you" : lock.byName ?? "someone"}. Everyone else can read and comment.`} onRequest={() => void toggleLock()} requestLabel="Unlock" />
@@ -1156,7 +1231,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           }}
         />
       ) : null}
-      {myRole === "edit" ? (
+      {myRole === "edit" && !lostAccess ? (
         <DraftRestoreStrip
           draft={draft}
           onRestore={(p) => {
@@ -1260,7 +1335,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled doc"
-          readOnly={readingMode || !!meta.locked || myRole !== "edit"}
+          readOnly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
@@ -1296,7 +1371,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
               initialBnDoc={bnDoc}
               legacyBlocks={blocks}
-              readonly={readingMode || !!meta.locked || myRole !== "edit"}
+              // lostAccess is left out of the key on purpose: BlockNote takes
+              // `editable` live, and a remount could drop the last debounced
+              // keystrokes from the screen the person is about to copy.
+              readonly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
               onChange={handleEditorChange}
               docId={docId}
               // No comment action for a Can view grant: the canvas hides the
@@ -1336,7 +1414,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {pane === "primary" ? (
           <SubDocsList
             rows={tree.childrenOf(docId)}
-            canEdit={myRole === "edit" && !readingMode}
+            canEdit={myRole === "edit" && !readingMode && !lostAccess}
             onNew={() => void addSubpage()}
             fmt={fmt}
             spaceSlug={place?.spaceSlug ?? null}
