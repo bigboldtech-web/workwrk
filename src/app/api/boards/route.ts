@@ -6,7 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { canContributeBoard, createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
-import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
+import { canEditSpace, getSpaceForReader, listSpacesForUser, readableListsInSpace } from "@/lib/space";
 import { canRead, type ViewerContext } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 
@@ -121,7 +121,18 @@ export async function GET(req: Request) {
     if (!(await canRead(viewer, { type: "folder", id: folderId }))) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const boards = await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId });
+    // Reading the FOLDER is not reading every List in it: a PRIVATE List
+    // inside is still its owner's. The Lists answered are the readable ones,
+    // by the same predicate the Space page and Bird's eye use.
+    const folder = await prisma.folder.findFirst({
+      where: { id: folderId, organizationId: c.organizationId },
+      select: { spaceId: true },
+    });
+    const readable = folder
+      ? new Set((await readableListsInSpace(folder.spaceId, c, { includeArchived })).lists.map((l) => l.id))
+      : new Set<string>();
+    const boards = (await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId }))
+      .filter((b) => readable.has(b.id));
     return NextResponse.json({ boards });
   }
   if (spaceId) {
@@ -129,7 +140,11 @@ export async function GET(req: Request) {
     if (!space || space.organizationId !== c.organizationId) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const boards = await listBoardsInSpace(spaceId, { includeArchived });
+    // Only the Lists this viewer can read, and never the names of the others
+    // (review #11): the listing used to answer every List of the Space,
+    // PRIVATE ones included.
+    const readable = new Set((await readableListsInSpace(spaceId, c, { includeArchived })).lists.map((l) => l.id));
+    const boards = (await listBoardsInSpace(spaceId, { includeArchived })).filter((b) => readable.has(b.id));
     return NextResponse.json({ boards });
   }
   return NextResponse.json({ error: "spaceId or folderId required" }, { status: 400 });
