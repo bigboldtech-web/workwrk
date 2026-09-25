@@ -13,6 +13,9 @@ const DEBOUNCE_MS = 600;
 export function NotesBody({ text, canEdit, onChange }: { text: string; canEdit: boolean; onChange: (next: string) => void }) {
   const [draft, setDraft] = useState(text);
   const [seen, setSeen] = useState(text);
+  // Typed here and not yet handed to the save queue: state for the render
+  // (the adopt rule below), the ref for the handlers and the unmount flush.
+  const [dirty, setDirty] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
@@ -22,7 +25,7 @@ export function NotesBody({ text, canEdit, onChange }: { text: string; canEdit: 
 
   // A new value from outside (a reload, a rebase) replaces the draft only
   // while nothing typed here is still waiting to be handed over.
-  if (seen !== text && pending.current === null) {
+  if (seen !== text && !dirty) {
     setSeen(text);
     setDraft(text);
   }
@@ -32,10 +35,21 @@ export function NotesBody({ text, canEdit, onChange }: { text: string; canEdit: 
     timer.current = null;
     const next = pending.current;
     pending.current = null;
+    setDirty(false);
     if (next !== null) onChangeRef.current(next);
   };
 
-  useEffect(() => () => commit(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving the page hands over whatever was typed, so nothing is lost: the
+  // save queue outlives the page and sends it.
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      const next = pending.current;
+      pending.current = null;
+      if (next !== null) onChangeRef.current(next);
+    },
+    [],
+  );
 
   if (!canEdit) {
     return text.trim() ? (
@@ -54,6 +68,7 @@ export function NotesBody({ text, canEdit, onChange }: { text: string; canEdit: 
         const v = e.target.value.slice(0, MAX);
         setDraft(v);
         pending.current = v;
+        setDirty(true);
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(commit, DEBOUNCE_MS);
       }}

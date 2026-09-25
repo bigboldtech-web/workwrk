@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  namedRecipientFor,
   appendRunLog,
   buildReportEmail,
   cadenceText,
@@ -215,7 +216,7 @@ describe("the run log", () => {
 
 describe("buildReportEmail", () => {
   it("escapes every string and links back", () => {
-    const r = buildReportEmail({ title: "<script>x</script>", kindLabel: "Dashboard", cadence: "Every day at 09:00 (UTC)", sections: [{ heading: "Open", lines: ["a & b"] }], link: "https://app.example/dashboards/1" });
+    const r = buildReportEmail({ title: "<script>x</script>", kindLabel: "Dashboard", cadence: "Every day at 09:00 (UTC)", sections: [{ heading: "Open", lines: ["a & b"] }], link: "https://app.example/dashboards/1", manageLink: "https://app.example/settings/notifications#reports" });
     expect(r.subject).toBe("Dashboard report: <script>x</script>");
     expect(r.html).not.toContain("<script>");
     expect(r.html).toContain("&lt;script&gt;");
@@ -223,7 +224,16 @@ describe("buildReportEmail", () => {
     expect(r.html).toContain('href="https://app.example/dashboards/1"');
   });
   it("says so when there is nothing to summarise", () => {
-    expect(buildReportEmail({ title: "T", kindLabel: "View", cadence: "c", sections: [], link: "/x" }).html).toContain("nothing in this report");
+    expect(buildReportEmail({ title: "T", kindLabel: "View", cadence: "c", sections: [], link: "/x", manageLink: "/m" }).html).toContain("nothing in this report");
+  });
+  it("carries a manage link that does not depend on the report's page, escaped", () => {
+    // A recipient who can no longer open the target can never reach its
+    // "Stop receiving", so the footer must offer a way out of its own.
+    const r = buildReportEmail({ title: "T", kindLabel: "View", cadence: "c", sections: [], link: "https://app.example/boards/b?view=v", manageLink: 'https://app.example/settings/notifications?a=1&b="2"#reports' });
+    expect(r.html).toContain('href="https://app.example/settings/notifications?a=1&amp;b=&quot;2&quot;#reports"');
+    expect(r.html).toContain(">Manage the reports you receive</a>");
+    expect(r.html).not.toContain("from the report's page");
+    expect(r.html.match(/href=/g)).toHaveLength(2);
   });
 });
 
@@ -233,5 +243,22 @@ describe("isMissingReportTableError", () => {
     expect(isMissingReportTableError(Object.assign(new Error("Unknown field `reportSchedule`"), { name: "PrismaClientValidationError" }))).toBe(true);
     expect(isMissingReportTableError({ code: "P2021", meta: { table: "public.ItemListLink" }, message: "The table `public.ItemListLink` does not exist" })).toBe(false);
     expect(isMissingReportTableError({ code: "P2002", message: "Unique constraint failed on ReportSchedule" })).toBe(false);
+  });
+});
+
+describe("namedRecipientFor", () => {
+  const person = { id: "u1", firstName: "Gone", lastName: "Person", avatar: null, email: "gone@acme.test" };
+
+  it("names an eligible member as the search would", () => {
+    const o = { ...person, eligible: true };
+    expect(namedRecipientFor(o, false)).toBe(o);
+  });
+
+  it("never names an ineligible account the caller has no schedule with", () => {
+    expect(namedRecipientFor({ ...person, eligible: false }, false)).toBeNull();
+  });
+
+  it("keeps a greyed chip on the caller's own schedule, without the email", () => {
+    expect(namedRecipientFor({ ...person, eligible: false }, true)).toEqual({ ...person, email: null, eligible: false });
   });
 });

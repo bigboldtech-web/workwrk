@@ -12,7 +12,7 @@
 //   ...on each item element: onContextMenu={(e) => menu.openItemMenu(e, item)}
 //   ...once, at the root:    <ItemContextMenuHost menu={menu} ... />
 
-import { useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
@@ -22,6 +22,14 @@ import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
 import { accessMessage } from "@/lib/access-message";
 import { emitItemChanged } from "@/lib/realtime-events";
 import { linkedMenuFlags, linkedRowKind, writeContext } from "@/lib/list-link-rows";
+
+/**
+ * True inside a Personal List's canvas. The five renderers that mount this
+ * host read it here instead of each threading a prop: a private task's menu
+ * never offers Add to another List (or Share), exactly as the Table, the
+ * Board and the drawer already hide them.
+ */
+export const PersonalListSurface = createContext(false);
 
 export interface ItemContextMenu {
   menuRef: React.RefObject<ContextMenuHandle | null>;
@@ -76,6 +84,7 @@ export function ItemContextMenuHost({
   onItemRemoved?: (id: string) => void;
 }) {
   const { menuRef, target } = menu;
+  const personalList = useContext(PersonalListSurface);
   const confirm = useConfirm();
   const { toast } = useOsToast();
   const { data: session } = useSession();
@@ -148,7 +157,7 @@ export function ItemContextMenuHost({
   // A task shown here THROUGH A LINK: its menu is the link's (Remove from
   // this List, the link Move, Delete everywhere) and its role the task's.
   const kind = target && boardId ? linkedRowKind(target, boardId) : "home";
-  const flags = target && boardId ? linkedMenuFlags(target, boardId, canEdit, currentUserId) : null;
+  const flags = target && boardId ? linkedMenuFlags(target, boardId, canEdit, currentUserId, { personalList }) : null;
   const listContext: ItemMenuListContext | undefined = target && boardId && flags
     ? kind === "home"
       ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
@@ -178,6 +187,7 @@ export function ItemContextMenuHost({
       listContext={listContext}
       onRemovedFromList={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       currentUserId={currentUserId}
+      personalList={personalList}
       statuses={statuses}
       watcherIds={watcherIdsOf(target)}
       timeTrackingOn={timeTrackingEnabled ?? true}

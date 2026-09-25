@@ -12,6 +12,14 @@
 // last answer is handed to the save as { key: previewKey(input), result }, and
 // the canvas shows it only when the key matches the saved settings.
 //
+// THE TITLE follows the settings until the person types one. A card starts
+// on defaultWidgetTitle ("Open tasks"), and while its title is untouched a
+// change of scope, metric, group by, sort or source re-derives it, so a card
+// can never be saved headed "Open tasks" while it counts completed ones. A
+// card opened for editing is untouched only when its saved title is still
+// its settings' default; a title anyone typed is never overwritten. Clearing
+// the field hands the title back to the settings at their next change.
+//
 // SAVING. The primary is disabled until the input is valid and while its
 // request is in flight. A failed save keeps the dialog open, with the input
 // as it was and a Retry; nothing typed here is lost.
@@ -44,7 +52,7 @@ import { OsShellContext, useLayer } from "@/components/layout/os/shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { previewKey } from "@/lib/dashboards/dashboard-editor";
-import { kindMeta, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
+import { defaultWidgetTitle, kindMeta, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
 import { EMPTY_FILTER, widgetInputSchema, type WidgetFilter, type WidgetInput } from "@/lib/dashboards/widgets";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
 import type { StatusOption } from "@/lib/board-items-shared";
@@ -148,14 +156,42 @@ export function WidgetEditor({
   partial?: boolean;
   onSave: (input: WidgetInput, preview: PreviewSeed | null) => Promise<EditorSaveResult>;
 }) {
-  const [input, setInput] = useState<WidgetInput>(initial);
+  const [draft, setDraft] = useState<WidgetInput>(initial);
+  // "typed": the person's own title, never overwritten. "cleared": they
+  // emptied the field, which stays empty until a setting changes. "auto":
+  // the title is the settings' default. "saved": an edited card, auto only
+  // while its saved title is its saved settings' default; read against
+  // `initial` on every render, so it settles once the Lists' field labels
+  // load (a "Sum of Points" title cannot match before "Points" is known).
+  const [titleMode, setTitleMode] = useState<"auto" | "typed" | "cleared" | "saved">(mode === "add" ? "auto" : "saved");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ key: string; state: "loading" } | { key: string; state: "ready"; result: WidgetResult } | { key: string; state: "failed" } | null>(null);
   const [previewNonce, setPreviewNonce] = useState(0);
-  const zone = useMemo(browserZone, []);
-  const meta = kindMeta(input.kind);
-  const entry = registryFor(input.kind);
+  const zone = useMemo(() => browserZone(), []);
+  const meta = kindMeta(draft.kind);
+  const entry = registryFor(draft.kind);
+
+  // The Lists' fields come from the draft's source; the title can name one.
+  const listIds = isData(draft) && draft.source.kind === "lists" ? draft.source.listIds : [];
+  const facts = useListFacts(listIds);
+  const fieldLabels = useMemo(() => new Map(facts.fields.map((f) => [f.key, f.label])), [facts.fields]);
+  const autoTitle =
+    isData(draft) &&
+    (titleMode === "auto" || (titleMode === "saved" && "title" in initial && initial.title === defaultWidgetTitle(initial, fieldLabels)));
+  const input = useMemo<WidgetInput>(() => {
+    if (!autoTitle || !("title" in draft)) return draft;
+    const t = defaultWidgetTitle(draft, fieldLabels);
+    return t === draft.title ? draft : ({ ...draft, title: t } as WidgetInput);
+  }, [draft, autoTitle, fieldLabels]);
+  // Every settings change goes through here; the Title field does not. The
+  // first change settles a "saved" title for good, so dropping the List that
+  // named its field cannot flip it back to the stale saved words.
+  const setInput = (next: WidgetInput) => {
+    if (titleMode === "cleared" || (titleMode === "saved" && autoTitle)) setTitleMode("auto");
+    else if (titleMode === "saved") setTitleMode("typed");
+    setDraft(next);
+  };
 
   // A shell layer while open; it refuses to close while its save is in
   // flight, so the answer always lands on the dialog that asked.
@@ -187,8 +223,6 @@ export function WidgetEditor({
 
   const valid = useMemo(() => widgetInputSchema.safeParse(input).success, [input]);
   const key = useMemo(() => (isData(input) ? previewKey(input) : ""), [input]);
-  const listIds = isData(input) && input.source.kind === "lists" ? input.source.listIds : [];
-  const facts = useListFacts(listIds);
 
   // The live preview, debounced, only for a valid data card.
   const seq = useRef(0);
@@ -251,7 +285,9 @@ export function WidgetEditor({
         }}
       >
         <div className="flex h-12 items-center gap-2 border-b border-line px-5 pe-12">
-          <DialogTitle className="text-base">{mode === "add" ? `Add ${meta?.label ?? "widget"}` : `${meta?.label ?? "Widget"} settings`}</DialogTitle>
+          {/* "List widget", never a bare "List": the List kind shares its
+              name with the Lists the card counts. */}
+          <DialogTitle className="text-base">{mode === "add" ? `Add ${meta ? `${meta.label} widget` : "a widget"}` : `${meta ? `${meta.label} widget` : "Widget"} settings`}</DialogTitle>
           <DialogDescription className="sr-only">{meta?.description ?? "Widget settings"}</DialogDescription>
         </div>
 
@@ -306,7 +342,10 @@ export function WidgetEditor({
               <input
                 value={title}
                 maxLength={120}
-                onChange={(e) => setInput({ ...input, title: e.target.value } as WidgetInput)}
+                onChange={(e) => {
+                  setTitleMode(e.target.value === "" ? "cleared" : "typed");
+                  setDraft({ ...input, title: e.target.value } as WidgetInput);
+                }}
                 aria-label="Title"
                 placeholder="Name this widget"
                 className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-[var(--os-focus)]"

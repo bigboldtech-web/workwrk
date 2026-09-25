@@ -160,6 +160,29 @@ function isEmptyValue(v: unknown): boolean {
 }
 
 /**
+ * Does one of the List's own fields carry a value on this task?
+ *
+ * Not every field keeps its value in `metadata`. A Mirror column is computed
+ * at read time from the tasks the viewer can read and arrives in
+ * `item.mirrors[key]`; it never has a metadata key at all. Reading metadata
+ * alone made every mirror count as empty, so the drawer dropped it (and the
+ * "N empty" count and the Add field hint were wrong about it) while the table
+ * showed the same values. A mirror counts when at least one of its readable
+ * values is non-empty. A Connect column keeps its ids in metadata, but the
+ * resolved `connections[key]` is checked too, so a connected task the viewer
+ * can read is never hidden if the two ever disagree.
+ */
+export function listFieldCarriesValue(
+  item: Pick<BoardItemRow, "metadata" | "mirrors" | "connections">,
+  key: string,
+): boolean {
+  if (!isEmptyValue(item.metadata?.[key])) return true;
+  const mirrored = item.mirrors?.[key]?.values;
+  if (Array.isArray(mirrored) && mirrored.some((v) => !isEmptyValue(v))) return true;
+  return (item.connections?.[key]?.length ?? 0) > 0;
+}
+
+/**
  * One key of `metadata`, changed without touching the rest of it.
  *
  * The earlier version of this spread the CLIENT's cached blob and sent the
@@ -218,10 +241,11 @@ export function BoardItemDetail({
 
   const { stored, storedRaw, toggle, toggleListField } = useItemFields(listContext?.id ?? item.boardId ?? null);
 
-  /** Does one of the List's own fields carry a value on this task? */
+  /** Does one of the List's own fields carry a value on this task? Mirrors included. */
   const listFieldHasValue = useCallback(
-    (key: string) => !isEmptyValue(item.metadata?.[key]),
-    [item.metadata],
+    (key: string) =>
+      listFieldCarriesValue({ metadata: item.metadata, mirrors: item.mirrors, connections: item.connections }, key),
+    [item.metadata, item.mirrors, item.connections],
   );
 
   const hasValue = useCallback(

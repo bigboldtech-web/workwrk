@@ -27,15 +27,19 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { accessMessage } from "@/lib/access-message";
 import {
   boardStatusFor,
-  homeStatusForBoardStatus,
+  bulkStatusSkipMessage,
+  homeStatusTarget,
   itemsUrl,
   linkedMenuFlags,
   linkedRowEditable,
   linkedRowKind,
   mergeRefetchedRow,
   optimisticLinkedStatus,
+  linkedStatusNote,
+  linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
+  statusPickerFor,
   writeContext,
 } from "@/lib/list-link-rows";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
@@ -177,32 +181,50 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // handlers reach it through a ref rather than being reordered around it.
   const refetchRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Bulk actions. A field write is ONE request to /api/items/bulk, naming this
-  // List (`contextBoardId`), the same as the List view: the server gates each
-  // card on its own and answers per card, and a card shown here through a link
-  // is written in this List's context. Archive and delete still go one
-  // request per card. Either way the local (and parent-reported) change
-  // applies ONLY to the cards the server accepted; the others stay visible,
-  // unchanged and selected, and are named in the error banner for a retry.
+  // Bulk actions. A field write is one PATCH /api/items/[id] per card, as
+  // before Phase 5b, now naming this List (`contextBoardId`) so a card shown
+  // here through a link is written in this List's context. The per-card
+  // route is the one that rolls a repeating task forward when it is
+  // completed, re-anchors a scheduled series when its due date moves, and
+  // tells other tabs and open drawers; /api/items/bulk does none of these and
+  // caps a selection at 200, so a Board selection never goes there. Archive
+  // and delete are one request per card too. Either way the local (and
+  // parent-reported) change applies ONLY to the cards the server accepted;
+  // the others stay visible, unchanged and selected, and are named in the
+  // error banner for a retry.
   const runBulk = useCallback(async (ids: string[], patch: Record<string, unknown>): Promise<{ succeeded: string[]; failed: string[]; reasons: string[] }> => {
-    try {
-      const res = await fetch("/api/items/bulk", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids, patch, contextBoardId: boardId }),
-      });
-      const data = (await res.json().catch(() => null)) as { results?: Array<{ id: string; ok: boolean; reason?: string }> } | null;
-      if (res.ok && Array.isArray(data?.results)) {
-        return {
-          succeeded: data.results.filter((r) => r.ok).map((r) => r.id),
-          failed: data.results.filter((r) => !r.ok).map((r) => r.id),
-          reasons: data.results.filter((r) => !r.ok && r.reason).map((r) => r.reason as string),
-        };
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    const BATCH = 10;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batch = ids.slice(i, i + BATCH);
+      const answers = await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const res = await fetch(`/api/items/${id}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...patch, contextBoardId: boardId }),
+            });
+            if (res.ok) return { id, ok: true as const };
+            const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+            return { id, ok: false as const, reason: typeof data?.error === "string" ? data.error : undefined };
+          } catch {
+            // Network failure: this card is unchanged and stays selected.
+            return { id, ok: false as const, reason: undefined };
+          }
+        }),
+      );
+      for (const a of answers) {
+        if (a.ok) succeeded.push(a.id);
+        else {
+          failed.push(a.id);
+          if (a.reason) reasons.push(a.reason);
+        }
       }
-    } catch {
-      // Network failure: nothing applied, everything stays selected.
     }
-    return { succeeded: [], failed: ids, reasons: [] };
+    return { succeeded, failed, reasons };
   }, [boardId]);
   const reasonSentences = (reasons: string[]): string => {
     const out: string[] = [];
@@ -266,7 +288,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     }
     const messages: string[] = [];
     if (failed.length > 0) messages.push(`${bulkFailureMessage("update", failed, rows.length, items)}${reasonSentences(reasons)}`);
-    if (plan.skipped.length > 0) messages.push(`${plan.skipped.length} task${plan.skipped.length === 1 ? "" : "s"} from other Lists weren't changed because their home List's statuses aren't shared with you.`);
+    // A linked card with no faithful home status for this one is left as it
+    // is and named, rather than saved as a status nobody picked.
+    if (plan.skipped.length > 0) messages.push(bulkStatusSkipMessage(plan, statuses.find((s) => s.value === status)?.label ?? status));
     setError(messages.length ? messages.join(" ") : null);
     setSelected(new Set([...failed, ...plan.skipped]));
     setBulkBusy(false);
@@ -393,13 +417,20 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
 
   // A drop into a column. A card shown here through a link writes the HOME
   // status that column maps to (its status belongs to its home set); with no
-  // home set known, it cannot be dragged at all.
+  // home set known, it cannot be dragged at all. A column its home has no
+  // status for is refused and SAID (homeStatusTarget): the old remap wrote
+  // the home's first Active status instead, so a drop on In Progress saved
+  // To Do, reopened a Done task and put the card back where it came from.
   const moveTo = useCallback((id: string, newStatus: string) => {
     const card = itemsRef.current.find((r) => r.id === id);
     if (card && linkedRowKind(card, boardId) !== "home") {
-      const home = homeStatusForBoardStatus(card, newStatus, statuses);
-      if (!home) return;
-      void patchCard(id, { status: home }, { status: home });
+      const target = homeStatusTarget(card, newStatus, statuses);
+      if (!target.ok) {
+        const label = statuses.find((s) => s.value === newStatus)?.label ?? newStatus;
+        setError(linkedStatusRefusal(card, label, target.reason));
+        return;
+      }
+      void patchCard(id, { status: target.status }, { status: target.status });
       return;
     }
     void patchCard(id, { status: newStatus }, { status: newStatus });
@@ -541,6 +572,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     }
   }, [canEdit, confirm, refetch, reportRemoved]);
 
+  // The card being dragged, read by each column to say whether it may go there.
+  const dragCard = useMemo(() => (dragId ? items.find((r) => r.id === dragId) ?? null : null), [dragId, items]);
+
   return (
     <div className="space-y-2">
       {error ? (
@@ -561,11 +595,22 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           const status = meta.value;
           const cards = grouped.get(status) ?? [];
           const isHover = hoverColumn === status;
+          // While a card shown here through a link is dragged, a column its
+          // home List has no status for is marked as one it cannot go in, so
+          // the refusal a drop there gets is never a surprise.
+          const dragTarget = dragCard && linkedRowKind(dragCard, boardId) !== "home" && statusOf(dragCard) !== status
+            ? homeStatusTarget(dragCard, status, statuses)
+            : null;
+          const refusal = dragCard && dragTarget && !dragTarget.ok ? linkedStatusRefusal(dragCard, meta.label, dragTarget.reason) : null;
+          const refusesDrag = refusal !== null;
           return (
             <div
               key={status}
-              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 p-2 transition-colors ${
-                isHover ? "outline-2 outline-dashed -outline-offset-2 outline-[var(--os-brand)]" : ""
+              title={refusal ?? undefined}
+              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 p-2 transition-[opacity,background-color] ${
+                refusesDrag
+                  ? `opacity-50 ${isHover ? "cursor-not-allowed outline-2 outline-dashed -outline-offset-2 outline-zinc-400" : ""}`
+                  : isHover ? "outline-2 outline-dashed -outline-offset-2 outline-[var(--os-brand)]" : ""
               }`}
               onDragOver={(e) => {
                 if (!canEdit || !dragId) return;
@@ -614,7 +659,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   const kind = linkedRowKind(card, boardId);
                   const cardCanEdit = linkedRowEditable(card, canEdit);
                   const flags = linkedMenuFlags(card, boardId, canEdit, currentUserId ?? null, { personalList });
-                  const draggable = cardCanEdit && (kind === "home" || homeStatusForBoardStatus(card, statuses[0]?.value ?? "", statuses) !== null);
+                  // A linked card drags only when its home set is known here:
+                  // the columns it can go in are then the ones its home maps.
+                  const draggable = cardCanEdit && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
                   const listContext: ItemMenuListContext | undefined = kind === "home"
                     ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
                     : {
@@ -648,6 +695,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     menuIsCreator={kind === "home" ? undefined : flags.isCreator}
                     listContext={listContext}
                     homeBoardId={card.listLink?.homeList?.id ?? null}
+                    statusNote={kind === "linked-root" ? linkedStatusNote(card, boardId, statuses) : null}
                     currentUserId={currentUserId ?? null}
                     canDelete={
                       kind !== "home" || canDeleteTasks === undefined
@@ -736,6 +784,7 @@ function KanbanCard({
   menuIsCreator,
   listContext,
   homeBoardId,
+  statusNote = null,
   currentUserId,
   canDelete,
   onDragStart,
@@ -770,6 +819,11 @@ function KanbanCard({
   listContext?: ItemMenuListContext;
   /** The task's home List, when the viewer can read it. */
   homeBoardId: string | null;
+  /**
+   * Why a card shown here through a link sits in a column that is not its own
+   * status (a home "In review" in this List's To Do), as the title's tooltip.
+   */
+  statusNote?: string | null;
   /** undefined = the host could not work it out; the menu leaves Delete alone. */
   /** The viewer, for the card menu's "Assign to me" and "Watch". */
   currentUserId: string | null;
@@ -886,7 +940,7 @@ function KanbanCard({
               className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-base font-medium text-zinc-900 focus:outline-none"
             />
           ) : (
-            <div className="break-words text-base font-medium leading-snug text-zinc-800">
+            <div className="break-words text-base font-medium leading-snug text-zinc-800" title={statusNote ?? undefined}>
               {card.title}
               {/* Also in another List: the home List's name, after the title. */}
               {card.listLink ? (

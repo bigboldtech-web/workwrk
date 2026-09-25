@@ -29,6 +29,7 @@ import { StatusGlyph } from "./status-glyph";
 import { GanttBacklogPanel } from "./gantt-backlog-panel";
 import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 import { accessMessage } from "@/lib/access-message";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { linkedRowEditable, writeContext } from "@/lib/list-link-rows";
 
 // Zoom steps for the visible window (fewer weeks = zoomed in). ClickUp
@@ -72,6 +73,12 @@ interface BoardGanttViewProps {
   onItemRemoved?: (id: string) => void;
   /** Time Tracking module gate — hides "Start timer" in the context menu. */
   timeTrackingEnabled?: boolean;
+  /**
+   * The List's settings as the canvas read them (gap 14). A create here names
+   * no status of the person's own, so a List's default status applies; until
+   * they load the body is today's.
+   */
+  loadedSettings?: LoadedListSettings | null;
 }
 
 function startOfWeek(d: Date): Date {
@@ -113,6 +120,7 @@ export function BoardGanttView({
   onItemCreated,
   onItemRemoved,
   timeTrackingEnabled,
+  loadedSettings = null,
 }: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on a name row / bar / marker opens the shared item menu.
@@ -370,15 +378,22 @@ export function BoardGanttView({
     }
   }, [onItemChanged, initialItems, canEdit, boardId]);
 
+  // The ref is the lock: Enter disables the input, the disable blurs it, and
+  // the blur's own add ran in the same frame, so one Enter made two tasks.
+  const addingRef = useRef(false);
   const addTask = useCallback(async () => {
     const title = newTitle.trim();
     if (!title || !boardId) { setNewTitle(""); return; }
+    if (addingRef.current) return;
+    addingRef.current = true;
     setAdding(true);
     try {
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, status: firstStatus }),
+        // The add row names no status of the person's own, so a List default
+        // status replaces the first one.
+        body: JSON.stringify(applyDefaultsToCreateBody({ title, status: firstStatus }, loadedSettings, new Set(), boardId)),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(accessMessage(data, "Couldn't add that task.")); return; }
@@ -387,9 +402,10 @@ export function BoardGanttView({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add task");
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
-  }, [newTitle, boardId, firstStatus, onItemCreated]);
+  }, [newTitle, boardId, firstStatus, onItemCreated, loadedSettings]);
 
   const weeks = Array.from({ length: weekCount }, (_, i) =>
     new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i * 7),

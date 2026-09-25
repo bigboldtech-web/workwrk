@@ -28,6 +28,7 @@ import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
 import { canContributeSpaceFor, canEditSpaceFor, spaceForViewer, viewerIsOrgAdmin, visibleSpacesFor } from "@/lib/list-links-server";
 import { canEditDashboard, isOverviewRow, requireWorkApp } from "@/lib/dashboards/dashboard-server";
+import { createReplayDecision, readCreateRequestId } from "@/lib/create-request-id";
 import { overviewSourceProblem, spaceOverviewId } from "@/lib/dashboards/dashboard-access";
 import { parseWidgets, resolvePassthrough, serializeWidgets, widgetInputSchema, WIDGET_LIMIT, type Widget } from "@/lib/dashboards/widgets";
 
@@ -137,7 +138,8 @@ export async function POST(req: Request) {
   if ("error" in c) return c.error;
   const app = await requireWorkApp();
   if ("error" in app) return app.error;
-  const parsed = createSchema.safeParse(await req.json().catch(() => null));
+  const raw = await req.json().catch(() => null);
+  const parsed = createSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
 
   // A passthrough names a STORED card, and a new dashboard has none.
@@ -181,16 +183,45 @@ export async function POST(req: Request) {
     }
   }
 
-  const dashboard = await prisma.dashboard.create({
-    data: {
-      organizationId: c.organizationId,
-      name: parsed.data.name,
-      description: parsed.data.description,
-      spaceId: parsed.data.spaceId ?? null,
-      ownerId: c.userId,
-      widgets: serializeWidgets(resolved.widgets) as object,
-    },
-    select: { id: true, name: true, spaceId: true, createdAt: true, updatedAt: true },
-  });
-  return NextResponse.json({ dashboard }, { status: 201 });
+  // New dashboard names the row's id once and sends it with its Try again,
+  // so a create that committed but lost its answer is answered with that
+  // dashboard instead of a second, empty one.
+  const requestId = readCreateRequestId(raw);
+  const select = { id: true, name: true, spaceId: true, createdAt: true, updatedAt: true } as const;
+  const replayed = async () => {
+    if (!requestId) return null;
+    const row = await prisma.dashboard.findUnique({ where: { id: requestId }, select: { ...select, organizationId: true, ownerId: true } });
+    const decision = createReplayDecision(row ? { organizationId: row.organizationId, creatorId: row.ownerId } : null, c);
+    if (decision === "create" || !row) return null;
+    if (decision === "refuse") return NextResponse.json({ error: "request_id_taken" }, { status: 409 });
+    const { organizationId: _o, ownerId: _w, ...dashboard } = row;
+    void _o;
+    void _w;
+    return NextResponse.json({ dashboard, replayed: true }, { status: 200 });
+  };
+  const first = await replayed();
+  if (first) return first;
+
+  try {
+    const dashboard = await prisma.dashboard.create({
+      data: {
+        ...(requestId ? { id: requestId } : {}),
+        organizationId: c.organizationId,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        spaceId: parsed.data.spaceId ?? null,
+        ownerId: c.userId,
+        widgets: serializeWidgets(resolved.widgets) as object,
+      },
+      select,
+    });
+    return NextResponse.json({ dashboard }, { status: 201 });
+  } catch (err) {
+    // The first attempt landed between the check above and this create.
+    if (requestId && isUniqueViolation(err)) {
+      const again = await replayed();
+      if (again) return again;
+    }
+    throw err;
+  }
 }

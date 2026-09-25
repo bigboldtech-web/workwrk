@@ -67,10 +67,32 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return NextResponse.json({ error: "invalid_recipients" }, { status: 400 });
       }
     }
-    // The private-view rule holds on every edit, whoever the editor is.
+    // A private view goes to its owner only, whoever the editor is. The rule
+    // is checked against what this edit SENDS, never against a stored list
+    // the edit leaves alone: a view made private after it was scheduled to
+    // colleagues keeps them on the stored list, and refusing every edit over
+    // that left the owner unable to pause, retime or fix the schedule, with a
+    // Retry that could never succeed (the cron already skips the colleagues).
+    //   - Recipients in the body are the person's own list: refused, as on
+    //     POST, if it names anyone but the owner.
+    //   - Left out, on a schedule that will send: trimmed to the owner, and
+    //     the answer carries the trimmed list. Refused only when that leaves
+    //     nobody, because a schedule cannot run with no one to send to.
+    //   - Left out, on a paused schedule: untouched. Pausing always works.
     const target = await readableTarget(row.targetKind, row.targetId, c);
-    if (target?.privateOwnerId && v.recipientUserIds.some((uid) => uid !== target.privateOwnerId)) {
-      return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+    let recipientUserIds = v.recipientUserIds;
+    if (target?.privateOwnerId) {
+      const owner = target.privateOwnerId;
+      if (v.patch.recipientUserIds) {
+        if (recipientUserIds.some((uid) => uid !== owner)) {
+          return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+        }
+      } else if (v.active) {
+        recipientUserIds = recipientUserIds.filter((uid) => uid === owner);
+        if (recipientUserIds.length === 0) {
+          return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+        }
+      }
     }
     const reactivated = v.active && !row.active;
     const nextRunAt = !v.active ? null : v.timingChanged || reactivated ? nextReportRunAt(v.spec, new Date()) : row.nextRunAt;
@@ -82,7 +104,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         monthDay: v.spec.monthDay,
         timeOfDay: v.spec.timeOfDay,
         timezone: v.spec.timezone,
-        recipientUserIds: v.recipientUserIds,
+        recipientUserIds,
         active: v.active,
         nextRunAt,
       },

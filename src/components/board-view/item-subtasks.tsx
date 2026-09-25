@@ -17,6 +17,7 @@ import { Dots } from "@/components/ui/dots";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { isDoneStatus } from "@/lib/board-items-shared";
 import { accessMessage } from "@/lib/access-message";
+import { subtaskCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { PersonAvatar } from "./assignee-picker";
 
 export function ItemSubtasks({
@@ -69,6 +70,29 @@ export function ItemSubtasks({
 
   useEffect(() => { void load(); }, [load]);
 
+  // The HOME List's settings (gap 14): a subtask is created there, so its
+  // default status, and under a linked parent its statuses, come from it.
+  // Until they answer, or when the home is not readable, the body is today's
+  // (outside a link) or names no status (under one).
+  const homeBoardId = item.boardId ?? null;
+  const [homeSettings, setHomeSettings] = useState<LoadedListSettings | null>(null);
+  useEffect(() => {
+    if (!canEdit || !homeBoardId) return;
+    let alive = true;
+    fetch(`/api/boards/${homeBoardId}/settings`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d) return;
+        setHomeSettings({
+          boardId: homeBoardId,
+          defaults: d.defaults && typeof d.defaults === "object" ? d.defaults : {},
+          statuses: Array.isArray(d.statuses) ? d.statuses : [],
+        });
+      })
+      .catch(() => { /* the body stays today's */ });
+    return () => { alive = false; };
+  }, [canEdit, homeBoardId]);
+
   // Type-and-Enter: create with the typed title, append instantly, keep the
   // cursor in the box for rapid-fire entry. Errors surface instead of the old
   // silent no-op. Never sends an empty/"New subtask" placeholder.
@@ -82,7 +106,14 @@ export function ItemSubtasks({
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, parentItemId: item.id, status: statuses[0]?.value }),
+        body: JSON.stringify(subtaskCreateBody({
+          title,
+          parentItemId: item.id,
+          homeBoardId,
+          linked: !!contextBoardId && contextBoardId !== homeBoardId,
+          firstStatus: statuses[0]?.value,
+          home: homeSettings,
+        })),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

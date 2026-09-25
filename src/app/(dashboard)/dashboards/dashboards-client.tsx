@@ -31,6 +31,7 @@ import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { dashboardMessage } from "@/lib/dashboards/dashboard-messages";
+import { newCreateRequestId } from "@/lib/create-request-id";
 import { isSpaceOverviewId } from "@/lib/dashboards/dashboard-access";
 
 type View = "all" | "mine" | "archived";
@@ -103,17 +104,26 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
     });
 
   // ── create ──
+  // The ref is the lock (a second click in the same frame sees it at once);
+  // the state only draws the busy primary.
+  const creatingRef = useRef(false);
+  // One id per New dashboard, kept across its Try again, so a create whose
+  // answer was lost is answered with the dashboard it made (create-request-id).
+  const createIdRef = useRef<string | null>(null);
   const createDashboard = useCallback(async () => {
-    if (creating) return;
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setCreating(true);
     try {
+      const requestId = (createIdRef.current ??= newCreateRequestId());
       const res = await fetch("/api/dashboards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Untitled dashboard" }),
+        body: JSON.stringify({ name: "Untitled dashboard", requestId }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.dashboard?.id) throw new Error(dashboardMessage(body, "Couldn't create the dashboard."));
+      createIdRef.current = null;
       router.push(`/dashboards/${body.dashboard.id}?rename=1`);
     } catch (e) {
       toast(e instanceof Error && e.message ? e.message : "Couldn't create the dashboard.", {
@@ -121,9 +131,10 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
         action: { label: "Try again", onClick: () => void createDashboardRef.current?.() },
       });
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
-  }, [creating, router, toast]);
+  }, [router, toast]);
   const createDashboardRef = useRef(createDashboard);
   useEffect(() => {
     createDashboardRef.current = createDashboard;
@@ -144,28 +155,42 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
   }, [openNew, router]);
 
   // ── row actions ──
-  const rename = useCallback(async (r: Row) => {
+  // Every failure says so and offers a Try again that keeps what the person
+  // gave: a failed rename reopens the prompt with the name they typed (read
+  // against the row as it is now, so a 409 is answered at the new version),
+  // and a failed delete or restore sends the same request again without
+  // asking twice.
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  });
+
+  const rename = useCallback(async (r: Row, typed?: string) => {
     if (busy.has(r.id)) return;
-    const name = (await prompt({ title: "Rename dashboard", defaultValue: r.name, submitLabel: "Rename", required: true }))?.trim();
-    if (!name || name === r.name) return;
+    const current = rowsRef.current?.find((x) => x.id === r.id) ?? r;
+    const name = (await prompt({ title: "Rename dashboard", defaultValue: typed ?? current.name, submitLabel: "Rename", required: true }))?.trim();
+    if (!name || name === current.name) return;
+    const again = { label: "Try again", onClick: () => void rename(current, name) };
     lock(r.id, true);
     try {
       const res = await fetch(`/api/dashboards/${r.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expectedUpdatedAt: r.updatedAt, name: name.slice(0, 160) }),
+        body: JSON.stringify({ expectedUpdatedAt: current.updatedAt, name: name.slice(0, 160) }),
       });
       const body = await res.json().catch(() => null);
       if (res.status === 409) {
         await load();
-        toast("This dashboard changed. Try the rename again.", { tone: "danger" });
+        toast("This dashboard changed while you were renaming it.", { tone: "danger", action: again });
         return;
       }
       if (!res.ok) {
-        toast(dashboardMessage(body, "Couldn't rename the dashboard."), { tone: "danger", action: { label: "Try again", onClick: () => void rename(r) } });
+        toast(dashboardMessage(body, "Couldn't rename the dashboard."), { tone: "danger", action: again });
         return;
       }
       setRows((prev) => prev?.map((x) => (x.id === r.id ? { ...x, name, updatedAt: body?.dashboard?.updatedAt ?? x.updatedAt } : x)) ?? prev);
+    } catch {
+      toast("Couldn't reach the server, so the dashboard wasn't renamed.", { tone: "danger", action: again });
     } finally {
       lock(r.id, false);
     }
@@ -173,21 +198,45 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
 
   const restore = useCallback(async (id: string, then?: () => void) => {
     if (busy.has(id)) return;
+    const again = { label: "Try again", onClick: () => void restore(id, then) };
     lock(id, true);
     try {
       const res = await fetch(`/api/dashboards/${id}/restore`, { method: "POST" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        toast(dashboardMessage(body, "Couldn't restore the dashboard."), { tone: "danger", action: { label: "Try again", onClick: () => void restore(id, then) } });
+        toast(dashboardMessage(body, "Couldn't restore the dashboard."), { tone: "danger", action: again });
         return;
       }
       toast("Dashboard restored");
       then?.();
       await load();
+    } catch {
+      toast("Couldn't reach the server, so the dashboard wasn't restored.", { tone: "danger", action: again });
     } finally {
       lock(id, false);
     }
   }, [busy, load, toast]);
+
+  // The request alone, so Try again does not ask the delete question twice.
+  const sendArchive = useCallback(async (r: Row) => {
+    if (busy.has(r.id)) return;
+    const again = { label: "Try again", onClick: () => void sendArchive(r) };
+    lock(r.id, true);
+    try {
+      const res = await fetch(`/api/dashboards/${r.id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(dashboardMessage(body, "Couldn't delete the dashboard."), { tone: "danger", action: again });
+        return;
+      }
+      setRows((prev) => prev?.filter((x) => x.id !== r.id) ?? prev);
+      toast("Dashboard moved to Archived", { onUndo: () => void restore(r.id) });
+    } catch {
+      toast("Couldn't reach the server, so the dashboard wasn't deleted.", { tone: "danger", action: again });
+    } finally {
+      lock(r.id, false);
+    }
+  }, [busy, restore, toast]);
 
   const archive = useCallback(async (r: Row) => {
     if (busy.has(r.id)) return;
@@ -198,20 +247,8 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
       destructive: true,
     });
     if (!ok) return;
-    lock(r.id, true);
-    try {
-      const res = await fetch(`/api/dashboards/${r.id}`, { method: "DELETE" });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast(dashboardMessage(body, "Couldn't delete the dashboard."), { tone: "danger", action: { label: "Try again", onClick: () => void archive(r) } });
-        return;
-      }
-      setRows((prev) => prev?.filter((x) => x.id !== r.id) ?? prev);
-      toast("Dashboard moved to Archived", { onUndo: () => void restore(r.id) });
-    } finally {
-      lock(r.id, false);
-    }
-  }, [busy, confirm, restore, toast]);
+    await sendArchive(r);
+  }, [busy, confirm, sendArchive]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -294,7 +331,12 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
         ))}
         toolbar={{
           left: (
-            <label className="relative block">
+            // The field shrinks with the toolbar's left cluster instead of
+            // holding a fixed width. OsToolbar gives that cluster flex-1 and
+            // min-w-0, so on a phone it narrows to whatever the primary button
+            // leaves; a fixed 160px input spilled out of it and sat under
+            // "New dashboard", with typed text running beneath the button.
+            <label className="relative block min-w-0 max-w-[220px] flex-1">
               <Search className="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" strokeWidth={1.5} aria-hidden />
               <input
                 type="search"
@@ -302,7 +344,7 @@ export function DashboardsClient({ openNew }: { openNew: boolean }) {
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search dashboards"
                 aria-label="Search dashboards"
-                className="h-9 w-[220px] rounded-md border border-line-strong bg-raised ps-8 pe-2 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand max-md:w-40"
+                className="h-9 w-full rounded-md border border-line-strong bg-raised ps-8 pe-2 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand"
               />
             </label>
           ),

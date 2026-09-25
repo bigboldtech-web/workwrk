@@ -11,7 +11,8 @@
 //            column carries its number. Past 12 buckets the tail folds into
 //            "Other".
 //   donut    part to whole, so at most 6 segments (the tail folds into
-//            "Other"); a 2px surface gap between segments, and a legend on
+//            "Other"); a 2px surface gap between segments (none on a ring of
+//            one, which has nothing to separate), and a legend on
 //            the right that names every segment with its share
 //            ("<label>: <pct>%"), so identity never rests on colour alone.
 //
@@ -101,6 +102,26 @@ function fillFor(b: Bucket & { other?: true }, display: "bar" | "donut", slots: 
   return `var(--dash-viz-${slots.get(keyOf(b)) ?? 1})`;
 }
 
+/**
+ * The donut's arcs: a bucket with nothing in it draws no arc, so it can
+ * never bring a separator back to a ring that is really one segment. The
+ * legend still lists every slice.
+ */
+export function donutSegments<T extends { count: number }>(slices: readonly T[]): T[] {
+  return slices.filter((s) => s.count > 0);
+}
+
+/**
+ * The surface gap between donut segments, in px. One segment has no
+ * neighbour to separate: recharts caps a full ring at 359.999 degrees, so
+ * both straight edges of that lone sector sit at the start angle, and a
+ * stroke on them draws a white notch at 3 o'clock that reads as a second
+ * slice the legend never names.
+ */
+export function segmentGap(segments: number): number {
+  return segments > 1 ? 2 : 0;
+}
+
 function ChartTip({ active, slice, total, count }: { active?: boolean; slice?: Slice; total: number; count: (n: number) => string }) {
   if (!active || !slice) return null;
   return (
@@ -134,6 +155,9 @@ export function ChartBody({ result }: { result: Extract<WidgetResult, { kind: "c
       pct: sum > 0 ? Math.round((b.count / sum) * 100) : 0,
     }));
   }, [result.buckets, display]);
+
+  const segments = useMemo(() => donutSegments(slices), [slices]);
+  const gap = segmentGap(segments.length);
 
   const [measure, width] = useWidth();
   // A column's label gets its band's width and no more: a longer one is cut
@@ -186,16 +210,16 @@ export function ChartBody({ result }: { result: Extract<WidgetResult, { kind: "c
                   content={(p) => <ChartTip active={p.active} slice={(p.payload?.[0]?.payload as Slice | undefined) ?? undefined} total={total} count={count} />}
                 />
                 <Pie
-                  data={slices}
+                  data={segments}
                   dataKey="count"
                   nameKey="label"
                   innerRadius="68%"
                   outerRadius="92%"
-                  stroke="var(--os-surface)"
-                  strokeWidth={2}
+                  stroke={gap > 0 ? "var(--os-surface)" : "none"}
+                  strokeWidth={gap}
                   isAnimationActive={false}
                 >
-                  {slices.map((s) => (
+                  {segments.map((s) => (
                     <Cell key={s.key} fill={s.fill} />
                   ))}
                 </Pie>

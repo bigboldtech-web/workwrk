@@ -24,6 +24,7 @@ import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Dots } from "@/components/ui/dots";
 import { ScheduleReportDialog, SCHEDULABLE_VIEW_TYPES } from "@/components/reports/schedule-report-dialog";
+import type { ViewMenuRows } from "@/lib/work/view-visibility";
 
 interface ViewLike {
   id: string;
@@ -38,17 +39,35 @@ interface ViewLike {
 
 interface Props {
   boardId: string;
+  /**
+   * The List's name, so the Schedule report dialog names the List as well as
+   * the view: every List's default view is called "List", and the dialog read
+   * the same on all of them.
+   */
+  boardName?: string;
   view: ViewLike;
   /**
    * The host decided the viewer may schedule reports of this List's views
    * (the strict List read, and a member). Absent: no Schedule report row.
    */
   scheduleReports?: boolean;
+  /**
+   * The write rows this viewer may use (viewMenuRows, the routes' own gates).
+   * Absent: every row, for a host whose viewer has full access (the Personal
+   * List). A menu with no row at all does not open.
+   */
+  rows?: ViewMenuRows;
   /** Plain children, or a render function handed the menu's opener. */
   children?: ReactNode | ((openAt: (x: number, y: number) => void) => ReactNode);
 }
 
-export function ViewTabContextMenu({ boardId, view, scheduleReports = false, children }: Props) {
+/** Does this viewer get any row in a view's menu? The host hides the "..." when not. */
+export function viewMenuHasRows(view: Pick<ViewLike, "type">, rows: ViewMenuRows | undefined, scheduleReports: boolean): boolean {
+  if (!rows) return true;
+  return rows.rename || rows.setDefault || rows.duplicate || rows.delete || (scheduleReports && SCHEDULABLE_VIEW_TYPES.has(view.type));
+}
+
+export function ViewTabContextMenu({ boardId, boardName, view, scheduleReports = false, rows, children }: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   // The dialog lives HERE, outside the menu panel: closing the menu (which
@@ -60,6 +79,7 @@ export function ViewTabContextMenu({ boardId, view, scheduleReports = false, chi
     setOpen(true);
   }, []);
   const canSchedule = scheduleReports && SCHEDULABLE_VIEW_TYPES.has(view.type);
+  const hasRows = viewMenuHasRows(view, rows, scheduleReports);
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +102,8 @@ export function ViewTabContextMenu({ boardId, view, scheduleReports = false, chi
       <div
         className="inline-flex h-full items-stretch"
         onContextMenu={(e) => {
+          // No row this viewer may use: the browser's own menu, not an empty one.
+          if (!hasRows) return;
           e.preventDefault();
           openAt(e.clientX, e.clientY);
         }}
@@ -100,6 +122,7 @@ export function ViewTabContextMenu({ boardId, view, scheduleReports = false, chi
           <ViewMenuPanel
             boardId={boardId}
             view={view}
+            rows={rows}
             onClose={() => setOpen(false)}
             onSchedule={canSchedule ? () => { setOpen(false); setScheduleOpen(true); } : undefined}
           />
@@ -112,7 +135,9 @@ export function ViewTabContextMenu({ boardId, view, scheduleReports = false, chi
           target={{
             kind: "view",
             id: view.id,
-            name: view.name,
+            // "List: View", the form the saved schedule and the email subject
+            // use (readableTarget), so the dialog and the inbox agree.
+            name: boardName ? `${boardName}: ${view.name}` : view.name,
             privateOwnerId: view.isShared === false && view.ownerId ? view.ownerId : null,
           }}
         />
@@ -161,11 +186,13 @@ type Mode = "menu" | "rename";
 function ViewMenuPanel({
   boardId,
   view,
+  rows,
   onClose,
   onSchedule,
 }: {
   boardId: string;
   view: ViewLike;
+  rows?: ViewMenuRows;
   onClose: () => void;
   /** Absent: this view cannot be scheduled here, so there is no row. */
   onSchedule?: () => void;
@@ -294,10 +321,11 @@ function ViewMenuPanel({
     );
   }
 
+  const may: ViewMenuRows = rows ?? { rename: true, setDefault: !view.isDefault, duplicate: true, delete: true };
   return (
     <MenuList>
-      <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
-      {!view.isDefault ? (
+      {may.rename ? <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} /> : null}
+      {may.setDefault && !view.isDefault ? (
         <MenuItem
           icon={Star}
           label="Set as default"
@@ -308,10 +336,14 @@ function ViewMenuPanel({
           }}
         />
       ) : null}
-      <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
+      {may.duplicate ? <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} /> : null}
       {onSchedule ? <MenuItem icon={CalendarClock} label="Schedule report" onClick={onSchedule} /> : null}
-      <MenuSeparator />
-      <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
+      {may.delete ? (
+        <>
+          {may.rename || may.setDefault || may.duplicate || onSchedule ? <MenuSeparator /> : null}
+          <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
+        </>
+      ) : null}
     </MenuList>
   );
 }

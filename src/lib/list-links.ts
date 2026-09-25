@@ -163,6 +163,12 @@ export interface AddLinkItem {
   parentItemId: string | null;
   /** The task's HOME List is archived. */
   homeArchived: boolean;
+  /**
+   * The task's HOME is a Personal List. Its tasks are private to its owner,
+   * so none is ever added to another List (a link would let every member of
+   * that List read it). Absent: not a Personal List.
+   */
+  homePersonal?: boolean;
 }
 
 function isSystemList(settings: unknown): boolean {
@@ -203,6 +209,7 @@ export function decideAddLink(i: {
   }
   if (it.archivedAt || it.homeArchived) return { ok: false, reason: "item_archived" };
   if (it.parentItemId) return { ok: false, reason: "is_subtask" };
+  if (it.homePersonal) return { ok: false, reason: "personal_list" };
   if (it.boardId === i.targetId) return { ok: false, reason: "already_home" };
   if (!i.canContributeHome) return { ok: false, reason: "home_list_read_only" };
   if (i.alreadyLinked) return { ok: true, idempotent: true };

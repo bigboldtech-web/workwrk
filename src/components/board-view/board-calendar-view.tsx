@@ -15,6 +15,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { FieldDef } from "@/lib/field-catalog";
 import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 import { accessMessage } from "@/lib/access-message";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { linkedRowEditable, writeContext } from "@/lib/list-link-rows";
 
 interface BoardCalendarViewProps {
@@ -38,6 +39,12 @@ interface BoardCalendarViewProps {
   onItemRemoved?: (id: string) => void;
   /** Time Tracking module gate — hides "Start timer" in the context menu. */
   timeTrackingEnabled?: boolean;
+  /**
+   * The List's settings as the canvas read them (gap 14). A create here names
+   * no status of the person's own, so a List's default status applies; until
+   * they load the body is today's.
+   */
+  loadedSettings?: LoadedListSettings | null;
 }
 
 function dateKey(d: Date): string {
@@ -53,7 +60,7 @@ function localMidnightIso(dayKey: string): string {
   return new Date(`${dayKey}T00:00:00`).toISOString();
 }
 
-export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled, loadedSettings = null }: BoardCalendarViewProps) {
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on any day chip opens the shared item menu.
@@ -137,7 +144,11 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
         // List with its own set does not have, so the day "+" created a task
         // whose status did not exist on its own List and rendered as a grey
         // orphan. The List's first ACTIVE status is what "new here" means.
-        body: JSON.stringify({ title: "New item", status: firstActiveStatus, dueAt: localMidnightIso(key) }),
+        // The status is not the person's choice, so a List default status
+        // replaces it (the day is: dueAt is always sent).
+        body: JSON.stringify(
+          applyDefaultsToCreateBody({ title: "New item", status: firstActiveStatus, dueAt: localMidnightIso(key) }, loadedSettings, new Set(), boardId),
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -151,7 +162,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     } finally {
       setBusyDay(null);
     }
-  }, [boardId, canEdit, busyDay, firstActiveStatus, onItemCreated, onOpenItem]);
+  }, [boardId, canEdit, busyDay, firstActiveStatus, onItemCreated, onOpenItem, loadedSettings]);
 
   // Drop handler — PATCH dueAt to the target day, then sync the parent
   // canvas with the server's row (calendar re-buckets from props).

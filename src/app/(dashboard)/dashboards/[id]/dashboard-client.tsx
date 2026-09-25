@@ -41,7 +41,7 @@ import { ScheduleReportDialog } from "@/components/reports/schedule-report-dialo
 import { layoutsOf, placeNewWidget, toWidgetInputs } from "@/lib/dashboards/dashboard-editor";
 import { isSpaceOverviewId } from "@/lib/dashboards/dashboard-access";
 import { dashboardMessage } from "@/lib/dashboards/dashboard-messages";
-import { kindMeta, newWidgetId, newWidgetInput, type WidgetKind } from "@/lib/dashboards/widget-kinds";
+import { kindMeta, newWidgetId, newWidgetInput, type WidgetKind, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
 import type { EditorWidget, WidgetInput } from "@/lib/dashboards/widgets";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import type { AutosaveStatus } from "@/hooks/use-autosave";
@@ -100,12 +100,26 @@ function NameEditor({ value, onSave, onCancel }: { value: string; onSave: (v: st
   );
 }
 
+/**
+ * "Refreshed 5m ago", kept true while the page sits open: it re-reads the
+ * clock once a minute on its own, so the canvas and its cards never
+ * re-render for a label.
+ */
+function RefreshedAt({ at }: { at: string }) {
+  const fmt = useFormat();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return <span title={fmt.title(at)}>Refreshed {fmt.relative(at)}</span>;
+}
+
 export function DashboardClient({ id, startRename }: { id: string; startRename: boolean }) {
   const router = useRouter();
   const d = useDashboard(id);
   const { toast } = useOsToast();
   const confirm = useConfirm();
-  const fmt = useFormat();
 
   const [renaming, setRenaming] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -135,6 +149,12 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
   const canEdit = d.meta?.canEdit === true;
   const name = d.name || "Dashboard";
   const overviewRow = isSpaceOverviewId(id);
+  // A Space's Overview opened here by its direct link is still that Space's:
+  // its cards count the Space or Lists inside it (the server refuses any
+  // other source), so the editor offers exactly those, as on the Overview
+  // tab. Once its Space is gone it is an ordinary dashboard.
+  const overviewSpaceId = overviewRow && d.meta?.spaceId && !d.meta.spaceMissing ? d.meta.spaceId : null;
+  const surface: WidgetSurface = overviewSpaceId ? "space-overview" : "dashboard";
 
   // ?rename=1 (a new dashboard) opens the name field once and is stripped.
   const renameLatch = useRef(false);
@@ -154,10 +174,15 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
         return "saving";
       case "saved":
         return "saved";
+      // Retrying reads "Not saved, retrying"; out of retries it reads "Not
+      // saved" with its Retry (onRetry below). A save the server refused, or
+      // one that met someone else's version, is "Unsaved changes": the strip
+      // under the title row says why and what to do, so the indicator never
+      // claims a retry that is not happening.
       case "retrying":
       case "error":
-      case "stopped":
         return "error";
+      case "stopped":
       case "conflict":
         return "dirty";
       default:
@@ -170,7 +195,7 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
     const meta = kindMeta(kind);
     const layout = placeNewWidget(Object.values(layoutsOf(d.widgets)), meta?.defaultSize ?? { w: 4, h: 4 });
     const widgetId = newWidgetId();
-    setEditor({ mode: "add", widgetId, input: newWidgetInput(kind, { id: widgetId, layout }), partial: false });
+    setEditor({ mode: "add", widgetId, input: newWidgetInput(kind, { id: widgetId, spaceId: overviewSpaceId, layout }), partial: false });
   };
 
   const openSettings = (w: EditorWidget) => {
@@ -272,7 +297,7 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
         <OsPageHeaderSkeleton toolbar />
         <div className="grid grid-cols-1 gap-4 px-6 pb-6 pt-2 md:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-44 rounded-[var(--os-r-lg)] border border-line bg-raised p-3">
+            <div key={i} className="h-44 rounded-lg border border-line bg-raised p-3">
               <SkeletonLines lines={3} />
             </div>
           ))}
@@ -317,8 +342,13 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
     ...(canEdit && !overviewRow ? [{ separator: true as const }, { label: "Delete", icon: Trash2, destructive: true, disabled: deleting, onClick: () => void deleteDashboard() }] : []),
   ];
 
-  const stopped = d.save.status === "stopped" || d.save.status === "error";
-  const refreshedLabel = d.computedAt ? `Refreshed ${fmt.relative(d.computedAt)}` : d.dataLoading ? "Refreshing" : "";
+  // A save the server refused says why in the strip under the title row; a
+  // network failure is the AutosaveIndicator's "Not saved" with its Retry.
+  // Retry is offered only where sending again can work: not after "you can
+  // no longer edit this" or "this is gone", which the strip explains.
+  const stopped = d.save.status === "stopped";
+  const retryable = d.save.status === "error" || (stopped && d.save.stopReason !== "forbidden" && d.save.stopReason !== "gone");
+  const refreshedLabel = d.computedAt ? null : d.dataLoading ? "Refreshing" : "";
 
   return (
     <>
@@ -357,7 +387,7 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
         toolbar={{
           left: (
             <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
-              {refreshedLabel ? <span title={d.computedAt ? fmt.title(d.computedAt) : undefined}>{refreshedLabel}</span> : null}
+              {d.computedAt ? <RefreshedAt at={d.computedAt} /> : refreshedLabel ? <span>{refreshedLabel}</span> : null}
               <button
                 type="button"
                 onClick={d.actions.refresh}
@@ -372,7 +402,7 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
           ),
           right: (
             <>
-              <AutosaveIndicator status={autosave} lastSavedAt={d.save.lastSavedAt} onRetry={d.save.status === "error" || d.save.status === "stopped" ? d.actions.retry : undefined} />
+              <AutosaveIndicator status={autosave} lastSavedAt={d.save.lastSavedAt} onRetry={d.save.status === "error" ? d.actions.retry : undefined} />
               {/* Marks the spot just before the primary, so addButton can find
                   it; -ms-2 takes back the gap the empty marker would add. */}
               <span ref={addAnchor} aria-hidden className="-ms-2 inline-block h-9 w-0" />
@@ -385,14 +415,19 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
       {d.save.status === "conflict" ? (
         <ConflictStrip noun="dashboard" onReload={() => void d.actions.reloadLive()} onDismiss={() => void d.actions.keepMine()} />
       ) : null}
-      <DraftRestoreStrip draft={d.draft} onRestore={d.actions.restoreDraft} />
+      {/* Only an editor is offered their unsaved changes back: for someone
+          who can no longer edit, Restore would be a control that can only
+          fail. The draft itself stays on this device in case they can again. */}
+      {canEdit ? <DraftRestoreStrip draft={d.draft} onRestore={d.actions.restoreDraft} /> : null}
       {stopped && d.save.message ? (
         <div role="alert" className="os-chrome flex min-h-11 items-center gap-3 border-b border-line bg-danger-bg px-4 text-base text-ink">
           <CircleAlert className="h-4 w-4 shrink-0 text-danger-text" strokeWidth={1.5} aria-hidden />
           <span className="min-w-0 flex-1">{d.save.message}</span>
-          <button type="button" onClick={d.actions.retry} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
-            Retry
-          </button>
+          {retryable ? (
+            <button type="button" onClick={d.actions.retry} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
+              Retry
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -436,8 +471,8 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
         )}
       </div>
 
-      <AddWidgetMenu open={addOpen} anchorRef={addButton} surface="dashboard" onClose={() => setAddOpen(false)} onPick={openAdd} />
-      <AddWidgetMenu open={emptyAddOpen} anchorRef={emptyAnchor} surface="dashboard" onClose={() => setEmptyAddOpen(false)} onPick={openAdd} />
+      <AddWidgetMenu open={addOpen} anchorRef={addButton} surface={surface} onClose={() => setAddOpen(false)} onPick={openAdd} />
+      <AddWidgetMenu open={emptyAddOpen} anchorRef={emptyAnchor} surface={surface} onClose={() => setEmptyAddOpen(false)} onPick={openAdd} />
 
       {editor ? (
         <WidgetEditor
@@ -446,7 +481,8 @@ export function DashboardClient({ id, startRename }: { id: string; startRename: 
           onOpenChange={(o) => {
             if (!o) setEditor(null);
           }}
-          surface="dashboard"
+          surface={surface}
+          spaceId={overviewSpaceId}
           mode={editor.mode}
           initial={editor.input}
           partial={editor.partial}

@@ -164,16 +164,71 @@ export function stackOrder(widgets: readonly EditorWidget[]): EditorWidget[] {
 }
 
 /**
- * react-grid-layout items for the cards. On 12 columns every card sits where
- * it is stored; an editor may move a card, never a hidden or passthrough one
- * (their items are static for everyone), and a viewer moves nothing. On a
- * narrower breakpoint (the Space Overview's xs and xxs) the cards are derived
- * as a full-width stack in stackOrder, static, and never saved.
+ * The cards pulled up into every free row, as react-grid-layout's vertical
+ * compaction would pull them: top to bottom, left to right, each card rises
+ * until the card above it (or the top) stops it, and a card that starts on
+ * top of one already placed drops just below it. Returned in input order.
+ *
+ * The result is already compact and has no overlaps, so the grid's own
+ * compaction pass leaves it exactly where it is, even with some cards
+ * static. That is what makes the layout the same for every person: the grid
+ * never compacts a static card, so compacting here, before the grid sees the
+ * items, is the only way a viewer and an editor get one arrangement.
+ */
+export function compactVertical<T extends WidgetLayout>(items: readonly T[]): T[] {
+  const order = items
+    .map((l, index) => ({ l, index }))
+    .sort((a, b) => a.l.y - b.l.y || a.l.x - b.l.x || a.index - b.index);
+  const placed: WidgetLayout[] = [];
+  const out: T[] = new Array(items.length);
+  for (const { l, index } of order) {
+    const bottom = placed.reduce((m, p) => Math.max(m, p.y + p.h), 0);
+    const spot: WidgetLayout = { x: l.x, y: Math.min(Math.max(0, l.y), bottom), w: l.w, h: l.h };
+    for (let hit = placed.find((p) => overlaps(spot, p)); hit; hit = placed.find((p) => overlaps(spot, p))) {
+      spot.y = hit.y + hit.h;
+    }
+    while (spot.y > 0 && !placed.some((p) => overlaps({ ...spot, y: spot.y - 1 }, p))) spot.y -= 1;
+    placed.push(spot);
+    out[index] = { ...l, y: spot.y };
+  }
+  return out;
+}
+
+export type WidgetGridItem = {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  static: boolean;
+  isDraggable?: boolean;
+  isResizable?: boolean;
+};
+
+/**
+ * react-grid-layout items for the cards. On 12 columns an editor may move a
+ * card, never a hidden or passthrough one (static: its layout is saved as
+ * the stored value, so a move would silently revert). A viewer moves
+ * nothing, but their cards are NOT static: the grid never compacts a static
+ * card, so a viewer's cards would sit at their raw stored rows (with the
+ * hole a deleted card left) while the editor's grid pulled them up. They are
+ * locked per item (isDraggable and isResizable false) instead, and compact
+ * exactly as the editor's do.
+ *
+ * With `compact` (the dashboard canvas, where the widgets are the whole
+ * grid) the positions are compacted here first (compactVertical), so the
+ * hidden and passthrough cards an editor cannot move land where everyone
+ * else sees them too. The Space Overview leaves it off: its widgets share
+ * the grid with each person's own cards, and the grid compacts them
+ * together.
+ *
+ * On a narrower breakpoint (the Space Overview's xs and xxs) the cards are
+ * derived as a full-width stack in stackOrder, static, and never saved.
  */
 export function widgetGridItems(
   widgets: readonly EditorWidget[],
-  o: { canEdit: boolean; cols: number; prefix?: string },
-): Array<{ i: string; x: number; y: number; w: number; h: number; static: boolean }> {
+  o: { canEdit: boolean; cols: number; prefix?: string; compact?: boolean },
+): WidgetGridItem[] {
   const prefix = o.prefix ?? "";
   if (o.cols < GRID_COLS) {
     let y = 0;
@@ -185,15 +240,18 @@ export function widgetGridItems(
     });
   }
   const placed: WidgetLayout[] = widgets.filter((w) => w.layout).map((w) => w.layout as WidgetLayout);
-  return widgets.map((w) => {
+  const items = widgets.map((w): WidgetGridItem => {
     let l = w.layout;
     if (!l) {
       l = placeNewWidget(placed, { w: 4, h: 4 });
       placed.push(l);
     }
+    const base = { i: `${prefix}${w.id}`, x: l.x, y: l.y, w: l.w, h: l.h };
+    if (!o.canEdit) return { ...base, static: false, isDraggable: false, isResizable: false };
     const locked = w.kind === "hidden" || w.kind === "passthrough";
-    return { i: `${prefix}${w.id}`, x: l.x, y: l.y, w: l.w, h: l.h, static: !o.canEdit || locked };
+    return { ...base, static: locked };
   });
+  return o.compact ? compactVertical(items) : items;
 }
 
 /** Every breakpoint's items minus the widget ones, so no card id enters a per-person preference. */
@@ -354,6 +412,32 @@ export function rebaseDashboard(
   }
   const removedIds = live.widgets.map((w) => w.id).filter((id) => !outIds.has(id));
   return { name: local.name !== base.name ? local.name : live.name, widgets: out, removedIds };
+}
+
+/**
+ * Does a local draft still hold edits the server does not have? Decided on
+ * the draft's own content, never on wall-clock order: a draft is written
+ * with the version it was built on (base) and what was on screen (local), so
+ * the question is whether rebasing those edits onto the server's copy would
+ * change it. A draft older than the row can still be unsaved (a save that
+ * was in flight landed later, or another editor saved after mine failed),
+ * and a draft newer than the row can already be merged (a keepalive save
+ * that landed after the tab closed).
+ */
+export function draftHasUnmergedEdits(
+  draft: { base: DashboardSnapshot; local: DashboardSnapshot; removedIds: readonly string[] },
+  live: DashboardSnapshot,
+): boolean {
+  const edited = draft.removedIds.length > 0 || draft.local.name !== draft.base.name || !same(draft.local.widgets, draft.base.widgets);
+  if (!edited) return false;
+  const r = rebaseDashboard(draft.base, draft.local, live);
+  if (r.name !== live.name || r.removedIds.length > 0) return true;
+  if (r.widgets.length !== live.widgets.length) return true;
+  const liveById = new Map(live.widgets.map((w) => [w.id, w] as const));
+  return r.widgets.some((w) => {
+    const v = liveById.get(w.id);
+    return !v || !same(w, v);
+  });
 }
 
 // ── Save outcomes ────────────────────────────────────────────────────

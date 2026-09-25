@@ -12,9 +12,18 @@
 //
 //   * patches merge while they wait, and a later value of a key wins;
 //   * exactly ONE request is in flight per view; the next goes when it lands;
-//   * a failed patch's keys stay dirty, under anything newer, so the next save
-//     or the failure toast's "Try again" (flush) sends them again. Nothing is
-//     retried in a loop on its own, and nothing is dropped;
+//   * a patch that failed on the way (not reached, a server failure) keeps
+//     its keys dirty, under anything newer, so the next save or the failure
+//     toast's "Try again" (flush) sends them again. Nothing is retried in a
+//     loop on its own;
+//   * a patch the server REFUSED (the person may not save this view, or it is
+//     gone) is said once and not kept: sending it again with a later save
+//     would only be refused again, and would raise the same toast each time;
+//   * a List page that mounts with the view's config fresh from the server
+//     lets go of keys an earlier visit failed to save (discardFailed): the
+//     screen now shows the stored values, and a key it does not show must
+//     never ride along with a later, unrelated save and overwrite someone
+//     else's newer value;
 //   * the queue is module level, so an in-app navigation does not cancel a
 //     save that is on its way; small bodies go with `keepalive` so a tab close
 //     does not either.
@@ -26,12 +35,15 @@
 import { accessMessage } from "@/lib/access-message";
 
 export type ViewPatch = Record<string, unknown>;
-export type SendResult = { ok: true } | { ok: false; message: string };
+/** `retryable` false means refused: the same patch would be refused again. */
+export type SendResult = { ok: true } | { ok: false; message: string; retryable?: boolean };
 
 export interface QueueState {
   status: "idle" | "saving" | "error";
   /** The sentence for the last failure; null once a save lands. */
   message: string | null;
+  /** Whether a Try again can help: false after a refusal. */
+  retryable: boolean;
 }
 
 /** Waiting patches merged: a later value of a key wins. */
@@ -50,6 +62,11 @@ export interface ViewConfigQueue {
   enqueue(patch: ViewPatch): void;
   /** Send whatever is dirty now; true when everything has landed. */
   flush(): Promise<boolean>;
+  /**
+   * Let go of keys a failed save left dirty, when nothing is on its way. For
+   * a page that has just read the view's config from the server.
+   */
+  discardFailed(): void;
   subscribe(fn: (state: QueueState) => void): () => void;
   state(): QueueState;
   pending(): ViewPatch;
@@ -58,7 +75,7 @@ export interface ViewConfigQueue {
 export function createViewConfigQueue(send: (patch: ViewPatch) => Promise<SendResult>): ViewConfigQueue {
   let pending: ViewPatch = {};
   let inflight: Promise<void> | null = null;
-  let current: QueueState = { status: "idle", message: null };
+  let current: QueueState = { status: "idle", message: null, retryable: true };
   const listeners = new Set<(s: QueueState) => void>();
 
   const setState = (next: QueueState) => {
@@ -77,20 +94,21 @@ export function createViewConfigQueue(send: (patch: ViewPatch) => Promise<SendRe
     while (dirty()) {
       const sent = pending;
       pending = {};
-      setState({ status: "saving", message: null });
+      setState({ status: "saving", message: null, retryable: true });
       let res: SendResult;
       try {
         res = await send(sent);
       } catch {
-        res = { ok: false, message: SAVE_FAILED };
+        res = { ok: false, message: SAVE_FAILED, retryable: true };
       }
       if (!res.ok) {
-        pending = afterFailure(pending, sent);
-        setState({ status: "error", message: res.message || SAVE_FAILED });
+        const retryable = res.retryable !== false;
+        if (retryable) pending = afterFailure(pending, sent);
+        setState({ status: "error", message: res.message || SAVE_FAILED, retryable });
         return;
       }
     }
-    setState({ status: "idle", message: null });
+    setState({ status: "idle", message: null, retryable: true });
   };
 
   const kick = () => {
@@ -112,6 +130,11 @@ export function createViewConfigQueue(send: (patch: ViewPatch) => Promise<SendRe
         if (inflight) await inflight;
       }
       return current.status !== "error" && !dirty();
+    },
+    discardFailed() {
+      if (inflight || current.status !== "error") return;
+      pending = {};
+      setState({ status: "idle", message: null, retryable: true });
     },
     subscribe(fn) {
       listeners.add(fn);
@@ -143,7 +166,10 @@ export function viewConfigQueue(boardId: string, viewId: string): ViewConfigQueu
       });
       if (res.ok) return { ok: true };
       const body = await res.json().catch(() => null);
-      return { ok: false, message: accessMessage(body, SAVE_FAILED) };
+      // A server failure or a rate limit can pass on a second try; any other
+      // answer is a refusal of this patch.
+      const retryable = res.status >= 500 || res.status === 429 || res.status === 408;
+      return { ok: false, message: accessMessage(body, SAVE_FAILED), retryable };
     });
     queues.set(key, q);
   }

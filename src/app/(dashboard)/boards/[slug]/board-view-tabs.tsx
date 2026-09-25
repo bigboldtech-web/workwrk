@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
-import { ViewTabContextMenu, ViewTabMoreTrigger } from "@/components/board-view/view-tab-menu";
+import { ViewTabContextMenu, ViewTabMoreTrigger, viewMenuHasRows } from "@/components/board-view/view-tab-menu";
+import { viewMenuRows } from "@/lib/work/view-visibility";
 import { useOsToast } from "@/components/layout/os/toast";
 import type { ViewType } from "@/generated/prisma";
 
@@ -76,15 +77,20 @@ export function BoardViewTabs({
   views,
   boardId,
   boardSlug,
+  boardName,
   activeViewId,
   defaultViewId,
   basePath,
   canManage = true,
+  canManageList,
+  viewerId = null,
   scheduleReports = false,
 }: {
   views: BoardViewItem[];
   boardId: string;
   boardSlug: string;
+  /** The List's name, for the Schedule report dialog's subtitle. */
+  boardName?: string;
   activeViewId: string | null;
   defaultViewId: string | null;
   /** URL the tabs link to (default `/boards/<slug>`). The Personal list passes
@@ -96,6 +102,13 @@ export function BoardViewTabs({
    * write, and both answered 403 while still being rendered.
    */
   canManage?: boolean;
+  /**
+   * Full access on the List (Delete a shared view). Absent: follows canManage,
+   * which is what the Personal List's owner has.
+   */
+  canManageList?: boolean;
+  /** Who is looking, so a view they own offers its Rename and Delete. */
+  viewerId?: string | null;
   /**
    * The viewer may schedule email reports of this List's views (the List
    * page's strict read, and a member). The Personal List never passes it.
@@ -175,6 +188,14 @@ export function BoardViewTabs({
         const isDefault = v.id === defaultViewId;
         const base = basePath ?? `/boards/${boardSlug}`;
         const href = isDefault ? base : `${base}?view=${v.id}`;
+        // Only the rows this viewer's writes would be accepted for; the "..."
+        // is drawn only when there is at least one.
+        const rows = viewMenuRows({ ownerId: v.ownerId ?? null, isDefault: v.isDefault }, order, {
+          viewerId,
+          canContribute: canManage,
+          hasFullAccess: canManageList ?? canManage,
+        });
+        const hasMenu = viewMenuHasRows(v, rows, scheduleReports);
         return (
           <span
             key={v.id}
@@ -185,7 +206,7 @@ export function BoardViewTabs({
             onDragEnd={endDrag}
             className={`inline-flex items-stretch transition-[opacity] ${canManage ? "cursor-grab active:cursor-grabbing" : ""} ${dragId === v.id ? "opacity-40" : ""}`}
           >
-            <ViewTabContextMenu boardId={boardId} view={v} scheduleReports={scheduleReports}>
+            <ViewTabContextMenu boardId={boardId} boardName={boardName} view={v} scheduleReports={scheduleReports} rows={rows}>
               {(openMenu) => (
                 <ViewTab
                   icon={VIcon}
@@ -196,7 +217,7 @@ export function BoardViewTabs({
                   // The active tab's own "...", on hover and focus: the same
                   // menu a right-click opens, for a pointer or a keyboard
                   // that cannot right-click.
-                  trailing={active ? <ViewTabMoreTrigger onOpen={openMenu} label={`${v.name} options`} /> : undefined}
+                  trailing={active && hasMenu ? <ViewTabMoreTrigger onOpen={openMenu} label={`${v.name} options`} /> : undefined}
                 />
               )}
             </ViewTabContextMenu>

@@ -29,6 +29,19 @@ export interface LayerEntry {
 }
 export type CloseTopLayerResult = "closed" | "refused" | "none";
 
+/**
+ * The layer kinds that carry their own primary (a modal, a drawer, a dialog).
+ * While one is open ANYWHERE in the stack the page's blue primary gives way
+ * (design-system principle 1). "Anywhere", not "on top": a Picker or a "..."
+ * menu opened inside the dialog registers a popover above it, and reading
+ * only the top layer brought the page's "+ Add widget" back beside the
+ * dialog's "Create schedule", two blues on one screen.
+ */
+const BLOCKING_LAYER_KINDS: ReadonlySet<LayerKind> = new Set<LayerKind>(["modal", "drawer", "dialog"]);
+export function hasBlockingLayer(layers: ReadonlyArray<Pick<LayerEntry, "kind">>): boolean {
+  return layers.some((l) => BLOCKING_LAYER_KINDS.has(l.kind));
+}
+
 /** Options for opening the Template Center. `kind` scopes the browser to
  *  one template type (e.g. LIST from the create-list modal); `applyContext`
  *  carries the target Space for applying a LIST template inline. */
@@ -237,6 +250,8 @@ type ShellState = {
   closeTopLayer: () => CloseTopLayerResult;
   layerCount: number;
   topLayerKind: LayerKind | null;
+  /** A modal, drawer or dialog is open somewhere in the stack, even under a popover. */
+  blockingLayerOpen: boolean;
 
   /** True while a route transition is pending past 200ms: the rail logo pulses. */
   routePending: boolean;
@@ -308,11 +323,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
 
   // ── LayerStack ──────────────────────────────────────────────────
   const layersRef = useRef<LayerEntry[]>([]);
-  const [layerSnapshot, setLayerSnapshot] = useState<{ count: number; top: LayerKind | null }>({ count: 0, top: null });
+  const [layerSnapshot, setLayerSnapshot] = useState<{ count: number; top: LayerKind | null; blocking: boolean }>({ count: 0, top: null, blocking: false });
   const snapshotLayers = useCallback(() => {
     const list = layersRef.current;
     const top = list[list.length - 1]?.kind ?? null;
-    setLayerSnapshot((prev) => (prev.count === list.length && prev.top === top ? prev : { count: list.length, top }));
+    const blocking = hasBlockingLayer(list);
+    setLayerSnapshot((prev) =>
+      prev.count === list.length && prev.top === top && prev.blocking === blocking ? prev : { count: list.length, top, blocking },
+    );
   }, []);
   const registerLayer = useCallback((entry: LayerEntry) => {
     layersRef.current = [...layersRef.current.filter((l) => l.id !== entry.id), entry];
@@ -333,6 +351,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const layerCount = layerSnapshot.count;
   const topLayerKind = layerSnapshot.top;
+  const blockingLayerOpen = layerSnapshot.blocking;
 
   useEffect(() => {
     if (!pathname) return;
@@ -603,11 +622,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       prefs, patchPrefs, refetchPrefs,
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedUntil, mutedNotifications, setMutedUntil,
-      registerLayer, closeTopLayer, layerCount, topLayerKind,
+      registerLayer, closeTopLayer, layerCount, topLayerKind, blockingLayerOpen,
       routePending, setRoutePending,
       lastAppPath,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, blockingLayerOpen, routePending, lastAppPath],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

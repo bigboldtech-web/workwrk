@@ -369,7 +369,16 @@ export default function ItemDetailPage() {
           deepLinkCommentId={comment}
           onDeepLinkResolved={onDeepLinkResolved}
           onOpenItem={(itemId) => openTask(router, itemId)}
-          onRequestAccess={board?.spaceId ? () => setShareOpen(true) : undefined}
+          // Not in a linked context: the dialog would be the linked List's,
+          // which cannot give edit on this task (see the drawer host).
+          onRequestAccess={board?.spaceId && !linkedHere ? () => setShareOpen(true) : undefined}
+          // Only ?list= goes; ?returnTo= stays, so the back target is the
+          // one the reader arrived with.
+          onOpenInHome={
+            linkedHere?.home.readable && id
+              ? () => router.replace(`/item/${id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`, { scroll: false })
+              : undefined
+          }
           missingView={gone(missingSentence)}
         />
       </div>

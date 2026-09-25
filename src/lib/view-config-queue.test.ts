@@ -125,5 +125,43 @@ describe("createViewConfigQueue", () => {
     q.enqueue({ a: 1 });
     expect(await q.flush()).toBe(false);
     expect(q.pending()).toEqual({ a: 1 });
+    expect(q.state().retryable).toBe(true);
+  });
+
+  it("says a refusal once and never re-sends its keys with a later save", async () => {
+    const s = controlledSend();
+    const q = createViewConfigQueue(s.send);
+    q.enqueue({ groupDirection: "desc" });
+    await tick();
+    s.calls[0].answer({ ok: false, message: "You can read this List but not change its views.", retryable: false });
+    await tick();
+    expect(q.state()).toEqual({ status: "error", message: "You can read this List but not change its views.", retryable: false });
+    expect(q.pending()).toEqual({});
+    q.enqueue({ groupBy: "priority" });
+    await tick();
+    expect(s.calls[1].patch).toEqual({ groupBy: "priority" });
+  });
+
+  it("lets go of a failed key when a page reads the view fresh, never mid-flight", async () => {
+    const s = controlledSend();
+    const q = createViewConfigQueue(s.send);
+    q.enqueue({ colWidths: { title: 300 } });
+    await tick();
+    s.calls[0].answer({ ok: false, message: "Couldn't save the view settings." });
+    await tick();
+    expect(q.pending()).toEqual({ colWidths: { title: 300 } });
+    q.discardFailed();
+    expect(q.pending()).toEqual({});
+    expect(q.state().status).toBe("idle");
+    // The next save carries only its own key, so a colleague's newer widths stand.
+    q.enqueue({ sortCol: { key: "due", dir: "asc" } });
+    await tick();
+    expect(s.calls[1].patch).toEqual({ sortCol: { key: "due", dir: "asc" } });
+    // A save on its way is never dropped.
+    q.discardFailed();
+    s.calls[1].answer({ ok: true });
+    await tick();
+    expect(q.state().status).toBe("idle");
+    expect(s.calls).toHaveLength(2);
   });
 });

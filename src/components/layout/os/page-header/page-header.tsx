@@ -210,7 +210,9 @@ export function OsPageHeader({
   return (
     <div id={id} className={cn("os-head os-chrome shrink-0 bg-app", className)}>
       <div className="flex h-10 items-center gap-2 px-6">
-        {back ? <BackButton fallbackHref={back.fallbackHref} label={back.label} className="me-0.5" /> : null}
+        {/* On a phone the Back label gives way (arrow only) so the title keeps
+            the room; the parent's name stays in the button's aria-label and title. */}
+        {back ? <BackButton fallbackHref={back.fallbackHref} label={back.label} compactOnPhone className="me-0.5" /> : null}
         {tile ? <EntityTile size="md" {...tile} /> : null}
         {titleSlot ? (
           <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={title}>{titleSlot}</div>
@@ -409,9 +411,11 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
   // at all"). Opening the create-task modal over a List put its blue "Create
   // task" beside the page's own blue "+ Create task", which is two blues
   // competing for the same click. The page's is the one that gives way,
-  // because the thing in front is what the person is doing.
-  const { topLayerKind } = useOsShell();
-  const primaryHidden = topLayerKind === "modal" || topLayerKind === "drawer" || topLayerKind === "dialog";
+  // because the thing in front is what the person is doing. It reads the
+  // whole stack, not the top layer: a picker opened inside that modal is a
+  // popover on top of it, and the modal's own primary is still showing.
+  const { blockingLayerOpen } = useOsShell();
+  const primaryHidden = blockingLayerOpen;
   const shownPrimary = primaryHidden ? undefined : primary;
   return (
     // Under 768 the right cluster (search, the primary, "...") wraps onto a

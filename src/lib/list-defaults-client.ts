@@ -85,6 +85,32 @@ export function applyDefaultsToCreateBody<T extends Record<string, unknown>>(
 }
 
 /**
+ * The drawer's subtask create. A subtask is always made in its parent's HOME
+ * List (under a linked parent the server files it there), so every status
+ * decision reads the home: its default status when it has one, else in the
+ * home the first status as today, and under a linked parent the home's first
+ * status when its settings are loaded, or none (the server then applies the
+ * home's own default). A status of the List the task is only shown in is
+ * never sent, because the home may not have it.
+ */
+export function subtaskCreateBody(i: {
+  title: string;
+  parentItemId: string;
+  homeBoardId: string | null;
+  /** The drawer is open in a List the task is shown in through a link. */
+  linked: boolean;
+  /** The first status of the statuses the drawer shows (the home's, outside a link). */
+  firstStatus: string | undefined;
+  home: LoadedListSettings | null;
+}): Record<string, unknown> {
+  const home = i.home && i.homeBoardId && i.home.boardId === i.homeBoardId ? i.home : null;
+  const status = i.linked ? home?.statuses[0]?.value : i.firstStatus;
+  const body: Record<string, unknown> = { title: i.title, parentItemId: i.parentItemId };
+  if (status) body.status = status;
+  return applyDefaultsToCreateBody(body, home, new Set(), i.homeBoardId);
+}
+
+/**
  * The stored defaults that still apply, and how many no longer do.
  *
  * A default is stale when what it names has gone: a field removed or retyped

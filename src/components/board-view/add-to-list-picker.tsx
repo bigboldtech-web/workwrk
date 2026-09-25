@@ -21,7 +21,7 @@ import { ListChecks } from "lucide-react";
 import { Picker, type PickerSectionDef } from "@/components/ui/picker";
 import { useOsToast } from "@/components/layout/os/toast";
 import { accessMessage } from "@/lib/access-message";
-import { addLinkReasonMessage } from "@/lib/list-link-rows";
+import { addLinkReasonMessage, distinctSectionLabels } from "@/lib/list-link-rows";
 import { emitItemChanged } from "@/lib/realtime-events";
 import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 
@@ -34,7 +34,10 @@ export interface TaskListsAnswer {
   canUnshareAll: boolean;
 }
 
-type AddOutcome = { ok: true; created: boolean } | { ok: false; message: string; reason?: string };
+// `retryable` is true when sending the same request again can succeed (the
+// server was not reached, failed, or the task moved twice); a refusal says why
+// and offers nothing that would only be refused again.
+type AddOutcome = { ok: true; created: boolean } | { ok: false; message: string; reason?: string; retryable: boolean };
 
 /** One POST to the links route, with the one retry `home_changed` asks for. */
 export async function addTaskToList(itemId: string, targetId: string): Promise<AddOutcome> {
@@ -47,22 +50,22 @@ export async function addTaskToList(itemId: string, targetId: string): Promise<A
         body: JSON.stringify({ itemIds: [itemId] }),
       });
     } catch {
-      return { ok: false, message: "Couldn't reach the server. Check your connection and try again." };
+      return { ok: false, message: "Couldn't reach the server. Check your connection and try again.", retryable: true };
     }
     const body = (await res.json().catch(() => null)) as
       | { results?: Array<{ itemId: string; ok: boolean; created?: boolean; reason?: string }> }
       | Record<string, unknown>
       | null;
-    if (!res.ok) return { ok: false, message: accessMessage(body, "Couldn't add this task to that List.") };
+    if (!res.ok) return { ok: false, message: accessMessage(body, "Couldn't add this task to that List."), retryable: res.status >= 500 || res.status === 429 };
     const result = Array.isArray((body as { results?: unknown })?.results)
       ? (body as { results: Array<{ itemId: string; ok: boolean; created?: boolean; reason?: string }> }).results.find((r) => r.itemId === itemId)
       : undefined;
-    if (!result) return { ok: false, message: "Couldn't add this task to that List." };
+    if (!result) return { ok: false, message: "Couldn't add this task to that List.", retryable: true };
     if (result.ok) return { ok: true, created: result.created !== false };
     if (result.reason === "home_changed" && attempt === 0) continue;
-    return { ok: false, message: addLinkReasonMessage(result.reason), reason: result.reason };
+    return { ok: false, message: addLinkReasonMessage(result.reason), reason: result.reason, retryable: false };
   }
-  return { ok: false, message: addLinkReasonMessage("home_changed") };
+  return { ok: false, message: addLinkReasonMessage("home_changed"), retryable: true };
 }
 
 export function AddToListPicker({
@@ -123,7 +126,7 @@ export function AddToListPicker({
 
   const sections: PickerSectionDef[] = useMemo(() => {
     if (!lists) return [];
-    return groupReadableLists(lists).map((g) => ({
+    return distinctSectionLabels(groupReadableLists(lists).map((g) => ({
       label: g.label,
       options: g.lists.map((l) => {
         const isHome = l.id === homeId;
@@ -136,7 +139,7 @@ export function AddToListPicker({
           disabled: isHome || already,
         };
       }),
-    }));
+    })));
   }, [lists, homeId, linkedIds]);
 
   const notice = task?.viaParentId
@@ -153,7 +156,12 @@ export function AddToListPicker({
     try {
       const out = await addTaskToList(itemId, targetId);
       if (!out.ok) {
-        toast(out.message, { tone: "danger" });
+        // The picker has already closed, so the Try again carries the pick:
+        // the person never has to find the List a second time.
+        toast(out.message, {
+          tone: "danger",
+          ...(out.retryable ? { action: { label: "Try again", onClick: () => void addRef.current(targetId) } } : {}),
+        });
         return;
       }
       toast(out.created ? `Added to ${target.name}` : `It was already in ${target.name}`);
@@ -176,6 +184,10 @@ export function AddToListPicker({
       busy.current = false;
     }
   }, [itemId, homeBoardId, homeId, lists, onAdded, task, toast]);
+  const addRef = useRef(add);
+  useEffect(() => {
+    addRef.current = add;
+  });
 
   return (
     <Picker

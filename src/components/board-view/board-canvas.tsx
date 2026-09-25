@@ -48,6 +48,7 @@ import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
   boardStatusFor,
+  computedFieldsKey,
   itemEventAction,
   itemsUrl,
   linkedRowKind,
@@ -57,6 +58,7 @@ import {
   type RefetchedTask,
 } from "@/lib/list-link-rows";
 import { viewConfigQueue } from "@/lib/view-config-queue";
+import { PersonalListSurface } from "./item-context-menu";
 import { LIST_SETTINGS_CHANGED } from "@/lib/table-comfort";
 import type { RowColorRule } from "@/lib/list-comfort";
 import type { LoadedListSettings } from "@/lib/list-defaults-client";
@@ -300,6 +302,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   }, [viewQueue, viewConfig]);
   // One place says a view save failed, with a real Try again: the table's
   // saves go through the same queue, so they surface here too.
+  // A refusal is said without a Try again, which could only be refused again.
   useEffect(() => {
     if (!viewQueue) return;
     return viewQueue.subscribe((st) => {
@@ -307,10 +310,16 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       toast(st.message ?? "Couldn't save the view settings.", {
         tone: "danger",
         key: `view-config:${viewId}`,
-        action: { label: "Try again", onClick: () => void viewQueue.flush() },
+        ...(st.retryable ? { action: { label: "Try again", onClick: () => void viewQueue.flush() } } : {}),
       });
     });
   }, [viewQueue, viewId, toast]);
+  // This page painted the view's config as the server has it now, so a key an
+  // earlier visit failed to save (and this screen does not show) is let go
+  // rather than sent with the next, unrelated save.
+  useEffect(() => {
+    viewQueue?.discardFailed();
+  }, [viewQueue]);
   const persistCols = useCallback((hiddenNext: string[], extraNext: string[]) => {
     persistViewConfig({ hiddenFields: hiddenNext, extraColumns: extraNext }, "column layout");
   }, [persistViewConfig]);
@@ -374,6 +383,27 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // (View.config.savedFilters) ride the same path.
   const [filters, setFiltersState] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
   const [savedFilters, setSavedFiltersState] = useState<SavedFilter[]>(() => parseSavedFilters(viewConfig?.savedFilters));
+
+  // A view tab is a client navigation: this canvas (the page renders it with
+  // no key) stays mounted and only its props change, so every state seeded
+  // from a view's config above kept the PREVIOUS view's values, and the next
+  // save wrote them into the new view (the walk: view A's pins, row height,
+  // grouping, hidden columns and filters appearing on view B, then saved into
+  // B's shared config by an unrelated pin). The canvas's own view state is
+  // re-read here when the view changes, and each renderer is keyed by the
+  // view (`viewKey`) so its own seeded state (pins, row height, group, sort,
+  // widths) is read afresh from the new config too.
+  const viewKey = viewId ?? `default:${viewType}`;
+  const [seededViewKey, setSeededViewKey] = useState(viewKey);
+  if (seededViewKey !== viewKey) {
+    setSeededViewKey(viewKey);
+    const hidden = viewConfig?.hiddenFields;
+    setHiddenFields(Array.isArray(hidden) ? hidden.filter((x): x is string => typeof x === "string") : []);
+    const extra = viewConfig?.extraColumns;
+    setExtraColumns(Array.isArray(extra) ? extra.filter((x): x is string => typeof x === "string") : []);
+    setFiltersState(parseFilters(viewConfig?.filters));
+    setSavedFiltersState(parseSavedFilters(viewConfig?.savedFilters));
+  }
   const setFilters = useCallback((next: BoardFilters) => {
     setFiltersState(next);
     persistViewConfig({ filters: serializeFilters(next) }, "filters");
@@ -480,6 +510,18 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     return () => { cancelled = true; clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
   }, [reloadList]);
 
+  // A Connect or Mirror column added or reconfigured (the field shelf, a
+  // column header's edit) leaves every held row's computed cells read for the
+  // OLD schema: a new Mirror column stayed blank until a full reload. The List
+  // is re-read at once, and reconcilePoll lays the fresh chips and values in.
+  const computedKey = useMemo(() => computedFieldsKey(fields), [fields]);
+  const seenComputedKeyRef = useRef(computedKey);
+  useEffect(() => {
+    if (seenComputedKeyRef.current === computedKey) return;
+    seenComputedKeyRef.current = computedKey;
+    void reloadList();
+  }, [computedKey, reloadList]);
+
   const dropItem = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
   }, []);
@@ -580,7 +622,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   );
 
   return (
-    <>
+    <PersonalListSurface.Provider value={personalList}>
       {sprint ? (
         <SprintHeaderStrip
           boardId={boardId}
@@ -600,6 +642,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
 
       {viewType === "TABLE" ? (
         <BoardTableView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -607,9 +650,16 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
+          canManage={mayManage}
           canDeleteTasks={canDeleteTasks}
           onOpenItem={openItem}
-          onEditStatuses={() => setStatusEditorOpen(true)}
+          // Statuses are the List's own, written by the management ladder
+          // only (PATCH /api/boards/[id]); a contributor is never handed the
+          // group header's Rename / New status rows that could only 403.
+          onEditStatuses={mayManage ? () => setStatusEditorOpen(true) : undefined}
+          // The Columns button stays for every viewer: it opens the shelf's
+          // show and hide, which is a view setting. The shelf itself offers
+          // field creation and editing only to `mayManage` (below).
           onOpenFields={() => setShelfOpen(true)}
           currentUserId={currentUserId}
           toolbarActions={toolbarActions}
@@ -633,6 +683,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "KANBAN" ? (
         <BoardKanbanView
+          key={viewKey}
           boardId={boardId}
           initialItems={filteredItems}
           initialFields={gatedFields}
@@ -654,6 +705,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -666,9 +718,11 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           onItemChanged={handleItemChanged}
           onItemRemoved={handleItemRemoved}
           timeTrackingEnabled={timeTrackingOn}
+          loadedSettings={loadedSettings}
         />
       ) : viewType === "GANTT" ? (
         <BoardGanttView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -681,9 +735,11 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
           timeTrackingEnabled={timeTrackingOn}
+          loadedSettings={loadedSettings}
         />
       ) : viewType === "CHART" ? (
         <BoardChartView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -702,6 +758,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardFileGalleryView boardId={boardId} onOpenItem={openItem} />
       ) : viewType === "WORKLOAD" ? (
         <BoardWorkloadView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -724,6 +781,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "MAP" ? (
         <BoardMapView
+          key={viewKey}
           viewConfig={viewConfig}
           initialItems={filteredItems}
           initialFields={fields}
@@ -745,6 +803,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "PIVOT" ? (
         <BoardPivotView
+          key={viewKey}
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
@@ -783,18 +842,23 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       <BoardStatusEditor
         boardId={boardId}
         open={statusEditorOpen}
-        canEdit={canEdit}
+        canEdit={mayManage}
         statuses={statuses}
         onClose={() => { setStatusEditorOpen(false); stripPanel(); }}
       />
 
       {/* The shelf is the COLUMN manager (built-ins + custom): always
           available. The Custom Fields module gates only custom-field
-          creation inside it. */}
+          creation inside it. Creating, renaming, reordering and configuring
+          a field (a Connect or Mirror form included) all write the List's
+          schema, which every fields route gates on Full access, so those
+          follow `mayManage`, not content write: a contributor filled in a
+          whole Mirror form and was then refused with a Retry that could
+          only be refused again. Show and hide stay theirs. */}
       <FieldShelf
         boardId={boardId}
         open={shelfOpen}
-        canEdit={canEdit}
+        canEdit={mayManage}
         customFieldsEnabled={customFieldsOn}
         fields={fields}
         hiddenFields={hiddenFields}
@@ -803,6 +867,6 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         onClose={() => { setShelfOpen(false); stripPanel(); }}
         onFieldsChanged={setFields}
       />
-    </>
+    </PersonalListSurface.Provider>
   );
 }

@@ -250,6 +250,9 @@ export async function buildRecipientReport(
     cadence: cadenceText(specOf(schedule)),
     sections,
     link: target.link,
+    // Not the target's page: a recipient who lost access to it still needs a
+    // way to stop receiving (the list on Settings, Notifications).
+    manageLink: absoluteUrl("/settings/notifications#reports"),
   });
 }
 

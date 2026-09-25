@@ -610,6 +610,9 @@ export function CreateTaskModal() {
         const tag: WorkspaceTag = { id: data.id, name: data.name, color: data.color };
         setOrgTags((prev) => (prev ? [...prev, tag] : [tag]));
         setTags((prev) => [...prev, tag]);
+        // A tag made here is a tag chosen here: the List's default tags must
+        // not replace it at Create.
+        touch("tagIds");
         setTagDraft("");
       }
     } finally {
@@ -883,7 +886,9 @@ export function CreateTaskModal() {
           title: taskName.trim(),
           status: selectedStatus,
           groupKey: selectedStatus,
-          ownerId: assigneeId ?? undefined,
+          // A cleared assignee is sent as an explicit null, so the List's
+          // default people do not come back after the person removed them.
+          ownerId: assigneeId ?? (touched.has("ownerId") ? null : undefined),
           startAt: startAt ? startAt.toISOString() : null,
           dueAt: dueAt ? dueAt.toISOString() : null,
           priority: priority ?? null,
@@ -1400,7 +1405,7 @@ export function CreateTaskModal() {
                         return (
                           <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: `${color}22`, color }}>
                             {t.name}
-                            <button type="button" onClick={() => setTags((p) => p.filter((x) => x.id !== t.id))} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
+                            <button type="button" onClick={() => { setTags((p) => p.filter((x) => x.id !== t.id)); touch("tagIds"); }} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
                           </span>
                         );
                       })}

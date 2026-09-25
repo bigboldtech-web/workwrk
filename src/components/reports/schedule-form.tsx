@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { nextReportRunAt } from "@/lib/reports/schedule";
 import {
   cadenceLabel,
@@ -80,6 +81,13 @@ export function ScheduleForm({
   const spec = specFromForm(form);
   const next = nextReportRunAt(spec, new Date());
   const set = (patch: Partial<ScheduleFormState>) => onChange({ ...form, ...patch });
+  // A private view is shown to its owner alone (viewVisibleTo), so whoever
+  // has this form open on one is that owner.
+  const { boot } = useBoot();
+  const ownerId = privateView ? boot.viewer.id : null;
+  // Scheduled to colleagues while shared, then made private: offer the one
+  // click that makes the list what the view allows, so a save can succeed.
+  const onlyOwner = !!ownerId && form.recipientIds.length === 1 && form.recipientIds[0] === ownerId;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -156,9 +164,30 @@ export function ScheduleForm({
       </Row>
 
       <Row label="Send to" error={errors.recipients}>
-        <RecipientPicker value={form.recipientIds} onChange={(recipientIds) => set({ recipientIds })} locked={privateView} disabled={disabled} onOpenChange={setPeopleOpen} />
+        <RecipientPicker
+          value={form.recipientIds}
+          onChange={(recipientIds) => set({ recipientIds })}
+          locked={privateView}
+          keepId={ownerId}
+          disabled={disabled}
+          onOpenChange={setPeopleOpen}
+        />
       </Row>
-      {privateView ? <p className="m-0 ps-[108px] text-xs text-ink-2">This view is private, so only its owner can receive it.</p> : null}
+      {privateView ? (
+        <p className="m-0 flex flex-wrap items-center gap-x-2 ps-[108px] text-xs text-ink-2">
+          <span>This view is private, so only its owner can receive it.</span>
+          {ownerId && !onlyOwner ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => set({ recipientIds: [ownerId] })}
+              className="font-medium text-brand-deep hover:underline disabled:text-ink-4 disabled:no-underline"
+            >
+              Send only to me
+            </button>
+          ) : null}
+        </p>
+      ) : null}
 
       <Row label="Active">
         <Switch checked={form.active} onChange={(active) => set({ active })} disabled={disabled} aria-label="Active" />

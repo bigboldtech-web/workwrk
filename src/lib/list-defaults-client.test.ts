@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FieldDef } from "./field-catalog";
 import type { StatusOption } from "./board-items-shared";
-import { applyDefaultsToCreateBody, pruneListDefaults, type LoadedListSettings } from "./list-defaults-client";
+import { applyDefaultsToCreateBody, pruneListDefaults, subtaskCreateBody, type LoadedListSettings } from "./list-defaults-client";
 
 const statuses: StatusOption[] = [
   { value: "TO_DO", label: "To Do", color: "#000", group: "ACTIVE" },
@@ -84,6 +84,41 @@ describe("applyDefaultsToCreateBody", () => {
     expect("tagIds" in out).toBe(false);
     expect("itemTypeId" in out).toBe(false);
     expect(out.title).toBe("New");
+  });
+});
+
+describe("the create modal's explicit choices", () => {
+  it("keeps a cleared assignee as an explicit null, so default people never come back", () => {
+    const out = applyDefaultsToCreateBody({ title: "x", ownerId: null }, loaded(), new Set(["ownerId"]), "b1");
+    expect(JSON.parse(JSON.stringify(out))).toEqual({ title: "x", ownerId: null });
+  });
+
+  it("keeps a tag the person made or chose once tagIds is touched", () => {
+    expect(applyDefaultsToCreateBody({ title: "x", tagIds: ["new"] }, loaded(), new Set(["tagIds"]), "b1")).toEqual({ title: "x", tagIds: ["new"] });
+    // Untouched, the List's default tags apply on the server instead.
+    expect(applyDefaultsToCreateBody({ title: "x", tagIds: ["new"] }, loaded(), new Set(), "b1")).toEqual({ title: "x" });
+  });
+});
+
+describe("subtaskCreateBody", () => {
+  const base = { title: "Sub", parentItemId: "p1", homeBoardId: "b1", firstStatus: "TO_DO" };
+
+  it("lets the home List's default status apply", () => {
+    expect(subtaskCreateBody({ ...base, linked: false, home: loaded() })).toEqual({ title: "Sub", parentItemId: "p1" });
+  });
+
+  it("sends today's first status when the home has no default or has not answered", () => {
+    expect(subtaskCreateBody({ ...base, linked: false, home: loaded({ status: undefined }) })).toEqual({ title: "Sub", parentItemId: "p1", status: "TO_DO" });
+    expect(subtaskCreateBody({ ...base, linked: false, home: null })).toEqual({ title: "Sub", parentItemId: "p1", status: "TO_DO" });
+  });
+
+  it("under a linked parent never sends the context List's status", () => {
+    const ctxFirst = { ...base, firstStatus: "CTX_ONLY" };
+    expect(subtaskCreateBody({ ...ctxFirst, linked: true, home: null })).toEqual({ title: "Sub", parentItemId: "p1" });
+    expect(subtaskCreateBody({ ...ctxFirst, linked: true, home: loaded({ status: undefined }) })).toEqual({ title: "Sub", parentItemId: "p1", status: "TO_DO" });
+    expect(subtaskCreateBody({ ...ctxFirst, linked: true, home: loaded() })).toEqual({ title: "Sub", parentItemId: "p1" });
+    // Settings read for another List are ignored.
+    expect(subtaskCreateBody({ ...ctxFirst, linked: true, home: loaded({ status: undefined }, "other") })).toEqual({ title: "Sub", parentItemId: "p1" });
   });
 });
 

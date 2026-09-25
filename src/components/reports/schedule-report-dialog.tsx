@@ -33,6 +33,7 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { OsShellContext, useLayer } from "@/components/layout/os/shell-context";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { dashboardMessage } from "@/lib/dashboards/dashboard-messages";
+import { newCreateRequestId } from "@/lib/create-request-id";
 import {
   cadenceLabel,
   defaultTimezone,
@@ -54,7 +55,7 @@ export interface ScheduleReportTarget {
   kind: "dashboard" | "view";
   /** The Dashboard id, or the View id for a saved List view. */
   id: string;
-  /** Shown in the dialog title. */
+  /** Shown under the dialog title. A view passes "List: View", as its email does. */
   name: string;
   /** The view's ownerId when the view is private (isShared false), else null. */
   privateOwnerId?: string | null;
@@ -103,6 +104,9 @@ interface ReceivedRow {
   monthDay: number | null;
   timeOfDay: string;
   timezone: string;
+  /** Paused by its creator: no email goes out, and nextRunAt is null. */
+  active: boolean;
+  nextRunAt: string | null;
   createdBy: { firstName: string; lastName: string } | null;
 }
 
@@ -146,7 +150,9 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
   );
   const [errors, setErrors] = useState<ReturnType<typeof issueFields>>({});
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [rebased, setRebased] = useState(false);
+  // Why the open form was re-based onto a stored schedule: someone changed it
+  // (a 409), or a Retry found that the first try had already created it.
+  const [rebased, setRebased] = useState<false | "changed" | "created">(false);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   // Delete asks inside its own row rather than through the app's confirm
@@ -243,6 +249,7 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
   }, [load]);
 
   const startNew = () => {
+    createIdRef.current = null;
     setEditing(null);
     setForm(emptyScheduleForm({ timezone: defaultTimezone(prefs.timezone), viewerId, privateOwnerId: target.privateOwnerId ?? null }));
     setErrors({});
@@ -333,13 +340,22 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
   const problems = useMemo(() => formProblems(form), [form]);
   const canSave = Object.keys(problems).length === 0 && !saving;
 
+  // The lock is a ref, so a second click in the same frame is refused before
+  // React has drawn the busy button: two POSTs would be two schedules, and
+  // everyone on them would get every email twice.
+  const saveLock = useRef(false);
+  // One id per new schedule, kept across its Retry: a create that committed
+  // but lost its answer is answered with the schedule it made, never a second
+  // one (create-request-id). A New schedule starts a fresh id.
+  const createIdRef = useRef<string | null>(null);
   const save = async () => {
-    if (saving) return;
+    if (saving || saveLock.current) return;
     const local = formProblems(form);
     if (Object.keys(local).length) {
       setErrors(local);
       return;
     }
+    saveLock.current = true;
     setSaving(true);
     setErrors({});
     setSaveMessage(null);
@@ -353,10 +369,30 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
         : await fetch("/api/report-schedules", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(formToCreateBody(form, { kind: target.kind, id: target.id })),
+            body: JSON.stringify({ ...formToCreateBody(form, { kind: target.kind, id: target.id }), requestId: (createIdRef.current ??= newCreateRequestId()) }),
           });
       const body = await readJson(res);
+      const replayed = !editing && res.ok ? ((body as { replayed?: unknown; schedule?: ScheduleRow } | null) ?? null) : null;
+      if (replayed?.replayed === true && replayed.schedule) {
+        createIdRef.current = null;
+        const stored = formFromSchedule(replayed.schedule);
+        const key = (f: ScheduleFormState) => {
+          const b = formToCreateBody(f, { kind: target.kind, id: target.id });
+          return JSON.stringify({ ...b, recipientUserIds: [...b.recipientUserIds].sort() });
+        };
+        const sameAsSent = key(stored) === key(form);
+        if (!sameAsSent) {
+          // The person changed the form after the lost answer: the schedule
+          // exists with the earlier settings, so the form now edits it and
+          // their latest input waits for Save (a PATCH, not a second POST).
+          setEditing({ id: replayed.schedule.id, updatedAt: replayed.schedule.updatedAt, openedWith: stored });
+          setRebased("created");
+          void load();
+          return;
+        }
+      }
       if (res.ok) {
+        if (!editing) createIdRef.current = null;
         toast(editing ? "Schedule saved" : "Report scheduled");
         setEditing(null);
         setRebased(false);
@@ -373,7 +409,7 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
           const reloaded = formFromSchedule(b2.schedule);
           setForm(rebaseScheduleForm(form, editing.openedWith, reloaded));
           setEditing({ id: editing.id, updatedAt: b2.schedule.updatedAt, openedWith: reloaded });
-          setRebased(true);
+          setRebased("changed");
           void load();
           return;
         }
@@ -382,7 +418,8 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
       }
       const code = (body as { error?: unknown } | null)?.error;
       if (res.status === 503) {
-        setNeedsDb(true);
+        // One quiet line beside the buttons, and the form stays as it is.
+        setSaveMessage(dashboardMessage(body, "Scheduled reports need a database update before they can be used here."));
         return;
       }
       if (code === "invalid_schedule") {
@@ -399,6 +436,7 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
     } catch {
       setSaveMessage("Couldn't reach the server. Check your connection and try again.");
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   };
@@ -421,7 +459,7 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
       >
         <div className="flex flex-col gap-0.5 border-b border-line px-5 py-3 pe-12">
           <DialogTitle className="text-base">Schedule report</DialogTitle>
-          <DialogDescription className="truncate text-sm text-ink-2">{target.name}</DialogDescription>
+          <DialogDescription className="truncate text-sm text-ink-2" title={target.name}>{target.name}</DialogDescription>
         </div>
 
         <div ref={bodyRef} className={cn("flex flex-col gap-4 px-5 py-4", unclipped ? "max-h-[65vh] overflow-visible" : "max-h-[65vh] overflow-y-auto")}>
@@ -447,12 +485,22 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
               {received.length > 0 && mode === "list" ? (
                 <section className="flex flex-col gap-1.5">
                   <h3 className="m-0 text-micro uppercase tracking-[0.06em] text-ink-2">You receive this report</h3>
-                  {received.map((r) => (
+                  {received.map((r) => {
+                    const sender = r.createdBy ? `${r.createdBy.firstName} ${r.createdBy.lastName}`.trim() : "";
+                    return (
                     <div key={r.id} className="flex min-h-10 items-center gap-2 rounded-md border border-line px-3 py-1.5">
                       <CalendarClock className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-ink">{cadenceLabel(specOfRow(r), prefs)}</span>
-                        {r.createdBy ? <span className="block truncate text-xs text-ink-2">from {`${r.createdBy.firstName} ${r.createdBy.lastName}`.trim()}</span> : null}
+                        {sender ? <span className="block truncate text-xs text-ink-2">from {sender}</span> : null}
+                        {/* The recipient's own answer to "why did no email come": a
+                            paused schedule says so instead of reading like one that
+                            still sends. It does not name who paused it: an Org admin
+                            can pause someone else's schedule, and the row only knows
+                            who made it. */}
+                        <span className="block truncate text-xs text-ink-2">
+                          {r.active && r.nextRunAt ? `Next ${formatRunTime(r.nextRunAt, r.timezone, prefs)}` : "Paused, no emails are being sent"}
+                        </span>
                       </span>
                       <button
                         type="button"
@@ -463,7 +511,8 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
                         Stop receiving
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </section>
               ) : null}
 
@@ -549,7 +598,9 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
                   <h3 className="m-0 text-micro uppercase tracking-[0.06em] text-ink-2">{editing ? "Edit schedule" : "New schedule"}</h3>
                   {rebased ? (
                     <p role="status" className="m-0 rounded-md bg-warning-bg px-3 py-2 text-xs text-ink">
-                      This schedule changed since you opened it. Your changes are kept; check them and save again.
+                      {rebased === "created"
+                        ? "Your first try created this schedule, with the settings you had then. Your latest changes are kept; save to apply them."
+                        : "This schedule changed since you opened it. Your changes are kept; check them and save again."}
                     </p>
                   ) : null}
                   <ScheduleForm

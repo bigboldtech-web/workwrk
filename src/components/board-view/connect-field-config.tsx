@@ -37,6 +37,7 @@ import {
   type MirrorRollupFn,
 } from "@/lib/list-connect";
 import { groupReadableLists, readableListsUrl, type ReadableListRow, type ReadableListsResponse } from "@/lib/readable-lists";
+import { distinctSectionLabels } from "@/lib/list-link-rows";
 
 const BUILTIN_CHOICES: Array<{ key: (typeof MIRROR_BUILTIN_KEYS)[number]; label: string }> = [
   { key: "__builtin_status", label: "Status" },
@@ -178,7 +179,7 @@ export function ConnectFieldConfig({
   const sections: PickerSectionDef[] = useMemo(
     () =>
       lists
-        ? groupReadableLists(lists).map((g) => ({
+        ? distinctSectionLabels(groupReadableLists(lists).map((g) => ({
             label: g.label,
             options: g.lists.map((l) => ({
               value: l.id,
@@ -186,7 +187,7 @@ export function ConnectFieldConfig({
               glyph: <ListChecks className="h-4 w-4" strokeWidth={1.5} aria-hidden />,
               disabled: !targets.includes(l.id) && targets.length >= MAX_CONNECT_TARGETS,
             })),
-          }))
+          })))
         : [],
     [lists, targets],
   );

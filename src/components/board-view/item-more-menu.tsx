@@ -32,6 +32,7 @@ import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 import { useItemTypes } from "./use-item-types";
 import { AddToListPicker } from "./add-to-list-picker";
+import { distinctSectionLabels } from "@/lib/list-link-rows";
 
 export interface ItemMoreMenuItem {
   id: string;
@@ -218,7 +219,9 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     // the last error sentence standing over a live retry.
     setListsState((prev) => (prev === "failed" ? "idle" : prev));
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 240) });
+    // Clamped on both sides: a card half scrolled out of a wide board still
+    // opens its whole menu on screen.
+    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.right - 240, window.innerWidth - 248)) });
     setOpen(true);
   }, []);
 
@@ -353,21 +356,30 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         case "remove-from-list": {
           close();
           if (!listContext) return;
-          const res = await fetch(`/api/boards/${listContext.boardId}/links/${item.id}`, { method: "DELETE" }).catch(() => null);
-          if (!res || !res.ok) {
-            const data = res ? await res.json().catch(() => ({})) : {};
-            toast(
-              res
-                ? accessMessage(data, "Couldn't take this task out of this List.", {
-                    list_read_only: "You need edit access to this List or to the task's home List to take it out.",
-                  })
-                : "Couldn't reach the server. Check your connection and try again.",
-            );
-            return;
-          }
-          toast("Removed from this List");
-          emitItemChanged(item.id, listContext.homeBoardId ?? null, false, { leftListIds: [listContext.boardId] });
-          onRemovedFromList?.();
+          const ctx = listContext;
+          // The menu has closed, so a failure says so in danger tone and,
+          // when sending again can work (not reached, or a server failure),
+          // carries its own Try again.
+          const removeOnce = async (): Promise<void> => {
+            const res = await fetch(`/api/boards/${ctx.boardId}/links/${item.id}`, { method: "DELETE" }).catch(() => null);
+            if (!res || !res.ok) {
+              const data = res ? await res.json().catch(() => ({})) : {};
+              const retryable = !res || res.status >= 500 || res.status === 429;
+              toast(
+                res
+                  ? accessMessage(data, "Couldn't take this task out of this List.", {
+                      list_read_only: "You need edit access to this List or to the task's home List to take it out.",
+                    })
+                  : "Couldn't reach the server. Check your connection and try again.",
+                { tone: "danger", ...(retryable ? { action: { label: "Try again", onClick: () => void removeOnce() } } : {}) },
+              );
+              return;
+            }
+            toast("Removed from this List");
+            emitItemChanged(item.id, ctx.homeBoardId ?? null, false, { leftListIds: [ctx.boardId] });
+            onRemovedFromList?.();
+          };
+          await removeOnce();
           return;
         }
         case "watch":
@@ -726,10 +738,10 @@ function LinkMovePicker({
 
   const exclude = new Set([listContext.boardId, ...(listContext.homeBoardId ? [listContext.homeBoardId] : [])]);
   const sections: PickerSectionDef[] = res
-    ? groupReadableLists({ ...res, boards: res.boards.filter((b) => !exclude.has(b.id)) }).map((g) => ({
+    ? distinctSectionLabels(groupReadableLists({ ...res, boards: res.boards.filter((b) => !exclude.has(b.id)) }).map((g) => ({
         label: g.label,
         options: g.lists.map((l) => ({ value: l.id, label: l.name })),
-      }))
+      })))
     : [];
 
   const move = async (targetId: string) => {

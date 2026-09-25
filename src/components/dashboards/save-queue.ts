@@ -28,13 +28,15 @@ import {
   buildDashboardPatch,
   classifySaveResponse,
   dataKey,
+  draftHasUnmergedEdits,
   mergeMissingWidgets,
   rebaseDashboard,
   stableStringify,
   type DashboardSnapshot,
 } from "@/lib/dashboards/dashboard-editor";
 import { dashboardMessage } from "@/lib/dashboards/dashboard-messages";
-import { draftKey, isDraftNewer, parseDraft, serializeDraft, type DraftEnvelope } from "@/lib/local-draft";
+import { isSpaceOverviewId } from "@/lib/dashboards/dashboard-access";
+import { draftKey, parseDraft, serializeDraft, type DraftEnvelope } from "@/lib/local-draft";
 import type { EditorWidget } from "@/lib/dashboards/widgets";
 
 export interface Confirmed extends DashboardSnapshot {
@@ -62,7 +64,7 @@ export interface QueueState {
   message: string | null;
   inFlight: boolean;
   lastSavedAt: Date | null;
-  /** A draft newer than the server's version, offered back by DraftRestoreStrip. */
+  /** A draft holding edits the server does not have, offered back by DraftRestoreStrip. */
   draftOffer: DraftEnvelope<DraftPayload> | null;
 }
 
@@ -194,11 +196,16 @@ export class DashboardQueue {
     return local.name !== base.name || stableStringify(local.widgets) !== stableStringify(base.widgets);
   }
 
-  /** A save is waiting or on the wire: the leave prompt's question. */
+  /**
+   * A save is waiting, on the wire, or failed on the network with Retry still
+   * worth pressing: the leave prompt's question. A stopped or conflicted
+   * queue does not ask, because staying would not help (the reason is on the
+   * page and the draft keeps the changes for the next open).
+   */
   busy(): boolean {
     const s = this.state.status;
     if (this.state.inFlight) return true;
-    if (s === "conflict" || s === "stopped" || s === "error") return false;
+    if (s === "conflict" || s === "stopped") return false;
     return this.hasUnsaved();
   }
 
@@ -213,14 +220,18 @@ export class DashboardQueue {
    * The server's copy, as the page just read it. A queue that still holds
    * work (a save waiting, failed or stopped) keeps its local state: that is
    * the point of it outliving the page. Otherwise base and local become the
-   * server's, and a draft newer than it is offered back.
+   * server's, and a draft whose edits the server does not have is offered
+   * back.
    */
   hydrate(server: Confirmed) {
     const holding = this.state.base && (this.hasUnsaved() || this.state.inFlight || this.state.status === "conflict" || this.state.status === "stopped" || this.state.status === "error");
     if (holding) return;
     const env = readDraft(this.state.id);
     let draftOffer: DraftEnvelope<DraftPayload> | null = null;
-    if (usableDraft(env) && isDraftNewer(env, server.updatedAt)) draftOffer = env;
+    // Offered when its edits are not on the server yet, whatever the clocks
+    // say: a save still in flight at close, or another editor's later save,
+    // leaves a draft older than the row that the server never merged.
+    if (usableDraft(env) && draftHasUnmergedEdits(env.payload, server)) draftOffer = env;
     else if (env) this.clearDraft();
     this.set({
       base: server,
@@ -332,7 +343,7 @@ export class DashboardQueue {
 
   // ── sending ────────────────────────────────────────────────────────
 
-  async flush(): Promise<void> {
+  async flush(opts: { keepalive?: boolean } = {}): Promise<void> {
     if (this.state.inFlight) return; // the landing PATCH sends the rest
     const { base, local } = this.state;
     if (!base || !local) return;
@@ -357,6 +368,7 @@ export class DashboardQueue {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        ...(opts.keepalive ? { keepalive: true } : {}),
       });
       status = res.status;
       payload = await res.json().catch(() => null);
@@ -425,11 +437,23 @@ export class DashboardQueue {
         this.stop("invalid", dashboardMessage(payload, "This change couldn't be saved."));
         return;
       case "forbidden":
-        this.stop("forbidden", "You can no longer edit this dashboard, so your last changes weren't saved.");
+        // A Space's Overview widgets belong to the Space's managers, so the
+        // sentence names what the person actually lost.
+        this.stop(
+          "forbidden",
+          isSpaceOverviewId(this.state.id)
+            ? "You can no longer change this Space's widgets, so your last changes weren't saved."
+            : "You can no longer edit this dashboard, so your last changes weren't saved.",
+        );
         for (const l of this.forbiddenListeners) l();
         return;
       case "gone":
-        this.stop("gone", "This dashboard was deleted or is no longer shared with you. Your last changes weren't saved.");
+        this.stop(
+          "gone",
+          isSpaceOverviewId(this.state.id)
+            ? "This Space is no longer shared with you. Your last changes to its widgets weren't saved."
+            : "This dashboard was deleted or is no longer shared with you. Your last changes weren't saved.",
+        );
         return;
       case "unauthorized":
         this.stop("unauthorized", "Your session ended. Sign in again; your changes are kept on this device.");
@@ -528,7 +552,14 @@ export class DashboardQueue {
 
   // ── unload ─────────────────────────────────────────────────────────
 
-  /** One keepalive PATCH, only when it can succeed and the browser can carry it. */
+  /**
+   * One keepalive PATCH, only when it can succeed (nothing in flight, so its
+   * version is current) and the browser can carry it. It is an ordinary
+   * flush, so when the page is not unloaded after all (a page restored from
+   * the back-forward cache) its answer moves base forward like any save, and
+   * the waiting debounce never sends the same change a second time at a
+   * version it has already used.
+   */
   flushOnPagehide() {
     const { base, local, inFlight, status } = this.state;
     if (!base || !local || inFlight || status === "conflict" || status === "stopped") return;
@@ -536,12 +567,11 @@ export class DashboardQueue {
     const body = JSON.stringify(
       buildDashboardPatch({ expectedUpdatedAt: base.updatedAt, widgets: local.widgets, removedIds: this.state.removedIds, name: local.name !== base.name ? local.name : undefined }),
     );
+    // Too big for keepalive: nothing is sent, and the draft holds the changes.
     if (body.length >= KEEPALIVE_MAX) return;
-    try {
-      void fetch(`/api/dashboards/${encodeURIComponent(this.state.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body, keepalive: true });
-    } catch {
-      /* the draft holds the changes */
-    }
+    if (this.debounce) clearTimeout(this.debounce);
+    this.debounce = null;
+    void this.flush({ keepalive: true });
   }
 }
 

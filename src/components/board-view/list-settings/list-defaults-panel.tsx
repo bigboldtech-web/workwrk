@@ -247,6 +247,9 @@ export function ListDefaultsPanel({
               mode="edit"
               boardId={boardId}
               popover="absolute"
+              // An empty field reads "No default", as the Status and Priority
+              // rows do; a table cell's empty glyph is not copy for a form.
+              emptyLabel="No default"
               onChange={(next) => { setValues((prev) => ({ ...prev, [f.key]: next })); setDirty(true); setSaved(false); }}
             />,
             values[f.key] !== undefined && values[f.key] !== null && values[f.key] !== "" ? () => { setValues((prev) => { const n = { ...prev }; delete n[f.key]; return n; }); setDirty(true); } : null,

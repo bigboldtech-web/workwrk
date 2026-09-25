@@ -48,13 +48,21 @@ export function RecipientPicker({
   value,
   onChange,
   locked,
+  keepId,
   disabled,
   onOpenChange,
 }: {
   value: string[];
   onChange: (ids: string[]) => void;
-  /** A private view goes to its owner only: the chips show, nothing changes. */
+  /**
+   * A private view goes to its owner only, so nobody can be ADDED. Removing
+   * stays possible: a view made private after it was scheduled to colleagues
+   * still lists them, and the save that trims them has to be reachable. Those
+   * chips show greyed, since the report no longer reaches them.
+   */
   locked?: boolean;
+  /** Under `locked`, the owner: the one chip that cannot be removed. */
+  keepId?: string | null;
   disabled?: boolean;
   /** Told when the list opens and closes, so a clipping host can make room. */
   onOpenChange?: (open: boolean) => void;
@@ -116,10 +124,11 @@ export function RecipientPicker({
     return () => clearTimeout(t);
   }, [open, q]);
 
+  const removable = (id: string) => !disabled && !(locked && id === keepId);
   const toggle = (id: string) => {
-    if (locked) return;
-    if (value.includes(id)) onChange(value.filter((x) => x !== id));
-    else if (value.length < MAX) onChange([...value, id]);
+    if (value.includes(id)) {
+      if (removable(id)) onChange(value.filter((x) => x !== id));
+    } else if (!locked && value.length < MAX) onChange([...value, id]);
   };
 
   const options = useMemo(
@@ -139,11 +148,13 @@ export function RecipientPicker({
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       {value.map((id) => {
         const p = known.get(id);
-        const ineligible = p ? !p.eligible : false;
+        // On a private view anyone but its owner is skipped by every run.
+        const barred = !!locked && !!keepId && id !== keepId;
+        const ineligible = barred || (p ? !p.eligible : false);
         return (
           <span
             key={id}
-            title={ineligible ? "No longer receives reports" : undefined}
+            title={barred ? "Doesn't receive a private view" : ineligible ? "No longer receives reports" : undefined}
             className={cn(
               "inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-md border border-line ps-1 pe-1 text-sm",
               ineligible ? "bg-subtle text-ink-3" : "bg-raised text-ink",
@@ -151,7 +162,7 @@ export function RecipientPicker({
           >
             {p ? <Avatar person={p} size={20} className={ineligible ? "opacity-50" : ""} /> : <span className="inline-block h-5 w-5 rounded-full bg-skeleton" aria-hidden />}
             <span className={cn("min-w-0 truncate", ineligible && "line-through")}>{p ? nameOf(p) : "Someone"}</span>
-            {!locked && !disabled ? (
+            {removable(id) ? (
               <button
                 type="button"
                 onClick={() => toggle(id)}

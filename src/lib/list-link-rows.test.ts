@@ -3,6 +3,7 @@ import type { BoardItemRow, StatusOption } from "./board-items-shared";
 import {
   addLinkReasonMessage,
   boardStatusFor,
+  distinctSectionLabels,
   homeStatusForBoardStatus,
   itemEventAction,
   itemsUrl,
@@ -285,6 +286,18 @@ describe("reconcilePoll", () => {
     const next = reconcilePoll([linkedRoot({ id: "l" })], [linkedRoot({ id: "l" }, { homeStatus: HOME_STATUSES[0] })]);
     expect(next?.[0].listLink?.homeStatus?.value).toBe("BACKLOG");
   });
+  it("replaces a linked row whose access changed at an equal updatedAt (a role just lowered)", () => {
+    const held = linkedRoot({ id: "l" }, { role: "EDIT", canRemove: true, canShare: true });
+    const lowered = linkedRoot({ id: "l" }, { role: "VIEW", canRemove: false, canShare: false });
+    const next = reconcilePoll([held], [lowered]);
+    expect(next?.[0].listLink?.role).toBe("VIEW");
+    expect(next?.[0].listLink?.canRemove).toBe(false);
+    // The home List unshared: no name and no home set any more.
+    const unshared = linkedRoot({ id: "l" }, { homeList: null, homeStatuses: undefined });
+    expect(reconcilePoll([held], [unshared])?.[0].listLink?.homeList).toBeNull();
+    // Nothing changed: nothing to replace.
+    expect(reconcilePoll([held], [linkedRoot({ id: "l" }, { role: "EDIT", canRemove: true, canShare: true })])).toBeNull();
+  });
   it("replaces only strictly newer rows and appends new ones, as today", () => {
     const old = row({ id: "a", title: "old" });
     const same = row({ id: "a", title: "server" });
@@ -369,5 +382,27 @@ describe("addLinkReasonMessage", () => {
       expect(s).not.toMatch(/_/);
       expect(s.endsWith(".")).toBe(true);
     }
+  });
+});
+
+describe("distinctSectionLabels", () => {
+  it("keeps every heading's words and makes a repeated one a distinct key", () => {
+    const out = distinctSectionLabels([
+      { label: "Ops", options: [1] },
+      { label: "Design", options: [2] },
+      { label: "Ops", options: [3] },
+      { options: [4] },
+      { label: "Ops", options: [5] },
+    ]);
+    const labels = out.map((s) => s.label);
+    expect(new Set(labels.filter(Boolean)).size).toBe(4);
+    expect(labels.map((l) => l?.replace(/\u200B/g, ""))).toEqual(["Ops", "Design", "Ops", undefined, "Ops"]);
+    expect(out.map((s) => s.options[0])).toEqual([1, 2, 3, 4, 5]);
+  });
+  it("leaves sections that are already distinct untouched", () => {
+    const input = [{ label: "A", options: [] }, { label: "B", options: [] }];
+    const out = distinctSectionLabels(input);
+    expect(out[0]).toBe(input[0]);
+    expect(out[1]).toBe(input[1]);
   });
 });

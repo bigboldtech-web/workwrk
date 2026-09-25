@@ -393,7 +393,12 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
             deepLinkCommentId={comment}
             onDeepLinkResolved={onDeepLinkResolved}
             onOpenItem={(id) => openTask(router, id)}
-            onRequestAccess={board?.slug ? () => setShareOpen(true) : undefined}
+            // Open in a List the task is only shown in, the Share dialog here
+            // would be THAT List's, and a link never gives more than Can view,
+            // so it cannot grant edit. The body's linked banner offers the
+            // task's home instead, when the viewer may read it.
+            onRequestAccess={board?.slug && !linkedHere ? () => setShareOpen(true) : undefined}
+            onOpenInHome={linkedHere?.home.readable ? () => router.replace(`/item/${itemId}`, { scroll: false }) : undefined}
             missingView={
               <div className="py-8 text-center">
                 {/* The drawer says what the page says, for the same reasons

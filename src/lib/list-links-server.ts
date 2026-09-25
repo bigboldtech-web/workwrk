@@ -20,6 +20,7 @@ import type { Prisma } from "@/generated/prisma";
 import { canContributeBoard, canEditBoard, getBoardForReader, getBoardForReaderOrFolderGrantee } from "@/lib/board";
 import { canContributeSpace, canEditSpace, getSpaceForReader, isOrgAdminAccessLevel, visibleSpaceIds } from "@/lib/space";
 import { orgRoleOf } from "@/lib/access/org-role";
+import { namedRecipientFor } from "@/lib/reports/schedule";
 import {
   buildListScopeWhere,
   decideAddLink,
@@ -553,10 +554,11 @@ export async function addItemsToList(args: {
       const byId = new Map(locked.map((r) => [r.id, r] as const));
       const homeIds = Array.from(new Set(locked.map((r) => r.boardId)));
       const [homes, existing] = await Promise.all([
-        tx.board.findMany({ where: { id: { in: homeIds } }, select: { id: true, archivedAt: true } }),
+        tx.board.findMany({ where: { id: { in: homeIds } }, select: { id: true, archivedAt: true, productSlug: true } }),
         tx.itemListLink.findMany({ where: { itemId: { in: ids } }, select: { itemId: true, boardId: true, position: true } }),
       ]);
       const homeArchived = new Map(homes.map((h) => [h.id, !!h.archivedAt] as const));
+      const homePersonal = new Set(homes.filter((h) => h.productSlug === "personal-list").map((h) => h.id));
       const countByItem = new Map<string, number>();
       const existingHere = new Map<string, number>();
       for (const l of existing) {
@@ -583,7 +585,7 @@ export async function addItemsToList(args: {
           ? decideAddLink({
               orgId: args.viewer.organizationId,
               target,
-              item: it ? { ...it, homeArchived: homeArchived.get(it.boardId) ?? true } : null,
+              item: it ? { ...it, homeArchived: homeArchived.get(it.boardId) ?? true, homePersonal: homePersonal.has(it.boardId) } : null,
               readable,
               targetId: args.boardId,
               alreadyLinked: existingHere.has(id),
@@ -1030,7 +1032,19 @@ export interface RecipientOption {
  * shows as a greyed chip) plus, for `q`, the ELIGIBLE members whose first
  * name, last name or email matches. Ordered by name.
  */
-export async function recipientOptions(i: { organizationId: string; q?: string; ids?: string[]; limit?: number }): Promise<RecipientOption[]> {
+export async function recipientOptions(i: {
+  organizationId: string;
+  q?: string;
+  ids?: string[];
+  limit?: number;
+  /**
+   * Who is asking. An ineligible person named by id is answered only when
+   * they are on a schedule this caller may manage (their own, or any in the
+   * org for an org admin), and never with an email (namedRecipientFor).
+   * Absent: ineligible ids are never named.
+   */
+  viewer?: LinkViewer;
+}): Promise<RecipientOption[]> {
   const limit = Math.min(50, Math.max(1, Math.floor(i.limit ?? 20)));
   const q = (i.q ?? "").trim().slice(0, 80);
   const ids = Array.from(new Set((i.ids ?? []).filter((id) => typeof id === "string" && id.length > 0))).slice(0, 100);
@@ -1069,8 +1083,28 @@ export async function recipientOptions(i: { organizationId: string; q?: string; 
       eligible: isEligibleRecipient({ deletedAt: u.deletedAt, status: String(u.status), guest }),
     };
   };
+  // The ineligible ids that sit on a schedule the caller may manage.
+  const ineligibleIds = named.map(toOption).filter((o) => !o.eligible).map((o) => o.id);
+  const onSchedule = new Set<string>();
+  if (ineligibleIds.length && i.viewer) {
+    const rows = await prisma.reportSchedule
+      .findMany({
+        where: {
+          organizationId: i.organizationId,
+          ...(viewerIsOrgAdmin(i.viewer) ? {} : { createdById: i.viewer.userId }),
+          recipientUserIds: { hasSome: ineligibleIds },
+        },
+        select: { recipientUserIds: true },
+        take: 500,
+      })
+      .catch(() => [] as Array<{ recipientUserIds: string[] }>);
+    for (const r of rows) for (const id of r.recipientUserIds) onSchedule.add(id);
+  }
   const out = new Map<string, RecipientOption>();
-  for (const u of named) out.set(u.id, toOption(u));
+  for (const u of named) {
+    const o = namedRecipientFor(toOption(u), onSchedule.has(u.id));
+    if (o) out.set(u.id, o);
+  }
   let taken = 0;
   for (const u of found) {
     if (taken >= limit) break;

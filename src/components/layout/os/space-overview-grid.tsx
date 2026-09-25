@@ -91,7 +91,7 @@ export const OVERVIEW_CARD_CATALOG: Array<{ key: string; label: string; descript
   { key: "bookmarks", label: "Bookmarks", description: "Pinned URLs for fast access" },
   { key: "folders",   label: "Folders",   description: "Folders inside this Space" },
   { key: "lists",     label: "Lists",     description: "Lists across folders and root" },
-  { key: "resources", label: "Resources", description: "Files on this Space — drag and drop to add; also in Library → Files" },
+  { key: "resources", label: "Resources", description: "Files on this Space. Drag and drop to add, also in Library → Files" },
   { key: "workload",  label: "Workload",  description: "Pie of items by status" },
 ];
 
@@ -127,6 +127,19 @@ type DeriveLayout = (
 ) => Layout[];
 const deriveResponsiveLayout: DeriveLayout | undefined = (Responsive as unknown as { utils?: { findOrGenerateResponsiveLayout?: DeriveLayout } }).utils
   ?.findOrGenerateResponsiveLayout;
+
+/**
+ * The narrow breakpoints the grid derives for this person when widgets are
+ * on it: xs and xxs (fewer than 12 columns) that the person never arranged.
+ * Their own cards there are a derivation, not a choice, so they are never
+ * written to the preference unless the person is on that breakpoint now.
+ */
+function derivedBreakpoints(layouts: LayoutShape): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!deriveResponsiveLayout) return out;
+  for (const [bp, cols] of Object.entries(COLS)) if (cols < 12 && !layouts[bp]) out.add(bp);
+  return out;
+}
 
 /** The same place for every one of this person's own cards, ignoring grid bookkeeping. */
 function sameCardLayouts(a: LayoutShape, b: LayoutShape): boolean {
@@ -186,18 +199,22 @@ export function SpaceOverviewGrid({
   // breakpoint change; the ref is what the drag callbacks read.
   const [gridCols, setGridCols] = useState(12);
   const colsRef = useRef(12);
-  // Breakpoints this render derived for the widgets (xs and xxs the person
-  // never arranged); see onLayoutChange.
-  const derivedRef = useRef<ReadonlySet<string>>(new Set());
-  const layoutsRef = useRef(layouts);
-  useEffect(() => {
-    layoutsRef.current = layouts;
-  });
   const [widgetEditor, setWidgetEditor] = useState<WidgetEditorState>(null);
   const { toast } = useOsToast();
   const confirm = useConfirm();
 
   const onLayoutChange = useCallback((current: Layout[], all: LayoutShape) => {
+    // onBreakpointChange fires only on a CHANGE, so a page opened on a phone
+    // would believe it had 12 columns until the window was resized; the
+    // layout pass says which breakpoint is live (its layout is `current`).
+    if (overview) {
+      const liveBp = Object.keys(all).find((bp) => all[bp] === current);
+      const liveCols = liveBp ? COLS[liveBp] : undefined;
+      if (liveCols && liveCols !== colsRef.current) {
+        colsRef.current = liveCols;
+        setGridCols(liveCols);
+      }
+    }
     if (!hydrated) return;
     // No widget on the grid: exactly the grid's save as it always was.
     if (!hasWidgets) {
@@ -208,19 +225,22 @@ export function SpaceOverviewGrid({
     // The built-in cards are this person's; a widget item is the Space's and
     // is saved (or not) by the drag and resize stops below, never here. A
     // breakpoint derived for the widgets is left out unless the person is on
-    // it now, exactly as the grid would have saved it before widgets.
+    // it now, exactly as the grid would have saved it before widgets. Both
+    // are read from this render's `layouts` (the grid calls the handler it
+    // was rendered with), never from a ref a later effect would update.
     const currentBp = Object.keys(all).find((bp) => all[bp] === current);
+    const derived = derivedBreakpoints(layouts);
     const own: LayoutShape = {};
     for (const [bp, items] of Object.entries(withoutWidgetItems(all, WIDGET_PREFIX))) {
-      if (derivedRef.current.has(bp) && bp !== currentBp) continue;
+      if (derived.has(bp) && bp !== currentBp) continue;
       own[bp] = items;
     }
     // Widgets loading, or a manager moving one, re-lays the grid; when none
     // of this person's own cards moved there is nothing of theirs to write.
-    if (sameCardLayouts(own, layoutsRef.current)) return;
+    if (sameCardLayouts(own, layouts)) return;
     setLayouts(own);
     saveLayouts(own);
-  }, [hydrated, saveLayouts, hasWidgets]);
+  }, [hydrated, saveLayouts, hasWidgets, overview, layouts]);
 
   const onWidgetStop = useCallback((layout: Layout[], _old: Layout, item: Layout) => {
     if (!manager || !item || !String(item.i).startsWith(WIDGET_PREFIX) || colsRef.current < 12) return;
@@ -285,7 +305,6 @@ export function SpaceOverviewGrid({
   for (const [bp, items] of Object.entries(layouts)) {
     visibleLayouts[bp] = items.filter((it) => !hidden.has(it.i));
   }
-  const derived = new Set<string>();
   if (hasWidgets) {
     // Every breakpoint gets its widget items explicitly. On 12 columns they
     // sit where the Overview row places them. On xs and xxs they are a
@@ -297,10 +316,13 @@ export function SpaceOverviewGrid({
     for (const [bp, cols] of Object.entries(COLS)) {
       let mine = own[bp];
       if (!mine) {
+        // derivedBreakpoints names exactly these, for onLayoutChange.
         if (cols >= 12 || !deriveResponsiveLayout) continue;
         mine = deriveResponsiveLayout(own, BREAKPOINTS, bp, bp, cols, "vertical");
-        derived.add(bp);
       }
+      // Not static for someone who cannot move them (widgetGridItems locks
+      // them per item instead), so the grid compacts them for a member
+      // exactly as it does for the manager who placed them.
       let items = widgetGridItems(widgets, { canEdit: manager && cols >= 12, cols, prefix: WIDGET_PREFIX });
       // The derived stack on a narrow breakpoint starts under the built-in
       // cards, so a shared widget never lands on top of someone's own card.
@@ -311,17 +333,21 @@ export function SpaceOverviewGrid({
       visibleLayouts[bp] = [...mine, ...items];
     }
   }
-  derivedRef.current = derived;
 
   const s = ov.save;
   const problem = overview && ov.exists && (s.status === "stopped" || s.status === "error") && s.message ? s.message : null;
+  // Sending again cannot help once the Space's managers no longer include
+  // this person, or the widgets are gone; the sentence says so instead.
+  const problemRetryable = s.status === "error" || (s.stopReason !== "forbidden" && s.stopReason !== "gone");
 
   return (
     <>
       {overview && ov.exists && s.status === "conflict" ? (
         <ConflictStrip noun="Overview" className="mb-2 rounded-md border" onReload={() => void ov.actions.reloadLive()} onDismiss={() => void ov.actions.keepMine()} />
       ) : null}
-      {overview && ov.exists ? <DraftRestoreStrip draft={ov.draft} onRestore={ov.actions.restoreDraft} className="mb-2 rounded-md border" /> : null}
+      {/* A manager's own unsaved widget changes, offered back to a manager
+          only: Restore would only fail for anyone else. */}
+      {overview && ov.exists && manager ? <DraftRestoreStrip draft={ov.draft} onRestore={ov.actions.restoreDraft} className="mb-2 rounded-md border" /> : null}
       {overview && ov.failed ? (
         <div role="alert" className="os-chrome mb-2 flex min-h-11 items-center gap-3 rounded-md border border-line bg-subtle px-4 text-base text-ink">
           <span className="min-w-0 flex-1">Couldn&apos;t load this Space&apos;s widgets.</span>
@@ -333,9 +359,11 @@ export function SpaceOverviewGrid({
       {problem ? (
         <div role="alert" className="os-chrome mb-2 flex min-h-11 items-center gap-3 rounded-md border border-line bg-danger-bg px-4 text-base text-ink">
           <span className="min-w-0 flex-1">{problem}</span>
-          <button type="button" onClick={ov.actions.retry} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
-            Retry
-          </button>
+          {problemRetryable ? (
+            <button type="button" onClick={ov.actions.retry} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
+              Retry
+            </button>
+          ) : null}
         </div>
       ) : null}
       <ResponsiveGridLayout

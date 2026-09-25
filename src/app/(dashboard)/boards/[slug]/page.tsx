@@ -283,9 +283,12 @@ export default async function BoardPage(props: {
         views={views.map((v) => ({ id: v.id, name: v.name, type: v.type, isDefault: v.isDefault, config: v.config, isShared: v.isShared, ownerId: v.ownerId }))}
         boardId={board.id}
         boardSlug={board.slug}
+        boardName={board.name}
         activeViewId={activeView?.id ?? null}
         defaultViewId={defaultView?.id ?? null}
         canManage={canContribute}
+        canManageList={canManage}
+        viewerId={u.id}
         scheduleReports={scheduleReports}
       />
 

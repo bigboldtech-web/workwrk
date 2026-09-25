@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { diffLayouts, layoutsFromGrid, layoutsOf, stackOrder, widgetGridItems } from "@/lib/dashboards/dashboard-editor";
+import { diffLayouts, layoutsFromGrid, stackOrder, widgetGridItems } from "@/lib/dashboards/dashboard-editor";
 import type { EditorWidget, WidgetLayout } from "@/lib/dashboards/widgets";
 
 const ROW_HEIGHT = 56;
@@ -76,13 +76,20 @@ export function DashboardGrid({
   }, [scrollToId, widgets.length]);
 
   const wide = width >= WIDE;
-  const items = useMemo(() => widgetGridItems(widgets, { canEdit: canEdit && wide, cols: 12 }), [widgets, canEdit, wide]);
+  // compact: every person gets the same compacted arrangement, whether or
+  // not they may edit it (see widgetGridItems).
+  const items = useMemo(() => widgetGridItems(widgets, { canEdit: canEdit && wide, cols: 12, compact: true }), [widgets, canEdit, wide]);
   const staticById = useMemo(() => new Map(items.map((i) => [i.i, i.static] as const)), [items]);
 
+  // A card moved when the grid differs from what was ON SCREEN (the
+  // compacted items), not from the stored rows: a drag that ends where it
+  // began saves nothing even when the stored rows still hold a deleted
+  // card's gap. A real move saves every card where it now shows, so the
+  // stored rows lose the gap too.
   const save = (layout: Layout[]) => {
     if (!canEdit || !wide) return;
     const next = layoutsFromGrid(layout);
-    if (diffLayouts(layoutsOf(widgets), next).length === 0) return;
+    if (diffLayouts(layoutsFromGrid(items), next).length === 0) return;
     onLayouts(next);
   };
 

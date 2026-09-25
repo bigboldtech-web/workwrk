@@ -78,7 +78,7 @@ export function useDashboard(id: string, opts: { enabled?: boolean } = {}) {
   const queue = useMemo(() => dashboardQueue(id), [id]);
   const qs: QueueState = useSyncExternalStore(queue.subscribe, queue.getState, queue.getState);
   const { toast } = useOsToast();
-  const zone = useMemo(browserZone, []);
+  const zone = useMemo(() => browserZone(), []);
 
   const [load, setLoad] = useState<DashboardLoad>({ kind: "loading" });
   const [meta, setMeta] = useState<DashboardMeta | null>(null);
@@ -97,8 +97,17 @@ export function useDashboard(id: string, opts: { enabled?: boolean } = {}) {
       const current = () => queue.getState().local?.widgets ?? [];
       const keysAtRequest = new Map(current().map((w) => [w.id, dataKey(w)] as const));
       const ids = only ?? null;
-      if (ids) setData((prev) => ({ ...prev, ...Object.fromEntries(ids.map((i) => [i, { state: "loading" } as CardData])) }));
-      else setDataLoading(true);
+      // A card already showing a result (the editor's preview of exactly
+      // these settings) keeps it until the stored answer lands, so a save
+      // never flashes a skeleton over the right numbers; a failed or empty
+      // one shows its skeleton while it is asked again.
+      if (ids) {
+        setData((prev) => {
+          const next = { ...prev };
+          for (const i of ids) if (prev[i]?.state !== "ready") next[i] = { state: "loading" };
+          return next;
+        });
+      } else setDataLoading(true);
       const urls = ids
         ? ids.map((w) => `/api/dashboards/${encodeURIComponent(id)}/data?widget=${encodeURIComponent(w)}&tz=${encodeURIComponent(zone)}`)
         : [`/api/dashboards/${encodeURIComponent(id)}/data?tz=${encodeURIComponent(zone)}`];
@@ -292,6 +301,9 @@ export function useDashboard(id: string, opts: { enabled?: boolean } = {}) {
 
   // ── conflict and draft ──────────────────────────────────────────────
 
+  // The toast's "Try again" calls the latest reloadLive through this ref,
+  // which an effect keeps current after every render.
+  const reloadLiveRef = useRef<(() => Promise<void>) | null>(null);
   const reloadLive = useCallback(async () => {
     const r = await queue.reloadLive();
     if (!r.ok) {
@@ -301,7 +313,6 @@ export function useDashboard(id: string, opts: { enabled?: boolean } = {}) {
     setMeta((m) => (m ? { ...m, canEdit: r.canEdit } : m));
     void fetchData();
   }, [queue, toast, fetchData]);
-  const reloadLiveRef = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => {
     reloadLiveRef.current = reloadLive;
   });

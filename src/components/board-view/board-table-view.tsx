@@ -29,15 +29,18 @@ import {
   type ItemTag,
 } from "@/lib/board-items-shared";
 import { isBuiltinShown, catalogEntryForField, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
-import { isConnectField } from "@/lib/list-connect";
+import { isConnectField, isMirrorField } from "@/lib/list-connect";
 import {
   boardStatusFor,
+  bulkStatusSkipMessage,
+  computedCellValue,
   itemsUrl,
   linkedMenuFlags,
   linkedRowEditable,
   linkedRowKind,
   mergeRefetchedRow,
   optimisticLinkedStatus,
+  linkedStatusNote,
   planBulkStatus,
   refetchedFromRow,
   statusPickerFor,
@@ -84,6 +87,13 @@ interface BoardTableViewProps {
   /** Per-List statuses (backbone #1) — the board's own set. */
   statuses: StatusOption[];
   canEdit: boolean;
+  /**
+   * May this viewer manage the List's fields (add, edit, move, delete a
+   * column)? Every fields route gates on Full access, which content write
+   * (`canEdit`) is not, so the header's field rows and its "+" follow this.
+   * Absent: `canEdit`, the old behaviour, for a host that did not work it out.
+   */
+  canManage?: boolean;
   /** Full access on the List. Only gates the row menu's Delete row, which is
    *  not an edit: it wants full access OR the task's own creator, so rendering
    *  it on `canEdit` gave every Member a control that always 403'd. */
@@ -214,7 +224,11 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
 // Header-menu sort — compares any column (built-in or custom field). Returns a
 // signed number; the caller flips it for descending. Missing values sort last
 // for ascending (Infinity / "" handled per type).
-function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[]): number {
+//
+// `computedKeys` names this List's Connect and Mirror columns: what they show
+// is not in `metadata` (list-link-rows.ts computedCellValue), so they are read
+// from the row's computed cells and never from the stored ids.
+function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[], computedKeys?: ReadonlySet<string>): number {
   const val = (row: BoardItemRow): string | number => {
     switch (key) {
       case "name": return row.title.toLowerCase();
@@ -245,6 +259,7 @@ function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses
       case "type": return row.itemTypeId ?? "￿";
       case "tags": return (row.tags ?? []).map((t) => t.name).join(",").toLowerCase() || "￿";
       default: {
+        if (computedKeys?.has(key)) return computedCellValue(row, key) ?? "￿";
         const v = row.metadata?.[key];
         if (v == null || v === "") return "￿";
         return typeof v === "number" ? v : String(v).toLowerCase();
@@ -307,7 +322,7 @@ function bulkReasonSentences(reasons: string[]): string {
   return out.length ? ` ${out.join(" ")}` : "";
 }
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canManage: canManageProp, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // The status a row has IN THIS LIST. A row shown here through a link keeps
@@ -323,6 +338,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     () => [...(initialFields ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     [initialFields],
   );
+  // The Connect and Mirror columns, whose sort and group read the computed
+  // cells rather than metadata (compareByColumn, the group-by below).
+  const computedKeys = useMemo(
+    () => new Set(customFields.filter((f) => isConnectField(f) || isMirrorField(f)).map((f) => f.key)),
+    [customFields],
+  );
+  // Field management is the List's schema, a step above content write.
+  const canManage = canManageProp ?? canEdit;
   const { byId: itemTypeMap, list: itemTypeList, default: defaultItemType } = useItemTypes();
   // Built-in column visibility — one model shared with the Fields panel
   // (isBuiltinShown): Assignee/Due/Priority default-on (hide via hiddenFields);
@@ -487,12 +510,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // mirror stays, so a renderer that writes the whole config still carries
   // every key saved here.
   const viewQueue = useMemo(() => (viewId ? viewConfigQueue(boardId, viewId) : null), [boardId, viewId]);
+  // Someone who may not save this view still sorts, groups and resizes for
+  // themselves (as before), but nothing is sent: the server would refuse it.
   const persistView = useCallback((patch: Record<string, unknown>) => {
     if (!viewQueue) return;
     const cfg = viewConfig ?? {};
     Object.assign(cfg, patch);
+    if (!canSaveView) return;
     viewQueue.enqueue(patch);
-  }, [viewQueue, viewConfig]);
+  }, [viewQueue, viewConfig, canSaveView]);
 
   // ── View comfort (Phase 5b, gap 14): pinned columns and row height ────
   // Read from the view for everyone; written only by someone who may save the
@@ -640,7 +666,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     const topSorted = sortCol
       ? [...topFiltered].sort((a, b) => {
-          const r = compareByColumn(a, b, sortCol.key, statuses);
+          const r = compareByColumn(a, b, sortCol.key, statuses, computedKeys);
           return sortCol.dir === "desc" ? -r : r;
         })
       : sortKey === "none"
@@ -650,7 +676,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         ? [...topFiltered].sort((a, b) => a.position - b.position)
         : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
-  }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId]);
+  }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId, computedKeys]);
 
   // CSV export of the currently visible (filtered/sorted) rows.
   function exportCsv() {
@@ -820,6 +846,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       if (groupBy === "owner") return it.ownerId ?? "__unset__";
       if (groupBy === "priority") return it.priority ?? "__unset__";
       if (groupBy === "type") return it.itemTypeId ?? "__unset__";
+      // A Connect or Mirror column groups by what its cell shows (the
+      // connected titles, the mirrored value), never by the stored ids,
+      // which also named tasks the viewer cannot read.
+      if (computedKeys.has(groupBy)) {
+        const shown = computedCellValue(it, groupBy, "group");
+        return shown == null || shown === "" ? "__unset__" : String(shown);
+      }
       const raw = it.metadata?.[groupBy];
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
@@ -913,7 +946,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap, statusOf]);
+  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap, statusOf, computedKeys]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -1100,8 +1133,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // A status across a selection that mixes both kinds of row: home rows get
   // this List's value, as today; each task shown here through a link gets the
   // HOME value it maps to, one request per distinct value; a linked task whose
-  // home statuses are not shared with the viewer cannot be mapped, so it is
-  // left as it is and the banner says so.
+  // home statuses are not shared with the viewer, or whose home has no status
+  // that lands back in this one, cannot be mapped, so it is left as it is and
+  // the banner says so.
   const bulkStatus = useCallback(async (status: string) => {
     if (selected.size === 0) return;
     setBulkBusy(true);
@@ -1136,9 +1170,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     const messages: string[] = [];
     if (failed.length > 0) messages.push(`${bulkFailureMessage("update", failed, rows.length, items)}${bulkReasonSentences(reasons)}`);
-    if (plan.skipped.length > 0) {
-      messages.push(`${plan.skipped.length} task${plan.skipped.length === 1 ? "" : "s"} from other Lists weren't changed because their home List's statuses aren't shared with you.`);
-    }
+    // A linked row with no faithful home status for this one is left as it
+    // is and named, rather than saved as a status nobody picked.
+    if (plan.skipped.length > 0) messages.push(bulkStatusSkipMessage(plan, statuses.find((s) => s.value === status)?.label ?? status));
     setError(messages.length ? messages.join(" ") : null);
     setSelected(new Set([...failed, ...plan.skipped]));
     setBulkBusy(false);
@@ -1496,7 +1530,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // their own view: they get the view rows (sort, group, pin), never the
     // field rows, which change the List for everybody.
     if (!canEdit && !canSaveView) return undefined;
-    const isField = canEdit && fieldKeys.has(key);
+    // Moving, editing and deleting a field write the List's schema, so they
+    // follow `canManage`: a contributor's header menu keeps sort, group,
+    // hide and pin, and never a field row the server would refuse.
+    const isField = canManage && fieldKeys.has(key);
     const hideKey = BUILTIN_HIDE_KEY[key] ?? (fieldKeys.has(key) ? key : undefined);
     const canGroup = key === "status" || key === "owner" || fieldKeys.has(key);
     return {
@@ -1507,10 +1544,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       onHide: hideKey && onHideField ? () => onHideField(hideKey) : undefined,
       onMoveStart: isField ? () => moveField(key, true) : undefined,
       onMoveEnd: isField ? () => moveField(key, false) : undefined,
-      onEditStatuses: canEdit && key === "status" ? onEditStatuses : undefined,
+      onEditStatuses: canManage && key === "status" ? onEditStatuses : undefined,
       onEditField: isField && onOpenFields ? onOpenFields : undefined,
       onDeleteField: isField ? () => deleteField(key) : undefined,
-      onAddColumn: canEdit ? onOpenFields : undefined,
+      onAddColumn: canManage ? onOpenFields : undefined,
       // Name is always the first frozen column once anything is pinned, so it
       // has no pin of its own.
       ...(canSaveView && key !== "name" ? { pinned: pinnedColumns.includes(key), onTogglePin: () => togglePin(key) } : {}),
@@ -1559,7 +1596,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     return m;
   })();
   const stickyHeadStyle = (key: string): React.CSSProperties | undefined =>
-    stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 4, background: "var(--os-surface)" } : undefined;
+    // The canvas the table sits on, so a frozen header cell is invisible as a
+    // box in both themes (the surface token is lighter than it in dark).
+    stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 4, background: "var(--os-canvas)" } : undefined;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -1587,7 +1626,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           scrolls horizontally and a non-sticky "+" (add field) drifts
           off-screen — users read it as the button being gone. */}
       <th className="sticky right-0 z-[5] bg-white px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
-        {canEdit && onOpenFields ? (
+        {canManage && onOpenFields ? (
           <button
             type="button"
             onClick={onOpenFields}
@@ -1688,6 +1727,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         statusOptions={picker.options}
         statusEditable={rowCanEdit && picker.editable}
         statusCurrent={kind === "linked-root" ? row.listLink?.homeStatus ?? null : undefined}
+        statusNote={kind === "linked-root" ? linkedStatusNote(row, boardId, statuses) : null}
         onCommitConnect={commitConnect}
       />,
     ];
@@ -1891,7 +1931,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                           <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
                           {canEdit ? (
                             <GroupHeaderMenu
-                              canEditStatuses={!!onEditStatuses}
+                              canEditStatuses={canManage && !!onEditStatuses}
                               onEditStatuses={onEditStatuses}
                               onCollapseGroup={() => toggleGroup(b.key)}
                               onCollapseAll={() => setCollapsedGroups(new Set(buckets.map((x) => x.key)))}
@@ -2066,6 +2106,7 @@ function Row({
   statusOptions,
   statusEditable,
   statusCurrent,
+  statusNote = null,
   onCommitConnect,
 }: {
   row: BoardItemRow;
@@ -2124,6 +2165,8 @@ function Row({
   statusEditable?: boolean;
   /** A linked row's home status pill, whatever this List's set holds. */
   statusCurrent?: StatusOption | null;
+  /** Why a linked row sits under a status that is not its own (linkedStatusNote). */
+  statusNote?: string | null;
   onCommitConnect?: (id: string, key: string, next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   // Bumped by the hover "rename" pencil to put the title cell into edit mode.
@@ -2146,7 +2189,7 @@ function Row({
       case "status":
         return showStatus ? (
           <td key={key} className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-1.5"} style={stick(key)}>
-            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} canEdit={statusCanEdit} onUpdate={onUpdate} monday={monday} />
+            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} note={statusNote} canEdit={statusCanEdit} onUpdate={onUpdate} monday={monday} />
           </td>
         ) : null;
       case "owner":
@@ -2302,7 +2345,10 @@ function Row({
       // view's Row height steps off the same token (table-comfort.ts).
       style={{
         height: rowHeightStyle(rowHeight),
-        ...(comfort ? { ["--row-base" as string]: tint ?? "var(--os-surface)" } : {}),
+        // An untinted row is the canvas it has always shown through to; only
+        // its frozen cells need the colour spelled out, to cover what scrolls
+        // beneath them.
+        ...(comfort ? { ["--row-base" as string]: tint ?? "var(--os-canvas)" } : {}),
       }}
       className={`border-b border-zinc-100 last:border-b-0 group ${
         comfort
@@ -2312,6 +2358,11 @@ function Row({
           : `hover:bg-zinc-50 ${selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""}`
       } ${isDragging ? "opacity-40" : ""} ${
         isDragOver ? "outline outline-2 outline-[var(--os-brand)] outline-offset-[-2px]" : ""
+      } ${
+        // Compact trims the cells' own padding too: their content alone
+        // (a 28px control plus its padding) held the row at 40px, so the
+        // compact step would otherwise have been 4px, not 8.
+        rowHeight === "compact" ? "[&>td]:py-0.5" : ""
       }`}
     >
       <td className="pl-1 pr-0 py-1.5 w-[34px]" style={stick("__leading")}>
@@ -2357,7 +2408,7 @@ function Row({
             <span className="w-4 h-4 shrink-0" aria-hidden />
           )}
           {!showStatus ? (
-            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} canEdit={statusCanEdit} onUpdate={onUpdate} dot />
+            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} note={statusNote} canEdit={statusCanEdit} onUpdate={onUpdate} dot />
           ) : null}
           <div className="flex-1 min-w-0">
             <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} wrap={tall} />
@@ -2374,8 +2425,14 @@ function Row({
         </div>
       </td>
       {columnKeys.map((key) => metaCell(key))}
+      {/* position:sticky makes this cell a stacking context, so the menu's
+          pickers (Move to, Add to another List), which are never portalled,
+          were painted UNDER every later row and group header, and a click on
+          their search field reached the hidden row below. While one is open
+          (the shared Picker always renders a listbox) the cell rises above
+          later rows and above the group headers' z-[5] frozen cells. */}
       <td
-        className={`sticky right-0 px-2 py-1.5 text-right ${comfort ? "" : "bg-white group-hover:bg-zinc-50"}`}
+        className={`sticky right-0 px-2 py-1.5 text-right has-[[role=listbox]]:z-[8] ${comfort ? "" : "bg-white group-hover:bg-zinc-50"}`}
         style={comfort ? { background: "var(--row-bg)" } : undefined}
       >
         {/* The canon menu, shared with the task drawer and the task page
@@ -3677,14 +3734,21 @@ function GroupHeaderMenu({
       </button>
       {open && menuPos ? (
         <div style={{ position: "fixed", left: menuPos.left, minWidth: 190, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-base">
-          <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <div className="h-px bg-zinc-100 my-1" />
+          {/* The status rows write the List's statuses, which only its
+              managers may: for anyone else they are absent, never a greyed
+              row or an enabled one the server refuses. */}
+          {canEditStatuses ? (
+            <>
+              <GHItem label="Rename" onClick={act(onEditStatuses)} />
+              <GHItem label="New status" onClick={act(onEditStatuses)} />
+              <GHItem label="Edit statuses" onClick={act(onEditStatuses)} />
+              <div className="h-px bg-zinc-100 my-1" />
+            </>
+          ) : null}
           <GHItem label="Collapse group" onClick={act(onCollapseGroup)} />
           <GHItem label="Collapse all groups" onClick={act(onCollapseAll)} />
           <GHItem label="Select all" onClick={act(onSelectAll)} />
-          <GHItem label="Hide status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          {canEditStatuses ? <GHItem label="Hide status" onClick={act(onEditStatuses)} /> : null}
           <div className="h-px bg-zinc-100 my-1" />
           <UpcomingOnly><ComingSoonRow label="Automate status" className="h-8" /></UpcomingOnly>
         </div>
@@ -3722,6 +3786,7 @@ function StatusCell({
   monday = false,
   dot = false,
   current: currentOverride,
+  note = null,
 }: {
   row: BoardItemRow;
   statuses: StatusOption[];
@@ -3732,6 +3797,12 @@ function StatusCell({
    * whatever this List's own set holds. Absent: resolved from `statuses`.
    */
   current?: StatusOption | null;
+  /**
+   * Phase 5b: why a row shown here through a link sits under a status that is
+   * not its own (a home "In review" under this List's To Do), as the pill's
+   * tooltip, so the placement can be explained.
+   */
+  note?: string | null;
   /** Monday-style Table variant: status fills the whole cell with the
    *  status color + white label, instead of a soft pill. */
   monday?: boolean;
@@ -3766,11 +3837,11 @@ function StatusCell({
   // (ACTIVE), filled with a check for DONE/CLOSED.
   if (dot) {
     const circle = <StatusGlyph current={current} statuses={statuses} />;
-    if (!canEdit) return circle;
+    if (!canEdit) return note ? <span className="shrink-0 leading-none" title={note}>{circle}</span> : circle;
     const activeTypeId = row.itemTypeId ?? itemTypes.default?.id ?? null;
     return (
       <div className="relative shrink-0 leading-none" ref={ref}>
-        <button type="button" onClick={() => setOpen((v) => !v)} title={current?.label ?? "Set status"} className="block">
+        <button type="button" onClick={() => setOpen((v) => !v)} title={note ?? current?.label ?? "Set status"} className="block">
           {circle}
         </button>
         {open && menuPos ? (
@@ -3836,6 +3907,7 @@ function StatusCell({
       <span
         className="flex items-center justify-center w-full h-full px-2 text-sm font-medium text-white"
         style={{ background: current.color }}
+        title={note ?? undefined}
       >
         {current.label}
       </span>
@@ -3876,6 +3948,7 @@ function StatusCell({
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
       style={{ background: `${current.color}22`, color: current.color }}
+      title={note ?? undefined}
     >
       {current.label}
     </span>

@@ -142,8 +142,16 @@ export function WidgetSourcePicker({
 
   const listSections: PickerSectionDef[] = useMemo(() => {
     if (!page) return [];
+    // The Picker keys a section by its label, and two Spaces may share a
+    // name: a repeated label gets zero-width spaces appended, so each Space
+    // keeps its own section (and its own Lists) while reading the same.
+    const seenLabels = new Map<string, number>();
     return groupReadableLists(page).map((g) => ({
-      label: g.label,
+      label: (() => {
+        const n = seenLabels.get(g.label) ?? 0;
+        seenLabels.set(g.label, n + 1);
+        return n === 0 ? g.label : `${g.label}${"​".repeat(n)}`;
+      })(),
       options: g.lists.map((b) => ({
         value: b.id,
         label: b.name,
@@ -168,6 +176,9 @@ export function WidgetSourcePicker({
             appends the Lists and rules this editor cannot see, and refuses
             a change of kind (source_locked). Which Lists it counts can still
             change, among the ones the editor can read. */}
+        {/* flex-wrap: the lock and its hint drop under the three segments
+            when the ~300px column has no room beside them, instead of
+            squeezing every segment onto two lines. */}
         <SegmentedControl<Mode>
           size="sm"
           label="Data source"
@@ -176,6 +187,7 @@ export function WidgetSourcePicker({
           options={modeOptions}
           locked={locked}
           lockedHint="Kept as it is"
+          className="flex-wrap"
         />
       </SettingsRow>
 

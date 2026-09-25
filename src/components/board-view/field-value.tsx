@@ -258,10 +258,20 @@ interface FieldValueProps {
   onCommit?: (next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
   /** Where a Connect cell's panel opens: over a table ("fixed") or inside the drawer ("absolute"). */
   popover?: "fixed" | "absolute";
+  /**
+   * What an empty value reads as. Table cells and drawer rows keep the muted
+   * EMPTY glyph; a settings form passes words instead (the List's Default
+   * values panel passes "No default", the wording of its Status and Priority
+   * rows), because that glyph must never be visible copy on a form.
+   */
+  emptyLabel?: string;
 }
 
+/** The long-standing empty placeholder of table cells and drawer rows. */
+const EMPTY = "\u2014";
+
 export function FieldValue(props: FieldValueProps) {
-  const { field, value, mode, onChange, disabled, currentUserId, boardId = null } = props;
+  const { field, value, mode, onChange, disabled, currentUserId, boardId = null, emptyLabel } = props;
   const readOnly = mode === "display" || disabled || !onChange;
 
   // Checked BEFORE the type switch: a Connect column is stored as a
@@ -297,25 +307,25 @@ export function FieldValue(props: FieldValueProps) {
     case "URL":
     case "EMAIL":
     case "PHONE":
-      return <TextValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <TextValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "LONG_TEXT":
-      return <LongTextValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <LongTextValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "NUMBER":
     case "MONEY":
     case "PERCENT":
-      return <NumberValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <NumberValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "DATE":
     case "DATETIME":
-      return <DateValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <DateValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "CHECKBOX":
       return <CheckboxValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "DROPDOWN":
     case "CUSTOM_DROPDOWN":
     case "TSHIRT_SIZE":
-      return <DropdownValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <DropdownValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "MULTI_SELECT":
     case "LABELS":
-      return <MultiSelectValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <MultiSelectValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "RATING":
       return <RatingValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
     case "KRA":
@@ -329,13 +339,13 @@ export function FieldValue(props: FieldValueProps) {
     case "RELATIONSHIP":
       return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":
-      return <UserValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
+      return <UserValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} emptyLabel={emptyLabel} />;
     case "PEOPLE":
-      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
+      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} emptyLabel={emptyLabel} />;
     case "PROGRESS_MANUAL":
       return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "LOCATION":
-      return <LocationValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <LocationValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "VOTING":
       return <VotingValue value={value} readOnly={readOnly} onChange={onChange} currentUserId={currentUserId ?? null} />;
     case "FILES":
@@ -352,18 +362,20 @@ function UserValue({
   readOnly,
   onChange,
   boardId = null,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
   boardId?: string | null;
+  emptyLabel?: string;
 }) {
   const userId = typeof value === "string" ? value : null;
   const users = useOrgUsers(boardId);
   const person = userId ? users.find((u) => u.id === userId) ?? null : null;
 
   if (readOnly) {
-    if (!userId) return <span className="text-xs text-zinc-500">—</span>;
+    if (!userId) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     if (!person) return <Dots variant="pending" label="Loading" className="text-ink-3" />;
     return (
       <span className="inline-flex items-center gap-1.5">
@@ -389,11 +401,13 @@ function PeopleValue({
   readOnly,
   onChange,
   boardId = null,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
   boardId?: string | null;
+  emptyLabel?: string;
 }) {
   const ids = Array.isArray(value) ? (value as string[]).filter((x) => typeof x === "string") : [];
   const users = useOrgUsers(boardId);
@@ -402,7 +416,7 @@ function PeopleValue({
   const selected = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is PersonRef => !!u);
 
   const stack = ids.length === 0 ? (
-    <span className="text-xs text-zinc-500">—</span>
+    <span className="text-xs text-zinc-500">{emptyLabel}</span>
   ) : (
     <span className="inline-flex items-center -space-x-1.5">
       {selected.slice(0, 4).map((p) => (
@@ -493,10 +507,12 @@ function LocationValue({
   value,
   readOnly,
   onChange,
+  emptyLabel,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -508,7 +524,7 @@ function LocationValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel ?? EMPTY}</span>;
     return (
       <a
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`}
@@ -529,7 +545,8 @@ function LocationValue({
       onBlur={() => { if (draft !== v) onChange?.(draft || null); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="Add a location…"
+      // Its own prompt in a cell or the drawer; a form's words when it passes them.
+      placeholder={emptyLabel ?? "Add a location…"}
     />
   );
 }
@@ -589,11 +606,13 @@ function TextValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -605,7 +624,7 @@ function TextValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     if (field.type === "URL" && /^https?:\/\//.test(v)) {
       return <a href={v} className="text-xs text-[var(--os-brand)] hover:underline truncate inline-block max-w-full" target="_blank" rel="noreferrer">{v}</a>;
     }
@@ -622,7 +641,7 @@ function TextValue({
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -631,10 +650,12 @@ function LongTextValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -644,7 +665,7 @@ function LongTextValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return <span className="text-xs whitespace-pre-wrap break-words">{v}</span>;
   }
   return (
@@ -654,7 +675,7 @@ function LongTextValue({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
       className="w-full px-2 py-1 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -666,11 +687,13 @@ function NumberValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: number | null) => void;
+  emptyLabel?: string;
 }) {
   const n = typeof value === "number" ? value : null;
   const [draft, setDraft] = useState<string>(n == null ? "" : String(n));
@@ -695,7 +718,7 @@ function NumberValue({
   };
 
   if (readOnly) {
-    if (n == null) return <span className="text-xs text-zinc-500">—</span>;
+    if (n == null) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return <span className="text-xs">{formatDisplay(n)}</span>;
   }
   return (
@@ -711,7 +734,7 @@ function NumberValue({
         if (parsed !== n) onChange?.(parsed);
       }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -723,15 +746,17 @@ function DateValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string | null) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     // Invalid dates fall back to the raw string — no try/catch around
     // JSX (new Date never throws; it yields NaN time instead).
     const d = new Date(v);
@@ -801,11 +826,13 @@ function DropdownValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string | null) => void;
+  emptyLabel?: string;
 }) {
   const choices: FieldChoice[] = field.options?.choices ?? [];
   const v = typeof value === "string" ? value : "";
@@ -821,7 +848,7 @@ function DropdownValue({
       {current.label}
     </span>
   ) : (
-    <span className="text-xs text-zinc-500">—</span>
+    <span className="text-xs text-zinc-500">{emptyLabel}</span>
   );
 
   if (readOnly) return pill;
@@ -871,18 +898,20 @@ function MultiSelectValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string[]) => void;
+  emptyLabel?: string;
 }) {
   const choices: FieldChoice[] = field.options?.choices ?? [];
   const values = Array.isArray(value) ? (value as string[]) : [];
   const chips = values.map((v) => choices.find((c) => c.value === v)).filter((c): c is FieldChoice => !!c);
 
   if (readOnly) {
-    if (chips.length === 0) return <span className="text-xs text-zinc-500">—</span>;
+    if (chips.length === 0) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return (
       <span className="flex flex-wrap gap-1">
         {chips.map((c) => (

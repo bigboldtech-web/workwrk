@@ -7,6 +7,7 @@
 // read), due date, priority flag and assignees. A row opens the task drawer
 // through openTask, the one door into a task.
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
 import { openTask } from "@/lib/nav/open-task";
@@ -20,11 +21,13 @@ type ListResult = Extract<WidgetResult, { kind: "list" }>;
 export function ListBody({ result }: { result: ListResult }) {
   const router = useRouter();
   const fmt = useFormat();
+  // "Overdue" is judged against when the card was drawn, read once (a render
+  // must not read the clock, or two renders could disagree about a row).
+  const [now] = useState(() => Date.now());
   if (result.rows.length === 0) {
     return <div className="flex h-full items-center justify-center text-sm text-ink-2">No tasks match</div>;
   }
   const more = Math.max(0, result.total - result.rows.length);
-  const now = Date.now();
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ul className="min-h-0 flex-1 overflow-y-auto">

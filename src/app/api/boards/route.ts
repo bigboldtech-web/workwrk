@@ -158,7 +158,8 @@ export async function GET(req: Request) {
 // ORG-visible List, a direct List grant, my own Personal List) and each is then
 // checked with getBoardForReader, the predicate the List page itself uses, so
 // no row names a List the viewer cannot open. writable=1 checks
-// canContributeBoard instead, which implies read.
+// canContributeBoard as well, never instead: it does not walk a PRIVATE
+// folder, so it alone would offer a List the viewer cannot open.
 //
 // Spaces come from listSpacesForUser WITHOUT includeFolderContainers: a Space
 // reached only through a folder grant is a container, not something the
@@ -238,10 +239,13 @@ async function readableLists(
     if (targets && b.productSlug === "personal-list") return false;
     return true;
   };
+  // Writable is read AND contribute, both checked: canContributeBoard does
+  // not walk a PRIVATE folder the List sits in (getBoardForReader does), so on
+  // its own it would name a List the viewer cannot open.
   const allowed = async (b: Row): Promise<boolean> => {
-    if (writable) return canContributeBoard(b.id, c.userId, c.accessLevel);
     const row = await getBoardForReader(b.id, c.userId, c.accessLevel);
-    return Boolean(row && row.organizationId === c.organizationId);
+    if (!row || row.organizationId !== c.organizationId) return false;
+    return writable ? canContributeBoard(b.id, c.userId, c.accessLevel) : true;
   };
   // `settings` is read for the system check only and never leaves the server.
   const toRow = (b: Row) => ({

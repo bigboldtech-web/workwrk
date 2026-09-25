@@ -10,7 +10,7 @@
 //
 // Pure: type-only imports.
 
-import type { WidgetInput, WidgetLayout } from "./widgets";
+import type { StatScope, WidgetInput, WidgetLayout } from "./widgets";
 
 export type WidgetKind = "stat" | "chart" | "list" | "notes";
 export type WidgetSurface = "dashboard" | "space-overview";
@@ -80,6 +80,68 @@ export function newWidgetId(): string {
   return out;
 }
 
+const SCOPE_WORDS: Record<StatScope, string> = {
+  total: "all tasks",
+  open: "open tasks",
+  completed: "completed tasks",
+  overdue: "overdue tasks",
+};
+
+const GROUP_WORDS: Record<string, string> = { status: "status", assignee: "assignee", priority: "priority" };
+
+const SORT_TITLES: Record<string, string> = {
+  updated: "Recently updated",
+  created: "Recently created",
+  due: "Tasks by due date",
+  priority: "Tasks by priority",
+  title: "Tasks by name",
+};
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * The title a card gets from its own settings, so an untouched title always
+ * says what the card shows: "Completed tasks", "Sum of Points (open tasks)",
+ * "Tasks by assignee". The editor keeps an untouched title in step with this
+ * as the settings change, and never overwrites one the person typed.
+ *
+ * `fieldLabels` maps a field key to its label, for a Sum or a group by a
+ * field; a key it does not know (its Lists are still loading, or the field
+ * is gone) reads as a generic word, never as the raw key. The unset scope,
+ * sort and metric read as the server reads them (total, updated, count).
+ * Capped at the write schema's 120 characters.
+ */
+export function defaultWidgetTitle(input: WidgetInput, fieldLabels: ReadonlyMap<string, string> = new Map()): string {
+  let title: string;
+  switch (input.kind) {
+    case "stat": {
+      const scope = SCOPE_WORDS[input.scope ?? "total"] ?? "tasks";
+      const metric = input.metric ?? { op: "count" as const };
+      if (metric.op === "sum") {
+        const label = fieldLabels.get(metric.fieldKey)?.trim();
+        title = label ? `Sum of ${label} (${scope})` : `Sum (${scope})`;
+      } else title = cap(scope);
+      break;
+    }
+    case "chart": {
+      const g = input.groupBy;
+      const word = typeof g === "object" ? fieldLabels.get(g.field)?.trim() || "field" : GROUP_WORDS[g] ?? "status";
+      title = `Tasks by ${word}`;
+      break;
+    }
+    case "list":
+      title = SORT_TITLES[input.sort ?? "updated"] ?? "Tasks";
+      break;
+    case "notes":
+      title = "Text";
+      break;
+    case "passthrough":
+      title = "Widget";
+      break;
+  }
+  return title.slice(0, 120);
+}
+
 /**
  * The input a new card of `kind` starts from. A card added to a Space's
  * Overview starts on that Space; one added to a dashboard starts on every
@@ -92,14 +154,20 @@ export function newWidgetInput(
   const layout = { ...ctx.layout };
   const source = ctx.spaceId ? { kind: "space" as const, spaceId: ctx.spaceId } : { kind: "all" as const };
   const filter = { connector: "AND" as const, rules: [], hideDone: false };
+  let input: WidgetInput;
   switch (kind) {
     case "stat":
-      return { id: ctx.id, kind: "stat", title: "Open tasks", source, filter, metric: { op: "count" }, scope: "open", layout };
+      input = { id: ctx.id, kind: "stat", title: "", source, filter, metric: { op: "count" }, scope: "open", layout };
+      break;
     case "chart":
-      return { id: ctx.id, kind: "chart", title: "Tasks by status", source, filter, groupBy: "status", display: "bar", layout };
+      input = { id: ctx.id, kind: "chart", title: "", source, filter, groupBy: "status", display: "bar", layout };
+      break;
     case "list":
-      return { id: ctx.id, kind: "list", title: "Recently updated", source, filter: { ...filter, hideDone: true }, sort: "updated", limit: 10, layout };
+      input = { id: ctx.id, kind: "list", title: "", source, filter: { ...filter, hideDone: true }, sort: "updated", limit: 10, layout };
+      break;
     case "notes":
-      return { id: ctx.id, kind: "notes", title: "Text", text: "", layout };
+      input = { id: ctx.id, kind: "notes", title: "", text: "", layout };
+      break;
   }
+  return { ...input, title: defaultWidgetTitle(input) } as WidgetInput;
 }

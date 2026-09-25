@@ -3,8 +3,10 @@ import {
   applyLayouts,
   buildDashboardPatch,
   classifySaveResponse,
+  compactVertical,
   dataKey,
   diffLayouts,
+  draftHasUnmergedEdits,
   layoutsFromGrid,
   mergeMissingWidgets,
   placeNewWidget,
@@ -99,7 +101,31 @@ describe("widgetGridItems", () => {
   it("lets an editor move data and notes cards, never hidden or passthrough ones", () => {
     const items = widgetGridItems(cards, { canEdit: true, cols: 12 });
     expect(items.map((i) => [i.i, i.static])).toEqual([["a", false], ["h", true], ["x", true], ["n", false]]);
-    expect(widgetGridItems(cards, { canEdit: false, cols: 12 }).every((i) => i.static)).toBe(true);
+  });
+  it("locks a viewer's cards per item, never as static, so the grid compacts them too", () => {
+    // The grid never compacts a static item: a viewer's static cards sat at
+    // their raw stored rows while the editor's grid pulled them up.
+    const items = widgetGridItems(cards, { canEdit: false, cols: 12 });
+    expect(items.every((i) => i.static === false && i.isDraggable === false && i.isResizable === false)).toBe(true);
+  });
+  it("gives a viewer and an editor the same compacted rows after a card is deleted", () => {
+    // What removing the card between them leaves stored: a stat at the top
+    // and a note 10 rows down, with nothing in between.
+    const left = [stat("s", { layout: L(0, 0, 4, 4) }), notes("n", "t", L(0, 10, 4, 3)), hiddenCard("h")];
+    const editor = widgetGridItems(left, { canEdit: true, cols: 12, compact: true });
+    const viewer = widgetGridItems(left, { canEdit: false, cols: 12, compact: true });
+    const rows = (xs: typeof editor) => xs.map((i) => [i.i, i.x, i.y, i.w, i.h]);
+    expect(rows(viewer)).toEqual(rows(editor));
+    // The note rises under the stat; the hidden card (x 4, y 0) sits beside it.
+    expect(editor.find((i) => i.i === "n")).toMatchObject({ y: 4 });
+    expect(editor.find((i) => i.i === "h")).toMatchObject({ y: 0, static: true });
+    // Without compact (the Space Overview, where the grid compacts widgets
+    // together with each person's own cards) the stored rows pass through.
+    expect(widgetGridItems(left, { canEdit: false, cols: 12 }).find((i) => i.i === "n")).toMatchObject({ y: 10 });
+  });
+  it("pulls a Space Overview's widgets up from under the built-in cards on the canvas", () => {
+    const sov = [stat("a", { layout: L(0, 16, 6, 4) }), stat("b", { layout: L(6, 16, 6, 4) }), notes("c", "t", L(0, 20, 12, 3))];
+    expect(widgetGridItems(sov, { canEdit: false, cols: 12, compact: true }).map((i) => i.y)).toEqual([0, 0, 4]);
   });
   it("prefixes ids and derives a static stack on narrow breakpoints", () => {
     const items = widgetGridItems(cards, { canEdit: true, cols: 6, prefix: "w:" });
@@ -111,6 +137,25 @@ describe("widgetGridItems", () => {
   it("places a card that has no layout instead of dropping it", () => {
     const items = widgetGridItems([stat("a", { layout: L(0, 0, 12, 3) }), { id: "h", kind: "hidden" }], { canEdit: true, cols: 12 });
     expect(items[1]).toMatchObject({ i: "h", y: 3, static: true });
+  });
+});
+
+describe("compactVertical", () => {
+  it("rises each card to the first row the cards above leave free, keeping input order", () => {
+    const out = compactVertical([
+      { i: "low", x: 0, y: 9, w: 4, h: 2 },
+      { i: "top", x: 0, y: 2, w: 12, h: 3 },
+      { i: "side", x: 8, y: 7, w: 4, h: 2 },
+    ]);
+    expect(out.map((l) => [l.i, l.y])).toEqual([["low", 3], ["top", 0], ["side", 3]]);
+  });
+  it("drops a card that starts on top of another just below it, never overlapping", () => {
+    const out = compactVertical([L(0, 0, 6, 4), L(2, 1, 6, 2)]);
+    expect(out).toEqual([L(0, 0, 6, 4), L(2, 4, 6, 2)]);
+  });
+  it("is a fixed point: compacting a compacted layout changes nothing", () => {
+    const once = compactVertical([L(0, 5, 4, 3), L(4, 12, 8, 2), L(0, 30, 12, 1), L(6, 2, 3, 9)]);
+    expect(compactVertical(once)).toEqual(once);
   });
 });
 
@@ -187,6 +232,36 @@ describe("rebaseDashboard", () => {
     const d = rebaseDashboard(base, local, live).widgets.find((w) => w.id === "d") as Extract<EditorWidget, { kind: "stat" }>;
     expect(d.layout).toEqual(L(6, 6, 3, 3));
     expect(d.metric).toEqual({ op: "sum", fieldKey: "pts" });
+  });
+});
+
+describe("draftHasUnmergedEdits", () => {
+  const base: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "first"), stat("a")] };
+
+  it("keeps a draft whose edit never reached the server, even when the row is newer", () => {
+    // Save 1 ("second") landed after the draft of save 2 ("third") was written.
+    const local: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "third"), stat("a")] };
+    const live: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "second"), stat("a")] };
+    expect(draftHasUnmergedEdits({ base, local, removedIds: [] }, live)).toBe(true);
+  });
+
+  it("keeps my failed edit when another editor saved something else later", () => {
+    const local: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "mine"), stat("a")] };
+    const live: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "first"), stat("a", { title: "Theirs" })] };
+    expect(draftHasUnmergedEdits({ base, local, removedIds: [] }, live)).toBe(true);
+  });
+
+  it("keeps a removal and a rename the server does not have", () => {
+    expect(draftHasUnmergedEdits({ base, local: { name: "Ops", widgets: [stat("a")] }, removedIds: ["n"] }, base)).toBe(true);
+    expect(draftHasUnmergedEdits({ base, local: { name: "Ops weekly", widgets: base.widgets }, removedIds: [] }, base)).toBe(true);
+  });
+
+  it("lets go of a draft the server already has, or one with no edits", () => {
+    const local: DashboardSnapshot = { name: "Ops", widgets: [notes("n", "second"), stat("a")] };
+    expect(draftHasUnmergedEdits({ base, local, removedIds: [] }, local)).toBe(false);
+    expect(draftHasUnmergedEdits({ base, local: base, removedIds: [] }, { name: "Ops", widgets: [notes("n", "later")] })).toBe(false);
+    // The removed card is gone on the server too.
+    expect(draftHasUnmergedEdits({ base, local: { name: "Ops", widgets: [stat("a")] }, removedIds: ["n"] }, { name: "Ops", widgets: [stat("a")] })).toBe(false);
   });
 });
 

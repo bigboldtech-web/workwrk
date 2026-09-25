@@ -11,7 +11,8 @@
 // ?received=1 answers the schedules the caller is ON, without the recipient
 // list or the run log: { id, targetKind, targetId (only when the caller can
 // read the target now), targetName, cadence, weekday, monthDay, timeOfDay,
-// timezone, cadenceText, nextRunAt, createdBy }.
+// timezone, cadenceText, active, nextRunAt, createdBy }. `active` is there so a
+// recipient can see that a paused schedule is why no email arrives.
 //
 // Recipients must be ELIGIBLE members (reportRecipientProblems over
 // recipientRows): this org, not deleted, not INACTIVE, not a Guest. One
@@ -21,10 +22,11 @@
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
-import { recipientRows, viewerIsOrgAdmin } from "@/lib/list-links-server";
+import { recipientRows, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
 import { requireWorkApp } from "@/lib/dashboards/dashboard-server";
 import { cadenceText, nextReportRunAt, reportRecipientProblems, validateScheduleInput } from "@/lib/reports/schedule";
 import { cronInstalled, readableTarget, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
+import { createReplayDecision, readCreateRequestId, withoutRequestId } from "@/lib/create-request-id";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +65,7 @@ export async function GET(req: Request) {
           timeOfDay: r.timeOfDay,
           timezone: r.timezone,
           cadenceText: cadenceText(specOf(r)),
+          active: r.active,
           nextRunAt: r.nextRunAt,
           createdBy: who ? { firstName: who.firstName, lastName: who.lastName } : null,
         });
@@ -93,8 +96,17 @@ export async function POST(req: Request) {
   if ("error" in c) return c.error;
   const app = await requireWorkApp();
   if ("error" in app) return app.error;
-  const body = await req.json().catch(() => null);
+  const raw = await req.json().catch(() => null);
+  // The dialog names the new row's id once and sends it with every Retry of
+  // that create, so a POST that committed but lost its answer is answered
+  // with its row, never a second schedule that would email everyone twice.
+  const requestId = readCreateRequestId(raw);
+  const body = withoutRequestId(raw);
   return withReportTable(async () => {
+    if (requestId) {
+      const replay = await replayedSchedule(requestId, c);
+      if (replay) return replay;
+    }
     const v = validateScheduleInput(body);
     if (!v.ok) return NextResponse.json({ error: "invalid_schedule", issues: v.issues }, { status: 400 });
     const s = v.value;
@@ -109,23 +121,51 @@ export async function POST(req: Request) {
     if (target.privateOwnerId && s.recipientUserIds.some((id) => id !== target.privateOwnerId)) {
       return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
     }
-    const created = await prisma.reportSchedule.create({
-      data: {
-        organizationId: c.organizationId,
-        createdById: c.userId,
-        targetKind: s.targetKind,
-        targetId: s.targetId,
-        cadence: s.cadence,
-        weekday: s.weekday,
-        monthDay: s.monthDay,
-        timeOfDay: s.timeOfDay,
-        timezone: s.timezone,
-        recipientUserIds: s.recipientUserIds,
-        active: s.active,
-        nextRunAt: s.active ? nextReportRunAt(specOf(s), new Date()) : null,
-      },
-    });
+    const data = {
+      ...(requestId ? { id: requestId } : {}),
+      organizationId: c.organizationId,
+      createdById: c.userId,
+      targetKind: s.targetKind,
+      targetId: s.targetId,
+      cadence: s.cadence,
+      weekday: s.weekday,
+      monthDay: s.monthDay,
+      timeOfDay: s.timeOfDay,
+      timezone: s.timezone,
+      recipientUserIds: s.recipientUserIds,
+      active: s.active,
+      nextRunAt: s.active ? nextReportRunAt(specOf(s), new Date()) : null,
+    };
+    let created;
+    try {
+      created = await prisma.reportSchedule.create({ data });
+    } catch (err) {
+      // The first attempt landed between the check above and this create.
+      if (requestId && isUniqueViolation(err)) {
+        const replay = await replayedSchedule(requestId, c);
+        if (replay) return replay;
+      }
+      throw err;
+    }
     const [schedule] = await toScheduleDTOs([created], c);
     return NextResponse.json({ schedule }, { status: 201 });
   });
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return !!err && typeof err === "object" && (err as { code?: unknown }).code === "P2002";
+}
+
+/**
+ * The answer to a retried create whose id is already taken: the caller's own
+ * row (200, replayed), or a refusal that says nothing about someone else's.
+ * Null when no row has the id yet.
+ */
+async function replayedSchedule(id: string, c: LinkViewer) {
+  const row = await prisma.reportSchedule.findUnique({ where: { id } });
+  const decision = createReplayDecision(row ? { organizationId: row.organizationId, creatorId: row.createdById } : null, c);
+  if (decision === "create" || !row) return null;
+  if (decision === "refuse") return NextResponse.json({ error: "request_id_taken" }, { status: 409 });
+  const [schedule] = await toScheduleDTOs([row], c);
+  return NextResponse.json({ schedule, replayed: true }, { status: 200 });
 }
