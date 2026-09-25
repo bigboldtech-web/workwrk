@@ -12,6 +12,7 @@ import { FileText, BookCopy } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 
 type Hit = {
   source: "doc" | "sop";
@@ -37,6 +38,8 @@ function relTime(iso: string): string {
 }
 
 export default function MentionsInboxPage() {
+  // Mentions is Work: each mention opens its doc or SOP in Work, at the block.
+  const { href: objectLink } = useObjectHref();
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -90,7 +93,7 @@ export default function MentionsInboxPage() {
       ) : (
         <ul className="mention-inbox">
           {hits.map((h, i) => {
-            const href = h.source === "doc" ? `/docs/${h.sourceId}#b-${h.blockId}` : `/sops/${h.sourceId}#b-${h.blockId}`;
+            const href = `${objectLink(h.source === "doc" ? "doc" : "sop", h.sourceId)}#b-${h.blockId}`;
             return (
               <li key={`${h.source}-${h.sourceId}-${h.blockId}-${i}`}>
                 <Link className="mention-inbox__row" href={href}>

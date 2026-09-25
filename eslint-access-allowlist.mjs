@@ -540,6 +540,25 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // routes (duplicate, export, presence) share, on the item-gate precedent,
   // so none of them reads the legacy signal itself.
   "src/lib/table-gate.ts",
+  // Open in place (2026-09-24): an object opened from Work gets a Work
+  // address, /spaces/[slug]/docs/[id] or /work/docs/[id], whose [id] layout
+  // works out where it sits for this viewer. The brief is explicit that the
+  // access pivot stays inert here ("use the existing gates"), so this ONE
+  // loader reads the legacy level once per object and hands it to exactly the
+  // helpers the object's own API gates with (docAccessible and the doc role,
+  // readableTable, whiteboardSpaceVisible, folderAccessForSpace and
+  // folderVisibleTo for the tree). No route or component reads it: the gate
+  // component and the eight route files call this file. It leaves this list
+  // on the day those helpers turn into can(), with the rest of step 6.
+  "src/lib/work/placement-server.ts",
+  // Phase 5b (the data layer: tasks in more than one List, connected columns,
+  // dashboards, scheduled reports): ONE entry for the whole feature, on the
+  // item-gate precedent. The brief keeps the engine inert and names the
+  // existing helpers as the gate, and those read accessLevel, so every
+  // Phase 5b route and module reaches them through this file's wrappers
+  // (boardForViewer, canContributeFor, spaceForViewer, viewerIsOrgAdmin,
+  // memberViewer and the rest) and none of them reads the signal itself.
+  "src/lib/list-links-server.ts",
   "src/lib/rail-apps.test.ts",
   "src/lib/rail-apps.ts",
   "src/lib/role-defaults.ts",

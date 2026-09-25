@@ -23,6 +23,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, FileText, Search } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
+import { useWorkPlacement } from "@/components/layout/os/work-placement";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 type DocRow = { id: string; title: string };
 
@@ -74,6 +76,10 @@ function SubpageConfigured({
   emoji: string;
 }) {
   const router = useRouter();
+  // React context reaches BlockNote's portals, so the host doc's Work
+  // placement is readable here: a sub-page opens in the section its parent
+  // is in, under the parent's Space in Work.
+  const place = useWorkPlacement();
   // Show the child's live title/icon so renaming the child updates the inline
   // link. Falls back to the stored props until the fetch resolves.
   const [liveTitle, setLiveTitle] = useState(title);
@@ -105,7 +111,7 @@ function SubpageConfigured({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        router.push(`/docs/${childDocId}`);
+        router.push(objectHrefNow("doc", childDocId, place?.spaceSlug));
       }}
       title={shown}
     >

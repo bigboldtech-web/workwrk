@@ -12,7 +12,7 @@
 //     whiteboards: []
 //   }
 //
-// FolderNode = { id, name, ..., boards, docs, childFolders } recursive.
+// FolderNode = { id, name, ..., boards, docs, whiteboards, childFolders } recursive.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -184,7 +184,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       : prisma.whiteboard.findMany({
           where: { organizationId: c.organizationId, spaceId: id, archivedAt: null },
           orderBy: { name: "asc" },
-          select: { id: true, name: true },
+          select: { id: true, name: true, folderId: true },
         }),
   ]);
 
@@ -271,6 +271,28 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     docsByFolder.set(d.entityId, arr);
   }
 
+  // A canvas made inside a Folder (its "+ > Canvas" sends folderId) sits
+  // under that Folder, but ONLY when the Folder is one this response renders.
+  // A folderId can go stale (a canvas moved to another Space keeps it, and a
+  // Folder can move without its canvases), and a Folder the viewer's tree
+  // prunes would hide a canvas their Space access can still open, so any
+  // canvas whose Folder is not rendered here stays at the Space's top level
+  // and is never lost from the tree. lib/work/placement.ts applies the same
+  // rule to the canvas's crumb, so the tree and the crumb always agree.
+  const renderedFolderIds = new Set(allFolderIds);
+  const allWhiteboards = whiteboardsR.status === "fulfilled" ? whiteboardsR.value : [];
+  const whiteboardsByFolder = new Map<string, { id: string; name: string }[]>();
+  const rootWhiteboards: { id: string; name: string }[] = [];
+  for (const { folderId, ...w } of allWhiteboards) {
+    if (folderId && renderedFolderIds.has(folderId)) {
+      const arr = whiteboardsByFolder.get(folderId) ?? [];
+      arr.push(w);
+      whiteboardsByFolder.set(folderId, arr);
+    } else {
+      rootWhiteboards.push(w);
+    }
+  }
+
   // Distribute docs to their folders + flatten childFolders -> childFolders shape.
   function annotate(nodes: FolderShape[]): unknown[] {
     return nodes.map((n) => ({
@@ -282,6 +304,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       // Only the Lists this viewer can read, and only those counted, so an
       // unreadable List is never named and never counted.
       _count: { ...n._count, boards: n.boards.filter(readable).length },
+      whiteboards: whiteboardsByFolder.get(n.id) ?? [],
       boards: n.boards.filter(readable).map((b) => ({ ...b, role: roleForBoard(b) })),
       childFolders: n.childFolders ? annotate(n.childFolders) : [],
     }));
@@ -303,6 +326,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       canManage: canManageObject(manageViewer, createdById),
     })),
     docs: docsR.status === "fulfilled" ? docsR.value : [],
-    whiteboards: whiteboardsR.status === "fulfilled" ? whiteboardsR.value : [],
+    whiteboards: rootWhiteboards,
   });
 }

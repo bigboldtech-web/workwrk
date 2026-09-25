@@ -36,6 +36,10 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { KindIcon } from "@/components/inbox/inbox-row";
 import { formatDate, type DateFormatPrefs } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
+// Every notification link is canonical in data. It is mapped when it is
+// clicked, into the section the person is in at that moment, so a doc
+// opened from the bell in Work stays in Work (src/lib/nav/object-href.ts).
+import { sectionHrefNow } from "./use-object-href";
 
 type Notification = {
   id: string;
@@ -331,7 +335,7 @@ function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => 
                     // a row whose task was deleted opens the Inbox, where the
                     // pane says so, rather than a 404.
                     const href = n.target?.readable === false ? `/inbox?n=${n.id}` : n.target?.href ?? n.link;
-                    if (href) { onClose(); router.push(href); }
+                    if (href) { onClose(); router.push(sectionHrefNow(href)); }
                   }}
                   className="flex h-11 w-full items-center gap-3 rounded-lg px-2 text-start hover:bg-hover"
                 >
@@ -592,7 +596,9 @@ function useNewItemAlerts(muted: boolean, desktop: ReturnType<typeof useDesktopN
         if (enabledRef.current) notifyRef.current({ title: newest.title || "New notification", body: newest.message || undefined, url: link, tag: "workwrk-notification" });
         return;
       }
-      toast(newest.title || "New notification", { onUndo: undefined, action: { label: "Open", onClick: () => router.push(link) } });
+      // Resolved when Open is clicked, not when the toast was raised: the
+      // person may have changed section in between.
+      toast(newest.title || "New notification", { onUndo: undefined, action: { label: "Open", onClick: () => router.push(sectionHrefNow(link)) } });
     })();
     return () => { alive = false; };
   }, [counts.inboxUnread, toast, router]);

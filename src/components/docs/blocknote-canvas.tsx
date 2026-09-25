@@ -53,6 +53,8 @@ import { videoEmbedBlockSpec, isPlayableVideoUrl, extractIframeSrc } from "./blo
 import { columnsBlockSpec } from "./blocknote-blocks/columns-block";
 import { mentionInlineSpec } from "./blocknote-blocks/mention-inline";
 import { BlockDragMenu, BlockDragMenuProvider } from "./blocknote-blocks/block-drag-menu";
+import { useWorkPlacement } from "@/components/layout/os/work-placement";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 // Schema = BlockNote defaults + our workspace-specific custom blocks +
 // custom inline content (mentions). Adding a new custom block is a two-line
@@ -478,13 +480,17 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
     };
   }, [flushSave]);
 
-  // Slash → "Page": save the inline link now, then jump into the new page.
+  // Slash → "Page": save the inline link now, then jump into the new page,
+  // in the section this doc is in (under its Space in Work).
+  const place = useWorkPlacement();
+  const spaceSlug = place?.spaceSlug ?? null;
   const onPageCreated = useCallback((childId: string) => {
     flushSave();
     // Small delay lets the save request dispatch before the route change
-    // (in-flight fetches survive navigation, so the link is persisted).
-    setTimeout(() => router.push(`/docs/${childId}`), 80);
-  }, [flushSave, router]);
+    // (in-flight fetches survive navigation, so the link is persisted). The
+    // address is read when the timer fires, in the section the person is in then.
+    setTimeout(() => router.push(objectHrefNow("doc", childId, spaceSlug)), 80);
+  }, [flushSave, router, spaceSlug]);
 
   return (
     <div className="bdoc-bn">
@@ -526,6 +532,9 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
         <BlockDragMenuProvider
           value={{
             docId: ent.id,
+            // CANONICAL on purpose: it builds block links that are stored and
+            // shared, and the section a link is opened from maps it at click
+            // time (src/lib/nav/object-href.ts).
             linkBase: ent.type === "sop" ? "/sops/" : ent.type === "policy" ? "/policies/" : ent.type === "agreement" ? "/agreements/" : "/docs/",
             features: { comment: !!onComment, askAI: !!onAskAI },
             onComment: (id) => onComment?.(id),

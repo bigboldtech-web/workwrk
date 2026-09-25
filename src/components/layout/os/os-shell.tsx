@@ -49,6 +49,7 @@ import { CallDock } from "@/components/calls/call-dock";
 import { IncomingCallWatcher } from "@/components/calls/incoming-call-watcher";
 import { RealtimeClient } from "./realtime-client";
 import { ShellShortcuts } from "./shell-shortcuts";
+import { SectionLinkInterceptor } from "./section-link-interceptor";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { MissionSplash } from "@/components/brand/mission-splash";
 import { isSettingsRoute, resolveCrumbFallback, resolveHub } from "@/lib/nav/route-hub";
@@ -279,6 +280,10 @@ export function OsShell({ children, drawer }: { children: React.ReactNode; drawe
           <IncomingCallWatcher />
           <RealtimeClient />
           <ShellShortcuts />
+          {/* Before <Frame>, so its capture listener is registered ahead of
+              any page's own guard: an object link opens in the section it
+              was clicked in (section-link-interceptor.tsx). */}
+          <SectionLinkInterceptor />
           <ShortcutsOverlay />
           <Frame>{children}</Frame>
           {/* The @drawer parallel slot (the intercepted task drawer). It is

@@ -27,6 +27,8 @@ import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "./toast";
+// A note made with the chord opens in the section the person is in.
+import { objectHrefNow } from "./use-object-href";
 
 export const SHORTCUTS_OVERLAY_EVENT = "workwrk:shortcuts-overlay";
 
@@ -120,7 +122,7 @@ export function ShellShortcuts() {
           });
           const id = r.ok ? r.data?.doc?.id : undefined;
           if (!id) { toast("Couldn't create note. Try again"); return; }
-          router.push(`/docs/${id}`);
+          router.push(objectHrefNow("doc", id));
         } finally {
           noteInFlight.current = false;
         }

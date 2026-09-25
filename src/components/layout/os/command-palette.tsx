@@ -75,6 +75,9 @@ import { cn } from "@/lib/utils";
 import { useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
+// The palette opens over any page, so an object row opens in the section
+// the person is in at the moment they pick it (src/lib/nav/object-href.ts).
+import { objectHrefNow, sectionHrefNow } from "./use-object-href";
 import type { AppEntry } from "./apps-catalog";
 
 /* ─── Model ─── */
@@ -373,7 +376,7 @@ function PaletteBody() {
       toast("Couldn't create doc. Try again");
       return;
     }
-    router.push(`/docs/${id}`);
+    router.push(objectHrefNow("doc", id));
   }, [router, toast]);
 
   const tool = useCallback((detail: "reminder" | "notepad" | "voice") => {
@@ -748,11 +751,11 @@ function PaletteBody() {
   const activate = useCallback(
     (row: Row, newTab = false) => {
       if (row.href && newTab) {
-        window.open(row.href, "_blank", "noopener");
+        window.open(sectionHrefNow(row.href), "_blank", "noopener");
         return;
       }
       closePalette();
-      if (row.href) router.push(row.href);
+      if (row.href) router.push(sectionHrefNow(row.href));
       else row.action?.();
     },
     [closePalette, router],

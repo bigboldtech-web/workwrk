@@ -5,8 +5,8 @@
 // for a List deep link.
 //
 // WHY A ROUTE. The sidebar's expand state came only from the stored
-// preference, so the FIRST time a person followed a link to a Folder or a List
-// the tree sat collapsed with no active row: the page knew where it was and the
+// preference, so the FIRST time a person followed a link to a Folder or a
+// List the tree sat collapsed with no active row: the page knew where it was and the
 // navigation did not. The tree cannot work the ancestry out for itself, because
 // it only loads a Space's children once that Space is already open, which is
 // the thing being decided. One cheap read answers it.
@@ -14,6 +14,15 @@
 // It returns ids only (never names, never contents), and it returns them only
 // when the viewer may read the object, so it is not an enumeration door: an
 // unreadable or absent object answers 404 exactly as its page does.
+//
+// THE FOLDERS IT RETURNS are the ones the viewer's own tree renders on the
+// way to the object (revealFolderIds, src/lib/work/placement-server.ts): the
+// tree's prune rule for a Space reader, the nearest grant for a folder-only
+// grantee, and the depth the tree loads. It used to return every ancestor it
+// could walk, so a private folder above a readable List was expanded, and
+// its id sent to the browser, for someone whose tree never shows it. A Doc,
+// Table or Canvas opened in Work needs no call here: its route's gate
+// computes the same ids and the page publishes them.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -21,26 +30,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { folderReadable } from "@/lib/folder";
 import { canRead, type ViewerContext } from "@/lib/access";
+import { revealFolderIds } from "@/lib/work/placement-server";
 
 export const dynamic = "force-dynamic";
-
-const MAX_DEPTH = 8;
-
-/** The folder's own id plus every ancestor, nearest first. */
-async function chainUp(folderId: string, organizationId: string): Promise<string[]> {
-  const out: string[] = [];
-  let current: string | null = folderId;
-  for (let hops = 0; current && hops < MAX_DEPTH; hops += 1) {
-    const row: { id: string; parentFolderId: string | null } | null = await prisma.folder.findFirst({
-      where: { id: current, organizationId },
-      select: { id: true, parentFolderId: true },
-    });
-    if (!row) break;
-    out.push(row.id);
-    current = row.parentFolderId;
-  }
-  return out;
-}
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
@@ -64,9 +56,11 @@ export async function GET(req: Request) {
       select: { id: true, spaceId: true },
     });
     if (!folder) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const ids = await revealFolderIds(folder.id, organizationId, folder.spaceId, u.id, accessLevel);
     return NextResponse.json({
       spaceId: folder.spaceId,
-      folderIds: await chainUp(folder.id, organizationId),
+      // Nearest first, as this route has always answered.
+      folderIds: ids.reverse(),
       boardId: null,
     });
   }
@@ -80,9 +74,12 @@ export async function GET(req: Request) {
     if (!(await canRead(viewer, { type: "board", id: board.id }))) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    const ids = board.folderId && board.spaceId
+      ? await revealFolderIds(board.folderId, organizationId, board.spaceId, u.id, accessLevel)
+      : [];
     return NextResponse.json({
       spaceId: board.spaceId,
-      folderIds: board.folderId ? await chainUp(board.folderId, organizationId) : [],
+      folderIds: ids.reverse(),
       boardId: board.id,
     });
   }

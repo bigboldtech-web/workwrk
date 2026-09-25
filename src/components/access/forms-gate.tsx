@@ -34,14 +34,24 @@ export async function FormsListGate({ children }: { children: React.ReactNode })
   return <>{children}</>;
 }
 
+/**
+ * FormGate's rule on its own: may this signed-in viewer open this form? A
+ * Guest only when they made it; everyone else always (the builder's own
+ * reads decide edit or view only). The Work door for a form
+ * (src/components/access/work-object-gate.tsx) asks the same question, so
+ * /work/forms/[id] and /forms/[id] can never disagree.
+ */
+export async function formGateAllows(formId: string, user: { id: string; organizationId: string }): Promise<boolean> {
+  if (!(await isGuestViewer())) return true;
+  const mine = await prisma.formDefinition.findFirst({
+    where: { id: formId, organizationId: user.organizationId, createdById: user.id },
+    select: { id: true },
+  });
+  return Boolean(mine);
+}
+
 export async function FormGate({ formId, children }: { formId: string; children: React.ReactNode }) {
   const user = await requireSessionUser();
-  if (await isGuestViewer()) {
-    const mine = await prisma.formDefinition.findFirst({
-      where: { id: formId, organizationId: user.organizationId, createdById: user.id },
-      select: { id: true },
-    });
-    if (!mine) notFound();
-  }
+  if (!(await formGateAllows(formId, user))) notFound();
   return <>{children}</>;
 }

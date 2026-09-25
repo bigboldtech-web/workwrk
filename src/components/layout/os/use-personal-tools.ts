@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { PERSONAL_TOOLS, readToolPins, togglePin, type PersonalTool } from "./personal-tools";
+import { objectHrefNow } from "./use-object-href";
 
 function hasSpeechRecognition(): boolean {
   if (typeof window === "undefined") return false;
@@ -55,7 +56,21 @@ export function usePersonalTools() {
           });
           const id = r.ok ? r.data?.doc?.id : undefined;
           if (!id) { toast("Couldn't create doc. Try again"); return; }
-          router.push(`/docs/${id}`);
+          // In the section the person is in: the Work door in Work, /docs elsewhere.
+          router.push(objectHrefNow("doc", id));
+          return;
+        }
+        case "canvas": {
+          // Make the canvas here and open it with ?new=1 (the title is
+          // selected), in the section the person is in. If the create fails,
+          // /canvas?new=1 is the old door and still makes one, so the tool
+          // never dead-ends.
+          const r = await apiFetch<{ whiteboard?: { id?: string } }>("/api/whiteboards", {
+            method: "POST",
+            json: { name: "Untitled canvas" },
+          });
+          const id = r.ok ? r.data?.whiteboard?.id : undefined;
+          router.push(id ? `${objectHrefNow("canvas", id)}?new=1` : "/canvas?new=1");
           return;
         }
         default:

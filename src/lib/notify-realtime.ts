@@ -26,6 +26,7 @@
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { readWatchers } from "@/lib/item-watchers";
+import { withListLinks } from "@/lib/list-links-server";
 
 /**
  * Tell the interested tabs that one task changed.
@@ -42,6 +43,10 @@ export async function publishItemChanged(args: {
   actorId?: string | null;
   /** Extra recipients the caller already knows (a fresh assignee, say). */
   extraUserIds?: (string | null | undefined)[];
+  /** Every List the task appears in; read from its links when absent. */
+  listIds?: string[];
+  /** Lists the task just left. */
+  leftListIds?: string[];
 }): Promise<void> {
   try {
     const item = await prisma.item.findUnique({
@@ -77,10 +82,21 @@ export async function publishItemChanged(args: {
     }
     if (ids.size === 0) return;
 
+    // Trigger-only like the rest: List ids, never content. Read here rather
+    // than by every caller, and absent (not an error) while the link table is.
+    const listIds = args.listIds ?? [
+      item.boardId,
+      ...(await withListLinks(
+        () => prisma.itemListLink.findMany({ where: { itemId: args.itemId }, select: { boardId: true } }).then((r) => r.map((l) => l.boardId)),
+        [] as string[],
+      )),
+    ];
     const event = {
       type: "item" as const,
       itemId: args.itemId,
       boardId: args.boardId ?? item.boardId ?? null,
+      listIds: Array.from(new Set(listIds)),
+      ...(args.leftListIds?.length ? { leftListIds: Array.from(new Set(args.leftListIds)) } : {}),
     };
     for (const userId of ids) publishToUser(userId, event);
   } catch {

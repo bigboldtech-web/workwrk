@@ -26,6 +26,10 @@ import { itemCtx, gateItem } from "@/lib/item-gate";
 import { archiveBoardItem, updateBoardItem } from "@/lib/board-items";
 import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
 import { unknownUserIds } from "@/lib/assignable";
+import { getBoardStatuses } from "@/lib/board-items-shared";
+import { validateLinkedStatus } from "@/lib/list-links";
+import { listLinksAvailable, listReader, topLevelAncestor, withListLinks, type LinkRow } from "@/lib/list-links-server";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -52,9 +56,15 @@ const patchSchema = z.object({
 const bodySchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(MAX_IDS),
   patch: patchSchema,
+  // Phase 5b: the List the selection was made in. Inside a SECONDARY List an
+  // archive is refused per row (use_list_link), so the bulk bar can never
+  // destroy tasks in their homes from a List they were only shared into.
+  contextBoardId: z.string().min(1).max(64).optional(),
 });
 
-type RowOutcome = { id: string; ok: true } | { id: string; ok: false; reason: "not_found" | "no_access" | "failed" };
+type RowOutcome =
+  | { id: string; ok: true }
+  | { id: string; ok: false; reason: "not_found" | "no_access" | "failed" | "invalid_status" | "use_list_link" };
 
 export async function POST(req: NextRequest) {
   const c = await itemCtx();
@@ -94,11 +104,47 @@ export async function POST(req: NextRequest) {
   // Sequential, not parallel. Two hundred concurrent gates each firing three
   // access queries is a self-inflicted load spike, and a bulk edit is not a
   // latency-sensitive path: the bar shows a saving dot while it runs.
+  const gated: Array<{ id: string; gate: Extract<Awaited<ReturnType<typeof gateItem>>, { item: unknown }> }> = [];
   for (const id of ids) {
     const gate = await gateItem(id, c, patch.archive ? "delete" : "edit");
     if ("error" in gate) {
       results.push({ id, ok: false, reason: gate.error.status === 404 ? "not_found" : "no_access" });
       continue;
+    }
+    gated.push({ id, gate });
+  }
+
+  // Phase 5b: which rows appear in other Lists. ONE link query over the batch
+  // (subtasks answer through their top-level ancestor); an absent table means
+  // no row has links, which is today's behaviour exactly.
+  const needLinks = patch.status !== undefined || (!!patch.archive && !!parsed.data.contextBoardId);
+  const linksByItem = new Map<string, LinkRow[]>();
+  if (needLinks && gated.length && (await listLinksAvailable())) {
+    const rootOf = new Map<string, string>();
+    for (const g of gated) rootOf.set(g.id, g.gate.item.parentItemId ? (await topLevelAncestor(g.gate.item)).id : g.id);
+    const links = await withListLinks(
+      () => prisma.itemListLink.findMany({ where: { itemId: { in: Array.from(new Set(rootOf.values())) } } }),
+      [] as LinkRow[],
+    );
+    for (const g of gated) {
+      const root = rootOf.get(g.id) ?? g.id;
+      linksByItem.set(g.id, links.filter((l) => l.itemId === root && l.boardId !== g.gate.item.boardId));
+    }
+  }
+  const contextReadable = parsed.data.contextBoardId ? await listReader(c).row(parsed.data.contextBoardId) : null;
+
+  for (const { id, gate } of gated) {
+    const rowLinks = linksByItem.get(id) ?? [];
+    if (patch.archive && contextReadable && rowLinks.some((l) => l.boardId === contextReadable.id)) {
+      results.push({ id, ok: false, reason: "use_list_link" });
+      continue;
+    }
+    if (patch.status !== undefined && patch.status !== null) {
+      const verdict = validateLinkedStatus(patch.status, getBoardStatuses(gate.item.board), gate.item.status, rowLinks.length > 0);
+      if (!verdict.ok) {
+        results.push({ id, ok: false, reason: "invalid_status" });
+        continue;
+      }
     }
     try {
       if (patch.archive) {
@@ -152,6 +198,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // The report keeps the order of the request, as it always has.
+  const order = new Map(ids.map((id, i) => [id, i] as const));
+  results.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   const updated = results.filter((r) => r.ok).length;
   return NextResponse.json({
     updated,

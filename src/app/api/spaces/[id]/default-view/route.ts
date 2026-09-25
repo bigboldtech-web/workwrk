@@ -19,7 +19,8 @@
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
-import { canContributeSpaceFor, mutateSpaceSettings, spaceForViewer } from "@/lib/space";
+import { mutateSpaceSettings } from "@/lib/space";
+import { canContributeSpaceFor, spaceForViewer } from "@/lib/list-links-server";
 import { hiddenSpaceViews, isSpaceViewKey, readSpaceDefaultView } from "@/lib/work/space-default-view";
 
 export const dynamic = "force-dynamic";

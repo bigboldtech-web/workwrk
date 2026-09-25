@@ -21,7 +21,9 @@
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
-import { readableListsInSpace, spaceForViewer } from "@/lib/space";
+import { readableListsInSpace } from "@/lib/space";
+import { spaceForViewer } from "@/lib/list-links-server";
+import { readListDefaults } from "@/lib/list-comfort";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { newTaskStatus, parseBirdseyeQuery, type BirdseyeBody, type BirdseyeList } from "@/lib/work/birdseye";
 import { loadFocus, loadFocusPage, loadListPage, loadOverview, type ListCounts, type LoaderList } from "@/lib/work/birdseye-server";
@@ -42,11 +44,7 @@ function answer(body: unknown, status = 200): NextResponse {
  * writes it yet, so today every List creates in its first status.
  */
 function storedDefaultStatus(settings: unknown): string | null {
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
-  const defaults = (settings as Record<string, unknown>).defaults;
-  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) return null;
-  const status = (defaults as Record<string, unknown>).status;
-  return typeof status === "string" && status ? status : null;
+  return readListDefaults(settings).status ?? null;
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

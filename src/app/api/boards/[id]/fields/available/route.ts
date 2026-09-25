@@ -9,6 +9,9 @@ import { authOptions } from "@/lib/auth";
 import { getSpaceForReader } from "@/lib/space";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { prisma } from "@/lib/prisma";
+import { isMirrorField } from "@/lib/list-connect";
+import { listReader } from "@/lib/list-links-server";
+import { redactFieldsForViewer } from "@/lib/board-items-view";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -35,10 +38,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   // Dedupe by (type, label) — the same field defined on two sibling
   // boards shows once, attributed to the first board found.
+  //
+  // Phase 5b: a MIRROR is never offered (it names another List's field keys
+  // and its own List's connect field, so a copy would point at nothing), and
+  // a connect field's targets pass through redactFieldForViewer, so the
+  // "Add existing" tab can never name a List the caller cannot read.
+  const reader = listReader({ userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId });
   const seen = new Set<string>();
   const candidates: Array<{ boardId: string; boardName: string; field: { key: string; label: string; type: string; options?: unknown } }> = [];
   for (const sib of siblings) {
-    for (const f of parseBoardSchema(sib.schema).fields) {
+    const visible = await redactFieldsForViewer(parseBoardSchema(sib.schema).fields.filter((f) => !isMirrorField(f)), reader);
+    for (const f of visible) {
       const dedupeKey = `${f.type}:${f.label.toLowerCase()}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);

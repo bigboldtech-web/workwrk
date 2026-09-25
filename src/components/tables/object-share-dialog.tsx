@@ -29,6 +29,8 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
+import { objectHref } from "@/lib/nav/object-href";
+import { hubNow } from "@/components/layout/os/use-object-href";
 
 export interface ShareObject {
   kind: "table" | "form";
@@ -51,11 +53,18 @@ export function embedSnippet(kind: "table" | "form", id: string, name: string): 
   return `<iframe src="${src}" width="100%" height="${height}" style="border:0" title="${(name || "").replace(/"/g, "&quot;")}"></iframe>`;
 }
 
-/** The link a person can open: the sheet itself, or the form's responder. */
+/**
+ * The link a person can open: the sheet itself, or the form's responder.
+ * The sheet's internal link is the share form of the section it is copied
+ * from, read at the moment of the copy: the Work door from Work (so the
+ * recipient stays in Work, and no Space's slug reaches a clipboard), the
+ * canonical /tables/<id> everywhere else. The public embed link and the
+ * form's responder are public addresses and never change.
+ */
 export function objectLink(kind: "table" | "form", id: string, publicLink = false): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   if (kind === "form") return `${origin}/forms/${id}/respond`;
-  return publicLink ? `${origin}/embed/tables/${id}` : `${origin}/tables/${id}`;
+  return publicLink ? `${origin}/embed/tables/${id}` : `${origin}${objectHref("table", id, hubNow())}`;
 }
 
 export function ObjectShareDialog({

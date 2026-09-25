@@ -1,27 +1,24 @@
+/* eslint-disable workwrk-ds/dynamic-page-declares-breadcrumb */
+// The crumb is declared one component down: BlockDocEditor renders
+// <Breadcrumb items/> from the doc's anchor and title, which the rule cannot
+// see from this file.
 "use client";
 
-// /docs/[id] — block-based page composer.
-//
-// Single-doc by default; opens a side-by-side pane when ?peek=<otherId>
-// is present in the URL. The split layout is rendered by DocSplitView,
-// which owns the drag-resize divider and the close/swap controls on the
-// peek pane.
+// /docs/[id], the Docs hub's address of a doc: block-based page composer.
+// The body is DocEditorRoute, the same component the Work addresses render
+// (src/components/docs/doc-editor-route.tsx).
 
 import { use } from "react";
-import { useSearchParams } from "next/navigation";
-import { BlockDocEditor } from "@/components/docs/block-doc-editor";
-import { DocSplitView } from "@/components/docs/doc-split-view";
+import { DocEditorRoute } from "@/components/docs/doc-editor-route";
 
-export default function DocPage({ params }: { params: Promise<{ id: string }> }) {
+export default function DocPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = use(params);
-  const search = useSearchParams();
-  const peek = search.get("peek");
-
-  if (peek && peek !== id) {
-    return <DocSplitView primaryId={id} peekId={peek} />;
-  }
-  // key={id} forces a fresh editor instance per note. Without it, navigating
-  // between notes reuses one instance whose stale bnDoc/title/lastUpdatedAtRef
-  // could be autosaved onto the newly-opened note — clobbering its content.
-  return <BlockDocEditor key={id} docId={id} />;
+  const sp = use(searchParams);
+  return <DocEditorRoute id={id} peek={typeof sp.peek === "string" ? sp.peek : null} />;
 }

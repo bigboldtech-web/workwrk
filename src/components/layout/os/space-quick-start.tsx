@@ -6,8 +6,12 @@
 //   List     → opens CreateListModal (the one List dialog; "Board" and the
 //              second dialog are retired, spec-spaces-lists section 0)
 //   Folder   → opens NewFolderDialog
-//   Doc      → POST /api/docs { entityType: SPACE, entityId } → /docs/[id]
-//   Table → POST /api/tables { spaceId } (the canonical seed) → /tables/[id]?new=1
+//   Doc      → POST /api/docs { entityType: SPACE, entityId } → the doc's
+//              Work address, /spaces/[slug]/docs/[id]
+//   Table → POST /api/tables { spaceId } (the canonical seed) →
+//              /spaces/[slug]/tables/[id]?new=1
+// Both open IN PLACE: this is a Work page, so what it creates stays in Work
+// (src/lib/nav/object-href.ts).
 //
 // Each tile sits on the Space's accent color (left border + tinted icon)
 // so the empty state feels like part of THIS Space, not a generic CTA.
@@ -21,13 +25,16 @@ import { NewFolderDialog } from "./new-folder-dialog";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { Dots } from "@/components/ui/dots";
+import { objectHrefNow } from "./use-object-href";
 
 interface Props {
   spaceId: string;
+  /** The Space's slug, so a new Doc or Table opens at its Work address. */
+  spaceSlug?: string | null;
   accent: string;
 }
 
-export function SpaceQuickStart({ spaceId, accent }: Props) {
+export function SpaceQuickStart({ spaceId, spaceSlug, accent }: Props) {
   const router = useRouter();
   const { toast } = useOsToast();
   const { openCreateList } = useOsShell();
@@ -52,7 +59,7 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
         return;
       }
       const data = await res.json();
-      router.push(`/docs/${data.doc.id}`);
+      router.push(objectHrefNow("doc", data.doc.id, spaceSlug));
     } finally {
       setBusy(null);
     }
@@ -73,7 +80,7 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
       }
       const table = await res.json();
       const t = table?.data ?? table;
-      if (t?.id) router.push(`/tables/${t.id}?new=1`);
+      if (t?.id) router.push(`${objectHrefNow("table", t.id, spaceSlug)}?new=1`);
       else router.refresh();
     } finally {
       setBusy(null);

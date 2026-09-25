@@ -37,6 +37,29 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import { remapDescendantStatuses } from "@/lib/item-move";
+import type { Prisma } from "@/generated/prisma";
+import { parseBoardSchema } from "@/lib/field-catalog";
+import { fieldKeySets } from "@/lib/list-connect";
+import { planCreateDefaults, readListDefaults, userIdsInDefaults } from "@/lib/list-comfort";
+import {
+  changedListFieldKeys,
+  isReservedMetadataKey,
+  metadataForCreate,
+  swapNamespacesOnMove,
+  LISTS_NS,
+} from "@/lib/list-metadata";
+import { linkToDropOnMove, SUBTREE_DEPTH } from "@/lib/list-links";
+import {
+  linkedListsOf,
+  listLinksAvailable,
+  listOrderLock,
+  listReader,
+  nextPositionInList,
+  topLevelAncestor,
+  withListLinks,
+  type LinkViewer,
+} from "@/lib/list-links-server";
+import { viewRows, type LinkedRowInfo, type ViewContextBoard } from "@/lib/board-items-view";
 
 // Re-export the client-safe pieces so existing server code (API routes,
 // page server components) keeps working with `from "@/lib/board-items"`.
@@ -330,7 +353,79 @@ async function enrichItemRows(
   });
 }
 
-export async function listBoardItems(boardId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardItemRow[]> {
+/** Who a row is for, and the List it is shown in. */
+export interface RowViewOptions {
+  viewer: LinkViewer;
+  /** The List the rows are shown in; each row's own home when absent. */
+  contextBoardId?: string | null;
+}
+
+/**
+ * The tasks linked into one List, with their same-home subtask trees, as raw
+ * rows plus what each one is (a linked root with its link position, or a
+ * subtask shown through it). A linked task whose home List is archived is not
+ * here: an archived List's tasks drop out of every union until it returns.
+ */
+async function linkedRowsForList(
+  board: { id: string; organizationId: string },
+  opts: { includeArchived: boolean },
+): Promise<{ rows: ItemSource[]; info: Map<string, LinkedRowInfo> }> {
+  const info = new Map<string, LinkedRowInfo>();
+  const links = await withListLinks(
+    () => prisma.itemListLink.findMany({ where: { boardId: board.id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { itemId: true, position: true } }),
+    [] as Array<{ itemId: string; position: number }>,
+  );
+  if (links.length === 0) return { rows: [], info };
+  const positionOf = new Map(links.map((l) => [l.itemId, l.position] as const));
+  const archived = opts.includeArchived ? {} : { archivedAt: null };
+  const roots = await prisma.item.findMany({
+    where: {
+      id: { in: [...positionOf.keys()] },
+      organizationId: board.organizationId,
+      parentItemId: null,
+      boardId: { not: board.id },
+      board: { archivedAt: null },
+      ...archived,
+    },
+  });
+  const rows: ItemSource[] = [...roots];
+  const rootOf = new Map<string, { rootId: string; home: string }>();
+  for (const r of roots) {
+    info.set(r.id, { rootId: r.id, position: positionOf.get(r.id) ?? 0 });
+    rootOf.set(r.id, { rootId: r.id, home: r.boardId });
+  }
+  const seen = new Set(roots.map((r) => r.id));
+  let frontier = roots.map((r) => r.id);
+  for (let depth = 0; depth < SUBTREE_DEPTH && frontier.length > 0; depth += 1) {
+    const kids = await prisma.item.findMany({ where: { parentItemId: { in: frontier }, ...archived }, orderBy: { position: "asc" } });
+    const fresh: typeof kids = [];
+    for (const k of kids) {
+      const parent = k.parentItemId ? rootOf.get(k.parentItemId) : undefined;
+      // Same home only: the subtree is the task's own tree, never a child that
+      // was moved to some other List.
+      if (!parent || k.boardId !== parent.home || seen.has(k.id)) continue;
+      seen.add(k.id);
+      rootOf.set(k.id, parent);
+      info.set(k.id, { rootId: parent.rootId, position: null });
+      fresh.push(k);
+    }
+    rows.push(...fresh);
+    frontier = fresh.map((k) => k.id);
+  }
+  return { rows, info };
+}
+
+/**
+ * A List's rows. Without `includeLinked` they are exactly today's home rows;
+ * with it (GET /api/boards/[id]/items?links=1) they are the home rows UNION the
+ * rows linked in, deduplicated by id with the home row winning, in ONE order
+ * space. Either way every row is projected for `view.viewer`, and with no
+ * viewer every reserved key and connect value is stripped.
+ */
+export async function listBoardItems(
+  boardId: string,
+  opts: { includeArchived?: boolean; view?: RowViewOptions; includeLinked?: boolean } = {},
+): Promise<BoardItemRow[]> {
   const rows = await prisma.item.findMany({
     where: {
       boardId,
@@ -338,26 +433,67 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
     },
     orderBy: { position: "asc" },
   });
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, slug: true, name: true, spaceId: true, schema: true, organizationId: true },
+  });
 
-  // Subtask counts derived from the same fetched rows — no extra query.
-  // Top-level item (parentItemId = null) gets count of its direct children.
+  let merged: ItemSource[] = rows;
+  const linkedInfo = new Map<string, LinkedRowInfo>();
+  if (opts.includeLinked && opts.view && board) {
+    const linked = await linkedRowsForList(board, { includeArchived: !!opts.includeArchived });
+    const own = new Set(rows.map((r) => r.id));
+    const extra = linked.rows.filter((r) => !own.has(r.id));
+    for (const r of extra) {
+      const li = linked.info.get(r.id);
+      if (li) linkedInfo.set(r.id, li);
+    }
+    merged = [...rows, ...extra];
+  }
+
+  // Subtask counts derived from the same fetched rows, no extra query. A
+  // linked parent counts its real children because they are fetched with it.
   const subtaskCountByParent = new Map<string, number>();
-  for (const r of rows) {
+  for (const r of merged) {
     if (r.parentItemId) {
       subtaskCountByParent.set(r.parentItemId, (subtaskCountByParent.get(r.parentItemId) ?? 0) + 1);
     }
   }
+  // A linked row reports THIS List's Space; a home row reports what it always
+  // has (nothing, on this read).
+  const spaceIdByItem = new Map<string, string | null>();
+  for (const id of linkedInfo.keys()) spaceIdByItem.set(id, board?.spaceId ?? null);
 
-  return enrichItemRows(rows, { subtaskCountByParent });
+  const enriched = await enrichItemRows(merged, { subtaskCountByParent, spaceIdByItem });
+  const viewed = await viewRows(enriched, { viewer: opts.view?.viewer ?? null, context: board, linked: linkedInfo });
+  if (linkedInfo.size === 0) return viewed;
+  return viewed
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => a.r.position - b.r.position || a.i - b.i)
+    .map((x) => x.r);
 }
 
 /**
  * Enrich an already-fetched set of Item rows (GET /api/items/[id]/subtasks).
  * Same decoration as listBoardItems, so a subtask row and a List row can never
- * drift apart.
+ * drift apart. `contextBoardId` is a List the caller has ALREADY validated as
+ * one these rows appear in through a link; the rows are projected for it.
  */
-export async function listBoardItemRows(rows: ItemSource[]): Promise<BoardItemRow[]> {
-  return enrichItemRows(rows);
+export async function listBoardItemRows(
+  rows: ItemSource[],
+  opts?: RowViewOptions & { rootId?: string },
+): Promise<BoardItemRow[]> {
+  const enriched = await enrichItemRows(rows);
+  if (!opts?.viewer) return viewRows(enriched, { viewer: null, context: null });
+  if (opts.contextBoardId) {
+    const reader = listReader(opts.viewer);
+    const b = await reader.row(opts.contextBoardId);
+    if (b) {
+      const linked = new Map(enriched.map((r) => [r.id, { rootId: opts.rootId ?? r.parentItemId ?? r.id, position: null }] as const));
+      return viewRows(enriched, { viewer: opts.viewer, context: b, linked, reader });
+    }
+  }
+  return viewRows(enriched, { viewer: opts.viewer, context: null });
 }
 
 /**
@@ -365,18 +501,36 @@ export async function listBoardItemRows(rows: ItemSource[]): Promise<BoardItemRo
  * row. API write routes respond with this so the client's optimistic caches
  * always merge a COMPLETE row — a lean writer-return here is what made rows
  * "disappear" client-side after a date/recurrence save.
- * Returns null when the item no longer exists.
+ *
+ * With a viewer the row is projected for them, in `contextBoardId` when that
+ * is a List the task appears in through a link and they can read (any other
+ * value is answered as the home). Returns null when the item no longer exists.
  */
-export async function getBoardItemRow(itemId: string): Promise<BoardItemRow | null> {
+export async function getBoardItemRow(itemId: string, opts?: RowViewOptions): Promise<BoardItemRow | null> {
   const row = await prisma.item.findUnique({
     where: { id: itemId },
-    include: { board: { select: { spaceId: true } } },
+    include: { board: { select: { id: true, slug: true, name: true, spaceId: true, schema: true } } },
   });
   if (!row) return null;
+  let context: ViewContextBoard = row.board;
+  let linked: Map<string, LinkedRowInfo> | undefined;
+  let spaceId = row.board.spaceId;
+  if (opts?.viewer && opts.contextBoardId && opts.contextBoardId !== row.boardId) {
+    const { rootId, links } = await linkedListsOf(row);
+    const link = links.find((l) => l.boardId === opts.contextBoardId);
+    const b = link ? await listReader(opts.viewer).row(link.boardId) : null;
+    if (link && b) {
+      context = b;
+      linked = new Map([[row.id, { rootId, position: row.parentItemId ? null : link.position }]]);
+      spaceId = b.spaceId;
+    }
+  }
   const [enriched] = await enrichItemRows([row], {
-    spaceIdByItem: new Map<string, string | null>([[row.id, row.board.spaceId]]),
+    spaceIdByItem: new Map<string, string | null>([[row.id, spaceId]]),
   });
-  return enriched ?? null;
+  if (!enriched) return null;
+  const [viewed] = await viewRows([enriched], { viewer: opts?.viewer ?? null, context, linked });
+  return viewed ?? null;
 }
 
 export interface CreateBoardItemInput {
@@ -429,14 +583,84 @@ export interface CreateBoardItemInput {
 import { resolveAssignees } from "./board-items-shared";
 export { resolveAssignees };
 
+export interface CreateBoardItemOptions {
+  /**
+   * POST /api/boards/[id]/items ONLY: the raw body keys the client sent, so
+   * the List's defaults (Board.settings.defaults, settings.defaultItemTypeId)
+   * fill only the keys it did not. Duplicate, recurrence, templates, forms,
+   * automations and imports never pass this, and keep today's behaviour.
+   */
+  listDefaults?: { sentKeys: ReadonlySet<string>; sentMetadataKeys: ReadonlySet<string> };
+  /**
+   * A duplicate (or a route that built the blob itself) keeps its connect
+   * values, markers and namespaces verbatim. Everything else has its reserved
+   * "$" keys stripped, so no client can plant another List's namespace.
+   */
+  trustedMetadata?: boolean;
+  /** Connect keys whose values the route validated; they are marked so every projection reduces them. */
+  validatedConnectKeys?: readonly string[];
+}
+
 /**
- * Append a new item to the end of a board. Position = max + 1024 to
- * preserve room for fractional inserts later. Generates a synthetic
- * itemId so the unique (itemType, itemId) constraint holds.
+ * The create input with its List's defaults applied: only for keys the
+ * client did not send, each re-checked now and skipped when it has stopped
+ * being true (list-comfort.ts planCreateDefaults).
  */
-export async function createBoardItem(input: CreateBoardItemInput): Promise<BoardItemRow> {
+async function withListDefaults(
+  input: CreateBoardItemInput,
+  sent: { sentKeys: ReadonlySet<string>; sentMetadataKeys: ReadonlySet<string> },
+): Promise<CreateBoardItemInput> {
+  const board = await prisma.board.findUnique({
+    where: { id: input.boardId },
+    select: { settings: true, statuses: true, schema: true },
+  });
+  if (!board) return input;
+  const defaults = readListDefaults(board.settings);
+  const fields = parseBoardSchema(board.schema).fields;
+  const userIds = userIdsInDefaults(defaults, fields);
+  const [users, tags, types] = await Promise.all([
+    userIds.length
+      ? prisma.user.findMany({ where: { id: { in: userIds }, organizationId: input.organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } })
+      : Promise.resolve([] as { id: string }[]),
+    defaults.tagIds?.length
+      ? prisma.tag.findMany({ where: { id: { in: defaults.tagIds }, organizationId: input.organizationId, archived: false }, select: { id: true } })
+      : Promise.resolve([] as { id: string }[]),
+    defaults.itemTypeId
+      ? prisma.itemType.findMany({ where: { id: defaults.itemTypeId, organizationId: input.organizationId }, select: { id: true } })
+      : Promise.resolve([] as { id: string }[]),
+  ]);
+  const plan = planCreateDefaults(defaults, {
+    sentKeys: sent.sentKeys,
+    sentMetadataKeys: sent.sentMetadataKeys,
+    statuses: getBoardStatuses(board),
+    fields,
+    liveUserIds: new Set(users.map((u) => u.id)),
+    liveTagIds: new Set(tags.map((t) => t.id)),
+    liveItemTypeIds: new Set(types.map((t) => t.id)),
+  });
+  return {
+    ...input,
+    ...(plan.status ? { status: plan.status } : {}),
+    ...(plan.priority ? { priority: plan.priority } : {}),
+    ...(plan.assigneeIds ? { assigneeIds: plan.assigneeIds, ownerId: undefined } : {}),
+    ...(plan.tagIds ? { tagIds: plan.tagIds } : {}),
+    ...(plan.itemTypeId ? { itemTypeId: plan.itemTypeId } : {}),
+    ...(plan.fields ? { metadata: { ...plan.fields, ...(input.metadata ?? {}) } } : {}),
+  };
+}
+
+/**
+ * Append a new item to the end of a board. Position = the List's end + 1024
+ * to preserve room for fractional inserts later: for a top-level task the end
+ * of BOTH its own tasks and its linked ones, read under the List's order lock
+ * so two creates can never share a slot. Generates a synthetic itemId so the
+ * unique (itemType, itemId) constraint holds.
+ */
+export async function createBoardItem(input: CreateBoardItemInput, opts: CreateBoardItemOptions = {}): Promise<BoardItemRow> {
   const trimmed = input.title.trim();
   if (!trimmed) throw new Error("Title is required");
+
+  if (opts.listDefaults) input = await withListDefaults(input, opts.listDefaults);
 
   const createAssignees = resolveAssignees(input.assigneeIds, input.ownerId);
 
@@ -452,43 +676,66 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
     if (!parent) throw new Error("Parent task must be on the same board");
   }
 
-  // Position scoped to the parent: subtasks order among themselves,
-  // top-level items order among themselves. Otherwise creating the
-  // first subtask under any parent would land at the bottom of the
-  // whole board's position space.
-  const last = await prisma.item.findFirst({
-    where: { boardId: input.boardId, parentItemId: input.parentItemId ?? null },
-    orderBy: { position: "desc" },
-    select: { position: true },
+  // The stored blob. A caller's reserved keys are dropped unless it is a
+  // trusted copy, EXCEPT a connect marker for keys it still holds (a marker
+  // only ever narrows what a projection sends), and a validated connect value
+  // is marked so every later projection reduces it to what its viewer can
+  // read (list-metadata.ts metadataForCreate).
+  const metadata = metadataForCreate(input.metadata ?? {}, {
+    trusted: opts.trustedMetadata,
+    validatedConnectKeys: opts.validatedConnectKeys,
   });
-  const position = (last?.position ?? 0) + 1024;
+  const priority = normalizePriority(input.priority);
 
   // Synthetic itemId — for studio-item rows the Item row IS the row;
   // there's no separate canonical entity table. We use the row's own
   // id so itemId == id; the unique constraint becomes per-row.
   const id = cuid();
-  const created = await prisma.item.create({
-    data: {
-      id,
-      organizationId: input.organizationId,
-      boardId: input.boardId,
-      itemType: "studio-item",
-      itemId: id,
-      title: trimmed,
-      status: input.status ?? "TO_DO",
-      ownerId: createAssignees.ownerId,
-      assigneeIds: createAssignees.assigneeIds,
-      groupKey: input.groupKey ?? null,
-      position,
-      startAt: input.startAt == null ? null : new Date(input.startAt),
-      dueAt: input.dueAt == null ? null : new Date(input.dueAt),
-      priority: normalizePriority(input.priority),
-      itemTypeId: input.itemTypeId ?? null,
-      metadata: (input.metadata ?? {}) as object,
-      parentItemId: input.parentItemId ?? null,
-    },
-    include: { board: { select: { spaceId: true } } },
+  const data = (position: number) => ({
+    id,
+    organizationId: input.organizationId,
+    boardId: input.boardId,
+    itemType: "studio-item",
+    itemId: id,
+    title: trimmed,
+    status: input.status ?? "TO_DO",
+    ownerId: createAssignees.ownerId,
+    assigneeIds: createAssignees.assigneeIds,
+    groupKey: input.groupKey ?? null,
+    position,
+    startAt: input.startAt == null ? null : new Date(input.startAt),
+    dueAt: input.dueAt == null ? null : new Date(input.dueAt),
+    priority,
+    itemTypeId: input.itemTypeId ?? null,
+    metadata: metadata as object,
+    parentItemId: input.parentItemId ?? null,
   });
+
+  // Position scoped to the parent: subtasks order among themselves,
+  // top-level items order among themselves. Otherwise creating the
+  // first subtask under any parent would land at the bottom of the
+  // whole board's position space.
+  let created;
+  if (input.parentItemId) {
+    const last = await prisma.item.findFirst({
+      where: { boardId: input.boardId, parentItemId: input.parentItemId },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    created = await prisma.item.create({ data: data((last?.position ?? 0) + 1024), include: { board: { select: { spaceId: true } } } });
+  } else {
+    // Asked BEFORE the transaction. On a cold process (after every restart or
+    // deploy) it is a query on the global pool, and asked from inside, each
+    // create held one connection while waiting for another: ten creates at
+    // once into one List (the pool's size) all timed out, and every one was
+    // a task somebody typed that was never saved.
+    const linksOn = await listLinksAvailable();
+    created = await prisma.$transaction(async (tx) => {
+      await listOrderLock(tx, input.boardId);
+      const position = await nextPositionInList(tx, input.boardId, linksOn);
+      return tx.item.create({ data: data(position), include: { board: { select: { spaceId: true } } } });
+    });
+  }
   const tags = input.tagIds?.length
     ? await syncItemTags(input.organizationId, created.id, input.tagIds, input.actorId ?? null)
     : [];
@@ -549,10 +796,36 @@ export interface UpdateBoardItemInput {
   recurNextAt?: Date | null;
 }
 
+export interface UpdateBoardItemOptions {
+  /**
+   * Compute the metadata from the STORED value. When given, the row is read
+   * with SELECT metadata ... FOR UPDATE and written in the same transaction,
+   * so two writers of different keys can never lose each other's change.
+   */
+  metadataFn?: (stored: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
+/** How many times a metadata write is recomputed when the row keeps moving under it. */
+const METADATA_CAS_ATTEMPTS = 5;
+
+/** JSON with object keys sorted, so two reads of one jsonb value compare equal. */
+function stableJson(v: unknown): string {
+  const norm = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(norm);
+    if (x && typeof x === "object" && !(x instanceof Date)) {
+      const o = x as Record<string, unknown>;
+      return Object.fromEntries(Object.keys(o).sort().map((k) => [k, norm(o[k])]));
+    }
+    return x ?? null;
+  };
+  return JSON.stringify(norm(v));
+}
+
 export async function updateBoardItem(
   itemId: string,
   patch: UpdateBoardItemInput,
   actorId: string | null = null,
+  opts: UpdateBoardItemOptions = {},
 ): Promise<BoardItemRow> {
   // Capture the pre-edit values so we can diff for the activity log.
   // Phase 2 (spec-task-detail section 4 step 1): the diff now covers
@@ -607,11 +880,40 @@ export async function updateBoardItem(
   if (patch.recurRule !== undefined) data.recurRule = patch.recurRule ?? null;
   if (patch.recurNextAt !== undefined) data.recurNextAt = patch.recurNextAt;
 
-  const updated = await prisma.item.update({
-    where: { id: itemId },
-    data,
-    include: { board: { select: { spaceId: true } } },
-  });
+  // The metadata the diff below compares against: the LOCKED value when a
+  // metadataFn computes the write, else the value read above.
+  let metadataBefore: unknown = before?.metadata;
+  const include = { board: { select: { spaceId: true } } } as const;
+  let updated: Prisma.ItemGetPayload<{ include: typeof include }> | null = null;
+  if (opts.metadataFn) {
+    // COMPUTED OUTSIDE THE TRANSACTION, WRITTEN AS A COMPARE-AND-SWAP INSIDE.
+    // A metadataFn may read the database (a connect write checks which tasks
+    // the writer can read), and those reads go through the global pool. Run
+    // inside the transaction they held its connection while waiting for a
+    // second one, and a burst of such saves (the pool is ten) deadlocked
+    // every one of them. So the value is computed from a snapshot of the
+    // stored blob, and the transaction only locks the row, checks the blob is
+    // still that snapshot, and writes. If someone else wrote in between, it
+    // is computed again from their value, so no key they wrote is ever lost.
+    let snapshot: unknown = before?.metadata;
+    for (let attempt = 0; attempt < METADATA_CAS_ATTEMPTS && !updated; attempt += 1) {
+      if (attempt > 0) snapshot = (await prisma.item.findUnique({ where: { id: itemId }, select: { metadata: true } }))?.metadata;
+      const base = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? (snapshot as Record<string, unknown>) : {};
+      const computed = (await opts.metadataFn(base)) as object;
+      const seen = snapshot;
+      updated = await prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ metadata: unknown }>>`SELECT metadata FROM "Item" WHERE id = ${itemId} FOR UPDATE`;
+        // A missing row falls through to the update, which refuses it as it
+        // always has.
+        if (locked.length > 0 && stableJson(locked[0].metadata) !== stableJson(seen)) return null;
+        metadataBefore = locked[0]?.metadata;
+        return tx.item.update({ where: { id: itemId }, data: { ...data, metadata: computed }, include });
+      }, { timeout: 30_000, maxWait: 10_000 });
+    }
+    if (!updated) throw new Error("This task kept changing while it was being saved. Try again.");
+  } else {
+    updated = await prisma.item.update({ where: { id: itemId }, data, include });
+  }
   const owner = updated.ownerId
     ? await prisma.user.findUnique({
         where: { id: updated.ownerId },
@@ -726,19 +1028,24 @@ export async function updateBoardItem(
         meta: patch.recurRule ? { rule: patch.recurRule } : {},
       });
     }
-    if (patch.metadata !== undefined) {
+    if (patch.metadata !== undefined || opts.metadataFn) {
       // Name the keys that actually moved. An autosaving description would
       // otherwise fill the tab with identical rows nobody can read (the
       // empty-meta FIELDS_UPDATED row this replaces). When nothing moved, 
       // a re-save of the same blob, no row is written at all.
-      const changed = changedMetadataKeys(before.metadata, patch.metadata);
-      if (changed.length > 0) {
+      // Reserved keys are never named, and a secondary List's own values are
+      // named per List under listFields, so a reader of one List can be shown
+      // only what changed there (redactActivityForLinkedReader).
+      const after = updated.metadata;
+      const changed = changedMetadataKeys(metadataBefore, after).filter((k) => !isReservedMetadataKey(k));
+      const listFields = changedListFieldKeys(metadataBefore, after);
+      if (changed.length > 0 || Object.keys(listFields).length > 0) {
         await logActivity({
           organizationId: before.organizationId,
           itemId,
           actorId,
           action: "FIELDS_UPDATED",
-          meta: { fields: changed },
+          meta: { fields: changed, ...(Object.keys(listFields).length ? { listFields } : {}) },
         });
       }
     }
@@ -844,16 +1151,15 @@ export async function moveBoardItem(args: {
 }): Promise<BoardItemRow> {
   const before = await prisma.item.findUnique({
     where: { id: args.itemId },
-    select: { boardId: true, organizationId: true, status: true, groupKey: true },
+    select: { boardId: true, organizationId: true, status: true, groupKey: true, parentItemId: true },
   });
   if (!before) throw new Error("Task not found");
 
-  const last = await prisma.item.findFirst({
-    where: { boardId: args.toBoardId },
-    orderBy: { position: "desc" },
-    select: { position: true },
-  });
-  const position = (last?.position ?? 0) + 1000;
+  // The source List's own field keys: the values a move parks in the source's
+  // namespace when the task was linked into the target (swapNamespacesOnMove).
+  const fromBoard = await prisma.board.findUnique({ where: { id: before.boardId }, select: { schema: true } });
+  const fromKeys = fieldKeySets(parseBoardSchema(fromBoard?.schema).fields).stored;
+  const linksOn = await listLinksAvailable();
 
   // The whole subtask tree, breadth-first from the row being moved. Bounded by
   // DESCENDANT_SWEEPS so a cycle written by an older release cannot loop here.
@@ -883,39 +1189,86 @@ export async function moveBoardItem(args: {
     ? remapDescendantStatuses(descendants, args.fromStatuses ?? [], args.toStatuses)
     : new Map<string | null, string[]>();
 
-  const [updated] = await prisma.$transaction([
-    prisma.item.update({
-      where: { id: args.itemId },
-      data: {
-        boardId: args.toBoardId,
-        status: args.status,
-        // The old groupKey named a group in the OLD List. Following the status
-        // is what keeps the row visible after the move; a groupKey that names
-        // nothing is how a moved task "disappears" from a grouped board.
-        groupKey: before.groupKey === before.status ? args.status : null,
-        position,
-      },
-      include: { board: { select: { spaceId: true } } },
-    }),
-    // Subtasks follow the parent, carrying a status the target List actually
-    // declares. The groupKey is cleared either way, so a row can never point at
-    // a group that does not exist in the target List.
-    ...(descendantIds.length > 0
-      ? childStatusGroups.size > 0
-        ? [...childStatusGroups.entries()].map(([status, ids]) =>
-            prisma.item.updateMany({
-              where: { id: { in: ids } },
-              data: { boardId: args.toBoardId, groupKey: null, status },
-            }),
-          )
-        : [
-            prisma.item.updateMany({
-              where: { id: { in: descendantIds } },
-              data: { boardId: args.toBoardId, groupKey: null },
-            }),
-          ]
-      : []),
-  ]);
+  // ONE transaction, under the TARGET List's order lock and a row lock on
+  // the task: the append position, the move, the link that becomes pointless
+  // (a task is never both home in a List and linked into it) and the
+  // namespace swap all land together or not at all. A link added concurrently
+  // waits on the row lock and then sees the task already home here.
+  const updated = await prisma.$transaction(
+    async (tx) => {
+      await listOrderLock(tx, args.toBoardId);
+      const locked = await tx.$queryRaw<Array<{ metadata: unknown }>>`SELECT metadata FROM "Item" WHERE id = ${args.itemId} FOR UPDATE`;
+      const stored = locked[0]?.metadata ?? {};
+      const position = await nextPositionInList(tx, args.toBoardId, linksOn);
+      // The namespaces swap ONLY when the task is shown in the target through
+      // a live link right now: its own link into the target, or (a subtask)
+      // its top-level ancestor's on the same home. A namespace left behind by
+      // a link that was removed is NOT what the target shows (removing a link
+      // keeps its values so adding it back brings them back), and swapping it
+      // in would hide the value the user just edited behind a stale one. With
+      // no live link this is today's move exactly: the blob is not written.
+      let shownInTarget = false;
+      if (linksOn) {
+        const links = await tx.itemListLink.findMany({ where: { itemId: args.itemId }, select: { itemId: true, boardId: true } });
+        const drop = linkToDropOnMove(links, args.itemId, args.toBoardId);
+        if (drop) {
+          await tx.itemListLink.deleteMany({ where: { itemId: drop.itemId, boardId: drop.boardId } });
+          shownInTarget = true;
+        } else if (before.parentItemId) {
+          const root = await topLevelAncestor({ id: args.itemId, boardId: before.boardId, parentItemId: before.parentItemId }, tx);
+          if (root.topLevel && root.id !== args.itemId) {
+            shownInTarget = !!(await tx.itemListLink.findUnique({ where: { itemId_boardId: { itemId: root.id, boardId: args.toBoardId } }, select: { itemId: true } }));
+          }
+        }
+      }
+      const metadata: unknown = shownInTarget
+        ? swapNamespacesOnMove(stored, { fromBoardId: before.boardId, toBoardId: args.toBoardId, fromKeys })
+        : stored;
+      const u = await tx.item.update({
+        where: { id: args.itemId },
+        data: {
+          boardId: args.toBoardId,
+          status: args.status,
+          // The old groupKey named a group in the OLD List. Following the status
+          // is what keeps the row visible after the move; a groupKey that names
+          // nothing is how a moved task "disappears" from a grouped board.
+          groupKey: before.groupKey === before.status ? args.status : null,
+          position,
+          ...(shownInTarget ? { metadata: metadata as object } : {}),
+        },
+        include: { board: { select: { spaceId: true } } },
+      });
+      // Subtasks follow the parent, carrying a status the target List actually
+      // declares. The groupKey is cleared either way, so a row can never point at
+      // a group that does not exist in the target List.
+      if (descendantIds.length > 0) {
+        if (childStatusGroups.size > 0) {
+          for (const [status, ids] of childStatusGroups.entries()) {
+            await tx.item.updateMany({ where: { id: { in: ids } }, data: { boardId: args.toBoardId, groupKey: null, status } });
+          }
+        } else {
+          await tx.item.updateMany({ where: { id: { in: descendantIds } }, data: { boardId: args.toBoardId, groupKey: null } });
+        }
+        // A subtask shown in the target through its parent kept the target's
+        // values in its own namespace; they come up exactly as the parent's
+        // do, and only when the parent really was shown there (above).
+        if (shownInTarget) {
+          const kids = await tx.item.findMany({ where: { id: { in: descendantIds } }, select: { id: true, metadata: true } });
+          for (const k of kids) {
+            const md = k.metadata && typeof k.metadata === "object" && !Array.isArray(k.metadata) ? (k.metadata as Record<string, unknown>) : {};
+            const lists = md[LISTS_NS] && typeof md[LISTS_NS] === "object" ? (md[LISTS_NS] as Record<string, unknown>) : null;
+            if (!lists || !(args.toBoardId in lists)) continue;
+            await tx.item.update({
+              where: { id: k.id },
+              data: { metadata: swapNamespacesOnMove(md, { fromBoardId: before.boardId, toBoardId: args.toBoardId, fromKeys }) as object },
+            });
+          }
+        }
+      }
+      return u;
+    },
+    { timeout: 30_000, maxWait: 10_000 },
+  );
 
   await logActivity({
     organizationId: before.organizationId,

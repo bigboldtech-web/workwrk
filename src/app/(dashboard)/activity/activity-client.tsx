@@ -38,6 +38,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
 import { ACTIVITY_SCOPES, type ActivityScope } from "@/lib/activity-scope";
 import { targetFor, targetHref, verbFor, withoutLeadingVerb } from "@/lib/activity-targets";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 
 interface ActivityRow {
   id: string;
@@ -344,12 +345,16 @@ export function ActivityClient({
 }
 
 function ActivityFeedRow({ row }: { row: ActivityRow }) {
+  // Activity is Work: a doc, table, canvas, SOP or form chip opens in Work
+  // (targetHref is canonical; it is mapped for this section here).
+  const { map: sectionLink } = useObjectHref();
   const def = targetFor(row.targetType);
   const Glyph = GLYPHS[def.glyph] ?? CircleDot;
   // The third argument is the whole point of the guard: the server says
   // whether this viewer can still read the target, so a chip whose object has
   // been moved out from under them renders as text rather than a link that 404s.
-  const href = targetHref(row.targetType, row.targetId, row.targetReadable !== false);
+  const canonicalTarget = targetHref(row.targetType, row.targetId, row.targetReadable !== false);
+  const href = canonicalTarget ? sectionLink(canonicalTarget) : null;
   const name = targetName(row);
   const actor = row.actor
     ? { id: row.actor.id, firstName: row.actor.firstName, lastName: row.actor.lastName, avatar: row.actor.avatar }

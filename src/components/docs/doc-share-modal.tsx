@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { copyObjectLink } from "@/components/layout/os/use-object-href";
 
 type DocRole = "edit" | "view";
 
@@ -199,7 +200,10 @@ export function DocShareModal({
   }
 
   function copyInApp() {
-    const url = `${window.location.origin}/docs/${docId}`;
+    // The in-app link is the share form of the section it is copied from:
+    // the Work door in Work (no Space's slug on the clipboard), /docs/<id>
+    // elsewhere. The public link above is a public address and never changes.
+    const url = copyObjectLink("doc", docId);
     void navigator.clipboard.writeText(url).then(() => toast("Link copied"));
   }
 

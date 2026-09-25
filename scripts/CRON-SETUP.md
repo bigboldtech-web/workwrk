@@ -91,6 +91,36 @@ nothing, because it writes into people's inboxes.
 |---|---|---|
 | Form responses daily summary | `0 8 * * *` (8 AM daily) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/form-daily-summary` |
 
+## Scheduled email reports (NOT INSTALLED: the founder adds this row)
+
+`POST /api/cron/report-schedules` sends the scheduled email reports of a
+dashboard or a saved view (Phase 5b, gap 16). Every five minutes it takes the
+schedules whose next instant has arrived, computes each recipient's copy
+under THAT recipient's own access (a card or a List they cannot read is not
+in their email; someone who cannot read the target at all is skipped and
+counted, never named), and queues the emails into the same EmailLog queue the
+"Drain queued emails" row above sends. It is idempotent per schedule and due
+instant: the run is claimed with a compare-and-swap in the transaction that
+queues its emails, so a retried or overlapping run never sends twice.
+Recipients are always workspace members, never typed addresses. Added in
+Phase 5b (2026-09-24).
+
+**Install it in two steps, together**: add the row below, AND set
+`REPORT_SCHEDULE_CRON=on` in the app's `.env` (then reload pm2). The app
+cannot see the crontab, so that flag is how the report routes tell the UI a
+sender exists (`cronInstalled` in GET /api/report-schedules); until it is on,
+the UI should not offer scheduling, so nobody sets up a report that never
+arrives.
+
+**It is fail-closed**: with `CRON_SECRET` unset it answers 503 and sends
+nothing, because it mails people. It needs prisma/sql/2026-09-24-phase5b-data.sql
+(in the deploy manifest); before that file is applied it answers
+`{ ran: true, skipped: "table_absent" }` and does nothing.
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Scheduled email reports | `*/5 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/report-schedules` |
+
 ## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
 
 `POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people

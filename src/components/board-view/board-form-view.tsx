@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, ClipboardList, ExternalLink, Link2, RefreshCcw } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 import { FormRenderer } from "@/components/forms/form-renderer";
 import { usePublicForm } from "@/components/forms/use-public-form";
 
@@ -35,6 +36,8 @@ interface BoardFormViewProps {
 }
 
 export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFormViewProps) {
+  // "Edit form" stays in Work: a List is a Work page.
+  const { href: objectLink } = useObjectHref();
   const [formId, setFormId] = useState<string | null>(
     typeof viewConfig?.formId === "string" ? (viewConfig.formId as string) : null,
   );
@@ -221,7 +224,7 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
         ) : null}
         {formMeta?.canOpen ? (
           <Link
-            href={`/forms/${formId}`}
+            href={objectLink("form", formId)}
             className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line text-xs text-ink-2 hover:bg-hover"
           >
             <ExternalLink className="w-3 h-3" />

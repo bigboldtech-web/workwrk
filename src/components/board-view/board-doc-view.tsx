@@ -13,6 +13,7 @@ import Link from "next/link";
 import { ExternalLink, FileText, RefreshCcw } from "lucide-react";
 import { BlockDocEditor } from "@/components/docs/block-doc-editor";
 import { Dots } from "@/components/ui/dots";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 
 interface ApiDoc { id: string; title: string; updatedAt?: string }
 
@@ -24,6 +25,8 @@ interface BoardDocViewProps {
 }
 
 export function BoardDocView({ boardId, viewId, viewConfig, canEdit }: BoardDocViewProps) {
+  // "Open full page" stays in Work: a List is a Work page.
+  const { href: objectLink } = useObjectHref();
   const [docId, setDocId] = useState<string | null>(
     typeof viewConfig?.docId === "string" ? (viewConfig.docId as string) : null,
   );
@@ -144,7 +147,7 @@ export function BoardDocView({ boardId, viewId, viewConfig, canEdit }: BoardDocV
         <span className="text-base font-medium text-zinc-800">Doc</span>
         <div className="flex-1" />
         <Link
-          href={`/docs/${docId}`}
+          href={objectLink("doc", docId)}
           className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-xs text-zinc-600 hover:bg-zinc-50"
         >
           <ExternalLink className="w-3 h-3" />

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { LinkExistingPicker } from "./link-existing-picker";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
 interface PickerCandidate { id: string; title: string; subtitle?: string | null }
 
@@ -437,6 +438,8 @@ function LinkSection({
       ) : (
         <ul className="space-y-1.5">
           {items.map((it) => {
+            // The stored or default href is canonical; it opens in the section
+            // the person is in when they click (Work, for a task).
             const href = it.target?.href ?? defaultHref(it.targetId);
             return (
               <li
@@ -446,14 +449,14 @@ function LinkSection({
                 <Icon className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                 <button
                   type="button"
-                  onClick={() => router.push(href)}
+                  onClick={() => router.push(sectionHrefNow(href))}
                   className="flex-1 min-w-0 text-left text-xs font-medium truncate hover:text-zinc-700"
                 >
                   {it.target?.title || "Untitled"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => router.push(href)}
+                  onClick={() => router.push(sectionHrefNow(href))}
                   className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-zinc-100 inline-flex items-center justify-center text-zinc-400"
                   aria-label="Open"
                 >

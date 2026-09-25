@@ -20,9 +20,15 @@
 // It is a MenuList body. Hosts use `useTableRowMenu()` + `TableRowMenuHost`,
 // which mount it in a MorePortal at the right-click point or under the "...",
 // and own the Share dialog so every door opens the same one.
+//
+// WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
+// object-href.ts). Open, Open in new tab and the "Copy made" toast build the
+// address of the section the person is in when they click (the Space-scoped
+// Work address when the host passes spaceSlug); Copy link copies the share
+// form; the Trash exit asks the open object where it is mounted.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Code2, Copy, Download, ExternalLink, FolderInput, Link2, Pencil, Share2, Star, Table2, Trash2 } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -35,12 +41,16 @@ import { notifyTablesChanged } from "@/components/layout/os/sidebar-refresh";
 import { apiFetch } from "@/lib/api-fetch";
 import { downloadUrl } from "@/lib/download";
 import { ObjectShareDialog, embedSnippet } from "./object-share-dialog";
+import { currentOpenObject } from "@/components/layout/os/work-placement";
+import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
 export interface TableMenuTarget {
   id: string;
   name: string;
   spaceId?: string | null;
   spaceName?: string | null;
+  /** The table's Space slug when the host knows it (a Work tree row, the sheet in Work). */
+  spaceSlug?: string | null;
   isFavorite?: boolean;
   isPublic?: boolean;
   /** Creator or Owner/Admin. Absent = resolved from GET /api/tables/[id] on open. */
@@ -73,7 +83,6 @@ export function TableRowMenu({
   onRenameInline?: () => void;
 }) {
   const router = useRouter();
-  const pathname = usePathname() || "";
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { boot } = useBoot();
@@ -134,7 +143,7 @@ export function TableRowMenu({
   }
 
   function copyLink() {
-    void navigator.clipboard?.writeText(`${window.location.origin}/tables/${table.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy link", { tone: "danger" }));
+    void navigator.clipboard?.writeText(copyObjectLink("table", table.id)).then(() => toast("Link copied"), () => toast("Couldn't copy link", { tone: "danger" }));
     onClose();
   }
 
@@ -156,7 +165,8 @@ export function TableRowMenu({
     if (!r.ok) { toast(r.error || "Couldn't copy the table", { tone: "danger" }); return; }
     dispatchTablesChanged();
     onChanged?.("duplicated");
-    toast("Copy made", { action: { label: "Open", onClick: () => router.push(`/tables/${r.data.id}`) } });
+    // Resolved when the action is clicked, in the section the person is in then.
+    toast("Copy made", { action: { label: "Open", onClick: () => router.push(objectHrefNow("table", r.data.id, table.spaceSlug)) } });
   }
 
   async function toggleFav() {
@@ -206,7 +216,10 @@ export function TableRowMenu({
     toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=table") } });
     dispatchTablesChanged();
     onChanged?.("trashed");
-    if (pathname === `/tables/${table.id}`) router.push("/tables");
+    // The open table leaves for the list of its own section: /tables in the
+    // Tables hub, the nearest Work crumb in Work.
+    const open = currentOpenObject();
+    if (open?.kind === "table" && open.id === table.id) router.push(open.closeHref);
   }
 
   if (mode === "rename") {
@@ -260,8 +273,8 @@ export function TableRowMenu({
     <MenuList style={{ minWidth: 240 }} aria-label={`Actions for ${title}`}>
       {context !== "sheet" ? (
         <>
-          <MenuItem icon={Table2} label="Open" onClick={() => { router.push(`/tables/${table.id}`); onClose(); }} />
-          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(`/tables/${table.id}`, "_blank", "noopener"); onClose(); }} />
+          <MenuItem icon={Table2} label="Open" onClick={() => { router.push(objectHrefNow("table", table.id, table.spaceSlug)); onClose(); }} />
+          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(objectHrefNow("table", table.id, table.spaceSlug), "_blank", "noopener"); onClose(); }} />
           <MenuSeparator />
         </>
       ) : null}

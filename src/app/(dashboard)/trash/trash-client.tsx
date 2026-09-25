@@ -35,6 +35,7 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { useShortcut } from "@/lib/shortcuts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-fetch";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 import {
   TRASH_SORTS,
   TRASH_TYPES,
@@ -222,7 +223,9 @@ export function TrashClient({
       if (!row?.type || !row.entityId) return undefined;
       const href = trashRowHref(row.type, row.entityId);
       if (href === "/") return undefined;
-      return { label: "Open", onClick: () => router.push(href) };
+      // Read when the toast's Open is clicked, in the section the person is
+      // in then: Trash is Work, so a restored doc or table opens in Work.
+      return { label: "Open", onClick: () => router.push(sectionHrefNow(href)) };
     },
     [router],
   );

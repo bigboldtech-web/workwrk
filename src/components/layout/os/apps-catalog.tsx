@@ -60,6 +60,12 @@ import { readSidebarCards } from "@/lib/home-prefs";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
+// The Work sidebar's static rows live in a pure module so a node test can
+// prove none of them lights on an object's Work address (work-rows.ts).
+import { WORK_ROWS } from "@/lib/nav/work-rows";
+import { objectHref, type ObjectKind } from "@/lib/nav/object-href";
+import { useFavoritePill, useOpenObject, useOpenRevealKey } from "./work-placement";
+import { readOpenObject } from "@/lib/nav/open-object";
 import { useActiveRowHref } from "./use-active-row";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
@@ -481,33 +487,51 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
   );
 }
 
-// Every static row of the Work sidebar in one list, in declaration order, so
-// resolveActiveRow can light exactly one of them (spec-shell §1.1). The Spaces
-// and Favorites trees are dynamic rows and carry their own active state.
+/**
+ * A FAVORITES row for a Doc, Table, Canvas or Form. The Work sidebar is a
+ * Work surface, so the row opens the object IN WORK: its Work door, which
+ * places it in its own Space before the editor mounts, or, when it is the
+ * object already open, the address it is mounted at, so clicking the
+ * favourite of what is on screen never remounts it. Its pill is the
+ * favourite's candidate key: it lights when the object is open and its own
+ * tree row is not on screen (a loose doc, a form, a collapsed Space).
+ */
+function FavObjectRow({ kind, id, label, tile, unstar }: {
+  kind: ObjectKind;
+  id: string;
+  label: string;
+  tile: React.ReactNode;
+  unstar: "doc" | "table" | "form" | "whiteboard";
+}) {
+  const open = useOpenObject();
+  const { active: pillActive, ref: pillRef } = useFavoritePill<HTMLLIElement>(kind, id);
+  const href = open && open.kind === kind && open.id === id ? open.self : objectHref(kind, id, "home");
+  return (
+    <li ref={pillRef} className="group/fav relative">
+      <Link
+        href={href}
+        className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+          pillActive ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
+        }`}
+      >
+        {tile}
+        <span className="truncate flex-1">{label}</span>
+      </Link>
+      <UnstarButton kind={unstar} id={id} />
+    </li>
+  );
+}
+
+// Every static row of the Work sidebar lives in src/lib/nav/work-rows.ts, in
+// declaration order, so resolveActiveRow can light exactly one of them
+// (spec-shell §1.1). The Spaces and Favorites trees are dynamic rows and
+// carry their own active state.
 /** The collapse key the My work group stores in `sidebar.collapsedSections`. */
 const MY_WORK_GROUP_KEY = "work:my-work";
 /** The same, for FAVORITES. Expanded by default: a collapsed section hides
  *  its own "See all favorites" row, which is the section's only door to the
  *  page, and the section renders only when there is at least one star to see. */
 const FAVORITES_SECTION_KEY = "work:favorites";
-
-const WORK_ROWS = [
-  { href: "/home", match: "exact" as const },
-  { href: "/my-work", match: "exact" as const },
-  { href: "/my-work/personal" },
-  { href: "/inbox" },
-  // /activity had a rendered NavItem and NO row here, so the one resolver
-  // could never return it and the row never lit. A row that renders without a
-  // row here is the same defect, silently, every time.
-  { href: "/activity" },
-  { href: "/everything" },
-  { href: "/favorites" },
-  { href: "/okrs" },
-  { href: "/okrs?view=team" },
-  { href: "/okrs?view=company" },
-  { href: "/templates" },
-  { href: "/trash" },
-];
 
 function HomeSidebar() {
   const router = useRouter();
@@ -556,8 +580,10 @@ function HomeSidebar() {
   // 1, Tree data: "ancestors expanded"). The tree cannot work the ancestry out
   // for itself, because a Space's children are only loaded once that Space is
   // open, which is the thing being decided; `GET /api/work/locate` answers it
-  // in ids. It runs once per deep-link URL and never for a Space URL, which
-  // already resolves from the pathname alone.
+  // in ids, and only with folders this viewer's tree would render. It runs
+  // once per Folder or List URL. A Space URL expands nothing (the Space row
+  // is the destination itself), and an object's Work address is revealed by
+  // the effect below from the ids its route's gate already computed.
   useEffect(() => {
     const folderMatch = /^\/folders\/([^/?#]+)/.exec(pathname);
     const boardMatch = /^\/boards\/([^/?#]+)/.exec(pathname);
@@ -584,6 +610,25 @@ function HomeSidebar() {
     })();
     return () => { alive = false; };
   }, [pathname]);
+
+  // AN OBJECT OPENED IN WORK OPENS ITS OWN BRANCH. A Doc, Table or Canvas at
+  // its Work address publishes the Space and the folders on its way
+  // (src/lib/nav/open-object.ts), computed by its route's gate with the
+  // tree's own rules, so this never fetches and never opens a folder the
+  // viewer's tree would not render. It runs once per placement (a new
+  // object, or a Move that re-placed it), after the stored expand state has
+  // hydrated, and does nothing for an item with no Space in the tree. A
+  // reveal only ever OPENS, so it never undoes a collapse the person made.
+  const revealKey = useOpenRevealKey();
+  useEffect(() => {
+    // The key names the branch exactly, so the store is read once, here.
+    const reveal = revealKey ? readOpenObject()?.reveal : null;
+    if (!reveal) return;
+    const ids = [reveal.spaceId, ...reveal.folderIds];
+    let alive = true;
+    void hydrateSidebarState().then(() => { if (alive) setAllExpanded(ids, true); });
+    return () => { alive = false; };
+  }, [revealKey]);
 
   const spacesMenuRef = useRef<HTMLButtonElement>(null);
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(DEFAULT_SECTIONS_ORDER);
@@ -826,9 +871,13 @@ function HomeSidebar() {
                   SPACES tree below, which reveals its own branch for whatever
                   URL is open (GET /api/work/locate), so a FAVORITES row of one
                   of those kinds never carries the pill: open a Space you have
-                  also starred and both rows lit, for one destination. Docs,
-                  Tables, Canvases and Files have no tree row in this hub, so
-                  their favourite IS the location row and keeps its pill. */}
+                  also starred and both rows lit, for one destination. A Doc,
+                  Table or Canvas IN A SPACE now has a tree row in this hub
+                  too, and that row outranks its favourite; a loose one (no
+                  Space in the tree), and every form, keeps its favourite as
+                  its location row (FavObjectRow, useFavoritePill). Their
+                  favourites open in Work: the door, or the open object's own
+                  address when it is the one on screen. Files open their URL. */}
               {total > 6 && favoriteSpaces.length > 0 ? (
                 <FavSubLabel>Spaces</FavSubLabel>
               ) : null}
@@ -866,23 +915,16 @@ function HomeSidebar() {
               {total > 6 && favoriteDocs.length > 0 ? (
                 <FavSubLabel>Docs</FavSubLabel>
               ) : null}
-              {favoriteDocs.map((d) => {
-                const active = pathname === `/docs/${d.id}`;
-                return (
-                  <li key={`d-${d.id}`} className="group/fav relative">
-                    <Link
-                      href={`/docs/${d.id}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
-                    >
-                      <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={d.title} />
-                      <span className="truncate flex-1">{d.title}</span>
-                    </Link>
-                    <UnstarButton kind="doc" id={d.id} />
-                  </li>
-                );
-              })}
+              {favoriteDocs.map((d) => (
+                <FavObjectRow
+                  key={`d-${d.id}`}
+                  kind="doc"
+                  id={d.id}
+                  label={d.title}
+                  unstar="doc"
+                  tile={<EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={d.title} />}
+                />
+              ))}
               {total > 6 && favoriteFolders.length > 0 ? (
                 <FavSubLabel>Folders</FavSubLabel>
               ) : null}
@@ -907,63 +949,42 @@ function HomeSidebar() {
               {total > 6 && favoriteTables.length > 0 ? (
                 <FavSubLabel>Tables</FavSubLabel>
               ) : null}
-              {favoriteTables.map((t) => {
-                const active = pathname === `/tables/${t.id}`;
-                return (
-                  <li key={`t-${t.id}`} className="group/fav relative">
-                    <Link
-                      href={`/tables/${t.id}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
-                    >
-                      <EntityTile size="sm" fallback="table" name={t.name} {...NEUTRAL_TILE} />
-                      <span className="truncate flex-1">{t.name}</span>
-                    </Link>
-                    <UnstarButton kind="table" id={t.id} />
-                  </li>
-                );
-              })}
+              {favoriteTables.map((t) => (
+                <FavObjectRow
+                  key={`t-${t.id}`}
+                  kind="table"
+                  id={t.id}
+                  label={t.name}
+                  unstar="table"
+                  tile={<EntityTile size="sm" fallback="table" name={t.name} {...NEUTRAL_TILE} />}
+                />
+              ))}
               {total > 6 && favoriteForms.length > 0 ? (
                 <FavSubLabel>Forms</FavSubLabel>
               ) : null}
-              {favoriteForms.map((f) => {
-                const active = pathname === `/forms/${f.id}`;
-                return (
-                  <li key={`fm-${f.id}`} className="group/fav relative">
-                    <Link
-                      href={`/forms/${f.id}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
-                    >
-                      <EntityTile size="sm" fallback="form" name={f.name} {...NEUTRAL_TILE} />
-                      <span className="truncate flex-1">{f.name || "Untitled form"}</span>
-                    </Link>
-                    <UnstarButton kind="form" id={f.id} />
-                  </li>
-                );
-              })}
+              {favoriteForms.map((f) => (
+                <FavObjectRow
+                  key={`fm-${f.id}`}
+                  kind="form"
+                  id={f.id}
+                  label={f.name || "Untitled form"}
+                  unstar="form"
+                  tile={<EntityTile size="sm" fallback="form" name={f.name} {...NEUTRAL_TILE} />}
+                />
+              ))}
               {total > 6 && favoriteWhiteboards.length > 0 ? (
                 <FavSubLabel>Canvases</FavSubLabel>
               ) : null}
-              {favoriteWhiteboards.map((w) => {
-                const active = pathname === `/canvas/${w.id}`;
-                return (
-                  <li key={`w-${w.id}`} className="group/fav relative">
-                    <Link
-                      href={`/canvas/${w.id}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
-                    >
-                      <EntityTile size="sm" color="#06B6D4" fallbackIcon={Brush} name={w.name} />
-                      <span className="truncate flex-1">{w.name}</span>
-                    </Link>
-                    <UnstarButton kind="whiteboard" id={w.id} />
-                  </li>
-                );
-              })}
+              {favoriteWhiteboards.map((w) => (
+                <FavObjectRow
+                  key={`w-${w.id}`}
+                  kind="canvas"
+                  id={w.id}
+                  label={w.name}
+                  unstar="whiteboard"
+                  tile={<EntityTile size="sm" color="#06B6D4" fallbackIcon={Brush} name={w.name} />}
+                />
+              ))}
               {total > 6 && favoriteFiles.length > 0 ? (
                 <FavSubLabel>Files</FavSubLabel>
               ) : null}

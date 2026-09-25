@@ -12,6 +12,7 @@ import Link from "next/link";
 import { Brush, Cloud, ExternalLink, RefreshCcw } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 import { Dots } from "@/components/ui/dots";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 import { Skeleton, SkeletonLines } from "@/components/ui/skeleton";
 
 const Excalidraw = dynamic(
@@ -37,6 +38,8 @@ interface BoardWhiteboardViewProps {
 }
 
 export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: BoardWhiteboardViewProps) {
+  // "Open full page" stays in Work: a List is a Work page.
+  const { href: objectLink } = useObjectHref();
   const [whiteboardId, setWhiteboardId] = useState<string | null>(
     typeof viewConfig?.whiteboardId === "string" ? (viewConfig.whiteboardId as string) : null,
   );
@@ -249,7 +252,7 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
         ) : null}
         <div className="flex-1" />
         <Link
-          href={`/canvas/${whiteboardId}`}
+          href={objectLink("canvas", whiteboardId)}
           className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-800"
         >
           <ExternalLink className="w-3 h-3" />

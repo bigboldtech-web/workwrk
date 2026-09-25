@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { playNotificationChime } from "@/lib/notification-chime";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
 type BrowserPermission = "granted" | "denied" | "default" | "unsupported";
 type UserPref = "on" | "off" | "unset";
@@ -101,7 +102,9 @@ export function useDesktopNotifications() {
         n.onclick = () => {
           try {
             window.focus();
-            if (payload.url) window.location.assign(payload.url);
+            // The tab's section at the moment of the click decides: a doc
+            // notified while the person works in Work opens in Work.
+            if (payload.url) window.location.assign(sectionHrefNow(payload.url));
           } finally {
             n.close();
           }

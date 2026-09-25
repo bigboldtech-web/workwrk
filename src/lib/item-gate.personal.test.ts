@@ -51,6 +51,8 @@ const ITEM_ROUTE_FILES = [
   "subtasks/route.ts",
   "duplicate/route.ts",
   "restore/route.ts",
+  // Phase 5b: the Lists a task appears in. Gated on the item ref like the rest.
+  "lists/route.ts",
 ];
 
 describe("a personal-list task resolves a role even with no Space", () => {

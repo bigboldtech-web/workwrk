@@ -12,9 +12,15 @@
 //   favorites · separator · Share... · separator · Export responses as CSV
 //   (never an Agent) · separator · Move to Trash (the maker or an admin;
 //   confirm naming the form and its response count)
+//
+// WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
+// object-href.ts). Open, Open in new tab and the "Copy made" toast build the
+// address of the section the person is in when they click (the Work door in
+// Work, /forms/<id> elsewhere); the Trash exit asks the open object where it
+// is mounted. "Open the form" is the public responder and never changes.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ClipboardList, Code2, Copy, Download, ExternalLink, Link2, Pencil, Send, Share2, Star, Trash2 } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -25,6 +31,8 @@ import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { apiFetch } from "@/lib/api-fetch";
 import { downloadUrl } from "@/lib/download";
 import { ObjectShareDialog, embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
+import { currentOpenObject } from "@/components/layout/os/work-placement";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 export interface FormMenuTarget {
   id: string;
@@ -60,7 +68,6 @@ export function FormRowMenu({
   onRenameInline?: () => void;
 }) {
   const router = useRouter();
-  const pathname = usePathname() || "";
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { boot } = useBoot();
@@ -120,7 +127,8 @@ export function FormRowMenu({
     if (!r.ok) { toast(r.error || "Couldn't copy the form", { tone: "danger" }); return; }
     dispatchFormsChanged();
     onChanged?.("duplicated");
-    toast("Copy made", { action: { label: "Open", onClick: () => router.push(`/forms/${r.data.id}`) } });
+    // Resolved when the action is clicked, in the section the person is in then.
+    toast("Copy made", { action: { label: "Open", onClick: () => router.push(objectHrefNow("form", r.data.id)) } });
   }
 
   async function toggleFav() {
@@ -152,7 +160,8 @@ export function FormRowMenu({
     toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=form") } });
     dispatchFormsChanged();
     onChanged?.("trashed");
-    if (pathname === `/forms/${form.id}`) router.push("/forms");
+    const open = currentOpenObject();
+    if (open?.kind === "form" && open.id === form.id) router.push(open.closeHref);
   }
 
   if (mode === "rename") {
@@ -182,8 +191,8 @@ export function FormRowMenu({
     <MenuList style={{ minWidth: 240 }} aria-label={`Actions for ${title}`}>
       {context !== "builder" ? (
         <>
-          <MenuItem icon={ClipboardList} label="Open" onClick={() => { router.push(`/forms/${form.id}`); onClose(); }} />
-          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(`/forms/${form.id}`, "_blank", "noopener"); onClose(); }} />
+          <MenuItem icon={ClipboardList} label="Open" onClick={() => { router.push(objectHrefNow("form", form.id)); onClose(); }} />
+          <MenuItem icon={ExternalLink} label="Open in new tab" onClick={() => { window.open(objectHrefNow("form", form.id), "_blank", "noopener"); onClose(); }} />
           <MenuSeparator />
         </>
       ) : null}

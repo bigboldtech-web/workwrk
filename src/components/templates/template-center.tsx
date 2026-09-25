@@ -66,6 +66,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
+// What a template makes opens in the section the person is in when they
+// apply it (a Doc applied from Work opens in Work); the hrefs built below are
+// canonical and are mapped at the moment they are followed.
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
 /* ───────────────────────────── data shapes ───────────────────────────── */
 
@@ -363,12 +367,12 @@ function TemplateCenterBody({
       setDetailIntake(null);
       if (mode === "modal") onClose?.();
       onApplied?.(result);
-      if (href) { router.push(href); return; }
+      if (href) { router.push(sectionHrefNow(href)); return; }
       // Nothing to navigate to means a Starter kit (three objects, no single
       // page). The toast names all three and its one action opens the first,
       // so what was just created always has a door out of the flow.
       const first = result.created?.[0];
-      toast(appliedToast(result), first ? { action: { label: "Open", onClick: () => router.push(first.href) } } : undefined);
+      toast(appliedToast(result), first ? { action: { label: "Open", onClick: () => router.push(sectionHrefNow(first.href)) } } : undefined);
     },
     [mode, onClose, onApplied, router, toast],
   );
@@ -406,7 +410,8 @@ function TemplateCenterBody({
       if (!res.ok) { toast("Couldn't apply that starter kit", { tone: "danger", description: res.error }); return; }
       const made = res.data.created ?? {};
       // A kit makes three things and has no page of its own, so the toast
-      // names what it made and links each one to the page it lives on.
+      // names what it made and links each one to the page it lives on. The
+      // links are canonical here and mapped where they are followed.
       const created: Array<{ label: string; href: string }> = [
         made.doc ? { label: made.doc.title || kit.summary.doc, href: `/docs/${made.doc.id}` } : { label: kit.summary.doc, href: "/docs" },
         made.form ? { label: made.form.name || kit.summary.form, href: `/forms/${made.form.id}` } : { label: kit.summary.form, href: "/forms" },

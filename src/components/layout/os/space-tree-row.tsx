@@ -27,6 +27,21 @@
 // `GET /api/spaces` and `GET /api/spaces/[id]/children`. Without it the menu
 // falls back to the reader's rows, which is the safe direction but hides
 // Rename / Move / Duplicate from people who do hold them.
+//
+// A DOC, TABLE OR CANVAS OPENS IN PLACE (founder, 2026-09-24). Their rows are
+// Links to the item's Space-scoped Work address, /spaces/{slug}/docs/{id} and
+// its two siblings (src/lib/nav/object-href.ts), so the Work sidebar stays on
+// the left, the item opens in the main area, and the rail never switches to
+// the Docs or Tables hub. They used to push /docs/{id} and /tables/{id}. As
+// Links, Cmd-click, middle-click and "Copy link address" give the Work
+// address too. The Space's slug is threaded down from SpaceTreeRow to every
+// row and every create door beneath it for exactly this.
+//
+// THE PILL follows what is actually rendered, for the object actually open
+// (useTreePill, src/lib/nav/open-object.ts): the item's own row, else its
+// favourite, else its nearest rendered ancestor (its List, its Folders, its
+// Space). The three leaf rows light by the pill alone; Space, Folder and List
+// rows also keep their own exact URL match.
 
 import { useState, useEffect, useRef, type DragEvent } from "react";
 import Link from "next/link";
@@ -58,6 +73,9 @@ import {
 // rows, which use their own units' menus"). Only the three container rows this
 // unit owns collapse to one "…".
 import { SidebarQuickStar } from "./sidebar-quick-star";
+import { useTreePill } from "./work-placement";
+import { objectHref } from "@/lib/nav/object-href";
+import { treeKey } from "@/lib/nav/open-object";
 
 // Expand state for the sidebar tree, keyed by id.
 //
@@ -212,6 +230,8 @@ interface FolderChild {
   _count: { boards: number; childFolders: number };
   boards: BoardChild[];
   docs: DocChild[];
+  /** Canvases made inside this Folder (absent from an older server). */
+  whiteboards: WhiteboardChild[];
   childFolders: FolderChild[];
 }
 
@@ -293,6 +313,10 @@ export function SpaceTreeRow({
   // Reorder drop indicator: which edge of this row the dragged Space would land on.
   const [spaceDropEdge, setSpaceDropEdge] = useState<"before" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
+  // Lit on its own page, and as the nearest rendered ancestor of an open
+  // item whose own row is not on screen (a collapsed Space, a deep folder).
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("space", space.id));
+  const lit = isActive || pillActive;
 
   const loadChildren = () => {
     setLoading(true);
@@ -303,6 +327,7 @@ export function SpaceTreeRow({
           const normalizeFolder = (f: FolderChild): FolderChild => ({
             ...f,
             docs: f.docs ?? [],
+            whiteboards: f.whiteboards ?? [],
             childFolders: (f.childFolders ?? []).map(normalizeFolder),
           });
           const payload: ChildrenPayload = {
@@ -406,9 +431,10 @@ export function SpaceTreeRow({
           const ok = await moveTreeItem(p, { folderId: null, spaceId: space.id });
           if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
+        ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-9 items-center gap-2 px-3 rounded-lg ${
-          rootDragOver ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"
+          rootDragOver ? "ring-2 ring-inset ring-brand bg-selected" : lit ? "bg-side-pill" : "hover:bg-hover"
         } ${reorderable ? "cursor-pointer" : ""}`}
       >
         {spaceDropEdge ? (
@@ -435,7 +461,7 @@ export function SpaceTreeRow({
         <Link
           href={`/spaces/${space.slug}`}
           className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 ${
-            isActive ? "text-ink font-medium" : "text-ink"
+            lit ? "text-ink font-medium" : "text-ink"
           }`}
         >
           <span className="min-w-0 flex-1 truncate">{space.name}</span>
@@ -443,8 +469,8 @@ export function SpaceTreeRow({
             <Globe className="w-3 h-3 text-ink-3 shrink-0" aria-label="Everyone in the org" />
           ) : null}
         </Link>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
-          <CreateInsideTrigger kind="space" spaceId={space.id} role={space.role} onCreated={() => { setExpanded(true); refresh(); }} />
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${lit ? "bg-side-pill" : "bg-side"}`}>
+          <CreateInsideTrigger kind="space" spaceId={space.id} spaceSlug={space.slug} role={space.role} onCreated={() => { setExpanded(true); refresh(); }} />
           <ContainerMenuTrigger
             ref={moreRef}
             compact
@@ -483,6 +509,7 @@ export function SpaceTreeRow({
                   key={f.id}
                   folder={f}
                   spaceId={space.id}
+                  spaceSlug={space.slug}
                   spaceName={space.name}
                   onChanged={refresh}
                 />
@@ -492,17 +519,18 @@ export function SpaceTreeRow({
                   key={b.id}
                   board={b}
                   spaceId={space.id}
+                  spaceSlug={space.slug}
                   onChanged={refresh}
                 />
               ))}
               {data.docs.map((d) => (
-                <DocTreeRow key={d.id} doc={d} />
+                <DocTreeRow key={d.id} doc={d} spaceSlug={space.slug} />
               ))}
               {data.whiteboards.map((w) => (
-                <WhiteboardTreeRow key={w.id} whiteboard={w} onChanged={refresh} />
+                <WhiteboardTreeRow key={w.id} whiteboard={w} spaceSlug={space.slug} onChanged={refresh} />
               ))}
               {data.tables.map((t) => (
-                <TableTreeRow key={t.id} table={t} onChanged={refresh} />
+                <TableTreeRow key={t.id} table={t} spaceSlug={space.slug} onChanged={refresh} />
               ))}
             </>
           )}
@@ -515,18 +543,22 @@ export function SpaceTreeRow({
 function FolderTreeRow({
   folder,
   spaceId,
+  spaceSlug,
   spaceName,
   onChanged,
 }: {
   folder: FolderChild;
   spaceId: string;
+  /** The Space's slug, for the Work addresses of everything beneath. */
+  spaceSlug: string;
   spaceName: string;
   onChanged: () => void;
 }) {
   const { toast } = useOsToast();
   const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? storedExpanded(folder.id));
   const pathname = usePathname();
-  const isActive = pathname === `/folders/${folder.id}`;
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("folder", folder.id));
+  const isActive = pathname === `/folders/${folder.id}` || pillActive;
   useEffect(() => { folderExpandStore.set(folder.id, expanded); storeExpanded(folder.id, expanded); }, [expanded, folder.id]);
   useEffect(() => {
     let alive = true;
@@ -548,6 +580,7 @@ function FolderTreeRow({
   const hasChildren =
     folder.boards.length > 0 ||
     folder.docs.length > 0 ||
+    folder.whiteboards.length > 0 ||
     folder.childFolders.length > 0 ||
     folder._count.childFolders > 0;
 
@@ -598,6 +631,7 @@ function FolderTreeRow({
           const ok = await moveTreeItem(p, { folderId: folder.id, spaceId });
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
+        ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
@@ -644,7 +678,7 @@ function FolderTreeRow({
           ) : null}
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
-          <CreateInsideTrigger kind="folder" spaceId={spaceId} folderId={folder.id} role={folder.role} onCreated={() => { setExpanded(true); onChanged(); }} />
+          <CreateInsideTrigger kind="folder" spaceId={spaceId} spaceSlug={spaceSlug} folderId={folder.id} role={folder.role} onCreated={() => { setExpanded(true); onChanged(); }} />
           <ContainerMenuTrigger
             ref={moreRef}
             compact
@@ -656,6 +690,7 @@ function FolderTreeRow({
               color: folder.color,
               visibility: folder.visibility,
               spaceId,
+              spaceSlug,
               spaceName,
             }}
             role={folder.role}
@@ -666,6 +701,7 @@ function FolderTreeRow({
       {expanded &&
        (folder.boards.length > 0 ||
         folder.docs.length > 0 ||
+        folder.whiteboards.length > 0 ||
         folder.childFolders.length > 0) ? (
         <ul className="mt-0.5 ps-[19px]">
           {folder.childFolders.map((cf) => (
@@ -673,15 +709,19 @@ function FolderTreeRow({
               key={cf.id}
               folder={cf}
               spaceId={spaceId}
+              spaceSlug={spaceSlug}
               spaceName={spaceName}
               onChanged={onChanged}
             />
           ))}
           {folder.boards.map((b) => (
-            <BoardTreeRow key={b.id} board={b} spaceId={spaceId} onChanged={onChanged} />
+            <BoardTreeRow key={b.id} board={b} spaceId={spaceId} spaceSlug={spaceSlug} onChanged={onChanged} />
           ))}
           {folder.docs.map((d) => (
-            <DocTreeRow key={d.id} doc={d} />
+            <DocTreeRow key={d.id} doc={d} spaceSlug={spaceSlug} />
+          ))}
+          {folder.whiteboards.map((w) => (
+            <WhiteboardTreeRow key={w.id} whiteboard={w} spaceSlug={spaceSlug} onChanged={onChanged} />
           ))}
         </ul>
       ) : null}
@@ -692,19 +732,24 @@ function FolderTreeRow({
 function BoardTreeRow({
   board,
   spaceId,
+  spaceSlug,
   onChanged,
 }: {
   board: BoardChild;
   /** The Space the List lives in, so its menu can create siblings. */
   spaceId?: string;
+  /** Its slug, so a doc created from the List's menu opens at its Work address. */
+  spaceSlug?: string;
   onChanged: () => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const moreRef = useRef<ContextMenuHandle>(null);
   // ClickUp highlights the currently-open List with the same grey pill the
-  // Space row uses; child icons stay monochrome unless user-colored.
-  const isActive = pathname === `/boards/${board.slug}`;
+  // Space row uses; child icons stay monochrome unless user-colored. The pill
+  // also lands here for a List doc or a task doc open in Work.
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("list", board.id));
+  const isActive = pathname === `/boards/${board.slug}` || pillActive;
   // Sprint Lists swap the glyph (dates already live in the name convention);
   // the icon stays neutral like every sibling row, no hue-keying.
   const sprint = parseSprintMeta(board.settings);
@@ -712,6 +757,7 @@ function BoardTreeRow({
     <li className="group/boardrow relative">
       <div
         draggable
+        ref={pillRef}
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
@@ -744,6 +790,7 @@ function BoardTreeRow({
               color: board.color,
               visibility: board.visibility,
               spaceId,
+              spaceSlug,
             }}
             role={board.role}
             onUpdated={onChanged}
@@ -756,32 +803,34 @@ function BoardTreeRow({
 
 function TableTreeRow({
   table,
+  spaceSlug,
   onChanged,
 }: {
   table: TableChild;
+  spaceSlug: string;
   onChanged: () => void;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
   // The ONE table menu (spec-tables-forms section 3 TableRowMenu, placement
   // tree), shared with the Tables sidebar, /tables and the sheet's "...".
   const menu = useTableRowMenu();
-  const target = { id: table.id, name: table.name, canManage: table.canManage };
-  const isActive = pathname === `/tables/${table.id}`;
+  const target = { id: table.id, name: table.name, canManage: table.canManage, spaceSlug };
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("table", table.id));
+  const isActive = pillActive;
   return (
     <li className="group/tablerow relative">
       <div
+        ref={pillRef}
         onContextMenu={(e) => menu.open(e, target)}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
-        <button
-          type="button"
-          onClick={() => router.push(`/tables/${table.id}`)}
+        {/* Opens IN WORK, at the table's Space-scoped address. */}
+        <Link
+          href={objectHref("table", table.id, "home", spaceSlug)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <TableIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
-        </button>
+        </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="table" id={table.id} />
           <button
@@ -801,33 +850,35 @@ function TableTreeRow({
   );
 }
 
-function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void }) {
+function DocTreeRow({ doc, spaceSlug, onChanged }: { doc: DocChild; spaceSlug: string; onChanged?: () => void }) {
   const router = useRouter();
-  const pathname = usePathname();
   const noteMenu = useDocRowMenu();
-  const isActive = pathname === `/docs/${doc.id}`;
+  const target = { id: doc.id, title: doc.title, spaceSlug };
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("doc", doc.id));
+  const isActive = pillActive;
   return (
     <li className="group/docrow relative">
       <div
+        ref={pillRef}
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
-        onContextMenu={(e) => noteMenu.open(e, { id: doc.id, title: doc.title })}
+        onContextMenu={(e) => noteMenu.open(e, target)}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
-        <button
-          type="button"
-          onClick={() => router.push(`/docs/${doc.id}`)}
+        {/* Opens IN WORK, at the doc's Space-scoped address. */}
+        <Link
+          href={objectHref("doc", doc.id, "home", spaceSlug)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <FileText className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
-        </button>
+        </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/docrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="doc" id={doc.id} />
           <button
             type="button"
             aria-label="Doc actions"
-            onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: doc.id, title: doc.title }); }}
+            onClick={(e) => { e.stopPropagation(); noteMenu.open(e, target); }}
             className="w-5 h-5 grid place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
@@ -839,28 +890,28 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
   );
 }
 
-function WhiteboardTreeRow({ whiteboard, onChanged }: { whiteboard: WhiteboardChild; onChanged: () => void }) {
-  const router = useRouter();
-  const pathname = usePathname();
+function WhiteboardTreeRow({ whiteboard, spaceSlug, onChanged }: { whiteboard: WhiteboardChild; spaceSlug: string; onChanged: () => void }) {
   const moreRef = useRef<ContextMenuHandle>(null);
-  const isActive = pathname === `/canvas/${whiteboard.id}`;
+  const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("canvas", whiteboard.id));
+  const isActive = pillActive;
   return (
     <li className="group/wbrow relative">
       <div
+        ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
-        <button
-          type="button"
-          onClick={() => router.push(`/canvas/${whiteboard.id}`)}
+        {/* Opens IN WORK, at the canvas's Space-scoped address. */}
+        <Link
+          href={objectHref("canvas", whiteboard.id, "home", spaceSlug)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
-        </button>
+        </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
-          <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name }} onUpdated={onChanged} />
+          <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name, spaceSlug }} onUpdated={onChanged} />
         </span>
       </div>
     </li>

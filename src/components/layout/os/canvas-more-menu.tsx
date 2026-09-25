@@ -15,6 +15,8 @@ interface CanvasRowLike {
   id: string;
   name: string;
   spaceId?: string | null;
+  /** The canvas's Space slug, so the menu's Open rows build its Space-scoped Work address. */
+  spaceSlug?: string | null;
 }
 
 interface Props {

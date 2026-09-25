@@ -10,11 +10,16 @@
  * Inserted from the "@" suggestion menu wired in blocknote-canvas. Content
  * mode is "none" — the pill is atomic (not editable inline), exactly like
  * Notion: you delete it as a unit.
+ *
+ * The stored href is canonical and is never rewritten; a click maps it into
+ * the section the person is in at that moment (a doc mention opened in Work
+ * stays in Work, src/lib/nav/object-href.ts).
  */
 
 import { createReactInlineContentSpec } from "@blocknote/react";
 import { useRouter } from "next/navigation";
 import { AtSign, FileText } from "lucide-react";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
 export const mentionInlineSpec = createReactInlineContentSpec(
   {
@@ -46,9 +51,9 @@ function MentionPill({
       contentEditable={false}
       role={href ? "link" : undefined}
       tabIndex={href ? 0 : undefined}
-      onClick={() => { if (href) router.push(href); }}
+      onClick={() => { if (href) router.push(sectionHrefNow(href)); }}
       onKeyDown={(e) => {
-        if (href && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); router.push(href); }
+        if (href && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); router.push(sectionHrefNow(href)); }
       }}
       title={label}
     >

@@ -1,10 +1,15 @@
 import { Prisma, PrismaClient } from "@/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { reuseCachedClient } from "@/lib/prisma-cache";
 
 const connectionString = process.env.DATABASE_URL!;
 
+// One cached client PER COPY of the generated client, keyed by its class
+// (lib/prisma-cache.ts has the whole why: the dev bundler loads a copy per
+// server layer, and a client from one copy mis-binds another copy's
+// Prisma.sql fragments).
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prismaByClass: WeakMap<object, PrismaClient> | undefined;
 };
 
 function createPrismaClient() {
@@ -12,7 +17,7 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-// The globalThis cache deliberately survives HMR, but it also survives
+// The cache deliberately survives HMR, but it also survives
 // `prisma generate`, so after a schema change the long-running dev server
 // keeps serving an instance that predates the newest models and every
 // route touching them 500s until someone manually restarts `pnpm dev`.
@@ -35,18 +40,15 @@ function fingerprint(client: PrismaClient): string {
   return Object.entries(rdm.models).map(([m, v]) => `${m}:${v.fields?.length ?? 0}`).join(",");
 }
 
-function resolveClient(): PrismaClient {
-  const cached = globalForPrisma.prisma;
-  if (!cached) return createPrismaClient();
-  const fresh = createPrismaClient();
-  if (isCurrent(cached) && fingerprint(cached) === fingerprint(fresh)) {
-    // Same shape: keep the warm pool, drop the one just built (it never connected).
-    void fresh.$disconnect().catch(() => {});
-    return cached;
-  }
-  return fresh;
-}
+const cache = (globalForPrisma.prismaByClass ??= new WeakMap<object, PrismaClient>());
 
-export const prisma = resolveClient();
+export const prisma = reuseCachedClient(
+  cache,
+  PrismaClient,
+  createPrismaClient,
+  // Same shape: keep the warm pool, drop the one just built (it never connected).
+  (cached, fresh) => isCurrent(cached) && fingerprint(cached) === fingerprint(fresh),
+  (unused) => { void unused.$disconnect().catch(() => {}); },
+);
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+if (process.env.NODE_ENV !== "production") cache.set(PrismaClient, prisma);

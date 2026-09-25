@@ -261,28 +261,14 @@ export async function canContributeSpace(spaceId: string, userId: string, access
 
 // ── A viewer, whole ─────────────────────────────────────────────────
 //
-// The routes Bird's eye added hand the session unwrap (itemCtx) to these and
-// never read the legacy signal themselves, on the item-gate precedent: this
-// file is on the access allow-list, the routes are not. They are the Space
-// twins of the Phase 5b wrappers on main (list-links-server.ts
-// spaceForViewer and canContributeSpaceFor), which this branch predates;
-// the two answer identically, so either can serve once they meet.
+// The session unwrap (itemCtx) the Bird's eye routes hand in. The Space gates
+// themselves are Phase 5b's wrappers in list-links-server.ts (spaceForViewer,
+// canContributeSpaceFor); this file only reads the Lists.
 
 export interface SpaceViewer {
   userId: string;
   organizationId: string;
   accessLevel: string | null | undefined;
-}
-
-/** The Space, when this viewer can read it in their own org; else null. */
-export async function spaceForViewer(v: SpaceViewer, spaceId: string) {
-  const s = await getSpaceForReader(spaceId, v.userId, v.accessLevel ?? undefined);
-  return s && s.organizationId === v.organizationId ? s : null;
-}
-
-/** The contribute ladder at Space level (any non-GUEST member, or an org admin). */
-export function canContributeSpaceFor(v: SpaceViewer, spaceId: string): Promise<boolean> {
-  return canContributeSpace(spaceId, v.userId, v.accessLevel ?? undefined);
 }
 
 // ── The Lists of a Space this viewer can read ───────────────────────

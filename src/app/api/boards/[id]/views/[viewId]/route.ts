@@ -22,6 +22,7 @@ import {
   UNPIN_STALE,
 } from "@/lib/work/default-view";
 import { prisma } from "@/lib/prisma";
+import { mergeJsonObject, parseViewComfort } from "@/lib/list-comfort";
 import type { Prisma } from "@/generated/prisma";
 
 async function ctx() {
@@ -90,6 +91,11 @@ const patchSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   displayOrder: z.number().int().min(0).max(1_000_000).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
+  // Phase 5b: a shallow merge over the STORED config (null deletes a key), on
+  // the row read FOR UPDATE, so two tabs saving different keys (a filter here,
+  // a pinned column there) stop clobbering each other. Wholesale `config`
+  // keeps working unchanged.
+  configPatch: z.record(z.string(), z.unknown()).optional(),
   isDefault: z.boolean().optional(),
   /** The view-type switcher: a view is a named filter, its type is how it draws. */
   type: z.enum(VIEW_TYPES).optional(),
@@ -137,10 +143,34 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: PIN_PRIVATE_DENIED }, { status: 409 });
   }
 
+  // Pinned (frozen) columns and row height, per view, wherever they arrive:
+  // normalised, and a wrong value is refused by name.
+  const comfort: Record<string, unknown> = {};
+  for (const blob of [parsed.data.config, parsed.data.configPatch]) {
+    if (!blob) continue;
+    const v = parseViewComfort(blob);
+    if (!v.ok) return NextResponse.json({ error: "invalid_view_config", key: v.key }, { status: 400 });
+    Object.assign(comfort, v.value);
+  }
+  // A whole config drops a nulled key; a patch keeps the null, which is how
+  // mergeJsonObject knows to delete the stored one.
+  const normalise = (cfg: Record<string, unknown>, keepNull = false) => {
+    const out = { ...cfg };
+    for (const [k, v] of Object.entries(comfort)) {
+      if (!(k in cfg)) continue;
+      if (v === null && !keepNull) delete out[k];
+      else out[k] = v;
+    }
+    return out;
+  };
+
   const data: Record<string, unknown> = { ...parsed.data };
-  // A pin is written by the pin branch alone, so no config the client sends
-  // may carry one in (or out): the stored mark is carried below.
-  if (parsed.data.config !== undefined) data.config = withoutPinnedDefault(parsed.data.config) as object;
+  // configPatch is not a column: it is merged into config on the locked row.
+  delete data.configPatch;
+  // A pin is written by the pin branch alone, so no config or configPatch the
+  // client sends may carry one in (or out): the stored mark is carried below.
+  if (parsed.data.config !== undefined) data.config = withoutPinnedDefault(normalise(parsed.data.config)) as object;
+  const configPatch = parsed.data.configPatch ? withoutPinnedDefault(parsed.data.configPatch) : undefined;
 
   type Refusal = { status: number; error: string };
   type LockedRow = { config: unknown; isShared: boolean; ownerId: string | null; isDefault: boolean; type: string };
@@ -150,8 +180,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       FROM "View" WHERE id = ${viewId} FOR UPDATE`;
     return rows[0] ?? null;
   };
-  // The config the write is based on: the one sent, else the stored one.
-  const composeConfig = (row: LockedRow): unknown => (parsed.data.config !== undefined ? data.config : row.config);
+  // The config the write is based on: the one sent, else the stored one,
+  // with a configPatch merged on top (a null in the patch deletes that key).
+  const composeConfig = (row: LockedRow): unknown => {
+    const base = parsed.data.config !== undefined ? data.config : row.config;
+    return configPatch ? mergeJsonObject(base, normalise(configPatch, true)) : base;
+  };
   // ONE advisory lock per List serialises every write that can change which
   // view is the default. Under READ COMMITTED an UPDATE re-checks only the
   // rows that matched its first snapshot, so two concurrent pins could each
@@ -185,7 +219,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       await tx.view.update({ where: { id: viewId }, data });
       return null;
     });
-  } else if (parsed.data.isDefault === false || makesPrivate || parsed.data.config !== undefined) {
+  } else if (parsed.data.isDefault === false || makesPrivate || parsed.data.config !== undefined || configPatch) {
     // UNPIN, MAKE PRIVATE, or a CONFIG WRITE. Every renderer PATCHes the
     // config it mounted with (board-canvas, board-table-view, calendar,
     // gantt, doc, form, chart, pivot, workload, whiteboard), so a config
@@ -198,7 +232,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const row = await lockedRow(tx);
       if (!row) return { status: 404, error: "Not found" };
       const nextConfig =
-        parsed.data.config !== undefined ? carryPinnedDefault(composeConfig(row), row.config) : row.config;
+        parsed.data.config !== undefined || configPatch ? carryPinnedDefault(composeConfig(row), row.config) : row.config;
       // The pinned default cannot go private (review #31), judged on the view
       // as this write leaves it. An ownerless legacy row stays visible to
       // everyone whatever its flag says, so it is not refused.
@@ -234,7 +268,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         // behind can surface as the default once this one is gone.
         await clearOthers(tx);
         data.config = withoutPinnedDefault(composeConfig(row)) as object;
-      } else if (parsed.data.config !== undefined) {
+      } else if (parsed.data.config !== undefined || configPatch) {
         data.config = nextConfig as object;
       }
       await tx.view.update({ where: { id: viewId }, data });

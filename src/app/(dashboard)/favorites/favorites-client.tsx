@@ -23,6 +23,7 @@ import { FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { DotsArt } from "@/components/ui/dots-art";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useObjectHref } from "@/components/layout/os/use-object-href";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
@@ -75,6 +76,9 @@ export function FavoritesClient({
   initialShowLocation: boolean;
   initialShowStarred: boolean;
 }) {
+  // /favorites is Work: a starred doc, table, canvas or form opens in Work
+  // (its server-built href is canonical and is mapped here).
+  const { map: sectionLink } = useObjectHref();
   const { patchPrefs } = useOsShell();
   const { toast } = useOsToast();
 
@@ -301,7 +305,7 @@ export function FavoritesClient({
                       className="group flex items-center gap-3 border-b border-line-soft px-4 last:border-b-0 hover:bg-hover"
                       style={{ minHeight: "var(--os-row-h)" }}
                     >
-                      <Link href={r.href} className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <Link href={sectionLink(r.href)} className="flex min-w-0 flex-1 items-center gap-2.5">
                         <EntityTile size="sm" icon={r.icon} color={r.color} name={r.name} />
                         <span className="min-w-0 flex-1 truncate font-medium text-ink group-hover:underline">{r.name}</span>
                       </Link>

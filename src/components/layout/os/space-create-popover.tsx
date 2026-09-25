@@ -10,7 +10,9 @@
 //
 // Every target goes through the same routes the container menu uses, and
 // tells the tree (refreshSidebar + treeChanged) so the new row appears at
-// once.
+// once. A new Doc, Canvas or Table opens in the section this row is in: at
+// its Space-scoped Work address when the row passes its Space's slug, at the
+// Work door otherwise (src/lib/nav/object-href.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -22,11 +24,14 @@ import { MorePortal } from "./more-portal";
 import { refreshSidebar } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
+import { objectHrefNow } from "./use-object-href";
 
 interface Props {
   kind: "space" | "folder";
   /** The Space id (for a Folder, its owning Space). */
   spaceId: string;
+  /** The Space's slug, so what is created here opens at its Work address. */
+  spaceSlug?: string | null;
   /** The Folder id when kind is "folder". */
   folderId?: string;
   /** Absent = the reader's role (no door), as the container menu treats it. */
@@ -35,7 +40,7 @@ interface Props {
   onCreated?: () => void;
 }
 
-export function CreateInsideTrigger({ kind, spaceId, folderId, role, onCreated }: Props) {
+export function CreateInsideTrigger({ kind, spaceId, spaceSlug, folderId, role, onCreated }: Props) {
   const router = useRouter();
   const { toast } = useOsToast();
   const { openCreateList, openCreateSprint, openTemplateCenter } = useOsShell();
@@ -102,7 +107,7 @@ export function CreateInsideTrigger({ kind, spaceId, folderId, role, onCreated }
     onCreated?.();
     close();
     const id = d?.doc?.id ?? d?.id;
-    if (id) router.push(`/docs/${id}`);
+    if (id) router.push(objectHrefNow("doc", id, spaceSlug));
   };
 
   const createCanvas = async () => {
@@ -113,7 +118,7 @@ export function CreateInsideTrigger({ kind, spaceId, folderId, role, onCreated }
     onCreated?.();
     close();
     const id = d?.whiteboard?.id ?? d?.id;
-    if (id) router.push(`/canvas/${id}`);
+    if (id) router.push(objectHrefNow("canvas", id, spaceSlug));
   };
 
   const createTable = async () => {
@@ -125,7 +130,7 @@ export function CreateInsideTrigger({ kind, spaceId, folderId, role, onCreated }
     refreshSidebar();
     treeChanged({ kind: "table", action: "created" });
     close();
-    router.push(`/tables/${id}?new=1`);
+    router.push(`${objectHrefNow("table", id, spaceSlug)}?new=1`);
   };
 
   if (!role || !roleAtLeast(role, "edit")) return null;

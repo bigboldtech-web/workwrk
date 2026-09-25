@@ -17,7 +17,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 /** An in-shell action the bar runs itself, as opposed to a navigation. */
-export type PersonalToolAction = "create-task" | "my-work" | "notepad" | "reminder" | "doc" | "voice";
+export type PersonalToolAction = "create-task" | "my-work" | "notepad" | "reminder" | "doc" | "voice" | "canvas";
 
 export interface PersonalTool {
   key: string;
@@ -40,7 +40,10 @@ export const PERSONAL_TOOLS: readonly PersonalTool[] = [
   { key: "create-doc", label: "Quick doc", Icon: FileText, href: null, action: "doc" },
   { key: "voice", label: "Voice to text", Icon: Mic, href: null, action: "voice", needsSpeech: true },
   { key: "track-time", label: "Track time", Icon: Clock, href: "/timesheets" },
-  { key: "create-whiteboard", label: "Create canvas", Icon: Frame, href: "/canvas?new=1" },
+  // An action, not the /canvas?new=1 link it was: the bar makes the canvas
+  // and opens it in the section the person is in, so a canvas made from the
+  // bar while in Work opens in Work (use-personal-tools.ts).
+  { key: "create-whiteboard", label: "Create canvas", Icon: Frame, href: null, action: "canvas" },
   { key: "view-people", label: "View people", Icon: Users, href: "/people" },
   { key: "ai-notetaker", label: "AI Notetaker", Icon: Sparkles, href: "/notetaker" },
 ];

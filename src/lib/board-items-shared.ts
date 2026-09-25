@@ -311,6 +311,30 @@ export interface BoardItemRow {
   /** Resolved assignees (primary first), when the fetch path provides them.
    *  ownerId/owner is always assignees[0]. */
   assignees?: { id: string; firstName: string; lastName: string; avatar: string | null; email?: string | null }[];
+  /**
+   * Phase 5b, connect columns: per connect field key, the connected tasks THIS
+   * viewer can read. Present only when the List has a connect field.
+   */
+  connections?: Record<string, Array<{ id: string; title: string; statusLabel: string | null; statusColor: string | null; done: boolean }>>;
+  /** Phase 5b, mirror columns: per mirror key, computed at read time from readable tasks only. */
+  mirrors?: Record<string, { values: unknown[]; rollup?: number | string | null }>;
+  /**
+   * Phase 5b: present when the row is shown in a List THROUGH A LINK (the
+   * task's home is another List). A linked root carries its position in this
+   * List and its home status for the indicator; a subtask shown through its
+   * parent carries position null.
+   */
+  listLink?: {
+    boardId: string;
+    position: number | null;
+    rootId: string;
+    /** Null unless the viewer can read the home List. */
+    homeList?: { id: string; slug: string; name: string } | null;
+    /** The task's status resolved in its HOME set, always present on a root. */
+    homeStatus?: StatusOption | null;
+    /** The home set, only when the viewer can read the home List. */
+    homeStatuses?: StatusOption[];
+  };
 }
 
 // ── Owner-only assignee patches (data-loss fix) ────────────────────

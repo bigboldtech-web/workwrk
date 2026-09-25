@@ -24,6 +24,8 @@ import { prisma } from "@/lib/prisma";
 import { canEditSpace } from "@/lib/space";
 import { folderVisibleTo, folderReadable } from "@/lib/folder";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
+import { mergeListTaskCounts } from "@/lib/list-links";
+import { linkedTreeCountGroups } from "@/lib/list-links-server";
 
 export const dynamic = "force-dynamic";
 
@@ -128,13 +130,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : [];
   const tasksByList = new Map<string, { open: number; done: number }>();
   const statusesByList = new Map(lists.map((b) => [b.id, getBoardStatuses(b)]));
-  for (const row of statusCounts) {
-    const bucket = tasksByList.get(row.boardId) ?? { open: 0, done: 0 };
-    const opts = statusesByList.get(row.boardId) ?? [];
-    if (isDoneStatus(opts, row.status)) bucket.done += row._count._all;
-    else bucket.open += row._count._all;
-    tasksByList.set(row.boardId, bucket);
+  // Phase 5b: a List's count includes the tasks linked into it, each done or
+  // open by its HOME status set (the status belongs to the home).
+  // Grouped in Postgres, so the count is exact however many tasks are shared.
+  const linkRows = await linkedTreeCountGroups(listIds, { organizationId });
+  const otherHomes = [...new Set(linkRows.map((r) => r.homeBoardId))].filter((h) => !statusesByList.has(h));
+  if (otherHomes.length) {
+    const homes = await prisma.board.findMany({ where: { id: { in: otherHomes } }, select: { id: true, statuses: true } });
+    for (const h of homes) statusesByList.set(h.id, getBoardStatuses(h));
   }
+  const merged = mergeListTaskCounts(
+    statusCounts.map((r) => ({ boardId: r.boardId, status: r.status, count: r._count._all })),
+    linkRows,
+    (home, status) => isDoneStatus(statusesByList.get(home) ?? [], status),
+  );
+  for (const [listId, count] of merged) tasksByList.set(listId, { open: count.open, done: count.done });
 
   const ownerIds = Array.from(new Set([
     ...folders.map((f) => f.ownerId),

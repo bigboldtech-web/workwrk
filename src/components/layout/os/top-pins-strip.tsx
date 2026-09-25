@@ -21,12 +21,17 @@ import { X } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { apiFetch } from "@/lib/api-fetch";
 import { useBoot } from "./boot-context";
+import { useObjectHref } from "./use-object-href";
 
 type PinChip = { kind: string; id: string; label: string; href: string; icon: string | null; color: string | null };
 
 export const PINS_CHANGED_EVENT = "workwrk:pins-changed";
 
 export function TopPinsStrip() {
+  // A pin's stored href is canonical; it opens in the section the strip is
+  // shown in (src/lib/nav/object-href.ts), and a pin of the object already
+  // open goes to the address it is mounted at.
+  const { map: sectionLink } = useObjectHref();
   const { boot } = useBoot();
   const bootPinCount = Array.isArray(boot.prefs.home?.topPins) ? boot.prefs.home.topPins.length : 0;
   // null = not hydrated yet (the boot count decides whether to reserve the row).
@@ -72,7 +77,7 @@ export function TopPinsStrip() {
           key={`${p.kind}:${p.id}`}
           className="group inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-line bg-raised pe-0.5 ps-1.5 text-sm text-ink hover:bg-hover"
         >
-          <Link href={p.href} className="inline-flex min-w-0 items-center gap-1.5" title={p.label}>
+          <Link href={sectionLink(p.href)} className="inline-flex min-w-0 items-center gap-1.5" title={p.label}>
             <EntityTile size="xs" icon={p.icon} color={p.color ?? undefined} name={p.label} />
             <span className="max-w-[160px] truncate">{p.label}</span>
           </Link>

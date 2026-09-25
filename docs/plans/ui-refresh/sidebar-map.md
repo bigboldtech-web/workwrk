@@ -28,6 +28,8 @@ Cross-unit canon, Phase 3. Compiled 2026-09-12 from the hub-owning unit specs. C
 
 **Locked rows.** A findable Space the viewer holds nothing on renders with its label in `--os-ink-3` and a 16px `Lock`; the click opens `LockedPage` at the Space URL. Folders and Lists render only as container labels above something the viewer holds.
 
+**The pill for an open object (2026-09-24).** When a Doc, Table, Canvas, SOP or form is open in Work, the pill follows what the sidebar actually rendered, for the object actually mounted (src/lib/nav/open-object.ts): the object's **own tree row** if it is rendered; else its **FAVORITES row** if that is rendered; else its **nearest rendered ancestor** (the List of a List or task doc, the anchored doc of a sub-page, then its Folders nearest first, then its Space); else nothing. Exactly one row carries it, and a row that takes it for a newly opened object scrolls into view once. It stays on the object while the task drawer's `/item/[id]` URL shows over it, because the mounted page publishes it, not the URL. The tree opens the object's branch once per placement (its Space and the folders its route's gate computed with the tree's own rules), and never opens a folder the viewer's tree would not render.
+
 ---
 
 ## 1. Work hub (`home`): owned by work-home; the Spaces tree by spaces-lists
@@ -60,7 +62,7 @@ Renders only when the viewer has at least one starred object; never for a Guest.
 
 | Row | href | Notes |
 |---|---|---|
-| one row per starred object, `EntityTile size="sm"` neutral + name, newest starred first, kinds mixed (Space, Folder, List, Doc, Table, Canvas, File) | the object's URL | sub-labels by kind only past 6 rows; unreadable favorites are dropped silently. Hover "…": Open in new tab · Copy link · Remove from favorites |
+| one row per starred object, `EntityTile size="sm"` neutral + name, newest starred first, kinds mixed (Space, Folder, List, Doc, Table, Canvas, File) | the object's URL. Doc, Table, Canvas and Form favourites link the Work door (`/work/docs/[id]` and siblings), which places the object in its own Space before its editor mounts, or the address it is already mounted at when it is the open object; Files open their URL | sub-labels by kind only past 6 rows; unreadable favorites are dropped silently. Hover "…": Open in new tab · Copy link · Remove from favorites. A favourite carries the pill only when its object's own tree row is not on screen (section 0) |
 | **See all favorites** (ghost row, 13/500 `--os-ink-2`, always last) | `/favorites` | rendered whenever the section renders; it is the row that goes active on `/favorites` |
 
 Data: one `GET /api/me/favorites` for all seven kinds. Collapse state `sidebar.groups.favorites`.
@@ -77,7 +79,7 @@ Label collapses only. Hover on the label reveals two 28px ghost buttons: "…" (
 | **Folder** (indent 20 per level, max 6) | `Folder` | `/folders/[id]` | 12px lock after the name when Restricted |
 | **List** | `ListChecks` (sprint Lists `IterationCw`) | `/boards/[slug]` | children = saved views, only when the List has 2 or more; collapsed by default |
 | **View** (child of a List) | a 6px `--os-ink-3` bullet in the glyph slot | `/boards/[slug]?view=<id>` | 14/400 `--os-ink-2` |
-| **Doc / Canvas / Table** (anchored) | `FileText` / `Brush` / `Table2` | `/docs/[id]` · `/canvas/[id]` · `/tables/[id]` | |
+| **Doc / Canvas / Table** (anchored) | `FileText` / `Brush` / `Table2` | `/spaces/[slug]/docs/[id]` · `/spaces/[slug]/canvas/[id]` · `/spaces/[slug]/tables/[id]` | Links to the item's Work address, so it **opens in place**: the Work sidebar stays, the item opens beside it, and the rail stays on Work (src/lib/nav/object-href.ts). Cmd-click and "Copy link address" give the same Work address. The row is lit by the pill rule in section 0. The canonical `/docs/[id]`, `/canvas/[id]` and `/tables/[id]` stay valid and are what the Docs and Tables hubs open |
 
 No counts on tree rows. Expand state `sidebar.expanded[]`; hidden Spaces `sidebar.hiddenSpaceIds[]`.
 

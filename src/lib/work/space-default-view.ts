@@ -15,6 +15,7 @@
 // client strip, the route and a unit test all run the same code.
 
 import { hasModule } from "@/lib/space-modules";
+import { mergeJsonObject } from "@/lib/list-comfort";
 
 export const SPACE_VIEW_KEYS = ["overview", "birdseye", "list", "board", "team", "calendar", "gantt"] as const;
 
@@ -130,13 +131,9 @@ export function spaceTabMenuRow({
  * bookmark and a pin can never erase each other's keys.
  */
 export function mergeSpaceSettings(stored: unknown, patch: Record<string, unknown>): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...asObject(stored) };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined) continue;
-    if (v === null) delete next[k];
-    else next[k] = v;
-  }
-  return next;
+  // The same rule every settings and config writer uses (Phase 5b's
+  // mergeJsonObject); kept under this name so the Space writer reads as one.
+  return mergeJsonObject(stored, patch);
 }
 
 /**

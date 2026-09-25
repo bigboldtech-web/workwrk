@@ -29,5 +29,5 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     organizationId: c.organizationId,
     actorId: c.userId,
   });
-  return NextResponse.json({ item: (await getBoardItemRow(id)) ?? row });
+  return NextResponse.json({ item: (await getBoardItemRow(id, { viewer: c })) ?? row });
 }
