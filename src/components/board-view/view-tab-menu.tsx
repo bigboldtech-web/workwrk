@@ -1,21 +1,37 @@
 "use client";
 
-// ViewTabMenu — the "..." popover that lives on each view tab in the
-// Board detail page. Actions:
-//   Rename       — inline editor in the popover, PATCH name
-//   Set default  — PATCH isDefault=true (server demotes the previous default in the same tx)
-//   Duplicate    — POST a new view with the source's type + config + " (copy)" suffix
-//   Delete       — DELETE; blocked server-side if it's the last view on the board
+// ViewTabContextMenu: the menu on each view tab of a List. It opens on a
+// right-click, a long-press (touch and pen) and the keyboard's context-menu
+// key or Shift+F10, all through useContextMenuTrigger. Rows:
+//   Rename               inline editor in the menu, PATCH { name }
+//   Pin as default view  PATCH { isDefault: true }: the view opens first for
+//                        everyone on the List (the route clears every other
+//                        view's default and mark in the same transaction)
+//   Unpin                PATCH { isDefault: false } on the pinned view: the
+//                        List falls back to its Board
+//   Duplicate            POST a new view with the source's type and config
+//                        and a " (copy)" suffix
+//   Delete               DELETE; refused server-side for the last view
+// Which pin row shows is the strip's call (pinMenuRow in default-view.ts),
+// passed in as `pinRow`, so the menu and the strip cannot disagree.
+//
+// Rename, Duplicate and Delete are gated the same way: the strip passes the
+// route's own answer for each (`gates`), and a row the route would refuse is
+// not drawn. They used to render for everyone, so a view-only reader got
+// three rows that could only answer 403. A tab with no row left opens no
+// menu at all (viewMenuHasRows), rather than an empty panel.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  MoreHorizontal, Edit2, Copy, Trash2, Star, } from "lucide-react";
+import { Edit2, Copy, Trash2, Pin, PinOff } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Dots } from "@/components/ui/dots";
+import { useContextMenuTrigger } from "@/components/ui/use-context-menu-trigger";
+import { accessMessage } from "@/lib/access-message";
+import { cn } from "@/lib/utils";
 
 interface ViewLike {
   id: string;
@@ -23,57 +39,137 @@ interface ViewLike {
   type: ViewType;
   isDefault: boolean;
   config: unknown;
+  isShared?: boolean;
+  ownerId?: string | null;
+}
+
+type PinRow = "none" | "pin" | "pin-disabled" | "unpin";
+
+/**
+ * Which of the non-pin rows this person may use on this view, each the gate
+ * its route checks (see board-view-tabs.tsx, viewTabGates). Every flag
+ * defaults to true, so a caller that passes none keeps the full menu.
+ */
+export interface ViewMenuGates {
+  /** PATCH { name }: canSaveView. */
+  canRename?: boolean;
+  /** POST /views: canContributeBoard. */
+  canDuplicate?: boolean;
+  /** DELETE: canManageView. */
+  canDelete?: boolean;
+}
+
+/** Does this tab's menu have any row to show? No row, no menu. */
+export function viewMenuHasRows(pinRow: PinRow, gates: ViewMenuGates = {}): boolean {
+  return pinRow !== "none"
+    || gates.canRename !== false
+    || gates.canDuplicate !== false
+    || gates.canDelete !== false;
 }
 
 interface Props {
   boardId: string;
   view: ViewLike;
+  /** Which pin row this tab's menu shows (pinMenuRow in default-view.ts). */
+  pinRow: PinRow;
+  /** Who pinned the List's default, for the Unpin row's second line. */
+  pinnedByName?: string | null;
+  /** The Personal list: its owner is its only reader, so the pin is "for you". */
+  personalList?: boolean;
+  /** After a pin or an unpin lands. The strip keeps the person on the view in front of them. */
+  onPinChanged?: () => void;
+  /** Rename / Duplicate / Delete, each only when its route would allow it. */
+  gates?: ViewMenuGates;
   children?: React.ReactNode;
 }
 
-export function ViewTabContextMenu({ boardId, view, children }: Props) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
+/** Wider than the old 200px, so the pin row's second line reads in one or two whole lines. */
+const PANEL_WIDTH = 280;
+
+export function ViewTabContextMenu({ boardId, view, pinRow, pinnedByName, personalList, onPinChanged, gates, children }: Props) {
+  const { point, close, bind } = useContextMenuTrigger();
+  // Nothing this person may do from the menu: the tab is left as a plain
+  // link (the browser's own menu, no long-press swallowing the tap).
+  const hasRows = viewMenuHasRows(pinRow, gates);
+  const open = hasRows && point !== null;
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard reach: focus moves into the menu when it opens (its first row),
+  // and a close from inside the menu (Esc, or a row that finished) hands it
+  // back to the tab before the menu unmounts, so Shift+F10, then Tab and
+  // Enter, work without a mouse. A click elsewhere keeps its own focus.
+  const closeToTrigger = useCallback(() => {
+    const restore = !!panelRef.current?.contains(document.activeElement);
+    close();
+    if (restore) triggerRef.current?.querySelector<HTMLElement>("a,button")?.focus({ preventScroll: true });
+  }, [close]);
 
   useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
+    // pointerdown, not mousedown: a long-press ends with the finger lifting,
+    // and some browsers follow that with a compatibility mousedown on the tab,
+    // which would close the menu the press had just opened. A real tap or
+    // click anywhere else still starts with a pointerdown.
+    const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (panelRef.current?.contains(t)) return;
-      setOpen(false);
+      close();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("mousedown", onClick);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeToTrigger();
+    };
+    window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
     };
+  }, [open, close, closeToTrigger]);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')?.focus({ preventScroll: true });
   }, [open]);
+
+  if (!hasRows) {
+    return <div className="inline-flex h-full items-stretch">{children}</div>;
+  }
 
   return (
     <>
       <div
-        className="inline-flex h-full items-stretch"
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setPos({ x: e.clientX, y: e.clientY });
-          setOpen(true);
-        }}
+        ref={triggerRef}
+        className={cn("inline-flex h-full items-stretch", bind.className)}
+        onContextMenu={bind.onContextMenu}
+        onPointerDown={bind.onPointerDown}
+        onPointerMove={bind.onPointerMove}
+        onPointerUp={bind.onPointerUp}
+        onPointerCancel={bind.onPointerCancel}
+        onClickCapture={bind.onClickCapture}
       >
         {children}
       </div>
-      {open ? (
-        <div 
-          ref={panelRef} 
-          className="fixed z-[100] w-[200px]"
-          style={{ 
-            left: Math.min(pos.x, typeof window !== 'undefined' ? window.innerWidth - 210 : pos.x), 
-            top: Math.min(pos.y, typeof window !== 'undefined' ? window.innerHeight - 300 : pos.y) 
+      {open && point ? (
+        <div
+          ref={panelRef}
+          className="fixed z-[100]"
+          style={{
+            width: PANEL_WIDTH,
+            left: Math.max(8, Math.min(point.x, typeof window !== "undefined" ? window.innerWidth - PANEL_WIDTH - 10 : point.x)),
+            top: Math.min(point.y, typeof window !== "undefined" ? window.innerHeight - 300 : point.y),
           }}
         >
-          <ViewMenuPanel boardId={boardId} view={view} onClose={() => setOpen(false)} />
+          <ViewMenuPanel
+            boardId={boardId}
+            view={view}
+            pinRow={pinRow}
+            pinnedByName={pinnedByName ?? null}
+            personalList={Boolean(personalList)}
+            onPinChanged={onPinChanged}
+            gates={gates ?? {}}
+            onClose={closeToTrigger}
+          />
         </div>
       ) : null}
     </>
@@ -85,10 +181,20 @@ type Mode = "menu" | "rename";
 function ViewMenuPanel({
   boardId,
   view,
+  pinRow,
+  pinnedByName,
+  personalList,
+  onPinChanged,
+  gates,
   onClose,
 }: {
   boardId: string;
   view: ViewLike;
+  pinRow: PinRow;
+  pinnedByName: string | null;
+  personalList: boolean;
+  onPinChanged?: () => void;
+  gates: ViewMenuGates;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -113,6 +219,42 @@ function ViewMenuPanel({
       }
       router.refresh();
       return true;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Pin and unpin are not optimistic: nothing reorders until the route has
+  // answered, so a refusal (the route's own sentence) changes nothing on the
+  // strip. On success the strip decides how to refresh (onPinChanged), so the
+  // person stays on the view in front of them rather than following the pin.
+  const setPin = async (pin: boolean) => {
+    const kind = pin ? "pin" : "unpin";
+    setBusy(kind);
+    try {
+      const res = await fetch(`/api/boards/${boardId}/views/${view.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ isDefault: pin }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(accessMessage(data, pin ? "Couldn't pin the view." : "Couldn't unpin the view."), { tone: "danger" });
+        // A stale unpin (409): someone pinned another view since, so the
+        // strip reloads to show the pin that is really there.
+        if (!pin && res.status === 409) {
+          onClose();
+          if (onPinChanged) onPinChanged();
+          else router.refresh();
+        }
+        return;
+      }
+      toast(pin ? "Pinned as the default view" : "Unpinned");
+      onClose();
+      if (onPinChanged) onPinChanged();
+      else router.refresh();
+    } catch {
+      toast(pin ? "Couldn't pin the view." : "Couldn't unpin the view.", { tone: "danger" });
     } finally {
       setBusy(null);
     }
@@ -215,23 +357,52 @@ function ViewMenuPanel({
     );
   }
 
+  // The pin rows' second line says who the pin is for and who set it (review
+  // #23), so it wraps rather than being cut off at the menu's width.
+  const wrap = (text: string) => <span className="whitespace-normal">{text}</span>;
+  const canRename = gates.canRename !== false;
+  const canDuplicate = gates.canDuplicate !== false;
+  const canDelete = gates.canDelete !== false;
+
   return (
     <MenuList>
-      <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
-      {!view.isDefault ? (
+      {canRename ? <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} /> : null}
+      {pinRow === "pin" ? (
         <MenuItem
-          icon={Star}
-          label="Set as default"
-          busy={busy === "default"}
-          onClick={async () => {
-            const ok = await patch({ isDefault: true }, "default");
-            if (ok) onClose();
-          }}
+          icon={Pin}
+          label="Pin as default view"
+          description={wrap(personalList ? "Opens first for you" : "Opens first for everyone on this List")}
+          busy={busy === "pin"}
+          onClick={() => void setPin(true)}
+        />
+      ) : pinRow === "pin-disabled" ? (
+        <MenuItem
+          icon={Pin}
+          label="Pin as default view"
+          description={wrap("Only a shared view can be pinned for everyone")}
+          title="A private view can't be the List's default, because the rest of the List can't see it."
+          disabled
+        />
+      ) : pinRow === "unpin" ? (
+        <MenuItem
+          icon={PinOff}
+          label="Unpin"
+          description={wrap(
+            pinnedByName
+              ? `Pinned by ${pinnedByName}`
+              : personalList
+                ? "Opens first for you"
+                : "Everyone on this List opens it first",
+          )}
+          busy={busy === "unpin"}
+          onClick={() => void setPin(false)}
         />
       ) : null}
-      <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
-      <MenuSeparator />
-      <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
+      {canDuplicate ? <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} /> : null}
+      {/* The separator sets Delete apart from the rows above it, so it only
+          draws when there is both a Delete and something above it. */}
+      {canDelete && (canRename || canDuplicate || pinRow !== "none") ? <MenuSeparator /> : null}
+      {canDelete ? <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} /> : null}
     </MenuList>
   );
 }

@@ -9,9 +9,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { canEditSpace, getSpaceForReader, mutateSpaceSettings } from "@/lib/space";
 
 const MAX_BOOKMARKS = 50;
 
@@ -59,14 +57,6 @@ function normalizeUrl(input: unknown): string | null {
   }
 }
 
-async function writeBookmarks(spaceId: string, settings: unknown, bookmarks: SpaceBookmark[]) {
-  const base = settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
-  await prisma.space.update({
-    where: { id: spaceId },
-    data: { settings: { ...base, bookmarks } as unknown as Prisma.InputJsonValue },
-  });
-}
-
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
@@ -84,11 +74,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const url = normalizeUrl(body?.url);
   if (!url) return NextResponse.json({ error: "Enter a valid web link." }, { status: 400 });
 
-  const bookmarks = readBookmarks(space.settings);
-  if (bookmarks.length >= MAX_BOOKMARKS) {
-    return NextResponse.json({ error: `A Space can hold up to ${MAX_BOOKMARKS} bookmarks.` }, { status: 400 });
-  }
-
   const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : new URL(url).hostname;
   const favicon = typeof body?.favicon === "string" && /^https?:\/\//i.test(body.favicon) ? body.favicon.slice(0, 500) : null;
 
@@ -100,9 +85,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     addedById: c.userId,
     addedAt: new Date().toISOString(),
   };
-  const next = [bookmark, ...bookmarks];
-  await writeBookmarks(id, space.settings, next);
-  return NextResponse.json({ bookmark, bookmarks: next });
+  // The list is read and written under the Space row's lock. Reading it from
+  // the gate's copy and writing it back wholesale lost a bookmark whenever two
+  // people added one at once, and wiped any other settings key (a pin, a
+  // module toggle) saved in between.
+  const r = await mutateSpaceSettings(id, (locked) => {
+    const bookmarks = readBookmarks(locked);
+    if (bookmarks.length >= MAX_BOOKMARKS) return { patch: null, result: null };
+    const next = [bookmark, ...bookmarks];
+    return { patch: { bookmarks: next }, result: next };
+  });
+  if (!r.found) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!r.result) {
+    return NextResponse.json({ error: `A Space can hold up to ${MAX_BOOKMARKS} bookmarks.` }, { status: 400 });
+  }
+  return NextResponse.json({ bookmark, bookmarks: r.result });
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -122,7 +119,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const bookmarkId = typeof body?.bookmarkId === "string" ? body.bookmarkId : null;
   if (!bookmarkId) return NextResponse.json({ error: "Missing bookmarkId" }, { status: 400 });
 
-  const next = readBookmarks(space.settings).filter((b) => b.id !== bookmarkId);
-  await writeBookmarks(id, space.settings, next);
-  return NextResponse.json({ bookmarks: next });
+  const r = await mutateSpaceSettings(id, (locked) => {
+    const next = readBookmarks(locked).filter((b) => b.id !== bookmarkId);
+    return { patch: { bookmarks: next }, result: next };
+  });
+  if (!r.found) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ bookmarks: r.result });
 }

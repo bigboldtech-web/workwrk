@@ -546,6 +546,20 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/route-guard.ts",
   "src/lib/sop-access.ts",
   "src/lib/space.ts",
+  // Bird's eye (2026-09-24) adds TWO, a pure module and its test.
+  // space-lists.ts answers which Lists of one Space a viewer can read and
+  // write, for dozens of Lists at once, by handing facts loaded in four
+  // queries (src/lib/space.ts, readableListsInSpace) to the frozen
+  // transcriptions: legacyAllows getBoardForReader, canContributeBoard and
+  // folderVisibleTo, the very functions getBoardForReader,
+  // getBoardForReaderOrFolderGrantee and canContributeBoard delegate to. It
+  // builds LegacyInputs, which names the signal, and its test proves parity
+  // with the per-List helpers. No route or component reads the signal: the
+  // two new routes (spaces/[id]/birdseye, spaces/[id]/default-view) go
+  // through itemCtx and the Space wrappers in src/lib/space.ts. Both leave
+  // with src/lib/space.ts at access step 6.
+  "src/lib/work/space-lists.ts",
+  "src/lib/work/space-lists.test.ts",
   "src/lib/suites/auth.ts",
   "src/lib/trash.ts",
   "src/lib/types.ts",

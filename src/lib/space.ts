@@ -8,13 +8,16 @@
 // will fold these checks into a single canonical entrypoint.
 
 import { prisma } from "@/lib/prisma";
-import type { SpaceRole, Visibility } from "@/generated/prisma";
+import type { Prisma, Space, SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
-import { legacyAllows } from "@/lib/access/parity";
+import { legacyAllows, type SpaceRoleValue, type VisibilityValue } from "@/lib/access/parity";
 import { emptyLegacyInputs, loadSpaceInputs } from "@/lib/access/legacy-facts";
 import { spaceContainerRole, type ContainerRole } from "@/lib/work/container-menu";
 import { withArchivedBy } from "@/lib/archived-by";
+import { accessibleFolderIds } from "@/lib/folder";
+import { decideSpaceLists } from "@/lib/work/space-lists";
+import { mergeSpaceSettings, spaceModulesPatch } from "@/lib/work/space-default-view";
 
 export interface SpaceSummary {
   id: string;
@@ -256,6 +259,197 @@ export async function canContributeSpace(spaceId: string, userId: string, access
   return legacyAllows(inputs, "canContributeSpace");
 }
 
+// ── A viewer, whole ─────────────────────────────────────────────────
+//
+// The routes Bird's eye added hand the session unwrap (itemCtx) to these and
+// never read the legacy signal themselves, on the item-gate precedent: this
+// file is on the access allow-list, the routes are not. They are the Space
+// twins of the Phase 5b wrappers on main (list-links-server.ts
+// spaceForViewer and canContributeSpaceFor), which this branch predates;
+// the two answer identically, so either can serve once they meet.
+
+export interface SpaceViewer {
+  userId: string;
+  organizationId: string;
+  accessLevel: string | null | undefined;
+}
+
+/** The Space, when this viewer can read it in their own org; else null. */
+export async function spaceForViewer(v: SpaceViewer, spaceId: string) {
+  const s = await getSpaceForReader(spaceId, v.userId, v.accessLevel ?? undefined);
+  return s && s.organizationId === v.organizationId ? s : null;
+}
+
+/** The contribute ladder at Space level (any non-GUEST member, or an org admin). */
+export function canContributeSpaceFor(v: SpaceViewer, spaceId: string): Promise<boolean> {
+  return canContributeSpace(spaceId, v.userId, v.accessLevel ?? undefined);
+}
+
+// ── The Lists of a Space this viewer can read ───────────────────────
+
+/** One readable List of a Space, in Work tree order. */
+export interface SpaceListRow {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  visibility: Visibility;
+  ownerId: string | null;
+  folderId: string | null;
+  statuses: Prisma.JsonValue | null;
+  /** Present only when asked for (includeSettings). */
+  settings?: Prisma.JsonValue;
+  /** Present only when asked for (includeSchema). */
+  schema?: Prisma.JsonValue;
+  /** The viewer's own BoardMember role on it. */
+  memberRole: SpaceRole | null;
+  /** canContributeBoard's answer: may this viewer create and change its tasks? */
+  canContribute: boolean;
+}
+
+/**
+ * Every List of one Space the viewer can read, in the Work sidebar's order,
+ * with whether they may write in each, and how many of its folders they see.
+ *
+ * Why one function. The Space page used to pick its Lists with an inline
+ * rule that read only the ROOT folders' Lists and never read BoardMember or
+ * FolderMember: a List in a sub-folder was missing from every cross-List tab,
+ * a PRIVATE List shared to someone never appeared for them, and the header
+ * counted every List, readable or not. This is now the one answer for Bird's
+ * eye, every other Space tab, the header's count and GET /api/boards?spaceId=.
+ *
+ * Cost, whatever the List count: four reads in parallel (the Space with the
+ * viewer's SpaceMember row, its live folders, its live Lists with the
+ * viewer's BoardMember row, the viewer's folder grants, which an org admin
+ * skips), then every decision in memory through the frozen transcriptions
+ * (src/lib/work/space-lists.ts). Member rows arrive as relation includes on
+ * org-scoped reads; the member tables are never queried on their own.
+ *
+ * The caller gates the Space first. A Space outside the viewer's org, or one
+ * that does not exist, answers no Lists.
+ */
+export async function readableListsInSpace(
+  spaceId: string,
+  viewer: SpaceViewer,
+  opts: { includeSchema?: boolean; includeSettings?: boolean; includeArchived?: boolean } = {},
+): Promise<{ lists: SpaceListRow[]; folderCount: number }> {
+  const live = opts.includeArchived ? {} : { archivedAt: null };
+  const includeSettings = opts.includeSettings === true;
+  const includeSchema = opts.includeSchema === true;
+  const [space, folders, boards, granted] = await Promise.all([
+    prisma.space.findFirst({
+      where: { id: spaceId, organizationId: viewer.organizationId },
+      select: {
+        id: true,
+        organizationId: true,
+        visibility: true,
+        ownerId: true,
+        members: { where: { userId: viewer.userId }, select: { role: true } },
+      },
+    }),
+    prisma.folder.findMany({
+      where: { spaceId, organizationId: viewer.organizationId, ...live },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+      select: { id: true, parentFolderId: true, visibility: true, ownerId: true },
+    }),
+    prisma.board.findMany({
+      where: { spaceId, organizationId: viewer.organizationId, ...live },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        icon: true,
+        color: true,
+        visibility: true,
+        ownerId: true,
+        folderId: true,
+        statuses: true,
+        settings: includeSettings,
+        schema: includeSchema,
+        members: { where: { userId: viewer.userId }, select: { role: true } },
+      },
+    }),
+    isOrgAdminAccessLevel(viewer.accessLevel) ? Promise.resolve(new Set<string>()) : accessibleFolderIds(viewer.userId),
+  ]);
+  if (!space) return { lists: [], folderCount: 0 };
+
+  const { lists, visibleFolderCount } = decideSpaceLists(viewer, {
+    space: {
+      id: space.id,
+      organizationId: space.organizationId,
+      visibility: space.visibility as VisibilityValue,
+      ownerId: space.ownerId,
+      memberRole: (space.members[0]?.role as SpaceRoleValue | undefined) ?? null,
+    },
+    folders,
+    boards: boards.map((b) => ({ ...b, memberRole: (b.members[0]?.role as SpaceRoleValue | undefined) ?? null })),
+    granted,
+  });
+  return {
+    lists: lists.map((b) => ({
+      id: b.id,
+      slug: b.slug,
+      name: b.name,
+      icon: b.icon,
+      color: b.color,
+      visibility: b.visibility,
+      ownerId: b.ownerId,
+      folderId: b.folderId,
+      statuses: b.statuses,
+      ...(includeSettings ? { settings: b.settings } : {}),
+      ...(includeSchema ? { schema: b.schema } : {}),
+      memberRole: b.memberRole,
+      canContribute: b.canContribute,
+    })),
+    folderCount: visibleFolderCount,
+  };
+}
+
+// ── The one Space.settings writer ───────────────────────────────────
+
+/**
+ * Change Space.settings under a row lock.
+ *
+ * `fn` sees the settings as they are INSIDE the lock and answers the patch
+ * to merge (a key set to null is deleted, every other stored key is kept)
+ * plus a result for the caller; a decision like "is this view switched off"
+ * is therefore made on the row it writes. `data` rides along for the plain
+ * columns of the same update. Every writer of settings goes through here
+ * (bookmarks, the module toggle, the Space pin), so two of them can no longer
+ * erase each other's keys, and a module toggle can no longer drop a pin that
+ * was saved a moment earlier. createSpace and the Space duplicate write
+ * settings only on insert.
+ */
+export async function mutateSpaceSettings<T>(
+  spaceId: string,
+  fn: (settings: unknown) => { patch: Record<string, unknown> | null; result: T },
+  data?: Record<string, unknown>,
+): Promise<{ found: false } | { found: true; result: T; space: Space }> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ settings: unknown }>>`
+      SELECT "settings" FROM "Space" WHERE "id" = ${spaceId} FOR UPDATE
+    `;
+    if (rows.length === 0) return { found: false as const };
+    const locked = rows[0].settings;
+    const out = fn(locked);
+    const hasData = !!data && Object.keys(data).length > 0;
+    if (!out.patch && !hasData) {
+      const space = await tx.space.findUniqueOrThrow({ where: { id: spaceId } });
+      return { found: true as const, result: out.result, space };
+    }
+    const space = await tx.space.update({
+      where: { id: spaceId },
+      data: {
+        ...(data ?? {}),
+        ...(out.patch ? { settings: mergeSpaceSettings(locked, out.patch) as Prisma.InputJsonValue } : {}),
+      },
+    });
+    return { found: true as const, result: out.result, space };
+  });
+}
+
 export interface CreateSpaceInput {
   organizationId: string;
   userId: string;
@@ -397,14 +591,16 @@ export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
   if (patch.displayOrder !== undefined) data.displayOrder = patch.displayOrder;
   if (patch.parentSpaceId !== undefined) data.parentSpaceId = patch.parentSpaceId;
 
-  // Modules live inside the settings JSON (settings.workflow.modules). Read the
-  // current blob and merge so we only touch the modules array — statuses,
-  // views, defaultView, etc. are preserved.
+  // Modules live inside the settings JSON (settings.workflow.modules). The
+  // merge happens on the LOCKED row, so only the modules array (and a pin the
+  // new modules hide, see spaceModulesPatch) changes; statuses, views,
+  // bookmarks and every other key are preserved, even against a writer that
+  // saved one of them a moment ago.
   if (patch.modules !== undefined) {
-    const current = await prisma.space.findUnique({ where: { id: spaceId }, select: { settings: true } });
-    const settings = (current?.settings && typeof current.settings === "object" ? current.settings : {}) as Record<string, unknown>;
-    const workflow = (settings.workflow && typeof settings.workflow === "object" ? settings.workflow : {}) as Record<string, unknown>;
-    data.settings = { ...settings, workflow: { ...workflow, modules: patch.modules } };
+    const modules = patch.modules;
+    const r = await mutateSpaceSettings(spaceId, (s) => ({ patch: spaceModulesPatch(s, modules), result: null }), data);
+    if (r.found) return r.space;
+    // No row: the same update as before answers the same not-found error.
   }
 
   return prisma.space.update({ where: { id: spaceId }, data });

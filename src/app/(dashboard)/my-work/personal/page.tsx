@@ -25,6 +25,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { gatePage } from "@/lib/access/gate";
 import { getOrCreatePersonalBoard, ensureCoreListViews } from "@/lib/board";
+import { listViewsForViewer } from "@/lib/work/default-view";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { BoardViewTabs } from "../../boards/[slug]/board-view-tabs";
@@ -49,11 +50,14 @@ export default async function PersonalListPage(props: {
 
   const board = await getOrCreatePersonalBoard(viewer.organizationId, viewer.userId);
   await ensureCoreListViews(board.id, viewer.userId);
-  const views = await prisma.view.findMany({
+  const rows = await prisma.view.findMany({
     where: { boardId: board.id },
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
   });
-  const defaultView = views.find((v) => v.isDefault) ?? views[0];
+  // The same resolver as every List (decision 8): the owner's pin, else Board.
+  // The views come back with that default first, so the strip's first tab is
+  // the view this bare URL opens.
+  const { views, defaultView, pinned } = listViewsForViewer(rows, viewer.userId);
   const activeView = (sp.view ? views.find((v) => v.id === sp.view) : null) ?? defaultView;
 
   const items = await listBoardItems(board.id);
@@ -82,6 +86,8 @@ export default async function PersonalListPage(props: {
         boardSlug={board.slug}
         activeViewId={activeView?.id ?? null}
         defaultViewId={defaultView?.id ?? null}
+        defaultPinned={pinned}
+        personalList
         basePath="/my-work/personal"
       />
 

@@ -15,9 +15,13 @@
 //   owner at all (rows seeded before ownerId existed; hiding those would make
 //   Lists lose their tabs, which is a data loss a filter must never cause).
 //
-// ORDER. Pinned first (personal, `home.work.pinnedViews[]`), then the default
-// view, then `displayOrder`, then name. Pinning is per person, so two people
-// reading the same List see the same views in the order each one chose.
+// ORDER. The List's RESOLVED default first (src/lib/work/default-view.ts
+// decides it: a pinned view, else the plain Board), then personal pins
+// (`home.work.pinnedViews[]`) in pin order, then `displayOrder`, then name.
+// The raw `isDefault` flag is not a rank any more: it sat on the auto List
+// view of almost every List, so ranking it put List first while the page
+// opened Board. Personal pinning is per person, so two people reading the
+// same List see the same default first and their own pins after it.
 //
 // Pure module: no imports, so vitest loads it in node and the route and the
 // client both call the same function.
@@ -50,22 +54,27 @@ export function visibleViews<T extends ViewLike>(views: readonly T[], viewerId: 
 }
 
 /**
- * Pinned first, then default, then displayOrder, then name. Stable: equal rows
- * keep the order they arrived in.
+ * The resolved default first, then personal pins, then displayOrder, then
+ * name. Stable: equal rows keep the order they arrived in. `defaultId` is the
+ * id default-view.ts resolved for this viewer; an id not in the set is
+ * ignored.
  */
 export function orderViews<T extends ViewLike>(
   views: readonly T[],
   pinnedIds: readonly string[] = [],
+  defaultId: string | null = null,
 ): T[] {
   const pinRank = new Map<string, number>();
   pinnedIds.forEach((id, i) => pinRank.set(id, i));
   return [...views]
     .map((v, i) => ({ v, i }))
     .sort((a, b) => {
+      const da = a.v.id === defaultId;
+      const db = b.v.id === defaultId;
+      if (da !== db) return da ? -1 : 1;
       const pa = pinRank.has(a.v.id) ? pinRank.get(a.v.id)! : Number.MAX_SAFE_INTEGER;
       const pb = pinRank.has(b.v.id) ? pinRank.get(b.v.id)! : Number.MAX_SAFE_INTEGER;
       if (pa !== pb) return pa - pb;
-      if (a.v.isDefault !== b.v.isDefault) return a.v.isDefault ? -1 : 1;
       if (a.v.displayOrder !== b.v.displayOrder) return a.v.displayOrder - b.v.displayOrder;
       const byName = a.v.name.localeCompare(b.v.name);
       if (byName !== 0) return byName;
@@ -74,13 +83,18 @@ export function orderViews<T extends ViewLike>(
     .map((x) => x.v);
 }
 
-/** Visible, then ordered: the one call a surface makes. */
+/**
+ * Visible, then ordered. A List surface calls listViewsForViewer() in
+ * default-view.ts, which resolves the default over the visible set and hands
+ * it here as `defaultId`.
+ */
 export function viewsForViewer<T extends ViewLike>(
   views: readonly T[],
   viewerId: string | null,
   pinnedIds: readonly string[] = [],
+  defaultId: string | null = null,
 ): T[] {
-  return orderViews(visibleViews(views, viewerId), pinnedIds);
+  return orderViews(visibleViews(views, viewerId), pinnedIds, defaultId);
 }
 
 /**
@@ -110,7 +124,7 @@ export function canManageView(
  * work, so removal stays on `canManageView`.
  */
 export function canSaveView(
-  view: ViewLike,
+  view: Pick<ViewLike, "ownerId">,
   viewerId: string | null,
   canContribute: boolean,
 ): boolean {

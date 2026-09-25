@@ -22,6 +22,7 @@ import { folderAccessForSpace, folderVisibleTo } from "@/lib/folder";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { canManageObject } from "@/lib/object-manage";
+import { readableListsInSpace } from "@/lib/space";
 import {
   spaceContainerRole, listContainerRole, type ContainerRole,
 } from "@/lib/work/container-menu";
@@ -124,6 +125,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     },
   } as const;
 
+  // WHICH LISTS THIS VIEWER MAY SEE, by the one predicate the Space page and
+  // Bird's eye use (readableListsInSpace). The folder and board reads below
+  // bring every live List; without this filter the tree named PRIVATE Lists
+  // the viewer cannot open (Bird's eye hid them, the sidebar did not). It is
+  // also what lets a PRIVATE List shared through BoardMember or a Folder
+  // grant show here for its grantee. A failed read shows no Lists rather
+  // than every List: the tree fails closed.
+  // Started now, awaited after the tree reads, so it runs beside them.
+  const readablePromise = readableListsInSpace(id, {
+    userId: c.userId,
+    organizationId: c.organizationId,
+    accessLevel: c.accessLevel,
+  }).then(
+    (r) => new Set(r.lists.map((l) => l.id)),
+    (err) => {
+      console.error("[spaces/children] readable Lists query failed:", err);
+      return new Set<string>();
+    },
+  );
   const [foldersR, rootBoardsR, tablesR, docsR, whiteboardsR] = await Promise.allSettled([
     prisma.folder.findMany({
       where: scoped
@@ -168,6 +188,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         }),
   ]);
 
+  const readableIds = await readablePromise;
+  const readable = (b: { id: string }) => readableIds.has(b.id);
+
   if (foldersR.status === "rejected") {
     console.error("[spaces/children] folders query failed:", foldersR.reason);
   }
@@ -201,7 +224,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   };
 
   // Drop PRIVATE folders (and their whole subtree) the viewer can't see. A
-  // private folder hides its boards too — they live under it in the tree.
+  // private folder hides its boards too, since they live under it in the tree.
   function prune(nodes: FolderShape[]): FolderShape[] {
     return nodes
       .filter((n) => folderVisibleTo(n, c.userId, c.accessLevel))
@@ -256,7 +279,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       // the Space role unchanged.
       role: spaceRole,
       docs: docsByFolder.get(n.id) ?? [],
-      boards: n.boards.map((b) => ({ ...b, role: roleForBoard(b) })),
+      // Only the Lists this viewer can read, and only those counted, so an
+      // unreadable List is never named and never counted.
+      _count: { ...n._count, boards: n.boards.filter(readable).length },
+      boards: n.boards.filter(readable).map((b) => ({ ...b, role: roleForBoard(b) })),
       childFolders: n.childFolders ? annotate(n.childFolders) : [],
     }));
   }
@@ -265,7 +291,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({
     spaceRole,
     folders: annotate(folders as FolderShape[]),
-    boards: (rootBoardsR.status === "fulfilled" ? rootBoardsR.value : []).map((b) => ({
+    boards: (rootBoardsR.status === "fulfilled" ? rootBoardsR.value : []).filter(readable).map((b) => ({
       ...b,
       role: roleForBoard(b),
     })),

@@ -85,3 +85,113 @@ describe("views/[viewId] PATCH preserves the view's existing data", () => {
     expect(tx.slice(0, tx.indexOf("} else"))).toMatch(/\$transaction/);
   });
 });
+
+// Decision 9: "Pin as default view" and "Unpin". The route is the only writer
+// of the List's default, so these are the properties a later edit must not
+// silently undo: who may pin, what may not be pinned, and that no write can
+// leave two defaults, lose a pin or forge one.
+describe("views/[viewId] PATCH pins and unpins the List's default (decision 9)", () => {
+  const patch = src.slice(src.indexOf("export async function PATCH"), src.indexOf("export async function DELETE"));
+
+  it("gates a pin or an unpin on canSaveView, the gate Set as default had, before anything is written (decision 9)", () => {
+    const guard = patch.indexOf("if (parsed.data.isDefault !== undefined && !canSaveView(gate.view, c.userId, gate.canContribute))");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(patch.indexOf("$transaction"));
+    expect(guard).toBeLessThan(patch.indexOf("view.update"));
+    expect(patch.slice(guard, guard + 200)).toMatch(/PIN_DENIED/);
+    // No stricter ladder for the pin than the one the save gate applies.
+    expect(patch).not.toMatch(/isDefault !== undefined && !gate\.canContribute/);
+  });
+
+  it("refuses a stale unpin instead of sweeping someone else's newer pin", () => {
+    const stale = patch.indexOf("parsed.data.isDefault === false && !row.isDefault && readPinnedDefault(row.config) === null");
+    expect(stale).toBeGreaterThan(-1);
+    expect(patch.slice(stale, stale + 600)).toMatch(/UNPIN_STALE/);
+    // The refusal comes before the List-wide sweep of the unpin branch.
+    const unpinBranch = patch.indexOf("} else if (parsed.data.isDefault === false || makesPrivate");
+    const sweep = patch.indexOf("await clearOthers(tx);", unpinBranch);
+    expect(stale).toBeGreaterThan(unpinBranch);
+    expect(stale).toBeLessThan(sweep);
+  });
+
+  it("refuses to pin a private view on a Space List, reading the EFFECTIVE isShared twice (reviews #3, #31)", () => {
+    // Once on the loaded view before the transaction, and again on the row
+    // read FOR UPDATE inside it, so a concurrent "make private" cannot slip
+    // between the check and the write.
+    expect(patch).toMatch(/parsed\.data\.isShared \?\? gate\.view\.isShared/);
+    expect(patch).toMatch(/parsed\.data\.isShared \?\? row\.isShared/);
+    expect(patch.match(/PIN_PRIVATE_DENIED/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("refuses to make the pinned default private", () => {
+    expect(patch).toMatch(/countsAsPinnedDefault\(/);
+    expect(patch).toMatch(/PINNED_PRIVATE_DENIED/);
+  });
+
+  it("serialises every default-changing write on the List's advisory lock and the row lock (review #30)", () => {
+    expect(patch).toMatch(/pg_advisory_xact_lock\(hashtext\(\$\{`view-default:\$\{id\}`\}\)\)/);
+    expect(patch).toMatch(/FOR UPDATE/);
+    const pinBranch = patch.slice(patch.indexOf("if (parsed.data.isDefault)"));
+    const pinBody = pinBranch.slice(0, pinBranch.indexOf("} else"));
+    expect(pinBody.indexOf("defaultLock(tx)")).toBeGreaterThan(-1);
+    expect(pinBody.indexOf("defaultLock(tx)")).toBeLessThan(pinBody.indexOf("lockedRow(tx)"));
+  });
+
+  it("clears the default AND the mark from the List's other views in the pin's own transaction", () => {
+    expect(patch).toMatch(/SET "isDefault" = false/);
+    expect(patch).toMatch(/"config" - 'pinned'/);
+    expect(patch).toMatch(/WHERE "boardId" = \$\{id\} AND "id" <> \$\{viewId\}/);
+    const pinBranch = patch.slice(patch.indexOf("if (parsed.data.isDefault)"));
+    const pinBody = pinBranch.slice(0, pinBranch.indexOf("} else"));
+    expect(pinBody.indexOf("clearOthers(tx)")).toBeGreaterThan(-1);
+    expect(pinBody.indexOf("clearOthers(tx)")).toBeLessThan(pinBody.indexOf("tx.view.update"));
+    expect(pinBody).toMatch(/withPinnedDefault\(/);
+  });
+
+  it("unpins the WHOLE List, so no leftover mark can surface as the default", () => {
+    const unpin = patch.slice(patch.indexOf("if (parsed.data.isDefault === false) {"));
+    expect(unpin.indexOf("clearOthers(tx)")).toBeGreaterThan(-1);
+    expect(unpin.slice(0, unpin.indexOf("tx.view.update"))).toMatch(/withoutPinnedDefault\(/);
+  });
+
+  it("never lets a config write drop or forge a pin (reviews #5a, #29)", () => {
+    // Every renderer PATCHes the config it mounted with.
+    expect(patch).toMatch(/if \(parsed\.data\.config !== undefined\) data\.config = withoutPinnedDefault\(/);
+    expect(patch).toMatch(/carryPinnedDefault\(/);
+  });
+
+  it("answers the same body it always did", () => {
+    expect(patch).toMatch(/NextResponse\.json\(\{ view: updated \}\)/);
+  });
+});
+
+describe("POST and GET /api/boards/[id]/views", () => {
+  const listSrc = readFileSync(join(process.cwd(), "src/app/api/boards/[id]/views/route.ts"), "utf8");
+
+  it("strips a copied mark from every created view (Duplicate copies config verbatim)", () => {
+    expect(listSrc).toMatch(/withoutPinnedDefault\(parsed\.data\.config/);
+  });
+
+  it("pins on create under the same List lock, and never a private view on a Space List", () => {
+    expect(listSrc).toMatch(/isDefault: z\.boolean\(\)\.optional\(\)/);
+    expect(listSrc).toMatch(/pg_advisory_xact_lock\(hashtext\(\$\{`view-default:\$\{id\}`\}\)\)/);
+    expect(listSrc).toMatch(/PIN_PRIVATE_DENIED/);
+    expect(listSrc).toMatch(/withPinnedDefault\(/);
+  });
+
+  it("reports the resolved default the page uses, not the raw flag", () => {
+    expect(listSrc).toMatch(/listViewsForViewer\(/);
+    expect(listSrc).toMatch(/defaultViewId/);
+    expect(listSrc).toMatch(/defaultPinned/);
+    expect(listSrc).not.toMatch(/isDefault: "desc"/);
+  });
+});
+
+describe("PATCH /api/boards/[id]/views/order", () => {
+  const orderSrc = readFileSync(join(process.cwd(), "src/app/api/boards/[id]/views/order/route.ts"), "utf8");
+
+  it("lets a contributor reorder a Space List's tabs, the same ladder that renders them draggable", () => {
+    expect(orderSrc).toMatch(/canContributeBoard\(/);
+    expect(orderSrc).not.toMatch(/canEditSpace\(/);
+  });
+});

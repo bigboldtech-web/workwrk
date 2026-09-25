@@ -248,7 +248,10 @@ const recurRuleSchema = z.object({
 
 const patchSchema = z.object({
   title: z.string().min(1).max(280).optional(),
-  status: z.string().max(40).nullable().optional(),
+  // 60, the limit the List's statuses schema allows (boards/[id]/route.ts) and
+  // the bulk route already uses: at 40 a long declared status could be picked
+  // everywhere and saved nowhere.
+  status: z.string().max(60).nullable().optional(),
   // A user id, not free text. `.trim().min(1)` rejects the whitespace-only id
   // that `.min(1)` waved through, and the length cap rejects the 5000-character
   // string that was accepted and stored verbatim. Existence is checked against

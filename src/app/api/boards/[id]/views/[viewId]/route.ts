@@ -1,6 +1,7 @@
-// PATCH  /api/boards/[id]/views/[viewId] — rename / re-order / re-config
-// DELETE /api/boards/[id]/views/[viewId] — remove (cannot delete the
-//        last view; UI should disable that case)
+// PATCH  /api/boards/[id]/views/[viewId]: rename, re-order, re-config, and
+//        pin or unpin the view as the List's default ({ isDefault })
+// DELETE /api/boards/[id]/views/[viewId]: remove (cannot delete the last
+//        view; the UI hides that case)
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -9,7 +10,19 @@ import { z } from "zod";
 import { getSpaceForReader } from "@/lib/space";
 import { canContributeBoard, canEditBoard } from "@/lib/board";
 import { canSaveView, canManageView } from "@/lib/work/view-visibility";
+import {
+  carryPinnedDefault,
+  countsAsPinnedDefault,
+  readPinnedDefault,
+  withPinnedDefault,
+  withoutPinnedDefault,
+  PIN_DENIED,
+  PIN_PRIVATE_DENIED,
+  PINNED_PRIVATE_DENIED,
+  UNPIN_STALE,
+} from "@/lib/work/default-view";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -90,28 +103,147 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id, viewId } = await params;
   const gate = await loadGate(id, viewId, c);
   if ("error" in gate) return gate.error;
-  if (!canSaveView(gate.view, c.userId, gate.canContribute)) {
-    return NextResponse.json({ error: SAVE_DENIED }, { status: 403 });
-  }
+  // The body is read before the save gate so a refused PIN answers with the
+  // pin's own sentence rather than the generic one; every write still passes
+  // canSaveView below before anything is written.
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  // Promoting a view to default? Demote the previous default in the same tx.
+  // PIN AND UNPIN KEEP THE GATE "Set as default" HAD (decision 9: same gate
+  // as today): canSaveView, the contribute ladder plus the view's own owner.
+  // An owner who lost contribute could set their own view as the default
+  // before pinning existed, and still can. The pin's own sentence answers a
+  // refusal, ahead of the generic save refusal below.
+  if (parsed.data.isDefault !== undefined && !canSaveView(gate.view, c.userId, gate.canContribute)) {
+    return NextResponse.json({ error: PIN_DENIED }, { status: 403 });
+  }
+  if (!canSaveView(gate.view, c.userId, gate.canContribute)) {
+    return NextResponse.json({ error: SAVE_DENIED }, { status: 403 });
+  }
+  // A private view cannot be the default of a Space List: the rest of the
+  // List cannot see it, so their first tab and the bare URL would disagree
+  // with the owner's. The EFFECTIVE privacy is what counts (the body may flip
+  // it in the same request), and it is read again on the locked row below.
+  // A space-less List (the Personal list) has one reader, so it is exempt.
+  const spaceList = !!gate.view.board.spaceId;
+  const makesPrivate = parsed.data.isShared === false;
+  if (
+    parsed.data.isDefault === true &&
+    spaceList &&
+    !((parsed.data.isShared ?? gate.view.isShared) || gate.view.ownerId === null)
+  ) {
+    return NextResponse.json({ error: PIN_PRIVATE_DENIED }, { status: 409 });
+  }
+
   const data: Record<string, unknown> = { ...parsed.data };
-  if (parsed.data.config !== undefined) data.config = parsed.data.config as object;
+  // A pin is written by the pin branch alone, so no config the client sends
+  // may carry one in (or out): the stored mark is carried below.
+  if (parsed.data.config !== undefined) data.config = withoutPinnedDefault(parsed.data.config) as object;
+
+  type Refusal = { status: number; error: string };
+  type LockedRow = { config: unknown; isShared: boolean; ownerId: string | null; isDefault: boolean; type: string };
+  const lockedRow = async (tx: Prisma.TransactionClient): Promise<LockedRow | null> => {
+    const rows = await tx.$queryRaw<LockedRow[]>`
+      SELECT config, "isShared", "ownerId", "isDefault", type::text AS type
+      FROM "View" WHERE id = ${viewId} FOR UPDATE`;
+    return rows[0] ?? null;
+  };
+  // The config the write is based on: the one sent, else the stored one.
+  const composeConfig = (row: LockedRow): unknown => (parsed.data.config !== undefined ? data.config : row.config);
+  // ONE advisory lock per List serialises every write that can change which
+  // view is the default. Under READ COMMITTED an UPDATE re-checks only the
+  // rows that matched its first snapshot, so two concurrent pins could each
+  // clear the old default and both mark themselves. $executeRaw, not
+  // $queryRaw: pg_advisory_xact_lock returns void, which the query
+  // deserializer refuses.
+  const defaultLock = (tx: Prisma.TransactionClient) =>
+    tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`view-default:${id}`}))`;
+  // Every other view of the List loses the default flag AND the mark, so
+  // neither a stale flag nor a leftover mark can resolve as a second default.
+  const clearOthers = (tx: Prisma.TransactionClient) =>
+    tx.$executeRaw`
+      UPDATE "View" SET "isDefault" = false,
+        "config" = CASE WHEN jsonb_typeof("config") = 'object' THEN "config" - 'pinned' ELSE "config" END,
+        "updatedAt" = NOW()
+      WHERE "boardId" = ${id} AND "id" <> ${viewId}
+        AND ("isDefault" = true OR ("config" -> 'pinned') IS NOT NULL)`;
+
+  let refusal: Refusal | null = null;
   if (parsed.data.isDefault) {
-    await prisma.$transaction(async (tx) => {
-      await tx.view.updateMany({
-        where: { boardId: id, isDefault: true, NOT: { id: viewId } },
-        data: { isDefault: false },
-      });
+    // PIN: this view becomes the List's default, marked with who and when.
+    refusal = await prisma.$transaction(async (tx): Promise<Refusal | null> => {
+      await defaultLock(tx);
+      const row = await lockedRow(tx);
+      if (!row) return { status: 404, error: "Not found" };
+      if (spaceList && !((parsed.data.isShared ?? row.isShared) || row.ownerId === null)) {
+        return { status: 409, error: PIN_PRIVATE_DENIED };
+      }
+      await clearOthers(tx);
+      data.config = withPinnedDefault(composeConfig(row), { byId: c.userId, at: new Date().toISOString() }) as object;
       await tx.view.update({ where: { id: viewId }, data });
+      return null;
+    });
+  } else if (parsed.data.isDefault === false || makesPrivate || parsed.data.config !== undefined) {
+    // UNPIN, MAKE PRIVATE, or a CONFIG WRITE. Every renderer PATCHes the
+    // config it mounted with (board-canvas, board-table-view, calendar,
+    // gantt, doc, form, chart, pivot, workload, whiteboard), so a config
+    // write goes through the locked row and carries the STORED mark: without
+    // that, a tab opened before a pin would drop it and a tab opened before
+    // an unpin would bring it back. The row lock also serialises a config
+    // write with a pin's sibling UPDATE.
+    refusal = await prisma.$transaction(async (tx): Promise<Refusal | null> => {
+      if (parsed.data.isDefault === false || makesPrivate) await defaultLock(tx);
+      const row = await lockedRow(tx);
+      if (!row) return { status: 404, error: "Not found" };
+      const nextConfig =
+        parsed.data.config !== undefined ? carryPinnedDefault(composeConfig(row), row.config) : row.config;
+      // The pinned default cannot go private (review #31), judged on the view
+      // as this write leaves it. An ownerless legacy row stays visible to
+      // everyone whatever its flag says, so it is not refused.
+      if (makesPrivate && spaceList && parsed.data.isDefault !== false && row.ownerId !== null && row.isDefault) {
+        // Whether an unmarked plain Board is a pin depends on the List's
+        // other Boards, so the siblings are read under the same lock.
+        const siblings = await tx.view.findMany({
+          where: { boardId: id },
+          select: { id: true, isDefault: true, type: true, config: true, isShared: true, ownerId: true, displayOrder: true },
+        });
+        const self = siblings.find((v) => v.id === viewId);
+        const leaving = {
+          id: viewId,
+          isDefault: row.isDefault,
+          type: parsed.data.type ?? row.type,
+          config: nextConfig,
+          isShared: row.isShared,
+          ownerId: row.ownerId,
+          displayOrder: self?.displayOrder ?? 0,
+        };
+        const all = [...siblings.filter((v) => v.id !== viewId), leaving];
+        if (countsAsPinnedDefault(leaving, all)) return { status: 409, error: PINNED_PRIVATE_DENIED };
+      }
+      if (parsed.data.isDefault === false && !row.isDefault && readPinnedDefault(row.config) === null) {
+        // A STALE UNPIN. The strip is not realtime: a tab that still shows
+        // this view as the pin may be unpinning after someone else pinned
+        // another view, which already cleared this one. Sweeping the List now
+        // would erase that newer pin, so the write is refused instead.
+        return { status: 409, error: UNPIN_STALE };
+      }
+      if (parsed.data.isDefault === false) {
+        // Unpin clears the WHOLE List, so no pin a race or a legacy row left
+        // behind can surface as the default once this one is gone.
+        await clearOthers(tx);
+        data.config = withoutPinnedDefault(composeConfig(row)) as object;
+      } else if (parsed.data.config !== undefined) {
+        data.config = nextConfig as object;
+      }
+      await tx.view.update({ where: { id: viewId }, data });
+      return null;
     });
   } else {
     await prisma.view.update({ where: { id: viewId }, data });
   }
+  if (refusal) return NextResponse.json({ error: refusal.error }, { status: refusal.status });
   const updated = await prisma.view.findUnique({ where: { id: viewId } });
   return NextResponse.json({ view: updated });
 }

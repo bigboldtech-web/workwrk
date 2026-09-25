@@ -28,6 +28,13 @@ import {
   SPRINT_POINTS_LABEL,
   type SprintMeta,
 } from "@/lib/sprint";
+import {
+  TASK_LIST_VIEW_TYPES,
+  coreListViewRows,
+  needsCoreListViews,
+  missingCoreListViews,
+} from "@/lib/work/list-view-seed";
+import { resolveDefaultView, visibleToEveryone, type DefaultViewCandidate } from "@/lib/work/default-view";
 
 // The org-admin ladder moved to src/lib/access/legacy-levels.ts with the
 // step-1 pivot; the three gates below read it through parity.ts.
@@ -78,7 +85,7 @@ export interface CreateBoardInput {
   icon?: string;
   color?: string;
   itemType?: string;             // default "studio-item"
-  defaultViewType?: ViewType;    // default TABLE
+  defaultViewType?: ViewType;    // default KANBAN, the Board
   visibility?: Visibility;
   /** Sprints (migration-free): when set, the board is created as a Sprint —
    *  settings.sprint written, Sprint Points NUMBER field seeded, and (when
@@ -86,75 +93,60 @@ export interface CreateBoardInput {
   sprint?: { startDate: string; endDate: string };
 }
 
-// The ClickUp-style view set every task List ships with: a grouped List, a
-// Board (kanban), a Calendar and a Gantt — all reading the SAME items, so a
-// task added in one shows in all. This is why "add in List → see in Board /
-// Gantt" just works. Non-task boards (Doc / Form / Whiteboard / Dashboard) are
-// single-view and are left alone.
-const CORE_LIST_VIEWS: { type: ViewType; name: string }[] = [
-  { type: "TABLE", name: "List" },
-  { type: "KANBAN", name: "Board" },
-  { type: "CALENDAR", name: "Calendar" },
-  { type: "GANTT", name: "Gantt" },
-];
-const TASK_LIST_VIEW_TYPES = new Set<ViewType>(["TABLE", "KANBAN", "CALENDAR", "GANTT", "TIMELINE"]);
-
+// Every task List ships with the same four views over the SAME tasks (Board,
+// List, Calendar, Gantt: CORE_LIST_VIEWS in src/lib/work/list-view-seed.ts),
+// so a task added in one shows in all. Board comes first and is the default by
+// rule (src/lib/work/default-view.ts), not by a flag. Non-task Lists (Doc,
+// Form, Canvas, Dashboard) are single-view and are left alone.
 function isTaskListBoard(itemType: string, viewType: ViewType): boolean {
   return itemType === "studio-item" && TASK_LIST_VIEW_TYPES.has(viewType);
 }
 
-// Build the create-data for a fresh task List's core views, default-view first.
-function coreViewCreateData(boardId: string, ownerId: string, defaultType: ViewType) {
-  const ordered = [
-    ...CORE_LIST_VIEWS.filter((v) => v.type === defaultType),
-    ...CORE_LIST_VIEWS.filter((v) => v.type !== defaultType),
-  ];
-  if (!ordered.some((v) => v.type === defaultType)) {
-    ordered.unshift({ type: defaultType, name: viewTypeDefaultLabel(defaultType) });
-  }
-  return ordered.map((v, i) => ({
+/** A seed row from list-view-seed.ts as a View create for this List. */
+function seedViewData(
+  boardId: string,
+  ownerId: string,
+  row: { name: string; type: ViewType; isDefault: boolean; config: Record<string, unknown>; displayOrder: number },
+) {
+  return {
     boardId,
-    name: v.name,
-    type: v.type,
-    isDefault: v.type === defaultType,
+    name: row.name,
+    type: row.type,
+    isDefault: row.isDefault,
     isShared: true,
     ownerId,
-    config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
-    displayOrder: i,
-  }));
+    config: row.config as Prisma.InputJsonValue,
+    displayOrder: row.displayOrder,
+  };
 }
 
 /**
  * Self-heal: ensure an existing task List has the full core view set. Only
- * touches boards that already have a TABLE view (i.e. real task Lists), and
- * only appends the missing core views (Board / Calendar / Gantt) — it never
- * changes the default or existing views. Idempotent + cheap after the first
- * run (returns 0 with no writes once all core views exist). Returns the number
- * of views created so the caller can decide whether to refetch.
+ * touches Lists that already have a TABLE view (real task Lists), and only
+ * appends the missing core views after the last one, never as the default:
+ * it changes no existing view. Returns the number of views created. A List
+ * with its full set costs one read and no write.
+ *
+ * The write takes a per-List advisory lock and re-reads inside it, so two
+ * first visits at the same moment cannot both seed a Board (the second waits,
+ * finds nothing missing, and writes nothing).
  */
 export async function ensureCoreListViews(boardId: string, ownerId: string): Promise<number> {
-  const views = await prisma.view.findMany({
-    where: { boardId },
-    select: { type: true, displayOrder: true },
+  const views = await prisma.view.findMany({ where: { boardId }, select: { type: true } });
+  if (!needsCoreListViews(views)) return 0;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`core-views:${boardId}`}))`;
+    const current = await tx.view.findMany({ where: { boardId }, select: { type: true, displayOrder: true } });
+    const missing = needsCoreListViews(current) ? missingCoreListViews(current) : [];
+    if (missing.length === 0) return 0;
+    let order = current.reduce((max, v) => Math.max(max, v.displayOrder), 0) + 1;
+    await tx.view.createMany({
+      data: missing.map((v) =>
+        seedViewData(boardId, ownerId, { ...v, isDefault: false, displayOrder: order++ }),
+      ),
+    });
+    return missing.length;
   });
-  if (!views.some((v) => v.type === "TABLE")) return 0; // not a task List — leave alone
-  const present = new Set(views.map((v) => v.type));
-  const missing = CORE_LIST_VIEWS.filter((v) => !present.has(v.type));
-  if (missing.length === 0) return 0;
-  let order = views.reduce((max, v) => Math.max(max, v.displayOrder), 0) + 1;
-  await prisma.view.createMany({
-    data: missing.map((v) => ({
-      boardId,
-      name: v.name,
-      type: v.type,
-      isDefault: false,
-      isShared: true,
-      ownerId,
-      config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
-      displayOrder: order++,
-    })),
-  });
-  return missing.length;
 }
 
 /**
@@ -212,9 +204,11 @@ export async function getOrCreatePersonalBoard(organizationId: string, userId: s
           settings: {},
         },
       });
-      // Personal List is "just a List that happens to be personal" — same full
-      // view set as any other List so its Board/Calendar/Gantt tabs match.
-      await tx.view.createMany({ data: coreViewCreateData(board.id, userId, "TABLE") });
+      // The Personal list is just a List that happens to be personal: the same
+      // four views as any other List, opening on Board like every List does.
+      await tx.view.createMany({
+        data: coreListViewRows(null, null).map((row) => seedViewData(board.id, userId, row)),
+      });
       return board;
     });
   } catch {
@@ -281,7 +275,10 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
 
   const slug = await uniqueBoardSlug(input.organizationId, toSlug(boardName));
   const itemType = input.itemType ?? "studio-item";
-  const viewType = input.defaultViewType ?? "TABLE";
+  // Board is every new List's default (decision 8). A caller that asks for
+  // another type (a template with a real preference) gets that view pinned
+  // by its creator, below.
+  const viewType = input.defaultViewType ?? "KANBAN";
 
   // Sprint task Lists ship with the Sprint Points NUMBER field pre-seeded —
   // exactly the FieldDef addBoardField would produce, so every existing
@@ -312,12 +309,18 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         ...(seededStatuses ? { statuses: seededStatuses as unknown as Prisma.InputJsonValue } : {}),
       },
     });
-    // Task Lists ship with the full ClickUp view set (List/Board/Calendar/
-    // Gantt); non-task boards (Doc/Form/Whiteboard/…) get just their one view.
+    // Task Lists ship with the four core views, Board first; non-task Lists
+    // (Doc, Form, Canvas...) get just their one view. KANBAN writes no
+    // isDefault at all (Board is the default by rule, so there is no Pin
+    // glyph nobody set); any other type is written as the creator's pin.
     if (isTaskListBoard(itemType, viewType)) {
-      await tx.view.createMany({ data: coreViewCreateData(board.id, input.userId, viewType) });
+      const mark = viewType === "KANBAN" ? null : { byId: input.userId, at: new Date().toISOString() };
+      await tx.view.createMany({
+        data: coreListViewRows(viewType, mark).map((row) => seedViewData(board.id, input.userId, row)),
+      });
       const defaultView = await tx.view.findFirstOrThrow({
-        where: { boardId: board.id, isDefault: true },
+        where: { boardId: board.id, type: viewType },
+        orderBy: { displayOrder: "asc" },
         select: { id: true, type: true },
       });
       return { board, defaultView };
@@ -379,15 +382,70 @@ function viewTypeDefaultLabel(t: ViewType): string {
   }
 }
 
+/**
+ * Each List's resolved default view (decision 8), in ONE query for all of
+ * them. The id is the same for every reader of the List, so only views
+ * everyone can see take part (a private default is its owner's alone). Only
+ * the three config keys the resolver reads cross the wire (review #37), not
+ * whole configs: a List's view config can hold column widths, filters and a
+ * dozen more keys per view.
+ */
+async function resolvedDefaultViewIds(boardIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (boardIds.length === 0) return out;
+  const rows = await prisma.$queryRaw<
+    Array<{
+      boardId: string;
+      id: string;
+      name: string;
+      type: string;
+      isDefault: boolean;
+      isShared: boolean;
+      ownerId: string | null;
+      displayOrder: number;
+      pinned: unknown;
+      grid: unknown;
+      variant: unknown;
+    }>
+  >`
+    SELECT "boardId", id, name, type::text AS type, "isDefault", "isShared", "ownerId", "displayOrder",
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'pinned' END AS pinned,
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'grid' END AS grid,
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'variant' END AS variant
+    FROM "View" WHERE "boardId" = ANY(${boardIds}::text[])`;
+  const byBoard = new Map<string, DefaultViewCandidate[]>();
+  for (const r of rows) {
+    if (!visibleToEveryone(r)) continue;
+    const list = byBoard.get(r.boardId) ?? [];
+    list.push({
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      isDefault: r.isDefault,
+      isShared: r.isShared,
+      ownerId: r.ownerId,
+      displayOrder: r.displayOrder,
+      config: { pinned: r.pinned, grid: r.grid, variant: r.variant },
+    });
+    byBoard.set(r.boardId, list);
+  }
+  for (const [boardId, views] of byBoard) {
+    views.sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name));
+    const resolved = resolveDefaultView(views);
+    if (resolved) out.set(boardId, resolved.view.id);
+  }
+  return out;
+}
+
 export async function listBoardsInSpace(spaceId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardSummary[]> {
   const rows = await prisma.board.findMany({
     where: { spaceId, ...(opts.includeArchived ? {} : { archivedAt: null }) },
     orderBy: { name: "asc" },
     include: {
-      views: { where: { isDefault: true }, take: 1, select: { id: true } },
       _count: { select: { views: true } },
     },
   });
+  const defaults = await resolvedDefaultViewIds(rows.map((b) => b.id));
   return rows.map((b) => ({
     id: b.id,
     slug: b.slug,
@@ -401,7 +459,7 @@ export async function listBoardsInSpace(spaceId: string, opts: { includeArchived
     productSlug: b.productSlug,
     visibility: b.visibility,
     archivedAt: b.archivedAt,
-    defaultViewId: b.views[0]?.id ?? null,
+    defaultViewId: defaults.get(b.id) ?? null,
     viewCount: b._count.views,
   }));
 }
@@ -418,10 +476,10 @@ export async function listBoardsInFolder(
     },
     orderBy: { name: "asc" },
     include: {
-      views: { where: { isDefault: true }, take: 1, select: { id: true } },
       _count: { select: { views: true } },
     },
   });
+  const defaults = await resolvedDefaultViewIds(rows.map((b) => b.id));
   return rows.map((b) => ({
     id: b.id,
     slug: b.slug,
@@ -435,7 +493,7 @@ export async function listBoardsInFolder(
     productSlug: b.productSlug,
     visibility: b.visibility,
     archivedAt: b.archivedAt,
-    defaultViewId: b.views[0]?.id ?? null,
+    defaultViewId: defaults.get(b.id) ?? null,
     viewCount: b._count.views,
   }));
 }
@@ -709,10 +767,20 @@ export async function getBoardForReaderOrFolderGrantee(
     select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
   });
   if (!row?.folderId) return null;
-  // A grant cascades to sub-folders, which is why this is the descendant-aware
-  // set and not a single FolderMember lookup.
+  return (await folderGrantCovers(row.folderId, userId)) ? row : null;
+}
+
+/**
+ * The folder-grant half of getBoardForReaderOrFolderGrantee on its own: does
+ * one of this viewer's folder grants cover `folderId`? For a caller that has
+ * already run getBoardForReader and already holds the List's folderId (the
+ * item gate), so the reader's reads are not repeated. A grant cascades to
+ * sub-folders, which is why this is the descendant-aware set and not a single
+ * FolderMember lookup.
+ */
+export async function folderGrantCovers(folderId: string, userId: string): Promise<boolean> {
   const granted = await accessibleFolderIds(userId);
-  return granted.has(row.folderId) ? row : null;
+  return granted.has(folderId);
 }
 
 /**

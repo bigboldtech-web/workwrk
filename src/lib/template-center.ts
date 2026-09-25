@@ -23,6 +23,13 @@ import { createBoardItem } from "@/lib/board-items";
 import type { ViewType, Prisma } from "@/generated/prisma";
 import type { StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import {
+  resolveDefaultView,
+  visibleToEveryone,
+  withPinnedDefault,
+  withoutPinnedDefault,
+} from "@/lib/work/default-view";
+import { planTemplateViews, templateDefaultViewType } from "@/lib/work/list-view-seed";
 
 /**
  * Who may create a Space, as one exported set.
@@ -44,8 +51,14 @@ export interface ListTemplatePayload {
   color?: string;
   statuses?: StatusOption[];
   fields?: FieldDef[];
-  views?: Array<{ type: ViewType; name?: string; config?: Record<string, unknown> }>;
+  /** `pinned` marks the view the List opens on (the source List's pinned default). */
+  views?: Array<{ type: ViewType; name?: string; config?: Record<string, unknown>; pinned?: boolean }>;
   items?: Array<{ title: string; status?: string; priority?: string; metadata?: Record<string, unknown> }>;
+  /**
+   * The type of the source List's default view. Older snapshots recorded the
+   * raw isDefault type, which was almost always TABLE (the old system
+   * default), so TABLE reads as no preference: see templateDefaultViewType.
+   */
   defaultView?: ViewType;
 }
 
@@ -72,7 +85,8 @@ export async function applyListTemplate(
   payload: ListTemplatePayload,
   ctx: { organizationId: string; userId: string; spaceId: string; folderId?: string | null; name: string },
 ): Promise<{ boardId: string; slug: string }> {
-  const defaultView = payload.defaultView ?? "TABLE";
+  // Board unless the template carries a real preference (review #33).
+  const defaultViewType = templateDefaultViewType(payload) as ViewType;
   const board = await createBoard({
     organizationId: ctx.organizationId,
     userId: ctx.userId,
@@ -81,7 +95,7 @@ export async function applyListTemplate(
     name: ctx.name,
     icon: payload.icon,
     color: payload.color,
-    defaultViewType: defaultView,
+    defaultViewType,
   });
 
   // Statuses + custom fields land on the Board row.
@@ -96,21 +110,58 @@ export async function applyListTemplate(
     await prisma.board.update({ where: { id: board.id }, data });
   }
 
-  // Extra views beyond the default createBoard already made.
-  if (Array.isArray(payload.views)) {
-    let order = 1;
-    for (const v of payload.views) {
-      if (!v?.type || v.type === defaultView) continue;
-      await prisma.view.create({
-        data: {
-          boardId: board.id,
-          name: v.name ?? viewLabel(v.type),
-          type: v.type,
-          isShared: true,
-          ownerId: ctx.userId,
-          config: (v.config ?? {}) as object,
-          displayOrder: order++,
-        },
+  // The template's views, laid over the ones createBoard just made. The old
+  // loop skipped only the default type and created everything else, so every
+  // snapshot of an ordinary List came back with a second Board, Calendar and
+  // Gantt beside createBoard's own, on colliding displayOrders. A payload
+  // view that matches a created one by type and name IS that view now.
+  const payloadViews = (Array.isArray(payload.views) ? payload.views : []).filter(
+    (v): v is NonNullable<typeof v> => typeof v?.type === "string",
+  );
+  if (payloadViews.length > 0) {
+    const created = await prisma.view.findMany({
+      where: { boardId: board.id },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, type: true, displayOrder: true, config: true },
+    });
+    const plan = planTemplateViews(created, payloadViews, (t) => viewLabel(t as ViewType));
+    if (plan.updates.length > 0 || plan.creates.length > 0) {
+      const mark = { byId: ctx.userId, at: new Date().toISOString() };
+      const pins = plan.updates.some((u) => u.pin) || plan.creates.some((cr) => cr.pin);
+      // One transaction: the template's views land together or not at all.
+      // No List lock is taken for the pin: the List is seconds old and nobody
+      // else can see it yet.
+      await prisma.$transaction(async (tx) => {
+        if (pins) {
+          await tx.$executeRaw`
+            UPDATE "View" SET "isDefault" = false,
+              "config" = CASE WHEN jsonb_typeof("config") = 'object' THEN "config" - 'pinned' ELSE "config" END,
+              "updatedAt" = NOW()
+            WHERE "boardId" = ${board.id}
+              AND ("isDefault" = true OR ("config" -> 'pinned') IS NOT NULL)`;
+        }
+        for (const u of plan.updates) {
+          await tx.view.update({
+            where: { id: u.id },
+            data: u.pin
+              ? { isDefault: true, config: withPinnedDefault(u.config, mark) as Prisma.InputJsonValue }
+              : { config: u.config as Prisma.InputJsonValue },
+          });
+        }
+        for (const cr of plan.creates) {
+          await tx.view.create({
+            data: {
+              boardId: board.id,
+              name: cr.name,
+              type: cr.type as ViewType,
+              isShared: true,
+              ownerId: ctx.userId,
+              isDefault: cr.pin,
+              config: (cr.pin ? withPinnedDefault(cr.config, mark) : cr.config) as Prisma.InputJsonValue,
+              displayOrder: cr.displayOrder,
+            },
+          });
+        }
       });
     }
   }
@@ -326,14 +377,27 @@ export async function snapshotBoard(boardId: string): Promise<{ name: string; pa
   });
   if (!board) return null;
   const schema = (board.schema ?? {}) as { fields?: FieldDef[] };
-  const defaultView = board.views.find((v) => v.isDefault)?.type ?? board.views[0]?.type ?? "TABLE";
+  // The List's default as the resolver sees it for everyone (a template is
+  // for the List, not for one reader), recorded as `pinned` on that view when
+  // it is somebody's choice. The stored mark itself never goes into the
+  // payload: the List a template creates gets a fresh one, by whoever applies it.
+  const resolved = resolveDefaultView(
+    board.views
+      .filter(visibleToEveryone)
+      .sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name)),
+  );
   const payload: ListTemplatePayload = {
     icon: board.icon ?? undefined,
     color: board.color ?? undefined,
     statuses: Array.isArray(board.statuses) ? (board.statuses as unknown as StatusOption[]) : undefined,
     fields: Array.isArray(schema.fields) ? schema.fields : undefined,
-    views: board.views.map((v) => ({ type: v.type, name: v.name, config: (v.config ?? {}) as Record<string, unknown> })),
-    defaultView,
+    views: board.views.map((v) => ({
+      type: v.type,
+      name: v.name,
+      config: withoutPinnedDefault(v.config),
+      ...(resolved?.pinned && resolved.view.id === v.id ? { pinned: true } : {}),
+    })),
+    ...(resolved ? { defaultView: resolved.view.type } : {}),
   };
   return { name: board.name, payload };
 }

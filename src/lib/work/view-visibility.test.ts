@@ -38,14 +38,30 @@ describe("visibleViews", () => {
 });
 
 describe("orderViews", () => {
-  it("puts pinned first in pin order, then the default, then displayOrder", () => {
+  it("puts the resolved default first, then personal pins in pin order, then displayOrder", () => {
+    const rows = [
+      v({ id: "c", displayOrder: 3 }),
+      v({ id: "d", displayOrder: 9 }),
+      v({ id: "a", displayOrder: 1 }),
+      v({ id: "b", displayOrder: 2 }),
+    ];
+    expect(orderViews(rows, ["b", "c"], "d").map((r) => r.id)).toEqual(["d", "b", "c", "a"]);
+  });
+  it("no longer ranks the raw isDefault flag: first is whatever default-view.ts resolved (decision 9)", () => {
+    // The flag sat on the auto List view of almost every List, so ranking it
+    // put List first while the page opened Board.
     const rows = [
       v({ id: "c", displayOrder: 3 }),
       v({ id: "d", isDefault: true, displayOrder: 9 }),
       v({ id: "a", displayOrder: 1 }),
       v({ id: "b", displayOrder: 2 }),
     ];
-    expect(orderViews(rows, ["b", "c"]).map((r) => r.id)).toEqual(["b", "c", "d", "a"]);
+    expect(orderViews(rows, ["b", "c"]).map((r) => r.id)).toEqual(["b", "c", "a", "d"]);
+    expect(orderViews(rows, [], "a").map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("ignores a default id that is not in the set", () => {
+    const rows = [v({ id: "b", displayOrder: 2 }), v({ id: "a", displayOrder: 1 })];
+    expect(orderViews(rows, [], "gone").map((r) => r.id)).toEqual(["a", "b"]);
   });
   it("falls back to name, then to arrival order, so the sort is stable", () => {
     const rows = [
@@ -70,6 +86,14 @@ describe("viewsForViewer", () => {
       v({ id: "mine", isShared: false, ownerId: "u1", displayOrder: 1 }),
     ];
     expect(viewsForViewer(rows, "u1", ["shared"]).map((r) => r.id)).toEqual(["shared", "mine"]);
+  });
+  it("passes the resolved default through, ahead of the personal pins", () => {
+    const rows = [
+      v({ id: "theirs", isShared: false, ownerId: "u2", displayOrder: 0 }),
+      v({ id: "shared", displayOrder: 2 }),
+      v({ id: "mine", isShared: false, ownerId: "u1", displayOrder: 1 }),
+    ];
+    expect(viewsForViewer(rows, "u1", ["shared"], "mine").map((r) => r.id)).toEqual(["mine", "shared"]);
   });
 });
 
