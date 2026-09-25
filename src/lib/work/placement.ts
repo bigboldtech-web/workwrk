@@ -3,7 +3,7 @@
 // and which tree branch opens to show it.
 //
 // The server half (placement-server.ts) fetches the facts with org-scoped
-// queries and the existing access gates, and hands them to the assemblers
+// queries and the one node-access resolver, and hands them to the assemblers
 // here. Everything in this file is pure: it decides nothing about access,
 // it only arranges facts the loader already proved readable, which is what
 // lets the test cover every shape without a database.
@@ -18,7 +18,11 @@ import type { PillCandidates, TreeReveal } from "../nav/open-object";
 /** One crumb after the hub. Plain data: it crosses the server-client boundary. */
 export interface PlacementCrumb {
   label: string;
-  /** Absent when the viewer cannot open the page it names (a folder-only grantee's Space). */
+  /**
+   * Absent when the viewer can neither open the page it names nor pass
+   * through it. A path container (a Space or Folder the viewer only passes
+   * through on the way to what they were given) links to its path view.
+   */
   href?: string;
   /** The Space crumb's tile. */
   tile?: { icon: string | null; color: string | null; name: string };
@@ -112,32 +116,37 @@ export function backFromTrail(trail: readonly PlacementCrumb[]): { href: string;
   return { href: WORK_HOME_HREF, label: "Work" };
 }
 
-/** The deepest folder level the Work tree renders (GET /api/spaces/[id]/children loads three). */
-export const TREE_FOLDER_DEPTH = 3;
+/**
+ * The deepest folder level the Work tree renders. GET /api/spaces/[id]/children
+ * returns every level now (node-tree.ts), and Folders nest six deep at most
+ * (folder.ts MAX_FOLDER_DEPTH), so a reveal can open the whole way down.
+ */
+export const TREE_FOLDER_DEPTH = 6;
 
 /** One folder on the way from the Space down to the object, root first. */
 export interface FolderStep {
   id: string;
-  /** The Work tree's own prune rule for a full viewer: folderVisibleTo, and not archived. */
+  /**
+   * The folder renders in the viewer's Work tree: readable, or a path
+   * container on the way to what they were given, and not archived.
+   */
   visible: boolean;
-  /** A FolderMember grant of the viewer's on this folder (folder-only grantees). */
-  granted: boolean;
 }
 
-/** How much of the Space the viewer's Work tree shows (lib/folder folderAccessForSpace). */
-export type TreeAccess = "full" | "scoped" | "none";
+/**
+ * How the viewer's Work tree shows the Space: "full" (a role on it), "path"
+ * (a path container: only the branches that lead to what they were given) or
+ * "none".
+ */
+export type TreeAccess = "full" | "path" | "none";
 
 /**
  * The folder rows the viewer's Work tree renders on the way to an object,
  * root first: the ids a reveal may open and the ids a pill may fall back to.
- *
- *   full    the tree's own rule: a folder shows only when it and every
- *           ancestor pass the prune rule, and only to the depth the tree
- *           loads. The walk stops at the first folder that would not render.
- *   scoped  a folder-only grantee's tree lifts each granted folder to the
- *           top level and never prunes beneath it, so the walk starts at the
- *           NEAREST grant above the object and stops at the depth limit.
- *   none    nothing.
+ * One walk for a full Space and a path Space alike, because the tree renders
+ * a path Folder at its real depth: a folder shows only when it and every
+ * ancestor render, to the depth the tree loads, and the walk stops at the
+ * first folder that would not render.
  *
  * `complete` is false when the loader's ancestor walk ran out of hops before
  * reaching a top-level folder; such a path is deeper than the tree renders.
@@ -145,24 +154,13 @@ export type TreeAccess = "full" | "scoped" | "none";
  * is expanded or sent to the browser.
  */
 export function treeFolderIds(path: readonly FolderStep[], access: TreeAccess, complete = true): string[] {
-  if (access === "none" || path.length === 0) return [];
-  if (access === "full") {
-    if (!complete) return [];
-    const out: string[] = [];
-    for (const step of path) {
-      if (!step.visible || out.length >= TREE_FOLDER_DEPTH) break;
-      out.push(step.id);
-    }
-    return out;
+  if (access === "none" || path.length === 0 || !complete) return [];
+  const out: string[] = [];
+  for (const step of path) {
+    if (!step.visible || out.length >= TREE_FOLDER_DEPTH) break;
+    out.push(step.id);
   }
-  let start = -1;
-  for (let i = path.length - 1; i >= 0; i -= 1) {
-    if (path[i].granted) {
-      start = i;
-      break;
-    }
-  }
-  return start < 0 ? [] : path.slice(start, start + TREE_FOLDER_DEPTH).map((s) => s.id);
+  return out;
 }
 
 /** A Space the viewer can see in the Work tree. */
@@ -172,14 +170,16 @@ export interface SpaceFact {
   name: string;
   icon: string | null;
   color: string | null;
-  /** "scoped": a folder-only grantee, whose Space is a bare container they cannot open. */
-  access: "full" | "scoped";
+  /** "path": the viewer only passes through this Space; its page is the path view. */
+  access: "full" | "path";
 }
 
 function spaceCrumb(space: SpaceFact): PlacementCrumb {
+  // Both link: a full Space to its page, a path Space to its path view (the
+  // same /spaces/<slug> address renders it for a path viewer).
   return {
     label: space.name,
-    ...(space.access === "full" ? { href: `/spaces/${encodeURIComponent(space.slug)}` } : {}),
+    href: `/spaces/${encodeURIComponent(space.slug)}`,
     tile: { icon: space.icon, color: space.color, name: space.name },
   };
 }
@@ -194,7 +194,11 @@ export interface DocFacts {
   folderPath: FolderStep[];
   /** False when the ancestor walk stopped before a top-level folder. */
   folderPathComplete: boolean;
-  /** The doc's own Folder or its List's Folder, when readable: its crumb. */
+  /**
+   * The doc's own Folder or its List's Folder, when the viewer can open it or
+   * passes through it (a path container, whose page is its path view): its
+   * crumb, linked either way.
+   */
   folder: { id: string; name: string } | null;
   /** The List of a List doc or a task doc, when readable. */
   list: { id: string; slug: string; name: string } | null;
@@ -281,7 +285,9 @@ export function nestedFolderIds(folder: SpaceItemFacts["folder"]): string[] {
  */
 export function assembleSpaceItemPlacement(kind: "table" | "canvas", f: SpaceItemFacts): WorkPlacementData {
   const slug = f.space?.slug ?? null;
-  const folderIds = f.space && f.space.access === "full" ? nestedFolderIds(f.folder) : [];
+  // A path Space nests the item too: a canvas granted inside a PRIVATE Folder
+  // sits under that Folder (a path) in the viewer's tree.
+  const folderIds = f.space ? nestedFolderIds(f.folder) : [];
   const trail: PlacementCrumb[] = f.space ? [spaceCrumb(f.space)] : [];
   if (f.folder && folderIds.length > 0) {
     trail.push({ label: f.folder.name, href: `/folders/${encodeURIComponent(f.folder.id)}` });

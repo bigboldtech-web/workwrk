@@ -44,7 +44,7 @@ import { NewSpaceDialog } from "./new-space-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { DocsSidebar } from "./docs-sidebar";
 import { TablesSidebar } from "./tables-sidebar";
-import { ShareSpaceDialog } from "./share-space-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import {
   hydrateSidebarState, hiddenSpaces, setAllExpanded, subscribeSidebarState,
@@ -431,9 +431,14 @@ interface SpaceRow {
   id: string;
   slug: string;
   name: string;
-  visibility: "PRIVATE" | "WORKSPACE" | "ORG";
+  /** Null on a path row (GET /api/spaces?paths=1): a Space named only on the way to something shared. */
+  visibility: "PRIVATE" | "WORKSPACE" | "ORG" | null;
   icon: string | null;
   color: string | null;
+  /** The viewer's role on the Space; null on a path row. */
+  role?: "full" | "edit" | "comment" | "view" | null;
+  /** "path": the viewer only passes through this Space (no role, no counts, no controls). */
+  access?: "member" | "path";
 }
 
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
@@ -712,7 +717,10 @@ function HomeSidebar() {
   }, []);
 
   const reload = useCallback(() => {
-    fetch("/api/spaces", { cache: "no-store" })
+    // paths=1: a Space the viewer only passes through on the way to a Folder,
+    // List, doc, table or canvas they were given is listed too, as a bare
+    // named row (access "path"), so what was shared has a place in the tree.
+    fetch("/api/spaces?paths=1", { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -1091,7 +1099,9 @@ function HomeSidebar() {
             return (
               <SpaceTreeRow
                 key={s.id}
-                space={s}
+                // A path row has no visibility and no role: it renders as the
+                // reader's row with no create trigger and no glyph.
+                space={{ ...s, visibility: s.visibility ?? "WORKSPACE", role: s.role ?? undefined }}
                 isActive={isActive}
                 onReloadSpaces={() => void reload()}
                 // Reordering only makes sense on the full, unfiltered list.
@@ -1210,12 +1220,12 @@ function HomeSidebar() {
         />
       ) : null}
 
-      <ShareSpaceDialog
+      <ShareDialog
         open={Boolean(shareDialogSpace)}
         onOpenChange={(v) => { if (!v) setShareDialogSpace(null); }}
-        spaceId={shareDialogSpace?.id ?? null}
-        spaceName={shareDialogSpace?.name ?? ""}
-        initialVisibility={shareDialogSpace?.visibility ?? "WORKSPACE"}
+        target={shareDialogSpace ? { kind: "space", id: shareDialogSpace.id, name: shareDialogSpace.name, visibility: shareDialogSpace.visibility ?? "WORKSPACE" } : null}
+        // Who has access, read only, unless the viewer holds Full access on the Space.
+        readOnly={shareDialogSpace?.role !== "full"}
         onChanged={() => void reload()}
       />
     </>

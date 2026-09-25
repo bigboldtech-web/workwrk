@@ -10,25 +10,24 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { visibleSpaceIds } from "@/lib/space";
-import { accessibleFolderIds } from "@/lib/folder";
 import { canReadBoard } from "@/lib/board";
+import { readableFileRows } from "@/lib/file-access";
+import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilesFilters, matchesFilesView, parseFilesListQuery, sortFiles, type FileCandidate } from "@/lib/files-list";
 import { sliceByCursor } from "@/lib/list-query";
 
 /**
- * Space-visibility gate over a set of files, one visibleSpaceIds call: a file
- * with no Space is org-wide; a Space file shows if the viewer reads the Space
- * or holds a grant on the Space folder it lives in (their own folder's files,
- * and ONLY those).
+ * The read gate over a set of files, one world for the whole batch
+ * (src/lib/file-access.ts, the one resolver): a file with no Space is
+ * org-wide; a file in a Space folder shows to whoever can view that Folder;
+ * a file tagged to a Space shows to whoever can view that Space.
  */
-async function gateFiles<T extends { spaceId: string | null; spaceFolderId: string | null }>(files: T[], userId: string, accessLevel: string): Promise<T[]> {
-  const scopedIds = [...new Set(files.map((f) => f.spaceId).filter((s): s is string => Boolean(s)))];
-  const [visible, accessibleFolders] = scopedIds.length > 0
-    ? await Promise.all([visibleSpaceIds(scopedIds, userId, accessLevel), accessibleFolderIds(userId)])
-    : [new Set<string>(), new Set<string>()];
-  return files.filter((f) => !f.spaceId || visible.has(f.spaceId) || (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)));
+async function gateFiles<T extends { id: string; spaceId: string | null; spaceFolderId: string | null }>(
+  files: T[],
+  viewer: { organizationId: string; userId: string; accessLevel: string },
+): Promise<T[]> {
+  return readableFileRows(files, viewer);
 }
 
 /**
@@ -54,7 +53,7 @@ async function pagedList(req: NextRequest, session: { user: unknown }, orgId: st
     }),
     getEffectivePreferences(userId, orgId),
   ]);
-  const gated = await gateFiles(rows, userId, accessLevel);
+  const gated = await gateFiles(rows, { organizationId: orgId, userId, accessLevel });
   const home = prefs.home as { favoriteFileIds?: string[] };
   const facts = { favoriteIds: new Set<string>(Array.isArray(home.favoriteFileIds) ? home.favoriteFileIds : []) };
 
@@ -170,27 +169,12 @@ export async function GET(req: NextRequest) {
     take: 500,
   });
 
-  // Phase 22 — gate by Space visibility. Files with spaceId=null stay
-  // visible to everyone in the org (unscoped). Files tagged to a Space
-  // are returned only if the viewer can read that Space.
+  // The read gate: files with spaceId=null stay visible to everyone in the
+  // org (unscoped); a Space folder's files to whoever can view that Folder;
+  // a Space's own files to whoever can view that Space. One world per page.
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
   const userId = getUserId(session);
-  const scopedIds = files.map((f) => f.spaceId).filter((s): s is string => Boolean(s));
-  const [visible, accessibleFolders] = scopedIds.length > 0
-    ? await Promise.all([
-        visibleSpaceIds(scopedIds, userId, accessLevel),
-        accessibleFolderIds(userId),
-      ])
-    : [new Set<string>(), new Set<string>()];
-  // A space file shows if the viewer fully reads its Space OR holds a folder
-  // grant on the Space folder it lives in (their own folder's files, and ONLY
-  // those — never the rest of the space).
-  const gated = files.filter(
-    (f) =>
-      !f.spaceId ||
-      visible.has(f.spaceId) ||
-      (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)),
-  );
+  const gated = await gateFiles(files, { organizationId: orgId, userId, accessLevel });
 
   // Attach the Space-folder name so the Library drive can show where a
   // space-anchored file lives (chip linking back to the folder).
@@ -247,10 +231,8 @@ export async function POST(req: NextRequest) {
     if (!folder) return jsonError("folder not found", 404);
   }
 
-  // Cross-tenant safety: the spaceId must belong to the caller's org.
-  // No membership check here — uploading from a board the caller can
-  // see is already permission-gated by the surface that hosts the upload
-  // (e.g. BoardItemDrawer enforces canEdit before exposing the form).
+  // Cross-tenant safety: the spaceId must belong to the caller's org. The
+  // viewer's reach into it is checked below, once the folder is known.
   if (spaceId) {
     const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
     if (!space) return jsonError("space not found", 404);
@@ -265,6 +247,22 @@ export async function POST(req: NextRequest) {
     });
     if (!sf) return jsonError("space folder not found", 404);
     spaceId = sf.spaceId ?? spaceId;
+  }
+
+  // The upload gate (the one resolver): a file in a Space folder needs Can
+  // view on that Folder; a file tagged to a Space needs Can view on the Space,
+  // or the Space being on the viewer's way to something they were given (a
+  // List member attaching a file to a task); an unscoped file is the org's.
+  // Refused as not found, like every other container the viewer cannot open.
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+  const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
+  const container = spaceFolderId
+    ? { kind: "folder" as const, id: spaceFolderId }
+    : spaceId
+      ? { kind: "space" as const, id: spaceId }
+      : null;
+  if (container && !(await canCreateAt(nodeCtx, container, "file"))) {
+    return jsonError(container.kind === "folder" ? "space folder not found" : "space not found", 404);
   }
 
   const entry = await prisma.fileEntry.create({

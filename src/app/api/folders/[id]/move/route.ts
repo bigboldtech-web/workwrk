@@ -19,8 +19,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import { isFolderDescendant, getFolderDepth, folderReadable } from "@/lib/folder";
+import { isFolderDescendant, getFolderDepth } from "@/lib/folder";
+import { moveAllowed, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -43,16 +44,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, name: true, spaceId: true, parentFolderId: true },
   });
   if (!folder) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // The folder's own read gate, not only its Space's: a Space ADMIN denied a
-  // PRIVATE folder must not be able to relocate it either.
-  if (!(await folderReadable(id, u.id, accessLevel))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (!(await getSpaceForReader(folder.spaceId, u.id, accessLevel))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (!(await canEditSpace(folder.spaceId, u.id, accessLevel))) {
-    return NextResponse.json({ error: "You need edit access to move this folder." }, { status: 403 });
+  // Full access on the folder itself (a Space ADMIN denied a PRIVATE folder
+  // must not be able to relocate it; a Full holder of the Folder may).
+  const ctx = nodeCtxFromLevel(u.id, u.organizationId, accessLevel);
+  const own = await nodeRole(ctx, { kind: "folder", id });
+  if (own.role === "none") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!roleAtLeast(own.role, "FULL")) {
+    return NextResponse.json({ error: "You need Full access to move this folder." }, { status: 403 });
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
@@ -82,12 +80,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     targetSpaceId = parent.spaceId;
   }
 
-  if (targetSpaceId !== folder.spaceId) {
-    const dest = await getSpaceForReader(targetSpaceId, u.id, accessLevel);
-    if (!dest) return NextResponse.json({ error: "That Space no longer exists" }, { status: 404 });
-    if (!(await canEditSpace(targetSpaceId, u.id, accessLevel))) {
-      return NextResponse.json({ error: "You need edit access to that Space." }, { status: 403 });
-    }
+  // The destination: Full access on the Folder it goes into, or on the
+  // Space at its root, in this org.
+  const destSpace = await prisma.space.findFirst({ where: { id: targetSpaceId, organizationId: u.organizationId }, select: { id: true } });
+  if (!destSpace) return NextResponse.json({ error: "That Space no longer exists" }, { status: 404 });
+  const dest = parentFolderId ? { kind: "folder" as const, id: parentFolderId } : { kind: "space" as const, id: targetSpaceId };
+  if (!(await moveAllowed(ctx, { kind: "folder", id }, dest))) {
+    return NextResponse.json({ error: "You need Full access where this folder is going." }, { status: 403 });
   }
 
   // The folder, its descendant folders and every List in the branch move

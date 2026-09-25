@@ -9,6 +9,8 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveSpace, canEditSpace, getSpaceForReader, updateSpace } from "@/lib/space";
 import { moveToTrash } from "@/lib/trash";
+import { prisma } from "@/lib/prisma";
+import { recordGeneralAccessChange } from "@/lib/access/grants";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -63,7 +65,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
   try {
-    const updated = await updateSpace(id, parsed.data);
+    // A visibility change is an access change: its activity row is written
+    // in the same transaction as the Space (general access sends no
+    // notification, by decision).
+    const before = space.visibility;
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await updateSpace(id, parsed.data, tx);
+      if (parsed.data.visibility !== undefined && parsed.data.visibility !== before) {
+        await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "space", id }, { visibility: { from: before, to: parsed.data.visibility } });
+      }
+      return row;
+    });
     return NextResponse.json({ space: updated });
   } catch (err) {
     return NextResponse.json(

@@ -1016,3 +1016,69 @@ Owner the holder) before the Phase 8 write. The local run of 2026-09-23 (Acme Co
 - **Where a response went** is recorded on new responses only, under the reserved `$went` key of `FormSubmission.data` (a task id on the List, a row id on the table, or the reason it was not sent). Responses written before this release show "Not sent" in the Went to column with no reason; nothing rewrites them.
 - **Deleting responses** (one, or all behind a typed confirm) is new and is a hard delete by the form's creator or an admin. A single deleted response is written in full to the audit log first (`form.response.deleted`, `oldValue.data`), so an admin can read it back; "Delete all" records the count (`form.responses.deleted`).
 - **New cron row, NOT installed**: "Form responses daily summary", `POST /api/cron/form-daily-summary`, 8 AM daily, in `scripts/CRON-SETUP.md`. It is fail-closed (503 with no `CRON_SECRET`). Until the founder adds it, a form set to "Send a daily summary instead" is quiet.
+
+## One access model (2026-09-24): `scripts/report-folder-overgrants.ts` (DRY RUN ONLY) and `scripts/apply-private-rule.ts`
+
+**What.** This release puts every node (Space, Folder, List, doc, table, canvas, form) on one access resolver (`src/lib/access/node-access.ts`) and one Manage access dialog. It fixes the reported bug ("admin on a folder gives the entire Space") **forward**: from this release a grant on a Folder never climbs to its Space or to sibling Folders, and the canvas Share chip no longer writes a Space row. **No existing row is touched on deploy.** Two scripts help the founder look at what the bug may have left behind and choose each workspace's rule for Private items.
+
+**Why a report and not a clean-up.** A Space row the bug wrote and a Space row someone meant to write look the same in the database. Removing one by script would take access away from people who were given it on purpose, so neither script ever revokes a grant.
+
+**Schema.** `prisma/sql/2026-09-24-access-grants.sql` adds the `AccessGrant` table (person grants on tables, canvases and forms). It is in the deploy manifest, so `npm run build` applies it before `next build`. By hand on the box: `npx prisma db execute --file prisma/sql/2026-09-24-access-grants.sql`, then `npx prisma generate`. Every reader answers "no grants" while the table is absent.
+
+### `report-folder-overgrants.ts`: what it lists, per workspace
+
+- **A. Space and Folder granted together** (a heuristic, never proof): every Folder grant whose person also holds a Space row in that Folder's Space, with both roles, both dates and both inviters. **SAME INVITER WITHIN WINDOW** marks the pairs one person wrote within `--window-minutes` (default 30) with a Space row below Owner.
+- **A2. Space rows possibly written by the canvas Share**: Space rows (below Owner) whose inviter created or last edited a canvas in that Space within the window. **These cannot be told apart from deliberate Space shares.**
+- **B. Folder grants inside an org-wide Space**, each marked "restriction impossible without changing the Space to Space members". Everyone at the org opens the whole of an org-wide Space, so the Folder grant only adds edit or manage rights on that Folder.
+- **C. What the strict Private rule would change**: one sub-section per row of `NODE_ACCESS_DELTAS` (C1 N1, C2 N2, C3 N3, C4 N4, C5 N6, C6 N7), each row a person, a node, the change and the row that gives today's reach. **C7 (N5)** is strict only too: a sub-page would follow its parent page, and C7 names the people who open a sub-page today and would not. Under the legacy rule every page made before the workspace's cutoff keeps today's reach (see "The legacy cutoff" below). C8 lists anything the named rows do not explain (it should be empty).
+- **D. Totals.**
+
+`--write` is refused with exit code 2. The report never writes.
+
+```
+# Local (agents may run this; reads only)
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/report-folder-overgrants.ts --report /tmp/folder-overgrants.md
+#   --org <organizationId>    one workspace only
+#   --window-minutes <n>      the SAME INVITER window, default 30
+
+# Production, on /www/wwwroot/workwrk.com with the production DATABASE_URL in the env (reads only)
+npx tsx scripts/report-folder-overgrants.ts --report ./folder-overgrants.md
+```
+
+### How to act on the report
+
+- **An A row**: confirm with the person (and whoever invited them) whether the Space row was meant. If it was not, remove the Space row from that Space's Manage access dialog ("..." on the Space, Manage access). The dialog says when the person still reaches the Space some other way, and it refuses to remove the last Full access holder.
+- **In an org-wide Space (the Space's visibility is Everyone at the org), removing the Space row changes nothing**: the person still opens the whole Space as every org member does (section B). To restrict, change the Space to Space members first, and expect everyone without a row to lose it.
+- **An A2 row** may be a deliberate share. Treat it like an A row: ask first.
+- **Nothing is revoked automatically**, by these scripts or by the release.
+
+### The legacy cutoff: existing rows keep today's reach, new grants follow the new rules
+
+The legacy floor (the reach a person had before this release) is kept for the rows that existed before it, and only for them. Each workspace records the instant this release first decided access in it, `Organization.settings.accessLegacyCutoff` (an ISO time). The first request that reads it stamps it, with one guarded UPDATE that only writes while the key is absent, so it is set once on deploy day and never moves (changing the Private rule rewrites `accessModel`, a different key).
+
+- A SpaceMember, FolderMember or BoardMember row created **before** the cutoff keeps everything it gave before (A8), under the legacy rule.
+- A row created **at or after** the cutoff (a grant from the Manage access dialog, a member route, an accepted email invitation) follows the new rules only (A2): a Folder grant does not reach a Private List or a Private sub-folder inside it that does not name the person.
+- A sub-page made before the cutoff keeps today's reach (every page with no location opened to the org); one made after it follows its parent page (A6).
+- **Nothing to run.** No row is rewritten. If the key cannot be read or written, every row reads as existing: today's answer, never a loss.
+- To look at it: `SELECT "settings"->>'accessLegacyCutoff' FROM "Organization" WHERE "id" = '<orgId>';`. Do not edit it by hand: moving it later would give newer grants the older reach, and moving it earlier would take reach away from rows that had it.
+
+### `apply-private-rule.ts`: the rule for Private items, per workspace
+
+Every existing workspace starts under the **legacy** rule: a person keeps at least the reach they had before this release (the legacy floor), so nothing that works today stops working on deploy. Under the **strict** rule an item marked Private inside a shared container is reached only by the people it names. **The founder applies the strict rule one workspace at a time, after reading that workspace's section C.** The rule is `Organization.settings.accessModel.privateRule`; absent reads as legacy.
+
+The script is a dry run by default: it prints the workspace's current rule and the C totals. `--write` sets (`strict`, `legacy`) or removes (`clear`) that one settings key through `writeOrgSettingsKeys` and records an `access.private_rule_changed` activity row, in one transaction. It never touches a grant row, so `--rule legacy` or `--rule clear` puts every person's reach back exactly as it was.
+
+```
+# Local (agents may run this)
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict            # dry run
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict --write    # apply
+
+# Production (the founder only, after reading section C of the report for that workspace)
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict              # dry run first
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict --write      # apply
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule clear --write       # undo: back to legacy
+#   --actor <email or id>     who the activity row names (default: the workspace's first active Owner, else Admin)
+```

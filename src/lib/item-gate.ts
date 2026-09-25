@@ -25,9 +25,9 @@
 // still INERT: spec section 4 step 2 says so itself, and says the assignee
 // branch and the item-ref move "ship as the interim fix" until access steps 0
 // and 1 land, with `canEdit` computed once and returned as `decision.role`.
-// That is exactly what this file does. The signals come from the existing
-// board helpers, which already delegate through parity.ts's one transcription,
-// so no helper is flipped to `can()` here. The SHAPE is `ItemDecision`, which
+// That is exactly what this file does. The List's role comes from the one
+// node-access resolver (src/lib/access/node-access.ts), so no helper is
+// flipped to `can()` here. The SHAPE is `ItemDecision`, which
 // is the shape the engine will produce, so the day it is switched on only this
 // file changes and nothing above it does.
 //
@@ -37,8 +37,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canContributeBoard, canEditBoard, getBoardForReader } from "@/lib/board";
+import { getBoardForReader } from "@/lib/board";
 import { isOrgAdminAccessLevel } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { readWatchers } from "@/lib/item-watchers";
@@ -267,21 +268,18 @@ export async function gateItem(
   const assignee = item.ownerId === c.userId || item.assigneeIds.includes(c.userId);
   const orgAdmin = isOrgAdminAccessLevel(c.accessLevel);
 
-  // Rule 10: what the parent List gives this viewer. The three legacy helpers
-  // are the source, in descending order, and each one already delegates
-  // through parity.ts. An org admin skips the queries entirely, and gets
-  // listRole "none", not a fabricated FULL: rule 4 is what makes them FULL, and
-  // stamping a synthetic List grant here made `decision.via` say "list" and
-  // `viaObject` name a List the admin holds no grant on, which is a lie the
-  // header chip and support would both repeat.
+  // Rule 10: what the parent List gives this viewer, from the one resolver
+  // (node-access, R5: tasks follow their List). One world for the List, its
+  // Folders and its Space; the Space Owner rung reads as Full access here. An
+  // org admin skips the query entirely, and gets listRole "none", not a
+  // fabricated FULL: rule 4 is what makes them FULL, and stamping a synthetic
+  // List grant here made `decision.via` say "list" and `viaObject` name a List
+  // the admin holds no grant on, which is a lie the header chip and support
+  // would both repeat.
   let listRole: ItemDecision["role"] = "none";
   if (!orgAdmin) {
-    const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
-    if (board) {
-      if (await canEditBoard(item.boardId, c.userId, c.accessLevel)) listRole = "FULL";
-      else if (await canContributeBoard(item.boardId, c.userId, c.accessLevel)) listRole = "EDIT";
-      else listRole = "VIEW";
-    }
+    const d = await nodeRole(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id: item.boardId });
+    listRole = d.role === "none" ? "none" : d.role === "OWNER" ? "FULL" : d.role;
   }
 
   // Rule 5, one indexed query. It is resolved on EVERY call rather than only
@@ -387,6 +385,7 @@ export async function itemBreadcrumb(
 /** Can the viewer open the task's List page? (Drives every crumb's link.) */
 export async function listIsReadable(item: ItemGateOk["item"], c: ItemCtx): Promise<boolean> {
   if (isOrgAdminAccessLevel(c.accessLevel)) return true;
+  // The List read door, which answers Can view or higher from node-access.
   return Boolean(await getBoardForReader(item.boardId, c.userId, c.accessLevel));
 }
 

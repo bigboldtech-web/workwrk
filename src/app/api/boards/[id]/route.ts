@@ -5,7 +5,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoard, canEditBoard, getBoardForReader, updateBoard } from "@/lib/board";
+import { archiveBoard, boardRoleOf, updateBoard } from "@/lib/board";
+import { moveAllowed, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { recordGeneralAccessChange } from "@/lib/access/grants";
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
 import { getBoardStatuses } from "@/lib/board-items-shared";
@@ -35,15 +38,15 @@ async function ctx() {
 }
 
 async function loadAndGate(boardId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
-  // Cross-tenant safety + read gate (composes Space + Board.visibility +
-  // BoardMember per Phase 23). Returns null when the viewer can't see
-  // the board OR when it's in a different org.
-  const board = await getBoardForReader(boardId, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
+  // Cross-tenant safety + the one resolver's role on the List: no role is the
+  // same 404 as a board in another org; below Full access is 403. Full access
+  // on a List (its own OWNER or ADMIN row, its owner, a Full holder of its
+  // Folder or Space) manages it (W3).
+  const { board, role } = await boardRoleOf(boardId, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId || role === "none") {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const canEdit = await canEditBoard(boardId, c.userId, c.accessLevel);
-  if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (!roleAtLeast(role, "FULL")) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { board };
 }
 
@@ -133,8 +136,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: "invalid_row_color_rules" }, { status: 400 });
     }
   }
+  // Re-foldering through PATCH follows the move rule: Full access on the
+  // destination Folder, or on the Space at its root.
+  if (parsed.data.folderId !== undefined && parsed.data.folderId !== gate.board.folderId) {
+    const dest = parsed.data.folderId
+      ? { kind: "folder" as const, id: parsed.data.folderId }
+      : gate.board.spaceId ? { kind: "space" as const, id: gate.board.spaceId } : { kind: "none" as const };
+    if (!(await moveAllowed(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id }, dest))) {
+      return NextResponse.json({ error: "You need Full access where this List is going." }, { status: 403 });
+    }
+  }
   try {
-    const updated = await updateBoard(id, parsed.data);
+    // A visibility change is an access change: the List's visibility and its
+    // activity row are one transaction (general access sends no notification,
+    // by decision). The rest of the patch goes through updateBoard as before.
+    const { visibility, ...rest } = parsed.data;
+    if (visibility !== undefined && visibility !== gate.board.visibility) {
+      await prisma.$transaction(async (tx) => {
+        await tx.board.update({ where: { id }, data: { visibility } });
+        await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "list", id }, { visibility: { from: gate.board.visibility, to: visibility } });
+      });
+    }
+    const updated = Object.keys(rest).length > 0 ? await updateBoard(id, rest) : await updateBoard(id, {});
     // The schema goes back as this caller may see it: connect targets they
     // cannot read are not named.
     const fields = await redactFieldsForViewer(parseBoardSchema(updated.schema).fields, listReader(c));

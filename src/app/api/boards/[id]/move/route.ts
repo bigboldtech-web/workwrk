@@ -8,8 +8,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canEditBoard, getBoardForReader } from "@/lib/board";
-import { canEditSpace } from "@/lib/space";
+import { boardRoleOf } from "@/lib/board";
+import { moveAllowed, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -25,11 +26,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if ("error" in c) return c.error;
   const { id } = await params;
 
-  const board = await getBoardForReader(id, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
+  const { board, role } = await boardRoleOf(id, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId || role === "none") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!(await canEditBoard(id, c.userId, c.accessLevel))) {
+  if (!roleAtLeast(role, "FULL")) {
     return NextResponse.json({ error: "You don't have permission to move this List." }, { status: 403 });
   }
 
@@ -44,9 +45,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true },
   });
   if (!space) return NextResponse.json({ error: "Destination Space not found." }, { status: 404 });
-  if (!(await canEditSpace(spaceId, c.userId, c.accessLevel))) {
-    return NextResponse.json({ error: "You don't have permission to move it there." }, { status: 403 });
-  }
   // A target folder must live inside the target space.
   if (folderId) {
     const folder = await prisma.folder.findFirst({
@@ -54,6 +52,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       select: { id: true },
     });
     if (!folder) return NextResponse.json({ error: "That folder isn't in the chosen Space." }, { status: 400 });
+  }
+  // Full access where it lands: on the Folder, or on the Space at its root.
+  const dest = folderId ? { kind: "folder" as const, id: folderId } : { kind: "space" as const, id: spaceId };
+  if (!(await moveAllowed(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id }, dest))) {
+    return NextResponse.json({ error: "You don't have permission to move it there." }, { status: 403 });
   }
 
   try {

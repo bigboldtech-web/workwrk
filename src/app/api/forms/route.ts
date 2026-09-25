@@ -18,7 +18,9 @@ import {
 } from "@/lib/api-helpers";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject } from "@/lib/object-manage";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { viewerObjectGrants } from "@/lib/access/access-grant-store";
 import {
   countListViews, formGoesTo, formStatus, matchesListFilters, matchesListView, parseFormsListQuery, slicePage, sortListRows,
   type ListCandidate,
@@ -31,16 +33,21 @@ export async function GET(req: NextRequest) {
   if (error) return error;
   const orgId = getOrgId(session);
 
-  // A Guest has no share path to a form while the access engine is inert
-  // (forms app rule: Guests see shared forms only), so the one set of forms a
-  // Guest may list is the ones they made themselves (creator Full access,
-  // access 3.3). Everyone else lists the org, as before.
+  // Forms app rule: Guests see shared forms only, so a Guest lists the forms
+  // they made (creator Full access, access 3.3) and the ones a form grant
+  // gives them. Everyone else lists the org, as before.
   const viewer = await viewerFromSession().catch(() => null);
   const guestOnly = viewer?.orgRole === "GUEST" ? viewer.userId : null;
-  const scope = guestOnly ? { organizationId: orgId, createdById: guestOnly } : { organizationId: orgId };
+  const granted = guestOnly
+    ? (await viewerObjectGrants(orgId, guestOnly).catch(() => [])).filter((g) => g.objectType === "FORM").map((g) => g.objectId)
+    : [];
+  const scope = guestOnly
+    ? { organizationId: orgId, OR: [{ createdById: guestOnly }, ...(granted.length ? [{ id: { in: granted } }] : [])] }
+    : { organizationId: orgId };
+  const nodeCtx = viewer ? nodeCtxFromViewer(viewer) : null;
 
   const listQuery = parseFormsListQuery(new URL(req.url).searchParams);
-  if (listQuery.paged) return pagedList(listQuery, { orgId, userId: getUserId(session), session, scope });
+  if (listQuery.paged) return pagedList(listQuery, { orgId, userId: getUserId(session), session, scope, nodeCtx });
 
   const forms = await prisma.formDefinition.findMany({
     where: scope,
@@ -92,7 +99,10 @@ export async function POST(req: NextRequest) {
 type PersonOut = { id: string; firstName: string | null; lastName: string | null; avatar: string | null; email: string | null; name: string | null };
 
 /** The /forms list page: views, filters, sort and cursor pages. */
-async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId: string; userId: string; session: Parameters<typeof readableDestinationIds>[2]; scope: { organizationId: string; createdById?: string } }) {
+async function pagedList(
+  q: ReturnType<typeof parseFormsListQuery>,
+  ctx: { orgId: string; userId: string; session: Parameters<typeof readableDestinationIds>[2]; scope: Record<string, unknown>; nodeCtx: ReturnType<typeof nodeCtxFromViewer> | null },
+) {
   const [forms, prefs] = await Promise.all([
     prisma.formDefinition.findMany({
       where: ctx.scope,
@@ -164,7 +174,8 @@ async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId
   const filtered = candidates.filter((r) => matchesListView(r, q.view, facts) && matchesListFilters(r, q));
   const sorted = sortListRows(filtered, q.sort, q.dir);
   const { page, nextCursor } = slicePage(sorted, q.cursor, q.limit);
-  const viewer = await viewerFromSession().catch(() => null);
+  // canManage: Full access on the form (its creator, an org admin, a Full form grant).
+  const roles = ctx.nodeCtx ? await nodeRoleMap(ctx.nodeCtx, "form", page.map((r) => r.id)) : new Map();
 
   return jsonSuccess({
     data: page.map((r) => ({
@@ -178,7 +189,7 @@ async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId
       responseCount: r.count ?? 0,
       hasPublicLink: r.isPublic,
       isFavorite: favoriteIds.has(r.id),
-      canManage: canManageObject(viewer, r.createdById),
+      canManage: roleAtLeast(roles.get(r.id) ?? "none", "FULL"),
       updatedAt: r.raw.updatedAt,
       createdAt: r.raw.createdAt,
     })),

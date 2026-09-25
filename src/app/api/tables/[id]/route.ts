@@ -15,30 +15,19 @@ import { moveToTrash } from "@/lib/trash";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
-import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject, MANAGE_REFUSAL } from "@/lib/object-manage";
+import { readableTableWithRole, tableCtx } from "@/lib/table-gate";
+import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { logAuditEvent } from "@/lib/activity";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
+import { moveAllowed } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
-// Phase 32b, gate scoped tables by their parent Space's visibility.
-// Mirrors the Files/Whiteboards/Docs per-row gate from Phase 22b.
-// Hide existence (404, not 403) so viewers can't probe for table IDs
-// in Spaces they shouldn't see.
-// A table in no Space is org-wide for Members; a Guest sees only one they
-// made (lib/table-visibility). `createdById` is undefined only for the Move
-// to Space target check, where spaceId is never null.
-async function checkSpaceVisible(
-  spaceId: string | null,
-  userId: string,
-  accessLevel: string | null | undefined,
-  createdById?: string | null,
-): Promise<boolean> {
-  if (!spaceId) return unscopedTableReadable(createdById, userId, accessLevel);
-  const space = await getSpaceForReader(spaceId, userId, accessLevel ?? "EMPLOYEE");
-  return Boolean(space);
-}
+// The gate is the one resolver's table rule (R7, lib/table-gate
+// readableTableWithRole): hide existence (404, not 403) so viewers can't
+// probe for table ids in Spaces they shouldn't see. Full access on the table
+// (its creator with reach, a Full holder of its Space, an org admin, a Full
+// table grant) deletes it and changes its public link; a move needs the
+// creator with reach or an org admin, never a table grant (M3).
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionAndModule("workwrk-tables");
@@ -51,21 +40,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     include: { _count: { select: { rows: { where: { deletedAt: null } } } } },
   });
   if (!table) return jsonError("not found", 404);
-  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
-  if (!(await checkSpaceVisible(table.spaceId, getUserId(session), accessLevel, table.createdById))) {
-    return jsonError("not found", 404);
-  }
+  const gate = await readableTableWithRole(id, orgId, getUserId(session), session);
+  if (!gate) return jsonError("not found", 404);
 
-  const [viewer, org] = await Promise.all([
-    viewerFromSession().catch(() => null),
-    prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
-  ]);
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
   // publicLinksAllowed: the org's toggle 10 (lib/public-links), which decides
   // whether the Share dialog's Public link row exists at all.
   return jsonSuccess({
     ...table,
     rowCount: table._count.rows,
-    canManage: canManageObject(viewer, table.createdById),
+    canManage: roleAtLeast(gate.role, "FULL"),
     publicLinksAllowed: orgPublicLinksAllowed(org?.settings),
   });
 }
@@ -79,10 +63,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const existing = await prisma.dataTable.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("not found", 404);
-  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
-  if (!(await checkSpaceVisible(existing.spaceId, getUserId(session), accessLevel, existing.createdById))) {
-    return jsonError("not found", 404);
-  }
+  const gate = await readableTableWithRole(id, orgId, getUserId(session), session);
+  if (!gate) return jsonError("not found", 404);
 
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
@@ -94,8 +76,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // a change and is not refused.
   let publicChange: boolean | null = null;
   if (typeof body.isPublic === "boolean" && body.isPublic !== existing.isPublic) {
-    const viewer = await viewerFromSession().catch(() => null);
-    if (!canManageObject(viewer, existing.createdById)) return jsonError(MANAGE_REFUSAL.publish, 403);
+    if (!roleAtLeast(gate.role, "FULL")) return jsonError(MANAGE_REFUSAL.publish, 403);
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
@@ -106,11 +87,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if ("spaceId" in body && body.spaceId !== existing.spaceId) {
     const next = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
     if (next !== existing.spaceId) {
-      const viewer = await viewerFromSession().catch(() => null);
-      if (!canManageObject(viewer, existing.createdById)) return jsonError(MANAGE_REFUSAL.move, 403);
       if (next) {
         const inOrg = await prisma.space.findFirst({ where: { id: next, organizationId: orgId }, select: { id: true } });
-        if (!inOrg || !(await checkSpaceVisible(next, getUserId(session), accessLevel))) return jsonError("space not found", 404);
+        if (!inOrg) return jsonError("space not found", 404);
+      }
+      const dest = next ? { kind: "space" as const, id: next } : { kind: "none" as const };
+      if (!(await moveAllowed(tableCtx(orgId, getUserId(session), session), { kind: "table", id }, dest))) {
+        return jsonError(MANAGE_REFUSAL.move, 403);
       }
       data.spaceId = next;
     }
@@ -144,13 +127,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const existing = await prisma.dataTable.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("not found", 404);
-  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
-  if (!(await checkSpaceVisible(existing.spaceId, getUserId(session), accessLevel, existing.createdById))) {
-    return jsonError("not found", 404);
-  }
-
-  const viewer = await viewerFromSession().catch(() => null);
-  if (!canManageObject(viewer, existing.createdById)) return jsonError(MANAGE_REFUSAL.delete, 403);
+  const gate = await readableTableWithRole(id, orgId, getUserId(session), session);
+  if (!gate) return jsonError("not found", 404);
+  if (!roleAtLeast(gate.role, "FULL")) return jsonError(MANAGE_REFUSAL.delete, 403);
 
   await moveToTrash("table", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

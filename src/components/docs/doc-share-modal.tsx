@@ -10,14 +10,22 @@
  * org config, NOT doc content, so plain fetch is correct and the doc
  * autosave path is untouched). Every mutation is optimistic; on failure
  * the previous state is restored and a toast fires.
+ *
+ * DocGeneralAccess, at the end of this file, is the doc's general access on
+ * its own (Restricted, the public link, the private link): the one Manage
+ * access dialog composes it (src/components/access/general-access.tsx). The
+ * popover above is kept, exported and working; nothing mounts it any more.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Globe, Lock, X } from "lucide-react";
+import { ChevronDown, Globe, Link2, Lock, X } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { InlineRetry } from "@/components/layout/os/share-space-dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useLayer } from "@/components/layout/os/shell-context";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { Switch } from "@/components/ui/switch";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
@@ -380,5 +388,136 @@ export function DocShareModal({
         </MenuList>
       </MorePortal>
     </>
+  );
+}
+
+/**
+ * A doc's general access: the Restricted switch, the public link (with Copy
+ * when the server hands this viewer its address) and the private link, which
+ * every reader may copy. Writes PATCH /api/docs/[id]/sharing with one field
+ * at a time ({ restricted } or { publicLink }), never the member map: people
+ * are the dialog's grants route's business. Not optimistic: a switch moves
+ * when the server agrees, and a failure keeps the choice with a Retry.
+ */
+export function DocGeneralAccess({
+  docId, restricted, publicLink, canChange, onChanged, restrictConfirm = null,
+}: {
+  docId: string;
+  restricted: boolean;
+  /**
+   * Asked before Restricted goes on when it locks people out (the viewer
+   * included, when they reach the doc only through its place). Null: no
+   * confirm, nobody on the list loses it.
+   */
+  restrictConfirm?: { title: string; description: string; confirmLabel: string } | null;
+  /** null: public links are not offered here. url is present only for people who can change sharing. */
+  publicLink: { on: boolean; allowed?: boolean; url: string | null } | null;
+  canChange: boolean;
+  /** After the server agreed; the dialog refetches its panel. */
+  onChanged?: () => void;
+}) {
+  const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState<"restricted" | "public" | null>(null);
+  const [failed, setFailed] = useState<{ message: string; body: { restricted: boolean } | { publicLink: boolean } } | null>(null);
+  // The address the PATCH that turned the link on answered with, until the
+  // refetched panel carries it.
+  const [minted, setMinted] = useState<string | null>(null);
+  const publicOn = !!publicLink?.on;
+  const publicUrl = publicLink?.url ?? (publicOn ? minted : null);
+
+  async function patch(body: { restricted: boolean } | { publicLink: boolean }) {
+    if (busy) return;
+    setBusy("restricted" in body ? "restricted" : "public");
+    setFailed(null);
+    try {
+      const res = await fetch(`/api/docs/${docId}/sharing`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        setFailed({ message: typeof d?.message === "string" ? d.message : "Couldn't change who can open this doc.", body });
+        return;
+      }
+      if ("publicLink" in body) setMinted(body.publicLink ? d?.sharing?.publicUrl ?? null : null);
+      if ("publicLink" in body && !body.publicLink) toast("Public link turned off");
+      onChanged?.();
+    } catch {
+      setFailed({ message: "Couldn't change who can open this doc. Check your connection.", body });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setRestricted(next: boolean) {
+    if (next && restrictConfirm && !(await confirm({ ...restrictConfirm, destructive: true }))) return;
+    await patch({ restricted: next });
+  }
+
+  function copy(text: string, done: string) {
+    void navigator.clipboard?.writeText(text).then(() => toast(done), () => toast("Couldn't copy", { tone: "danger" }));
+  }
+
+  const absolute = (url: string) => (/^https?:\/\//.test(url) ? url : `${window.location.origin}${url}`);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="rounded-lg border border-line bg-raised px-3 py-2.5">
+        <div className="flex items-start gap-3">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block text-base font-medium text-ink">{canChange ? "Restricted" : restricted ? "Restricted" : "Not restricted"}</span>
+            <span className="block text-sm text-ink-2">
+              {restricted
+                ? "Only the people listed here can open it, plus the person who made it and Admins."
+                : "It follows where it lives: anyone who can open that can open this doc."}
+            </span>
+          </span>
+          {canChange ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
+              {busy === "restricted" ? <Dots variant="pending" /> : null}
+              <Switch checked={restricted} disabled={busy !== null} onChange={(next) => void setRestricted(next)} aria-label="Restricted" />
+            </span>
+          ) : null}
+        </div>
+
+        {publicLink && (publicLink.allowed !== false || publicOn) ? (
+          <div className="mt-2.5 flex items-start gap-3 border-t border-line-soft pt-2.5">
+            <Globe className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-medium text-ink">{canChange ? "Share link with anyone" : publicOn ? "Public link is on" : "No public link"}</span>
+              <span className="block text-sm text-ink-2">
+                {publicOn
+                  ? publicLink.allowed === false
+                    ? "Public links are off for this workspace, so this doc's link does not open."
+                    : "Anyone with the link can view. Turn it off to revoke it."
+                  : "Off. Only people with access can open this doc."}
+              </span>
+              {publicOn && publicUrl && canChange ? (
+                <button type="button" onClick={() => copy(absolute(publicUrl), "Public link copied")} className="mt-1.5 inline-flex h-7 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover">
+                  <Link2 className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden /> Copy public link
+                </button>
+              ) : null}
+            </span>
+            {canChange && (publicLink.allowed !== false || publicOn) ? (
+              <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
+                {busy === "public" ? <Dots variant="pending" /> : null}
+                <Switch checked={publicOn} disabled={busy !== null} onChange={(next) => void patch({ publicLink: next })} aria-label="Public share link" />
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {failed ? <InlineRetry message={failed.message} onRetry={() => void patch(failed.body)} /> : null}
+      <div>
+        {/* The in-app link is the share form of the section it is copied
+            from: the Work door in Work, /docs/<id> elsewhere. */}
+        <button type="button" onClick={() => copy(copyObjectLink("doc", docId), "Link copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+          <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy private link
+        </button>
+      </div>
+    </div>
   );
 }

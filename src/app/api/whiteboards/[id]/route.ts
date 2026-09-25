@@ -7,13 +7,17 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { canContributeSpace, canEditSpace, isOrgAdminAccessLevel } from "@/lib/space";
-import { whiteboardSpaceVisible } from "@/lib/whiteboard-gate";
+import { whiteboardReadable } from "@/lib/whiteboard-gate";
 import { recordSnapshot } from "@/lib/snapshots";
 import { withArchivedBy } from "@/lib/archived-by";
+import { legacyFloorRole, moveAllowed, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
-// The read gate (whiteboardSpaceVisible) lives in src/lib/whiteboard-gate.ts,
-// so the Work canvas routes gate with the same function as these three verbs.
+// The read gate (whiteboardReadable) lives in src/lib/whiteboard-gate.ts, so
+// the Work canvas routes gate with the same function as these three verbs:
+// the viewer's role on the canvas from the one resolver (its Folder when that
+// Folder is in its Space, else its Space, else the org; its owner with reach;
+// a canvas grant).
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,28 +28,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!whiteboard) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await whiteboardSpaceVisible(whiteboard.spaceId, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const role = await whiteboardReadable(nodeCtx, whiteboard);
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // The viewer's role on this canvas, for the editor's read-only mode and the
-  // role chip (spec-docs-knowledge section 2, /canvas/[id]). A canvas has no
-  // grant rows of its own yet, so the role is the anchor's: on a Space,
-  // Can edit for anyone who can CONTRIBUTE to it and Can view for a Space
-  // guest; standalone canvases are org-wide and everyone edits. Full access =
-  // the owner or an org admin. `spaceManage` says whether the viewer manages
-  // the Space, which is where the Share door for an anchored canvas opens.
-  const admin = isOrgAdminAccessLevel(ctx.accessLevel);
-  const owner = whiteboard.ownerId === ctx.userId;
-  const [contributes, spaceManage] = whiteboard.spaceId
-    ? await Promise.all([
-        canContributeSpace(whiteboard.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"),
-        canEditSpace(whiteboard.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"),
-      ])
-    : [true, false];
-  const myRole: "full" | "edit" | "view" = admin || owner ? "full" : contributes ? "edit" : "view";
+  // role chip (spec-docs-knowledge section 2, /canvas/[id]). `canManage` and
+  // `canShare` are Full access on the canvas: the canvas's own Manage access
+  // dialog (a canvas grant), never a Space membership. `spaceManage` still
+  // says whether the viewer manages the canvas's Space.
+  const space = whiteboard.spaceId ? await nodeRole(nodeCtx, { kind: "space", id: whiteboard.spaceId }) : null;
+  const myRole: "full" | "edit" | "view" = roleAtLeast(role, "FULL") ? "full" : roleAtLeast(role, "EDIT") ? "edit" : "view";
+  const full = roleAtLeast(role, "FULL");
 
-  return NextResponse.json({ whiteboard, myRole, spaceManage: admin || spaceManage });
+  return NextResponse.json({
+    whiteboard,
+    myRole,
+    canManage: full,
+    canShare: full,
+    spaceManage: nodeCtx.orgAdmin || (!!space && roleAtLeast(space.role, "FULL")),
+  });
 }
 
 const patchSchema = z.object({
@@ -74,21 +76,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await whiteboardSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const role = await whiteboardReadable(nodeCtx, existing);
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  // A Space guest reads the Space and cannot contribute to it, so the canvas
-  // is view-only for them: the editor renders no tools, and this is the
-  // backstop for a stale tab. Same shape as the docs 403 ("read-only").
-  if (existing.spaceId && !isOrgAdminAccessLevel(ctx.accessLevel) && existing.ownerId !== ctx.userId) {
-    if (!(await canContributeSpace(existing.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
-      return NextResponse.json({ error: "read-only", message: "You can view this canvas but not edit it." }, { status: 403 });
-    }
+  // Content needs Can edit on the canvas: a Can view holder gets the one 403
+  // the editor already renders as read-only (the backstop for a stale tab).
+  const contentChange = parsed.data.name !== undefined || parsed.data.description !== undefined || parsed.data.scene !== undefined || parsed.data.thumbnail !== undefined;
+  if (contentChange && !roleAtLeast(role, "EDIT")) {
+    return NextResponse.json({ error: "read-only", message: "You can view this canvas but not edit it." }, { status: 403 });
   }
 
   if (parsed.data.expectedUpdatedAt && parsed.data.scene !== undefined) {
@@ -102,11 +102,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  // A Space move needs edit on the destination (and read on the source, which
-  // the visibility check above already gave).
-  if (parsed.data.spaceId !== undefined && parsed.data.spaceId !== null) {
-    if (!(await canEditSpace(parsed.data.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
-      return NextResponse.json({ error: "You need edit access to that Space." }, { status: 403 });
+  // A move follows the move rule (M3): the role the canvas's container gives
+  // (never a canvas grant alone) must be Can edit, and the destination Space
+  // must be one the viewer manages; out of every Space at that same role.
+  if (parsed.data.spaceId !== undefined) {
+    const dest = parsed.data.spaceId === null ? { kind: "none" as const } : { kind: "space" as const, id: parsed.data.spaceId };
+    if (!(await moveAllowed(nodeCtx, { kind: "canvas", id }, dest))) {
+      return NextResponse.json(
+        { error: parsed.data.spaceId === null ? "You need Full access to take this canvas out of its Space." : "You need edit access to that Space." },
+        { status: 403 },
+      );
     }
   }
 
@@ -142,8 +147,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await whiteboardSpaceVisible(existing.spaceId, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const role = await whiteboardReadable(nodeCtx, existing);
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // Moving a canvas to the Trash is an edit under the one model. Before it,
+  // any reader of the canvas's Space could trash it (a Space guest included),
+  // and that reach is kept for the rows that gave it (A8): the legacy floor
+  // answers today's reader, and never for a grant made by this release.
+  if (!roleAtLeast(role, "EDIT") && !roleAtLeast(await legacyFloorRole(nodeCtx, { kind: "canvas", id }), "VIEW")) {
+    return NextResponse.json({ error: "read-only", message: "You can view this canvas but not delete it." }, { status: 403 });
   }
 
   await withArchivedBy(ctx.userId, (extra) =>

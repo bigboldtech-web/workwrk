@@ -28,6 +28,11 @@ import { orgRoleOf } from "@/lib/access/org-role";
 // them" exists to prevent. This is the honest approximation of the access
 // engine's `accessibleUsers` until step 3 lands, and it is deliberately the
 // narrow side of the question.
+//
+// ?reach=signin is the Manage access dialog's picker: everyone who can sign
+// in, so a person on leave, on probation, on a PIP or serving notice can
+// still be given access (only INACTIVE people cannot sign in). Without it the
+// picker lists ACTIVE people, as every other picker always has.
 
 const LIMIT = 20;
 
@@ -45,6 +50,7 @@ export async function GET(req: NextRequest) {
   // A picker that already holds somebody does not want to offer them again.
   const exclude = (searchParams.get("exclude") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const includeSelf = searchParams.get("includeSelf") === "1";
+  const signIn = searchParams.get("reach") === "signin";
 
   let visibleIds: string[] | null = null;
   if (orgRoleOf({ accessLevel }) === "GUEST") {
@@ -57,14 +63,20 @@ export async function GET(req: NextRequest) {
     if (visibleIds.length === 0) return jsonSuccess({ people: [] });
   }
 
+  // The id conditions COMBINE: a Guest's shared-conversation set AND the
+  // self exclusion AND the picker's own exclusions. (Spread into one object
+  // they overwrote each other, and a Guest's picker listed the whole staff.)
+  const idRules = [
+    ...(visibleIds ? [{ id: { in: visibleIds } }] : []),
+    ...(includeSelf ? [] : [{ id: { not: userId } }]),
+    ...(exclude.length > 0 ? [{ NOT: { id: { in: exclude } } }] : []),
+  ];
   const people = await prisma.user.findMany({
     where: {
       organizationId: orgId,
       deletedAt: null,
-      status: "ACTIVE",
-      ...(visibleIds ? { id: { in: visibleIds } } : {}),
-      ...(includeSelf ? {} : { id: { not: userId } }),
-      ...(exclude.length > 0 ? { NOT: { id: { in: exclude } } } : {}),
+      ...(signIn ? { status: { not: "INACTIVE" as const } } : { status: "ACTIVE" as const }),
+      ...(idRules.length > 0 ? { AND: idRules } : {}),
       ...(q
         ? {
             OR: [

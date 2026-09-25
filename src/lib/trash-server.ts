@@ -7,9 +7,10 @@
 //
 // 1. THE GATE. `GET /api/trash` was `isManager`, so a plain Member who deleted
 //    their own list got "Trash is for managers" and had to find a manager to
-//    get it back (work-tasks #11). It is `accessibleIds(type, FULL)` per source
-//    now, plus "rows you deleted yourself", with Owner and Admin over the org.
-//    The sets narrow; nobody sees more than before.
+//    get it back (work-tasks #11). It is Full access on the row's own node or
+//    its container, from the one node-access resolver over ONE world for the
+//    rows on the page, plus "rows you deleted yourself", with Owner and Admin
+//    over the org. The sets narrow; nobody sees more than before.
 //
 // 2. THE ARCHIVED HALF. The route read `TrashItem` snapshots plus archived
 //    Docs, Canvases and Contracts, and nothing else. Archiving a Space, a
@@ -22,11 +23,12 @@
 //    and a second caller (a poll, a prefetch) doubled the destruction. The
 //    purge is a cron row now (scripts/CRON-SETUP.md).
 //
-// Server-only: imports prisma and the access engine.
+// Server-only: imports prisma and the node-access resolver.
 
 import { prisma } from "./prisma";
-import { accessibleIds } from "./access/ids";
 import type { Viewer } from "./access/types";
+import { nodeCtxFromViewer, nodeRole, nodeRoles } from "./access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "./access/node-rules";
 import { freeTrashStorage, restoreFromTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
@@ -150,12 +152,11 @@ export async function trashRetentionDays(organizationId: string): Promise<number
 }
 
 /**
- * What the viewer may see and restore, as id sets.
- *
- * `accessibleIds` answers for Spaces, Folders, Lists, Tables and Canvases.
- * The other types have no id set yet, so for those the rule is the narrow half
- * alone: rows the viewer deleted. Narrow is the safe direction; widening one
- * of them is adding a case to `accessibleIds`, not a special case here.
+ * What the viewer may see and restore, as id sets: the Spaces, Folders,
+ * Lists, Tables and Canvases among the candidates on which they hold Full
+ * access. The other types have no node of their own in the resolver, so for
+ * those the rule is the narrow half alone: rows the viewer deleted. Narrow is
+ * the safe direction.
  */
 export interface TrashScope {
   all: boolean;
@@ -167,25 +168,54 @@ export interface TrashScope {
   canvases: Set<string>;
 }
 
-export async function trashScope(viewer: Viewer): Promise<TrashScope> {
+/** The node ids a page of Trash rows names: their own ids and their anchors. */
+export interface TrashCandidates {
+  spaces: Set<string>;
+  folders: Set<string>;
+  lists: Set<string>;
+  tables: Set<string>;
+  canvases: Set<string>;
+}
+
+function candidatesOf(rows: Array<{ anchor: { spaceId?: string | null; folderId?: string | null; boardId?: string | null }; ownId?: string | null; type: TrashTypeKey | null }>): TrashCandidates {
+  const c: TrashCandidates = { spaces: new Set(), folders: new Set(), lists: new Set(), tables: new Set(), canvases: new Set() };
+  for (const r of rows) {
+    if (r.anchor.spaceId) c.spaces.add(r.anchor.spaceId);
+    if (r.anchor.folderId) c.folders.add(r.anchor.folderId);
+    if (r.anchor.boardId) c.lists.add(r.anchor.boardId);
+    if (!r.ownId) continue;
+    if (r.type === "space") c.spaces.add(r.ownId);
+    else if (r.type === "folder") c.folders.add(r.ownId);
+    else if (r.type === "list") c.lists.add(r.ownId);
+    else if (r.type === "table") c.tables.add(r.ownId);
+    else if (r.type === "canvas") c.canvases.add(r.ownId);
+  }
+  return c;
+}
+
+export async function trashScope(viewer: Viewer, candidates: TrashCandidates): Promise<TrashScope> {
   if (viewerIsOwnerOrAdmin(viewer)) {
     return { all: true, userId: viewer.userId, spaces: new Set(), folders: new Set(), lists: new Set(), tables: new Set(), canvases: new Set() };
   }
-  const [spaces, folders, lists, tables, canvases] = await Promise.all([
-    accessibleIds(viewer, "space", "FULL"),
-    accessibleIds(viewer, "folder", "FULL"),
-    accessibleIds(viewer, "list", "FULL"),
-    accessibleIds(viewer, "table", "FULL"),
-    accessibleIds(viewer, "whiteboard", "FULL"),
-  ]);
+  const refs: NodeRef[] = [
+    ...[...candidates.spaces].map((id) => ({ kind: "space" as const, id })),
+    ...[...candidates.folders].map((id) => ({ kind: "folder" as const, id })),
+    ...[...candidates.lists].map((id) => ({ kind: "list" as const, id })),
+    ...[...candidates.tables].map((id) => ({ kind: "table" as const, id })),
+    ...[...candidates.canvases].map((id) => ({ kind: "canvas" as const, id })),
+  ];
+  // ONE world for every node the rows name, never a gate call per row.
+  const decisions = await nodeRoles(nodeCtxFromViewer(viewer), refs);
+  const full = (ref: NodeRef) => roleAtLeast(decisions.get(refKey(ref))?.role ?? "none", "FULL");
+  const keep = (kind: NodeRef["kind"], ids: Set<string>) => new Set([...ids].filter((id) => full({ kind, id })));
   return {
     all: false,
     userId: viewer.userId,
-    spaces: new Set(spaces.readable),
-    folders: new Set(folders.readable),
-    lists: new Set(lists.readable),
-    tables: new Set(tables.readable),
-    canvases: new Set(canvases.readable),
+    spaces: keep("space", candidates.spaces),
+    folders: keep("folder", candidates.folders),
+    lists: keep("list", candidates.lists),
+    tables: keep("table", candidates.tables),
+    canvases: keep("canvas", candidates.canvases),
   };
 }
 
@@ -325,8 +355,11 @@ interface RawRow {
 
 export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<TrashPage> {
   const orgId = viewer.organizationId;
-  const [scope, days] = await Promise.all([trashScope(viewer), trashRetentionDays(orgId)]);
-  const { rows: raw, capped } = query.tab === "deleted" ? await readDeleted(orgId) : await readArchived(orgId);
+  const [{ rows: raw, capped }, days] = await Promise.all([
+    query.tab === "deleted" ? readDeleted(orgId) : readArchived(orgId),
+    trashRetentionDays(orgId),
+  ]);
+  const scope = await trashScope(viewer, candidatesOf(raw));
 
   // Scope, then filter, then sort, then page. Scoping first is what makes the
   // total honest: a count over rows the viewer cannot see is not their total.
@@ -625,14 +658,14 @@ export type TrashActionResult =
 
 /** Can this viewer act on this row id? Resolved against the same scope the read uses. */
 async function gateRow(viewer: Viewer, rowId: string): Promise<TrashActionResult> {
-  const scope = await trashScope(viewer);
-  if (scope.all) return { ok: true };
+  if (viewerIsOwnerOrAdmin(viewer)) return { ok: true };
 
   const parsed = parseRowId(rowId);
   if (parsed.archive) {
     const { type, id } = parsed.archive;
     const anchor = await archiveAnchor(type, id, viewer.organizationId);
     if (!anchor) return { ok: false, status: 404, message: "Not found" };
+    const scope = await trashScope(viewer, candidatesOf([{ anchor: anchor.anchor, ownId: id, type }]));
     // The owner arrives in the owner slot: an archived row has no recorded
     // actor unless archivedById holds one, and the gate must not read the
     // owner as though they were the archiver.
@@ -647,7 +680,9 @@ async function gateRow(viewer: Viewer, rowId: string): Promise<TrashActionResult
   });
   if (!snap) return { ok: false, status: 404, message: "Not found" };
   const type = typeKeyFor(snap.entityType);
-  return inScope(scope, { ...snapshotAnchor(snap.snapshot), ownId: snap.entityId, type }, snap.deletedById)
+  const anchor = snapshotAnchor(snap.snapshot);
+  const scope = await trashScope(viewer, candidatesOf([{ anchor, ownId: snap.entityId, type }]));
+  return inScope(scope, { ...anchor, ownId: snap.entityId, type }, snap.deletedById)
     ? { ok: true }
     : { ok: false, status: 403, message: "You need Full access on this to restore it." };
 }
@@ -740,8 +775,9 @@ export async function restoreTrashRow(
     }
     // The target has to be a List this viewer may WRITE to, or "Restore to..."
     // would be a way to put a row somewhere you cannot reach.
-    const writable = await accessibleIds(viewer, "list", "EDIT");
-    if (!writable.readable.has(targetBoardId)) {
+    const targetList = await prisma.board.findFirst({ where: { id: targetBoardId, organizationId: viewer.organizationId }, select: { id: true } });
+    const writable = targetList ? roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: targetList.id })).role, "EDIT") : false;
+    if (!writable) {
       return { ok: false, status: 403, message: "You need edit access on that list." };
     }
   }

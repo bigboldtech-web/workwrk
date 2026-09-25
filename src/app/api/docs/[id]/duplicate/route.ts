@@ -1,14 +1,19 @@
 // POST /api/docs/[id]/duplicate — clone a doc as a fresh note.
 //
-// Copies title (with " (copy)" suffix), content, meta, excerpt, and the
-// entityType/entityId anchor. Does NOT carry over comments or version
+// Copies title (with " (copy)" suffix), content, meta, excerpt, the
+// entityType/entityId anchor and the parent page, so the copy sits beside the
+// original and is open to exactly the people who reach that place. The actor
+// must be able to create a doc there (canCreateDocAt, the rule POST /api/docs
+// applies): a grant on one doc never plants a copy in a Folder or Space the
+// person holds no role on, where they could not open it. Does NOT carry over comments or version
 // history — those belong to the original. Generates new block ids so
 // the clone doesn't accidentally share comment threads via blockId.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { docAccessible } from "@/lib/doc-access";
+import { canCreateDocAt, docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +25,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     where: { id, organizationId: ctx.orgId },
     select: {
       title: true, content: true, excerpt: true,
-      entityType: true, entityId: true, archivedAt: true, createdById: true,
+      id: true, entityType: true, entityId: true, parentId: true, archivedAt: true, createdById: true,
     },
   });
   if (!original) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -32,6 +37,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const role = await requireDocRole(ctx, { id, createdById: original.createdById });
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (original.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
+
+  const anchor = original.entityType && original.entityId ? { entityType: original.entityType, entityId: original.entityId } : null;
+  if (!(await canCreateDocAt(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), anchor, original.parentId))) {
+    return NextResponse.json(
+      { error: "forbidden", message: "You can't add docs where this one lives, so it can't be copied there." },
+      { status: 403 },
+    );
+  }
 
   // Re-key every block so the clone's comment-storage namespace (which
   // is `${docId}:${blockId}`) is fresh — no chance of a comment thread
@@ -46,6 +59,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       excerpt: original.excerpt,
       entityType: original.entityType,
       entityId: original.entityId,
+      parentId: original.parentId,
       createdById: ctx.userId,
     },
     select: { id: true, title: true, content: true, excerpt: true, updatedAt: true, createdAt: true },

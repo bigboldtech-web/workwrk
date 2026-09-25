@@ -1,176 +1,206 @@
 "use client";
 
-// WhoHasAccess — the read-only half of the one Share door.
+// Who has access: the read-only half of the one Manage access dialog, as
+// list renderers over the AccessPanel (src/lib/access/access-panel.ts).
 //
-// Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 1 row 8 ("for Can
-// view and Can comment / Can edit without toggle 4 the row reads 'Who has
-// access' and opens the dialog READ-ONLY") and the section 1 Access table,
-// whose read-only column is a list with no controls.
+// It used to be a dialog of its own that fetched a container's /members
+// route, which answered for a Space, a Folder and a List only and knew
+// nothing of inherited reach, org-wide Spaces, admins or the older rule for
+// Private items. It now renders exactly what the panel says, so the read-only
+// view and the write view can never disagree about who is on the list: the
+// dialog renders these same pieces around its controls.
 //
-// WHY A SEPARATE BODY. "Who has access" was a label swap and nothing else:
-// `ShareButton` chose the wording from `canManage` and then handed both cases
-// the identical write dialog, so a person told the surface was read-only was
-// given the Restricted switch, the Add-people picker and a role select, none of
-// which their role can commit. The access model's read-only rule is that the
-// control is ABSENT, not disabled and not present-then-403, and the cheapest
-// honest way to honour it across three dialogs of different shapes is one body
-// that renders only what a reader may see.
-//
-// It asks the same members endpoint the write dialog does, so the two can never
-// disagree about who is on the list, and it shows the role as a word rather
-// than a select.
+// Nothing here writes. A "Manage in <name>" door appears only where the
+// server says the viewer manages that ancestor, and it switches the dialog's
+// target in place (the host decides what that means).
 
-import { useCallback, useEffect, useState } from "react";
-import { Globe, Lock, Users as UsersIcon } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { SkeletonLines } from "@/components/ui/skeleton";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import type { ShareTarget } from "./share-dialog";
+import type { ReactNode } from "react";
+import { Globe, ShieldCheck } from "lucide-react";
+import { Avatar } from "@/components/ui/avatar-stack";
+import {
+  panelRoleLabel,
+  type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type AccessPerson,
+} from "@/lib/access/access-panel";
+import {
+  adminsLine, alsoViaText, capText, everyoneLine, groupInherited, hasOlderRule, inheritedHeader,
+  LAST_FULL_TEXT, OLDER_RULE_FOOTNOTE,
+} from "./manage-access-model";
 
-interface MemberRow {
-  role: string;
-  user: { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null };
+export type ManageInTarget = { kind: AccessNodeKind; id: string; name: string };
+
+/** The one micro heading every section of the dialog carries. */
+export function AccessSectionHeading({ children }: { children: ReactNode }) {
+  return <h3 className="m-0 mb-2 text-micro uppercase tracking-[0.06em] text-ink-2">{children}</h3>;
 }
 
-const MEMBERS_PATH: Record<ShareTarget["kind"], string> = {
-  space: "/api/spaces",
-  folder: "/api/folders",
-  list: "/api/boards",
-};
-
-/** The words the canon uses, never "Member"/"Guest" as raw enum values. */
-const ROLE_WORD: Record<string, string> = {
-  OWNER: "Owner",
-  ADMIN: "Full access",
-  MEMBER: "Can edit",
-  GUEST: "Can view",
-};
-
-function displayName(u: MemberRow["user"]): string {
-  return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email;
+function avatarOf(p: AccessPerson) {
+  const [firstName, ...rest] = p.name.split(" ");
+  return { id: p.id, firstName: firstName || null, lastName: rest.join(" ") || null, avatar: p.avatar, email: p.email };
 }
 
-export function WhoHasAccess({
-  open,
-  onOpenChange,
-  target,
+/**
+ * One person: avatar, name, email and any quiet sub-lines, with whatever the
+ * host puts at the end of the row (a role word, or the dialog's controls).
+ */
+export function AccessPersonRow({
+  person, isYou = false, sub, children,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  target: ShareTarget;
+  person: AccessPerson;
+  isYou?: boolean;
+  /** Quiet second lines under the email: where else access comes from, a cap, the last Full holder. */
+  sub?: ReactNode;
+  children?: ReactNode;
 }) {
-  const [members, setMembers] = useState<MemberRow[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  const load = useCallback(async () => {
-    setFailed(false);
-    setMembers(null);
-    try {
-      const res = await fetch(`${MEMBERS_PATH[target.kind]}/${target.id}/members`, { cache: "no-store" });
-      if (!res.ok) { setFailed(true); return; }
-      const d = await res.json();
-      setMembers(Array.isArray(d?.members) ? (d.members as MemberRow[]) : []);
-    } catch {
-      setFailed(true);
-    }
-  }, [target.id, target.kind]);
-
-  // The fetch is kicked off a microtask after the effect, not inside it: the
-  // reset it starts with is a setState, and doing that synchronously from an
-  // effect cascades a render.
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    const t = setTimeout(() => { if (alive) void load(); }, 0);
-    return () => { alive = false; clearTimeout(t); };
-  }, [open, load]);
-
-  const noun = target.kind === "space" ? "Space" : target.kind === "folder" ? "Folder" : "List";
-  const restricted = target.visibility === "PRIVATE";
-  const everyone = target.visibility === "ORG";
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[520px] p-0 gap-0">
-        <div className="px-6 pt-6 pb-3">
-          <DialogTitle className="text-lg font-semibold">Who has access to {target.name}</DialogTitle>
-          <DialogDescription className="mt-1">
-            You can read this {noun.toLowerCase()}. Ask someone with Full access to change who else can.
-          </DialogDescription>
-        </div>
+    <li className="flex min-h-11 items-center gap-2.5 py-1.5">
+      <Avatar person={avatarOf(person)} size={28} />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5 text-base text-ink">
+          <span className="truncate">{person.name}</span>
+          {isYou ? <span className="shrink-0 text-ink-3">(you)</span> : null}
+          {!person.active ? <span className="shrink-0 rounded bg-active px-1.5 text-xs text-ink-2">Not active</span> : null}
+        </span>
+        <span className="block truncate text-xs text-ink-3">{person.email}</span>
+        {sub}
+      </span>
+      {children ? <span className="flex shrink-0 items-center gap-1.5">{children}</span> : null}
+    </li>
+  );
+}
 
-        <div className="px-6 pb-4">
-          <div className="flex items-start gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5">
-            {everyone ? (
-              <Globe className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
-            ) : restricted ? (
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
-            ) : (
-              <UsersIcon className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
-            )}
-            <span className="min-w-0">
-              <span className="block text-base font-medium text-ink">
-                {everyone ? "Everyone in the org" : restricted ? "Restricted" : target.kind === "space" ? "Space members" : "Inherits from the Space"}
-              </span>
-              <span className="block text-sm text-ink-2">
-                {everyone
-                  ? `Every member of the organisation can open this ${noun.toLowerCase()}.`
-                  : restricted
-                    ? `Only the people below can open this ${noun.toLowerCase()}.`
-                    : target.parentSpaceName
-                      ? `Anyone who can open the Space ${target.parentSpaceName} can open this ${noun.toLowerCase()}.`
-                      : `Anyone who can open the parent Space can open this ${noun.toLowerCase()}.`}
-              </span>
-            </span>
+/** The quiet lines under a direct row: another source, a cap from before, the last Full holder. */
+export function DirectEntrySub({ entry, showLastFull }: { entry: AccessDirectEntry; showLastFull: boolean }) {
+  const lines: string[] = [];
+  if (entry.alsoVia) lines.push(alsoViaText(entry.alsoVia));
+  if (entry.cap) lines.push(capText(entry));
+  if (showLastFull && entry.lastFull) lines.push(LAST_FULL_TEXT);
+  if (lines.length === 0) return null;
+  return (
+    <>
+      {lines.map((l) => (
+        <span key={l} className="block text-xs text-ink-2">{l}</span>
+      ))}
+    </>
+  );
+}
+
+/** The Owner chip: the person who made it, who always keeps Full access. */
+export function OwnerChip() {
+  return <span className="inline-flex h-6 items-center rounded-md bg-active px-2 text-xs font-medium text-ink">Owner</span>;
+}
+
+/** A role as a word, where the viewer cannot change it. */
+export function RoleWord({ role }: { role: AccessDirectEntry["role"] }) {
+  return <span className="text-sm text-ink-2">{panelRoleLabel(role)}</span>;
+}
+
+/** Everyone listed on the node itself, read only: the owner first, as the server orders them. */
+export function DirectAccessList({ panel, meId }: { panel: AccessPanel; meId: string | null }) {
+  if (panel.direct.length === 0) {
+    return <p className="m-0 text-sm text-ink-2">Nobody has been added here directly.</p>;
+  }
+  return (
+    <ul className="m-0 list-none divide-y divide-line-soft p-0">
+      {panel.direct.map((e) => (
+        <AccessPersonRow key={e.person.id} person={e.person} isYou={e.person.id === meId} sub={<DirectEntrySub entry={e} showLastFull={false} />}>
+          {e.owner ? <OwnerChip /> : <RoleWord role={e.role} />}
+        </AccessPersonRow>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * People who reach the node from somewhere above it, grouped by where, in
+ * the server's order. A container the viewer cannot open is never named.
+ */
+export function InheritedAccess({
+  panel, meId, onManageIn,
+}: {
+  panel: AccessPanel;
+  meId: string | null;
+  onManageIn?: (target: ManageInTarget) => void;
+}) {
+  const groups = groupInherited(panel);
+  const older = hasOlderRule(panel);
+  if (groups.length === 0 && panel.hiddenInherited.length === 0 && !older) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map((g) => {
+        const via = g.via;
+        const door = via.type === "node" && via.canManage && onManageIn ? via : null;
+        return (
+          <div key={g.key}>
+            <div className="mb-1 flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-2">{inheritedHeader(via)}</span>
+              {door ? (
+                <button
+                  type="button"
+                  onClick={() => onManageIn?.({ kind: door.kind, id: door.id, name: door.name })}
+                  className="shrink-0 text-sm font-medium text-brand-deep hover:underline"
+                >
+                  Manage in {door.name}
+                </button>
+              ) : null}
+            </div>
+            {g.entries.length > 0 ? (
+              <ul className="m-0 list-none divide-y divide-line-soft p-0">
+                {g.entries.map((e) => (
+                  <AccessPersonRow key={`${g.key}:${e.person.id}`} person={e.person} isYou={e.person.id === meId}>
+                    <RoleWord role={e.role} />
+                  </AccessPersonRow>
+                ))}
+              </ul>
+            ) : null}
+            {g.more > 0 ? <p className="m-0 mt-1 text-sm text-ink-2">and {g.more} more</p> : null}
           </div>
-        </div>
+        );
+      })}
+      {panel.hiddenInherited.map((h) => (
+        <p key={`${h.kind}:${h.name}`} className="m-0 text-sm text-ink-2">People with access to {h.name} can also open this.</p>
+      ))}
+      {older ? <p className="m-0 text-xs text-ink-3">{OLDER_RULE_FOOTNOTE}</p> : null}
+    </div>
+  );
+}
 
-        <div className="border-t border-line-soft px-6 py-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-2">People with access</div>
-          {members === null && !failed ? (
-            <SkeletonLines lines={3} />
-          ) : failed ? (
-            <OsEmptyView
-              variant="error"
-              compact
-              title="Couldn't load who has access"
-              action={{ label: "Try again", onClick: () => void load() }}
-            />
-          ) : members === null || members.length === 0 ? (
-            <p className="text-base text-ink-2">
-              Nobody has been added directly. Access comes from the parent Space.
-            </p>
-          ) : (
-            <ul className="space-y-1.5">
-              {members.map((m) => (
-                <li key={m.user.id} className="flex items-center gap-2.5">
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-active text-xs font-semibold text-ink-2">
-                    {(displayName(m.user) || "?").slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-base text-ink">{displayName(m.user)}</span>
-                    <span className="block truncate text-xs text-ink-3">{m.user.email}</span>
-                  </span>
-                  <span className="shrink-0 text-sm text-ink-2">{ROLE_WORD[m.role] ?? m.role}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+/** The two lines under the people: everyone at the org, and the org's admins. */
+export function EveryoneAndAdmins({ panel }: { panel: AccessPanel }) {
+  const everyone = everyoneLine(panel);
+  const admins = adminsLine(panel);
+  if (!everyone && !admins) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {everyone ? (
+        <p className="m-0 flex items-start gap-2 text-sm text-ink">
+          <Globe className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden /> <span className="min-w-0">{everyone}</span>
+        </p>
+      ) : null}
+      {admins ? (
+        <p className="m-0 flex items-start gap-2 text-sm text-ink-2">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden /> <span className="min-w-0">{admins}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
-        {/* No Copy link here: the container "…" carries one for every viewer
-            (spec section 1 row 5, "everyone"), and this body has no slug to
-            build a URL from without a second prop that could go stale. */}
-        <div className="flex items-center justify-end border-t border-line-soft px-6 py-3">
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="h-8 rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover"
-          >
-            Close
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
+/** The whole read-only list: listed here, from above, everyone and admins. */
+export function WhoHasAccess({
+  panel, meId, onManageIn,
+}: {
+  panel: AccessPanel;
+  meId: string | null;
+  onManageIn?: (target: ManageInTarget) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <section>
+        <AccessSectionHeading>People with access</AccessSectionHeading>
+        <DirectAccessList panel={panel} meId={meId} />
+      </section>
+      <InheritedAccess panel={panel} meId={meId} onManageIn={onManageIn} />
+      <EveryoneAndAdmins panel={panel} />
+    </div>
   );
 }

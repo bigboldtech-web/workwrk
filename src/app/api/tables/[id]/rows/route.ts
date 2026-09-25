@@ -10,8 +10,7 @@ import type { Prisma } from "@/generated/prisma";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { tableReadableBy } from "@/lib/table-gate";
 import { decodeRowCursor, encodeRowCursor, type RowCursor } from "@/lib/table-row-cursor";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
@@ -23,13 +22,10 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
     select: { id: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
-  if (table.spaceId) {
-    const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
-    if (!space) return null;
-  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
-    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
-    return null;
-  }
+  // The one resolver's table rule (R7): a Space reader edits, a Space Full
+  // holder manages, an unscoped table is org-wide for Members and a Guest's
+  // own only, and a table grant opens it on its own.
+  if (!(await tableReadableBy(table.id, orgId, userId, accessLevel))) return null;
   return table;
 }
 

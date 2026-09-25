@@ -26,7 +26,15 @@
 // THE ROLE EVERY "…" NEEDS comes down with the row, from
 // `GET /api/spaces` and `GET /api/spaces/[id]/children`. Without it the menu
 // falls back to the reader's rows, which is the safe direction but hides
-// Rename / Move / Duplicate from people who do hold them.
+// Rename / Move / Duplicate from people who do hold them. Each row's role is
+// the server's answer for THAT node (a Folder grant is the Folder's, never its
+// Space's), passed to the row's own menu: docs, canvases and tables included.
+//
+// PATH ROWS (decision A3). Someone given one node deep inside a Space sees
+// its Space and its parent Folders as bare names on the way to it: the Space
+// row carries access "path" (GET /api/spaces?paths=1) and a Folder row
+// `path: true`. Such a row has no create door, a menu that is exactly Copy
+// link, no drag in or out, and a chevron only for the branches it renders.
 //
 // A DOC, TABLE OR CANVAS OPENS IN PLACE (founder, 2026-09-24). Their rows are
 // Links to the item's Space-scoped Work address, /spaces/{slug}/docs/{id} and
@@ -201,8 +209,15 @@ interface SpaceRow {
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
   icon: string | null;
   color: string | null;
-  /** From `GET /api/spaces` (SpaceSummary.role). Absent = the reader's menu. */
-  role?: ContainerRole;
+  /** From `GET /api/spaces` (SpaceSummary.role). Absent or null = the reader's menu. */
+  role?: ContainerRole | null;
+  /**
+   * "path" (GET /api/spaces?paths=1): the viewer only passes through this
+   * Space on the way to something shared inside it (decision A3). The row is
+   * a bare name: no create door, and a menu that is exactly Copy link.
+   * Absent from an older server, which reads as a member row.
+   */
+  access?: "member" | "path";
 }
 
 interface BoardChild {
@@ -214,8 +229,8 @@ interface BoardChild {
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
   /** Board.settings — sprint Lists carry settings.sprint (parseSprintMeta). */
   settings?: unknown;
-  /** The viewer's role on this List, from the children route. */
-  role?: ContainerRole;
+  /** The viewer's role on this List, from the children route. Null = the reader's menu. */
+  role?: ContainerRole | null;
 }
 
 interface FolderChild {
@@ -224,9 +239,14 @@ interface FolderChild {
   icon: string | null;
   color: string | null;
   position: number;
-  /** A Folder's management gate is its Space's, so this IS the Space role. */
-  role?: ContainerRole;
-  visibility?: "PRIVATE" | "WORKSPACE" | "ORG";
+  /**
+   * The viewer's role on THIS Folder, decided by the server (a Folder grant
+   * is the Folder's own, never its Space's). Null or absent = the reader's menu.
+   */
+  role?: ContainerRole | null;
+  /** A path container: named only on the way to something shared inside it (decision A3). */
+  path?: boolean;
+  visibility?: "PRIVATE" | "WORKSPACE" | "ORG" | null;
   _count: { boards: number; childFolders: number };
   boards: BoardChild[];
   docs: DocChild[];
@@ -239,19 +259,25 @@ interface TableChild {
   id: string;
   name: string;
   description: string | null;
-  /** May this viewer delete it (absent from an older server: treated as yes,
+  /** Full access on the table (absent from an older server: treated as yes,
    *  and the server still refuses anyone else). */
   canManage?: boolean;
+  /** The viewer's role on the table, from the children route. */
+  role?: ContainerRole | null;
 }
 
 interface DocChild {
   id: string;
   title: string;
+  /** The viewer's role on the doc, from the children route. Absent: its menu asks. */
+  role?: ContainerRole | null;
 }
 
 interface WhiteboardChild {
   id: string;
   name: string;
+  /** The viewer's role on the canvas, from the children route. */
+  role?: ContainerRole | null;
 }
 
 interface ChildrenPayload {
@@ -317,6 +343,10 @@ export function SpaceTreeRow({
   // item whose own row is not on screen (a collapsed Space, a deep folder).
   const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("space", space.id));
   const lit = isActive || pillActive;
+  // A path Space names the way to what was shared inside it and nothing
+  // more: no create door, a Copy link only menu, and nothing moved into its
+  // root (that needs Full access on the Space, which a path never holds).
+  const pathOnly = space.access === "path";
 
   const loadChildren = () => {
     setLoading(true);
@@ -402,7 +432,7 @@ export function SpaceTreeRow({
             setSpaceDropEdge(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
             return;
           }
-          if (isTreeDrag(e)) { e.preventDefault(); setRootDragOver(true); }
+          if (isTreeDrag(e) && !pathOnly) { e.preventDefault(); setRootDragOver(true); }
         }}
         onDragLeave={() => { setRootDragOver(false); setSpaceDropEdge(null); }}
         onDrop={async (e) => {
@@ -423,7 +453,7 @@ export function SpaceTreeRow({
             }
             return;
           }
-          if (!isTreeDrag(e)) return;
+          if (!isTreeDrag(e) || pathOnly) return;
           e.preventDefault();
           setRootDragOver(false);
           const p = readTreeDrag(e);
@@ -470,7 +500,9 @@ export function SpaceTreeRow({
           ) : null}
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${lit ? "bg-side-pill" : "bg-side"}`}>
-          <CreateInsideTrigger kind="space" spaceId={space.id} spaceSlug={space.slug} role={space.role} onCreated={() => { setExpanded(true); refresh(); }} />
+          {pathOnly ? null : (
+            <CreateInsideTrigger kind="space" spaceId={space.id} spaceSlug={space.slug} role={space.role ?? undefined} onCreated={() => { setExpanded(true); refresh(); }} />
+          )}
           <ContainerMenuTrigger
             ref={moreRef}
             compact
@@ -486,7 +518,8 @@ export function SpaceTreeRow({
               spaceSlug: space.slug,
               spaceName: space.name,
             }}
-            role={space.role}
+            role={pathOnly ? null : space.role}
+            pathOnly={pathOnly}
             onUpdated={() => { onReloadSpaces(); refresh(); }}
             onMoveUp={onMoveUp}
             onMoveDown={onMoveDown}
@@ -577,19 +610,25 @@ function FolderTreeRow({
   // this folder relative to the dragged one. null = not a drop target right now.
   const [dropZone, setDropZone] = useState<"before" | "inside" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
+  // A path Folder (decision A3) is only the way to something shared inside
+  // it: no role, no create door, a Copy link only menu, and nothing dragged
+  // out of it or dropped into it (both need Full access on the Folder).
+  const pathOnly = folder.path === true;
+  // What is RENDERED decides the chevron: a count can include branches the
+  // viewer cannot open, and a path must never hint at those.
   const hasChildren =
     folder.boards.length > 0 ||
     folder.docs.length > 0 ||
     folder.whiteboards.length > 0 ||
-    folder.childFolders.length > 0 ||
-    folder._count.childFolders > 0;
+    folder.childFolders.length > 0;
 
   return (
     <li className="group/folderrow relative">
       <div
-        draggable
-        onDragStart={(e) => { e.stopPropagation(); startTreeDrag(e, { kind: "folder", id: folder.id }); }}
+        draggable={!pathOnly}
+        onDragStart={(e) => { if (pathOnly) return; e.stopPropagation(); startTreeDrag(e, { kind: "folder", id: folder.id }); }}
         onDragOver={(e) => {
+          if (pathOnly) return;
           // OS files dropped on a folder row land INSIDE the folder.
           if (dragHasFiles(e)) { e.preventDefault(); e.stopPropagation(); setDropZone("inside"); return; }
           if (!isTreeDrag(e)) return;
@@ -608,6 +647,7 @@ function FolderTreeRow({
         }}
         onDragLeave={() => setDropZone(null)}
         onDrop={async (e) => {
+          if (pathOnly) return;
           if (dragHasFiles(e)) {
             e.preventDefault(); e.stopPropagation();
             setDropZone(null);
@@ -678,7 +718,9 @@ function FolderTreeRow({
           ) : null}
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
-          <CreateInsideTrigger kind="folder" spaceId={spaceId} spaceSlug={spaceSlug} folderId={folder.id} role={folder.role} onCreated={() => { setExpanded(true); onChanged(); }} />
+          {pathOnly ? null : (
+            <CreateInsideTrigger kind="folder" spaceId={spaceId} spaceSlug={spaceSlug} folderId={folder.id} role={folder.role ?? undefined} onCreated={() => { setExpanded(true); onChanged(); }} />
+          )}
           <ContainerMenuTrigger
             ref={moreRef}
             compact
@@ -688,12 +730,13 @@ function FolderTreeRow({
               name: folder.name,
               icon: folder.icon,
               color: folder.color,
-              visibility: folder.visibility,
+              visibility: folder.visibility ?? undefined,
               spaceId,
               spaceSlug,
               spaceName,
             }}
-            role={folder.role}
+            role={pathOnly ? null : folder.role}
+            pathOnly={pathOnly}
             onUpdated={() => { setExpanded(true); onChanged(); }}
           />
         </span>
@@ -813,7 +856,7 @@ function TableTreeRow({
   // The ONE table menu (spec-tables-forms section 3 TableRowMenu, placement
   // tree), shared with the Tables sidebar, /tables and the sheet's "...".
   const menu = useTableRowMenu();
-  const target = { id: table.id, name: table.name, canManage: table.canManage, spaceSlug };
+  const target = { id: table.id, name: table.name, canManage: table.canManage, role: table.role, spaceSlug };
   const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("table", table.id));
   const isActive = pillActive;
   return (
@@ -853,7 +896,9 @@ function TableTreeRow({
 function DocTreeRow({ doc, spaceSlug, onChanged }: { doc: DocChild; spaceSlug: string; onChanged?: () => void }) {
   const router = useRouter();
   const noteMenu = useDocRowMenu();
-  const target = { id: doc.id, title: doc.title, spaceSlug };
+  // The server's role for this row, so the menu needs no fetch; absent (an
+  // older server) and the menu asks GET /api/docs/[id] on open.
+  const target = { id: doc.id, title: doc.title, spaceSlug, role: doc.role ?? undefined };
   const { active: pillActive, ref: pillRef } = useTreePill<HTMLDivElement>(treeKey("doc", doc.id));
   const isActive = pillActive;
   return (
@@ -911,7 +956,7 @@ function WhiteboardTreeRow({ whiteboard, spaceSlug, onChanged }: { whiteboard: W
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
-          <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name, spaceSlug }} onUpdated={onChanged} />
+          <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name, spaceSlug }} role={whiteboard.role} onUpdated={onChanged} />
         </span>
       </div>
     </li>

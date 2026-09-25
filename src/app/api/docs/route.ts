@@ -11,8 +11,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { docAccessible } from "@/lib/doc-access";
-import { getDocSharingMap, isDocFull, resolveDocRole } from "@/lib/doc-sharing";
+import { canCreateDocAt } from "@/lib/doc-access";
+import { getDocSharingMap } from "@/lib/doc-sharing";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { applyDocLock, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilters, matchesView, parseDocsListQuery, slicePage, sortDocs, type DocsCandidate } from "@/lib/docs-list";
 import { resolveDocLocations } from "@/lib/doc-location";
@@ -28,23 +30,27 @@ const createSchema = z.object({
   position: z.number().optional(),
 });
 
+type SuiteCtx = { orgId: string; userId: string; accessLevel: string | null | undefined };
+
 /**
- * Per-row gate with one call per distinct anchor: a hundred docs on the same
- * List ask the resolver once. The gate runs over EVERY candidate before any
- * cap or page slice (critic 12: the old `take: 200` bit before gating, so a
- * viewer who could read 30 of the newest 200 saw 30 rows and no way to page).
+ * The docs this viewer can open, and their roles, over ONE world for every
+ * candidate (node-access nodeRoleMap): a restricted doc they are not listed
+ * on, a sub-page under a parent they cannot read and a doc in a Folder they
+ * cannot reach never reach the list. The gate runs over EVERY candidate
+ * before any cap or page slice (critic 12: the old `take: 200` bit before
+ * gating, so a viewer who could read 30 of the newest 200 saw 30 rows and no
+ * way to page).
  */
-async function gateDocs<T extends { entityType: string | null; entityId: string | null }>(docs: T[], userId: string, accessLevel: string | null | undefined): Promise<T[]> {
-  const cache = new Map<string, Promise<boolean>>();
-  const flags = await Promise.all(
-    docs.map((d) => {
-      const key = `${d.entityType ?? ""}:${d.entityId ?? ""}`;
-      let p = cache.get(key);
-      if (!p) { p = docAccessible(d, userId, accessLevel); cache.set(key, p); }
-      return p;
-    }),
-  );
-  return docs.filter((_, i) => flags[i]);
+async function gateDocs<T extends { id: string }>(docs: T[], ctx: SuiteCtx): Promise<{ docs: T[]; roleOf: Map<string, NodeRole> }> {
+  const roleOf = await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "doc", docs.map((d) => d.id));
+  return { docs: docs.filter((d) => roleAtLeast(roleOf.get(d.id) ?? "none", "VIEW")), roleOf };
+}
+
+/** The row menu's role: the page lock applied (below Full access a locked doc is Can comment). */
+function rowRoleOf(role: NodeRole, locked: boolean): "edit" | "comment" | "view" {
+  const r = applyDocLock(role, locked);
+  if (roleAtLeast(r, "EDIT")) return "edit";
+  return r === "COMMENT" ? "comment" : "view";
 }
 
 /**
@@ -58,7 +64,7 @@ async function gateDocs<T extends { entityType: string | null; entityId: string 
  * pass none of these params (the sidebar tree, the card pickers, entity
  * anchors), so nothing that read it before reads anything different.
  */
-async function pagedList(req: Request, ctx: { orgId: string; userId: string; accessLevel: string | null | undefined }) {
+async function pagedList(req: Request, ctx: SuiteCtx) {
   const q = parseDocsListQuery(new URL(req.url).searchParams);
 
   const [candidates, prefs, org, childCounts] = await Promise.all([
@@ -75,7 +81,7 @@ async function pagedList(req: Request, ctx: { orgId: string; userId: string; acc
     prisma.doc.groupBy({ by: ["parentId"], where: { organizationId: ctx.orgId, archivedAt: null, parentId: { not: null } }, _count: { _all: true } }),
   ]);
 
-  const gated = await gateDocs(candidates, ctx.userId, ctx.accessLevel);
+  const { docs: gated, roleOf } = await gateDocs(candidates, ctx);
 
   const sharing = getDocSharingMap(org?.settings);
   const home = prefs.home as { favoriteDocIds?: string[]; recentDocViews?: { id: string; at: string }[] };
@@ -188,18 +194,12 @@ async function pagedList(req: Request, ctx: { orgId: string; userId: string; acc
         .map((c) => userById.get(c.id))
         .filter((x): x is NonNullable<typeof x> => !!x)
         .map((x) => ({ id: x.id, firstName: x.firstName, lastName: x.lastName, avatar: x.avatar })),
-      // The viewer's role on this doc (settings.docSharing) and whether they
-      // hold Full access (creator or admin), so the row menu can gate its rows.
-      myRole: rowRole(d.id, d.createdById),
-      canManage: isDocFull(ctx, { createdById: d.createdById }),
+      // The viewer's role on this doc and whether they hold Full access, from
+      // the one resolver, so the row menu can gate its rows.
+      myRole: rowRoleOf(roleOf.get(d.id) ?? "none", !!locks.get(d.id)?.lockedById),
+      canManage: roleAtLeast(roleOf.get(d.id) ?? "none", "FULL"),
     };
   });
-
-  function rowRole(id: string, createdById: string | null): "edit" | "comment" | "view" {
-    const role = resolveDocRole(sharing[id], { userId: ctx.userId, accessLevel: ctx.accessLevel, createdById }) ?? "view";
-    if (!locks.get(id)?.lockedById || isDocFull(ctx, { createdById })) return role;
-    return role === "view" ? "view" : "comment";
-  }
 
   return NextResponse.json({ data, total: sorted.length, nextCursor, counts });
 }
@@ -246,30 +246,19 @@ export async function GET(req: Request) {
     take: 200,
   });
 
-  // Phase 37 — gate per row via docAccessible, which handles SPACE +
-  // BOARD + BOARD_ITEM anchors. Standalone docs (entityType=null) and
-  // suite-specific anchors fall through. Per-row resolution is fine
-  // at the 100-doc cap; library views typically pre-filter by
-  // entity anyway.
-  const flags = await Promise.all(
-    docs.map((d) => docAccessible(d, ctx.userId, ctx.accessLevel)),
-  );
-  const gated = docs.filter((_, i) => flags[i]);
+  // One world for every row (node-access): anchors, parent pages, listings
+  // and restricted docs, never a gate call per row.
+  const { docs: gated, roleOf } = await gateDocs(docs, ctx);
 
   // The viewer's role per row rides on the legacy shape too, so the tree
   // hosts that read it (the Docs sidebar, the pages panel) gate their row
   // menu the way the /docs table does instead of assuming Can edit.
-  const [locMap, legacyOrg, legacyLocks] = await Promise.all([
+  const [locMap, legacyLocks] = await Promise.all([
     resolveDocLocations(gated),
-    prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } }),
     readDocLocks(gated.map((d) => d.id)),
   ]);
-  const legacySharing = getDocSharingMap(legacyOrg?.settings);
-  const legacyRole = (d: { id: string; createdById: string | null }): "edit" | "comment" | "view" => {
-    const role = resolveDocRole(legacySharing[d.id], { userId: ctx.userId, accessLevel: ctx.accessLevel, createdById: d.createdById }) ?? "view";
-    if (!legacyLocks.get(d.id)?.lockedById || isDocFull(ctx, { createdById: d.createdById })) return role;
-    return role === "view" ? "view" : "comment";
-  };
+  const legacyRole = (d: { id: string }): "edit" | "comment" | "view" =>
+    rowRoleOf(roleOf.get(d.id) ?? "none", !!legacyLocks.get(d.id)?.lockedById);
 
   // Contributors — every distinct DocVersion author per doc, derived at
   // read time (no storage). Most-recent-save first, capped at 5 below.
@@ -321,7 +310,7 @@ export async function GET(req: Request) {
     return {
       ...rest, emoji, location, createdBy: u ? { name, avatar: u.avatar } : null, contributors,
       myRole: legacyRole(d),
-      canManage: isDocFull(ctx, { createdById: d.createdById }),
+      canManage: roleAtLeast(roleOf.get(d.id) ?? "none", "FULL"),
     };
   });
 
@@ -338,13 +327,14 @@ export async function POST(req: Request) {
 
   const content = (parsed.data.content as object) ?? {};
 
-  // Phase 37 — block pinning to an entity the viewer can't see.
-  // Without this, a probe with a guessed boardId could mint a doc on
-  // a board the viewer can't read.
-  const ok = await docAccessible(
+  // Block pinning to an entity the viewer can't see, and nesting under a
+  // page they can't read (a sub-page follows its parent, A6), or under
+  // someone else's note. Without this, a probe with a guessed boardId or
+  // parentId could mint a doc where the viewer has no reach.
+  const ok = await canCreateDocAt(
+    nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel),
     { entityType: parsed.data.entityType ?? null, entityId: parsed.data.entityId ?? null },
-    ctx.userId,
-    ctx.accessLevel,
+    parsed.data.parentId ?? null,
   );
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 

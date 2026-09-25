@@ -29,12 +29,13 @@ import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject, MANAGE_REFUSAL } from "@/lib/object-manage";
+import { MANAGE_REFUSAL } from "@/lib/object-manage";
+import { formResponsesAllowed, nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { describeSettingsError, formSettingsPatchSchema, mergeFormSettings, readFormSettings } from "@/lib/forms/settings";
-import { canReadResponses } from "@/lib/forms/responses-server";
 import { viewerCanRespondAsMember } from "@/lib/forms/responder-access";
 import { validFieldMappingsInput, validFieldsInput } from "@/lib/forms/fields";
 import { dailySummaryInstalled } from "@/lib/forms/daily-summary";
@@ -44,12 +45,14 @@ import { formContentRev, patchAllowed, type FormContentKey } from "@/lib/forms/c
 
 type FormViewer = Awaited<ReturnType<typeof viewerFromSession>>;
 
-/** Every Member may edit; a Guest only a form they made (and never an
- *  unknown viewer). */
-function canEditForm(viewer: FormViewer | null, createdById: string): boolean {
-  if (!viewer) return false;
-  if (viewer.orgRole === "GUEST") return viewer.userId === createdById;
-  return true;
+/**
+ * The viewer's role on the form, from the one resolver (R9): every Member
+ * edits, its creator holds Full access for life, and a form grant gives its
+ * role (a Guest included). An unknown viewer holds nothing.
+ */
+async function formRoleOf(viewer: FormViewer | null, formId: string): Promise<NodeRole> {
+  if (!viewer) return "none";
+  return (await nodeRole(nodeCtxFromViewer(viewer), { kind: "form", id: formId })).role;
 }
 
 /** Both destinations a form can feed (a List and a table, either or both).
@@ -98,13 +101,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     destinationsOf(orgId, form.targetBoardId, form.targetTableId, getUserId(session), session),
     prisma.user.findUnique({ where: { id: form.createdById }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true } }),
   ]);
-  // A Guest who did not make the form and cannot reach its anchor has no
-  // business knowing it exists: the same 404 as a wrong id.
-  if (viewer?.orgRole === "GUEST" && viewer.userId !== form.createdById) {
-    const reach = await canReadResponses(form, { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent });
-    if (!reach) return jsonError("not found", 404);
-  }
-  const canEdit = canEditForm(viewer, form.createdById);
+  // Someone who holds no role on the form (a Guest who neither made it nor
+  // was given it) has no business knowing it exists: the same 404 as a wrong id.
+  const role = await formRoleOf(viewer, form.id);
+  if (!roleAtLeast(role, "VIEW")) return jsonError("not found", 404);
+  const canEdit = roleAtLeast(role, "EDIT");
+  const canRead = viewer ? await formResponsesAllowed(nodeCtxFromViewer(viewer), form.id) : false;
   const { _count, ...rest } = form;
   const settings = readFormSettings((form as { settings?: unknown }).settings);
   const responder = viewer ? { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent } : null;
@@ -130,9 +132,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     owner: owner ? { ...owner, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email || null } : null,
     canEdit,
     canRespond,
-    canManage: canManageObject(viewer, form.createdById),
-    // Reading responses is an editor's right; a Can view reader has no Responses tab.
-    canReadResponses: canEdit,
+    // Full access on the form: its public link, delete, deleting responses.
+    canManage: roleAtLeast(role, "FULL"),
+    // Reading responses needs the form AND where its answers land (R9); a
+    // form grant never bypasses the destination.
+    canReadResponses: canRead,
     isAgent: !!viewer?.isAgent,
     // Whether "Send a daily summary instead" has its reader (the cron row):
     // the builder renders the switch only then.
@@ -153,7 +157,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const existing = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("not found", 404);
   const editor = await viewerFromSession().catch(() => null);
-  if (!canEditForm(editor, existing.createdById)) return jsonError("You can view this form but not change it.", 403);
+  const editorRole = await formRoleOf(editor, existing.id);
+  if (!roleAtLeast(editorRole, "VIEW")) return jsonError("not found", 404);
+  if (!roleAtLeast(editorRole, "EDIT")) return jsonError("You can view this form but not change it.", 403);
 
   const data: Record<string, unknown> = {};
   if ("settings" in body) {
@@ -184,7 +190,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // value is not a change and is never refused.
   let publicChange: boolean | null = null;
   if (typeof body.isPublic === "boolean" && body.isPublic !== existing.isPublic) {
-    if (!canManageObject(editor, existing.createdById)) return jsonError(MANAGE_REFUSAL.publish, 403);
+    if (!roleAtLeast(editorRole, "FULL")) return jsonError(MANAGE_REFUSAL.publish, 403);
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
@@ -259,7 +265,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!existing) return jsonError("not found", 404);
 
   const viewer = await viewerFromSession().catch(() => null);
-  if (!canManageObject(viewer, existing.createdById)) return jsonError(MANAGE_REFUSAL.delete, 403);
+  const role = await formRoleOf(viewer, existing.id);
+  if (!roleAtLeast(role, "VIEW")) return jsonError("not found", 404);
+  // Full access deletes, an Agent's own form included (canManageObject let
+  // the creator delete before node-access, A8).
+  if (!roleAtLeast(role, "FULL")) return jsonError(MANAGE_REFUSAL.delete, 403);
 
   await moveToTrash("form", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

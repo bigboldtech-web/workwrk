@@ -10,6 +10,11 @@
 //   GET   /api/boards/[id]/members         → current members
 //   POST  /api/boards/[id]/members         → upsert member { userId, role }
 //   DELETE /api/boards/[id]/members?userId → remove
+//
+// ListVisibilityControl, at the end of this file, is the List's tri-state on
+// its own: the one Manage access dialog composes it (src/components/access/
+// general-access.tsx). The dialog above is kept, exported and working;
+// nothing mounts it any more.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,6 +28,8 @@ import { useOsToast } from "./toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
+import { InlineRetry, VisibilityCards, VisibilityReadout, type VisibilityOption } from "./share-space-dialog";
+import { generalErrorText } from "@/components/access/manage-access-model";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
 type BoardRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
@@ -64,9 +71,9 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string; blurb: string; Ico
 // Member = read + write, Guest = read only.
 const ROLE_OPTIONS: { value: BoardRole; label: string }[] = [
   { value: "OWNER",   label: "Owner" },
-  { value: "ADMIN",   label: "Can manage" },
+  { value: "ADMIN",   label: "Full access" },
   { value: "MEMBER",  label: "Can edit" },
-  { value: "GUEST",   label: "View only" },
+  { value: "GUEST",   label: "Can view" },
 ];
 
 function displayName(u: UserOption): string {
@@ -301,7 +308,7 @@ export function ShareBoardDialog({
           <div className="mt-2 flex items-start gap-1.5 text-xs text-zinc-500">
             <Info className="h-3 w-3 mt-0.5 shrink-0" />
             <span>
-              Anyone you add below gets access to <span className="font-medium">this list</span>, even without access to the Space. <span className="font-medium">Can edit</span> to work on it, <span className="font-medium">View only</span> to just see it.
+              Anyone you add below gets access to <span className="font-medium">this list</span>, even without access to the Space. <span className="font-medium">Can edit</span> to work on it, <span className="font-medium">Can view</span> to just see it.
             </span>
           </div>
         </div>
@@ -413,5 +420,76 @@ function Avatar({ user }: { user: UserOption }) {
     <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-xs font-semibold text-zinc-600 shrink-0">
       {avatarInitials(user)}
     </span>
+  );
+}
+
+/**
+ * The List tri-state in the naming canon's words. A List inside a Folder
+ * inherits from that Folder, not from the Space, so `parentFolderName` names
+ * it when the List has one: the Space alone would promise the List to Space
+ * members a Restricted Folder above it shuts out.
+ */
+export function listVisibilityOptions(spaceName: string | null | undefined, orgName: string, parentFolderName?: string | null): VisibilityOption<Visibility>[] {
+  const inherit = parentFolderName
+    ? { label: `Inherits from ${parentFolderName}`, blurb: `Anyone who can open ${parentFolderName}.` }
+    : { label: spaceName ? `Inherits from ${spaceName}` : "Inherits from the Space", blurb: "Anyone who can open the Space." };
+  return [
+    { value: "WORKSPACE", label: inherit.label, blurb: inherit.blurb, Icon: UsersIcon },
+    { value: "PRIVATE", label: "Restricted", blurb: "Only the people listed below, plus Admins.", Icon: Lock },
+    { value: "ORG", label: `Everyone at ${orgName}`, blurb: `Every member of ${orgName}.`, Icon: Globe },
+  ];
+}
+
+/**
+ * Who can open a List: inherit the Space, Restricted, or everyone at the org,
+ * written through PATCH /api/boards/[id] { visibility }. Not optimistic: the
+ * card changes when the server agrees, and a failure keeps the choice on
+ * screen with a Retry that sends it again.
+ */
+export function ListVisibilityControl({
+  boardId, value, spaceName, parentFolderName, orgName, readOnly = false, onChanged,
+}: {
+  boardId: string;
+  value: Visibility;
+  spaceName?: string | null;
+  /** The Folder the List sits in, when it has one: what it inherits from. */
+  parentFolderName?: string | null;
+  orgName: string;
+  readOnly?: boolean;
+  onChanged?: (next: Visibility) => void;
+}) {
+  const [busy, setBusy] = useState<Visibility | null>(null);
+  const [failed, setFailed] = useState<{ message: string; next: Visibility } | null>(null);
+  const options = listVisibilityOptions(spaceName, orgName, parentFolderName);
+
+  const choose = async (next: Visibility) => {
+    if (next === value || busy) return;
+    setBusy(next);
+    setFailed(null);
+    try {
+      const res = await fetch(`/api/boards/${boardId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: next }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setFailed({ message: generalErrorText(res.status, d, "list", "Couldn't change who can open this List."), next });
+        return;
+      }
+      onChanged?.(next);
+    } catch {
+      setFailed({ message: "Couldn't change who can open this List. Check your connection.", next });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (readOnly) return <VisibilityReadout option={options.find((o) => o.value === value)} />;
+  return (
+    <div>
+      <VisibilityCards label="Who can open this List" options={options} value={value} busy={busy} onChoose={(v) => void choose(v)} />
+      {failed ? <InlineRetry message={failed.message} onRetry={() => void choose(failed.next)} /> : null}
+    </div>
   );
 }

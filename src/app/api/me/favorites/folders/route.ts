@@ -10,7 +10,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -31,10 +32,11 @@ export async function GET() {
       space: { select: { slug: true } },
     },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (f) => ((await getSpaceForReader(f.spaceId, u.id!, accessLevel)) ? f : null)),
-  )).filter((f): f is NonNullable<typeof f> => f !== null);
+  // The role on the Folder itself, never its Space: a Folder grantee keeps
+  // their starred Folder, and a Private Folder that does not name the viewer
+  // drops out. One world for every starred Folder.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "folder", rows.map((f) => f.id));
+  const visible = rows.filter((f) => roleAtLeast(roles.get(f.id) ?? "none", "VIEW"));
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));

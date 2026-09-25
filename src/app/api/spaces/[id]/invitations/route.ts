@@ -22,6 +22,7 @@ import { authOptions } from "@/lib/auth";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
+import { recordSpaceInvite } from "@/lib/access/grants";
 
 const schema = z.object({
   email: z.string().email(),
@@ -128,19 +129,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, token: true, expiresAt: true },
   });
 
+  // A new invitation and its security activity row land together: the row
+  // is what credits the sender when the invitee accepts (A7).
   const invitation = existingInvite
     ? existingInvite
-    : await prisma.invitation.create({
-        data: {
-          email,
-          accessLevel: "EMPLOYEE",
-          token: crypto.randomBytes(32).toString("hex"),
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    : await prisma.$transaction(async (tx) => {
+        const created = await tx.invitation.create({
+          data: {
+            email,
+            accessLevel: "EMPLOYEE",
+            token: crypto.randomBytes(32).toString("hex"),
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            organizationId: c.organizationId,
+            spaceId,
+            spaceRole: parsed.data.spaceRole,
+          },
+          select: { id: true, token: true, expiresAt: true },
+        });
+        await recordSpaceInvite(tx, {
+          actorId: c.userId,
           organizationId: c.organizationId,
           spaceId,
-          spaceRole: parsed.data.spaceRole,
-        },
-        select: { id: true, token: true, expiresAt: true },
+          invitationId: created.id,
+          email,
+          role: parsed.data.spaceRole,
+        });
+        return created;
       });
 
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";

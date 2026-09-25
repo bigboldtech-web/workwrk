@@ -46,7 +46,7 @@ import { clearTaskDrawer, openTask, readTaskDrawer } from "@/lib/nav/open-task";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { emitItemChanged } from "@/lib/realtime-events";
 import { BackButton, goBackOr } from "@/components/ui/back-button";
-import { ShareBoardDialog } from "@/components/layout/os/share-board-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { TaskDetailBody } from "./task-detail-body";
 import { ItemMoreMenu } from "./item-more-menu";
 import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items-shared";
@@ -354,12 +354,12 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         </div>
       </Drawer>
       {board?.slug ? (
-        <ShareBoardDialog
+        // A task's access is its List's: the List's Manage access dialog,
+        // write or read as the server says the viewer may on that List.
+        <ShareDialog
           open={shareOpen}
           onOpenChange={setShareOpen}
-          boardId={board.id}
-          boardName={board.name}
-          initialVisibility={board.visibility ?? "WORKSPACE"}
+          target={{ kind: "list", id: board.id, name: board.name, visibility: board.visibility ?? "WORKSPACE" }}
           onChanged={() => void task.reload()}
         />
       ) : null}

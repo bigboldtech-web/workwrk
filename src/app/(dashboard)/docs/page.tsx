@@ -42,7 +42,6 @@ import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile
 import { PersonAvatar, PersonAvatarStack, type PersonRef } from "@/components/board-view/assignee-picker";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 import { DocRowMenuHost, useDocRowMenu, dispatchDocsChanged, type DocMenuTarget } from "@/components/docs/doc-row-menu";
-import { DocShareModal } from "@/components/docs/doc-share-modal";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -272,10 +271,8 @@ export default function DocsPage() {
     window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
   }, [toast]);
 
-  /* ── row menu + share ── */
+  /* ── row menu (its host owns the Manage access dialog) ── */
   const menu = useDocRowMenu();
-  const [shareFor, setShareFor] = useState<DocRow | null>(null);
-  const shareAnchor = useRef<HTMLButtonElement | null>(null);
   const meId = boot.viewer.id;
   const toTarget = (d: DocRow): DocMenuTarget => ({
     id: d.id, title: d.title, parentId: d.parentId, entityType: d.entityType, entityId: d.entityId,
@@ -539,24 +536,13 @@ export default function DocsPage() {
         </div>
       </div>
 
+      {/* The row menu's Manage access opens the one dialog, mounted by the
+          host; a sharing change reloads the list (its lock glyphs follow). */}
       <DocRowMenuHost
         menu={menu}
         context="table"
         onChanged={() => void load()}
-        onShare={(d) => { shareAnchor.current = (menu.state?.anchor?.current as HTMLButtonElement | null) ?? null; const row = rows?.find((r) => r.id === d.id) ?? null; setShareFor(row); }}
       />
-      {shareFor ? (
-        <DocShareModal
-          docId={shareFor.id}
-          docTitle={shareFor.title || "Untitled doc"}
-          createdById={shareFor.ownerId}
-          meId={meId}
-          open
-          onClose={() => setShareFor(null)}
-          anchorRef={shareAnchor}
-          viewerRole={shareFor.myRole}
-        />
-      ) : null}
     </>
   );
 }

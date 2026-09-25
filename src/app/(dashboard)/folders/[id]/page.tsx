@@ -34,9 +34,11 @@ import { FileText, Brush, Lock } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { BackButton } from "@/components/ui/back-button";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
-import { folderVisibleTo } from "@/lib/folder";
-import { canEditSpace } from "@/lib/space";
-import { resolveAccess, meets, type ViewerContext } from "@/lib/access";
+import { nodeCtxFromLevel, nodePath, nodeRole, nodeRoleMap, nodeRoles, spaceTree } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, toContainerRole, type NodeRef, type NodeRole } from "@/lib/access/node-rules";
+import { pathViewRows } from "@/lib/access/node-tree";
+import { PathContainerView } from "@/components/access/path-container-view";
+import type { PlacementCrumb } from "@/lib/work/placement";
 import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
 import { ShareButton } from "@/components/access/share-button";
 import { FolderTabs } from "./folder-tabs";
@@ -83,29 +85,50 @@ export default async function FolderPage(props: {
   });
   if (!folder) notFound();
 
-  const viewer: ViewerContext = { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" };
-  const decision = await resolveAccess(viewer, { type: "folder", id: folder.id });
-  if (decision.permission === "none") notFound();
-  const canEdit = meets(decision, "edit");
-  const canManage = meets(decision, "admin");
+  // The viewer's role on this Folder, from the one resolver
+  // (src/lib/access/node-access.ts): its own grant, an ancestor's, its
+  // Space's, its owner, with the PRIVATE cut. A Folder grant (Full included)
+  // gives nothing on the Space or on sibling Folders: roles never climb.
+  const nodeCtx = nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel);
+  const folderRef: NodeRef = { kind: "folder", id: folder.id };
+  const [decision, steps] = await Promise.all([nodeRole(nodeCtx, folderRef), nodePath(nodeCtx, folderRef)]);
 
-  // WHAT A FOLDER GRANT ACTUALLY BUYS, TODAY.
-  //
-  // The Share dialog's "Can edit the contents" on a Folder writes a
-  // FolderMember row, and `resolveFolder` above honours it, so `canEdit` is
-  // true for a folder grantee. No WRITE gate anywhere else consults
-  // FolderMember: `POST /api/boards` and `POST /api/folders` both answer to
-  // `canEditSpace` (org admin, Space OWNER, Space ADMIN). So the two create
-  // rows at the foot of the Contents table were offered to exactly the people
-  // the server refuses.
-  //
-  // Until the contribute path learns about FolderMember (tracked separately;
-  // it is an access-engine change, not a screen change), the honest thing is
-  // to render those two rows only to people the create endpoints accept, and
-  // to say plainly why they are absent. Files are NOT in this bucket: `POST
-  // /api/files` scopes by org and never asks about the folder, so the drop
-  // zone below keeps working for a grantee and stays on `canEdit`.
-  const canCreateInFolder = await canEditSpace(folder.spaceId, u.id, u.accessLevel ?? "EMPLOYEE");
+  // The crumb names the Space and the Folders above this one while the
+  // viewer can open each or passes through it on the way here, and stops at
+  // the first they can do neither with (no gap, nothing hidden named).
+  const trail: PlacementCrumb[] = [];
+  for (const st of steps) {
+    if (!st.readable && !st.path) break;
+    trail.push(
+      st.kind === "space"
+        ? { label: st.name, href: `/spaces/${encodeURIComponent(st.slug ?? st.id)}`, tile: { icon: st.icon, color: st.color, name: st.name } }
+        : { label: st.name, href: `/folders/${encodeURIComponent(st.id)}` },
+    );
+  }
+
+  if (!roleAtLeast(decision.role, "VIEW")) {
+    if (!decision.path) notFound();
+    // A path container: the viewer passes through this Folder on the way to
+    // something they were given below it. Its name and those branches only.
+    const tree = await spaceTree(nodeCtx, folder.spaceId);
+    return (
+      <PathContainerView
+        kind="folder"
+        id={folder.id}
+        name={folder.name}
+        icon={folder.icon}
+        color={folder.color}
+        trail={trail}
+        rows={tree && folder.space ? pathViewRows(tree, folderRef, folder.space.slug) : []}
+      />
+    );
+  }
+  const canEdit = roleAtLeast(decision.role, "EDIT");
+  // Full access on the Folder manages it and creates Lists, sub-folders and
+  // canvases in it (POST /api/boards and /api/folders ask the same question).
+  const canManage = roleAtLeast(decision.role, "FULL");
+  const canCreateInFolder = canManage;
+  const folderRole = toContainerRole(decision.role) ?? "view";
 
   // Everything nested under this folder, so the Tasks tab covers the shelf and
   // every shelf below it.
@@ -136,20 +159,32 @@ export default async function FolderPage(props: {
       _count: { select: { boards: true, childFolders: true } },
     },
   });
-  const visibleChildFolders = childFolders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));
-
-  const isAdmin = u.accessLevel === "SUPER_ADMIN" || u.accessLevel === "COMPANY_ADMIN";
   const rawBoards = await prisma.board.findMany({
-    where: { folderId: { in: Array.from(descendantIds) }, archivedAt: null },
+    where: { folderId: { in: Array.from(descendantIds) }, organizationId: u.organizationId, archivedAt: null },
     orderBy: { name: "asc" },
     select: {
       id: true, slug: true, name: true, icon: true, color: true,
       visibility: true, ownerId: true, folderId: true, updatedAt: true, statuses: true,
     },
   });
-  const boards = rawBoards.filter((b) => isAdmin || canEdit || b.visibility !== "PRIVATE" || b.ownerId === u.id);
+  // ONE world for every sub-folder and every List below this shelf: the
+  // child Folder rows show the ones the viewer can open or passes through,
+  // and every List read here (the rows, the Tasks tab, the counts, the
+  // statuses) is one the viewer can open. A PRIVATE List, or a List under a
+  // PRIVATE sub-folder, that the viewer cannot open is never read, named or
+  // counted.
+  const [childDecisions, listRoles] = await Promise.all([
+    nodeRoles(nodeCtx, childFolders.map((f) => ({ kind: "folder" as const, id: f.id })), { paths: true }),
+    nodeRoleMap(nodeCtx, "list", rawBoards.map((b) => b.id)),
+  ]);
+  const childRole = (id: string): NodeRole => childDecisions.get(refKey({ kind: "folder", id }))?.role ?? "none";
+  const childIsPath = (id: string): boolean => childDecisions.get(refKey({ kind: "folder", id }))?.path ?? false;
+  const visibleChildFolders = childFolders.filter((f) => roleAtLeast(childRole(f.id), "VIEW") || childIsPath(f.id));
+  const boards = rawBoards.filter((b) => roleAtLeast(listRoles.get(b.id) ?? "none", "VIEW"));
   const directBoards = boards.filter((b) => b.folderId === folder.id);
   const boardIds = boards.map((b) => b.id);
+  const readableListsIn = new Map<string, number>();
+  for (const b of boards) if (b.folderId) readableListsIn.set(b.folderId, (readableListsIn.get(b.folderId) ?? 0) + 1);
 
   // audit High #3: every row's statuses come from that row's own List. A
   // Space-wide palette was the wrong answer for any List that sets its own.
@@ -167,21 +202,32 @@ export default async function FolderPage(props: {
           _count: { _all: true },
         })
       : Promise.resolve([] as { boardId: string; status: string | null; _count: { _all: number } }[]),
-    prisma.doc.findMany({
-      where: { organizationId: u.organizationId, entityType: "FOLDER", entityId: folder.id, archivedAt: null },
-      orderBy: { updatedAt: "desc" }, take: 20,
-      select: { id: true, title: true, updatedAt: true, createdById: true },
-    }),
+    // The Folder's docs the viewer can open (a restricted doc they are not on
+    // never shows), through one world.
+    prisma.doc
+      .findMany({
+        where: { organizationId: u.organizationId, entityType: "FOLDER", entityId: folder.id, archivedAt: null },
+        orderBy: { updatedAt: "desc" }, take: 50,
+        select: { id: true, title: true, updatedAt: true, createdById: true },
+      })
+      .then(async (rows) => {
+        const roles = await nodeRoleMap(nodeCtx, "doc", rows.map((d) => d.id));
+        return rows.filter((d) => roleAtLeast(roles.get(d.id) ?? "none", "VIEW")).slice(0, 20);
+      }),
     // One release of tolerance: `Whiteboard.folderId` is new
     // (prisma/sql/2026-09-19-canvas-folder.sql). A database that has not had
-    // the file applied loses the Canvas rows, never the page.
+    // the file applied loses the Canvas rows, never the page. Only the
+    // canvases that sit in THIS Folder of THIS Space (a Space move leaves a
+    // canvas's folderId behind), and only the ones the viewer can open.
     prisma.whiteboard
       .findMany({
-        where: { organizationId: u.organizationId, folderId: folder.id, archivedAt: null },
-        orderBy: { updatedAt: "desc" }, take: 20,
-        // spaceId too: a Space move leaves a canvas's folderId behind, so its
-        // link is Space-scoped only when it still sits in this Folder's Space.
+        where: { organizationId: u.organizationId, folderId: folder.id, spaceId: folder.spaceId, archivedAt: null },
+        orderBy: { updatedAt: "desc" }, take: 50,
         select: { id: true, name: true, updatedAt: true, ownerId: true, spaceId: true },
+      })
+      .then(async (rows) => {
+        const roles = await nodeRoleMap(nodeCtx, "canvas", rows.map((c) => c.id));
+        return rows.filter((c) => roleAtLeast(roles.get(c.id) ?? "none", "VIEW")).slice(0, 20);
       })
       .catch(() => [] as Array<{ id: string; name: string; updatedAt: Date; ownerId: string | null; spaceId: string | null }>),
     (async () => {
@@ -232,22 +278,18 @@ export default async function FolderPage(props: {
 
   const space = folder.space!;
   // back-map: the crumb immediately to the left, so a nested Folder goes to its
-  // parent Folder and never skips a level.
-  const backHref = folder.parentFolder ? `/folders/${folder.parentFolder.id}` : `/spaces/${space.slug}`;
-  const backLabel = folder.parentFolder?.name ?? space.name;
+  // parent Folder and never skips a level. A crumb the viewer may not see is
+  // never the Back target: then Back goes to the nearest one they may, or Work.
+  const nearest = trail[trail.length - 1];
+  const backHref = nearest?.href ?? "/home";
+  const backLabel = nearest?.label ?? "Work";
   const isRestricted = folder.visibility === "PRIVATE";
 
   const rowCount = visibleChildFolders.length + directBoards.length + docs.length + canvases.length;
 
   return (
     <div className="flex flex-col h-full bg-app">
-      <Breadcrumb
-        items={[
-          { label: space.name, href: `/spaces/${space.slug}`, tile: { icon: space.icon, color: space.color, name: space.name } },
-          ...(folder.parentFolder ? [{ label: folder.parentFolder.name, href: `/folders/${folder.parentFolder.id}` }] : []),
-          { label: folder.name },
-        ]}
-      />
+      <Breadcrumb items={[...trail, { label: folder.name }]} />
 
       {/* Title row (40): back · tile · name · lock · Share · "…" */}
       <div className="flex h-[40px] items-center gap-2 px-6">
@@ -284,7 +326,7 @@ export default async function FolderPage(props: {
             spaceName: space.name,
             contents: `${directBoards.length} lists · ${visibleChildFolders.length} folders · ${docs.length} docs`,
           }}
-          role={canManage ? "full" : canEdit ? "edit" : "view"}
+          role={folderRole}
         />
       </div>
 
@@ -327,27 +369,47 @@ export default async function FolderPage(props: {
                 </p>
               ) : (
                 <ul>
-                  {visibleChildFolders.map((f) => (
-                    <ContentsRow
-                      key={f.id}
-                      href={`/folders/${f.id}`}
-                      glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
-                      name={f.name}
-                      type="Folder"
-                      tasks={`${f._count.boards} list${f._count.boards === 1 ? "" : "s"}`}
-                      owner={f.ownerId ? ownerById.get(f.ownerId) ?? null : null}
-                      menu={
-                        <ContainerMenuTrigger
-                          container={{
-                            kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
-                            visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
-                            spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
-                          }}
-                          role={canManage ? "full" : canEdit ? "edit" : "view"}
+                  {visibleChildFolders.map((f) => {
+                    // A sub-folder the viewer only passes through (a path) is
+                    // named and opens its path view: no count, no owner, no menu.
+                    const role = toContainerRole(childRole(f.id));
+                    if (!role) {
+                      return (
+                        <ContentsRow
+                          key={f.id}
+                          href={`/folders/${f.id}`}
+                          glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
+                          name={f.name}
+                          type="Folder"
+                          tasks=""
+                          owner={null}
+                          ownerHidden
                         />
-                      }
-                    />
-                  ))}
+                      );
+                    }
+                    const lists = readableListsIn.get(f.id) ?? 0;
+                    return (
+                      <ContentsRow
+                        key={f.id}
+                        href={`/folders/${f.id}`}
+                        glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
+                        name={f.name}
+                        type="Folder"
+                        tasks={`${lists} list${lists === 1 ? "" : "s"}`}
+                        owner={f.ownerId ? ownerById.get(f.ownerId) ?? null : null}
+                        menu={
+                          <ContainerMenuTrigger
+                            container={{
+                              kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
+                              visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                            }}
+                            role={role}
+                          />
+                        }
+                      />
+                    );
+                  })}
                   {directBoards.map((b) => {
                     const t = tasksByList.get(b.id) ?? { open: 0, done: 0 };
                     return (
@@ -367,7 +429,7 @@ export default async function FolderPage(props: {
                               spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
                               folderId: folder.id, folderName: folder.name,
                             }}
-                            role={canManage ? "full" : canEdit ? "edit" : "view"}
+                            role={toContainerRole(listRoles.get(b.id) ?? "none") ?? "view"}
                           />
                         }
                       />
@@ -404,16 +466,6 @@ export default async function FolderPage(props: {
                   <NewListGhostRow spaceId={space.id} folderId={folder.id} />
                   <NewFolderGhostRow spaceId={space.id} parentFolderId={folder.id} />
                 </div>
-              ) : canEdit ? (
-                // A refusal has to be readable. This person was shared into the
-                // folder and can work inside the lists on it, but creating a
-                // list or a sub-folder is a Space-level right today, so name
-                // the right and name who grants it instead of showing a button
-                // that answers 403.
-                <p className="px-3 py-2 border-t border-line-soft text-xs text-ink-3">
-                  You can work in this folder, but adding a list or a sub-folder
-                  needs Full access on the {space.name} space. Ask a space admin.
-                </p>
               ) : null}
               {boardIds.length > 0 ? (
                 <div className="px-3 py-2 border-t border-line-soft">
@@ -440,7 +492,7 @@ export default async function FolderPage(props: {
 }
 
 function ContentsRow({
-  href, glyph, name, type, tasks, owner, menu,
+  href, glyph, name, type, tasks, owner, ownerHidden = false, menu,
 }: {
   href: string;
   glyph: React.ReactNode;
@@ -448,6 +500,8 @@ function ContentsRow({
   type: string;
   tasks: string;
   owner: string | null;
+  /** A path row names nothing about the container beyond its name. */
+  ownerHidden?: boolean;
   menu?: React.ReactNode;
 }) {
   return (
@@ -458,7 +512,7 @@ function ContentsRow({
       </Link>
       <span className="text-xs text-ink-2">{type}</span>
       <span className="text-xs text-ink-2 tabular-nums">{tasks}</span>
-      <span className="text-xs text-ink-2 truncate">{owner ?? "No owner"}</span>
+      <span className="text-xs text-ink-2 truncate">{ownerHidden ? "" : owner ?? "No owner"}</span>
       <span className="inline-flex items-center justify-end opacity-0 group-hover/row:opacity-100 transition-opacity">
         {menu}
       </span>

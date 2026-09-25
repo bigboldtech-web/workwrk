@@ -5,10 +5,11 @@
 // Phase 6 resolver may add per-Folder ACLs later.
 
 import { prisma } from "@/lib/prisma";
-import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { legacyAllows, type LegacyInputs, type VisibilityValue } from "@/lib/access/parity";
-import { loadFolderInputs } from "@/lib/access/legacy-facts";
 import { withArchivedBy } from "@/lib/archived-by";
+import { loadPathEvidence } from "@/lib/access/node-world";
+import { NodeEvaluator, placementContainers, roleAtLeast } from "@/lib/access/node-rules";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 
 const MAX_FOLDER_DEPTH = 6;
 
@@ -74,26 +75,30 @@ export async function folderAccessForSpace(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<FolderAccessMode> {
-  // Not a delegate: this returns a three-mode set, not a decision. Only its
-  // ladder is shared (see notDelegated in the step-1 report).
-  if (legacyIsAdminLevel(accessLevel)) return { mode: "full" };
-  const [space, spaceMember, folderGrants] = await Promise.all([
-    prisma.space.findUnique({ where: { id: spaceId }, select: { visibility: true } }),
-    prisma.spaceMember.findUnique({
-      where: { spaceId_userId: { spaceId, userId } },
-      select: { role: true },
-    }),
-    prisma.folderMember.findMany({
-      where: { userId, folder: { spaceId, archivedAt: null } },
-      select: { folderId: true },
-    }),
-  ]);
+  // Derived from the one resolver: "full" when the viewer holds a role on the
+  // Space, "scoped" when the Space is a path container for them (the ids are
+  // the Folders they were given inside it, or that hold what they were
+  // given), "none" otherwise.
+  const space = await prisma.space.findUnique({ where: { id: spaceId }, select: { organizationId: true } });
   if (!space) return { mode: "none" };
-  if (space.visibility === "ORG" || spaceMember) return { mode: "full" };
-  if (folderGrants.length > 0) {
-    return { mode: "scoped", folderIds: new Set(folderGrants.map((g) => g.folderId)) };
+  const ctx = nodeCtxFromLevel(userId, space.organizationId, accessLevel);
+  const d = await nodeRole(ctx, { kind: "space", id: spaceId });
+  if (roleAtLeast(d.role, "VIEW")) return { mode: "full" };
+  if (ctx.orgAdmin) return { mode: "full" };
+  const evidence = await loadPathEvidence(ctx);
+  const ev = new NodeEvaluator(evidence.rows, evidence.grants);
+  const folderIds = new Set<string>();
+  for (const ref of evidence.candidates) {
+    if (!roleAtLeast(ev.strict(ref).role, "VIEW")) continue;
+    const chain = placementContainers(evidence.rows, ref);
+    if (chain[chain.length - 1]?.id !== spaceId) continue;
+    if (ref.kind === "folder") folderIds.add(ref.id);
+    else {
+      const top = chain.find((c) => c.kind === "folder");
+      if (top) folderIds.add(top.id);
+    }
   }
-  return { mode: "none" };
+  return folderIds.size > 0 ? { mode: "scoped", folderIds } : { mode: "none" };
 }
 
 /** Every folder id the viewer can reach through a folder grant — the directly
@@ -189,22 +194,21 @@ export async function removeFolderMember(folderId: string, userId: string) {
   });
 }
 
-/** Boolean read check for a single folder, mirroring the central resolver's
- *  folder logic (org admin · direct/ancestor FolderMember · owner · else the
- *  parent Space unless the folder is PRIVATE). Kept as a self-contained
- *  boolean (no ViewerContext) so the Doc gate can call it without an orgId;
- *  the caller is responsible for the org scope. */
+/**
+ * Can view or higher on one Folder, from the one resolver: its own grant,
+ * its owner, an ancestor Folder's grant or its Space, with the PRIVATE cut
+ * and the legacy floor. The caller is responsible for the org scope, as
+ * before: the Folder row's own org is the world's.
+ */
 export async function folderReadable(
   folderId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of folder.ts:176-206.
-  // The loader runs the same eight-hop ancestor walk, and skips it (plus the
-  // parent Space read) only where this body returned before consulting either:
-  // an org admin, the viewer's own FolderMember row, or ownership.
-  const { inputs } = await loadFolderInputs(folderId, { userId, accessLevel });
-  return legacyAllows(inputs, "folderReadable");
+  const folder = await prisma.folder.findUnique({ where: { id: folderId }, select: { organizationId: true } });
+  if (!folder) return false;
+  const d = await nodeRole(nodeCtxFromLevel(userId, folder.organizationId, accessLevel), { kind: "folder", id: folderId });
+  return roleAtLeast(d.role, "VIEW");
 }
 
 export interface FolderSummary {
@@ -388,7 +392,10 @@ export async function isFolderDescendant(folderId: string, candidate: string): P
   return false;
 }
 
-export async function updateFolder(folderId: string, patch: UpdateFolderInput) {
+/** A client or a transaction: the visibility route writes the Folder and its activity row in one. */
+type FolderDb = typeof prisma | Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+export async function updateFolder(folderId: string, patch: UpdateFolderInput, db: FolderDb = prisma) {
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) {
     const trimmed = patch.name.trim();
@@ -420,7 +427,7 @@ export async function updateFolder(folderId: string, patch: UpdateFolderInput) {
   if (patch.position !== undefined) data.position = patch.position;
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
 
-  return prisma.folder.update({ where: { id: folderId }, data });
+  return db.folder.update({ where: { id: folderId }, data });
 }
 
 export async function archiveFolder(folderId: string, actorId: string | null = null) {

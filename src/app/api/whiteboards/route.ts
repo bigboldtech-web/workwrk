@@ -5,8 +5,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { visibleSpaceIds, canEditSpace, getSpaceForReader } from "@/lib/space";
-import { folderReadable } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesCanvasFilters, matchesCanvasView, parseCanvasListQuery, sortCanvases, type CanvasCandidate } from "@/lib/canvas-list";
 import { sliceByCursor } from "@/lib/list-query";
@@ -32,8 +32,11 @@ async function pagedList(req: Request, ctx: { orgId: string; userId: string; acc
     getEffectivePreferences(ctx.userId, ctx.orgId),
   ]);
   const scopedIds = [...new Set(rows.map((w) => w.spaceId).filter((x): x is string => !!x))];
-  const visible = scopedIds.length ? await visibleSpaceIds(scopedIds, ctx.userId, ctx.accessLevel ?? "EMPLOYEE") : new Set<string>();
-  const gated = rows.filter((w) => !w.spaceId || visible.has(w.spaceId));
+  // One world for every candidate (the one resolver): a canvas follows its
+  // Folder when that Folder is in its Space (the Private cut included), else
+  // its Space; its owner with reach and a canvas grant open it too.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "canvas", rows.map((w) => w.id));
+  const gated = rows.filter((w) => roleAtLeast(roles.get(w.id) ?? "none", "VIEW"));
 
   const home = prefs.home as { favoriteWhiteboardIds?: string[] };
   const facts = { userId: ctx.userId, favoriteIds: new Set<string>(Array.isArray(home.favoriteWhiteboardIds) ? home.favoriteWhiteboardIds : []) };
@@ -110,14 +113,11 @@ export async function GET(req: Request) {
     take: 200,
   });
 
-  // Phase 22 — gate by Space visibility. Unscoped whiteboards (spaceId=null)
-  // stay visible org-wide; scoped ones are returned only if the viewer
-  // can read the parent Space.
-  const scopedIds = whiteboards.map((w) => w.spaceId).filter((s): s is string => Boolean(s));
-  const visible = scopedIds.length > 0
-    ? await visibleSpaceIds(scopedIds, ctx.userId, ctx.accessLevel ?? "EMPLOYEE")
-    : new Set<string>();
-  const gated = whiteboards.filter((w) => !w.spaceId || visible.has(w.spaceId));
+  // One world for every row (the one resolver): unscoped canvases stay
+  // org-wide for Members, a canvas in a Space or Folder follows it, and a
+  // canvas grant opens its canvas.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "canvas", whiteboards.map((w) => w.id));
+  const gated = whiteboards.filter((w) => roleAtLeast(roles.get(w.id) ?? "none", "VIEW"));
 
   return NextResponse.json({ whiteboards: gated });
 }
@@ -147,25 +147,26 @@ export async function POST(req: Request) {
   // cannot open. `createBoard` validates its own folderId the same way.
   let folderId: string | null = null;
   let spaceId = parsed.data.spaceId ?? null;
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
   if (parsed.data.folderId) {
     const folder = await prisma.folder.findFirst({
       where: { id: parsed.data.folderId, organizationId: ctx.orgId, archivedAt: null },
       select: { id: true, spaceId: true },
     });
     if (!folder) return NextResponse.json({ error: "That folder no longer exists" }, { status: 404 });
-    if (!(await folderReadable(folder.id, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!(await canEditSpace(folder.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
-      return NextResponse.json({ error: "You need edit access to that folder." }, { status: 403 });
+    // Full access on the Folder creates in it (W2), never the Space's rights.
+    const d = await nodeRole(nodeCtx, { kind: "folder", id: folder.id });
+    if (d.role === "none" && !d.path) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!roleAtLeast(d.role, "FULL")) {
+      return NextResponse.json({ error: "You need Full access to that folder." }, { status: 403 });
     }
     folderId = folder.id;
     // The folder settles the Space, so the two keys in one body cannot disagree.
     spaceId = folder.spaceId;
   } else if (spaceId) {
-    if (!(await getSpaceForReader(spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
+    // The Space root: Can view on the Space, as today.
+    const d = await nodeRole(nodeCtx, { kind: "space", id: spaceId });
+    if (!roleAtLeast(d.role, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   // The column is new (prisma/sql/2026-09-19-canvas-folder.sql). A deployment

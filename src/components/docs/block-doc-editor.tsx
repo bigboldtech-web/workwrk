@@ -69,7 +69,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { BackButton } from "@/components/ui/back-button";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
-import { DocShareModal } from "./doc-share-modal";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { useDocTree, createChildPage } from "./doc-pages-panel";
 import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -241,11 +241,16 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // Per-doc role from GET /api/docs/[id] (settings.docSharing). Missing
   // myRole (older cached responses) defaults to "edit" — zero behavior
   // change for existing docs.
-  // "comment" = a locked doc below Full access (change request A4): the
-  // content is read-only, the comment composer stays.
+  // "comment" = Can comment, or a locked doc below Full access (change
+  // request A4): the content is read-only, the comment composer stays.
   const [myRole, setMyRole] = useState<"edit" | "comment" | "view">("edit");
   const [shareOpen, setShareOpen] = useState(false);
-  const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  // From GET /api/docs/[id] too. canShare: Can edit or higher changes who can
+  // open the doc (MANAGE_BAR.doc, today's doc sharing rule); an older server
+  // omits it and it follows myRole edit. canComment: a Can view grant reads
+  // only; absent means today's behaviour, every comment door open.
+  const [canShare, setCanShare] = useState(false);
+  const [canComment, setCanComment] = useState(true);
   // Lock page (change request A4), Full access, the anchor and the owner,
   // all from GET /api/docs/[id].
   const [lock, setLock] = useState<DocLock | null>(null);
@@ -423,7 +428,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         const d: DocPayload = data.doc ?? data;
         setDoc(d);
         setTitle(d.title ?? "");
-        setMyRole(data.myRole === "view" ? "view" : data.myRole === "comment" ? "comment" : "edit");
+        const role: "edit" | "comment" | "view" = data.myRole === "view" ? "view" : data.myRole === "comment" ? "comment" : "edit";
+        setMyRole(role);
+        setCanShare(typeof data.canShare === "boolean" ? data.canShare : role === "edit");
+        setCanComment(data.canComment !== false);
         setLock(data.lock ?? null);
         setCanManage(!!data.canManage);
         setLocation(data.location ?? null);
@@ -986,32 +994,35 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             </button>
           ) : null}
           {pane !== "peek" ? (
-            <span ref={shareBtnRef as React.RefObject<HTMLSpanElement | null>} className="inline-flex">
-              <ShareOrRoleChip role={canManage ? "FULL" : myRole === "view" ? "VIEW" : myRole === "comment" ? "COMMENT" : "EDIT"} onOpen={() => setShareOpen(true)} />
-            </span>
+            // Share from Can edit up (a doc's sharing is Can edit's to change,
+            // MANAGE_BAR.doc); the role chip below that. Both open the one
+            // Manage access dialog, read only for the chip.
+            <ShareOrRoleChip
+              role={canManage ? "FULL" : myRole === "view" ? "VIEW" : myRole === "comment" ? "COMMENT" : "EDIT"}
+              editorsCanShare={canShare}
+              onOpen={() => setShareOpen(true)}
+            />
           ) : null}
-          <DocShareModal
-            docId={docId}
-            docTitle={title || "Untitled doc"}
-            createdById={doc.createdById ?? null}
-            meId={me?.id ?? null}
+          <ShareDialog
             open={shareOpen}
-            onClose={() => setShareOpen(false)}
-            anchorRef={shareBtnRef}
-            // The modal writes the member map only for Full access, the same
-            // rule the chip above renders (Can edit shares only under toggle
-            // 4, which no surface reads yet); everyone else gets it read-only.
-            viewerRole={canManage ? "edit" : "view"}
+            onOpenChange={setShareOpen}
+            target={{ kind: "doc", id: docId, name: title || "Untitled doc" }}
+            readOnly={!canShare}
+            // A change can move the viewer's own sharing right (they lowered
+            // themselves, with a confirm): the chip follows the server.
+            onChanged={(p) => { if (p) setCanShare(p.viewer.canManage); }}
           />
-          <button
-            type="button"
-            onClick={() => setCommentOpen(true)}
-            title="Comments (⌘⇧C)"
-            aria-label="Comments"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
-          >
-            <MessageSquare className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-          </button>
+          {canComment ? (
+            <button
+              type="button"
+              onClick={() => setCommentOpen(true)}
+              title="Comments (⌘⇧C)"
+              aria-label="Comments"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <MessageSquare className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+            </button>
+          ) : null}
           <button
             ref={moreBtnRef}
             type="button"
@@ -1124,6 +1135,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <ReadOnlyBanner message={`Locked by ${lock.byName ?? "someone"}. Ask them to unlock.`} />
       ) : pane !== "peek" && lock && canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byId === me?.id ? "you" : lock.byName ?? "someone"}. Everyone else can read and comment.`} onRequest={() => void toggleLock()} requestLabel="Unlock" />
+      ) : pane !== "peek" && myRole === "comment" ? (
+        // Can comment with no lock: the content is read only and the
+        // comment doors stay, so the strip says both halves.
+        <ReadOnlyBanner message="You can read and comment on this doc." onRequest={() => setShareOpen(true)} />
       ) : pane !== "peek" && myRole === "view" ? (
         <ReadOnlyBanner ownerName={owner?.name} onRequest={() => setShareOpen(true)} />
       ) : null}
@@ -1215,9 +1230,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             </button>
           )}
 
-          <button type="button" className="bdoc__add-comment" onClick={() => setCommentOpen(true)}>
-            <MessageSquare /> Add comment
-          </button>
+          {canComment ? (
+            <button type="button" className="bdoc__add-comment" onClick={() => setCommentOpen(true)}>
+              <MessageSquare /> Add comment
+            </button>
+          ) : null}
         </div>
 
         {emojiOpen && (
@@ -1249,7 +1266,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
 
         {!readingMode && (
-          <PageComments docId={docId} me={me} open={commentOpen} onClose={() => setCommentOpen(false)} />
+          <PageComments docId={docId} me={me} open={commentOpen} canComment={canComment} onClose={() => setCommentOpen(false)} />
         )}
 
         {summary && (
@@ -1282,7 +1299,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               readonly={readingMode || !!meta.locked || myRole !== "edit"}
               onChange={handleEditorChange}
               docId={docId}
-              onComment={(blockId) => setPanel({ kind: "comments", blockId })}
+              // No comment action for a Can view grant: the canvas hides the
+              // block menu's Comment when it has no handler. canComment is set
+              // by the same load as the blocks, before this mounts.
+              onComment={canComment ? (blockId) => setPanel({ kind: "comments", blockId }) : undefined}
               onAskAI={() => setPanel({ kind: "ask" })}
             />
           </div>
@@ -1383,8 +1403,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 // ItemUpdate store as block comments (entityType="DOC_BLOCK") using the
 // reserved blockId "__page__", so it reuses /api/item-updates with no schema
 // changes. Existing comments render above an always-visible composer row that
-// mirrors Notion's avatar + input + attach/mention/send layout.
-function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser | null; open: boolean; onClose: () => void }) {
+// mirrors Notion's avatar + input + attach/mention/send layout. A Can view
+// grant reads the thread and gets no composer (canComment false).
+function PageComments({ docId, me, open, canComment = true, onClose }: { docId: string; me: MeUser | null; open: boolean; canComment?: boolean; onClose: () => void }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const [thread, setThread] = useState<Comment[]>([]);
@@ -1466,9 +1487,10 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
   }
 
   // Nothing to show until there's a comment or the writer opened the
-  // composer via the hover "Add comment" affordance.
-  const showComposer = open || thread.length > 0;
-  if (thread.length === 0 && !open) return null;
+  // composer via the hover "Add comment" affordance. A reader who cannot
+  // comment sees the thread and never the composer.
+  const showComposer = canComment && (open || thread.length > 0);
+  if (thread.length === 0 && !showComposer) return null;
 
   return (
     <div className="bdoc__pcmts">

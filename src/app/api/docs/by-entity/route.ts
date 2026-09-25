@@ -10,7 +10,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { docAccessible } from "@/lib/doc-access";
+import { canCreateDocAt, docAccess } from "@/lib/doc-access";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
 
 const bodySchema = z.object({
   entityType: z.string().min(1).max(40),
@@ -26,11 +27,11 @@ export async function POST(req: Request) {
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  // Phase 37 — gate the parent entity. Without this, find-or-create
-  // would let a probe with a guessed parent ID either surface an
-  // existing doc on a private parent or mint a new one. 404-not-403
-  // so the gate doesn't leak existence.
-  const ok = await docAccessible(parsed.data, ctx.userId, ctx.accessLevel);
+  // Gate the parent entity. Without this, find-or-create would let a probe
+  // with a guessed parent ID either surface an existing doc on a private
+  // parent or mint a new one. 404-not-403 so the gate doesn't leak existence.
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const ok = await canCreateDocAt(nodeCtx, { entityType: parsed.data.entityType, entityId: parsed.data.entityId }, null);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Look for an existing, non-archived doc on this entity.
@@ -42,7 +43,12 @@ export async function POST(req: Request) {
       archivedAt: null,
     },
   });
-  if (existing) return NextResponse.json({ doc: existing, created: false });
+  if (existing) {
+    // An existing doc is handed back only to someone who can open it: a
+    // restricted doc on a readable anchor stays closed to the unlisted.
+    if (!(await docAccess(nodeCtx, existing.id))) return NextResponse.json({ error: "not found" }, { status: 404 });
+    return NextResponse.json({ doc: existing, created: false });
+  }
 
   const title = parsed.data.title ?? "Untitled note";
   const content = {};

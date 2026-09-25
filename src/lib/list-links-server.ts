@@ -18,6 +18,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { canContributeBoard, canEditBoard, getBoardForReader, getBoardForReaderOrFolderGrantee } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { canContributeSpace, getSpaceForReader, isOrgAdminAccessLevel, visibleSpaceIds } from "@/lib/space";
 import {
   buildListScopeWhere,
@@ -211,24 +213,48 @@ const LIST_SELECT = {
 
 /**
  * A memoised "can this viewer read this List" for one request, answered by
- * getBoardForReader (the one read predicate) plus the org and archive checks
- * a multi-List surface also needs. `row` answers the List itself when it is
- * readable and live, else null.
+ * the one node-access resolver plus the archive check a multi-List surface
+ * also needs. `row` answers the List itself when it is readable and live,
+ * else null; `canContribute` answers Can edit.
+ *
+ * ONE WORLD PER BATCH. Every List asked about in the same tick (a
+ * Promise.all over rows, or a `prime` of ids about to be read one by one) is
+ * resolved by ONE nodeRoleMap, never a resolver call per List. The world is
+ * org-scoped, so a List in another org reads as none.
  */
 export function listReader(viewer: LinkViewer) {
-  const readable = new Map<string, Promise<boolean>>();
-  const rows = new Map<string, Promise<ReadableList | null>>();
-  const canRead = (boardId: string): Promise<boolean> => {
-    let p = readable.get(boardId);
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel);
+  const roles = new Map<string, Promise<NodeRole>>();
+  let pending: Map<string, (role: NodeRole) => void> | null = null;
+  const flush = async (batch: Map<string, (role: NodeRole) => void>) => {
+    const map = await nodeRoleMap(ctx, "list", batch.keys()).catch(() => new Map<string, NodeRole>());
+    for (const [id, resolve] of batch) resolve(map.get(id) ?? "none");
+  };
+  const roleOf = (boardId: string): Promise<NodeRole> => {
+    let p = roles.get(boardId);
     if (!p) {
-      p = (isOrgAdminAccessLevel(viewer.accessLevel)
-        ? prisma.board.findFirst({ where: { id: boardId, organizationId: viewer.organizationId }, select: { id: true } }).then(Boolean)
-        : getBoardForReader(boardId, viewer.userId, viewer.accessLevel).then((b) => !!b && b.organizationId === viewer.organizationId)
-      ).catch(() => false);
-      readable.set(boardId, p);
+      p = new Promise<NodeRole>((resolve) => {
+        if (!pending) {
+          const batch = new Map<string, (role: NodeRole) => void>();
+          pending = batch;
+          queueMicrotask(() => {
+            pending = null;
+            void flush(batch);
+          });
+        }
+        pending.set(boardId, resolve);
+      });
+      roles.set(boardId, p);
     }
     return p;
   };
+  /** Queue these Lists into the next batch, so the reads that follow share one world. */
+  const prime = (boardIds: Iterable<string>): void => {
+    for (const id of boardIds) void roleOf(id);
+  };
+  const canRead = async (boardId: string): Promise<boolean> => roleAtLeast(await roleOf(boardId), "VIEW");
+  const canContribute = async (boardId: string): Promise<boolean> => roleAtLeast(await roleOf(boardId), "EDIT");
+  const rows = new Map<string, Promise<ReadableList | null>>();
   const row = (boardId: string): Promise<ReadableList | null> => {
     let p = rows.get(boardId);
     if (!p) {
@@ -241,7 +267,7 @@ export function listReader(viewer: LinkViewer) {
     }
     return p;
   };
-  return { canRead, row };
+  return { canRead, canContribute, row, prime };
 }
 
 export type ListReader = ReturnType<typeof listReader>;
@@ -620,11 +646,12 @@ export async function eligibleCopyLists(originalId: string, viewer: LinkViewer):
   const links = await linksOfItem(originalId);
   if (links.length === 0) return [];
   const reader = listReader(viewer);
+  reader.prime(links.map((l) => l.boardId));
   const out: string[] = [];
   for (const l of links) {
     const b = await reader.row(l.boardId);
     if (!b || !isLinkTarget(b)) continue;
-    if (!(await canContributeBoard(b.id, viewer.userId, viewer.accessLevel))) continue;
+    if (!(await reader.canContribute(b.id))) continue;
     out.push(b.id);
   }
   return out;
@@ -885,7 +912,9 @@ export async function resolveListScope(
   reader: ListReader = listReader(viewer),
 ): Promise<ListScope> {
   const lists: ReadableList[] = [];
-  for (const id of Array.from(new Set(boardIds))) {
+  const unique = Array.from(new Set(boardIds));
+  reader.prime(unique);
+  for (const id of unique) {
     const b = await reader.row(id);
     if (b) lists.push(b);
   }

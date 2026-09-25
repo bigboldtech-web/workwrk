@@ -8,8 +8,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { positionBetween, updateFolder } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -35,17 +36,16 @@ export async function POST(req: Request) {
   if (!moved || moved.organizationId !== u.organizationId) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!target || target.organizationId !== u.organizationId) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Edit rights on both the source and destination Space.
-  const [srcSpace, dstSpace] = await Promise.all([
-    getSpaceForReader(moved.spaceId, u.id, accessLevel),
-    getSpaceForReader(target.spaceId, u.id, accessLevel),
-  ]);
-  if (!srcSpace || !dstSpace) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const [canSrc, canDst] = await Promise.all([
-    canEditSpace(moved.spaceId, u.id, accessLevel),
-    canEditSpace(target.spaceId, u.id, accessLevel),
-  ]);
-  if (!canSrc || !canDst) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Full access on the moved folder and on where it lands: the target's
+  // parent Folder, or the target's Space at its root. One world for both.
+  const ctx = nodeCtxFromLevel(u.id, u.organizationId, accessLevel);
+  const destRef = target.parentFolderId ? { kind: "folder" as const, id: target.parentFolderId } : { kind: "space" as const, id: target.spaceId };
+  const roles = await nodeRoles(ctx, [{ kind: "folder", id: movedId }, destRef]);
+  const movedRole = roles.get(`folder:${movedId}`)?.role ?? "none";
+  if (movedRole === "none") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!roleAtLeast(movedRole, "FULL") || !roleAtLeast(roles.get(`${destRef.kind}:${destRef.id}`)?.role ?? "none", "FULL")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   // Cycle guard: the moved folder's new parent is the target's parent. If that
   // parent lives inside the moved folder's own subtree, the move would create a

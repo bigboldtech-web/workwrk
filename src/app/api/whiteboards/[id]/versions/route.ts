@@ -3,7 +3,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { getSpaceForReader } from "@/lib/space";
+import { whiteboardReadable } from "@/lib/whiteboard-gate";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { listSnapshots } from "@/lib/snapshots";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -16,9 +17,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, spaceId: true },
   });
   if (!wb) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (wb.spaceId) {
-    const space = await getSpaceForReader(wb.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE");
-    if (!space) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await whiteboardReadable(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), wb))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   const versions = await listSnapshots("WHITEBOARD", id);

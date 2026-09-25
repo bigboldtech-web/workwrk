@@ -18,10 +18,10 @@
 // Server-only: imports prisma.
 
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
-import { canReadBoard } from "@/lib/board";
 import { unscopedTableVisible } from "@/lib/table-visibility";
 import { orgRoleOf } from "@/lib/access/org-role";
+import { nodeCtxFromLevel, nodeRole, nodeRoles, type NodeCtx } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 
 /**
  * A table in no Space: org-wide for Members, a Guest's own only
@@ -39,18 +39,45 @@ export function unscopedTableReadable(
 
 type SessionLike = { user?: unknown } | null | undefined;
 
-/** The table when the session's viewer can read it, else null. */
-export async function readableTable(id: string, orgId: string, userId: string, session: SessionLike) {
+/** The node-access context a table route builds from the session it holds. */
+export function tableCtx(orgId: string, userId: string, session: SessionLike): NodeCtx {
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  return nodeCtxFromLevel(userId, orgId, accessLevel);
+}
+
+/**
+ * The table and the viewer's role on it when they can read it, else null. The
+ * role is node-access R7: a Space reader edits (read implies write for rows),
+ * a Space Full holder manages, an unscoped table is org-wide for Members and
+ * a Guest's own only, the creator manages with reach, and a TABLE grant
+ * opens the table on its own.
+ */
+export async function readableTableWithRole(id: string, orgId: string, userId: string, session: SessionLike) {
   const table = await prisma.dataTable.findFirst({ where: { id, organizationId: orgId } });
   if (!table) return null;
-  if (table.spaceId) {
-    const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "EMPLOYEE";
-    if (!(await getSpaceForReader(table.spaceId, userId, accessLevel))) return null;
-  } else {
-    const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
-    if (!unscopedTableReadable(table.createdById, userId, accessLevel)) return null;
-  }
-  return table;
+  const d = await nodeRole(tableCtx(orgId, userId, session), { kind: "table", id });
+  if (!roleAtLeast(d.role, "VIEW")) return null;
+  return { table, role: d.role as Exclude<NodeRole, "none"> };
+}
+
+/**
+ * Can this viewer read (and so write the rows of) this table? The one
+ * resolver's R7 over the table's own id, for the table routes that load their
+ * own select and only need the gate.
+ */
+export async function tableReadableBy(
+  tableId: string,
+  orgId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<boolean> {
+  const d = await nodeRole(nodeCtxFromLevel(userId, orgId, accessLevel), { kind: "table", id: tableId });
+  return roleAtLeast(d.role, "VIEW");
+}
+
+/** The table when the session's viewer can read it, else null. */
+export async function readableTable(id: string, orgId: string, userId: string, session: SessionLike) {
+  return (await readableTableWithRole(id, orgId, userId, session))?.table ?? null;
 }
 
 // ── Form destinations (Phase 5 Stage D) ──────────────────────────
@@ -75,16 +102,21 @@ export async function readableDestinationIds(
   input: { boards: { id: string }[]; tables: { id: string; spaceId: string | null }[] },
   userId: string,
   session: SessionLike,
+  orgId?: string,
 ): Promise<{ boards: Set<string>; tables: Set<string> }> {
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "EMPLOYEE";
   const boardIds = [...new Set(input.boards.map((b) => b.id))];
-  const spaceIds = [...new Set(input.tables.map((t) => t.spaceId).filter((s): s is string => !!s))];
-  const [boardOk, spaceOk] = await Promise.all([
-    Promise.all(boardIds.map((id) => canReadBoard(id, userId, accessLevel).catch(() => false))),
-    Promise.all(spaceIds.map((id) => getSpaceForReader(id, userId, accessLevel).then(Boolean).catch(() => false))),
-  ]);
-  const boards = new Set(boardIds.filter((_, i) => boardOk[i]));
-  const spaces = new Set(spaceIds.filter((_, i) => spaceOk[i]));
-  const tables = new Set(input.tables.filter((t) => !t.spaceId || spaces.has(t.spaceId)).map((t) => t.id));
+  const tableIds = [...new Set(input.tables.map((t) => t.id))];
+  const boards = new Set<string>();
+  const tables = new Set<string>();
+  if (boardIds.length === 0 && tableIds.length === 0) return { boards, tables };
+  const organizationId = orgId ?? (session?.user as { organizationId?: string } | undefined)?.organizationId;
+  if (!organizationId) return { boards, tables };
+  // One world for every destination, never a gate call per id.
+  const decisions = await nodeRoles(tableCtx(organizationId, userId, session), [
+    ...boardIds.map((id) => ({ kind: "list" as const, id })),
+    ...tableIds.map((id) => ({ kind: "table" as const, id })),
+  ]).catch(() => new Map());
+  for (const id of boardIds) if (roleAtLeast(decisions.get(`list:${id}`)?.role ?? "none", "VIEW")) boards.add(id);
+  for (const id of tableIds) if (roleAtLeast(decisions.get(`table:${id}`)?.role ?? "none", "VIEW")) tables.add(id);
   return { boards, tables };
 }

@@ -68,7 +68,8 @@ import { StrippedViewNotice } from "@/components/access/denial-views";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
 import { ShareOrRoleChip, type ShareChipRole } from "@/components/access/share-or-role-chip";
-import { ObjectShareDialog, embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
+import { embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { FormRowMenu, dispatchFormsChanged } from "@/components/forms/form-row-menu";
 import { FormFavoriteButton } from "@/components/forms/form-favorite-button";
 import { FieldTypeIcon, FormFieldCard } from "@/components/forms/form-field-card";
@@ -1157,24 +1158,22 @@ export function FormBuilder({ formId }: { formId: string }) {
         </div>
       </Drawer>
 
-      {shareMode ? (
-        <ObjectShareDialog
-          open
-          mode={shareMode}
-          onClose={() => setShareMode(null)}
-          object={{
-            kind: "form",
-            id: formId,
-            name: displayName,
-            isPublic: form.isPublic,
-            canManage,
-            publicLinksAllowed: form.publicLinksAllowed !== false,
-            anchorName: primaryDest?.name ?? null,
-            ownerName: form.owner?.name ?? null,
-          }}
-          onPublicChange={(isPublic) => { setForm((f) => (f ? { ...f, isPublic } : f)); dispatchFormsChanged(); }}
-        />
-      ) : null}
+      {/* The one Manage access dialog: people, the public link, its embed
+          code and the responder link. The public link's state flows back so
+          the title row's globe and the embed row stay true. */}
+      <ShareDialog
+        open={shareMode !== null}
+        onOpenChange={(o) => { if (!o) setShareMode(null); }}
+        target={{ kind: "form", id: formId, name: displayName }}
+        readOnly={!canManage}
+        onChanged={(panel) => {
+          if (panel) {
+            const isPublic = !!panel.general.publicLink?.on;
+            setForm((f) => (f ? { ...f, isPublic } : f));
+          }
+          dispatchFormsChanged();
+        }}
+      />
     </div>
   );
 }

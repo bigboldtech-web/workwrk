@@ -181,7 +181,8 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
-import { ObjectShareDialog, embedSnippet } from "@/components/tables/object-share-dialog";
+import { embedSnippet } from "@/components/tables/object-share-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { TableRowMenu } from "@/components/tables/table-row-menu";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { csvExportCell, csvFormulaSafe } from "@/lib/csv";
@@ -5522,9 +5523,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
 
   /* ── The sheet's chrome: role, menus, toolbar popovers ─────────────── */
 
-  // Read implies write on a table until the access engine lands Can view
-  // (docs/plans/tables.md 3a), so every reader is at least Can edit; the
-  // creator and Owners/Admins hold Full access (lib/object-manage).
+  // Read implies write on a table (docs/plans/tables.md 3a), so every reader
+  // is at least Can edit; Full access on the table (GET /api/tables/[id]
+  // canManage: its maker, the admins, a Space manager or a Full grant) gets
+  // Share, everyone else the chip, and both open the one Manage access dialog.
   const shareRole = table.canManage ? "FULL" : "EDIT";
   const tableName = table.name || UNTITLED_TABLE_NAME;
   const colIndexOf = (colId: string | undefined) => (colId ? table.columns.findIndex((c) => c.id === colId) : -1);
@@ -6501,20 +6503,21 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         }}
       />
 
-      <ObjectShareDialog
+      {/* The one Manage access dialog: people, the public link, its embed
+          code and the internal link. Its public link state flows back into
+          the sheet so the Public glyph and the embed row stay true. */}
+      <ShareDialog
         open={shareMode !== null}
-        mode={shareMode ?? "who"}
-        onClose={() => setShareMode(null)}
-        object={{
-          kind: "table",
-          id: table.id,
-          name: tableName,
-          isPublic: !!table.isPublic,
-          canManage: !!table.canManage,
-          publicLinksAllowed: table.publicLinksAllowed !== false,
-          anchorName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null,
+        onOpenChange={(o) => { if (!o) setShareMode(null); }}
+        target={{ kind: "table", id: table.id, name: tableName }}
+        readOnly={!table.canManage}
+        onChanged={(panel) => {
+          if (panel) {
+            const isPublic = !!panel.general.publicLink?.on;
+            setTable((prev) => (prev ? { ...prev, isPublic } : prev));
+          }
+          notifyTablesChanged();
         }}
-        onPublicChange={(isPublic) => { setTable((prev) => (prev ? { ...prev, isPublic } : prev)); notifyTablesChanged(); }}
       />
       <TableAboutDialog
         open={aboutOpen}

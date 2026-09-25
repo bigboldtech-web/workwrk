@@ -21,6 +21,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { copyName } from "@/lib/tables-forms-list";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -29,10 +31,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const userId = getUserId(session);
   const { id } = await params;
 
+  // Can view on the form (the one resolver): a Member always, a Guest when
+  // they made it or were given it. Any other id is the same 404.
   const viewer = await viewerFromSession().catch(() => null);
-  const guest = viewer?.orgRole === "GUEST";
-  const source = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId, ...(guest ? { createdById: userId } : {}) } });
-  if (!source) return jsonError("not found", 404);
+  const source = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId } });
+  if (!source || !viewer) return jsonError("not found", 404);
+  if (!roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), { kind: "form", id })).role, "VIEW")) return jsonError("not found", 404);
 
   // The additive `settings` bucket rides along when the column exists; the
   // spread keeps this route working for the one release it may be absent.

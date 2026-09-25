@@ -117,6 +117,15 @@ const SQL_MANIFEST = [
   // report routes answer a named 503 (the cron a no-op) until it lands. It
   // is here so the release that ships the code is the release that can use it.
   "2026-09-24-phase5b-data.sql",
+  // One access model (2026-09-24): the "AccessGrant" table, a person's grant
+  // on one table, canvas or form. Late-safe and CHECKED rather than
+  // asserted: no existing model gains a column, every reader
+  // (src/lib/access/access-grant-store.ts) checks to_regclass and answers "no
+  // grants" while the table is absent, and the grant writes answer a named
+  // 503 grants_unavailable. It is here because this script runs inside
+  // `npm run build`, before `next build` and before pm2 reloads, so
+  // production never serves the grant routes without their table.
+  "2026-09-24-access-grants.sql",
 ];
 
 /**

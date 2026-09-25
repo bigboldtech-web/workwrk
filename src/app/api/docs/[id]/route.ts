@@ -9,8 +9,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { docAccessible } from "@/lib/doc-access";
-import { isDocFull, requireDocRole } from "@/lib/doc-sharing";
+import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
+import { legacyFloorRole, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { docLeavesEveryPlace, roleAtLeast } from "@/lib/access/node-rules";
+import { docSharingEntries } from "@/lib/access/access-grant-store";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
@@ -41,24 +44,52 @@ const putSchema = z.object({
 
 /**
  * The parent page the crumb and the Back link name, ONLY when this viewer can
- * read it through the same two gates the parent's own GET applies
- * (docAccessible, then the per-doc role). A sub-page carries no anchor of its
- * own, so it can be readable while its parent is not; naming the parent then
- * would hand its title to someone its own URL answers 404. Unreadable is null,
- * exactly like a doc with no parent, so the page falls back to the anchor.
+ * read it through the SAME gate the parent's own GET applies (docAccess, the
+ * one resolver). A sub-page follows its parent (A6), but it can carry a grant
+ * of its own, so it can be readable while its parent is not; naming the
+ * parent then would hand its title to someone its own URL answers 404.
+ * Unreadable is null, exactly like a doc with no parent, so the page falls
+ * back to the anchor.
  */
 async function readableParent(
-  ctx: Parameters<typeof requireDocRole>[0],
+  ctx: { orgId: string; userId: string; accessLevel: string | null | undefined },
   parentId: string,
 ): Promise<{ id: string; title: string } | null> {
   const p = await prisma.doc.findFirst({
     where: { id: parentId, organizationId: ctx.orgId },
-    select: { id: true, title: true, entityType: true, entityId: true, createdById: true },
+    select: { id: true, title: true },
   });
   if (!p) return null;
-  if (!(await docAccessible(p, ctx.userId, ctx.accessLevel))) return null;
-  if (!(await requireDocRole(ctx, { id: p.id, createdById: p.createdById }))) return null;
+  if (!(await docAccess(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), p.id))) return null;
   return { id: p.id, title: p.title };
+}
+
+/** Anchor types a doc may be moved onto (M2: never an unknown type). */
+const MOVABLE_ANCHORS = new Set(["SPACE", "FOLDER", "BOARD", "BOARD_ITEM"]);
+
+/** Does any page above this one carry a restricted sharing entry? */
+async function underRestrictedPage(orgId: string, parentId: string | null): Promise<boolean> {
+  const ids: string[] = [];
+  let cursor = parentId;
+  for (let hops = 0; cursor && hops < 9 && !ids.includes(cursor); hops += 1) {
+    ids.push(cursor);
+    const row: { parentId: string | null } | null = await prisma.doc.findFirst({ where: { id: cursor, organizationId: orgId }, select: { parentId: true } });
+    cursor = row?.parentId ?? null;
+  }
+  if (ids.length === 0) return false;
+  const entries = await docSharingEntries(orgId, ids);
+  return [...entries.values()].some((e) => e.restricted === true);
+}
+
+/** Would nesting `docId` under `parentId` put the doc inside its own subtree? */
+async function nestsUnderItself(orgId: string, docId: string, parentId: string): Promise<boolean> {
+  let cursor: string | null = parentId;
+  for (let hops = 0; cursor && hops < 32; hops += 1) {
+    if (cursor === docId) return true;
+    const row: { parentId: string | null } | null = await prisma.doc.findFirst({ where: { id: cursor, organizationId: orgId }, select: { parentId: true } });
+    cursor = row?.parentId ?? null;
+  }
+  return false;
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -77,14 +108,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     },
   });
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-  // Per-doc role (settings.docSharing). null = restricted + unlisted →
-  // same 404 as an invisible anchor. "view" | "edit" rides back to the
-  // editor so it can lock the canvas client-side.
-  const role = await requireDocRole(ctx, { id: doc.id, createdById: doc.createdById });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // The one resolver: anchor, parent page, listings, restricted, the note
+  // rule and the page lock, in one world. No role is the same 404 as an
+  // invisible anchor.
+  const access = await docAccess(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), doc.id);
+  if (!access) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Refresh presigned URLs for image / file blocks backed by S3. The
   // stored URL is a 1-hour signature; re-signing per read keeps doc
@@ -102,11 +130,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const by = await prisma.user.findFirst({ where: { id: lockRow.lockedById }, select: { firstName: true, lastName: true } });
     lock = { byId: lockRow.lockedById, byName: by ? `${by.firstName ?? ""} ${by.lastName ?? ""}`.trim() || null : null, at: lockRow.lockedAt };
   }
-  // A4: below Full access a locked doc resolves to COMMENT, not view. The
-  // content is read-only, the comment composer stays, and the chip reads
-  // "Can comment". A Can view holder stays at view: a lock never widens.
-  const full = isDocFull(ctx, { createdById: doc.createdById });
-  const myRole: "edit" | "comment" | "view" = lock && !full ? (role === "view" ? "view" : "comment") : role;
+  // A4: below Full access a locked doc resolves to COMMENT, not view (the
+  // resolver applies it). The content is read-only, the comment composer
+  // stays, and the chip reads "Can comment". "view" is read only: a Can view
+  // grant never comments, and a lock never widens.
+  const myRole: "edit" | "comment" | "view" = roleAtLeast(access.role, "EDIT") ? "edit" : access.role === "COMMENT" ? "comment" : "view";
   // The anchor as a Location (spec-docs-knowledge section 1, Back / close):
   // the editor's BackButton falls back to the anchor page for an anchored
   // doc, and the breadcrumb names it.
@@ -119,7 +147,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     doc: enriched,
     myRole,
     lock,
-    canManage: full,
+    // Full access: lock, Trash, save as template.
+    canManage: access.canManage,
+    // Can edit or higher changes who can open it (today's doc sharing rule).
+    canShare: access.canShare,
+    // Can comment or higher: a Can view grant reads only.
+    canComment: access.canComment,
     location,
     parent,
     owner: owner ? { id: owner.id, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || null, avatar: owner.avatar } : null,
@@ -137,26 +170,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
   const existing = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, title: true, content: true, archivedAt: true, entityType: true, entityId: true, updatedAt: true, createdById: true },
+    select: { id: true, title: true, content: true, archivedAt: true, entityType: true, entityId: true, updatedAt: true, createdById: true, parentId: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const access = await docAccess(nodeCtx, existing.id);
+  if (!access) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (existing.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
 
   // Write gate — BEFORE the tree-only fast path, so a view-only member
   // can't move/re-anchor the doc either. 404 for unlisted-on-restricted,
   // 403 read-only for viewers; the client guards persist() so this is
   // only the backstop.
-  const role = await requireDocRole(ctx, { id, createdById: existing.createdById });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
+  if (!roleAtLeast(access.unlockedRole, "EDIT")) return NextResponse.json({ error: "read-only" }, { status: 403 });
   // Lock page (change request A4): a locked doc takes content from Full
   // access holders only. Everyone else gets the one 403 the editor already
   // renders as read-only; nothing is silently dropped.
-  const lockRow = await readDocLock(id);
-  if (lockRow?.lockedById && !isDocFull(ctx, { createdById: existing.createdById })) {
+  if (access.locked && !access.canManage) {
     return NextResponse.json({ error: "locked", message: "This doc is locked. Ask the person who locked it to unlock it." }, { status: 403 });
   }
 
@@ -185,6 +215,47 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         (parsed.data.entityType !== undefined || parsed.data.entityId !== undefined))
     ) {
       return NextResponse.json({ error: "notepad notes cannot be re-anchored" }, { status: 400 });
+    }
+    // The tree rules of the one access model (M2, M3). A doc moves only onto
+    // an anchor type the model knows, only to an anchor the viewer reaches
+    // and only under a page the viewer can read, in the same org. Leaving
+    // every place is gated below: it opens the doc to the whole org.
+    const nextType = parsed.data.entityType !== undefined ? parsed.data.entityType : existing.entityType;
+    const nextId = parsed.data.entityId !== undefined ? parsed.data.entityId : existing.entityId;
+    const anchorChanges = parsed.data.entityType !== undefined || parsed.data.entityId !== undefined;
+    const parentChanges = parsed.data.parentId !== undefined && parsed.data.parentId !== existing.parentId;
+    if (anchorChanges && nextType && !MOVABLE_ANCHORS.has(nextType)) {
+      return NextResponse.json({ error: "invalid_anchor", message: "A doc can move to a Space, a Folder, a List or a task." }, { status: 400 });
+    }
+    if (anchorChanges && nextType && nextId && !(await canCreateDocAt(nodeCtx, { entityType: nextType, entityId: nextId }, null))) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    if (parentChanges && parsed.data.parentId) {
+      if (await nestsUnderItself(ctx.orgId, id, parsed.data.parentId)) {
+        return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
+      }
+      if (!(await canCreateDocAt(nodeCtx, null, parsed.data.parentId))) {
+        return NextResponse.json({ error: "not found" }, { status: 404 });
+      }
+    }
+    // Leaving every place makes a root doc, which the whole org opens: that
+    // changes who can open it, so it takes Full access on the doc (its own
+    // grant or one on its container), or today's answer (a reader who could
+    // move it before this release, A8). A Can edit grant on one doc or one
+    // Folder never publishes it to the org.
+    const nextParent = parsed.data.parentId !== undefined ? parsed.data.parentId : existing.parentId;
+    const leaves = docLeavesEveryPlace(existing, { entityType: nextType ?? null, entityId: nextId ?? null, parentId: nextParent ?? null });
+    if ((anchorChanges || parentChanges) && leaves && !access.canManage) {
+      if (!roleAtLeast(await legacyFloorRole(nodeCtx, { kind: "doc", id }), "EDIT")) {
+        return NextResponse.json({ error: "forbidden", message: "You need Full access to take this doc out of its place: it would open to everyone." }, { status: 403 });
+      }
+    }
+    // A sub-page inside a restricted page tree leaves it only with Full
+    // access: moving it out would open it to everyone the new place reaches.
+    if ((anchorChanges || parentChanges) && !existing.entityType && existing.parentId && !access.canManage) {
+      if (await underRestrictedPage(ctx.orgId, existing.parentId)) {
+        return NextResponse.json({ error: "forbidden", message: "You need Full access to move this page out of a restricted page." }, { status: 403 });
+      }
     }
     const doc = await prisma.doc.update({
       where: { id },

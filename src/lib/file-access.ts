@@ -9,18 +9,48 @@
 // and read it out, or republish a restricted Space's file into a task with a
 // wider audience.
 //
-// The rule, transcribed from /api/files and unchanged:
+// The rule, from the one resolver (src/lib/access/node-access.ts), for a
+// whole batch in one world:
 //
 //   * a file with no `spaceId` is unscoped and readable by the whole org;
-//   * a file tagged to a Space is readable when the viewer reads that Space;
-//   * or when the viewer holds a grant on the SPACE FOLDER the file sits in
-//     (their own folder's files, and only those).
+//   * a file in a Space folder is readable by whoever holds Can view on that
+//     Folder (its own grant, a parent's, its Space's, unless it is PRIVATE);
+//   * a file tagged to a Space is readable by whoever holds Can view on that
+//     Space. Under the legacy Private rule a Space reader also keeps the files
+//     of a PRIVATE folder they cannot open, which is today's reach (A8); the
+//     strict rule applies the Private cut to them.
 //
 // Server-only: imports prisma.
 
 import { prisma } from "@/lib/prisma";
-import { visibleSpaceIds } from "@/lib/space";
-import { accessibleFolderIds } from "@/lib/folder";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { NodeEvaluator, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
+import { loadWorld } from "@/lib/access/node-world";
+
+type FileRow = { id: string; spaceId: string | null; spaceFolderId: string | null };
+
+async function readableSubset(
+  files: FileRow[],
+  viewer: { organizationId: string; userId: string; accessLevel?: string | null },
+): Promise<FileRow[]> {
+  const refs: NodeRef[] = [];
+  for (const f of files) {
+    if (f.spaceId) refs.push({ kind: "space", id: f.spaceId });
+    if (f.spaceFolderId) refs.push({ kind: "folder", id: f.spaceFolderId });
+  }
+  if (refs.length === 0) return files;
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel ?? "EMPLOYEE");
+  const { rows, grants } = await loadWorld(ctx, refs);
+  const ev = new NodeEvaluator(rows, grants);
+  const reads = (ref: NodeRef) => roleAtLeast(ev.effective(ref).role, "VIEW");
+  const legacy = rows.privateRule !== "strict";
+  return files.filter((f) => {
+    if (!f.spaceId) return true;
+    const space = reads({ kind: "space", id: f.spaceId });
+    if (!f.spaceFolderId) return space;
+    return reads({ kind: "folder", id: f.spaceFolderId }) || (legacy && space);
+  });
+}
 
 /**
  * Narrow a set of FileEntry ids to the ones this viewer may read.
@@ -39,7 +69,7 @@ export async function readableFileIds(args: {
    */
   viewer: { organizationId: string; userId: string; accessLevel?: string | null };
 }): Promise<string[]> {
-  const { organizationId, userId } = args.viewer;
+  const { organizationId } = args.viewer;
   const ids = [...new Set(args.ids)].filter((id) => typeof id === "string" && id.length > 0);
   if (ids.length === 0) return [];
   try {
@@ -47,43 +77,38 @@ export async function readableFileIds(args: {
       where: { id: { in: ids }, organizationId },
       select: { id: true, spaceId: true, spaceFolderId: true },
     });
-    const scoped = files.map((f) => f.spaceId).filter((s): s is string => Boolean(s));
-    const [visible, folders] = scoped.length
-      ? await Promise.all([
-          visibleSpaceIds(scoped, userId, args.viewer.accessLevel ?? "EMPLOYEE"),
-          accessibleFolderIds(userId),
-        ])
-      : [new Set<string>(), new Set<string>()];
-    return files
-      .filter(
-        (f) =>
-          !f.spaceId ||
-          visible.has(f.spaceId) ||
-          (!!f.spaceFolderId && folders.has(f.spaceFolderId)),
-      )
-      .map((f) => f.id);
+    return (await readableSubset(files, args.viewer)).map((f) => f.id);
   } catch {
     return [];
   }
 }
 
+/** The same rule over rows the caller already loaded (the /files list). */
+export async function readableFileRows<T extends FileRow>(
+  files: T[],
+  viewer: { organizationId: string; userId: string; accessLevel?: string | null },
+): Promise<T[]> {
+  const ok = new Set((await readableSubset(files, viewer)).map((f) => f.id));
+  return files.filter((f) => ok.has(f.id));
+}
+
 /**
  * The same rule for ONE file row, for the per-file routes (GET /api/files/[id],
- * /[id]/url, PATCH, DELETE). The /files list admits a Space file when the viewer
- * reads its Space OR holds a grant on its Space folder; the per-file routes used
- * to check the Space alone, so a folder-only grantee saw a row in /files whose
- * Preview and Download then answered 404. One rule, one answer.
+ * /[id]/url, PATCH, DELETE), so a row the /files list shows never answers 404
+ * on Preview or Download.
  */
 export async function canReadFile(
-  file: { spaceId: string | null; spaceFolderId: string | null },
+  file: { spaceId: string | null; spaceFolderId: string | null; organizationId?: string },
   userId: string,
   accessLevel: string | null | undefined,
+  organizationId?: string,
 ): Promise<boolean> {
   if (!file.spaceId) return true;
-  const level = accessLevel ?? "EMPLOYEE";
-  const [visible, folders] = await Promise.all([
-    visibleSpaceIds([file.spaceId], userId, level),
-    file.spaceFolderId ? accessibleFolderIds(userId) : Promise.resolve(new Set<string>()),
-  ]);
-  return visible.has(file.spaceId) || (!!file.spaceFolderId && folders.has(file.spaceFolderId));
+  const orgId =
+    organizationId ??
+    file.organizationId ??
+    (await prisma.space.findUnique({ where: { id: file.spaceId }, select: { organizationId: true } }))?.organizationId;
+  if (!orgId) return false;
+  const [ok] = await readableSubset([{ id: "file", spaceId: file.spaceId, spaceFolderId: file.spaceFolderId }], { organizationId: orgId, userId, accessLevel });
+  return !!ok;
 }

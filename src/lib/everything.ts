@@ -8,8 +8,9 @@
 //    set came from `board.findMany()` over the whole org followed by a
 //    `getBoardForReader` per board inside a Promise.all, on every page load of
 //    a force-dynamic route. That is an N+1 access check whose cost grows with
-//    the workspace, before a single task is read. `accessibleIds(viewer,
-//    "list", VIEW)` answers the same question as set arithmetic.
+//    the workspace, before a single task is read. The one node-access
+//    resolver answers it over ONE world for every List (nodeRoleMap), with
+//    the same answer each List's own page gives.
 // 2. IT CAPPED AT 500 AND SAID "500+". A capped list with no total looks
 //    complete and is not (work-tasks 1.10, critic #12). There is a cursor and
 //    a real count now.
@@ -17,12 +18,13 @@
 //    failed later. Each row carries the viewer's role on its own List, so a
 //    Can view row renders as text (critic #4).
 //
-// Server-only: prisma and the access engine.
+// Server-only: prisma and the node-access resolver.
 
 import { prisma } from "./prisma";
 import { delegatedWhere } from "./delegated-items";
-import { accessibleIds } from "./access/ids";
 import type { ObjectRole, Viewer } from "./access/types";
+import { nodeCtxFromViewer, nodeRole, nodeRoleMap } from "./access/node-access";
+import { roleAtLeast } from "./access/node-rules";
 import { atLeast } from "./access/id-sets";
 import { getBoardStatuses, isDoneStatusName, makeStatusLookup } from "./board-items-shared";
 import { bucketFor, type LocaleContext } from "./work-buckets";
@@ -151,16 +153,21 @@ function humaniseStatus(value: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : value;
 }
 
-/** The role the viewer holds on each readable List, as one map. */
+/**
+ * The role the viewer holds on each readable List, as one map: every live
+ * List of the org through ONE node-access world. The Space Owner rung reads
+ * as Full access on a List.
+ */
 async function listRoles(viewer: Viewer): Promise<Map<string, ObjectRole>> {
   const out = new Map<string, ObjectRole>();
-  // Four passes over the same set arithmetic, widest last, so each id ends on
-  // the highest role it qualifies for. This is far cheaper than canMany() per
-  // row and gives exactly the same answer, because both read the same sets.
-  const levels: ObjectRole[] = ["VIEW", "COMMENT", "EDIT", "FULL"];
-  for (const level of levels) {
-    const ids = await accessibleIds(viewer, "list", level);
-    for (const id of ids.readable) out.set(id, level);
+  const lists = await prisma.board.findMany({
+    where: { organizationId: viewer.organizationId, archivedAt: null },
+    select: { id: true },
+  });
+  const roles = await nodeRoleMap(nodeCtxFromViewer(viewer), "list", lists.map((l) => l.id));
+  for (const [id, role] of roles) {
+    if (role === "none") continue;
+    out.set(id, role === "OWNER" ? "FULL" : role);
   }
   return out;
 }
@@ -176,9 +183,8 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   // READABILITY IS PART OF RESOLVING. The lookup is by slug, and the answer
   // carries the Space's id and name into the page title, so it has to be
   // filtered by what the viewer may read or the title leaks the existence and
-  // name of a PRIVATE Space. `accessibleIds` is the same set arithmetic the
-  // rest of this file uses, so an unreadable Space and a missing one are
-  // indistinguishable from the outside.
+  // name of a PRIVATE Space. The one resolver answers both, so an unreadable
+  // Space and a missing one are indistinguishable from the outside.
   const [rawSpace, rawFolder] = await Promise.all([
     query.space
       ? prisma.space.findFirst({ where: { slug: query.space, organizationId: orgId }, select: { id: true, slug: true, name: true } })
@@ -187,12 +193,16 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
       ? prisma.folder.findFirst({ where: { id: query.folder, space: { organizationId: orgId } }, select: { id: true, name: true, spaceId: true } })
       : Promise.resolve(null),
   ]);
-  const [readableSpaces, readableFolders] = await Promise.all([
-    rawSpace ? accessibleIds(viewer, "space", "VIEW") : Promise.resolve(null),
-    rawFolder ? accessibleIds(viewer, "folder", "VIEW") : Promise.resolve(null),
+  const ctx = nodeCtxFromViewer(viewer);
+  const [spaceDecision, folderDecision] = await Promise.all([
+    rawSpace ? nodeRole(ctx, { kind: "space", id: rawSpace.id }) : Promise.resolve(null),
+    rawFolder ? nodeRole(ctx, { kind: "folder", id: rawFolder.id }) : Promise.resolve(null),
   ]);
-  const space = rawSpace && readableSpaces?.readable.has(rawSpace.id) ? rawSpace : null;
-  const folder = rawFolder && readableFolders?.readable.has(rawFolder.id) ? rawFolder : null;
+  // A path container (a Space or Folder the viewer only passes through on the
+  // way to Lists they were given) scopes too: only those Lists are readable.
+  const scopes = (d: { role: Parameters<typeof roleAtLeast>[0]; path: boolean } | null) => !!d && (roleAtLeast(d.role, "VIEW") || d.path);
+  const space = rawSpace && scopes(spaceDecision) ? rawSpace : null;
+  const folder = rawFolder && scopes(folderDecision) ? rawFolder : null;
   // A scope that was asked for and could not be honoured is an error, not a
   // silent widening: the caller asked for one Space's tasks and must never be
   // handed the whole workspace under the page title "Everything".

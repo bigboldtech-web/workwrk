@@ -6,10 +6,20 @@
 //
 // Rows, in the spec's order, each rendered only when the role allows it:
 //   Open · Open beside · Copy link (cmd L) · Add to / Remove from favorites ·
-//   Rename (inline) · New doc inside · Move to… · Share · Duplicate (cmd D) ·
-//   separator · Move to Trash (destructive; Full access, or own creation at
-//   Can edit; Agents never)
-// A Can view viewer's menu is Open, Open beside, Copy link, Add to favorites.
+//   Rename (inline) · New doc inside · Move to… · Manage access · Duplicate
+//   (cmd D) · separator · Move to Trash (destructive; Full access, or own
+//   creation at Can edit; Agents never)
+// A Can view viewer's menu is Open, Open beside, Copy link, Add to favorites
+// and Who has access.
+//
+// THE ACCESS ROW IS FOR EVERY READER (problem 51). It sat inside the Can edit
+// block and read "Share" at Full access only, so a Can view or Can comment
+// holder had no way to see who else can open the doc, and a Can edit holder,
+// who may change a doc's sharing (MANAGE_BAR.doc), was never offered it. It
+// now reads "Manage access" from Can edit up and "Who has access" below, and
+// opens the one Manage access dialog: DocRowMenuHost mounts it when its host
+// passes no dialog of its own, so the Work tree, the Docs sidebar and /docs
+// all get it. Agents never share, so they get no row.
 //
 // It is a MenuList body. Hosts mount it in a MorePortal anchored to the row's
 // "..." (or at the right-click point), or use `useDocRowMenu()` + `DocRowMenuHost`,
@@ -29,8 +39,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Share2, Star, Trash2, LayoutTemplate,
+  Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Star, Trash2, LayoutTemplate, UserPlus, Users,
 } from "lucide-react";
+import { ShareDialog } from "@/components/access/share-dialog";
+import { MANAGE_BAR, panelAtLeast, type PanelRole } from "@/lib/access/access-panel";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { Picker } from "@/components/ui/picker";
@@ -47,8 +59,13 @@ import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object
 
 export type DocMenuRole = "full" | "edit" | "comment" | "view";
 
-/** GET /api/docs/[id]'s role fields, read when a host cannot pass the role. */
-type ResolvedRole = { role: DocMenuRole; own: boolean };
+/**
+ * GET /api/docs/[id]'s role fields, read when a host cannot pass the role.
+ * canShare is the server's own answer to "may this viewer change who can open
+ * it": a locked doc reads Can comment below Full access, yet its editors still
+ * manage its sharing, so the role alone would mislabel the access row.
+ */
+type ResolvedRole = { role: DocMenuRole; own: boolean; canShare?: boolean };
 
 export interface DocMenuTarget {
   id: string;
@@ -70,7 +87,14 @@ export interface DocMenuTarget {
   spaceSlug?: string | null;
 }
 
-export type DocMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "child-created" | "moved" | "templated";
+export type DocMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "child-created" | "moved" | "templated" | "shared";
+
+const PANEL_ROLE_OF: Record<DocMenuRole, PanelRole> = { full: "FULL", edit: "EDIT", comment: "COMMENT", view: "VIEW" };
+
+/** Can this role change who can open the doc? Can edit and up (MANAGE_BAR.doc, today's doc sharing rule). */
+export function docRoleManagesAccess(role: DocMenuRole): boolean {
+  return panelAtLeast(PANEL_ROLE_OF[role], MANAGE_BAR.doc);
+}
 
 export function dispatchDocsChanged() {
   if (typeof window === "undefined") return;
@@ -85,8 +109,12 @@ export interface DocRowMenuProps {
   context: "table" | "tree" | "editor";
   onClose: () => void;
   onChanged?: (kind: DocMenuChange) => void;
-  /** The host opens its Share dialog for this doc (absent = no Share row). */
-  onShare?: () => void;
+  /**
+   * Opens the Manage access dialog for this doc, read only when the menu knows
+   * the viewer cannot change it (absent = no access row; DocRowMenuHost always
+   * passes one).
+   */
+  onShare?: (readOnly: boolean) => void;
   /** Editor context: extra rows the host renders between the shared rows and Trash. */
   extraRows?: React.ReactNode;
   /** The editor focuses its title instead of the inline rename row. */
@@ -112,11 +140,15 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     if (roleKnown) return;
     let alive = true;
     void (async () => {
-      const r = await apiFetch<{ myRole?: string; canManage?: boolean; doc?: { createdById?: string | null } }>(`/api/docs/${doc.id}`, { cache: "no-store" });
+      const r = await apiFetch<{ myRole?: string; canManage?: boolean; canShare?: boolean; doc?: { createdById?: string | null } }>(`/api/docs/${doc.id}`, { cache: "no-store" });
       if (!alive) return;
       if (!r.ok) { setResolved({ role: "view", own: false }); return; }
       const myRole = r.data.myRole === "view" ? "view" : r.data.myRole === "comment" ? "comment" : "edit";
-      setResolved({ role: r.data.canManage ? "full" : myRole, own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id });
+      setResolved({
+        role: r.data.canManage ? "full" : myRole,
+        own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id,
+        canShare: typeof r.data.canShare === "boolean" ? r.data.canShare : undefined,
+      });
     })();
     return () => { alive = false; };
   }, [roleKnown, doc.id, boot.viewer.id]);
@@ -125,10 +157,11 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   const pending = !roleKnown && resolved === null;
   const canEdit = role === "full" || role === "edit";
   const canTrash = role === "full" || (role === "edit" && own);
-  // Share writes the member map: Full access only, the same rule the header's
-  // ShareOrRoleChip renders (Can edit shares only under toggle 4, which no
-  // surface reads yet), so the two doors never disagree.
-  const canShare = role === "full";
+  // The same rule the header's chip and the server's canShare use, so the
+  // two doors never disagree. Until the role lands the row waits behind the
+  // skeleton rather than reading one label and then the other.
+  const managesAccess = resolved?.canShare ?? docRoleManagesAccess(role);
+  const showAccessRow = !!onShare && !pending;
   const title = doc.title || "Untitled doc";
   const trashDays = boot.org.trashDays;
 
@@ -320,7 +353,17 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
           <MenuItem icon={Pencil} label="Rename" onClick={() => { if (onRenameInline) { onClose(); onRenameInline(); } else { setName(doc.title); setMode("rename"); } }} />
           <MenuItem icon={Plus} label="New doc inside" onClick={() => void newInside()} />
           <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} />
-          {onShare && canShare ? <MenuItem icon={Share2} label="Share" onClick={() => { onClose(); onShare(); }} /> : null}
+        </>
+      ) : null}
+      {showAccessRow ? (
+        <MenuItem
+          icon={managesAccess ? UserPlus : Users}
+          label={managesAccess ? "Manage access" : "Who has access"}
+          onClick={() => { onClose(); onShare?.(!managesAccess); }}
+        />
+      ) : null}
+      {canEdit ? (
+        <>
           <MenuItem icon={Copy} label="Duplicate" shortcut="⌘D" busy={busy === "duplicate"} onClick={() => void duplicate()} />
           {role === "full" ? <MenuItem icon={LayoutTemplate} label="Save as template" busy={busy === "template"} onClick={() => void saveAsTemplate()} /> : null}
         </>
@@ -378,6 +421,11 @@ export function useDocRowMenu() {
   return { state, openAt, openFrom, open, close };
 }
 
+/**
+ * The menu at its anchor, and the Manage access dialog its access row opens.
+ * A host that passes `onShare` opens a dialog of its own; every other host
+ * gets this one, so no doc row is left without a way to see who has access.
+ */
 export function DocRowMenuHost({ menu, context, onChanged, onShare }: {
   menu: ReturnType<typeof useDocRowMenu>;
   context: "table" | "tree" | "editor";
@@ -385,17 +433,37 @@ export function DocRowMenuHost({ menu, context, onChanged, onShare }: {
   onShare?: (doc: DocMenuTarget) => void;
 }) {
   const dummy = useRef<HTMLElement | null>(null);
+  // The doc the dialog is about outlives the menu (which closes as the row is
+  // clicked), and stays set while the dialog closes so it animates out whole.
+  const [share, setShare] = useState<{ doc: DocMenuTarget; readOnly: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const s = menu.state;
-  if (!s) return null;
   return (
-    <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
-      <DocRowMenu
-        doc={s.doc}
-        context={context}
-        onClose={menu.close}
-        onChanged={(kind) => onChanged?.(kind, s.doc)}
-        onShare={onShare ? () => onShare(s.doc) : undefined}
-      />
-    </MorePortal>
+    <>
+      {s ? (
+        <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
+          <DocRowMenu
+            doc={s.doc}
+            context={context}
+            onClose={menu.close}
+            onChanged={(kind) => onChanged?.(kind, s.doc)}
+            onShare={(readOnly) => {
+              if (onShare) { onShare(s.doc); return; }
+              setShare({ doc: s.doc, readOnly });
+              setShareOpen(true);
+            }}
+          />
+        </MorePortal>
+      ) : null}
+      {!onShare && share ? (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          target={{ kind: "doc", id: share.doc.id, name: share.doc.title || "Untitled doc" }}
+          readOnly={share.readOnly}
+          onChanged={() => { onChanged?.("shared", share.doc); dispatchDocsChanged(); }}
+        />
+      ) : null}
+    </>
   );
 }

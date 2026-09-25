@@ -5,10 +5,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveFolder, updateFolder, folderReadable } from "@/lib/folder";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { archiveFolder, updateFolder } from "@/lib/folder";
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
+import { moveAllowed, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { recordGeneralAccessChange } from "@/lib/access/grants";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -22,27 +24,24 @@ async function ctx() {
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId, userName: u.name ?? null };
 }
 
-// READ THE FOLDER, THEN THE SPACE. Gated on the Space alone, a Space ADMIN
-// denied a PRIVATE folder could still rename it, read its description back in
-// the 200 body, and (once `visibility` joined the schema) flip it to WORKSPACE
-// and expose the whole subtree in one call, while /folders/[id] answered the
-// same person with the in-shell 404.
+// FULL ACCESS ON THE FOLDER ITSELF (W2), never the Space's rights: a Full
+// holder of a Folder renames, moves, restricts and deletes it, and a Space
+// manager named on a PRIVATE folder keeps managing it through the lift. A
+// viewer with no role on the Folder gets the same 404 its page answers, so a
+// PRIVATE folder can be neither probed nor flipped to WORKSPACE through here.
 async function loadFolderAndGate(folderId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const folder = await prisma.folder.findUnique({
     where: { id: folderId },
-    select: { id: true, spaceId: true, organizationId: true },
+    select: { id: true, spaceId: true, organizationId: true, visibility: true },
   });
   if (!folder || folder.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  if (!(await folderReadable(folderId, c.userId, c.accessLevel))) {
-    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  }
-  const space = await getSpaceForReader(folder.spaceId, c.userId, c.accessLevel);
-  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditSpace(folder.spaceId, c.userId, c.accessLevel);
-  if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-  return { folder };
+  const ctx = nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel);
+  const d = await nodeRole(ctx, { kind: "folder", id: folderId });
+  if (d.role === "none") return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  if (!roleAtLeast(d.role, "FULL")) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  return { folder, ctx };
 }
 
 const patchSchema = z.object({
@@ -69,8 +68,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
+  // A re-parent or a Space change through PATCH follows the move rule: Full
+  // access on the destination Folder, or on the destination Space at its root.
+  if (parsed.data.parentFolderId !== undefined || parsed.data.spaceId !== undefined) {
+    const dest = parsed.data.parentFolderId
+      ? { kind: "folder" as const, id: parsed.data.parentFolderId }
+      : { kind: "space" as const, id: parsed.data.spaceId ?? gate.folder.spaceId };
+    if (!(await moveAllowed(gate.ctx, { kind: "folder", id }, dest))) {
+      return NextResponse.json({ error: "You need Full access where this folder is going." }, { status: 403 });
+    }
+  }
   try {
-    const updated = await updateFolder(id, parsed.data);
+    const before = gate.folder.visibility;
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await updateFolder(id, parsed.data, tx);
+      if (parsed.data.visibility !== undefined && parsed.data.visibility !== before) {
+        await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "folder", id }, { visibility: { from: before, to: parsed.data.visibility } });
+      }
+      return row;
+    });
     return NextResponse.json({ folder: updated });
   } catch (err) {
     return NextResponse.json(

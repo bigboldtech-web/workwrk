@@ -16,11 +16,10 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
-import { legacyAllows } from "@/lib/access/parity";
-import { loadBoardInputs } from "@/lib/access/legacy-facts";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { withArchivedBy } from "@/lib/archived-by";
-import { accessibleFolderIds } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { mergeJsonObject, type ListDefaultsInput, type RowColorRule } from "@/lib/list-comfort";
 import {
   parseSprintMeta,
@@ -645,131 +644,93 @@ export async function duplicateBoard(
   return { id: created.id, slug: created.slug, name };
 }
 
+/** The row every List reader hands back: the same select board.ts always used. */
+export interface BoardReaderRow {
+  id: string;
+  spaceId: string | null;
+  visibility: Visibility;
+  ownerId: string | null;
+  organizationId: string;
+  folderId: string | null;
+}
+
 /**
- * Resolve board-level read access, composing Space + Board layers.
- *
- *   visibility = ORG       → any org member can read (overrides Space if Space is stricter)
- *   visibility = WORKSPACE → defer to Space access (the default; "inherit")
- *   visibility = PRIVATE   → BoardMember + Board.ownerId + Space OWNER + org admin only
- *
- * Returns the board row when readable, null otherwise.
+ * The viewer's role on one List, from the one resolver (node-access): the
+ * List's own grant, its owner, its Folder chain and its Space, with the
+ * PRIVATE cut and the legacy floor. No org filter is applied here today and
+ * none is added: the row's own org is the world's, and callers compare
+ * board.organizationId themselves.
+ */
+export async function boardRoleOf(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<{ board: BoardReaderRow | null; role: NodeRole }> {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
+  });
+  if (!board) return { board: null, role: "none" };
+  const decision = await nodeRole(nodeCtxFromLevel(userId, board.organizationId, accessLevel), { kind: "list", id: boardId });
+  return { board, role: decision.role };
+}
+
+/**
+ * Read access: Can view or higher on the List. A Folder grant reaches its
+ * Lists (W1), a List grant or the List's owner opens it under any Folder
+ * (W6), a PRIVATE List answers to its own grants, its owner and the Space
+ * OWNER's pierce. Returns the board row when readable, null otherwise.
  */
 export async function getBoardForReader(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ) {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts's
-  // seven branches (:614 through :664), including the two this file is known
-  // for: the direct BoardMember grant of ANY role, and the private-folder
-  // cascade that checks folder.ownerId and never FolderMember. Both stay
-  // exactly as they are; the engine's own answers for them differ and are
-  // recorded in EXPECTED_MISMATCHES as audit-1.6 rows a and c.
-  //
-  // The loader issues at most three queries where this body issued four, and
-  // returns the identical row shape ({ id, spaceId, visibility, ownerId,
-  // organizationId, folderId }) so boards/[id]/items:62's cross-org check and
-  // every other field read still compile and behave.
-  const { inputs, board } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "shallow" },
-  );
-  return legacyAllows(inputs, "getBoardForReader") ? board : null;
+  const { board, role } = await boardRoleOf(boardId, userId, accessLevel);
+  return board && roleAtLeast(role, "VIEW") ? board : null;
 }
 
 /**
- * getBoardForReader PLUS the one reader it deliberately does not know about:
- * a FOLDER GRANTEE.
- *
- * `getBoardForReader`'s folder branch consults `folder.ownerId` and never
- * `FolderMember` (its own comment says so), so a person holding a granular
- * folder grant and no Space membership fails it. Granular folder access is a
- * shipped feature that is ADDITIVE and INHERITED downward, and the rest of the
- * product honours it: `folderAccessForSpace` ships every board in a granted
- * folder to the sidebar tree, and the Folder page goes out of its way to keep
- * a grantee working. Reading the board through the strict predicate alone
- * therefore left the grantee with live links into a notFound() page: a dead
- * end with no explanation, on a destination that used to work.
- *
- * Kept as its own function rather than folded into `getBoardForReader`,
- * because that one is transcribed in the frozen parity engine and every API
- * route is pinned to its exact answers. Use this on SURFACES that a grantee is
- * linked to.
+ * The same read as getBoardForReader. It used to add the one reader the old
+ * predicate did not know about (a Folder grantee); the one resolver reads
+ * Folder grants on every List now, so the two are one answer. Kept under its
+ * name for its callers.
  */
 export async function getBoardForReaderOrFolderGrantee(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ) {
-  const board = await getBoardForReader(boardId, userId, accessLevel);
-  if (board) return board;
-  const row = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
-  });
-  if (!row?.folderId) return null;
-  // A grant cascades to sub-folders, which is why this is the descendant-aware
-  // set and not a single FolderMember lookup.
-  const granted = await accessibleFolderIds(userId);
-  return granted.has(row.folderId) ? row : null;
+  return getBoardForReader(boardId, userId, accessLevel);
 }
 
-/**
- * Edit access check. Org admins always edit. Otherwise:
- *   PRIVATE → BoardMember OWNER/ADMIN, Board.ownerId, or Space OWNER
- *   else    → defer to canEditSpace (Space OWNER/ADMIN)
- */
+/** Manage access (fields, settings, members, delete): Full access on the List. */
 export async function canEditBoard(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts:677-704.
-  // The asymmetry it preserves: a BoardMember ADMIN manages only a PRIVATE
-  // board, because on any other visibility this function falls through to
-  // canEditSpace and the board-level grant is never consulted.
-  const { inputs } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "none" },
-  );
-  return legacyAllows(inputs, "canEditBoard");
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "FULL");
 }
 
 /**
- * CONTENT-write access — create / edit / delete tasks and comment. This is the
- * "can a MEMBER make changes" gate, deliberately looser than canEditBoard
- * (which MANAGES the board: fields, settings, members, delete). A GUEST is
- * read-only; MEMBER / ADMIN / OWNER on the board OR the parent Space
- * contribute; org admins and the board owner always do. Additive: the most
- * permissive grant wins. A PRIVATE board is reachable only by an explicit
- * (non-guest) board grant — Space membership doesn't pierce it.
+ * CONTENT-write access (create, edit, delete tasks and comment): Can edit or
+ * higher on the List, looser than canEditBoard, which MANAGES it.
  */
 export async function canContributeBoard(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts:721-746.
-  // A non-guest Space MEMBER still writes, which is the 2026-09-09 decision the
-  // schema comment at prisma/schema.prisma:4364-4365 still contradicts; that
-  // stale comment is a docs fix, not an access change, and is left alone here.
-  const { inputs } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "none" },
-  );
-  return legacyAllows(inputs, "canContributeBoard");
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "EDIT");
 }
 
-/**
- * Legacy thin wrapper. Kept so older call sites compile while we
- * migrate them to getBoardForReader. New code should use the resolver.
- */
+/** Can view or higher on the List. */
 export async function canReadBoard(boardId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  const board = await getBoardForReader(boardId, userId, accessLevel);
-  return Boolean(board);
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "VIEW");
 }
 
 export async function listBoardMembers(boardId: string) {

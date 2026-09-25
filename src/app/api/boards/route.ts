@@ -5,10 +5,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canContributeBoard, createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
-import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
-import { canRead, type ViewerContext } from "@/lib/access";
+import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
+import { getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { prisma } from "@/lib/prisma";
+import { containerGate, nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 const VIEW_TYPES = [
   "TABLE", "KANBAN", "GANTT", "CALENDAR", "TIMELINE", "CHART", "DOC", "FORM",
@@ -50,8 +51,13 @@ export async function GET(req: Request) {
   // List's task into it is refused by PATCH /api/items/[id] with 403. The route
   // stays the superset and answers enough for a caller to filter, rather than
   // narrowing for one caller and breaking the other.
+  const nodeCtx = nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel);
+
   if (url.searchParams.get("editable") === "1") {
-    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    // Path Spaces are candidates too: a Folder grantee writes to the Lists in
+    // their Folder without holding a role on its Space, and the picker groups
+    // rows under the Space's name. The write check below decides every row.
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel, paths: true });
     const spaceIds = spaces.map((s) => s.id);
     const candidates = await prisma.board.findMany({
       where: {
@@ -68,13 +74,10 @@ export async function GET(req: Request) {
       select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true, folderId: true, productSlug: true },
       orderBy: { name: "asc" },
     });
-    // One write check per candidate. The list is per-viewer and small (a
-    // person is on tens of Lists, not thousands), and offering a row that
-    // 403s would be worse than the checks.
-    const allowed = await Promise.all(
-      candidates.map(async (b) => ((await canContributeBoard(b.id, c.userId, c.accessLevel)) ? b : null)),
-    );
-    const boards = allowed.filter((b): b is NonNullable<typeof b> => b !== null);
+    // ONE world for every candidate (never a gate call per row): only the
+    // Lists the viewer can edit, so a picker row never 403s on click.
+    const roles = await nodeRoleMap(nodeCtx, "list", candidates.map((b) => b.id));
+    const boards = candidates.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "EDIT"));
     // Only the Spaces that still have a List under them after the write check.
     // `spaces` is everything the viewer can READ, so a Space they can open but
     // write to nowhere inside came back with no boards beneath it, and the
@@ -98,9 +101,12 @@ export async function GET(req: Request) {
   // caller has no single Space context. Backwards-compatible: only
   // triggers on ?all=1.
   if (url.searchParams.get("all") === "1") {
-    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    // Path Spaces too: a person granted one Folder or List of a Space picks
+    // those Lists here like any other, and the role filter below keeps
+    // everything else in that Space out.
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel, paths: true });
     const spaceIds = spaces.map((s) => s.id);
-    const boards = spaceIds.length
+    const rows = spaceIds.length
       ? await prisma.board.findMany({
           where: {
             organizationId: c.organizationId,
@@ -111,17 +117,24 @@ export async function GET(req: Request) {
           orderBy: { name: "asc" },
         })
       : [];
+    // Every row through one world: a PRIVATE List in a readable Space is not
+    // listed to someone it does not name.
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
 
   if (folderId) {
-    // Gate on folder READ (the resolver also enforces org scope + PRIVATE +
-    // folder grants). Previously this branch was unauthenticated and cross-org.
-    const viewer: ViewerContext = { userId: c.userId, organizationId: c.organizationId, accessLevel: c.accessLevel };
-    if (!(await canRead(viewer, { type: "folder", id: folderId }))) {
+    // Can view on the Folder (org scope, the Private cut and Folder grants,
+    // from the one resolver), then only the Lists in it the viewer can open:
+    // the same answer the Work tree gives.
+    const folder = await nodeRole(nodeCtx, { kind: "folder", id: folderId });
+    if (!roleAtLeast(folder.role, "VIEW")) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const boards = await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId });
+    const rows = await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId });
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
   if (spaceId) {
@@ -129,7 +142,9 @@ export async function GET(req: Request) {
     if (!space || space.organizationId !== c.organizationId) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const boards = await listBoardsInSpace(spaceId, { includeArchived });
+    const rows = await listBoardsInSpace(spaceId, { includeArchived });
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
   return NextResponse.json({ error: "spaceId or folderId required" }, { status: 400 });
@@ -169,12 +184,22 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  const space = await getSpaceForReader(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!space || space.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const space = await prisma.space.findFirst({ where: { id: parsed.data.spaceId, organizationId: c.organizationId }, select: { id: true } });
+  if (!space) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // The container the List is made in: its Folder (in this Space and org),
+  // with Full access on that Folder, or the Space root with Full access on the
+  // Space. A Folder grant never needs, and never gives, anything on the Space.
+  const folderIdIn = parsed.data.folderId ?? null;
+  if (folderIdIn) {
+    const inSpace = await prisma.folder.findFirst({ where: { id: folderIdIn, organizationId: c.organizationId, spaceId: parsed.data.spaceId }, select: { id: true } });
+    if (!inSpace) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const canEdit = await canEditSpace(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const container = folderIdIn ? { kind: "folder" as const, id: folderIdIn } : { kind: "space" as const, id: parsed.data.spaceId };
+  // Full access on it, or (a Folder, under the legacy Private rule) today's
+  // canEditSpace on its Space (containerGate has the rule).
+  const gate = await containerGate(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), container);
+  if (gate === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (gate === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const board = await createBoard({
