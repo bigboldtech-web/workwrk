@@ -93,14 +93,16 @@ describe("views/[viewId] PATCH preserves the view's existing data", () => {
 describe("views/[viewId] PATCH pins and unpins the List's default (decision 9)", () => {
   const patch = src.slice(src.indexOf("export async function PATCH"), src.indexOf("export async function DELETE"));
 
-  it("gates a pin or an unpin on canSaveView, the gate Set as default had, before anything is written (decision 9)", () => {
-    const guard = patch.indexOf("if (parsed.data.isDefault !== undefined && !canSaveView(gate.view, c.userId, gate.canContribute))");
+  it("gates a pin or an unpin on Can edit for the List, with no owner exception, before anything is written", () => {
+    // Worst-case rule (2026-09-25): a pin re-points the whole List, so a
+    // view owner whose access was lowered must not keep that control.
+    const guard = patch.indexOf("if (parsed.data.isDefault !== undefined && !gate.canContribute)");
     expect(guard).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(patch.indexOf("$transaction"));
     expect(guard).toBeLessThan(patch.indexOf("view.update"));
     expect(patch.slice(guard, guard + 200)).toMatch(/PIN_DENIED/);
-    // No stricter ladder for the pin than the one the save gate applies.
-    expect(patch).not.toMatch(/isDefault !== undefined && !gate\.canContribute/);
+    // The owner exception the old Set as default gate had is gone for pins.
+    expect(patch).not.toMatch(/isDefault !== undefined && !canSaveView\(/);
   });
 
   it("refuses a stale unpin instead of sweeping someone else's newer pin", () => {

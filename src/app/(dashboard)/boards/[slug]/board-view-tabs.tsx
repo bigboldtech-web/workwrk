@@ -274,7 +274,9 @@ export function BoardViewTabs({
   const pinRowFor = (v: BoardViewItem, isDefault: boolean) => pinMenuRow({
     isDefault,
     pinned: defaultPinned && isDefault,
-    canPin: canSaveView(v, currentUserId, canManage),
+    // Pinning is List-wide, so only Can edit on the List offers it (the
+    // route's gate); a view owner without it keeps the view, not the pin.
+    canPin: canManage,
     pinnable: personalList || visibleToEveryone(v),
     tabCount: order.length,
   });

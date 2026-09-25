@@ -117,12 +117,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  // PIN AND UNPIN KEEP THE GATE "Set as default" HAD (decision 9: same gate
-  // as today): canSaveView, the contribute ladder plus the view's own owner.
-  // An owner who lost contribute could set their own view as the default
-  // before pinning existed, and still can. The pin's own sentence answers a
-  // refusal, ahead of the generic save refusal below.
-  if (parsed.data.isDefault !== undefined && !canSaveView(gate.view, c.userId, gate.canContribute)) {
+  // PIN AND UNPIN NEED CAN EDIT ON THE LIST (the contribute ladder), with no
+  // owner exception. A pin changes what EVERYONE on the List opens first, so
+  // it is a List-wide control. Decided on the worst case (founder,
+  // 2026-09-25: plan by the worst case of every situation): with the old
+  // "Set as default" gate, a person whose access was lowered on purpose
+  // could still re-point the whole List at their own view, and nobody else
+  // could tell why the List opened there. With this gate the worst case is
+  // small: that person keeps their view and can still open it by its link.
+  // They lose only a control over other people. The pin's own sentence
+  // answers a refusal, ahead of the generic save refusal below.
+  if (parsed.data.isDefault !== undefined && !gate.canContribute) {
     return NextResponse.json({ error: PIN_DENIED }, { status: 403 });
   }
   if (!canSaveView(gate.view, c.userId, gate.canContribute)) {

@@ -414,7 +414,7 @@ describe("pinMenuRow (decision 9: the gate Set as default had)", () => {
     expect(pinMenuRow({ ...base, tabCount: 1 })).toBe("none");
   });
 
-  it("shows no row to a viewer the route would refuse (canPin is canSaveView for that view)", () => {
+  it("shows no row to a viewer the route would refuse (canPin is Can edit on the List)", () => {
     expect(pinMenuRow({ ...base, canPin: false })).toBe("none");
     expect(pinMenuRow({ ...base, isDefault: true, pinned: true, canPin: false })).toBe("none");
   });
