@@ -339,3 +339,27 @@ describe("widget math", () => {
     expect(sortListRows(rows, "title", 1).map((r) => r.id)).toEqual(["b"]);
   });
 });
+
+// An older List may hold a custom field keyed "status" beside the built-in
+// Status; a card's rule names it "field:status" (field-keys.ts ruleFieldIdOf).
+describe("a field keyed like a built-in", () => {
+  it("is matched from the field, and the built-in from the task", () => {
+    const r = row({ status: "TO_DO", metadata: { status: "Waiting on legal" } });
+    expect(matchesWidgetRule(r, { field: "field:status", operator: "contains", value: "legal" }, "UTC")).toBe(true);
+    expect(matchesWidgetRule(r, { field: "field:status", operator: "is", value: "TO_DO" }, "UTC")).toBe(false);
+    expect(matchesWidgetRule(r, { field: "status", operator: "is", value: "TO_DO" }, "UTC")).toBe(true);
+  });
+
+  it("is kept for a reader of a List that defines it, and dropped for one that cannot read it", () => {
+    const [card] = parseWidgets([
+      { id: "c", kind: "list", title: "C", source: { kind: "lists", listIds: ["A", "P"] }, filter: { rules: [{ field: "field:status", operator: "isSet", value: "" }, { field: "field:secret", operator: "isSet", value: "" }] }, layout },
+    ]);
+    const ctx: RedactContext = {
+      readableListsFor: (s) => (s.kind === "lists" ? s.listIds.filter((id) => id === "A") : ["A"]),
+      fieldKeysByList: new Map([["A", new Set(["status"])], ["P", new Set(["secret"])]]),
+    };
+    const [out] = redactWidgetsForReader([card], ctx);
+    expect((out as { filter: { rules: Array<{ field: string }> } }).filter.rules.map((r) => r.field)).toEqual(["field:status"]);
+    expect(cardVisibility(card, ctx)).toEqual({ kind: "partial", hiddenListIds: ["P"], hiddenRules: [{ field: "field:secret", operator: "isSet", value: "" }] });
+  });
+});

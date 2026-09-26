@@ -20,6 +20,7 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { axisIdOf, fieldKeyOfId } from "@/lib/field-keys";
 
 const FALLBACK_COLORS = ["#6366F1", "#10B981", "#F59E0B", "#EC4899", "#06B6D4", "#A855F7", "#EF4444", "#71717A"];
 
@@ -74,7 +75,9 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
     ];
     for (const f of fields) {
       if (f.type === "DROPDOWN" || f.type === "MULTI_SELECT" || f.type === "LABELS" || f.type === "TSHIRT_SIZE") {
-        opts.push({ key: f.key, label: f.label });
+        // An older field keyed "owner" or "status" is its own axis
+        // ("field:owner"), never the built-in one (field-keys.ts).
+        opts.push({ key: axisIdOf(f.key), label: f.label });
       }
     }
     return opts;
@@ -114,7 +117,7 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
       else if (groupBy === "owner") push(it.ownerId ?? "__unset__", it);
       else if (groupBy === "priority") push(it.priority ?? "__unset__", it);
       else {
-        const raw = it.metadata?.[groupBy];
+        const raw = it.metadata?.[fieldKeyOfId(groupBy)];
         if (Array.isArray(raw)) {
           if (raw.length === 0) push("__unset__", it);
           for (const v of raw) push(String(v), it);
@@ -148,7 +151,7 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
         buckets.delete(t.k);
       });
     } else {
-      const field = fields.find((f) => f.key === groupBy);
+      const field = fields.find((f) => axisIdOf(f.key) === groupBy);
       const choices = field?.options?.choices ?? [];
       choices.forEach((c, i) => take(c.value, c.label, c.color ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]));
       const leftover = Array.from(buckets.entries()).filter(([k]) => k !== "__unset__");

@@ -74,6 +74,8 @@ export async function addBoardField(args: {
   return mutateBoardSchema(args.boardId, async (schema) => {
     if (args.check) await args.check(schema);
     const existingKeys = schema.fields.map((f) => f.key);
+    // Never a built-in's key either ("Owner" is owner_2, not the Assignee
+    // column's "owner"): field-keys.ts. A rename keeps the key it was given.
     const key = slugifyFieldKey(trimmed, existingKeys);
     const options = args.optionsFor ? await args.optionsFor(schema) : args.options;
     const def: FieldDef = {

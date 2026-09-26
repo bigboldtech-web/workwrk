@@ -29,6 +29,7 @@ import {
   type ItemTag,
 } from "@/lib/board-items-shared";
 import { isBuiltinShown, catalogEntryForField, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
+import { fieldKeyOfId, tableColumnIdOf } from "@/lib/field-keys";
 import { isConnectField, isMirrorField } from "@/lib/list-connect";
 import {
   boardStatusFor,
@@ -228,6 +229,11 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
 // `computedKeys` names this List's Connect and Mirror columns: what they show
 // is not in `metadata` (list-link-rows.ts computedCellValue), so they are read
 // from the row's computed cells and never from the stored ids.
+//
+// `key` is a COLUMN id. A custom field's column id is its key, or
+// "field:<key>" when an older List has a field keyed like a built-in column
+// (field-keys.ts tableColumnIdOf), so the built-in cases below only ever match
+// the built-in and the default reads the field's own stored key.
 function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[], computedKeys?: ReadonlySet<string>): number {
   const val = (row: BoardItemRow): string | number => {
     switch (key) {
@@ -259,8 +265,9 @@ function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses
       case "type": return row.itemTypeId ?? "￿";
       case "tags": return (row.tags ?? []).map((t) => t.name).join(",").toLowerCase() || "￿";
       default: {
-        if (computedKeys?.has(key)) return computedCellValue(row, key) ?? "￿";
-        const v = row.metadata?.[key];
+        const fieldKey = fieldKeyOfId(key);
+        if (computedKeys?.has(fieldKey)) return computedCellValue(row, fieldKey) ?? "￿";
+        const v = row.metadata?.[fieldKey];
         if (v == null || v === "") return "￿";
         return typeof v === "number" ? v : String(v).toLowerCase();
       }
@@ -342,6 +349,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // cells rather than metadata (compareByColumn, the group-by below).
   const computedKeys = useMemo(
     () => new Set(customFields.filter((f) => isConnectField(f) || isMirrorField(f)).map((f) => f.key)),
+    [customFields],
+  );
+  // Each custom field by its COLUMN id, the id every column, sort, group,
+  // width and pin here is keyed by. A List made before field keys skipped the
+  // built-ins may hold a field keyed "owner": its column is "field:owner", so
+  // it never renders, sorts or writes as the Assignee column (field-keys.ts).
+  const fieldByCol = useMemo(
+    () => new Map(customFields.map((f) => [tableColumnIdOf(f.key), f] as const)),
     [customFields],
   );
   // Field management is the List's schema, a step above content write.
@@ -830,7 +845,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // Every column in the list is a valid grouping — select fields bucket by
     // their option, everything else buckets by its raw value.
     for (const f of customFields) {
-      opts.push({ key: f.key, label: f.label });
+      opts.push({ key: tableColumnIdOf(f.key), label: f.label });
     }
     return opts;
   }, [customFields]);
@@ -849,11 +864,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       // A Connect or Mirror column groups by what its cell shows (the
       // connected titles, the mirrored value), never by the stored ids,
       // which also named tasks the viewer cannot read.
-      if (computedKeys.has(groupBy)) {
-        const shown = computedCellValue(it, groupBy, "group");
+      // Past the built-ins, `groupBy` is a column id: "field:owner" groups by
+      // the field keyed "owner", never by the assignee.
+      const fieldKey = fieldKeyOfId(groupBy);
+      if (computedKeys.has(fieldKey)) {
+        const shown = computedCellValue(it, fieldKey, "group");
         return shown == null || shown === "" ? "__unset__" : String(shown);
       }
-      const raw = it.metadata?.[groupBy];
+      const raw = it.metadata?.[fieldKey];
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
     const map = new Map<string, BoardItemRow[]>();
@@ -915,7 +933,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       map.clear();
     } else {
       // Custom SELECT field — use field.options to resolve label + color.
-      const field = customFields.find((f) => f.key === groupBy);
+      const field = fieldByCol.get(groupBy);
       const optionByValue = new Map<string, { label: string; color?: string }>();
       // Grouping is allowed on any field now, so options may be absent or a
       // non-array shape — guard so a for..of never throws ("not iterable").
@@ -946,7 +964,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap, statusOf, computedKeys]);
+  }, [groupBy, topLevel, fieldByCol, groupDirection, statuses, itemTypeMap, statusOf, computedKeys]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -1445,7 +1463,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (showPriority) cols.push({ key: "priority", label: "Priority", def: 104 });
     if (showType) cols.push({ key: "type", label: "Type", def: 120 });
     if (showTags) cols.push({ key: "tags", label: "Tags", def: 150 });
-    for (const f of customFields) cols.push({ key: f.key, label: f.label, def: 150 });
+    for (const f of customFields) cols.push({ key: tableColumnIdOf(f.key), label: f.label, def: 150 });
     if (showCreated) cols.push({ key: "created", label: "Created", def: 110 });
     if (showStart) cols.push({ key: "start", label: "Start date", def: 100 });
     if (showUpdated) cols.push({ key: "updated", label: "Updated", def: 110 });
@@ -1524,7 +1542,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Build the header-menu context for one column. Options are column-kind aware:
   // custom fields get move/edit/delete; status gets Edit statuses; owner/status/
   // fields can group; owner/due/priority/type/tags/created + fields can hide.
-  const fieldKeys = new Set(customFields.map((f) => f.key));
+  // `key` is a column id throughout: a custom field is looked up by it
+  // (fieldByCol) and acted on by its stored key, so the header of an older
+  // field keyed "owner" moves, edits, hides and deletes that field and never
+  // the Assignee column.
   const buildColMenu = (key: string): ColMenuCtx | undefined => {
     // A view's owner who cannot write the List's tasks may still arrange
     // their own view: they get the view rows (sort, group, pin), never the
@@ -1533,20 +1554,22 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // Moving, editing and deleting a field write the List's schema, so they
     // follow `canManage`: a contributor's header menu keeps sort, group,
     // hide and pin, and never a field row the server would refuse.
-    const isField = canManage && fieldKeys.has(key);
-    const hideKey = BUILTIN_HIDE_KEY[key] ?? (fieldKeys.has(key) ? key : undefined);
-    const canGroup = key === "status" || key === "owner" || fieldKeys.has(key);
+    const field = fieldByCol.get(key);
+    const managed = canManage ? field : undefined;
+    // A field hides under its stored key, the one the Fields shelf toggles.
+    const hideKey = field ? field.key : BUILTIN_HIDE_KEY[key];
+    const canGroup = key === "status" || key === "owner" || !!field;
     return {
       sortDir: sortCol?.key === key ? sortCol.dir : null,
       grouped: groupBy === key,
       onSort: (dir) => setSortCol(dir ? { key, dir } : null),
       onGroup: canGroup ? () => setGroupBy(groupBy === key ? null : key) : undefined,
       onHide: hideKey && onHideField ? () => onHideField(hideKey) : undefined,
-      onMoveStart: isField ? () => moveField(key, true) : undefined,
-      onMoveEnd: isField ? () => moveField(key, false) : undefined,
+      onMoveStart: managed ? () => moveField(managed.key, true) : undefined,
+      onMoveEnd: managed ? () => moveField(managed.key, false) : undefined,
       onEditStatuses: canManage && key === "status" ? onEditStatuses : undefined,
-      onEditField: isField && onOpenFields ? onOpenFields : undefined,
-      onDeleteField: isField ? () => deleteField(key) : undefined,
+      onEditField: managed && onOpenFields ? onOpenFields : undefined,
+      onDeleteField: managed ? () => deleteField(managed.key) : undefined,
       onAddColumn: canManage ? onOpenFields : undefined,
       // Name is always the first frozen column once anything is pinned, so it
       // has no pin of its own.
@@ -1557,10 +1580,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Resolve a column's colored type icon for the header (ClickUp shows the
   // field-type icon before each label). Custom fields use their field type;
   // built-ins (incl. Name/Status) map to their BUILTIN_COLUMNS icon.
-  const fieldByKey = new Map(customFields.map((f) => [f.key, f] as const));
   const COL_BUILTIN: Record<string, string> = { name: "__name", status: "__builtin_status", ...BUILTIN_HIDE_KEY };
   const colIcon = (key: string): { Icon: LucideIcon; color: string } | null => {
-    const cf = fieldByKey.get(key);
+    const cf = fieldByCol.get(key);
     // catalogEntryForField, not the type alone: a Connect column is stored as
     // a RELATIONSHIP and must not wear the doc-link Relationship icon.
     if (cf) { const e = catalogEntryForField(cf); return e ? { Icon: e.Icon, color: e.color } : null; }
@@ -2172,7 +2194,10 @@ function Row({
   // Bumped by the hover "rename" pencil to put the title cell into edit mode.
   const [editToken, setEditToken] = useState(0);
   const moreRef = useRef<ContextMenuHandle>(null);
-  const fieldByKey = useMemo(() => new Map(customFields.map((f) => [f.key, f] as const)), [customFields]);
+  // By COLUMN id (field-keys.ts tableColumnIdOf): the built-in cases of
+  // metaCell match only built-in columns, and an older field keyed "owner"
+  // arrives here as "field:owner", reads metadata.owner and writes only it.
+  const fieldByCol = useMemo(() => new Map(customFields.map((f) => [tableColumnIdOf(f.key), f] as const)), [customFields]);
   const pickerStatuses = statusOptions ?? statuses;
   const statusCanEdit = statusEditable ?? canEdit;
   // A row that carries a colour, or sits in a table with frozen columns, has
@@ -2280,7 +2305,7 @@ function Row({
       case "sops":
         return <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>;
       default: {
-        const f = fieldByKey.get(key);
+        const f = fieldByCol.get(key);
         if (!f) return null;
         return (
           <MetaCell key={key} style={stick(key)}>
@@ -3371,11 +3396,13 @@ function GroupSummaryRow({
   }, [rows]);
 
   if (columnKeys) {
-    const fieldByKey = new Map(customFields.map((f) => [f.key, f] as const));
+    // By column id, as the rows are: an older field keyed "owner" sums under
+    // its own column and the Assignee column keeps its avatars.
+    const fieldByCol = new Map(customFields.map((f) => [tableColumnIdOf(f.key), f] as const));
     const stick = (key: string): React.CSSProperties | undefined =>
       stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 2, background: "var(--os-surface-1, var(--os-surface))" } : undefined;
     const cell = (key: string): React.ReactNode => {
-      const f = fieldByKey.get(key);
+      const f = fieldByCol.get(key);
       if (f) return <td key={key} className="px-4 py-1.5" style={stick(key)}><CustomFieldSummary field={f} rows={rows} /></td>;
       switch (key) {
         case "status":
@@ -3492,7 +3519,7 @@ function GroupSummaryRow({
       ) : null}
       {/* Custom fields */}
       {customFields.map((f) => (
-        <td key={f.key} className="px-4 py-1.5"><CustomFieldSummary field={f} rows={rows} /></td>
+        <td key={tableColumnIdOf(f.key)} className="px-4 py-1.5"><CustomFieldSummary field={f} rows={rows} /></td>
       ))}
       {/* Optional built-in column spacers (match the data-row columns) + actions */}
       {showCreated ? <td className="px-4 py-1.5" /> : null}

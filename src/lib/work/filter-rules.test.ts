@@ -82,6 +82,18 @@ describe("matchesRule (moved verbatim from board-filter-bar.tsx)", () => {
     expect(matchesRule(row(), rule("priority", "is", "HIGH"))).toBe(true);
     expect(matchesRule(row(), rule("type", "is", "type-bug"))).toBe(true);
   });
+
+  // An older List may hold a custom field keyed "status" or "due" beside the
+  // built-ins; its rule names it "field:status" (field-keys.ts ruleFieldIdOf).
+  it("reads a field keyed like a built-in from the field, and the built-in from the task", () => {
+    const r = row({ metadata: { status: "Blocked on vendor", due: "2027-01-01" } });
+    expect(matchesRule(r, rule("field:status", "is", "blocked on vendor"))).toBe(true);
+    expect(matchesRule(r, rule("field:status", "is", "to_do"))).toBe(false);
+    expect(matchesRule(r, rule("status", "is", "to_do"))).toBe(true);
+    expect(matchesRule(r, rule("status", "is", "blocked on vendor"))).toBe(false);
+    expect(matchesRule(r, rule("field:due", "contains", "2027"))).toBe(true);
+    expect(matchesRule(row({ metadata: {} }), rule("field:status", "isNotSet"))).toBe(true);
+  });
 });
 
 describe("ruleActive", () => {

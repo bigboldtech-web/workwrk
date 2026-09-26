@@ -7,10 +7,16 @@
 // rule must mean the same thing. board-filter-bar.tsx re-exports everything
 // here, so every existing import keeps working unchanged.
 //
-// Pure: type-only imports.
+// A rule's `field` is a built-in ("status", "assignee", ...) or a custom
+// field's id: its key, or "field:<key>" when an older List has a field keyed
+// like a built-in (field-keys.ts ruleFieldIdOf). The built-in branches only
+// ever match the built-in; a field is always read from its own stored key.
+//
+// Pure: type-only imports, and field-keys.ts, which is pure too.
 
 import type { BoardItemRow } from "@/lib/board-items-shared";
 import type { RowColor, RowColorRule } from "@/lib/list-comfort";
+import { fieldKeyOfId } from "@/lib/field-keys";
 
 export type FilterOperator =
   | "is"
@@ -57,7 +63,7 @@ function scalarFor(row: BoardItemRow, field: string): string {
     case "type": return row.itemTypeId ?? "";
     case "title": return row.title;
     default: {
-      const v = row.metadata?.[field];
+      const v = row.metadata?.[fieldKeyOfId(field)];
       return v == null ? "" : String(v);
     }
   }

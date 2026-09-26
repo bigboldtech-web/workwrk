@@ -11,6 +11,7 @@
 // server's.
 
 import { zonedTimeToUtc } from "@/lib/reports/schedule";
+import { fieldKeyOfId } from "@/lib/field-keys";
 import type { ChartGroupBy, ListSort, StatMetric, StatScope, WidgetFilter, WidgetRule } from "./widgets";
 
 export interface WidgetRow {
@@ -93,7 +94,9 @@ export function matchesWidgetRule(row: WidgetRow, rule: WidgetRule, zone: string
       : rule.field === "priority" ? row.priority ?? ""
         : rule.field === "type" ? row.itemTypeId ?? ""
           : rule.field === "title" ? row.title
-            : scalar(row.metadata[rule.field]);
+            // A custom field's id: its key, or "field:<key>" for a key a
+            // built-in also uses (field-keys.ts ruleFieldIdOf).
+            : scalar(row.metadata[fieldKeyOfId(rule.field)]);
   const lv = v.toLowerCase();
   const target = rule.value.toLowerCase();
   switch (rule.operator) {

@@ -19,6 +19,7 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { ruleFieldIdOf } from "@/lib/field-keys";
 import type { PersonRef } from "./assignee-picker";
 import { useItemTypes } from "./use-item-types";
 import { Switch } from "@/components/ui/switch";
@@ -53,8 +54,9 @@ export const OPERATOR_LABEL: Record<FilterOperator, string> = {
   contains: "contains",
 };
 
-/** Built-in filterable fields. Any other `field` string is treated as a
- *  custom-field key and matched against Item.metadata[field]. */
+/** Built-in filterable fields. Any other `field` string is a custom field's
+ *  id (its key, or "field:<key>" for a key a built-in also uses) and is
+ *  matched against that field's own Item.metadata value. */
 export type BuiltinFilterField = "status" | "assignee" | "priority" | "due" | "tags" | "title" | "type";
 
 export interface BoardFilters {
@@ -334,7 +336,9 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
     { key: "tags", label: "Tags" },
     { key: "title", label: "Title" },
     ...(itemTypes.length > 0 ? [{ key: "type", label: "Task Type" }] : []),
-    ...customFields.map((f) => ({ key: f.key, label: f.label })),
+    // A field keyed like a built-in ("status" on an older List) is offered as
+    // "field:status", so its rule reads the field and never the built-in.
+    ...customFields.map((f) => ({ key: ruleFieldIdOf(f.key), label: f.label })),
   ], [itemTypes.length, customFields]);
 
   const update = (id: string, patch: Partial<FilterRule>) =>
