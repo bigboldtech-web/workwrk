@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { Building2, Crown, Sparkles, Palette, Globe2 } from "lucide-react";
+import { Building2, Crown, Sparkles, Palette, Globe2, type LucideIcon } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 
 interface Company {
@@ -126,10 +126,15 @@ export default function CompanyDetailPage() {
             <Select
               value={company.status}
               onValueChange={(v) => {
+                // Says only what the build does: the write bumps every
+                // member's tokenVersion and the session check revokes on the
+                // workspace status, so live sessions end within five minutes.
                 if (
                   (v === "SUSPENDED" || v === "CANCELLED") &&
                   !window.confirm(
-                    `Set ${company.name} to ${v}? This immediately blocks all of their users from signing in.`,
+                    v === "SUSPENDED"
+                      ? `Suspend ${company.name}? Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time. Anyone who also belongs to another WorkwrK workspace can sign back in to that one.`
+                      : `Schedule ${company.name} for deletion? Nobody there can sign in, and everyone signed in now is signed out within five minutes. It stays recoverable for 30 days by setting it back to Active. Anyone who also belongs to another WorkwrK workspace can sign back in to that one.`,
                   )
                 ) {
                   return;
@@ -214,7 +219,7 @@ function Stat({ label, value }: { label: string; value: number }) {
 function FeatureRow({
   icon: Icon, title, blurb, enabled, disabled, onChange,
 }: {
-  icon: any;
+  icon: LucideIcon;
   title: string;
   blurb: string;
   enabled: boolean;

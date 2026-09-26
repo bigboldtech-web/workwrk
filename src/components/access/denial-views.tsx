@@ -24,7 +24,7 @@
 // module switch) are client islands rendered as children.
 
 import type { ReactNode } from "react";
-import { Hash, Lock } from "lucide-react";
+import { Hash, Lock, ShieldCheck } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
 import { BackButton } from "@/components/ui/back-button";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,15 @@ function LockTile() {
   return (
     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-hover text-ink-2" aria-hidden>
       <Lock className="h-5 w-5" strokeWidth={1.5} />
+    </span>
+  );
+}
+
+/** The same tile with a shield: a staff-only surface (the Staff console gate). */
+function ShieldTile() {
+  return (
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-hover text-ink-2" aria-hidden>
+      <ShieldCheck className="h-5 w-5" strokeWidth={1.5} />
     </span>
   );
 }
@@ -159,7 +168,7 @@ export interface LockedPageProps {
    * with a "#" in the sidebar two columns away, so a lock here said the
    * opposite of what the product said about it everywhere else.
    */
-  glyph?: "lock" | "hash";
+  glyph?: "lock" | "hash" | "shield";
   /** The owner's avatar beside their name (spec-talk 2.2 States). */
   ownerAvatar?: string | null;
   back: BackTarget;
@@ -177,7 +186,7 @@ export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId
     <DenialBlock
       title={name}
       sentence={sentence}
-      tile={kind === "hash" ? <HashTile /> : <LockTile />}
+      tile={kind === "hash" ? <HashTile /> : kind === "shield" ? <ShieldTile /> : <LockTile />}
       back={back}
       primary={primary}
     >

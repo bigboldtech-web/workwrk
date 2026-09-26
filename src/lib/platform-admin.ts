@@ -13,11 +13,34 @@ export async function isPlatformAdminEmail(
   email: string | null | undefined,
 ): Promise<boolean> {
   if (!email) return false;
+  const lower = email.toLowerCase();
   const row = await prisma.platformAdmin.findUnique({
-    where: { email: email.toLowerCase() },
+    where: { email: lower },
     select: { id: true },
   });
-  return Boolean(row);
+  if (row) return true;
+  return bootstrapEmails().has(lower);
+}
+
+/**
+ * LOCAL DEVELOPMENT ONLY. A fresh database has an empty PlatformAdmin table
+ * and the only way onto the staff list is to be added by someone already on
+ * it (POST /api/admin/platform-staff is itself staff-gated), so nobody can be
+ * first. `PLATFORM_STAFF_BOOTSTRAP_EMAILS` (comma-separated, in .env.local)
+ * names who counts as staff until their row exists: add yourself through
+ * Staff console › Staff, then clear it. It is ignored entirely in production
+ * (`next start` sets NODE_ENV=production), so the allow-list table stays the
+ * one security boundary there.
+ */
+function bootstrapEmails(): Set<string> {
+  if (process.env.NODE_ENV === "production") return new Set();
+  const raw = process.env.PLATFORM_STAFF_BOOTSTRAP_EMAILS ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 interface SessionLike {

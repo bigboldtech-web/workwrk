@@ -1,20 +1,19 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
-import { logAuditEvent } from "@/lib/activity";
-import { setFeature, type EnterpriseFeature } from "@/lib/enterprise-features";
+import { applyCompanyPatch, validateCompanyPatch } from "@/lib/admin/company-patch";
+import { requestIp, staffActorFromSession } from "@/lib/staff-audit";
 
 /**
- * Admin → company detail. Platform staff only.
+ * Staff console → one company. Platform staff only.
  *
- * GET    → org metadata + counts + current Enterprise feature flags.
- * PATCH  → toggle a single feature flag (body: { feature, enabled })
- *          OR change the plan (body: { plan }).
+ * GET    → company metadata + counts + current Enterprise add-on flags.
+ * PATCH  → change the plan (body: { plan }), the status (body: { status })
+ *          or one add-on (body: { feature, enabled }). Every branch runs in
+ *          one transaction with its StaffAction row (src/lib/admin/company-patch.ts);
+ *          SUSPENDED and CANCELLED also revoke every member's live session.
  */
-
-const VALID_FEATURES = new Set<EnterpriseFeature>(["byok", "whiteLabel", "customDomain"]);
-const VALID_PLANS = new Set(["STARTER", "GROWTH", "SCALE", "ENTERPRISE"]);
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -35,9 +34,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       },
     },
   });
-  if (!org) return jsonError("Org not found", 404);
+  if (!org) return jsonError("Company not found", 404);
 
-  // Surface flags clearly for the admin UI.
+  // Surface flags clearly for the console.
   const settings = (org.settings ?? {}) as Record<string, unknown>;
   const features = (settings.features ?? {}) as Record<string, boolean>;
   return jsonSuccess({
@@ -57,55 +56,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (denied) return denied;
 
   const { id } = await params;
-  const body = await req.json();
-  const actorId = getUserId(session);
+  const body = await req.json().catch(() => ({}));
+  const validated = validateCompanyPatch(body);
+  if (!validated.ok) return jsonError(validated.error);
 
-  // Plan change
-  if (typeof body?.plan === "string") {
-    if (!VALID_PLANS.has(body.plan)) return jsonError("Invalid plan");
-    await prisma.organization.update({
-      where: { id },
-      data: { plan: body.plan },
-    });
-    logAuditEvent({
-      type: "admin.org.plan_changed",
-      actorId,
-      organizationId: id,
-      description: `Platform staff changed plan to ${body.plan}`,
-      targetType: "Organization",
-      targetId: id,
-      metadata: { plan: body.plan },
-      severity: "warning",
-    });
-  }
+  const result = await applyCompanyPatch({
+    id,
+    patch: validated.patch,
+    actor: staffActorFromSession(session),
+    ip: requestIp(req),
+  });
+  if (!result.ok) return jsonError(result.error, result.status);
 
-  // Feature toggle
-  if (typeof body?.feature === "string") {
-    if (!VALID_FEATURES.has(body.feature as EnterpriseFeature)) return jsonError("Unknown feature");
-    if (typeof body?.enabled !== "boolean") return jsonError("`enabled` must be a boolean");
-    await setFeature(id, body.feature as EnterpriseFeature, body.enabled);
-  }
-
-  // Status change
-  if (typeof body?.status === "string") {
-    const VALID_STATUS = new Set(["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"]);
-    if (!VALID_STATUS.has(body.status)) return jsonError("Invalid status");
-    await prisma.organization.update({
-      where: { id },
-      data: { status: body.status as "ACTIVE" | "TRIAL" | "SUSPENDED" | "CANCELLED" },
-    });
-    logAuditEvent({
-      type: "admin.org.status_changed",
-      actorId,
-      organizationId: id,
-      description: `Platform staff set status to ${body.status}`,
-      targetType: "Organization",
-      targetId: id,
-      metadata: { status: body.status },
-      // Suspend/cancel lock users out — log those as critical.
-      severity: body.status === "ACTIVE" || body.status === "TRIAL" ? "warning" : "critical",
-    });
-  }
-
-  return jsonSuccess({ ok: true });
+  return jsonSuccess({ ok: true, changed: result.changed, signedOut: result.signedOut, company: result.company });
 }

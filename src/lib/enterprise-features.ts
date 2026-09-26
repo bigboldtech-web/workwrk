@@ -57,8 +57,10 @@ export async function setFeature(
   organizationId: string,
   feature: EnterpriseFeature,
   enabled: boolean,
+  /** The caller's transaction, so the flag and its audit row commit together. */
+  db: Pick<typeof prisma, "organization"> = prisma,
 ): Promise<void> {
-  const org = await prisma.organization.findUnique({
+  const org = await db.organization.findUnique({
     where: { id: organizationId },
     select: { settings: true },
   });
@@ -66,7 +68,7 @@ export async function setFeature(
   const current = (org.settings && typeof org.settings === "object" ? org.settings : {}) as Record<string, unknown>;
   const features = (current.features && typeof current.features === "object" ? current.features : {}) as FeatureFlags;
   features[feature] = enabled;
-  await prisma.organization.update({
+  await db.organization.update({
     where: { id: organizationId },
     data: { settings: { ...current, features: features as Record<string, boolean> } },
   });

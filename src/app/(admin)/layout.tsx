@@ -1,67 +1,58 @@
-// Server-side gate for the cross-tenant back-office (bbtadmin.workwrk.com).
+// Server-side gate for the Staff console (admin.workwrk.com).
 //
-// Platform STAFF only — resolved from the PlatformAdmin allowlist, NOT from
+// Platform STAFF only, resolved from the PlatformAdmin allow-list, NOT from
 // tenant `User.accessLevel`. A customer's own SUPER_ADMIN is an admin of THEIR
-// org, not of WorkwrK, and must never reach this surface or other tenants'
-// data/ARR. The matching API routes (/api/admin/*) gate on the same check, so
-// security does not depend on this UI layer alone.
+// workspace, not of WorkwrK, and must never reach this surface or another
+// company's data. The matching API routes (/api/admin/*) gate on the same
+// check (src/app/api/admin/require-platform-admin.test.ts asserts it for
+// every file), so security does not depend on this layout alone.
 //
 // LOOP SAFETY: on the admin host the proxy bounces every non-/admin path back
-// to /admin. So we must NEVER redirect to a relative app path from here —
-// unauthenticated users go to the APP host login (absolute URL); non-staff get
-// a rendered dead-end page, not a redirect.
+// to /admin. So this file never redirects to a relative app path: an
+// unauthenticated person goes to /login (allowed on the admin host, with
+// callbackUrl bringing them back), and a signed-in person who is not staff
+// gets a rendered denial, whose only link is the ABSOLUTE app URL.
 
+import "@/app/(dashboard)/tokens.css";
+import "@/app/(dashboard)/os.css";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isPlatformAdminSession } from "@/lib/platform-admin";
+import { recordDeniedAccess, requestIp } from "@/lib/staff-audit";
+import { LockedPage } from "@/components/access";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { AdminShell } from "./admin-shell";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
-  // bbtadmin is a STANDALONE back-office with its own login on its own host —
-  // internal staff never need to touch the customer app. The proxy allows
-  // /login + /api/auth through on the admin host; callbackUrl returns the
-  // staff member to the console after they sign in. (Relative, not the app
-  // host — this is a self-contained system.)
   if (!session?.user) {
     redirect("/login?callbackUrl=/admin");
   }
 
   const allowed = await isPlatformAdminSession(session);
   if (!allowed) {
-    const email = (session.user as { email?: string | null }).email ?? "unknown";
+    const user = session.user as { id?: string; email?: string | null };
+    const email = user.email ?? "an account with no email";
+    // One row per would-be viewer per ten minutes (spec section 1 Denial):
+    // a person who hits the wall is recorded on /admin/audit, a script
+    // hammering the host bumps one row's hit count. Never throws.
+    await recordDeniedAccess({ email, userId: user.id ?? null, ip: requestIp(await headers()) });
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#0a0a0a",
-          color: "#fafafa",
-          fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
-          padding: 24,
-        }}
-      >
-        <div style={{ maxWidth: 440, textAlign: "center" }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 8px" }}>
-            Restricted — WorkwrK staff only
-          </h1>
-          <p style={{ fontSize: 14, color: "#a0a0a0", lineHeight: 1.55, margin: "0 0 10px" }}>
-            This back-office is limited to the WorkwrK platform-staff allowlist.
-          </p>
-          <p style={{ fontSize: 13, color: "#808080", margin: "0 0 22px" }}>
-            Signed in as <span style={{ color: "#d4ff2e" }}>{email}</span>
-          </p>
-          {appUrl ? (
-            <a href={appUrl} style={{ color: "#fafafa", fontSize: 13, textDecoration: "underline" }}>
-              ← Back to the app
-            </a>
-          ) : null}
-        </div>
+      <div className="workwrk-os min-h-screen bg-app text-ink">
+        <LockedPage
+          glyph="shield"
+          name="This console is for WorkwrK staff"
+          sentence={`You are signed in as ${email}. That account is not on the WorkwrK staff list.`}
+          back={{
+            // Absolute on purpose: the admin host bounces relative paths to /admin.
+            fallbackHref: appUrl ? `${appUrl}${WORK_HOME_HREF}` : WORK_HOME_HREF,
+            label: "WorkwrK",
+          }}
+        />
       </div>
     );
   }

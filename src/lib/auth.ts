@@ -334,7 +334,13 @@ export const authOptions: NextAuthOptions = {
       if (token.id && Date.now() - lastCheck > REVALIDATE_MS) {
         const account_ = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { deletedAt: true, status: true, accessLevel: true, tokenVersion: true },
+          select: {
+            deletedAt: true,
+            status: true,
+            accessLevel: true,
+            tokenVersion: true,
+            organization: { select: { status: true } },
+          },
         });
         token.checkedAt = Date.now();
         const versionMismatch =
@@ -350,6 +356,33 @@ export const authOptions: NextAuthOptions = {
           // Access-level changes (promotion / demotion) take effect in the
           // same window instead of waiting for a fresh sign-in.
           token.accessLevel = account_.accessLevel;
+
+          // The workspace itself. A support suspension or a scheduled
+          // deletion blocked new sign-ins but never touched a live session,
+          // so a company suspended from the Staff console kept working for
+          // the rest of every token's life. Same rule and same fallback as
+          // authorize(): someone who also belongs to a healthy workspace is
+          // moved into it rather than locked out; everyone else is revoked.
+          const orgStatus = account_.organization?.status;
+          if (orgStatus === "SUSPENDED" || orgStatus === "CANCELLED") {
+            const alt = await prisma.organizationMembership.findFirst({
+              where: {
+                userId: token.id as string,
+                organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
+              },
+              select: { organizationId: true, organization: { select: { name: true } } },
+              orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+            });
+            if (alt) {
+              await prisma.user
+                .update({ where: { id: token.id as string }, data: { organizationId: alt.organizationId } })
+                .catch(() => {});
+              token.organizationId = alt.organizationId;
+              token.organizationName = alt.organization.name;
+            } else {
+              token.revoked = true;
+            }
+          }
         }
       }
 

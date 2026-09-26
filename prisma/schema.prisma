@@ -80,6 +80,7 @@ model Organization {
   workflowRuns          WorkflowRun[]
   overtimePolicies      OvertimePolicy[]
   memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
+  staffActions          StaffAction[]
 
   // 🆕 Phase A — universal primitives
   productInstallations ProductInstallation[]
@@ -617,6 +618,44 @@ model PlatformAdmin {
   email     String   @unique
   name      String?
   createdAt DateTime @default(now())
+  /// Console-local layout state per staff member (spec-admin-backoffice
+  /// section 1 Console preferences): sidebar.collapsed, companies.drawerWidth,
+  /// companies.columns, audit.columns, recents. Null reads as an empty object.
+  /// Product preferences (theme, density) are NEVER copied here.
+  consolePrefs Json?
+}
+
+/// One row per write a WorkwrK staff member makes from the Staff console
+/// (spec-admin-backoffice section 3 item 5), plus the sampled
+/// `admin.access.denied` probe. Who (staff user id and email), what (the
+/// action key), which company, a plain summary, before and after, the IP.
+/// Kept for ever: removing a staff member never removes their history, and
+/// deleting a company nulls `targetCompanyId` rather than deleting the rows.
+/// The individual staff member's identity lives ONLY here; the customer's own
+/// ActivityLog row names "WorkwrK Support".
+model StaffAction {
+  id              String        @id @default(cuid())
+  action          String
+  actorUserId     String?
+  actorEmail      String
+  targetCompanyId String?
+  targetCompany   Organization? @relation(fields: [targetCompanyId], references: [id], onDelete: SetNull)
+  targetLabel     String?
+  summary         String
+  before          Json?
+  after           Json?
+  reason          String?
+  ip              String?
+  /// Only `admin.access.denied` ever exceeds 1: a repeat within ten minutes of
+  /// the row's creation increments this instead of writing a new row.
+  hits            Int           @default(1)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @default(now()) @updatedAt
+
+  @@index([createdAt])
+  @@index([targetCompanyId, createdAt])
+  @@index([actorEmail, createdAt])
+  @@index([action, createdAt])
 }
 
 enum UserStatus {
