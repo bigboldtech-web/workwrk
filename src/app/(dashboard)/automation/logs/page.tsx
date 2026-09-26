@@ -1,49 +1,73 @@
 "use client";
 
-/* /automation/logs, the execution log.
+/* /automation/logs: exactly what an automation did, and why it failed
+ * (spec-ai-automation /automation/logs). Every Member reads it.
  *
- *  GET  /api/automation/runs?workflowId=&status=&take=   → run table
- *  GET  /api/automation/runs/[id]                        → drawer detail (steps)
- *  GET  /api/automation/workflows                        → workflow filter select
- *  GET  /api/automation/actions                          → safeToRetry map
- *  POST /api/automation/runs/[id]/retry                  → manual retry
+ *   GET  /api/automation/runs   ?status= ?workflowId= ?severity= ?record=
+ *        ?days= | ?from= ?to=  ?sort=newest|oldest  ?take=  ?cursor=
+ *        -> { runs, total, nextCursor, restarted }
+ *   GET  /api/automation/runs/[id]         the drawer (steps, payloads, retry)
+ *   POST /api/automation/runs/[id]/retry   Retry failed steps
  *
- * Row click opens a right-side drawer with every step's input/output
- * JSON. Retry appears only when the server would accept it (FAILED/
- * PARTIAL run whose failed action steps are all retry-safe), the API
- * re-validates regardless. Deep links: ?workflowId= pre-filters,
- * ?runId= opens the drawer directly (builder run-history links here).
+ * Every filter, the sort and the page are in the URL, so each entry point
+ * (Health's legend, a workflow's View logs, the builder's Recent runs)
+ * arrives filtered and a filtered view is shareable. Per viewer, in
+ * home.work.surface["automation.logs"]: the columns, the page size and the
+ * default sort. ?runId= opens the run drawer; Esc closes it through the
+ * shell's LayerStack.
  */
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { RotateCcw, ScrollText, X } from "lucide-react";
-import { Dots } from "@/components/ui/dots";
-import { SkeletonLines, SkeletonRows } from "@/components/ui/skeleton";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Activity, ChevronRight, Gauge, Link2, RotateCcw, X } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
-import { AutomationHeader, RUN_STATUS_COLORS, StatusPill, relTime, useAutomationRights } from "../shared";
+import { Drawer } from "@/components/ui/drawer";
+import { JsonBlock } from "@/components/ui/json-block";
+import { Picker } from "@/components/ui/picker";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { RunStatusChip, RunStatusDot } from "@/components/automation/run-status-chip";
+import { BTN, InlineRow, NeutralChip } from "@/components/automation/automation-ui";
+import { apiFetch } from "@/lib/api-fetch";
+import { LOG_PAGE_SIZES, LOG_VIEWS, LOG_VIEW_LABEL, RECORD_LABEL, RECORD_TYPES, parseRunStatuses, viewForStatuses } from "@/lib/automation/run-query";
+import { ALERT_LABEL, ALERT_LEVELS } from "@/lib/automation/workflow-list";
+import { formatDate, formatRelative } from "@/lib/format/date";
+import { formatDuration } from "@/lib/format/duration";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { useSurfaceState } from "@/lib/use-surface-state";
+import { pick } from "@/lib/surface-prefs";
 
-interface ApiRunRow {
+interface RunRecord { type: string; id: string; name: string; url: string | null }
+
+interface RunRow {
   id: string;
   workflowId: string;
   workflow: { id: string; name: string } | null;
   triggerEventKey: string;
+  triggerName: string;
   status: string;
   severity: string;
   recordType: string | null;
   recordId: string | null;
   errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
   durationMs: number | null;
   createdAt: string;
+  record: RunRecord | null;
 }
 
-interface ApiStep {
+interface RunStep {
   id: string;
   order: number;
-  stepType: string;
+  stepType: "TRIGGER" | "CONDITION" | "ACTION";
   stepKey: string;
-  stepName: string | null;
+  stepName: string;
   status: string;
   inputJson: unknown;
   outputJson: unknown;
@@ -51,434 +75,526 @@ interface ApiStep {
   durationMs: number | null;
 }
 
-interface ApiRunDetail extends ApiRunRow {
+interface RunDetail extends Omit<RunRow, "workflow"> {
+  workflow: { id: string; name: string; status: string; severity: string };
+  steps: RunStep[];
   triggerPayload: unknown;
-  steps: ApiStep[];
+  detailHidden: boolean;
+  retry: { can: boolean; blockedBy: string[] };
 }
 
-interface ApiWorkflowOption {
-  id: string;
-  name: string;
+const COLUMN_KEYS = ["when", "record", "started", "took", "error"] as const;
+type ColumnKey = (typeof COLUMN_KEYS)[number];
+const COLUMN_LABEL: Record<ColumnKey, string> = { when: "When", record: "Record", started: "Started", took: "Took", error: "Error" };
+const SORTS = ["newest", "oldest"] as const;
+const SORT_LABEL: Record<(typeof SORTS)[number], string> = { newest: "Newest first", oldest: "Oldest first" };
+const STEP_TYPE_LABEL: Record<RunStep["stepType"], string> = { TRIGGER: "Trigger", CONDITION: "Check", ACTION: "Action" };
+
+function runSummary(r: { status: string; errorMessage: string | null; steps?: RunStep[] }): string {
+  const actions = (r.steps ?? []).filter((s) => s.stepType === "ACTION");
+  const ok = actions.filter((s) => s.status === "SUCCESS").length;
+  if (r.status === "SKIPPED") return "The conditions did not match, so nothing ran.";
+  if (r.status === "RUNNING") return "Still running.";
+  if (r.status === "SUCCESS") return actions.length ? `All ${actions.length} action${actions.length === 1 ? "" : "s"} ran.` : "It ran.";
+  if (r.status === "PARTIAL") return `${ok} of ${actions.length} actions ran. ${r.errorMessage ?? ""}`.trim();
+  return r.errorMessage ?? "It failed.";
 }
 
-const RUN_STATUSES = ["SUCCESS", "FAILED", "PARTIAL", "SKIPPED", "RUNNING"] as const;
+/* ─────────────────────────── the run drawer ─────────────────────────── */
 
-const GRID =
-  "grid grid-cols-[96px_minmax(160px,1.4fr)_minmax(130px,1fr)_minmax(120px,1fr)_90px_70px_minmax(140px,1.6fr)] items-center gap-2";
-
-const SELECT =
-  "h-7 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-700 outline-none focus:border-zinc-400";
-
-function fmtDuration(ms: number | null): string {
-  if (ms === null) return "Still running";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function JsonBlock({ label, value }: { label: string; value: unknown }) {
-  if (value === null || value === undefined) return null;
-  let text: string;
-  try {
-    text = JSON.stringify(value, null, 2);
-  } catch {
-    text = String(value);
-  }
-  if (text === "{}" || text === "null") return null;
-  return (
-    <div className="mt-1.5">
-      <div className="text-micro font-semibold uppercase tracking-wide text-zinc-400">
-        {label}
-      </div>
-      <pre className="mt-0.5 max-h-48 overflow-auto rounded-md border border-zinc-100 bg-zinc-50 p-2 text-xs leading-relaxed text-zinc-700">
-        {text}
-      </pre>
-    </div>
-  );
-}
-
-function RunDrawer({
-  runId,
-  safeToRetry,
-  onClose,
-  onRetried,
-}: {
-  runId: string;
-  safeToRetry: Map<string, boolean>;
-  onClose: () => void;
-  onRetried: () => void;
-}) {
+/**
+ * `known`: the run is a row on this page, so the drawer opens at once while it
+ * loads. A deep link to any other id waits for the answer, and a run that is
+ * not in this workspace never opens the drawer at all: `onMissing` hands the
+ * page its 44px sentence instead (spec: "the drawer does not open").
+ */
+function RunDrawer({ runId, known, onClose, onRetried, onMissing }: { runId: string | null; known: boolean; onClose: () => void; onRetried: () => void; onMissing: (id: string) => void }) {
   const { toast } = useOsToast();
-  const [run, setRun] = useState<ApiRunDetail | null>(null);
-  const [error, setError] = useState(false);
+  const datePrefs = useDatePrefs();
+  const [run, setRun] = useState<RunDetail | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [retrying, setRetrying] = useState(false);
-  // Retry is a manager write (POST .../retry answers 403 otherwise).
-  const { canManage } = useAutomationRights();
+  const [openStep, setOpenStep] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/automation/runs/${runId}`, { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setRun(data.run ?? null);
-      if (!data.run) setError(true);
-    } catch {
-      setError(true);
+  const load = useCallback(async (id: string) => {
+    const r = await apiFetch<{ run: RunDetail }>(`/api/automation/runs/${id}`, { cache: "no-store" });
+    if (!r.ok) {
+      setState(r.status === 404 ? "missing" : "error");
+      if (r.status === 404) onMissing(id);
+      return;
     }
-  }, [runId]);
+    setRun(r.data.run);
+    setState("ready");
+  }, [onMissing]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!runId) return;
+    const t = setTimeout(() => { setRun(null); setState("loading"); setOpenStep(null); void load(runId); }, 0);
+    return () => clearTimeout(t);
+  }, [runId, load]);
 
-  const failedActionSteps = run
-    ? run.steps.filter((s) => s.stepType === "ACTION" && s.status === "FAILED")
-    : [];
-  const hasUnsafeFailure = failedActionSteps.some((s) => safeToRetry.get(s.stepKey) !== true);
-  const retryEligible =
-    canManage &&
-    run !== null &&
-    (run.status === "FAILED" || run.status === "PARTIAL") &&
-    failedActionSteps.length > 0 &&
-    !hasUnsafeFailure;
+  // A running run refetches every 10 seconds while the drawer is open, and
+  // stops the moment it finishes.
+  useEffect(() => {
+    if (!runId || run?.status !== "RUNNING") return;
+    const t = setInterval(() => void load(runId), 10_000);
+    return () => clearInterval(t);
+  }, [runId, run?.status, load]);
 
-  const retry = useCallback(async () => {
+  const retry = async () => {
+    if (!run) return;
     setRetrying(true);
-    try {
-      const res = await fetch(`/api/automation/runs/${runId}/retry`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast(data?.error ?? "Couldn't retry the run");
-        return;
-      }
-      toast(data?.recovered ? "Run recovered. Every step succeeded." : "Retried. Some steps still failed.");
-      await load();
-      onRetried();
-    } catch {
-      toast("Couldn't retry the run");
-    } finally {
-      setRetrying(false);
+    const r = await apiFetch<{ status?: string }>(`/api/automation/runs/${run.id}/retry`, { method: "POST", json: {} });
+    setRetrying(false);
+    if (!r.ok) {
+      toast(r.error || "The retry didn't run", { tone: "danger" });
+      return;
     }
-  }, [runId, toast, load, onRetried]);
+    toast("Retried the failed steps");
+    void load(run.id);
+    onRetried();
+  };
+
+  const copyLink = () => {
+    if (!run) return;
+    const url = `${window.location.origin}/automation/logs?runId=${run.id}`;
+    void navigator.clipboard?.writeText(url).then(() => toast("Link copied")).catch(() => toast("Couldn't copy the link", { tone: "danger" }));
+  };
+
+  const started = run ? run.startedAt ?? run.createdAt : null;
 
   return (
-    <>
-      <div className="fixed inset-0 z-[110] bg-black/20" onClick={onClose} aria-hidden />
-      <aside
-        className="fixed inset-y-0 right-0 z-[120] flex w-full max-w-[520px] flex-col border-l border-zinc-200 bg-white shadow-2xl"
-        role="dialog"
-        aria-label="Run detail"
-      >
-        <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
-          <span className="text-base font-semibold text-zinc-900">Run detail</span>
+    <Drawer
+      open={Boolean(runId) && state !== "missing" && (known || state !== "loading")}
+      onClose={onClose}
+      ariaLabel="Run"
+      layerId="automation-run-drawer"
+      header={
+        <>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
+            {run ? <><span className="text-ink">{run.workflow.name}</span> › Run</> : "Run"}
+          </span>
           {run ? (
-            <StatusPill
-              color={RUN_STATUS_COLORS[run.status] ?? "#A1A1AA"}
-              label={run.status.toLowerCase()}
-            />
+            <button type="button" aria-label="Copy link" title="Copy link" onClick={copyLink} className={BTN.icon}>
+              <Link2 className="size-4" strokeWidth={1.5} />
+            </button>
           ) : null}
-          <div className="ml-auto flex items-center gap-2">
-            {retryEligible ? (
-              <button
-                type="button"
-                onClick={() => void retry()}
-                disabled={retrying}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-              >
-                {retrying ? (
-                  <Dots variant="pending" label="Retrying" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-                Retry failed steps
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close run detail"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-            >
-              <X className="h-4 w-4" />
+          <button type="button" aria-label="Close" title="Close · Esc" onClick={onClose} className={BTN.icon}>
+            <X className="size-4" strokeWidth={1.5} />
+          </button>
+        </>
+      }
+      footer={run && (run.status === "FAILED" || run.status === "PARTIAL") ? (
+        run.retry.can ? (
+          <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
+            <button type="button" onClick={() => void retry()} disabled={retrying} className={BTN.secondary}>
+              <RotateCcw className="size-4" aria-hidden /> {retrying ? "Retrying" : "Retry failed steps"}
             </button>
           </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          {error ? (
-            <p className="text-base text-zinc-500">Couldn&apos;t load this run.</p>
-          ) : run === null ? (
-            <div aria-busy="true" aria-label="Loading this run">
-              <SkeletonLines lines={6} />
+        ) : run.retry.blockedBy.length > 0 ? (
+          <div className="border-t border-line px-4 py-3 text-sm text-warning-text">
+            {run.retry.blockedBy.join(", ")} cannot be repeated safely (it could do the same thing twice), so this run cannot be retried.
+          </div>
+        ) : null
+      ) : null}
+    >
+      <div className="os-chrome flex flex-col gap-4 p-4">
+        {state === "error" ? (
+          <InlineRow action={{ label: "Try again", onClick: () => runId && void load(runId) }}>Couldn&apos;t load this run</InlineRow>
+        ) : !run ? (
+          <SkeletonLines lines={6} />
+        ) : (
+          <>
+            <div className="flex flex-col gap-2">
+              <RunStatusChip status={run.status} />
+              <p className="m-0 text-row text-ink">{runSummary(run)}</p>
             </div>
-          ) : (
-            <>
-              <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-base">
-                <dt className="text-zinc-400">Workflow</dt>
-                <dd className="truncate">
-                  <Link
-                    href={`/automation/workflows/${run.workflowId}`}
-                    className="font-medium text-zinc-900 hover:text-[#0073EA]"
-                  >
-                    {run.workflow?.name ?? "Deleted workflow"}
-                  </Link>
-                </dd>
-                <dt className="text-zinc-400">Trigger</dt>
-                <dd className="truncate text-zinc-700">{run.triggerEventKey}</dd>
-                <dt className="text-zinc-400">Record</dt>
-                <dd className="truncate text-zinc-700">
-                  {run.recordType ? `${run.recordType} · ${run.recordId ?? "?"}` : "No record"}
-                </dd>
-                <dt className="text-zinc-400">Started</dt>
-                <dd className="tabular-nums text-zinc-700">{relTime(run.createdAt)}</dd>
-                <dt className="text-zinc-400">Duration</dt>
-                <dd className="tabular-nums text-zinc-700">{fmtDuration(run.durationMs)}</dd>
-                {run.errorMessage ? (
-                  <>
-                    <dt className="text-zinc-400">Error</dt>
-                    <dd className="text-[#E2445C]">{run.errorMessage}</dd>
-                  </>
-                ) : null}
-              </dl>
+            <dl className="m-0 grid grid-cols-[110px_1fr] gap-y-1 text-sm">
+              <dt className="flex h-9 items-center text-ink-2">Automation</dt>
+              <dd className="m-0 flex h-9 items-center"><Link href={`/automation/workflows/${run.workflow.id}`} className="truncate text-ink hover:underline">{run.workflow.name}</Link></dd>
+              <dt className="flex h-9 items-center text-ink-2">Trigger</dt>
+              <dd className="m-0 flex h-9 items-center truncate text-ink">{run.triggerName}</dd>
+              <dt className="flex h-9 items-center text-ink-2">Record</dt>
+              <dd className="m-0 flex h-9 items-center">
+                {run.record ? (run.record.url ? <Link href={run.record.url} className="truncate text-ink hover:underline">{run.record.name}</Link> : <span className="truncate">{run.record.name}</span>) : <span className="text-ink-3">Not available</span>}
+              </dd>
+              <dt className="flex h-9 items-center text-ink-2">Started</dt>
+              <dd className="m-0 flex h-9 items-center text-ink" title={started ? formatRelative(started, datePrefs) : undefined}>{started ? formatDate(started, datePrefs, "datetime") : "Not started"}</dd>
+              <dt className="flex h-9 items-center text-ink-2">Took</dt>
+              <dd className="m-0 flex h-9 items-center tabular-nums text-ink">{formatDuration(run.durationMs) ?? (run.status === "RUNNING" ? "Still running" : "Not recorded")}</dd>
+            </dl>
 
-              {hasUnsafeFailure && (run.status === "FAILED" || run.status === "PARTIAL") ? (
-                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
-                  This run can&apos;t be retried: a failed action isn&apos;t safe to re-run (it
-                  could cause duplicate side effects).
-                </p>
+            <section aria-labelledby="steps-title" className="flex flex-col">
+              <h3 id="steps-title" className="m-0 mb-1 text-sm font-semibold text-ink">Steps</h3>
+              {run.detailHidden ? (
+                <p className="m-0 mb-2 text-sm text-ink-2">This run is about a task in a List you can&apos;t open, so what went in and came back is not shown.</p>
               ) : null}
-
-              <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Steps
-              </div>
-              <div className="mt-1.5 space-y-2">
-                {run.steps.length === 0 ? (
-                  <p className="text-sm text-zinc-400">This run recorded no steps.</p>
-                ) : (
-                  run.steps.map((step) => (
-                    <div key={step.id} className="rounded-lg border border-zinc-200 p-2.5">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-[16px] items-center rounded border border-zinc-200 bg-zinc-50 px-1 text-micro font-semibold uppercase tracking-wide text-zinc-500">
-                          {step.stepType}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-base font-medium text-zinc-900">
-                          {step.stepName ?? step.stepKey}
-                        </span>
-                        <span className="shrink-0 text-xs tabular-nums text-zinc-400">
-                          {fmtDuration(step.durationMs)}
-                        </span>
-                        <StatusPill
-                          color={RUN_STATUS_COLORS[step.status] ?? "#A1A1AA"}
-                          label={step.status.toLowerCase()}
-                        />
+              {run.steps.map((s) => {
+                const open = openStep === s.id;
+                const hasDetail = !run.detailHidden && s.stepType !== "TRIGGER";
+                return (
+                  <div key={s.id} className="border-b border-line-soft last:border-b-0">
+                    <button
+                      type="button"
+                      disabled={!hasDetail}
+                      aria-expanded={hasDetail ? open : undefined}
+                      onClick={() => setOpenStep(open ? null : s.id)}
+                      className="flex h-9 w-full items-center gap-2 rounded-md px-1 text-start text-sm hover:bg-hover disabled:hover:bg-transparent"
+                    >
+                      {/* The chevron says the row opens; a row with nothing to show has none. */}
+                      {hasDetail ? (
+                        <ChevronRight className={`size-4 shrink-0 text-ink-2 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />
+                      ) : (
+                        <span className="size-4 shrink-0" aria-hidden />
+                      )}
+                      <NeutralChip className="h-5 px-1">{STEP_TYPE_LABEL[s.stepType]}</NeutralChip>
+                      <span className="min-w-0 flex-1 truncate text-ink">{s.stepName}</span>
+                      <span className="shrink-0 tabular-nums text-ink-2">{formatDuration(s.durationMs) ?? ""}</span>
+                      <RunStatusDot status={s.status} />
+                    </button>
+                    {s.errorMessage ? <p className="m-0 mb-1 ps-1 text-sm text-danger-text">{s.errorMessage}</p> : null}
+                    {open && hasDetail ? (
+                      <div className="mb-2 flex flex-col gap-2 ps-1">
+                        <JsonBlock label="What went in" value={s.inputJson} defaultOpen />
+                        <JsonBlock label="What came back" value={s.outputJson} defaultOpen />
                       </div>
-                      {step.errorMessage ? (
-                        <p className="mt-1.5 text-xs text-[#E2445C]">{step.errorMessage}</p>
-                      ) : null}
-                      <JsonBlock label="Input" value={step.inputJson} />
-                      <JsonBlock label="Output" value={step.outputJson} />
-                    </div>
-                  ))
-                )}
-              </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </section>
 
-              <div className="mt-4">
-                <JsonBlock label="Trigger payload" value={run.triggerPayload} />
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
-    </>
+            {!run.detailHidden ? <JsonBlock label="The event" value={run.triggerPayload} /> : null}
+          </>
+        )}
+      </div>
+    </Drawer>
   );
 }
 
-function AutomationLogsInner() {
-  const searchParams = useSearchParams();
-  const { toast } = useOsToast();
+/* ─────────────────────────── the page ─────────────────────────── */
 
-  const [runs, setRuns] = useState<ApiRunRow[] | null>(null);
-  const [workflows, setWorkflows] = useState<ApiWorkflowOption[]>([]);
-  const [safeToRetry, setSafeToRetry] = useState<Map<string, boolean>>(new Map());
+function LogsInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const datePrefs = useDatePrefs();
 
-  const [workflowFilter, setWorkflowFilter] = useState(
-    () => searchParams.get("workflowId") ?? "",
-  );
-  const [statusFilter, setStatusFilter] = useState("");
-  const [openRunId, setOpenRunId] = useState<string | null>(() => searchParams.get("runId"));
+  const statuses = useMemo(() => parseRunStatuses(sp?.get("status")).statuses, [sp]);
+  const view = viewForStatuses(statuses);
+  const workflowId = sp?.get("workflowId") ?? null;
+  const severities = useMemo(() => (sp?.get("severity") ?? "").split(",").filter(Boolean).map((s) => s.toUpperCase()), [sp]);
+  const records = useMemo(() => (sp?.get("record") ?? "").split(",").filter(Boolean), [sp]);
+  const days = sp?.get("days") ?? null;
+  const from = sp?.get("from") ?? null;
+  const to = sp?.get("to") ?? null;
+  const cursor = sp?.get("cursor") ?? null;
+  const runId = sp?.get("runId") ?? null;
+
+  const [surface, setSurface] = useSurfaceState("automation.logs");
+  const urlSort = sp?.get("sort");
+  const sort = pick(urlSort ?? surface.sortKey, SORTS, "newest");
+  const pageSize = (LOG_PAGE_SIZES as readonly number[]).includes(Number(surface.viewOptions?.pageSize)) ? Number(surface.viewOptions?.pageSize) : 50;
+  const columns = useMemo<ColumnKey[]>(() => {
+    const stored = surface.columns?.filter((c): c is ColumnKey => (COLUMN_KEYS as readonly string[]).includes(c));
+    return stored && stored.length ? stored : [...COLUMN_KEYS];
+  }, [surface.columns]);
+
+  const [rows, setRows] = useState<RunRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([]);
+  // A ?runId= that is not in this workspace: the page says so, the drawer stays shut.
+  const [missingRunId, setMissingRunId] = useState<string | null>(null);
+  const onMissing = useCallback((id: string) => setMissingRunId(id), []);
+  // The cursors of the pages before this one, so Previous works on a keyset.
+  const history = useRef<string[]>([]);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  const setParams = useCallback((patch: Record<string, string | null>, keepPage = false) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === "") next.delete(k);
+      else next.set(k, v);
+    }
+    if (!keepPage && !("cursor" in patch)) {
+      next.delete("cursor");
+      history.current = [];
+      setPageIndex(0);
+    }
+    const qs = next.toString();
+    router.replace(qs ? `/automation/logs?${qs}` : "/automation/logs", { scroll: false });
+  }, [router, sp]);
+
+  const activeFilters = (workflowId ? 1 : 0) + (severities.length ? 1 : 0) + (records.length ? 1 : 0) + (days || from || to ? 1 : 0);
+
+  const query = useMemo(() => {
+    const q = new URLSearchParams({ sort, take: String(pageSize) });
+    if (statuses.length) q.set("status", statuses.join(","));
+    if (workflowId) q.set("workflowId", workflowId);
+    if (severities.length) q.set("severity", severities.join(","));
+    if (records.length) q.set("record", records.join(","));
+    if (from || to) {
+      if (from) q.set("from", from);
+      if (to) q.set("to", to);
+    } else if (days) q.set("days", days);
+    if (cursor) q.set("cursor", cursor);
+    return q.toString();
+  }, [sort, pageSize, statuses, workflowId, severities, records, from, to, days, cursor]);
 
   const load = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ take: "100" });
-      if (workflowFilter) params.set("workflowId", workflowFilter);
-      if (statusFilter) params.set("status", statusFilter);
-      const res = await fetch(`/api/automation/runs?${params}`, { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setRuns(Array.isArray(data.runs) ? data.runs : []);
-    } catch {
-      setRuns([]);
-      toast("Couldn't load the execution log");
+    const r = await apiFetch<{ runs: RunRow[]; total: number; nextCursor: string | null; restarted?: boolean }>(`/api/automation/runs?${query}`, { cache: "no-store" });
+    if (!r.ok) {
+      setError(r.error || "Couldn't load runs");
+      setRows((prev) => prev ?? []);
+      return;
     }
-  }, [workflowFilter, statusFilter, toast]);
+    setError(null);
+    if (r.data.restarted) {
+      history.current = [];
+      setPageIndex(0);
+    }
+    setRows(r.data.runs);
+    setTotal(r.data.total);
+    setNextCursor(r.data.nextCursor);
+  }, [query]);
 
   useEffect(() => {
-    void load();
+    const t = setTimeout(() => void load(), 0);
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
-  // Filter + retry-safety lookups (once).
+  // The Automation filter lists every automation, archived ones included
+  // (their runs are kept).
   useEffect(() => {
     let alive = true;
-    fetch("/api/automation/workflows?includeArchived=1", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (alive && Array.isArray(d?.workflows)) {
-          setWorkflows(d.workflows.map((w: { id: string; name: string }) => ({ id: w.id, name: w.name })));
-        }
-      })
-      .catch(() => {});
-    fetch("/api/automation/actions")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (alive && Array.isArray(d?.actions)) {
-          setSafeToRetry(
-            new Map(
-              (d.actions as Array<{ key: string; safeToRetry: boolean }>).map((a) => [
-                a.key,
-                a.safeToRetry,
-              ]),
-            ),
-          );
-        }
-      })
-      .catch(() => {});
+    void apiFetch<{ workflows: Array<{ id: string; name: string }> }>("/api/automation/workflows?includeArchived=1&take=100&sort=name", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok) setWorkflows(r.data.workflows.map((w) => ({ id: w.id, name: w.name })));
+    });
     return () => {
       alive = false;
     };
   }, []);
 
+  const tableColumns = useMemo<TableColumn<RunRow>[]>(() => {
+    const all: Array<TableColumn<RunRow> & { k?: ColumnKey }> = [
+      { key: "status", label: "Status", width: "130px", render: (r) => <RunStatusChip status={r.status} /> },
+      {
+        key: "automation",
+        label: "Automation",
+        title: true,
+        width: "minmax(200px,1.6fr)",
+        render: (r) => r.workflow
+          ? <Link href={`/automation/workflows/${r.workflow.id}`} onClick={(e) => e.stopPropagation()} className="truncate hover:underline">{r.workflow.name}</Link>
+          : <span className="text-ink-3">Removed</span>,
+      },
+      { key: "when", k: "when", label: "When", width: "minmax(210px,1.4fr)", render: (r) => <span className="truncate text-ink-2" title={r.triggerName}>{r.triggerName}</span> },
+      {
+        key: "record",
+        k: "record",
+        label: "Record",
+        width: "minmax(120px,0.9fr)",
+        render: (r) => r.record
+          ? (r.record.url ? <Link href={r.record.url} onClick={(e) => e.stopPropagation()} className="truncate text-ink hover:underline">{r.record.name}</Link> : <span className="truncate">{r.record.name}</span>)
+          : <span className="text-ink-3">Not available</span>,
+      },
+      {
+        key: "started",
+        k: "started",
+        label: "Started",
+        width: "140px",
+        render: (r) => {
+          const at = r.startedAt ?? r.createdAt;
+          return <span className="whitespace-nowrap text-ink-2" title={formatRelative(at, datePrefs)}>{formatDate(at, datePrefs, "datetime")}</span>;
+        },
+      },
+      { key: "took", k: "took", label: "Took", width: "104px", numeric: true, render: (r) => <span className="whitespace-nowrap text-ink-2">{formatDuration(r.durationMs) ?? (r.status === "RUNNING" ? "Running" : "Not recorded")}</span> },
+      { key: "error", k: "error", label: "Error", width: "minmax(100px,0.7fr)", render: (r) => r.errorMessage ? <span className="truncate text-ink-2" title={r.errorMessage}>{r.errorMessage.split("\n")[0]}</span> : null },
+    ];
+    return all.filter((c) => !c.k || columns.includes(c.k));
+  }, [columns, datePrefs]);
+
+  const fieldMatch = (label: string) => label.toLowerCase().includes(filterSearch.trim().toLowerCase());
+  const clearFilters = () => setParams({ workflowId: null, severity: null, record: null, days: null, from: null, to: null, status: null });
+  const toggleList = (key: string, list: string[], value: string, on: boolean) => {
+    const next = new Set(list);
+    if (on) next.add(value);
+    else next.delete(value);
+    setParams({ [key]: [...next].join(",") || null });
+  };
+
+  const menu = [
+    ...COLUMN_KEYS.map((k) => ({
+      label: COLUMN_LABEL[k],
+      checked: columns.includes(k),
+      keepOpen: true,
+      onClick: () => {
+        const next = columns.includes(k) ? columns.filter((c) => c !== k) : COLUMN_KEYS.filter((c) => c === k || columns.includes(c));
+        setSurface({ columns: next.length ? next : [...COLUMN_KEYS] });
+      },
+    })),
+    { separator: true as const },
+    { label: "Health", icon: Activity, href: days ? `/automation/health?days=${days}` : "/automation/health" },
+    { label: "Usage", icon: Gauge, href: "/automation/usage" },
+  ];
+
+  const nothingAtAll = rows !== null && !error && total === 0 && statuses.length === 0 && activeFilters === 0 && !cursor;
+  const offsetFrom = pageIndex * pageSize;
+
   return (
-    <div className="flex h-full flex-col bg-white">
-      <AutomationHeader
-        Icon={ScrollText}
+    <>
+      <OsPageHeader
         title="Logs"
-        meta={runs !== null ? <span className="tabular-nums">{runs.length} runs</span> : undefined}
-        actions={
-          <div className="flex items-center gap-2">
-            <select
-              value={workflowFilter}
-              onChange={(e) => setWorkflowFilter(e.target.value)}
-              aria-label="Filter by workflow"
-              className={`${SELECT} max-w-[200px]`}
-            >
-              <option value="">All workflows</option>
-              {workflows.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Filter by status"
-              className={SELECT}
-            >
-              <option value="">All statuses</option>
-              {RUN_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.charAt(0) + s.slice(1).toLowerCase()}
-                </option>
-              ))}
-            </select>
-          </div>
+        views={
+          <>
+            {LOG_VIEWS.map((v) => (
+              <ViewTab key={v} label={LOG_VIEW_LABEL[v]} active={view === v && (v !== "all" || statuses.length === 0)} onClick={() => setParams({ status: v === "all" ? null : v })} />
+            ))}
+          </>
         }
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeFilters },
+          sort: { onClick: () => setSortOpen((o) => !o), label: SORT_LABEL[sort], active: sort !== "newest" },
+          left: (
+            <div className="relative">
+              <Picker
+                open={sortOpen}
+                onClose={() => setSortOpen(false)}
+                ariaLabel="Sort runs"
+                width={200}
+                selected={sort}
+                onSelect={(v) => {
+                  setSortOpen(false);
+                  setSurface({ sortKey: v });
+                  setParams({ sort: v === "newest" ? null : v });
+                }}
+                sections={[{ options: SORTS.map((s) => ({ value: s, label: SORT_LABEL[s] })) }]}
+              />
+            </div>
+          ),
+          menu,
+        }}
       />
 
-      <div className="flex-1 overflow-y-auto">
-        {runs === null ? (
-          <div className="px-4 py-2" aria-busy="true" aria-label="Loading runs">
-            <SkeletonRows rows={8} />
-          </div>
-        ) : runs.length === 0 ? (
-          <div className="flex flex-col items-center pt-20">
-            <span className="grid h-12 w-12 place-items-center rounded-full bg-zinc-50">
-              <ScrollText className="h-5 w-5 text-zinc-500" />
-            </span>
-            <h2 className="mt-4 text-lg font-semibold text-zinc-900">No runs logged</h2>
-            <p className="mt-1 max-w-sm text-center text-base text-zinc-500">
-              {workflowFilter || statusFilter
-                ? "Nothing matches these filters."
-                : "Every automation run lands here with its steps, inputs, and outputs."}
-            </p>
-          </div>
+      <div className="px-6 pb-10 pt-2">
+        {nothingAtAll ? (
+          <OsEmptyView title="Nothing has run yet" action={{ label: "See your workflows", href: "/automation/workflows" }} />
         ) : (
-          <div className="overflow-x-auto px-4 py-2">
-            <div className="min-w-[920px]">
-              <div
-                className={`${GRID} h-7 border-b border-zinc-100 px-2 text-xs font-medium uppercase tracking-wide text-zinc-400`}
-              >
-                <span>Status</span>
-                <span>Workflow</span>
-                <span>Trigger</span>
-                <span>Record</span>
-                <span>Started</span>
-                <span>Duration</span>
-                <span>Error</span>
-              </div>
-              {runs.map((run) => (
-                <button
-                  key={run.id}
-                  type="button"
-                  onClick={() => setOpenRunId(run.id)}
-                  className={`${GRID} h-7 w-full border-b border-zinc-100 px-2 text-left text-base text-zinc-600 hover:bg-zinc-50`}
-                >
-                  <span>
-                    <StatusPill
-                      color={RUN_STATUS_COLORS[run.status] ?? "#A1A1AA"}
-                      label={run.status.toLowerCase()}
-                    />
-                  </span>
-                  <span className="truncate font-medium text-zinc-900">
-                    {run.workflow?.name ?? "Deleted workflow"}
-                  </span>
-                  <span className="truncate text-zinc-500">{run.triggerEventKey}</span>
-                  <span className="truncate text-zinc-500">
-                    {run.recordType ? `${run.recordType} · ${(run.recordId ?? "").slice(0, 8)}` : "No record"}
-                  </span>
-                  <span className="tabular-nums text-zinc-500">{relTime(run.createdAt)}</span>
-                  <span className="tabular-nums text-zinc-500">{fmtDuration(run.durationMs)}</span>
-                  <span className="truncate text-zinc-500" title={run.errorMessage ?? undefined}>
-                    {run.errorMessage ?? ""}
-                  </span>
-                </button>
-              ))}
+          <div className="os-chrome flex min-h-0 gap-4">
+            <FilterPanel
+              open={filterOpen}
+              onClose={() => setFilterOpen(false)}
+              objects="runs"
+              activeCount={activeFilters}
+              onClearAll={() => setParams({ workflowId: null, severity: null, record: null, days: null, from: null, to: null })}
+              search={{ value: filterSearch, onChange: setFilterSearch, placeholder: "Search fields" }}
+            >
+              {fieldMatch("automation") ? (
+                <FilterGroup label="Automation">
+                  {workflows.length === 0 ? <span className="px-2 text-sm text-ink-3">No automations yet</span> : workflows.map((w) => (
+                    <FilterRow key={w.id} label={w.name} checked={workflowId === w.id} onCheckedChange={(on) => setParams({ workflowId: on ? w.id : null })} />
+                  ))}
+                </FilterGroup>
+              ) : null}
+              {fieldMatch("date range started") ? (
+                <FilterGroup label="Date range">
+                  {["7", "30", "90"].map((d) => (
+                    <FilterRow key={d} label={`Last ${d} days`} checked={days === d && !from && !to} onCheckedChange={(on) => setParams({ days: on ? d : null, from: null, to: null })} />
+                  ))}
+                  <FilterRow label="Between dates" checked={Boolean(from || to)} onCheckedChange={(on) => setParams(on ? { from: new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10), days: null } : { from: null, to: null })}>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="flex items-center gap-2 text-sm text-ink-2">From <input type="date" value={from ?? ""} onChange={(e) => setParams({ from: e.target.value || null, days: null })} className="h-8 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink" /></label>
+                      <label className="flex items-center gap-2 text-sm text-ink-2">To <input type="date" value={to ?? ""} onChange={(e) => setParams({ to: e.target.value || null, days: null })} className="h-8 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink" /></label>
+                    </div>
+                  </FilterRow>
+                </FilterGroup>
+              ) : null}
+              {fieldMatch("record type") ? (
+                <FilterGroup label="Record type">
+                  {RECORD_TYPES.map((t) => (
+                    <FilterRow key={t} label={RECORD_LABEL[t] ?? t} checked={records.includes(t)} onCheckedChange={(on) => toggleList("record", records, t, on)} />
+                  ))}
+                </FilterGroup>
+              ) : null}
+              {fieldMatch("alert level") ? (
+                <FilterGroup label="Alert level">
+                  {ALERT_LEVELS.map((a) => (
+                    <FilterRow key={a} label={ALERT_LABEL[a]} checked={severities.includes(a)} onCheckedChange={(on) => toggleList("severity", severities, a, on)} />
+                  ))}
+                </FilterGroup>
+              ) : null}
+            </FilterPanel>
+
+            <div className="flex min-w-0 flex-1 flex-col">
+              {runId && missingRunId === runId ? (
+                <InlineRow action={{ label: "Dismiss", onClick: () => setParams({ runId: null }, true) }}>That run is not in this workspace</InlineRow>
+              ) : null}
+              {error && (rows ?? []).length === 0 ? (
+                <InlineRow action={{ label: "Try again", onClick: () => void load() }}>{error.startsWith("Invalid") ? "That link has a filter this page does not know" : "Couldn't load runs"}</InlineRow>
+              ) : (
+                <TableCard
+                  ariaLabel="Automation runs"
+                  columns={tableColumns}
+                  rows={rows}
+                  rowKey={(r) => r.id}
+                  skeletonRows={10}
+                  highlightKey={runId}
+                  onRowClick={(r) => setParams({ runId: r.id }, true)}
+                  empty={
+                    <span>
+                      No runs match ·{" "}
+                      <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button>
+                    </span>
+                  }
+                  footer={rows && total > 0 ? {
+                    total,
+                    noun: "records",
+                    from: offsetFrom + 1,
+                    to: offsetFrom + rows.length,
+                    onPrev: pageIndex > 0 ? () => {
+                      const prev = history.current.pop() ?? null;
+                      setPageIndex((i) => Math.max(0, i - 1));
+                      setParams({ cursor: prev }, true);
+                    } : undefined,
+                    onNext: nextCursor ? () => {
+                      history.current.push(cursor ?? "");
+                      setPageIndex((i) => i + 1);
+                      setParams({ cursor: nextCursor }, true);
+                    } : undefined,
+                    pageSize,
+                    pageSizes: [...LOG_PAGE_SIZES],
+                    onPageSize: (n) => { setSurface({ viewOptions: { pageSize: n } }); setParams({ cursor: null }); },
+                  } : undefined}
+                />
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {openRunId ? (
-        <RunDrawer
-          runId={openRunId}
-          safeToRetry={safeToRetry}
-          onClose={() => setOpenRunId(null)}
-          onRetried={() => void load()}
-        />
-      ) : null}
-    </div>
+      <RunDrawer
+        runId={runId}
+        known={Boolean(runId && rows?.some((r) => r.id === runId))}
+        onClose={() => setParams({ runId: null }, true)}
+        onRetried={() => void load()}
+        onMissing={onMissing}
+      />
+    </>
   );
 }
 
 export default function AutomationLogsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="h-full bg-white px-4 py-2" aria-busy="true" aria-label="Loading runs">
-          <SkeletonRows rows={8} />
-        </div>
-      }
-    >
-      <AutomationLogsInner />
+    <Suspense fallback={null}>
+      <LogsInner />
     </Suspense>
   );
 }

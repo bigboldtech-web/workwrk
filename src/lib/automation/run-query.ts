@@ -101,7 +101,7 @@ export function parseRunQuery(sp: URLSearchParams, now: Date = new Date()): RunQ
   const toRaw = parseDate(sp.get("to"), true);
   if (toRaw === "invalid") return { ok: false, error: "Invalid to date" };
   let from = fromRaw;
-  let to = toRaw;
+  const to = toRaw;
   // An exact range supersedes ?days= when both are present.
   if (!from && !to) {
     const days = parseDays(sp.get("days"));

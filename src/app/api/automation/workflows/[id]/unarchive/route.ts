@@ -6,13 +6,14 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation } from "@/lib/automation/gate";
+import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.isAdmin) return forbidden("Only workspace Owners and Admins can bring an automation back.");
   const { id } = await params;
+  const refused = await refuseWorkflowWrite(ctx, id, "archive");
+  if (refused) return refused;
 
   const wf = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },

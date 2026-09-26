@@ -697,7 +697,7 @@ export default async function SpacePage(props: {
           />
           <div className="flex-1" />
           <Link
-            href="/automation/workflows"
+            href={`/automation/workflows?spaceId=${encodeURIComponent(space.id)}`}
             className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >

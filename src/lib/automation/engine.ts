@@ -7,6 +7,7 @@ import { buildIdempotencyKey, extractEventTimestamp, extractRecordId } from "./i
 import { getAction, type ActionContext } from "./registry-actions";
 import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
 import { triggerDisplayName } from "./registry-triggers";
+import { authorCanRead, eventAllowedForAuthor, loadAuthor, type AutomationAuthor } from "./author-reach";
 
 /**
  * Automation engine entry point — called by `dispatchEvent` in
@@ -80,7 +81,9 @@ export function parseDefinition(definition: unknown): ParsedDefinition {
     if (!key) continue;
     actions.push({
       key,
-      name: typeof a.name === "string" && a.name ? a.name : key,
+      // The registry's words when the definition carries no name, so a run
+      // step reads "Set a field", never the raw key.
+      name: typeof a.name === "string" && a.name ? a.name : getAction(key)?.name ?? key,
       params: asRecord(a.params ?? a.config),
     });
   }
@@ -135,15 +138,16 @@ export async function runAutomationsForEvent(input: RunAutomationsInput): Promis
  * event path applies (status, pause, scope, idempotency, usage) applies here.
  * Never throws.
  */
-export async function runAutomationForWorkflow(input: RunAutomationsInput & { workflowId: string }): Promise<void> {
+export async function runAutomationForWorkflow(input: RunAutomationsInput & { workflowId: string }): Promise<number> {
   try {
     const workflows = await prisma.automationWorkflow.findMany({
       where: { id: input.workflowId, organizationId: input.organizationId, triggerEvent: input.event, status: "ACTIVE" },
       select: MATCH_SELECT,
     });
-    await runMatched({ organizationId: input.organizationId, event: input.event, payload: input.payload, workflows });
+    return await runMatched({ organizationId: input.organizationId, event: input.event, payload: input.payload, workflows });
   } catch {
     // Never throws.
+    return 0;
   }
 }
 
@@ -152,19 +156,19 @@ async function runMatched(args: {
   event: string;
   payload: unknown;
   workflows: MatchedWorkflow[];
-}): Promise<void> {
+}): Promise<number> {
   const { organizationId, event } = args;
-  if (args.workflows.length === 0) return;
+  if (args.workflows.length === 0) return 0;
   const payload = toJsonSafe(asRecord(args.payload));
 
   // Anti-loop 1: chain depth. Events re-dispatched by automation
   // actions carry __automationDepth = parent depth + 1.
   const depth = typeof payload.__automationDepth === "number" ? payload.__automationDepth : 0;
-  if (depth >= MAX_CHAIN_DEPTH) return;
+  if (depth >= MAX_CHAIN_DEPTH) return 0;
 
   // Pause all automations (Settings > Apps and modules > Automations).
   const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
-  if (readAutomationSettings(org?.settings).paused) return;
+  if (readAutomationSettings(org?.settings).paused) return 0;
 
   // The published snapshot each workflow runs.
   const versionIds = args.workflows.map((w) => w.publishedVersionId).filter((v): v is string => !!v);
@@ -189,15 +193,32 @@ async function runMatched(args: {
     return (place = board ? { boardId: board.id, folderId: board.folderId, spaceId: board.spaceId } : null);
   };
 
-  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue }> = [];
+  // The creator's reach (author-reach.ts), looked up once per creator.
+  const authors = new Map<string, AutomationAuthor | null>();
+  const authorOf = async (id: string): Promise<AutomationAuthor | null> => {
+    if (!authors.has(id)) authors.set(id, await loadAuthor(organizationId, id));
+    return authors.get(id) ?? null;
+  };
+  const eventBoardId = typeof payload.boardId === "string" && payload.boardId ? payload.boardId : null;
+
+  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue; author: AutomationAuthor | null }> = [];
   for (const wf of args.workflows) {
     const live = liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null) as Prisma.JsonValue;
     if (!whenMatches(event, readWhen(live), payload)) continue;
+    // "On a schedule" fires for the workspace, not for a record, so it has
+    // no place to match; its scope (if an older draft saved one) is moot.
+    const placeless = event === "schedule.every";
     const scope = readScope(live);
-    if (!isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
-    runnable.push({ ...wf, live });
+    if (!placeless && !isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
+    let author: AutomationAuthor | null = null;
+    if (wf.createdById) {
+      author = await authorOf(wf.createdById);
+      if (!eventAllowedForAuthor(event, payload, author)) continue;
+      if (eventBoardId && !(await authorCanRead(author, eventBoardId))) continue;
+    }
+    runnable.push({ ...wf, live, author });
   }
-  if (runnable.length === 0) return;
+  if (runnable.length === 0) return 0;
 
   const recordId = extractRecordId(payload);
   const recordType = event.includes(".") ? event.slice(0, event.indexOf(".")) : event;
@@ -209,7 +230,7 @@ async function runMatched(args: {
     const recent = await prisma.automationRun.count({
       where: { organizationId, recordId, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
     });
-    if (recent >= MAX_RUNS_PER_RECORD_PER_HOUR) return;
+    if (recent >= MAX_RUNS_PER_RECORD_PER_HOUR) return 0;
   }
 
   const idempotencyKey = buildIdempotencyKey({
@@ -221,10 +242,12 @@ async function runMatched(args: {
 
   // Sequential per workflow — keeps per-record write ordering sane and
   // the DB load bounded. Each workflow's failure is isolated.
+  let ran = 0;
   for (const wf of runnable) {
     try {
-      await runWorkflow({
+      const created = await runWorkflow({
         workflow: { ...wf, definition: wf.live },
+        author: wf.author,
         organizationId,
         event,
         payload,
@@ -233,10 +256,12 @@ async function runMatched(args: {
         idempotencyKey,
         depth,
       });
+      if (created) ran++;
     } catch {
       // One workflow's crash never blocks its siblings.
     }
   }
+  return ran;
 }
 
 async function runWorkflow(args: {
@@ -255,7 +280,8 @@ async function runWorkflow(args: {
   recordType: string | null;
   idempotencyKey: string;
   depth: number;
-}): Promise<void> {
+  author?: AutomationAuthor | null;
+}): Promise<boolean> {
   const { workflow, organizationId, event, payload, recordId, recordType, idempotencyKey, depth } = args;
   const startedAt = new Date();
 
@@ -282,7 +308,7 @@ async function runWorkflow(args: {
     });
     runId = run.id;
   } catch (err) {
-    if (isP2002(err)) return; // duplicate trigger event — already handled
+    if (isP2002(err)) return false; // duplicate trigger event, already handled
     throw err;
   }
 
@@ -370,12 +396,12 @@ async function runWorkflow(args: {
     }
     if (!evaluation.matched) {
       await finish("SKIPPED", null);
-      return;
+      return true;
     }
 
     if (def.actions.length === 0) {
       await finish("SUCCESS", "Workflow has no actions");
-      return;
+      return true;
     }
 
     // Usage gate — block the whole run when the monthly limit is spent.
@@ -383,7 +409,7 @@ async function runWorkflow(args: {
     if (usage.blocked) {
       await finish("FAILED", `Monthly automation limit reached (${usage.used}/${usage.limit} actions used)`);
       await notifyLimitExceeded(organizationId, usage.limit);
-      return;
+      return true;
     }
 
     // Executor — each action isolated; failures downgrade the run to
@@ -398,6 +424,7 @@ async function runWorkflow(args: {
       runId,
       depth,
       workflowCreatorId: workflow.createdById,
+      author: args.author,
     };
 
     let succeeded = 0;
@@ -424,7 +451,9 @@ async function runWorkflow(args: {
         continue;
       }
       try {
-        const output = await impl.execute(ctx, action.params);
+        // The step's own order rides along, so a webhook delivery id is
+        // unique per step and the same on every retry of that step.
+        const output = await impl.execute({ ...ctx, stepOrder }, action.params);
         succeeded++;
         await logStep({
           stepType: "ACTION",
@@ -476,4 +505,5 @@ async function runWorkflow(args: {
     const message = err instanceof Error ? err.message.slice(0, 500) : "Automation engine error";
     await finish("FAILED", message).catch(() => {});
   }
+  return true;
 }

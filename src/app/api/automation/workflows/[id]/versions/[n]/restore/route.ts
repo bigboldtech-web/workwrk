@@ -16,14 +16,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation } from "@/lib/automation/gate";
+import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { draftTrigger, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; n: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
   const { id, n } = await params;
+  const refused = await refuseWorkflowWrite(ctx, id, "edit");
+  if (refused) return refused;
   const number = Number.parseInt(n, 10);
   if (!Number.isFinite(number) || number < 1) return NextResponse.json({ error: "Invalid version number" }, { status: 400 });
 

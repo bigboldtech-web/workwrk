@@ -14,24 +14,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation } from "@/lib/automation/gate";
+import { notYours, requireAutomation, workflowRights } from "@/lib/automation/gate";
 import { getAction, type ActionContext } from "@/lib/automation/registry-actions";
 import { recordUsage } from "@/lib/automation/usage";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
   const { id } = await params;
 
   const run = await prisma.automationRun.findFirst({
     where: { id, organizationId: ctx.orgId },
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { id: true, status: true } },
+      workflow: { select: { id: true, status: true, createdById: true } },
     },
   });
   if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+  if (!workflowRights(ctx, run.workflow.createdById).edit) return notYours();
 
   if (run.status !== "FAILED" && run.status !== "PARTIAL") {
     return NextResponse.json(
@@ -74,6 +74,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     workflowId: run.workflowId,
     runId: run.id,
     depth,
+    workflowCreatorId: run.workflow.createdById,
   };
 
   let stillFailing = 0;
@@ -87,7 +88,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
     const stepStartedAt = new Date();
     try {
-      const output = await impl.execute(actionCtx, (step.inputJson ?? {}) as Record<string, unknown>);
+      const output = await impl.execute({ ...actionCtx, stepOrder: step.order }, (step.inputJson ?? {}) as Record<string, unknown>);
       const completedAt = new Date();
       await prisma.automationRunStep.update({
         where: { id: step.id },

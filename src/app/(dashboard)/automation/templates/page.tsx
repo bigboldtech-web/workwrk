@@ -1,28 +1,28 @@
 "use client";
 
-/* /automation/templates, the starter-recipe gallery.
+/* /automation/templates: start from an automation someone already worked out
+ * (spec-ai-automation /automation/templates).
  *
- *  GET  /api/automation/templates    → global AutomationTemplate rows
- *                                      (the API seeds 5 recipes if empty)
- *  POST /api/automation/workflows    → "Use template" clones templateJson
- *                                      into a new DRAFT, then routes to
- *                                      the builder to finish and publish.
+ *   GET  /api/automation/templates   the recipes (the API seeds any missing
+ *                                    fixed recipe; the Cashkr-era Leads
+ *                                    recipe is behind the legacy flag)
+ *   POST /api/automation/workflows   "Use this" clones a recipe into a new
+ *                                    DRAFT and opens it in the builder
  *
- * Monday-style sentence cards: the template name IS the recipe sentence.
- * A template on a trigger that does not fire yet would create a workflow
- * that never runs, so it renders only under Show upcoming features, as a
- * card with no Use template button. A template on a hidden (legacy) trigger
- * never renders. "Use template" renders only for a viewer the create route
- * accepts, and it is a neutral button: the page has no single primary.
+ * No page-level primary: the honest primary is per recipe, so each card
+ * carries one secondary "Use this". A recipe on a trigger that does not fire
+ * yet says so with a "Not live yet" chip and stays usable.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutTemplate, Zap } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SkeletonGrid } from "@/components/ui/skeleton";
-import { useShowUpcoming } from "@/components/ui/coming-soon-row";
-import { AutomationHeader, CARD, SECONDARY_PILL, SEVERITY_META, useAutomationRights } from "../shared";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { BTN, CARD, InlineRow, NeutralChip, useAutomationCatalog, useAutomationRights } from "@/components/automation/automation-ui";
+import { apiFetch } from "@/lib/api-fetch";
+import { notifyAiChatsChanged } from "@/lib/ai/events";
 
 interface ApiTemplate {
   id: string;
@@ -33,185 +33,135 @@ interface ApiTemplate {
   templateJson: unknown;
 }
 
-interface ApiTrigger {
-  key: string;
-  name: string;
-  isEmitting: boolean;
-  hidden?: boolean;
+interface TemplateJson {
+  triggerEvent?: string;
+  definition?: { actions?: Array<{ key?: string }>; [k: string]: unknown };
 }
 
-function templateTrigger(t: ApiTemplate): string | null {
-  if (t.templateJson && typeof t.templateJson === "object") {
-    const v = (t.templateJson as Record<string, unknown>).triggerEvent;
-    if (typeof v === "string" && v) return v;
-  }
-  return null;
+function readJson(t: ApiTemplate): TemplateJson {
+  return t.templateJson && typeof t.templateJson === "object" ? (t.templateJson as TemplateJson) : {};
 }
 
 export default function AutomationTemplatesPage() {
   const router = useRouter();
   const { toast } = useOsToast();
-  const [templates, setTemplates] = useState<ApiTemplate[] | null>(null);
-  const [triggers, setTriggers] = useState<Map<string, ApiTrigger>>(new Map());
-  const [usingId, setUsingId] = useState<string | null>(null);
-  const [triggersLoaded, setTriggersLoaded] = useState(false);
   const rights = useAutomationRights();
-  const showUpcoming = useShowUpcoming();
+  const catalog = useAutomationCatalog({ actions: true });
+  const [templates, setTemplates] = useState<ApiTemplate[] | null>(null);
+  const [error, setError] = useState(false);
+  const [usingId, setUsingId] = useState<string | null>(null);
 
+  const load = useCallback(async () => {
+    const r = await apiFetch<{ templates: ApiTemplate[] }>("/api/automation/templates", { cache: "no-store" });
+    if (!r.ok) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    setTemplates(Array.isArray(r.data.templates) ? r.data.templates : []);
+  }, []);
   useEffect(() => {
-    let alive = true;
-    fetch("/api/automation/templates", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!alive) return;
-        setTemplates(Array.isArray(d?.templates) ? d.templates : []);
-      })
-      .catch(() => {
-        if (alive) {
-          setTemplates([]);
-          toast("Couldn't load templates");
-        }
-      });
-    fetch("/api/automation/triggers")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (alive && Array.isArray(d?.triggers)) {
-          setTriggers(new Map((d.triggers as ApiTrigger[]).map((t) => [t.key, t])));
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (alive) setTriggersLoaded(true); });
-    return () => {
-      alive = false;
-    };
-  }, [toast]);
+    const t = setTimeout(() => void load(), 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  const applyTemplate = useCallback(
-    async (t: ApiTemplate) => {
-      const json =
-        t.templateJson && typeof t.templateJson === "object"
-          ? (t.templateJson as Record<string, unknown>)
-          : {};
-      setUsingId(t.id);
-      try {
-        const res = await fetch("/api/automation/workflows", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            name: t.name,
-            description: t.description ?? undefined,
-            triggerEvent: typeof json.triggerEvent === "string" ? json.triggerEvent : undefined,
-            severity: t.severity,
-            definition:
-              json.definition && typeof json.definition === "object" ? json.definition : undefined,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          toast(data?.error ?? "Couldn't create the automation");
-          return;
-        }
-        toast("Draft created from template");
-        router.push(`/automation/workflows/${data.workflow.id}`);
-      } catch {
-        toast("Couldn't create the automation");
-      } finally {
-        setUsingId(null);
+  const triggerByKey = useMemo(() => new Map(catalog.triggers.map((t) => [t.key, t])), [catalog.triggers]);
+  const actionByKey = useMemo(() => new Map(catalog.actions.map((a) => [a.key, a])), [catalog.actions]);
+
+  /** "When a task is created, send an in-app notification." */
+  const sentence = useCallback((t: ApiTemplate): string => {
+    const json = readJson(t);
+    const trig = json.triggerEvent ? triggerByKey.get(json.triggerEvent) : undefined;
+    const acts = (json.definition?.actions ?? [])
+      .map((a) => (a.key ? actionByKey.get(a.key)?.name : undefined))
+      .filter((n): n is string => Boolean(n))
+      .map((n) => n.charAt(0).toLowerCase() + n.slice(1));
+    if (!trig || acts.length === 0) return t.description ?? "";
+    return `When ${trig.phrase}, ${acts.join(", and then ")}.`;
+  }, [triggerByKey, actionByKey]);
+
+  const applyTemplate = useCallback(async (t: ApiTemplate) => {
+    const json = readJson(t);
+    setUsingId(t.id);
+    const r = await apiFetch<{ workflow: { id: string } }>("/api/automation/workflows", {
+      method: "POST",
+      json: {
+        name: t.name,
+        description: t.description ?? undefined,
+        triggerEvent: json.triggerEvent,
+        severity: t.severity,
+        definition: json.definition,
+      },
+    });
+    setUsingId(null);
+    if (!r.ok) {
+      toast(r.error || "Couldn't create the automation", { tone: "danger" });
+      return;
+    }
+    const id = r.data.workflow.id;
+    notifyAiChatsChanged();
+    // The draft is theirs, so its creator may take it back. Undo archives it
+    // (the hub never hard-deletes: run history and versions stay), and a
+    // failed Undo says so instead of leaving the draft behind in silence.
+    const undo = async () => {
+      const u = await apiFetch(`/api/automation/workflows/${id}`, { method: "DELETE" });
+      if (!u.ok) {
+        toast("Couldn't undo. The draft is still in Workflows.", { tone: "danger", action: { label: "Try again", onClick: () => void undo() } });
+        return;
       }
-    },
-    [router, toast],
-  );
+      notifyAiChatsChanged();
+      router.push("/automation/templates");
+    };
+    toast("Draft created", { action: { label: "Undo", onClick: () => void undo() } });
+    router.push(`/automation/workflows/${id}`);
+  }, [router, toast]);
 
-  // Until the trigger catalog answers, a card's liveness is unknown, so the
-  // grid waits for both lists rather than flashing a card that then goes.
-  const visible = templates && triggersLoaded
+  const ready = templates !== null && catalog.loaded;
+  const visible = ready
     ? templates.filter((t) => {
-        const key = templateTrigger(t);
-        const trig = key ? triggers.get(key) : undefined;
-        if (trig?.hidden) return false;
-        if (trig && !trig.isEmitting) return showUpcoming;
-        return true;
+        const key = readJson(t).triggerEvent;
+        return !(key && triggerByKey.get(key)?.hidden);
       })
     : null;
 
   return (
-    <div className="flex h-full flex-col bg-white">
-      <AutomationHeader
-        Icon={LayoutTemplate}
-        title="Templates"
-        meta={
-          visible && visible.length > 0 ? (
-            <span className="tabular-nums">{visible.length} starter recipe{visible.length === 1 ? "" : "s"}</span>
-          ) : undefined
-        }
-      />
-
-      <div className="flex-1 overflow-y-auto p-4">
-        {visible === null ? (
-          <div className="mx-auto max-w-5xl" aria-busy="true" aria-label="Loading templates">
-            <SkeletonGrid count={6} />
+    <>
+      <OsPageHeader title="Templates" />
+      <div className="px-6 pb-10 pt-2">
+        <div className="os-chrome">
+        {error ? (
+          <InlineRow action={{ label: "Try again", onClick: () => void load() }} className="justify-center">Couldn&apos;t load templates</InlineRow>
+        ) : visible === null ? (
+          <div className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-2 min-[1280px]:grid-cols-3" aria-busy="true" aria-label="Loading templates">
+            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : visible.length === 0 ? (
-          <div className="flex flex-col items-center pt-20">
-            <span className="grid h-12 w-12 place-items-center rounded-full bg-zinc-50">
-              <Zap className="h-5 w-5 text-zinc-500" />
-            </span>
-            <h2 className="mt-4 text-lg font-semibold text-zinc-900">No templates yet</h2>
-            <p className="mt-1 max-w-sm text-center text-base text-zinc-500">
-              Starter recipes appear here. You can always build an automation from scratch in
-              Workflows.
-            </p>
-          </div>
+          <OsEmptyView title="No templates yet" action={{ label: "Create an automation from scratch", href: "/automation/workflows" }} />
         ) : (
-          <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-2 min-[1280px]:grid-cols-3">
             {visible.map((t) => {
-              const triggerKey = templateTrigger(t);
-              const trigger = triggerKey ? triggers.get(triggerKey) : undefined;
-              const severityMeta = SEVERITY_META.find((s) => s.key === t.severity);
+              const key = readJson(t).triggerEvent;
+              const trig = key ? triggerByKey.get(key) : undefined;
+              // Using a template is a create, which every Member may do.
+              const canUse = rights.canCreate;
               return (
-                <div key={t.id} className={`${CARD} flex flex-col p-4`}>
-                  <div className="flex items-center gap-1.5">
-                    {t.category ? (
-                      <span className="inline-flex h-[18px] items-center rounded-md border border-zinc-200 bg-zinc-50 px-1.5 text-micro font-semibold uppercase tracking-wide text-zinc-500">
-                        {t.category}
-                      </span>
-                    ) : null}
-                    {severityMeta && severityMeta.key !== "MINOR" ? (
-                      <span
-                        className="inline-flex h-[18px] items-center gap-1 rounded-md px-1.5 text-micro font-semibold uppercase tracking-wide"
-                        style={{
-                          backgroundColor: `${severityMeta.color}14`,
-                          color: severityMeta.color,
-                          border: `1px solid ${severityMeta.color}33`,
-                        }}
-                      >
-                        {severityMeta.label}
-                      </span>
-                    ) : null}
-                    {trigger && !trigger.isEmitting ? (
-                      <span
-                        className="inline-flex h-[18px] items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 text-micro font-semibold uppercase tracking-wide text-amber-700"
-                        title="This trigger does not fire yet. The recipe starts working as soon as it does."
-                      >
-                        not live yet
-                      </span>
-                    ) : null}
+                <div
+                  key={t.id}
+                  tabIndex={canUse ? 0 : undefined}
+                  onKeyDown={canUse ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget && usingId === null) void applyTemplate(t); } : undefined}
+                  className={`${CARD} flex flex-col p-4 outline-none focus-visible:border-brand`}
+                >
+                  <h2 className="m-0 text-row font-medium text-ink">{t.name}</h2>
+                  <p className="m-0 mt-1 line-clamp-2 text-sm text-ink-2" title={t.description ?? undefined}>{sentence(t)}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {t.category ? <NeutralChip>{t.category}</NeutralChip> : null}
+                    {trig && !trig.isEmitting ? <NeutralChip title="This trigger does not fire yet.">Not live yet</NeutralChip> : null}
                   </div>
-                  <h3 className="mt-2.5 text-base font-semibold leading-snug text-zinc-900">
-                    {t.name}
-                  </h3>
-                  <p className="mt-1.5 flex-1 text-sm leading-relaxed text-zinc-500">
-                    {t.description}
-                  </p>
-                  {rights.canManage && !(trigger && !trigger.isEmitting) ? (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => void applyTemplate(t)}
-                        disabled={usingId !== null}
-                        className={SECONDARY_PILL}
-                      >
-                        {usingId === t.id ? "Creating" : "Use template"}
+                  <span className="flex-1" />
+                  {canUse ? (
+                    <div className="mt-4">
+                      <button type="button" onClick={() => void applyTemplate(t)} disabled={usingId !== null} className={BTN.secondarySm}>
+                        {usingId === t.id ? "Creating" : "Use this"}
                       </button>
                     </div>
                   ) : null}
@@ -220,7 +170,8 @@ export default function AutomationTemplatesPage() {
             })}
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

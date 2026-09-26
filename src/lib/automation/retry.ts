@@ -59,7 +59,7 @@ export async function processAutomationRetries(): Promise<{
     take: 100,
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { status: true } },
+      workflow: { select: { status: true, createdById: true } },
     },
   });
 
@@ -96,6 +96,7 @@ export async function processAutomationRetries(): Promise<{
         workflowId: run.workflowId,
         runId: run.id,
         depth,
+        workflowCreatorId: run.workflow.createdById,
       };
 
       let stillFailing = 0;
@@ -108,7 +109,7 @@ export async function processAutomationRetries(): Promise<{
         }
         const stepStartedAt = new Date();
         try {
-          const output = await impl.execute(ctx, (step.inputJson ?? {}) as Record<string, unknown>);
+          const output = await impl.execute({ ...ctx, stepOrder: step.order }, (step.inputJson ?? {}) as Record<string, unknown>);
           const completedAt = new Date();
           await prisma.automationRunStep.update({
             where: { id: step.id },

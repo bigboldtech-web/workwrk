@@ -30,6 +30,8 @@ import { getBoardStatuses } from "@/lib/board-items-shared";
 import { validateLinkedStatus } from "@/lib/list-links";
 import { listLinksAvailable, listReader, topLevelAncestor, withListLinks, type LinkRow } from "@/lib/list-links-server";
 import { prisma } from "@/lib/prisma";
+import { dispatchEvent } from "@/services/webhookDispatcher";
+import { fieldChanges } from "@/lib/automation/field-changes";
 
 export const dynamic = "force-dynamic";
 
@@ -191,6 +193,45 @@ export async function POST(req: NextRequest) {
           actorId: c.userId,
           metadata: before.metadata,
         }).catch(() => {});
+      }
+      // The same automation events a single PATCH fires, so "when a task's
+      // status changes" or "when Priority changes" never goes quiet because
+      // the change came from the bulk bar. Fire-and-forget, never throws.
+      try {
+        const base = {
+          id: updated.id,
+          boardId: before.boardId,
+          title: updated.title,
+          status: updated.status,
+          ownerId: updated.ownerId,
+          assigneeId: updated.ownerId,
+          priority: updated.priority,
+          dueAt: updated.dueAt,
+          actorId: c.userId,
+          updatedAt: updated.updatedAt,
+        };
+        if (patch.status !== undefined && before.status !== updated.status) {
+          dispatchEvent({ organizationId: c.organizationId, event: "task.status_changed", payload: { ...base, previousStatus: before.status } }).catch(() => {});
+        }
+        if (patch.ownerId !== undefined && before.ownerId !== updated.ownerId) {
+          dispatchEvent({ organizationId: c.organizationId, event: "task.assignee_changed", payload: { ...base, previousAssigneeId: before.ownerId } }).catch(() => {});
+        }
+        const stored = updated as unknown as Record<string, unknown>;
+        const saved: Record<string, unknown> = {};
+        for (const key of ["priority", "dueAt", "startAt"] as const) if (patch[key] !== undefined) saved[key] = stored[key];
+        const changes = fieldChanges(
+          { priority: before.priority, dueAt: before.dueAt, startAt: before.startAt },
+          saved,
+        );
+        for (const ch of changes) {
+          dispatchEvent({
+            organizationId: c.organizationId,
+            event: "task.field_changed",
+            payload: { ...base, startAt: updated.startAt, field: ch.field, value: ch.value, previousValue: ch.previousValue },
+          }).catch(() => {});
+        }
+      } catch {
+        /* the save already landed; an event pipe never fails it */
       }
       results.push({ id, ok: true });
     } catch {

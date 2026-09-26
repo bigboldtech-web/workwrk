@@ -6,7 +6,7 @@
 // Admin sees every record.
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access";
+import { accessibleIds } from "@/lib/access/index";
 import type { Viewer } from "@/lib/access/types";
 import { recordHref } from "./run-query";
 

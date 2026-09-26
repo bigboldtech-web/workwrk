@@ -15,7 +15,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation, workflowRights } from "@/lib/automation/gate";
+import { refuseWorkflowWrite, requireAutomation, workflowRights } from "@/lib/automation/gate";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
 import { draftDiffersFromLive, draftTrigger, readScope } from "@/lib/automation/definition";
@@ -74,7 +74,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const trigger = draftTrigger(workflow.definition, workflow.triggerEvent);
   const liveTrigger = workflow.publishedVersionId ? workflow.triggerEvent : null;
   const namer = await scopeNamer(ctx.viewer, ctx.orgId, [readScope(workflow.definition)]);
-  const rights = workflowRights(ctx);
+  const rights = workflowRights(ctx, workflow.createdById);
 
   return NextResponse.json(
     {
@@ -97,8 +97,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
   const { id } = await params;
+  const refused = await refuseWorkflowWrite(ctx, id, "edit");
+  if (refused) return refused;
 
   const body = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(body);
@@ -156,8 +157,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.isAdmin) return forbidden("Only workspace Owners and Admins can archive automations.");
   const { id } = await params;
+  const refused = await refuseWorkflowWrite(ctx, id, "archive");
+  if (refused) return refused;
 
   const existing = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },

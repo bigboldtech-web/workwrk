@@ -9,7 +9,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation } from "@/lib/automation/gate";
+import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
 import { getTrigger } from "@/lib/automation/registry-triggers";
@@ -18,8 +18,9 @@ import { draftTrigger } from "@/lib/automation/definition";
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
   const { id } = await params;
+  const refused = await refuseWorkflowWrite(ctx, id, "edit");
+  if (refused) return refused;
 
   const workflow = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
@@ -33,23 +34,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   // The DRAFT trigger goes live with this publish (the column is the live one).
   const trigger = draftTrigger(workflow.definition, workflow.triggerEvent);
   if (!trigger) {
-    return NextResponse.json({ error: "Choose what starts this automation", section: "when" }, { status: 400 });
+    return NextResponse.json({ error: "Choose what starts this automation", section: "when", issues: { section: "when" } }, { status: 400 });
   }
   if (!getTrigger(trigger)) {
-    return NextResponse.json({ error: "That trigger no longer exists. Choose another.", section: "when" }, { status: 400 });
+    return NextResponse.json({ error: "That trigger no longer exists. Choose another.", section: "when", issues: { section: "when" } }, { status: 400 });
   }
 
   const def = parseDefinition(workflow.definition);
   if (def.actions.length === 0) {
-    return NextResponse.json({ error: "Add at least one action", section: "then" }, { status: 400 });
+    return NextResponse.json({ error: "Add at least one action", section: "then", issues: { section: "then" } }, { status: 400 });
   }
   for (const [index, action] of def.actions.entries()) {
     const impl = getAction(action.key);
     if (!impl) {
-      return NextResponse.json({ error: "One of the actions no longer exists. Remove it.", section: "then", index }, { status: 400 });
+      return NextResponse.json({ error: "One of the actions no longer exists. Remove it.", section: "then", index, issues: { section: "then", index } }, { status: 400 });
     }
     if (!impl.available) {
-      return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index }, { status: 400 });
+      return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index, issues: { section: "then", index } }, { status: 400 });
     }
   }
   const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger };

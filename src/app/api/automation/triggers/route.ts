@@ -20,7 +20,12 @@ export async function GET() {
   const org = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
 
   return NextResponse.json(
-    { triggers: triggersForOrg(legacyTriggersEnabled(org?.settings)) },
+    {
+      triggers: triggersForOrg(legacyTriggersEnabled(org?.settings)),
+      // The time triggers read times in the server's calendar; the builder
+      // names this zone beside the time so nobody guesses.
+      serverZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    },
     { headers: { "Cache-Control": "private, no-store" } },
   );
 }

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { generateSecret, publicWebhookMeta, readWebhookMeta, signBody, webhookUrlProblem } from "./webhook";
+import { generateSecret, guardedLookup, isPrivateAddress, publicWebhookMeta, readWebhookMeta, signBody, webhookUrlProblem } from "./webhook";
 
 describe("webhookUrlProblem", () => {
   it("accepts a public https address", () => {
@@ -19,6 +19,15 @@ describe("webhookUrlProblem", () => {
       "http://[::1]/x",
       "http://intranet/x",
       "http://db.internal/x",
+      // IPv6 forms that carry a private IPv4 inside them
+      "http://[64:ff9b::7f00:1]/",
+      "http://[::ffff:127.0.0.1]/",
+      "http://[::ffff:a9fe:a9fe]/",
+      "http://[2002:7f00:1::]/",
+      "http://[fd00::1]/",
+      "http://[fe80::1]/",
+      "http://0.0.0.0/",
+      "http://100.64.0.1/",
     ]) {
       expect(webhookUrlProblem(u), u).not.toBeNull();
     }
@@ -58,5 +67,27 @@ describe("metadata", () => {
     const meta = readWebhookMeta({ url: "https://x.example" });
     expect(meta.secret).toBeNull();
     expect(publicWebhookMeta(meta).secretHint).toBeNull();
+  });
+});
+
+describe("isPrivateAddress", () => {
+  it("reads private ranges in every spelling and leaves public ones alone", () => {
+    for (const ip of ["127.0.0.1", "10.1.2.3", "169.254.169.254", "::1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "fc00::1", "224.0.0.1"]) {
+      expect(isPrivateAddress(ip), ip).toBe(true);
+    }
+    for (const ip of ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "64:ff9b::808:808"]) {
+      expect(isPrivateAddress(ip), ip).toBe(false);
+    }
+  });
+});
+
+describe("guardedLookup", () => {
+  it("refuses a name that resolves to a private address, at connect time", async () => {
+    // "localhost" resolves without a network; any name that resolves to a
+    // loopback or private address takes this same path.
+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+      guardedLookup("localhost", {}, (e) => resolve(e));
+    });
+    expect(err?.code).toBe("EWEBHOOKPRIVATE");
   });
 });

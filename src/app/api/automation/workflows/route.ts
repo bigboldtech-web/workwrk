@@ -173,7 +173,6 @@ export async function GET(req: NextRequest) {
   const { page, total, nextCursor, offset } = pageOf(sorted, parseOffsetCursor(sp.get("cursor")), take);
 
   const namer = await scopeNamer(ctx.viewer, ctx.orgId, page.map((w) => readScope(w.definition)));
-  const rights = workflowRights(ctx);
 
   return NextResponse.json(
     {
@@ -185,7 +184,7 @@ export async function GET(req: NextRequest) {
           createdByName: creator?.name ?? null,
           createdByAvatar: creator?.avatar ?? null,
           where: namer(readScope(definition)),
-          can: w.status === "ARCHIVED" ? { edit: false, archive: rights.archive } : rights,
+          can: ((r) => (w.status === "ARCHIVED" ? { edit: false, archive: r.archive } : r))(workflowRights(ctx, w.createdById)),
         };
       }),
       total,
@@ -194,7 +193,7 @@ export async function GET(req: NextRequest) {
       container: containerOut,
       creators: creators.map((u) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim() })),
       paused: readAutomationSettings(org?.settings).paused,
-      rights: { canCreate: ctx.canManage, isAdmin: ctx.isAdmin },
+      rights: { canCreate: ctx.canCreate, isAdmin: ctx.isAdmin },
     },
     { headers: { "Cache-Control": "private, no-store" } },
   );
@@ -203,7 +202,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
+  if (!ctx.canCreate) return forbidden();
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

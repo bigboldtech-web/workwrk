@@ -27,7 +27,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const run = await prisma.automationRun.findFirst({
     where: { id, organizationId: ctx.orgId },
     include: {
-      workflow: { select: { id: true, name: true, status: true, severity: true } },
+      workflow: { select: { id: true, name: true, status: true, severity: true, createdById: true } },
       steps: {
         orderBy: { order: "asc" },
         select: {
@@ -62,7 +62,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const steps = run.steps.map((s) => ({
     ...s,
-    stepName: s.stepType === "TRIGGER" ? triggerDisplayName(s.stepKey) : s.stepName,
+    stepName:
+      s.stepType === "TRIGGER"
+        ? triggerDisplayName(s.stepKey)
+        : s.stepType === "ACTION" && (!s.stepName || s.stepName === s.stepKey)
+          ? getAction(s.stepKey)?.name ?? s.stepName
+          : s.stepName,
     ...(detailHidden ? { inputJson: null, outputJson: null } : {}),
   }));
 
@@ -75,7 +80,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         triggerName: triggerDisplayName(run.triggerEventKey),
         record: records.record(run.recordType, run.recordId),
         detailHidden,
-        retry: { can: retryable && workflowRights(ctx).edit, blockedBy: failedActions.length > 0 ? blockedBy : [] },
+        retry: { can: retryable && workflowRights(ctx, run.workflow.createdById).edit, blockedBy: failedActions.length > 0 ? blockedBy : [] },
       },
     },
     { headers: { "Cache-Control": "private, no-store" } },

@@ -87,6 +87,8 @@ export interface TableCardProps<T> {
   onRowClick?: (row: T, e: React.MouseEvent) => void;
   /** Row-level checkbox column. */
   selectable?: boolean;
+  /** A row the viewer cannot act on gets no checkbox (spec-ai-automation 1.4). Default: every row. */
+  isRowSelectable?: (row: T) => boolean;
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
   sort?: TableSort | null;
@@ -125,6 +127,7 @@ export function TableCard<T>({
   rowHref,
   onRowClick,
   selectable = false,
+  isRowSelectable,
   selected,
   onSelectedChange,
   sort,
@@ -164,7 +167,10 @@ export function TableCard<T>({
     return tracks.join(" ");
   }, [columns, selectable, rowMenu]);
 
-  const allKeys = useMemo(() => (rows ?? []).map(rowKey), [rows, rowKey]);
+  const allKeys = useMemo(
+    () => (rows ?? []).filter((r) => !isRowSelectable || isRowSelectable(r)).map(rowKey),
+    [rows, rowKey, isRowSelectable],
+  );
   const allChecked = allKeys.length > 0 && allKeys.every((k) => sel.has(k));
   const someChecked = !allChecked && allKeys.some((k) => sel.has(k));
 
@@ -204,7 +210,7 @@ export function TableCard<T>({
     const key = rowEl.dataset.key ?? "";
     const row = rows.find((r) => rowKey(r) === key);
     if (!row) return;
-    if (plain && e.key === " " && selectable) { e.preventDefault(); toggleOne(key); return; }
+    if (plain && e.key === " " && selectable && (!isRowSelectable || isRowSelectable(row))) { e.preventDefault(); toggleOne(key); return; }
     if (plain && e.key === ".") {
       const more = rowEl.querySelector<HTMLElement>(".os-tc__more button, .os-tc__more [role=button]");
       if (more) { e.preventDefault(); more.click(); }
@@ -312,7 +318,9 @@ export function TableCard<T>({
               );
               const style = { gridTemplateColumns: template, height: "var(--os-row-h)" } as React.CSSProperties;
               const stop = (e: React.MouseEvent) => e.stopPropagation();
-              const check = selectable ? (
+              const check = selectable && isRowSelectable && !isRowSelectable(row) ? (
+                <div className={CELL} aria-hidden />
+              ) : selectable ? (
                 <div className={cn(CELL, "justify-center")} onClick={stop}>
                   <input
                     type="checkbox"

@@ -5,15 +5,17 @@
 // the Workflows list and the builder cannot leak a private List's name.
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access";
+import { accessibleIds } from "@/lib/access/index";
 import type { Viewer } from "@/lib/access/types";
 import { parseBoardSchema } from "@/lib/field-catalog";
+import { getBoardStatuses } from "@/lib/board-items-shared";
 import type { AutomationScope } from "./definition";
+import { SETTABLE_FIELD_TYPES } from "./set-field";
 
 export interface PlaceSpace { id: string; name: string }
 export interface PlaceFolder { id: string; name: string; spaceId: string }
 export interface PlaceField { key: string; label: string; type: string; choices?: Array<{ value: string; label: string }> }
-export interface PlaceList { id: string; name: string; spaceId: string | null; folderId: string | null; fields?: PlaceField[] }
+export interface PlaceList { id: string; name: string; spaceId: string | null; folderId: string | null; fields?: PlaceField[]; statuses?: Array<{ value: string; label: string }> }
 
 export interface Places {
   spaces: PlaceSpace[];
@@ -22,7 +24,7 @@ export interface Places {
 }
 
 /** The fields a set-field action and a field-change trigger may name. */
-export const SETTABLE_FIELD_TYPES = new Set(["TEXT", "LONG_TEXT", "NUMBER", "MONEY", "PERCENT", "RATING", "DATE", "CHECKBOX", "DROPDOWN", "URL", "EMAIL", "PHONE", "TSHIRT_SIZE"]);
+export { SETTABLE_FIELD_TYPES };
 
 export async function loadPlaces(viewer: Viewer, orgId: string, opts: { withFields?: boolean } = {}): Promise<Places> {
   const [spaceIds, folderIds, listIds] = await Promise.all([
@@ -40,7 +42,7 @@ export async function loadPlaces(viewer: Viewer, orgId: string, opts: { withFiel
     listIds.readable.size
       ? prisma.board.findMany({
           where: { id: { in: [...listIds.readable] }, organizationId: orgId, archivedAt: null },
-          select: { id: true, name: true, spaceId: true, folderId: true, ...(opts.withFields ? { schema: true } : {}) },
+          select: { id: true, name: true, spaceId: true, folderId: true, ...(opts.withFields ? { schema: true, statuses: true } : {}) },
           orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
@@ -54,6 +56,9 @@ export async function loadPlaces(viewer: Viewer, orgId: string, opts: { withFiel
       const schema = parseBoardSchema((l as { schema?: unknown }).schema);
       return {
         ...base,
+        // The List's own statuses, so a status condition or "Change status"
+        // offers the words that List uses.
+        statuses: getBoardStatuses(l as { statuses?: unknown }).map((st) => ({ value: st.value, label: st.label })),
         fields: schema.fields
           .filter((f) => SETTABLE_FIELD_TYPES.has(String(f.type)))
           .map((f) => ({

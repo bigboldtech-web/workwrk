@@ -15,7 +15,8 @@ import { draftTrigger } from "@/lib/automation/definition";
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!ctx.canManage) return forbidden();
+  // Every Member may duplicate: the copy is a new draft they own.
+  if (!ctx.canCreate) return forbidden();
   const { id } = await params;
 
   const src = await prisma.automationWorkflow.findFirst({
