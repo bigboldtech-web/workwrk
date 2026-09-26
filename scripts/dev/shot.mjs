@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { existsSync as __e, readdirSync as __r } from "node:fs";
 // Authenticated screenshot harness for the WorkwrK UI refresh.
 // Usage: node shot.mjs <out.png> <path> [width] [height] [cookieFile]
 //   cookieFile: a file whose content is the next-auth session token value.
@@ -11,7 +13,28 @@ import { join } from "node:path";
 
 const [outFile, path = "/today", width = "1440", height = "900", cookieFile = "session.cookie"] = process.argv.slice(2);
 const BASE = process.env.BASE || "http://localhost:3007";
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// The browser: $CHROME if set, else the Chrome app, else the newest
+// chrome-headless-shell under ~/.cache/chrome-headless (installed with
+// "npx @puppeteer/browsers install chrome-headless-shell@stable --path
+// ~/.cache/chrome-headless"). The Chrome app vanished once mid-update and
+// took every screenshot in every running walk with it.
+const CHROME = (() => {
+  const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (process.env.CHROME && __e(process.env.CHROME)) return process.env.CHROME;
+  if (__e(app)) return app;
+  const root = join(homedir(), ".cache", "chrome-headless", "chrome-headless-shell");
+  try {
+    const builds = __r(root).sort().reverse();
+    for (const b of builds) {
+      const dir = join(root, b);
+      for (const sub of __r(dir)) {
+        const bin = join(dir, sub, "chrome-headless-shell");
+        if (__e(bin)) return bin;
+      }
+    }
+  } catch {}
+  return app;
+})();
 const PORT = 9333 + Math.floor(Math.random() * 500);
 const token = (() => { try { return readFileSync(cookieFile, "utf8").trim(); } catch { return ""; } })();
 
