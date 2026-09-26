@@ -37,7 +37,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canContributeBoard, canEditBoard, getBoardForReader } from "@/lib/board";
+import { canContributeBoard, canEditBoard, folderGrantCovers, getBoardForReader } from "@/lib/board";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -281,6 +281,17 @@ export async function gateItem(
       if (await canEditBoard(item.boardId, c.userId, c.accessLevel)) listRole = "FULL";
       else if (await canContributeBoard(item.boardId, c.userId, c.accessLevel)) listRole = "EDIT";
       else listRole = "VIEW";
+    } else if (item.board.folderId) {
+      // A FOLDER GRANTEE reads the tasks of every List under the folder they
+      // were granted: the List page shows them these tasks (board.ts,
+      // getBoardForReaderOrFolderGrantee, explains the grant), yet every
+      // /api/items/[id] door answered 404, so the drawer, the subtasks pill
+      // and the realtime refresh all dead-ended on a task the List had just
+      // drawn. VIEW only: a folder grant never writes (canContributeBoard has
+      // no folder branch), so every write still answers 403 here. Only the
+      // grant half is asked: getBoardForReader already refused just above,
+      // and the wrapper would run it again.
+      listRole = (await folderGrantCovers(item.board.folderId, c.userId)) ? "VIEW" : "none";
     }
   }
 
@@ -387,7 +398,13 @@ export async function itemBreadcrumb(
 /** Can the viewer open the task's List page? (Drives every crumb's link.) */
 export async function listIsReadable(item: ItemGateOk["item"], c: ItemCtx): Promise<boolean> {
   if (isOrgAdminAccessLevel(c.accessLevel)) return true;
-  return Boolean(await getBoardForReader(item.boardId, c.userId, c.accessLevel));
+  // The List page's own gate (getBoardForReaderOrFolderGrantee), so a folder
+  // grantee's crumbs link to the page that will actually open for them. Its
+  // two halves are asked here directly: the item already carries the List's
+  // folderId, so the wrapper's second board read and its repeated reader
+  // check are skipped.
+  if (await getBoardForReader(item.boardId, c.userId, c.accessLevel)) return true;
+  return item.board.folderId ? folderGrantCovers(item.board.folderId, c.userId) : false;
 }
 
 /** The board context every task host renders from (fields + status palette). */

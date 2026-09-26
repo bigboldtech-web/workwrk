@@ -16,7 +16,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { getSpaceForReader } from "@/lib/space";
+import { canContributeBoard } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -48,8 +49,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!(await getSpaceForReader(board.spaceId, u.id, accessLevel))) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    if (!(await canEditSpace(board.spaceId, u.id, accessLevel))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // THE CONTRIBUTE LADDER, the one that renders the tabs draggable
+    // (boards/[slug]/page.tsx passes canManage={canContribute}) and the one
+    // PATCH { displayOrder } on the sibling route already accepts. This gate
+    // was canEditSpace, the Space MANAGEMENT ladder, so every drag a Space
+    // member made answered 403 and snapped back.
+    if (!(await canContributeBoard(id, u.id, accessLevel))) {
+      return NextResponse.json(
+        { error: "You can read this List but not reorder its views. Ask a List or Space admin for Can edit access." },
+        { status: 403 },
+      );
     }
   }
 

@@ -28,7 +28,8 @@ import { ShareButton } from "@/components/access/share-button";
 import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
 import { BackButton } from "@/components/ui/back-button";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { viewsForViewer } from "@/lib/work/view-visibility";
+import { listViewsForViewer } from "@/lib/work/default-view";
+import { needsCoreListViews } from "@/lib/work/list-view-seed";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
@@ -83,23 +84,27 @@ export default async function BoardPage(props: {
   }
   if (!board || !board.space) notFound();
 
-  // Self-heal: give every task List the full ClickUp view set (Board/Calendar/
-  // Gantt) so switching views on the list always shows the same tasks. No-op
-  // (no writes) once the views exist. Refetch the view set only if it grew.
+  // Self-heal: give every task List the full core view set (Board, List,
+  // Calendar, Gantt) so switching views always shows the same tasks. A List
+  // that already has its set issues no query here at all. One that lacks a
+  // view is topped up and its views read again, whether this request made the
+  // rows or waited on the lock while another request made them (review #36):
+  // either way this request's own snapshot is short a view.
   let allViews = board.views;
-  const createdViews = await ensureCoreListViews(board.id, u.id);
-  if (createdViews > 0) {
+  if (needsCoreListViews(allViews)) {
+    await ensureCoreListViews(board.id, u.id);
     allViews = await prisma.view.findMany({
       where: { boardId: board.id },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     });
   }
   // audit High #5: "Private view" was cosmetic here. The dialog wrote
-  // `isShared: false` and `ownerId`, and this page read every row anyway. The
-  // filter is `src/lib/work/view-visibility.ts`, the same function
-  // `GET /api/boards/[id]/views` applies, so the page and the API cannot
-  // disagree about what a person can see.
-  const views = viewsForViewer(allViews, u.id);
+  // `isShared: false` and `ownerId`, and this page read every row anyway.
+  // listViewsForViewer (src/lib/work/default-view.ts) filters with the same
+  // rule `GET /api/boards/[id]/views` applies, and resolves the default the
+  // same way (decision 8: a pinned view, else the Board), so the page, the
+  // API and the strip's first tab cannot disagree.
+  const { views, defaultView, pinned, pinnedById } = listViewsForViewer(allViews, u.id);
 
   // READ GATE — the SAME predicate this page's own endpoints use.
   //
@@ -119,7 +124,15 @@ export default async function BoardPage(props: {
   const readable = await getBoardForReaderOrFolderGrantee(board.id, u.id, u.accessLevel ?? "EMPLOYEE");
   if (!readable) notFound();
 
-  const defaultView = views.find((v) => v.isDefault) ?? views[0];
+  // Who pinned the default, for the Unpin row's "Pinned by" line. Scoped to
+  // the organisation: a mark can only ever name a colleague.
+  const pinnedBy = pinnedById
+    ? await prisma.user.findFirst({
+        where: { id: pinnedById, organizationId: u.organizationId },
+        select: { firstName: true, lastName: true },
+      })
+    : null;
+  const pinnedByName = pinnedBy ? `${pinnedBy.firstName} ${pinnedBy.lastName}`.trim() || null : null;
   // Active view = ?view=<id> if it matches an existing view; else default.
   // Tab click is a Link that updates this param.
   const activeView =
@@ -278,7 +291,8 @@ export default async function BoardPage(props: {
           in risk terms and is exactly the founder's "if I give some access to
           someone they are also not able to make some changes". DELETING a
           shared view stays on the management ladder, in canManageView, because
-          that destroys other people's saved work. */}
+          that destroys other people's saved work, so the management answer
+          goes in as canDeleteShared. */}
       <BoardViewTabs
         views={views.map((v) => ({ id: v.id, name: v.name, type: v.type, isDefault: v.isDefault, config: v.config, isShared: v.isShared, ownerId: v.ownerId }))}
         boardId={board.id}
@@ -286,9 +300,11 @@ export default async function BoardPage(props: {
         boardName={board.name}
         activeViewId={activeView?.id ?? null}
         defaultViewId={defaultView?.id ?? null}
+        defaultPinned={pinned}
+        pinnedByName={pinnedByName}
         canManage={canContribute}
-        canManageList={canManage}
-        viewerId={u.id}
+        canDeleteShared={canManage}
+        currentUserId={u.id}
         scheduleReports={scheduleReports}
       />
 

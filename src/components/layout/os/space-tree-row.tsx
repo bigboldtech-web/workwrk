@@ -433,7 +433,10 @@ export function SpaceTreeRow({
         }}
         ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-9 items-center gap-2 px-3 rounded-lg ${
+        // The sidebar grid (sidebar-primitives.tsx ROW_BASE): 32px rows, 16px
+        // glyphs, 8px gap, 14px labels, 16px per level (the child lists'
+        // ps-4 plus each row's ps-3), so every level's labels line up.
+        className={`relative flex h-8 items-center gap-2 px-3 rounded-lg text-base ${
           rootDragOver ? "ring-2 ring-inset ring-brand bg-selected" : lit ? "bg-side-pill" : "hover:bg-hover"
         } ${reorderable ? "cursor-pointer" : ""}`}
       >
@@ -452,7 +455,7 @@ export function SpaceTreeRow({
           aria-expanded={expanded}
         >
           <span className="group-hover/space:opacity-0 transition-opacity">
-            <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
+            <EntityTile size="xs" icon={space.icon} color={space.color} name={space.name} />
           </span>
           <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-ink-3">
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
@@ -460,7 +463,7 @@ export function SpaceTreeRow({
         </button>
         <Link
           href={`/spaces/${space.slug}`}
-          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 ${
+          className={`flex items-center gap-1.5 flex-1 min-w-0 ${
             lit ? "text-ink font-medium" : "text-ink"
           }`}
         >
@@ -495,7 +498,7 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="mt-0.5 mb-1 ps-[19px]">
+        <ul className="mt-0.5 mb-1 ps-4">
           {loading && data === null ? (
             <li><SkeletonLines lines={2} className="px-2 py-1" /></li>
           ) : data === null ? (
@@ -633,7 +636,7 @@ function FolderTreeRow({
         }}
         ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-8 items-center gap-2 ps-3 pe-1.5 rounded-lg text-base cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {dropZone === "before" || dropZone === "after" ? (
           <span
@@ -645,7 +648,7 @@ function FolderTreeRow({
         <button
           type="button"
           onClick={() => hasChildren && setExpanded((v) => !v)}
-          className="relative h-3.5 w-3.5 shrink-0 inline-flex items-center justify-center"
+          className="relative h-4 w-4 shrink-0 inline-flex items-center justify-center"
           aria-label={expanded ? "Collapse folder" : "Expand folder"}
           aria-expanded={expanded}
           disabled={!hasChildren}
@@ -654,7 +657,7 @@ function FolderTreeRow({
             const FolderGlyph = expanded && hasChildren ? FolderOpen : FolderIcon;
             return (
               <FolderGlyph
-                className={`h-3.5 w-3.5 text-ink-2 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity" : ""}`}
+                className={`h-4 w-4 text-ink-2 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity" : ""}`}
                 style={folder.color ? { color: folder.color } : undefined}
               />
             );
@@ -703,7 +706,7 @@ function FolderTreeRow({
         folder.docs.length > 0 ||
         folder.whiteboards.length > 0 ||
         folder.childFolders.length > 0) ? (
-        <ul className="mt-0.5 ps-[19px]">
+        <ul className="mt-0.5 ps-4">
           {folder.childFolders.map((cf) => (
             <FolderTreeRow
               key={cf.id}
@@ -760,17 +763,17 @@ function BoardTreeRow({
         ref={pillRef}
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-8 items-center gap-2 ps-3 pe-1.5 rounded-lg text-base cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
+          className={`flex items-center gap-2 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           {sprint ? (
-            <IterationCw className="h-3.5 w-3.5 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
+            <IterationCw className="h-4 w-4 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
           ) : (
-            <ListChecks className="h-3.5 w-3.5 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
+            <ListChecks className="h-4 w-4 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
           )}
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
@@ -821,14 +824,14 @@ function TableTreeRow({
       <div
         ref={pillRef}
         onContextMenu={(e) => menu.open(e, target)}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-8 items-center gap-2 ps-3 pe-1.5 rounded-lg text-base ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {/* Opens IN WORK, at the table's Space-scoped address. */}
         <Link
           href={objectHref("table", table.id, "home", spaceSlug)}
-          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
+          className={`flex items-center gap-2 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <TableIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
+          <TableIcon className="h-4 w-4 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
@@ -863,14 +866,14 @@ function DocTreeRow({ doc, spaceSlug, onChanged }: { doc: DocChild; spaceSlug: s
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
         onContextMenu={(e) => noteMenu.open(e, target)}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-8 items-center gap-2 ps-3 pe-1.5 rounded-lg text-base cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {/* Opens IN WORK, at the doc's Space-scoped address. */}
         <Link
           href={objectHref("doc", doc.id, "home", spaceSlug)}
-          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
+          className={`flex items-center gap-2 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <FileText className="h-3.5 w-3.5 shrink-0 text-ink-2" />
+          <FileText className="h-4 w-4 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/docrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
@@ -899,14 +902,14 @@ function WhiteboardTreeRow({ whiteboard, spaceSlug, onChanged }: { whiteboard: W
       <div
         ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-8 items-center gap-2 ps-3 pe-1.5 rounded-lg text-base cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {/* Opens IN WORK, at the canvas's Space-scoped address. */}
         <Link
           href={objectHref("canvas", whiteboard.id, "home", spaceSlug)}
-          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
+          className={`flex items-center gap-2 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
+          <WhiteboardIcon className="h-4 w-4 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
         </Link>
         <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
