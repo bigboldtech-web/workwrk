@@ -47,6 +47,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
+  applyRowPatchReport,
   boardStatusFor,
   computedFieldsKey,
   itemEventAction,
@@ -56,6 +57,7 @@ import {
   reconcilePoll,
   refetchedFromRow,
   type RefetchedTask,
+  type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { viewConfigQueue } from "@/lib/view-config-queue";
 import { PersonalListSurface } from "./item-context-menu";
@@ -457,9 +459,13 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const handleItemCreated = useCallback((item: BoardItemRow) => {
     setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
   }, []);
-  const handleItemPatched = useCallback((id: string, patch: Partial<BoardItemRow>) => {
+  // `applyRowPatchReport`, not a spread: a custom-field edit arrives as
+  // `metadataPatch` and merges into THIS copy's metadata. The renderer used
+  // to report only row fields, so the copy here kept the old blob and the
+  // next resync snapped the edited cell back until a full reload.
+  const handleItemPatched = useCallback((id: string, patch: RowPatchReport) => {
     setItems((prev) => {
-      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      const next = prev.map((r) => (r.id === id ? applyRowPatchReport(r, patch) : r));
       // A `position` patch is a drag-reorder. The ledger must stay in the same
       // position order listBoardItems hands back, otherwise the renderer
       // re-syncs from a snapshot that still holds the pre-drag order and the

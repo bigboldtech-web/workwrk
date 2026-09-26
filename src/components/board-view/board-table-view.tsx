@@ -39,6 +39,7 @@ import {
   linkedMenuFlags,
   linkedRowEditable,
   linkedRowKind,
+  mergeMetadataPatch,
   mergeRefetchedRow,
   optimisticLinkedStatus,
   linkedStatusNote,
@@ -46,6 +47,7 @@ import {
   refetchedFromRow,
   statusPickerFor,
   writeContext,
+  type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { MAX_PINNED_COLUMNS, ROW_HEIGHTS, type RowColorRule, type RowHeight } from "@/lib/list-comfort";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
@@ -135,7 +137,7 @@ interface BoardTableViewProps {
    *  would clobber the local copy (created rows vanish, archived rows
    *  resurrect, edits revert). */
   onItemCreated?: (item: BoardItemRow) => void;
-  onItemPatched?: (id: string, patch: Partial<BoardItemRow>) => void;
+  onItemPatched?: (id: string, patch: RowPatchReport) => void;
   onItemRemoved?: (id: string) => void;
   /** Failure-path refetches hand the fresh server list to the parent instead
    *  of trapping it locally (where the next parent resync would regress it). */
@@ -180,19 +182,6 @@ type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "own
    */
   metadataPatch?: Record<string, unknown>;
 };
-
-/** The optimistic twin of the server-side metadataPatch merge. */
-function mergeMetadata(
-  current: Record<string, unknown> | undefined,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...(current ?? {}) };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === null) delete next[k];
-    else next[k] = v;
-  }
-  return next;
-}
 
 // Toolbar sort (ported from the Personal List).
 type SortKey = "none" | "title" | "due" | "created" | "priority";
@@ -1313,16 +1302,20 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // A linked row's status is a HOME value (its picker offers the home set),
     // and its pill is the home status: both move together, at once.
     const optimisticFor = (r: BoardItemRow): BoardItemRow => {
-      const next: BoardItemRow = { ...r, ...rowFields, ...(mdPatch ? { metadata: mergeMetadata(r.metadata, mdPatch) } : {}) };
+      const next: BoardItemRow = { ...r, ...rowFields, ...(mdPatch ? { metadata: mergeMetadataPatch(r.metadata, mdPatch) } : {}) };
       return linked && typeof patch.status === "string" ? optimisticLinkedStatus(next, patch.status) : next;
     };
     setItems((prev) => prev.map((r) => (r.id === id ? optimisticFor(r) : r)));
-    // The host list is told only about the row FIELDS. It holds its own copy
-    // of `metadata` and merging a patch into somebody else's copy from here
-    // would be the stale-blob bug again, one level up.
+    // The host holds its own copy of `metadata`, so a custom-field edit
+    // travels to it as the PATCH itself and the host merges it into that copy
+    // (applyRowPatchReport). Sending this row's merged blob instead would be
+    // the stale-blob bug one level up, and sending no metadata at all (the
+    // old shape) left the host's stale value to win the next resync: the
+    // edited cell showed the old value until a full reload.
+    const report: RowPatchReport = { ...rowFields, ...(mdPatch ? { metadataPatch: mdPatch } : {}) };
     onItemPatched?.(id, linked && row && typeof patch.status === "string"
-      ? { ...rowFields, listLink: optimisticLinkedStatus(row, patch.status).listLink }
-      : rowFields);
+      ? { ...report, listLink: optimisticLinkedStatus(row, patch.status).listLink }
+      : report);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
@@ -1398,7 +1391,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       }
       return { ...r, metadata, ...(connections ? { connections } : {}) };
     }));
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, metadata: mergeMetadata(r.metadata, { [key]: value }) } : r)));
+    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, metadata: mergeMetadataPatch(r.metadata, { [key]: value }) } : r)));
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
