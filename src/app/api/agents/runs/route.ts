@@ -1,79 +1,78 @@
-// GET /api/agents/runs?trigger=SCHEDULED&limit=10
+// GET /api/agents/runs
+//   ?agentSlug=<slug>              (the older ?agent= still works)
+//   ?status=succeeded,failed,running
+//   ?trigger=SCHEDULED|MANUAL
+//   ?from=YYYY-MM-DD&to=YYYY-MM-DD the start date range
+//   ?sort=newest|oldest
+//   ?take=1..100 (default 50; the older ?limit= still works)
+//   ?cursor=<id>                   from nextCursor
 //
-// Lists recent AgentRun rows for this org, joined with agent name +
-// productSlug so the dashboard card can render them without a second
-// roundtrip. Defaults to all triggers (manual + scheduled), but the
-// dashboard digest passes ?trigger=SCHEDULED so users see the
-// autonomous work specifically.
+// The Run history tab (spec-ai-automation section 2, /agents), in the cursor
+// envelope { runs, total, nextCursor }. Each run is
+// { id, agentSlug, agentName, status, trigger, startedAt, durationMs,
+//   summary, sessionId, error }.
+//
+// Every Member reads on the ai app key; what they read is narrower than the
+// org because the rows carry tool results (src/lib/agents/run-query.ts):
+// Owner and Admin read every run, everyone else the autonomous runs and the
+// runs they triggered themselves. Every filter is in the database query, so
+// `total` is the real count and a page is never short because of a filter.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
+import { agentRunsOrder, agentRunsWhere, parseRunQuery } from "@/lib/agents/run-query";
+import { runDurationMs, runSummary, runTrigger } from "@/lib/agents/run-view";
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const organizationId = (session.user as { organizationId?: string }).organizationId;
-  if (!organizationId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
+  const { viewer } = gate;
+  const q = parseRunQuery(new URL(req.url).searchParams);
+  const where = agentRunsWhere(q, { organizationId: viewer.organizationId, userId: viewer.userId, admin: isOwnerOrAdmin(viewer) });
 
-  const url = new URL(req.url);
-  const trigger = url.searchParams.get("trigger");
-  const agentSlug = url.searchParams.get("agent");
-  const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "10", 10) || 10, 50);
-
-  // Pull a slightly wider window and filter in-memory by trigger so we
-  // don't have to denormalize trigger onto AgentRun (it lives inside
-  // input JSON).
-  const rows = await prisma.agentRun.findMany({
-    where: {
-      agent: {
-        organizationId,
-        ...(agentSlug ? { slug: agentSlug } : {}),
+  // A cursor that no longer names a row this viewer can read starts again
+  // at the first page rather than erroring.
+  const cursorValid = q.cursor ? (await prisma.agentRun.count({ where: { AND: [where, { id: q.cursor }] } })) > 0 : false;
+  const [rows, total] = await Promise.all([
+    prisma.agentRun.findMany({
+      where,
+      orderBy: agentRunsOrder(q.sort),
+      take: q.take + 1,
+      ...(q.cursor && cursorValid ? { cursor: { id: q.cursor }, skip: 1 } : {}),
+      select: {
+        id: true, status: true, startedAt: true, endedAt: true, tokensIn: true, tokensOut: true,
+        input: true, output: true, error: true,
+        agent: { select: { name: true, slug: true } },
       },
-    },
-    orderBy: { startedAt: "desc" },
-    take: limit * 3,
-    select: {
-      id: true,
-      status: true,
-      startedAt: true,
-      endedAt: true,
-      tokensIn: true,
-      tokensOut: true,
-      input: true,
-      output: true,
-      error: true,
-      agent: { select: { name: true, slug: true } },
-    },
-  });
-
-  const filtered = trigger
-    ? rows.filter((r) => {
-        const inp = r.input as { trigger?: string } | null;
-        return inp?.trigger === trigger;
-      })
-    : rows;
-
-  const limited = filtered.slice(0, limit);
+    }),
+    prisma.agentRun.count({ where }),
+  ]);
+  const page = rows.slice(0, q.take);
+  const nextCursor = rows.length > q.take ? page[page.length - 1]?.id ?? null : null;
 
   return NextResponse.json({
-    runs: limited.map((r) => ({
+    runs: page.map((r) => ({
       id: r.id,
       agentName: r.agent.name,
       agentSlug: r.agent.slug,
-      agentHue: "violet",
+      trigger: runTrigger(r.input),
       status: r.status,
       startedAt: r.startedAt.toISOString(),
       endedAt: r.endedAt?.toISOString() ?? null,
+      durationMs: runDurationMs(r.startedAt, r.endedAt),
+      summary: runSummary(r),
+      // AgentRun has no chat link today; the field is in the envelope so a
+      // reader can rely on it when one is added.
+      sessionId: null as string | null,
+      error: r.error,
       tokensIn: r.tokensIn,
       tokensOut: r.tokensOut,
+      // Kept for the Work home "Agent runs" card, which reads output.text.
       output: r.output,
-      error: r.error,
     })),
+    total,
+    nextCursor,
+    restarted: Boolean(q.cursor) && !cursorValid,
   });
 }

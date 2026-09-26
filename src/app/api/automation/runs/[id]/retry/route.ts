@@ -14,18 +14,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import {
-  canManageAutomations,
-  forbidden,
-  resolveAutomationContext,
-} from "@/lib/automation/hub-access";
+import { forbidden, requireAutomation } from "@/lib/automation/gate";
 import { getAction, type ActionContext } from "@/lib/automation/registry-actions";
 import { recordUsage } from "@/lib/automation/usage";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!canManageAutomations(ctx)) return forbidden();
+  if (!ctx.canManage) return forbidden();
   const { id } = await params;
 
   const run = await prisma.automationRun.findFirst({

@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { moveToTrash } from "@/lib/trash";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { Prisma } from "@/generated/prisma";
 
-// Enum allowlists — the register UI now writes these directly, so reject a
+// Enum allowlists, the register UI now writes these directly, so reject a
 // bad value with a 400 rather than letting Prisma throw a 500.
 const ASSET_TYPES = new Set(["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM", "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER"]);
 const ASSET_CONDITIONS = new Set(["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"]);
@@ -147,6 +148,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (denied) return denied;
 
   const { id } = await params;
-  await prisma.asset.deleteMany({ where: { id, organizationId: getOrgId(session) } });
-  return jsonSuccess({ message: "Asset deleted" });
+  const orgId = getOrgId(session);
+  // To Trash, not out of the database (spec-tools-misc 2.12): restorable for
+  // the retention window. Another org's id is a 404, as before.
+  const asset = await prisma.asset.findFirst({ where: { id, organizationId: orgId }, select: { id: true } });
+  if (!asset) return jsonError("Asset not found", 404);
+  const u = session.user as { id?: string; name?: string | null };
+  await moveToTrash("asset", id, { organizationId: orgId, userId: u.id ?? null, userName: u.name ?? null });
+  return jsonSuccess({ message: "Asset moved to Trash", trashed: true });
 }

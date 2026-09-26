@@ -175,8 +175,8 @@ function PendingDots() {
  * the AI hub is visible to the viewer (the create menu uses the same read).
  */
 function AskAiSlot({ prompt }: { prompt?: string }) {
-  const { railApps } = useOsShell();
-  const entitled = railApps.some((a) => a.key === "ai");
+  const { askAiVisible } = useOsShell();
+  const entitled = askAiVisible;
   if (!entitled) return null;
   return (
     <button type="button" onClick={() => askSidekick(prompt)} className={GHOST_28} title={`${SHELL_LABELS.askAi} (⌘J)`}>

@@ -1,6 +1,6 @@
 "use client";
 
-/* /automation/workflows — the Automation Hub's workflow list.
+/* /automation/workflows, the Automation Hub's workflow list.
  *
  *  GET  /api/automation/workflows            → rows + run stats + creator
  *  GET  /api/automation/triggers             → trigger key → display name
@@ -18,7 +18,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Copy,
-  Loader2,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -33,12 +32,16 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import {
   AutomationHeader,
-  DARK_PILL,
+  PRIMARY_PILL,
+  SECONDARY_PILL,
   StatusPill,
   WORKFLOW_STATUS_META,
   relTime,
+  useAutomationRights,
+  type AutomationRights,
 } from "../shared";
 
 interface ApiWorkflow {
@@ -68,11 +71,14 @@ const GRID =
 
 function RowMenu({
   workflow,
+  rights,
   onDuplicate,
   onSetActive,
   onDelete,
 }: {
   workflow: ApiWorkflow;
+  /** Only the rows the write routes accept for this viewer render. */
+  rights: AutomationRights;
   onDuplicate: () => void;
   onSetActive: (next: boolean) => void;
   onDelete: () => void;
@@ -105,19 +111,21 @@ function RowMenu({
             <MenuList>
               <MenuItem
                 icon={Pencil}
-                label="Edit"
+                label={rights.canManage ? "Edit" : "Open"}
                 href={`/automation/workflows/${workflow.id}`}
                 onClick={() => setOpen(false)}
               />
-              <MenuItem
-                icon={Copy}
-                label="Duplicate"
-                onClick={() => {
-                  setOpen(false);
-                  onDuplicate();
-                }}
-              />
-              {workflow.status === "ACTIVE" ? (
+              {rights.canManage ? (
+                <MenuItem
+                  icon={Copy}
+                  label="Duplicate"
+                  onClick={() => {
+                    setOpen(false);
+                    onDuplicate();
+                  }}
+                />
+              ) : null}
+              {!rights.canManage ? null : workflow.status === "ACTIVE" ? (
                 <MenuItem
                   icon={Pause}
                   label="Deactivate"
@@ -142,16 +150,20 @@ function RowMenu({
                 href={`/automation/logs?workflowId=${workflow.id}`}
                 onClick={() => setOpen(false)}
               />
-              <MenuSeparator />
-              <MenuItem
-                icon={Trash2}
-                label="Delete"
-                destructive
-                onClick={() => {
-                  setOpen(false);
-                  onDelete();
-                }}
-              />
+              {rights.isAdmin ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    icon={Trash2}
+                    label="Delete"
+                    destructive
+                    onClick={() => {
+                      setOpen(false);
+                      onDelete();
+                    }}
+                  />
+                </>
+              ) : null}
             </MenuList>
           </MorePortal>
         </>
@@ -165,6 +177,7 @@ export default function AutomationWorkflowsPage() {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const prompt = usePrompt();
+  const rights = useAutomationRights();
   const [workflows, setWorkflows] = useState<ApiWorkflow[] | null>(null);
   const [triggers, setTriggers] = useState<Map<string, ApiTrigger>>(new Map());
   const [creating, setCreating] = useState(false);
@@ -202,7 +215,7 @@ export default function AutomationWorkflowsPage() {
   const createNew = useCallback(async () => {
     const name = await prompt({
       title: "New automation",
-      description: "Name it after what it does — you'll pick the trigger and actions next.",
+      description: "Name it after what it does. You pick the trigger and actions next.",
       placeholder: "e.g. Assign new tasks to the board owner",
       submitLabel: "Create",
       required: true,
@@ -301,7 +314,7 @@ export default function AutomationWorkflowsPage() {
           toast(data?.error ?? "Couldn't delete automation");
           return;
         }
-        toast(data?.archived ? "Archived — run history preserved" : "Automation deleted");
+        toast(data?.archived ? "Archived. Its run history is kept." : "Automation deleted");
         void load();
       } catch {
         toast("Couldn't delete automation");
@@ -325,17 +338,19 @@ export default function AutomationWorkflowsPage() {
           ) : undefined
         }
         actions={
-          <button type="button" onClick={() => void createNew()} disabled={creating} className={DARK_PILL}>
-            {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-            New automation
-          </button>
+          rights.canManage ? (
+            <button type="button" onClick={() => void createNew()} disabled={creating} className={PRIMARY_PILL}>
+              <Plus className="h-3.5 w-3.5" />
+              {creating ? "Creating" : "New automation"}
+            </button>
+          ) : undefined
         }
       />
 
       <div className="flex-1 overflow-y-auto">
         {workflows === null ? (
-          <div className="flex items-center gap-2 p-6 text-base text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          <div className="px-4 py-2" aria-busy="true" aria-label="Loading automations">
+            <SkeletonRows rows={6} />
           </div>
         ) : workflows.length === 0 ? (
           <div className="flex flex-col items-center pt-20">
@@ -343,17 +358,19 @@ export default function AutomationWorkflowsPage() {
               <Zap className="h-5 w-5 text-zinc-500" />
             </span>
             <h2 className="mt-4 text-lg font-semibold text-zinc-900">
-              Create your first automation
+              {rights.canManage ? "Create your first automation" : "No automations yet"}
             </h2>
             <p className="mt-1 max-w-sm text-center text-base text-zinc-500">
               When something happens in WorkwrK, check conditions and run actions automatically:
               assign people, change statuses, create tasks, send notifications.
             </p>
             <div className="mt-5 flex items-center gap-3">
-              <button type="button" onClick={() => void createNew()} className={DARK_PILL}>
-                <Plus className="h-3.5 w-3.5" />
-                New automation
-              </button>
+              {rights.canManage ? (
+                <button type="button" onClick={() => void createNew()} className={SECONDARY_PILL}>
+                  <Plus className="h-3.5 w-3.5" />
+                  New automation
+                </button>
+              ) : null}
               <Link
                 href="/automation/templates"
                 className="text-base font-medium text-zinc-600 hover:text-zinc-900"
@@ -410,12 +427,13 @@ export default function AutomationWorkflowsPage() {
                       {w.lastRunAt ? relTime(w.lastRunAt) : "Never"}
                     </span>
                     <span className="tabular-nums" title={`${w.totalRuns} total runs`}>
-                      {w.successRate !== null ? `${w.successRate}%` : "—"}
+                      {w.successRate !== null ? `${w.successRate}%` : "No runs yet"}
                     </span>
-                    <span className="truncate text-zinc-500">{w.createdByName ?? "—"}</span>
+                    <span className="truncate text-zinc-500">{w.createdByName ?? "Unknown"}</span>
                     <span className="flex justify-end">
                       <RowMenu
                         workflow={w}
+                        rights={rights}
                         onDuplicate={() => void duplicate(w)}
                         onSetActive={(next) => void setActive(w, next)}
                         onDelete={() => void remove(w)}

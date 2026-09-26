@@ -1,235 +1,181 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Check } from "lucide-react";
+// Marketplace (/store, spec-tools-misc 2.5): everything WorkwrK can add to a
+// workspace, and the switch that turns each part on.
+//
+// The inventory is REAL: every row of the module registry (src/lib/modules.ts,
+// today Talk and Tables) with this workspace's state from GET /api/products,
+// plus two link cards to the neighbouring AI rows. What went: the fixture
+// catalogue (getAllModules, which listed CRM, Helpdesk, ITSM, Legal,
+// Financials, Procurement and Marketing, all out of scope), the constant
+// INSTALLED set behind the "N apps installed" count, the 13 category buttons
+// and their gradients, FEATURED_INTEGRATIONS (connectors live on
+// /integrations only), the "50+ integrations supported" hero, and the Install
+// buttons that had no onClick. The word "install" is gone: a module is turned
+// on or off.
+//
+// "Suggest an app" is the page's one primary, for every Member.
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Hammer, Plug, Plus } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
-import { GRAD, getAllModules } from "@/components/layout/os/catalog";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { ModuleCard } from "@/components/modules/module-card";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { apiFetch } from "@/lib/api-fetch";
+import { MODULES } from "@/lib/modules";
+import { appAudienceAllows } from "@/lib/nav/app-audience";
 
-type Tier = "core" | "plus" | "suite" | "free";
-type StoreCategory = "core" | "people" | "sales" | "ops" | "it" | "marketing" | "engineering" | "finance" | "legal" | "support" | "ai" | "integrations";
+type Product = { slug: string; tier: string; installation: { status: string } | null };
+type Tab = "all" | "on" | "off";
 
-type StoreItem = {
-  id: string;
-  name: string;
-  desc: string;
-  category: StoreCategory;
-  tier: Tier;
-  installed: boolean;
-  initial?: string;
-  IconKey?: string;
-  badge?: string;
-};
+export default function MarketplacePage() {
+  const { boot } = useBoot();
+  const { toast } = useOsToast();
+  const [products, setProducts] = useState<Product[] | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [override, setOverride] = useState<Record<string, boolean>>({});
+  const [tab, setTab] = useState<Tab>("all");
+  const [suggestOpen, setSuggestOpen] = useState(false);
 
-// Curated category mapping for the catalog modules (keeps the store
-// taxonomy clean instead of dumping all 60 under "All").
-const CATEGORY_MAP: Record<string, StoreCategory> = {
-  tasks: "core", meetings: "core", okrs: "core", sops: "core", docs: "core",
-  whiteboards: "core", kudos: "core", announcements: "core", ideas: "core",
-  policies: "core", activity: "core", inbox: "core",
-  people: "people", organization: "people", reviews: "people",
-  talent: "people", timesheets: "people", clock: "people",
-  "kra-kpi": "people",
-  crm: "sales",
-  procurement: "ops", assets: "ops", autopilot: "ops", "process-runs": "ops",
-  itsm: "it",
-  marketing: "marketing",
-  dev: "engineering",
-  financials: "finance", planning: "finance",
-  legal: "legal",
-  helpdesk: "support",
-  sidekick: "ai", agents: "ai", ai: "ai", notetaker: "ai", analytics: "ai",
-  studio: "ai", build: "ai", tools: "ai",
-};
+  const load = useCallback(async () => {
+    const r = await apiFetch<{ products: Product[]; canManage: boolean }>("/api/products", { cache: "no-store" });
+    if (!r.ok) { setError(r.error); return; }
+    setError(null);
+    setProducts(r.data.products);
+    setCanManage(r.data.canManage);
+    setOverride({});
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => { clearTimeout(t); window.removeEventListener("focus", onFocus); };
+  }, [load]);
 
-const TIER_MAP: Record<string, Tier> = {
-  tasks: "core", meetings: "core", okrs: "core", sops: "core", docs: "core",
-  whiteboards: "core", kudos: "core", announcements: "core", ideas: "core",
-  policies: "core", activity: "core", inbox: "core", favorites: "core",
-  // Suite-level (premium)
-  legal: "suite",
-  financials: "suite", planning: "suite",
-  agents: "suite", autopilot: "suite", notetaker: "suite",
-  // Most others are plus
-};
-
-const INSTALLED = new Set([
-  "tasks", "meetings", "okrs", "sops", "docs", "inbox", "announcements",
-  "people", "organization", "reviews", "timesheets",
-  "crm", "marketing", "dev", "itsm", "helpdesk",
-  "procurement", "assets",
-  "sidekick", "agents", "ai", "settings", "account",
-]);
-
-const CATEGORIES = [
-  { id: "all",          label: "All",          gradient: GRAD.bluePurple },
-  { id: "installed",    label: "Installed",    gradient: GRAD.tealGreen },
-  { id: "ai",           label: "AI",           gradient: GRAD.pinkPurple },
-  { id: "people",       label: "People & HR",  gradient: GRAD.pinkPurple },
-  { id: "sales",        label: "Sales",        gradient: GRAD.greenTeal },
-  { id: "ops",          label: "Operations",   gradient: GRAD.brownOrange },
-  { id: "engineering",  label: "Engineering",  gradient: GRAD.indigoBlue },
-  { id: "finance",      label: "Finance",      gradient: GRAD.tealGreen },
-  { id: "marketing",    label: "Marketing",    gradient: GRAD.orangePink },
-  { id: "support",      label: "Support",      gradient: GRAD.orangePink },
-  { id: "it",           label: "IT",           gradient: GRAD.bluePurple },
-  { id: "legal",        label: "Legal",        gradient: GRAD.purpleIndigo },
-  { id: "core",         label: "Core",         gradient: GRAD.indigoBlue },
-];
-
-const FEATURED_INTEGRATIONS = [
-  { id: "gmail",        name: "Gmail",        desc: "Sync threads into CRM and surface them in your Inbox.", gradient: "#EA4335", initial: "G", category: "integrations" as const, tier: "free" as const },
-  { id: "slack",        name: "Slack",        desc: "Cross-post updates, get notifications, run commands.",  gradient: "#4A154B", initial: "S", category: "integrations" as const, tier: "free" as const },
-  { id: "googlecal",    name: "Google Cal",   desc: "Two-way meeting sync. Sidekick books with attendees.", gradient: "#4285F4", initial: "C", category: "integrations" as const, tier: "free" as const },
-  { id: "github",       name: "GitHub",       desc: "Link PRs to tasks, surface CI status on items.",       gradient: "#181717", initial: "G", category: "integrations" as const, tier: "free" as const },
-  { id: "stripe",       name: "Stripe",       desc: "Mirror customers, invoices, subscriptions into CRM.",  gradient: "#635BFF", initial: "S", category: "integrations" as const, tier: "free" as const },
-  { id: "salesforce",   name: "Salesforce",   desc: "Two-way sync of accounts, contacts, and opportunities.", gradient: "#00A1E0", initial: "S", category: "integrations" as const, tier: "plus" as const },
-  { id: "hubspot",      name: "HubSpot",      desc: "Sync contacts, campaigns, deal pipeline.",             gradient: "#FF7A59", initial: "H", category: "integrations" as const, tier: "plus" as const },
-  { id: "zoom",         name: "Zoom",         desc: "Auto-record meetings, attach transcripts to items.",   gradient: "#2D8CFF", initial: "Z", category: "integrations" as const, tier: "free" as const },
-  { id: "linear",       name: "Linear",       desc: "Pull issues into Dev tasks. Status syncs both ways.",  gradient: "#5E6AD2", initial: "L", category: "integrations" as const, tier: "free" as const },
-];
-
-export default function StorePage() {
-  const [filter, setFilter] = useState<string>("all");
-
-  const moduleItems: StoreItem[] = getAllModules().map((m) => ({
-    id: m.id,
-    name: m.name,
-    desc: m.description,
-    category: CATEGORY_MAP[m.id] ?? "core",
-    tier: TIER_MAP[m.id] ?? "plus",
-    installed: INSTALLED.has(m.id),
-  }));
-
-  const integrationItems: StoreItem[] = FEATURED_INTEGRATIONS.map((i) => ({
-    id: `int-${i.id}`,
-    name: i.name,
-    desc: i.desc,
-    category: "integrations",
-    tier: i.tier,
-    installed: false,
-    initial: i.initial,
-  }));
-
-  const all: (StoreItem & { gradient?: string })[] = [
-    ...moduleItems.map((m) => {
-      const mod = getAllModules().find((x) => x.id === m.id);
-      return { ...m, gradient: mod?.gradient ?? GRAD.bluePurple, IconKey: m.id };
-    }),
-    ...integrationItems.map((i) => {
-      const meta = FEATURED_INTEGRATIONS.find((f) => `int-${f.id}` === i.id);
-      return { ...i, gradient: meta?.gradient ?? GRAD.bluePurple };
-    }),
-  ];
-
-  const shown = all.filter((it) => {
-    if (filter === "all") return it.category !== "integrations";
-    if (filter === "installed") return it.installed;
-    return it.category === filter;
-  });
-
-  const installedCount = all.filter((m) => m.installed).length;
+  const bySlug = useMemo(() => new Map((products ?? []).map((p) => [p.slug, p])), [products]);
+  const isOn = useCallback(
+    (slug: string) => override[slug] ?? bySlug.get(slug)?.installation?.status === "ACTIVE",
+    [override, bySlug],
+  );
+  const shown = MODULES.filter((m) => (tab === "all" ? true : tab === "on" ? isOn(m.productSlug) : !isOn(m.productSlug)));
+  const showBuild = appAudienceAllows("build", boot.viewer);
 
   return (
     <>
-      <OsPageHeader title="Marketplace" />
-
-      <div className="os-mkt">
-        <div className="os-mkt__hero">
-          <div>
-            <div className="os-mkt__hero-eyebrow">App marketplace</div>
-            <h2>
-              One install away from a{" "}
-              <em style={{ fontStyle: "normal", color: "var(--os-c-orange)" }}>complete</em> operating system.
-            </h2>
-            <p>
-              Every app shares the same boards, the same Sidekick, the same agents.
-              Install only what your team uses. Uninstall any time without losing data.
-            </p>
+      <OsPageHeader
+        title="Marketplace"
+        views={
+          <>
+            <ViewTab label="All" active={tab === "all"} onClick={() => setTab("all")} />
+            <ViewTab label="On" active={tab === "on"} onClick={() => setTab("on")} />
+            <ViewTab label="Off" active={tab === "off"} onClick={() => setTab("off")} />
+          </>
+        }
+        primary={{ label: "Suggest an app", icon: Plus, onClick: () => setSuggestOpen(true) }}
+      />
+      <div className="px-6 pb-8 pt-2">
+        {error ? (
+          <OsEmptyView variant="error" title="Couldn't load Marketplace" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
+        ) : products === null ? (
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
-          <div className="os-mkt__hero-side">
-            <div className="os-mkt__hero-stat">
-              <strong>{installedCount}</strong>
-              apps installed
-            </div>
-            <div className="os-mkt__hero-stat">
-              <strong>{all.length}</strong>
-              apps + integrations available
-            </div>
-            <div className="os-mkt__hero-stat">
-              <strong>50+</strong>
-              integrations supported
-            </div>
-          </div>
-        </div>
-
-        <div className="os-mkt__filters">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`os-mkt__filter ${filter === c.id ? "is-on" : ""}`}
-              onClick={() => setFilter(c.id)}
-            >
-              {c.label}
-              {c.id === "all" ? <span className="os-mkt__filter-count">{all.filter((x) => x.category !== "integrations").length}</span> : null}
-              {c.id === "installed" ? <span className="os-mkt__filter-count">{installedCount}</span> : null}
-            </button>
-          ))}
-          <button
-            type="button"
-            className={`os-mkt__filter ${filter === "integrations" ? "is-on" : ""}`}
-            onClick={() => setFilter("integrations")}
-            style={{ marginLeft: "auto" }}
-          >
-            Integrations
-            <span className="os-mkt__filter-count">{integrationItems.length}</span>
-          </button>
-        </div>
-
-        <h3 className="os-mkt__section-title">
-          {CATEGORIES.find((c) => c.id === filter)?.label ?? "Integrations"}
-          <span>{shown.length} items</span>
-        </h3>
-
-        <div className="os-mkt__grid">
-          {shown.map((it) => {
-            const mod = getAllModules().find((x) => x.id === it.id);
-            return (
-              <article key={it.id} className="os-mkt-card">
-                <div className="os-mkt-card__head">
-                  <div
-                    className="os-mkt-card__icon"
-                    style={{ background: it.gradient ?? GRAD.bluePurple }}
-                  >
-                    {mod ? <mod.Icon /> : it.initial ?? it.name[0]}
-                  </div>
-                  <div className="os-mkt-card__head-text">
-                    <div className="os-mkt-card__name">{it.name}</div>
-                    <div className="os-mkt-card__role">
-                      {it.category === "integrations" ? "Integration" : CATEGORIES.find((c) => c.id === it.category)?.label}
-                    </div>
-                  </div>
-                </div>
-                <p className="os-mkt-card__desc">{it.desc}</p>
-                <div className="os-mkt-card__foot">
-                  <span className={`os-mkt-card__tier os-mkt-card__tier--${it.tier}`}>{it.tier}</span>
-                  {it.installed ? (
-                    <button type="button" className="os-mkt-card__btn os-mkt-card__btn--installed">
-                      <Check />
-                      Installed
-                    </button>
-                  ) : (
-                    <button type="button" className="os-mkt-card__btn os-mkt-card__btn--install">
-                      <Plus />
-                      Install
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        ) : (
+          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            {shown.map((m) => (
+              <ModuleCard
+                key={m.appKey}
+                module={m}
+                on={isOn(m.productSlug)}
+                canManage={canManage}
+                addOn={(bySlug.get(m.productSlug)?.tier ?? "PLUS") !== "FREE"}
+                onChanged={(on) => setOverride((o) => ({ ...o, [m.productSlug]: on }))}
+              />
+            ))}
+            {tab === "all" ? (
+              <>
+                {showBuild ? (
+                  <LinkCard href="/build" icon={Hammer} title="Build apps" blurb="Describe a small app of your own and WorkwrK drafts it for you." />
+                ) : null}
+                <LinkCard href="/integrations" icon={Plug} title="Integrations" blurb="See which of your other tools WorkwrK can talk to, and ask for the ones it can't yet." />
+              </>
+            ) : null}
+            {shown.length === 0 && tab !== "all" ? (
+              <li className="flex h-11 items-center gap-1 text-row text-ink-2">
+                {tab === "on" ? "Nothing is turned on" : "Everything is on"} ·
+                <button type="button" className="text-brand-deep hover:underline" onClick={() => setTab("all")}>Show all</button>
+              </li>
+            ) : null}
+          </ul>
+        )}
       </div>
+      <SuggestDialog open={suggestOpen} onOpenChange={setSuggestOpen} onSent={() => toast("Thanks. We read every one of these.")} />
     </>
+  );
+}
+
+function LinkCard({ href, icon: Icon, title, blurb }: { href: string; icon: typeof Plug; title: string; blurb: string }) {
+  return (
+    <li>
+      <Link href={href} className="flex h-full flex-col gap-3 rounded-lg border border-line bg-raised p-4 hover:bg-hover">
+        <span className="flex items-start gap-3">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2">
+            <Icon className="h-5 w-5" strokeWidth={1.5} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-lg font-semibold text-ink">{title}</span>
+            <span className="mt-1 block text-sm text-ink-2">{blurb}</span>
+          </span>
+        </span>
+        <span className="mt-auto text-base font-medium text-brand-deep">Open {title}</span>
+      </Link>
+    </li>
+  );
+}
+
+function SuggestDialog({ open, onOpenChange, onSent }: { open: boolean; onOpenChange: (v: boolean) => void; onSent: () => void }) {
+  const { toast } = useOsToast();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function send() {
+    if (text.trim().length < 3) return;
+    setBusy(true);
+    const r = await apiFetch("/api/marketplace/requests", { method: "POST", json: { text: text.trim() } });
+    setBusy(false);
+    if (!r.ok) { toast(r.error || "Couldn't send the suggestion", { tone: "danger" }); return; }
+    setText("");
+    onOpenChange(false);
+    onSent();
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Suggest an app</DialogTitle>
+          <DialogDescription>What would you want WorkwrK to do? One sentence is plenty.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            aria-label="What would you want WorkwrK to do?"
+            className="rounded-md border border-line-strong bg-raised px-3 py-2 text-base text-ink"
+          />
+        </div>
+        <DialogFooter>
+          <button type="button" onClick={() => onOpenChange(false)} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
+          <button type="button" onClick={() => void send()} disabled={busy || text.trim().length < 3} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-50">Send</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

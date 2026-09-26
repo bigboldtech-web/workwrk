@@ -1,6 +1,6 @@
 "use client";
 
-/* /automation/logs — the execution log.
+/* /automation/logs, the execution log.
  *
  *  GET  /api/automation/runs?workflowId=&status=&take=   → run table
  *  GET  /api/automation/runs/[id]                        → drawer detail (steps)
@@ -10,7 +10,7 @@
  *
  * Row click opens a right-side drawer with every step's input/output
  * JSON. Retry appears only when the server would accept it (FAILED/
- * PARTIAL run whose failed action steps are all retry-safe) — the API
+ * PARTIAL run whose failed action steps are all retry-safe), the API
  * re-validates regardless. Deep links: ?workflowId= pre-filters,
  * ?runId= opens the drawer directly (builder run-history links here).
  */
@@ -18,9 +18,11 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, RotateCcw, ScrollText, X } from "lucide-react";
+import { RotateCcw, ScrollText, X } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { SkeletonLines, SkeletonRows } from "@/components/ui/skeleton";
 import { useOsToast } from "@/components/layout/os/toast";
-import { AutomationHeader, RUN_STATUS_COLORS, StatusPill, relTime } from "../shared";
+import { AutomationHeader, RUN_STATUS_COLORS, StatusPill, relTime, useAutomationRights } from "../shared";
 
 interface ApiRunRow {
   id: string;
@@ -68,7 +70,7 @@ const SELECT =
   "h-7 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-700 outline-none focus:border-zinc-400";
 
 function fmtDuration(ms: number | null): string {
-  if (ms === null) return "—";
+  if (ms === null) return "Still running";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
@@ -109,6 +111,8 @@ function RunDrawer({
   const [run, setRun] = useState<ApiRunDetail | null>(null);
   const [error, setError] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  // Retry is a manager write (POST .../retry answers 403 otherwise).
+  const { canManage } = useAutomationRights();
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +135,7 @@ function RunDrawer({
     : [];
   const hasUnsafeFailure = failedActionSteps.some((s) => safeToRetry.get(s.stepKey) !== true);
   const retryEligible =
+    canManage &&
     run !== null &&
     (run.status === "FAILED" || run.status === "PARTIAL") &&
     failedActionSteps.length > 0 &&
@@ -145,7 +150,7 @@ function RunDrawer({
         toast(data?.error ?? "Couldn't retry the run");
         return;
       }
-      toast(data?.recovered ? "Run recovered — all steps succeeded" : "Retried — some steps still failing");
+      toast(data?.recovered ? "Run recovered. Every step succeeded." : "Retried. Some steps still failed.");
       await load();
       onRetried();
     } catch {
@@ -180,7 +185,7 @@ function RunDrawer({
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
               >
                 {retrying ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Dots variant="pending" label="Retrying" />
                 ) : (
                   <RotateCcw className="h-3.5 w-3.5" />
                 )}
@@ -202,8 +207,8 @@ function RunDrawer({
           {error ? (
             <p className="text-base text-zinc-500">Couldn&apos;t load this run.</p>
           ) : run === null ? (
-            <div className="flex items-center gap-2 text-base text-zinc-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            <div aria-busy="true" aria-label="Loading this run">
+              <SkeletonLines lines={6} />
             </div>
           ) : (
             <>
@@ -221,7 +226,7 @@ function RunDrawer({
                 <dd className="truncate text-zinc-700">{run.triggerEventKey}</dd>
                 <dt className="text-zinc-400">Record</dt>
                 <dd className="truncate text-zinc-700">
-                  {run.recordType ? `${run.recordType} · ${run.recordId ?? "?"}` : "—"}
+                  {run.recordType ? `${run.recordType} · ${run.recordId ?? "?"}` : "No record"}
                 </dd>
                 <dt className="text-zinc-400">Started</dt>
                 <dd className="tabular-nums text-zinc-700">{relTime(run.createdAt)}</dd>
@@ -391,8 +396,8 @@ function AutomationLogsInner() {
 
       <div className="flex-1 overflow-y-auto">
         {runs === null ? (
-          <div className="flex items-center gap-2 p-6 text-base text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          <div className="px-4 py-2" aria-busy="true" aria-label="Loading runs">
+            <SkeletonRows rows={8} />
           </div>
         ) : runs.length === 0 ? (
           <div className="flex flex-col items-center pt-20">
@@ -438,7 +443,7 @@ function AutomationLogsInner() {
                   </span>
                   <span className="truncate text-zinc-500">{run.triggerEventKey}</span>
                   <span className="truncate text-zinc-500">
-                    {run.recordType ? `${run.recordType} · ${(run.recordId ?? "").slice(0, 8)}` : "—"}
+                    {run.recordType ? `${run.recordType} · ${(run.recordId ?? "").slice(0, 8)}` : "No record"}
                   </span>
                   <span className="tabular-nums text-zinc-500">{relTime(run.createdAt)}</span>
                   <span className="tabular-nums text-zinc-500">{fmtDuration(run.durationMs)}</span>
@@ -468,8 +473,8 @@ export default function AutomationLogsPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-full items-center gap-2 bg-white p-6 text-base text-zinc-500">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        <div className="h-full bg-white px-4 py-2" aria-busy="true" aria-label="Loading runs">
+          <SkeletonRows rows={8} />
         </div>
       }
     >

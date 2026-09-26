@@ -6,10 +6,10 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 
 export async function GET() {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const connections = await prisma.integrationConnection.findMany({

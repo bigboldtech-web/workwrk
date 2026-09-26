@@ -36,6 +36,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Activity,
   AlarmClock,
+  Bot,
+  Plug,
   Building2,
   CalendarDays,
   CheckSquare,
@@ -256,7 +258,7 @@ function PaletteBody() {
     recentAppKeys,
     hubHref,
     launcherApps,
-    railApps,
+    askAiVisible,
     prefs,
   } = useOsShell();
   const { boot } = useBoot();
@@ -287,7 +289,7 @@ function PaletteBody() {
 
   const q = query.trim();
   const isMember = !isGuest;
-  const aiVisible = railApps.some((a) => a.key === "ai");
+  const aiVisible = askAiVisible;
   const setQuery = (v: string) => {
     setQueryState(v);
     setActive(0);
@@ -499,11 +501,15 @@ function PaletteBody() {
         { id: "j-favorites", label: "Favorites", glyph: <Glyph icon={Star} />, href: "/favorites" },
         { id: "j-activity", label: "Activity", glyph: <Glyph icon={Activity} />, href: "/activity" },
       );
+      // Two AI hub pages that are routes, not catalog apps, so the Apps list
+      // alone could not reach them (spec-ai-automation 1.3 canon labels).
+      if (aiVisible) personal.push({ id: "j-agents", label: "Agents", glyph: <Glyph icon={Bot} />, href: "/agents" });
+      personal.push({ id: "j-integrations", label: "Integrations", glyph: <Glyph icon={Plug} />, href: "/integrations" });
     }
     const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);
     const folded = launcherApps.filter((a) => !isHubKey(a.key)).map(appRow);
     return [...personal, ...hubs, ...folded];
-  }, [launcherApps, appRow, isMember]);
+  }, [launcherApps, appRow, isMember, aiVisible]);
 
   const recentRows = useMemo<Row[]>(() => {
     const byKey = new Map(launcherApps.map((a) => [a.key, a]));

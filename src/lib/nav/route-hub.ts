@@ -141,10 +141,8 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
 
   // ── AI ────────────────────────────────────────────────────────────
   "/sidekick": "ai",
-  "/ai": "ai",
   "/agents": "ai",
   "/automation": "ai",
-  "/autopilot": "ai",
   "/build": "ai",
   "/store": "ai",
   "/integrations": "ai",
@@ -226,10 +224,8 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/meetings": "Meetings",
   "/clock": "Clock in/out",
   "/sidekick": "Ask AI",
-  "/ai": "Ask AI",
   "/agents": "Agents",
   "/automation": "Automation",
-  "/autopilot": "Workflows",
   "/build": "Build apps",
   "/store": "Marketplace",
   "/integrations": "Integrations",

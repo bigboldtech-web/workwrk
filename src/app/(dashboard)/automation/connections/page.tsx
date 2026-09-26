@@ -17,12 +17,13 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Plug, Webhook } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { Dots } from "@/components/ui/dots";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { AutomationHeader, CARD, DARK_PILL, StatusPill, relTime } from "../shared";
+import { AutomationHeader, CARD, PRIMARY_PILL, StatusPill, relTime } from "../shared";
 
 interface ApiConnection {
   id: string;
@@ -99,7 +100,7 @@ function WebhookForm({
         aria-label="Webhook URL"
         className="h-7 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
       />
-      <button type="button" onClick={() => void connect()} disabled={busy} className={DARK_PILL}>
+      <button type="button" onClick={() => void connect()} disabled={busy} className={PRIMARY_PILL}>
         {busy ? <Dots variant="pending" label="Connecting" /> : null}
         {existingUrl ? "Update" : "Connect"}
       </button>
@@ -128,24 +129,15 @@ export default function AutomationConnectionsPage() {
     void load();
   }, [load]);
 
-  const connectedCount = connections
-    ? [...connections.values()].filter((c) => c.status === "CONNECTED").length
-    : 0;
   const webhook = connections?.get("WEBHOOK");
   const statusMeta =
     CONNECTION_STATUS_META[webhook?.status ?? "DISCONNECTED"] ?? CONNECTION_STATUS_META.DISCONNECTED;
 
   return (
     <div className="flex h-full flex-col bg-white">
-      <AutomationHeader
-        Icon={Plug}
-        title="Connections"
-        meta={
-          connections !== null ? (
-            <span className="tabular-nums">{connectedCount} connected</span>
-          ) : undefined
-        }
-      />
+      {/* No "N connected" count: there is one connection, and its card
+          carries its own status. */}
+      <AutomationHeader Icon={Plug} title="Connections" />
 
       <div className="flex-1 overflow-y-auto p-4">
         {loadError ? (
@@ -177,6 +169,12 @@ export default function AutomationConnectionsPage() {
               ) : null}
               <WebhookForm connection={webhook} onConnected={() => void load()} />
             </div>
+            <p className="text-sm text-zinc-500 sm:col-span-2 lg:col-span-3">
+              Need another app connected?{" "}
+              <Link href="/integrations" className="font-medium text-brand hover:underline">
+                Request it in Integrations
+              </Link>
+            </p>
           </div>
         )}
       </div>

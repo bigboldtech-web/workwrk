@@ -52,7 +52,7 @@ export function ShellShortcuts() {
     toggleSidekick,
     toggleSidebar,
     setSidebarCollapsed,
-    railApps,
+    railApps, askAiVisible,
     hubHref,
     closeTopLayer,
     layerCount,
@@ -129,13 +129,15 @@ export function ShellShortcuts() {
       })();
     },
   });
-  // Spec 1.8 makes this Members-only. The Guest gate waits for the access
-  // step's useViewer().orgRole; today it matches the rail: whoever can open
-  // the AI hub can press this. The panel is not mounted in the takeover.
+  // Spec 1.8: Members only. askAiVisible is the one fact (the ai rail app,
+  // AI features on, not a Guest). Deliverable from inside a text field so the
+  // panel's own composer can close it with the same chord; below 1024 and on
+  // /sidekick the shell's openSidekick funnel navigates or focuses instead.
   useShortcut({
     ...canon["ask-ai"],
     scope: "global",
-    when: () => !inSettings && railApps.some((a) => a.key === "ai"),
+    inInputs: true,
+    when: () => !inSettings && askAiVisible,
     run: () => toggleSidekick(),
   });
   useShortcut({

@@ -18,7 +18,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { runAgentAutonomously } from "@/lib/agents/autonomous";
+import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
+import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
@@ -58,13 +59,27 @@ export async function POST(req: Request) {
         { nextRunAt: { lte: now } },
       ],
     },
-    select: { id: true, slug: true, name: true, organizationId: true },
+    select: { id: true, slug: true, name: true, organizationId: true, scheduleCron: true, organization: { select: { settings: true } } },
     // Cap how many we fire per tick so a backlog doesn't run away.
     take: 50,
   });
 
-  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string }> = [];
+  // AI features off for the workspace (settings.data.aiEnabled === false)
+  // turns the `ai` app key off, and Agents are that key: a scheduled agent
+  // does not run either. Its schedule is kept and moved to its next slot, so
+  // it neither clogs this tick's cap nor fires the moment AI comes back on.
+  const skipped: string[] = [];
+  const runnable = [];
   for (const agent of due) {
+    if (aiEnabledFromSettings(agent.organization?.settings)) { runnable.push(agent); continue; }
+    skipped.push(agent.slug);
+    await prisma.agent
+      .update({ where: { id: agent.id }, data: { nextRunAt: agent.scheduleCron ? computeNextRunAt(agent.scheduleCron, now) : null } })
+      .catch(() => {});
+  }
+
+  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string }> = [];
+  for (const agent of runnable) {
     try {
       const result = await runAgentAutonomously({
         agentId: agent.id,
@@ -89,6 +104,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     firedCount: fired.length,
     runs: fired,
+    skippedAiOff: skipped,
   });
 }
 

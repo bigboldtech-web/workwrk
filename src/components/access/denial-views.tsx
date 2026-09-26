@@ -238,15 +238,34 @@ export interface AppOffProps {
   isAdmin: boolean;
   admins?: OrgAdmin[];
   back: BackTarget;
+  /**
+   * The `ai` key's second off switch (spec-ai-automation 1.4): "AI features
+   * for members" on Settings > Data turns the app off without hiding it, so
+   * the sentence and the Admin's door name that page instead of Apps.
+   */
+  reason?: "hidden" | "ai-disabled";
 }
 
-export function AppOff({ label, isAdmin, admins = [], back }: AppOffProps) {
+export function AppOff({ label, isAdmin, admins = [], back, reason = "hidden" }: AppOffProps) {
+  const aiOff = reason === "ai-disabled";
   return (
     <DenialBlock
-      title={`${label} is hidden in this workspace`}
-      sentence={isAdmin ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.` : `Ask a workspace admin to turn ${label} on.`}
+      title={aiOff ? "AI is turned off for this workspace" : `${label} is hidden in this workspace`}
+      sentence={
+        aiOff
+          ? isAdmin
+            ? "AI features for members are off in Settings. Turn them back on from Data."
+            : "Ask a workspace admin to turn AI features on."
+          : isAdmin
+            ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.`
+            : `Ask a workspace admin to turn ${label} on.`
+      }
       back={back}
-      primary={isAdmin ? <SettingsLink href="/settings/apps" label="Open Apps & modules" /> : undefined}
+      primary={
+        isAdmin ? (
+          aiOff ? <SettingsLink href="/settings/data" label="Open Data" /> : <SettingsLink href="/settings/apps" label="Open Apps & modules" />
+        ) : undefined
+      }
     >
       {isAdmin ? null : <AdminAvatars admins={admins} />}
     </DenialBlock>

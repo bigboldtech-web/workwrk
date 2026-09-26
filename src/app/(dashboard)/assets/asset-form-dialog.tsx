@@ -3,7 +3,7 @@
 // Add / edit an asset. Create mode POSTs /api/assets; edit mode PATCHes
 // /api/assets/[id]. Offers only fields the Asset model + routes accept
 // (name, type, brand, model, serial, IMEI, purchase date/cost, warranty,
-// condition, notes, and — edit only — status). Assignment is a separate
+// condition, notes and, on edit only, status). Assignment is a separate
 // row action, so this form never sets an owner.
 
 import { useEffect, useState } from "react";
@@ -147,7 +147,7 @@ export function AssetFormDialog({
               id="ast-name"
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder='e.g. "MacBook Pro 16&quot; — Design"'
+              placeholder="e.g. MacBook Pro 16 inch, Design"
               autoFocus
             />
           </div>

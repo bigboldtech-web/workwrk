@@ -3,8 +3,8 @@
 // The "…" overflow menu for one asset row. Same primitives as the rest of
 // the app (MenuList / MenuItem via MorePortal, useConfirm for destructive):
 //
-//   Edit…            → shared form dialog (PATCH /api/assets/[id])   — page-owned
-//   Assign / Reassign → assign dialog (PATCH assignedToId)           — page-owned
+//   Edit…            → shared form dialog (PATCH /api/assets/[id]) , page-owned
+//   Assign / Reassign → assign dialog (PATCH assignedToId)         , page-owned
 //   Unassign          → PATCH { assignedToId: null }  (when assigned)
 //   Change status ›   → PATCH { status }
 //   Check-out log     → Coming soon (no check-in/out backend yet)
@@ -13,6 +13,7 @@
 // Mutations are enforced server-side (requirePermission); a 403 surfaces as
 // a clear toast rather than a dead button.
 
+import { useBoot } from "@/components/layout/os/boot-context";
 import { useEffect, useRef, useState } from "react";
 import {
   MoreHorizontal, Pencil, UserRound, UserMinus, CircleDot, LogOut, Trash2,
@@ -27,7 +28,7 @@ import {
 } from "./types";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
-// Statuses a person can set directly. ASSIGNED is intentionally excluded —
+// Statuses a person can set directly. ASSIGNED is intentionally excluded
 // it's derived from assigning an owner, not picked from a list.
 const DIRECT_STATUSES: AssetStatus[] = ["AVAILABLE", "IN_REPAIR", "RETIRED", "LOST"];
 
@@ -39,6 +40,7 @@ export function AssetRowMenu({
   onAssign: (a: ApiAsset) => void;
   onChanged: () => void;
 }) {
+  const { boot } = useBoot();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -77,7 +79,7 @@ export function AssetRowMenu({
         const d = await res.json().catch(() => ({}));
         toast.error(
           "Couldn't update asset",
-          res.status === 403 ? "You don't have permission for this." : (d?.error ?? `HTTP ${res.status}`),
+          res.status === 403 ? "You don't have permission for this." : (d?.error ?? "Try again."),
         );
         return;
       }
@@ -93,8 +95,8 @@ export function AssetRowMenu({
   const del = async () => {
     close();
     const ok = await confirm({
-      title: "Delete asset",
-      description: `Delete "${asset.name}"? This removes it from the register permanently and can't be undone.`,
+      title: `Delete ${asset.name}?`,
+      description: `It moves to Trash. You can restore it from there for ${boot.org.trashDays} days.`,
       destructive: true,
       confirmLabel: "Delete",
     });
@@ -110,7 +112,7 @@ export function AssetRowMenu({
         );
         return;
       }
-      toast.success("Asset deleted");
+      toast.success("Asset moved to Trash");
       onChanged();
     } catch {
       toast.error("Network error", "Please try again.");

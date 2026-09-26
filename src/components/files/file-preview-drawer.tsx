@@ -94,11 +94,11 @@ export function FilePreviewDrawer({ fileId, initial, onClose, onChanged }: {
   const router = useRouter();
   const { map: sectionLink } = useObjectHref();
   const { toast } = useOsToast();
-  const { railApps } = useOsShell();
+  const { askAiVisible } = useOsShell();
   const { boot } = useBoot();
   const confirm = useConfirm();
   const fmt = useFormat();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
 
   const [file, setFile] = useState<PreviewFile | null>(initial ?? null);
   const [missing, setMissing] = useState(false);

@@ -7,7 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 import { getUsageState, monthStart } from "@/lib/automation/usage";
 
 const TOP_N = 5;
@@ -20,7 +20,7 @@ function dayKey(d: Date): string {
 }
 
 export async function GET() {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const from = monthStart();
@@ -108,10 +108,17 @@ export async function GET() {
       actionKey: r.actionKey,
       count: r._sum.usageCount ?? 0,
     })),
-    topUsers: userRows.map((r) => ({
-      userId: r.userId,
-      name: r.userId ? (userName.get(r.userId) ?? "Former member") : "Unknown",
-      count: r._sum.usageCount ?? 0,
-    })),
+    // Per-person automation activity is Owner and Admin only (the
+    // conservative reading, spec-ai-automation /automation/usage): for
+    // everyone else the field is omitted, never an empty list pretending.
+    ...(ctx.isAdmin
+      ? {
+          topUsers: userRows.map((r) => ({
+            userId: r.userId,
+            name: r.userId ? (userName.get(r.userId) ?? "Former member") : "Unknown",
+            count: r._sum.usageCount ?? 0,
+          })),
+        }
+      : {}),
   });
 }

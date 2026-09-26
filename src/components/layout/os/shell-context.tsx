@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
@@ -12,6 +12,12 @@ import { deepMergePatch, type PreferencesPatch } from "@/lib/preferences-schema"
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import type { EffectivePreferences } from "@/lib/preferences";
 import { useBoot } from "./boot-context";
+import { ASK_AI_FOCUS_EVENT, askAiTarget } from "@/lib/ai/ask-ai-route";
+import { appAudienceAllows } from "@/lib/nav/app-audience";
+import type { AppKey } from "@/lib/access/types";
+
+/** The folded keys whose launcher entry follows APP_RULES rather than a tier. */
+const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation"]);
 
 /**
  * LayerStack (spec-shell.md sections 1.5 and 2.1): every open overlay
@@ -116,6 +122,12 @@ type ShellState = {
   closePalette: () => void;
 
   sidekickOpen: boolean;
+  /**
+   * Whether any Ask AI entry point renders for this viewer: the `ai` rail app
+   * is visible, AI features are on for the workspace (settings.data.aiEnabled)
+   * and the viewer is not a Guest. Every entry point reads this one fact.
+   */
+  askAiVisible: boolean;
   openSidekick: (initialPrompt?: string) => void;
   closeSidekick: () => void;
   toggleSidekick: () => void;
@@ -183,6 +195,14 @@ type ShellState = {
   hubHref: (appKey: string) => string;
   /** Which catalog app's sidebar the grey column renders for a resolved hub. */
   hubSidebarApp: (hub: HubKey) => AppEntry;
+  /**
+   * The Teams hub as a plain Member holds it: no rail pill (the hub tier is
+   * manager until the Teams unit opens the Directory), but its sidebar still
+   * renders its Member branch (My profile, RESOURCING > Tools) on Teams URLs,
+   * with no "+" and a landing of /people/me. False for Guests and for anyone
+   * who has the full hub on the rail.
+   */
+  memberTeamsHub: boolean;
   /** Recently launched apps (palette ephemera, most-recent-first, capped at 6). */
   recentAppKeys: string[];
   pushRecentApp: (key: string) => void;
@@ -272,9 +292,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const { boot } = useBoot();
   const { data: session } = useSession();
   const pathname = usePathname();
+  const router = useRouter();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
+  const sidekickOpenRef = useRef(false);
   const [sidekickInitialPrompt, setSidekickInitialPrompt] = useState<string | null>(null);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
@@ -435,12 +457,29 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  // Every Ask AI entry point funnels through openSidekick / toggleSidekick, so
+  // the width rule and the /sidekick rule live here once (askAiTarget).
+  const askAiVisibleRef = useRef(false);
+  const pathnameRef = useRef<string | null>(pathname);
+  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
   const openSidekick = useCallback((initialPrompt?: string) => {
+    if (!askAiVisibleRef.current) return;
+    const width = typeof window === "undefined" ? 1440 : window.innerWidth;
+    const target = askAiTarget({ width, pathname: pathnameRef.current, prompt: initialPrompt });
+    if (target.kind === "navigate") {
+      setSidekickOpen(false);
+      router.push(target.href);
+      return;
+    }
+    if (target.kind === "focus-page") {
+      window.dispatchEvent(new CustomEvent(ASK_AI_FOCUS_EVENT));
+      return;
+    }
     if (initialPrompt && initialPrompt.trim().length > 0) {
       setSidekickInitialPrompt(initialPrompt);
     }
     setSidekickOpen(true);
-  }, []);
+  }, [router]);
   useEffect(() => {
     const onAsk = (e: Event) => {
       const prompt = (e as CustomEvent<{ prompt?: string }>).detail?.prompt;
@@ -450,7 +489,10 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("workwrk:os:ask-sidekick", onAsk);
   }, [openSidekick]);
   const closeSidekick = useCallback(() => setSidekickOpen(false), []);
-  const toggleSidekick = useCallback(() => setSidekickOpen((v) => !v), []);
+  const toggleSidekick = useCallback(() => {
+    if (sidekickOpenRef.current) { setSidekickOpen(false); return; }
+    openSidekick();
+  }, [openSidekick]);
   const consumeSidekickInitialPrompt = useCallback(() => {
     const v = sidekickInitialPrompt;
     if (v !== null) setSidekickInitialPrompt(null);
@@ -516,14 +558,39 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys) }),
     [railConfig, accessLevel, activeModuleKeys],
   );
+  // The palette's JUMP TO list and every sidebar's "is this key open" check.
+  // The Phase 7 keys also answer to their APP_RULES audience (access 5.2.1),
+  // which no tier can express (Assets is "anyone with reports, the People
+  // team and Admin"), so the palette never offers a page that would 404.
   const launcherApps = useMemo<AppEntry[]>(
-    () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys), includeFolded: true }),
-    [railConfig, accessLevel, activeModuleKeys],
+    () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys), includeFolded: true })
+      .filter((a) => !AUDIENCE_KEYS.has(a.key) || appAudienceAllows(a.key as AppKey, boot.viewer)),
+    [railConfig, accessLevel, activeModuleKeys, boot.viewer],
   );
+  const askAiVisible = useMemo(
+    () => railApps.some((a) => a.key === "ai") && boot.org.aiEnabled !== false && boot.viewer.orgRole !== "GUEST",
+    [railApps, boot.org.aiEnabled, boot.viewer.orgRole],
+  );
+  useEffect(() => { askAiVisibleRef.current = askAiVisible; }, [askAiVisible]);
+  // The panel is open only while the viewer has Ask AI and is not on the
+  // /sidekick page, whose own thread would make two on screen. Derived, not
+  // written back, so losing the right or arriving on /sidekick closes it.
+  const onAskAiPage = pathname === "/sidekick" || Boolean(pathname?.startsWith("/sidekick/"));
+  const panelOpen = sidekickOpen && askAiVisible && !onAskAiPage;
+  useEffect(() => { sidekickOpenRef.current = panelOpen; }, [panelOpen]);
   const manageableOffModules = boot.manageableOffModules;
   const canCreateSpace = accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
+  const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
+  // sidebar-map section 5: RESOURCING > Tools is a row for every Member, and
+  // the Teams sidebar already renders a Member branch (My profile, Tools). A
+  // Member does not hold the Teams pill (its landing /people is manager-gated),
+  // so on a Teams URL they get that branch with no "+" (every TeamsCreateMenu
+  // row is a manager or People-team create) and a landing of their own career
+  // home. Guests never see this hub (sidebar-map 5).
+  const memberTeamsHub = !railKeys.has("teams") && boot.viewer.orgRole !== "GUEST";
   const hubHref = useCallback(
     (appKey: string): string => {
+      if (appKey === "teams" && memberTeamsHub) return "/people/me";
       if (isHubKey(appKey)) {
         return hubDefaultHref(appKey, {
           talkModuleOn: activeModuleKeys.includes("chat"),
@@ -533,11 +600,15 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       }
       return getApp(appKey)?.defaultHref ?? "/";
     },
-    [activeModuleKeys, accessLevel],
+    [activeModuleKeys, accessLevel, memberTeamsHub],
   );
-  const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
   const launcherKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
   const isHubVisible = useCallback((hubKey: string): boolean => railKeys.has(hubKey), [railKeys]);
+  const memberTeamsApp = useMemo<AppEntry | null>(() => {
+    if (!memberTeamsHub) return null;
+    const teams = getApp("teams");
+    return teams ? { ...teams, defaultHref: "/people/me", CreateMenu: undefined, createActions: undefined } : null;
+  }, [memberTeamsHub]);
   const hubSidebarApp = useCallback(
     (hub: HubKey): AppEntry => {
       const work = getApp("home")!;
@@ -545,10 +616,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
         const announce = getApp("announcements");
         if (announce && launcherKeys.has("announcements")) return announce;
       }
+      if (hub === "teams" && memberTeamsApp) return memberTeamsApp;
       if (!isHubVisible(hub)) return work;
       return getApp(hub) ?? work;
     },
-    [activeModuleKeys, launcherKeys, isHubVisible],
+    [activeModuleKeys, launcherKeys, isHubVisible, memberTeamsApp],
   );
 
   const setPresenceStatus = useCallback((s: PresenceStatus) => {
@@ -587,7 +659,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ShellState>(
     () => ({
       paletteOpen, openPalette, closePalette,
-      sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
+      sidekickOpen: panelOpen, askAiVisible, openSidekick, closeSidekick, toggleSidekick,
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate,
@@ -598,7 +670,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       openItem, openItemDrawer, closeItemDrawer,
       bumpRowVersion, rowVersion,
       sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth,
-      railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp,
+      railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, memberTeamsHub,
       recentAppKeys, pushRecentApp,
       prefs, patchPrefs, refetchPrefs,
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
@@ -607,7 +679,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       routePending, setRoutePending,
       lastAppPath,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
+    [paletteOpen, openPalette, closePalette, panelOpen, askAiVisible, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, memberTeamsHub, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -16,7 +16,7 @@
 // page header, and the relative-time helper every page needs.
 
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 
 export const BRAND_BLUE = "#0073EA";
@@ -46,9 +46,44 @@ export const SEVERITY_META: Array<{ key: string; label: string; color: string }>
   { key: "MINOR", label: "Minor", color: "#A1A1AA" },
 ];
 
-/** Dark primary pill — same recipe as the Dashboards "New Dashboard" CTA. */
-export const DARK_PILL =
-  "inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-base font-semibold text-white hover:bg-zinc-800";
+/** The page's one blue primary (design-system: one primary button per page). */
+export const PRIMARY_PILL =
+  "inline-flex h-7 items-center gap-1 rounded-md bg-brand px-3 text-base font-semibold text-white hover:bg-brand-hover disabled:opacity-50";
+
+/** A neutral bordered button for every other action on the page. */
+export const SECONDARY_PILL =
+  "inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-base font-medium text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50";
+
+export interface AutomationRights {
+  /** Create, edit, publish, activate, deactivate, retry. */
+  canManage: boolean;
+  /** Owner or Admin: delete a workflow, connections. */
+  isAdmin: boolean;
+}
+
+const NO_RIGHTS: AutomationRights = { canManage: false, isAdmin: false };
+
+/**
+ * What this viewer may change (GET /api/automation/me, the same facts every
+ * write route checks). Until it answers, and when it fails, the viewer is
+ * treated as read-only, so a control that could only fail with a 403 is
+ * never on screen.
+ */
+export function useAutomationRights(): AutomationRights {
+  const [rights, setRights] = useState<AutomationRights>(NO_RIGHTS);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/automation/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Partial<AutomationRights> | null) => {
+        if (!alive || !d) return;
+        setRights({ canManage: d.canManage === true, isAdmin: d.isAdmin === true });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return rights;
+}
 
 /** Flat white card — the hub's only container chrome. */
 export const CARD = "rounded-xl border border-zinc-200 bg-white";

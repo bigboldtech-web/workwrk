@@ -26,6 +26,7 @@ import { prisma } from "@/lib/prisma";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { nextCronRun } from "@/lib/agents/cron";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
@@ -53,12 +54,11 @@ interface ToolCallLog {
 }
 
 /**
- * Compute the next run time given a schedule string. v1 supports a
- * tiny vocabulary — "hourly", "daily", "weekly", "every <N> minutes",
- * "every <N> hours". Cron expressions are parsed loosely (first field
- * = minute; we just bucket everything to the next hour for now). This
- * is intentionally minimal so it works without pulling cron-parser as
- * a dep; we'll swap in a real parser when the user needs precision.
+ * Compute the next run time given a schedule string: the keywords
+ * "hourly", "daily", "weekly", "every <N> minutes", "every <N> hours", and
+ * a five-field cron (src/lib/agents/cron.ts), which is what the Agents
+ * drawer's schedule picker writes ("0 9 * * 1-5" is every weekday at 9:00).
+ * Anything else runs an hour out, so a bad string never fire-loops.
  */
 export function computeNextRunAt(schedule: string, from: Date = new Date()): Date {
   const s = schedule.trim().toLowerCase();
@@ -84,6 +84,10 @@ export function computeNextRunAt(schedule: string, from: Date = new Date()): Dat
   if (everyMin) return new Date(now.getTime() + parseInt(everyMin[1], 10) * 60 * 1000);
   const everyHr = s.match(/^every\s+(\d+)\s+hour/);
   if (everyHr) return new Date(now.getTime() + parseInt(everyHr[1], 10) * 60 * 60 * 1000);
+
+  // A five-field cron: its next matching minute on the server's clock.
+  const cron = nextCronRun(schedule, now);
+  if (cron) return cron;
 
   // Unknown schedule — default to one hour out so a bad string doesn't
   // cause a fire-loop.

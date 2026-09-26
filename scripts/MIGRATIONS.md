@@ -894,9 +894,12 @@ Founder step, production, one release from now:
 
 ```
 DIRECT_URL= DATABASE_URL="<prod url>" npx prisma db execute \
-  --file prisma/sql/2026-09-22-drop-announcement-dismissal.sql \
-  --schema prisma/schema.prisma
+  --file prisma/sql/2026-09-22-drop-announcement-dismissal.sql
 ```
+
+(No `--schema`: Prisma 7 removed the flag from `db execute`, and passing it
+is a hard CLI error. The command reads `prisma.config.ts`, as
+`prisma/sql/README.md` says.)
 
 ## Phase 4, stage E: announcements, what changed in data terms
 
@@ -1016,3 +1019,29 @@ Owner the holder) before the Phase 8 write. The local run of 2026-09-23 (Acme Co
 - **Where a response went** is recorded on new responses only, under the reserved `$went` key of `FormSubmission.data` (a task id on the List, a row id on the table, or the reason it was not sent). Responses written before this release show "Not sent" in the Went to column with no reason; nothing rewrites them.
 - **Deleting responses** (one, or all behind a typed confirm) is new and is a hard delete by the form's creator or an admin. A single deleted response is written in full to the audit log first (`form.response.deleted`, `oldValue.data`), so an admin can read it back; "Delete all" records the count (`form.responses.deleted`).
 - **New cron row, NOT installed**: "Form responses daily summary", `POST /api/cron/form-daily-summary`, 8 AM daily, in `scripts/CRON-SETUP.md`. It is fail-closed (503 with no `CRON_SECRET`). Until the founder adds it, a form set to "Send a daily summary instead" is quiet.
+
+## Phase 7 (AI, automation and add-ons), stage A: two request tables, one reversible cleanup
+
+- **Schema**: `prisma/sql/2026-09-24-phase7-requests.sql` creates `IntegrationRequest` ("Request this" on /integrations, unique on organizationId, key and userId) and `AppSuggestion` ("Suggest an app" on Marketplace). Two new tables, no existing column touched. It is in the deploy manifest (`scripts/deploy-migrations.mjs`). By hand: `npx prisma db execute --file prisma/sql/2026-09-24-phase7-requests.sql`, then `npx prisma generate`. Deploy order is free: the catalogue reads zero counts and the two request routes answer a named 503 while the tables are absent. (Prisma 7's `db execute` no longer takes `--schema`; it reads `prisma.config.ts`, whose datasource is `DIRECT_URL || DATABASE_URL`.)
+- **`scripts/cleanup-legacy-automation-workflows.ts`** removes the legacy Autopilot rows: `Workflow` rows with `kind = AUTOMATION`, which only the deleted `/autopilot` mock and `/api/autopilot/*` ever wrote and which nothing ever ran (`src/lib/workflows/runtime.ts` `triggerEvent` has no caller). APPROVAL rows are never touched. Dry run by default: it prints the rows per organization. `--export <file>` writes every AUTOMATION row with its `WorkflowRun` rows as JSON, and `--write` refuses to run without `--export` in the same command, so the delete always has its undo; it then asserts zero remain. `--restore <file>` recreates the rows from an export, skipping ids that already exist. Local run on 2026-09-24: 0 rows, report and empty export under the Phase 7 scratchpad. Production, founder's step:
+  ```
+  DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/cleanup-legacy-automation-workflows.ts                       # read the report
+  DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/cleanup-legacy-automation-workflows.ts --export legacy-automation.json --write
+  ```
+  Keep the JSON: `--restore legacy-automation.json` is the way back.
+- **No data step, behaviour changes to know about**:
+  - Tool and Asset deletes go to the one Trash (TrashType `tool` with its `ToolShare` rows, and `asset`) instead of erasing the row. Past deletes are already gone; nothing is backfilled.
+  - `GET /api/assets?assignedToId=` now narrows within the caller's scope instead of skipping it. A colleague's profile Assets tab shows only what the viewer may already see (their own kit, their reports' kit, or everything for an org-wide role).
+  - `GET /api/integrations` returns the connector catalogue. Its old body returned every `Integration` row with its `config` (API keys) to any signed-in person and had no caller in the app; the rows, without config, are `?records=1` for Owners and Admins.
+  - Agent writes (add, create, pause, schedule, Run now, remove) are Owner and Admin. Adding a catalog agent always was; creating a custom agent and scheduling one were manager and above. Agent runs: Owners and Admins read every run; everyone else reads autonomous runs and their own.
+  - Build apps is Owner and Admin (APP_RULES.build), pages and API alike, including `/api/build/generate`, which any member could call. **One exception so nobody loses what they could do before:** in an org that has built apps, a Member keeps USING them (the list shows the org's live apps plus their own archived ones; open any of them, add, change and delete rows) and gets an APPS > Build apps row; on the apps THEY created they also keep archive and restore. Creating a new app and AI generation are Owner and Admin (`src/lib/build/gate.ts`), and that is the one narrowing. **Founder decision still open, reported as a spec conflict** (spec-tools-misc 2.3 open question 1): whether a Member may build their own apps, as they could at HEAD. Before shipping, count who made the apps on production:
+    ```sql
+    SELECT u."accessLevel", a.status, count(*) AS apps,
+           count(*) FILTER (WHERE jsonb_array_length(COALESCE(a.ui->'rows', '[]'::jsonb)) > 0) AS apps_with_rows
+    FROM "App" a LEFT JOIN "User" u ON u.id = a."createdById"
+    GROUP BY 1, 2 ORDER BY 1, 2;
+    ```
+    Apps created at a Member level are the ones whose makers can no longer make another; if that count is not zero, decide before the deploy.
+  - Automation writes are unchanged (create, edit, publish, activate, deactivate and retry for a manager or above; delete and connections for Owner and Admin), but the Automation pages are now open to every Member to read, with every write control hidden for a viewer the write routes refuse (`GET /api/automation/me`).
+  - The Cashkr-era automation triggers (leads, quotes, pickups, payments) and the Leads template are hidden, not deleted: an org that sets `Organization.settings.automation.legacyTriggers = true` gets them back, and a workflow already on one keeps it.
+  - `settings.data.aiEnabled === false` turns the `ai` app key off (Ask AI and Agents answer `AppOff`, the API 403 `app_off`; scheduled agents skip the org), and the model calls of this phase's other surfaces answer 403 `ai_off` (`src/lib/ai/ai-off-gate.ts`: the meeting summary `POST /api/ai`, `/api/ai/cmdk-summary`, `/api/ai/inbox-suggestion`, `/api/build/generate`); absent reads as on. Automations are unaffected. **Still to follow with the switch's writer (Phase 8, Data > Retention and privacy):** the AI calls owned by other hubs (docs write/ask/summarize/extract-table, tables ask, canvas generate/analyze, forms generate, notetaker process, KRA and SOP generate, OKR assess, board field suggest, file summarize) do not read the switch yet. No org can turn it off before Phase 8 ships the control.

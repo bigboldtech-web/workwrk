@@ -11,11 +11,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import {
-  canManageAutomations,
-  forbidden,
-  resolveAutomationContext,
-} from "@/lib/automation/hub-access";
+import { forbidden, requireAutomation } from "@/lib/automation/gate";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 
 const definitionSchema = z.object({
@@ -32,7 +28,7 @@ const updateSchema = z.object({
 });
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
   const { id } = await params;
 
@@ -68,9 +64,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!canManageAutomations(ctx)) return forbidden();
+  if (!ctx.canManage) return forbidden();
   const { id } = await params;
 
   const body = await req.json().catch(() => null);
@@ -112,9 +108,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (ctx.role !== "admin") return forbidden("Forbidden: only workspace admins can delete workflows");
+  if (!ctx.isAdmin) return forbidden("Forbidden: only workspace admins can delete workflows");
   const { id } = await params;
 
   const existing = await prisma.automationWorkflow.findFirst({

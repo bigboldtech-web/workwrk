@@ -84,7 +84,7 @@ const nextConfig: NextConfig = {
     turbopackFileSystemCacheForDev: process.env.WORKWRK_DEV_FS_CACHE !== "0",
   },
 
-  // Comms Hub was briefly shipped under /chat before the Room rename —
+  // Comms Hub was briefly shipped under /chat before the Room rename
   // stored notification links and bookmarks keep working.
   async redirects() {
     return [
@@ -345,7 +345,7 @@ const nextConfig: NextConfig = {
         destination: "/sops/:id?edit=1",
         permanent: true,
       },
-      // Whiteboards were renamed to Canvas — keep old links/bookmarks working.
+      // Whiteboards were renamed to Canvas, keep old links/bookmarks working.
       { source: "/whiteboards", destination: "/canvas", permanent: false },
       { source: "/whiteboards/:id", destination: "/canvas/:id", permanent: false },
       // Settings chassis (docs/plans/ui-refresh/settings-architecture.md 8.4).
@@ -384,6 +384,19 @@ const nextConfig: NextConfig = {
       // (register reads ?token and switches to "Join <org>").
       { source: "/signup", destination: "/register", permanent: false },
       { source: "/join", destination: "/register", permanent: false },
+      //
+      // Phase 7 (spec-ai-automation.md section 0). The two static AI mocks
+      // are deleted and their addresses land on the real surfaces. Next
+      // appends the source query to the destination, so /ai?q=... arrives at
+      // /sidekick?q=..., which the Ask AI page reads.
+      { source: "/ai", destination: "/sidekick", permanent: true },
+      { source: "/autopilot", destination: "/automation/workflows", permanent: true },
+      // The Automation hub's natural address has no page of its own.
+      { source: "/automation", destination: "/automation/workflows", permanent: true },
+      // Two sidebar links that never had a page. Chat history is the All
+      // chats view; starter prompts are on the Ask AI landing.
+      { source: "/sidekick/history", destination: "/sidekick?view=all", permanent: true },
+      { source: "/sidekick/prompts", destination: "/sidekick", permanent: true },
     ];
   },
   /* config options here */

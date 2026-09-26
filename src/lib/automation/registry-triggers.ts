@@ -1,5 +1,5 @@
 /**
- * Trigger catalog — every event key the Automation Hub can react to.
+ * Trigger catalog, every event key the Automation Hub can react to.
  *
  * `isEmitting: true`  = the key is actually passed to `dispatchEvent`
  *                       somewhere in src/ today, so ACTIVE workflows on
@@ -7,15 +7,15 @@
  * `isEmitting: false` = catalog-only seed (the plan's Cashkr/candidate
  *                       keys). The builder shows them as "not yet
  *                       emitting"; they light up automatically once the
- *                       owning domain starts dispatching — no engine
+ *                       owning domain starts dispatching, no engine
  *                       change needed.
  *
  * Real emitters today (grep `dispatchEvent` from @/services/webhookDispatcher):
- *   task.created          — api/v1/tasks POST, api/integrations/ingest
- *   task.status_changed   — api/items/[id] PATCH (board items)
- *   task.assignee_changed — api/items/[id] PATCH (board items)
- *   kpi.recorded          — api/v1/kpi-records POST, api/integrations/ingest
- *   kudos.created         — api/v1/kudos POST, api/integrations/ingest
+ *   task.created        , api/v1/tasks POST, api/integrations/ingest
+ *   task.status_changed , api/items/[id] PATCH (board items)
+ *   task.assignee_changed, api/items/[id] PATCH (board items)
+ *   kpi.recorded        , api/v1/kpi-records POST, api/integrations/ingest
+ *   kudos.created       , api/v1/kudos POST, api/integrations/ingest
  */
 
 export interface TriggerField {
@@ -238,4 +238,36 @@ const TRIGGER_BY_KEY = new Map(AUTOMATION_TRIGGERS.map((t) => [t.key, t] as cons
 
 export function getTrigger(key: string): AutomationTrigger | undefined {
   return TRIGGER_BY_KEY.get(key);
+}
+
+/**
+ * The Cashkr-era triggers (leads, quotes, pickups, payments) belong to a
+ * vertical this product no longer ships. They are HIDDEN behind a product
+ * flag, never deleted: a workflow already built on one keeps its trigger, its
+ * name still resolves everywhere, and an org that turns the flag on
+ * (Organization.settings.automation.legacyTriggers === true) gets them back
+ * in the picker. Decided in docs/plans/competitor-gap-2026-09.md section 7.
+ */
+const LEGACY_TRIGGER_PREFIXES = ["lead.", "quote.", "pickup.", "payment."] as const;
+
+export function isLegacyTrigger(key: string): boolean {
+  return LEGACY_TRIGGER_PREFIXES.some((p) => key.startsWith(p));
+}
+
+/** The org's product flag, read tolerantly: absent means off. */
+export function legacyTriggersEnabled(settings: unknown): boolean {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return false;
+  const automation = (settings as Record<string, unknown>).automation;
+  if (!automation || typeof automation !== "object" || Array.isArray(automation)) return false;
+  return (automation as Record<string, unknown>).legacyTriggers === true;
+}
+
+/**
+ * The catalog as the builder sees it: every trigger, with `hidden: true` on a
+ * legacy one while the flag is off. Hidden triggers stay in the list so an
+ * existing workflow, a template or a log row can still print the name; the
+ * picker leaves them out unless one is the workflow's current trigger.
+ */
+export function triggersForOrg(showLegacy: boolean): Array<AutomationTrigger & { hidden?: boolean }> {
+  return AUTOMATION_TRIGGERS.map((t) => (!showLegacy && isLegacyTrigger(t.key) ? { ...t, hidden: true } : t));
 }

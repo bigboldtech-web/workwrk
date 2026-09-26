@@ -29,14 +29,14 @@ const focusOptions: { key: Focus; label: string; body: string; modules: string[]
   {
     key: "manager",
     label: "I lead a team",
-    body: "You'll spend most time in People, Reviews, and the AI Engine. We'll pre-open the dashboards for your directs.",
-    modules: ["People", "Reviews", "Analytics", "AI Engine"],
+    body: "You'll spend most time in People, Reviews, and Ask AI. We'll pre-open the dashboards for your directs.",
+    modules: ["People", "Reviews", "Analytics", "Ask AI"],
   },
   {
     key: "founder",
     label: "I run the company",
     body: "You'll see company OKRs, composite scoring, and signals the AI surfaces (attrition risk, drift, wins).",
-    modules: ["OKRs", "Analytics", "AI Engine", "KRAs"],
+    modules: ["OKRs", "Analytics", "Ask AI", "KRAs"],
   },
 ];
 
@@ -127,7 +127,7 @@ export default function OnboardingPage() {
             </div>
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-base font-medium text-zinc-700">
               <Sparkles size={16} />
-              <span>AI Engine</span>
+              <span>Ask AI</span>
             </div>
           </div>
 

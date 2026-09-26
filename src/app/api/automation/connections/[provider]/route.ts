@@ -11,7 +11,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { forbidden, resolveAutomationContext } from "@/lib/automation/hub-access";
+import { forbidden, requireAutomation } from "@/lib/automation/gate";
 
 const PROVIDERS = ["WHATSAPP", "GMAIL", "GOOGLE_CALENDAR", "SLACK", "WEBHOOK", "ZAPIER", "CRM"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -21,9 +21,9 @@ const webhookSchema = z.object({
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (ctx.role !== "admin") {
+  if (!ctx.isAdmin) {
     return forbidden("Forbidden: only workspace admins can connect integrations");
   }
 

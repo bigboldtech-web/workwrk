@@ -1,7 +1,7 @@
 // GET /api/automation/templates
 //
 // The starter-recipe gallery. AutomationTemplate rows are global
-// (org-independent) — the 5 seed recipes below are created lazily the
+// (org-independent): the 5 seed recipes below are created lazily the
 // first time any org loads the gallery (create-if-empty; fixed ids +
 // skipDuplicates make the seeding idempotent under races).
 //
@@ -12,7 +12,8 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
+import { isLegacyTrigger, legacyTriggersEnabled } from "@/lib/automation/registry-triggers";
 
 const SEEDS: Prisma.AutomationTemplateCreateManyInput[] = [
   {
@@ -42,7 +43,7 @@ const SEEDS: Prisma.AutomationTemplateCreateManyInput[] = [
   {
     id: "tpl-task-done-notify-board-owner",
     name: "When a task's status changes to Done, notify the board owner",
-    description: "Tells the board's owner the moment work is marked Done — the closest thing to a task creator in WorkwrK.",
+    description: "Tells the board's owner the moment work is marked Done.",
     category: "Tasks",
     severity: "MINOR",
     templateJson: {
@@ -135,7 +136,7 @@ const SEEDS: Prisma.AutomationTemplateCreateManyInput[] = [
 ];
 
 export async function GET() {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   // Create-if-empty seeding. Fixed ids + skipDuplicates keep concurrent
@@ -147,7 +148,7 @@ export async function GET() {
       await prisma.automationTemplate.createMany({ data: SEEDS, skipDuplicates: true });
     }
   } catch {
-    // Non-fatal — the gallery just renders whatever rows exist.
+    // Non-fatal: the gallery just renders whatever rows exist.
   }
 
   const templates = await prisma.automationTemplate.findMany({
@@ -164,5 +165,28 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ templates });
+  // A recipe on a trigger hidden behind the legacy product flag (the
+  // Cashkr-era Leads recipe) is not offered while the flag is off. The row
+  // stays in the table, untouched, and comes back with the flag.
+  const org = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
+  const showLegacy = legacyTriggersEnabled(org?.settings);
+  const offered = showLegacy
+    ? templates
+    : templates.filter((t) => {
+        const trigger = (t.templateJson as { trigger?: { event?: string }; triggerEvent?: string } | null);
+        const key = trigger?.trigger?.event ?? trigger?.triggerEvent ?? "";
+        return !isLegacyTrigger(key);
+      });
+
+  // A seed row keeps the copy it was first inserted with (skipDuplicates
+  // never rewrites it), so an older row can carry wording since corrected
+  // here. The gallery serves the current copy for the fixed seed ids; the
+  // stored row is left untouched.
+  const seedCopy = new Map(SEEDS.map((t) => [t.id, t]));
+  const served = offered.map((t) => {
+    const seed = seedCopy.get(t.id);
+    return seed ? { ...t, name: seed.name, description: seed.description ?? t.description } : t;
+  });
+
+  return NextResponse.json({ templates: served });
 }

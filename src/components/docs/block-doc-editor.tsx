@@ -1,6 +1,6 @@
 "use client";
 
-/* BlockDocEditor — chrome around the BlockNote canvas for /docs/[id].
+/* BlockDocEditor, chrome around the BlockNote canvas for /docs/[id].
  *
  * Adds Notion-grade page polish on top of the block editor:
  *   - Cover gradient or image at the top of the page
@@ -9,7 +9,7 @@
  *   - Legacy `{ html }` doc detection + lossless "convert to blocks"
  *   - Sticky chrome (back, copy link, summarise, extract table)
  *
- * Doc content shape (additive — older docs without `meta` still work):
+ * Doc content shape (additive, older docs without `meta` still work):
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
  *
  * ONE EDITOR, THREE ADDRESSES. /docs/[id] (the Docs hub), and the Work
@@ -97,7 +97,7 @@ import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
-// the writer actually opens the picker — keeps the doc page light + fast.
+// the writer actually opens the picker, keeps the doc page light + fast.
 const NoteIconPicker = dynamic(
   () => import("./note-icon-picker").then((m) => m.NoteIconPicker),
   { ssr: false },
@@ -108,7 +108,7 @@ type DocMeta = {
   icon?: string;
   coverGradient?: string;
   coverUrl?: string;
-  // Notion-style page preferences (all additive — older docs default sensibly).
+  // Notion-style page preferences (all additive, older docs default sensibly).
   font?: DocFont;
   smallText?: boolean;
   fullWidth?: boolean;
@@ -119,7 +119,7 @@ type DocPayload = {
   id: string;
   title: string;
   // Content shape evolves:
-  //   v1 (legacy): { blocks: Block[] }            — custom editor
+  //   v1 (legacy): { blocks: Block[] }          , custom editor
   //   v2:          { bnDoc: PartialBlock[], blocks: Block[] (mirror), version: 2 }
   // We read both shapes and migrate v1 → v2 lazily on first save.
   content: { bnDoc?: PartialBlock[]; blocks?: Block[]; html?: string; meta?: DocMeta; comments?: CommentsByBlock; version?: number } | null;
@@ -178,7 +178,7 @@ function gradientCSS(key?: string): string {
 interface Props {
   docId: string;
   // "primary" (default) is the main pane. "peek" is the right pane in a
-  // split view — its chrome hides the back button + open-side-panel button
+  // split view, its chrome hides the back button + open-side-panel button
   // because the surrounding DocSplitView owns those actions.
   pane?: "primary" | "peek";
 }
@@ -195,7 +195,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const hubBack = useHubBack();
   const inWork = pane === "primary" && place?.kind === "doc" && place.id === docId;
   const selfPath = inWork && place ? place.self : canonicalHref("doc", docId);
-  // Peek picker — popover state + fetched recent docs for the picker list.
+  // Peek picker, popover state + fetched recent docs for the picker list.
   const [peekPickerOpen, setPeekPickerOpen] = useState(false);
   const [peekQuery, setPeekQuery] = useState("");
   const [peekDocs, setPeekDocs] = useState<{ id: string; title: string; updatedAt: string }[] | null>(null);
@@ -205,7 +205,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // The Work crumb's live title, once the doc has loaded (the gate's
   // placement already names it until then).
   useWorkTitle(inWork && doc ? (title || "Untitled doc") : null);
-  // bnDoc is BlockNote's native JSON — the source of truth for editing.
+  // bnDoc is BlockNote's native JSON, the source of truth for editing.
   // `blocks` is a derived mirror (LegacyBlock[]) the surrounding chrome
   // reads for the outline / word count without rewriting those components.
   const [bnDoc, setBnDoc] = useState<PartialBlock[] | null>(null);
@@ -226,7 +226,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const [commentOpen, setCommentOpen] = useState(false);
-  // Single side-panel slot — only one of Ask/History/Comments can be
+  // Single side-panel slot, only one of Ask/History/Comments can be
   // open at a time so they never overlap or fight for focus. The
   // Comments variant carries the block id it belongs to.
   const [panel, setPanel] = useState<null | { kind: "ask" } | { kind: "history" } | { kind: "comments"; blockId: string }>(null);
@@ -239,7 +239,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [comments, setComments] = useState<CommentsByBlock>({});
   const [me, setMe] = useState<MeUser | null>(null);
   // Per-doc role from GET /api/docs/[id] (settings.docSharing). Missing
-  // myRole (older cached responses) defaults to "edit" — zero behavior
+  // myRole (older cached responses) defaults to "edit", zero behavior
   // change for existing docs.
   // "comment" = a locked doc below Full access (change request A4): the
   // content is read-only, the comment composer stays.
@@ -266,8 +266,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const draft = useLocalDraft<DraftPayload>("doc", docId, serverUpdatedAt);
   const draftRef = useRef(draft);
   draftRef.current = draft;
-  const { railApps, prefs, patchPrefs } = useOsShell();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const { askAiVisible, prefs, patchPrefs } = useOsShell();
+  const aiOn = askAiVisible;
   const outlineOpen = outlineOverride ?? readDocsOutline(prefs.home);
   const setOutlineOpen = useCallback((next: boolean) => {
     setOutlineOverride(next);
@@ -301,7 +301,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }, []);
 
   // Load the doc list when the peek picker opens. Lazy + once per open
-  // is plenty — a workspace's doc count is small enough to filter client-side.
+  // is plenty, a workspace's doc count is small enough to filter client-side.
   useEffect(() => {
     if (!peekPickerOpen || peekDocs !== null) return;
     let cancelled = false;
@@ -393,7 +393,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // the new value; the next PUT carries it back so the server can
   // reject (409) when another writer has moved on without us.
   const lastUpdatedAtRef = useRef<string | null>(null);
-  // Last title we told the sidebar about — so we only re-fetch the tree when the
+  // Last title we told the sidebar about, so we only re-fetch the tree when the
   // title actually changes, not on every body-autosave.
   const lastSyncedTitleRef = useRef<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -434,7 +434,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         const c = d.content;
         setMeta((c?.meta as DocMeta) ?? {});
         // v2: native BlockNote JSON. Preferred.
-        // v1: legacy {blocks:[...]} — passed through to the canvas which
+        // v1: legacy {blocks:[...]}, passed through to the canvas which
         //     converts it transparently. The next save persists v2 shape.
         // legacy html: still shows the convert-to-blocks banner.
         if (c && Array.isArray((c as { bnDoc?: PartialBlock[] }).bnDoc)) {
@@ -456,7 +456,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         } else if (c && (c as { type?: string }).type === "doc" && Array.isArray((c as { content?: unknown[] }).content)) {
           // TipTap shape (authored by the Notepad quick-tool / new-note create).
           // Convert its paragraphs straight to legacy blocks so the canvas
-          // renders them normally (via legacyBlocksToBN) — NOT the "old
+          // renders them normally (via legacyBlocksToBN), NOT the "old
           // rich-text format / Convert to blocks" banner, which was wrongly
           // firing on every note. The next save rewrites it in v2 shape.
           const paras = ((c as { content: Array<{ content?: Array<{ text?: string }> }> }).content) ?? [];
@@ -504,7 +504,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // single persist() writer (below) so title + body can never fire two
   // concurrent PUTs that 409 each other against the same knownUpdatedAt.
   const titleRef = useRef(title);
-  // Freshly created sub-pages arrive with ?new=1 — focus + select the title
+  // Freshly created sub-pages arrive with ?new=1, focus + select the title
   // so the writer names the page instead of re-clicking Add subpage.
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const focusedNewRef = useRef(false);
@@ -535,7 +535,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     nextExcerpt?: string,
     attempt = 0,
   ) => {
-    // View-only members never fire PUTs — the server would 403 every
+    // View-only members never fire PUTs, the server would 403 every
     // attempt and the retry loop would burn 4 tries + a scary save toast.
     // Ref read (not a closure) so the guard is never stale.
     if (myRoleRef.current !== "edit") return;
@@ -629,7 +629,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         refreshSidebar();
       }
     } catch {
-      // Network failure or a >64KB keepalive rejection — retry with backoff
+      // Network failure or a >64KB keepalive rejection, retry with backoff
       // (dropping keepalive won't matter for in-editor autosaves) so a
       // transient failure never silently loses the edit. Mandate: never drop.
       setSaveStatus("error");
@@ -684,12 +684,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // BN source of truth and the derived legacy mirror, then persist.
   //
   // The mirror is BN→legacy and is lossy for custom embeds (sop_card,
-  // task_card, subpage, entity_link, etc.) — BN renders those as plain
+  // task_card, subpage, entity_link, etc.), BN renders those as plain
   // paragraphs. Before persisting, we splice the originals back in by
   // matching block ids. Result: as long as the writer keeps the proxy
   // paragraph in place, the EntityLink graph keeps pointing at the
   // original embed. If they delete the proxy, the original disappears
-  // from the next save — exactly the right behavior.
+  // from the next save, exactly the right behavior.
   const handleEditorChange = useCallback((nextBnDoc: PartialBlock[], mirror: Block[], plainText: string) => {
     const enrichedMirror = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
     setBnDoc(nextBnDoc);
@@ -698,7 +698,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }, [persist, meta]);
 
   const saveBlocks = useCallback(async (next: Block[]) => {
-    // Legacy entry point — still used by convertLegacy() for the v0 html flow.
+    // Legacy entry point, still used by convertLegacy() for the v0 html flow.
     // We don't have a BN doc here; persist with bnDoc=null so the next edit
     // (which goes through the canvas) regenerates it.
     setBlocks(next);
@@ -754,7 +754,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     setBlocks(converted);
     setLegacy(null);
     void saveBlocks(converted);
-    toast("Converted to blocks — old content preserved as paragraphs");
+    toast("Converted to blocks, old content preserved as paragraphs");
   }
 
   function copyLink() {
@@ -802,7 +802,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane, docId, aiOn]);
 
-  // Copy the whole page as Markdown — reuses the export endpoint so the
+  // Copy the whole page as Markdown, reuses the export endpoint so the
   // clipboard content matches an exported file exactly.
   async function copyContents() {
     try {
@@ -891,7 +891,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     );
   }
 
-  // Trashed docs never render their content — stale sub-page links used to
+  // Trashed docs never render their content, stale sub-page links used to
   // open deleted pages as if nothing happened. Offer restore or a way out.
   if (doc.archivedAt) {
     return (
@@ -1273,7 +1273,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         ) : (
           // Key by docId + reading-mode + restoreNonce so the editor
           // force-remounts on doc switch, reading-mode toggle, or version
-          // restore — never holds a stale in-memory document.
+          // restore, never holds a stale in-memory document.
           <div className="os-prose">
             <BlockNoteCanvas
               key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
@@ -1288,14 +1288,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           </div>
         )}
 
-        {/* Empty-doc hint row (ClickUp parity) — shown until the first real
+        {/* Empty-doc hint row (ClickUp parity), shown until the first real
             edit; both chips are backed (Ask panel / child-page create). It
             disappears automatically because `blocks` mirrors the canvas. */}
         {pane === "primary" && !readingMode && !meta.locked && myRole === "edit" && legacy === null && blocks !== null &&
           (blocks.length === 0 ||
             (blocks.length === 1 && blocks[0].kind === "paragraph" && !(blocks[0] as { text: string }).text.trim())) && (
           <div
-            // Just the Ask chip — the editor placeholder already says
+            // Just the Ask chip, the editor placeholder already says
             // "type / for commands" (no duplicate line), and Add subpage
             // lives in the header; keeping it here invited accidental
             // child-of-child chains on every fresh page.
@@ -1329,7 +1329,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       </div>
 
       {/* Outline rail only when no slide-over panel is open and not in
-          reading mode — keeps the right edge calm. */}
+          reading mode, keeps the right edge calm. */}
       {outlineOpen && blocks && blocks.length > 0 && !readingMode && panel === null && (
         <OutlineRail blocks={blocks} onClose={() => setOutlineOpen(false)} />
       )}
@@ -1721,7 +1721,7 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
 
   const scrollTo = (id: string, text?: string) => {
     // data-id first; fall back to matching the heading's TEXT among rendered
-    // heading blocks — the mirror's ids can drift from the DOM after
+    // heading blocks, the mirror's ids can drift from the DOM after
     // conversions, and a stale id used to land the scroll on the wrong
     // section entirely.
     let el = document.querySelector(`[data-id="${id}"]`);
@@ -1731,14 +1731,14 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
         .find((h) => (h.textContent ?? "").trim() === target) ?? null;
     }
     if (!el) return;
-    // The clicked entry is the truth for the highlight — don't let the
+    // The clicked entry is the truth for the highlight, don't let the
     // scroll-spy flicker through intermediate sections mid-scroll.
     setActiveId(id);
     // scroll-margin keeps the heading below the sticky chrome instead of
     // vanishing under it (which read as "it jumped to the next section").
     (el as HTMLElement).style.scrollMarginTop = "96px";
     el.scrollIntoView({ behavior: "smooth", block: "start" });
-    // Smooth scrolls drift when content shifts mid-flight — verify the
+    // Smooth scrolls drift when content shifts mid-flight, verify the
     // landing once settled and correct in one instant hop if needed.
     const check = () => {
       const rect = el!.getBoundingClientRect();
@@ -1908,7 +1908,7 @@ function AskDocPanel({ docId, docTitle, onClose, quick }: {
 //
 // Backed by ItemUpdate (entityType="DOC_BLOCK", entityId="<docId>:<blockId>").
 // Every action is a real API call against /api/item-updates and
-// /api/item-updates/[id] — no more last-write-wins on in-content JSON.
+// /api/item-updates/[id], no more last-write-wins on in-content JSON.
 // `initialThread` seeds the UI from the per-doc aggregator so the panel
 // opens instantly; we then refetch the live thread to be safe.
 function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadChanged }: {

@@ -78,7 +78,7 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   const hardLoad = isInitialEntryPath(`/item/${itemId}`);
   const { data: session } = useSession();
   const { boot } = useBoot();
-  const { openSidekick } = useOsShell();
+  const { openSidekick, askAiVisible } = useOsShell();
   const { toast } = useOsToast();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
@@ -144,7 +144,9 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   }, [close, expanded]);
 
   const statuses = board?.statuses?.length ? board.statuses : [...DEFAULT_STATUS_OPTIONS];
-  const aiOn = Boolean(boot.prefs?.modules?.activeAppKeys?.includes("ai"));
+  // "ai" was never a module key, so this read false for everyone and the
+  // task strip never offered Ask AI. The one shell fact decides now.
+  const aiOn = askAiVisible;
   const isWatching = Boolean(currentUserId && watcherIds.includes(currentUserId));
   const gone = useCallback(() => {
     if (item) emitItemChanged(item.id, item.boardId ?? null, true);

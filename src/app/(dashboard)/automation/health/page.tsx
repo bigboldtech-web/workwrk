@@ -14,7 +14,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, HeartPulse, Loader2 } from "lucide-react";
+import { Activity, HeartPulse } from "lucide-react";
+import { SkeletonGrid } from "@/components/ui/skeleton";
 import {
   AutomationHeader,
   CARD,
@@ -124,8 +125,8 @@ export default function AutomationHealthPage() {
         {error ? (
           <div className="p-6 text-base text-zinc-500">Couldn&apos;t load automation health.</div>
         ) : health === null ? (
-          <div className="flex items-center gap-2 p-6 text-base text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          <div aria-busy="true" aria-label="Loading health">
+            <SkeletonGrid count={4} />
           </div>
         ) : (
           <div className="mx-auto max-w-5xl space-y-4">

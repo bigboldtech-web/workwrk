@@ -1,4 +1,4 @@
-// loadFacts — every Prisma read the resolver needs, and nothing else.
+// loadFacts, every Prisma read the resolver needs, and nothing else.
 //
 // The split is deliberate (spec 5.1, graft G12): all I/O lives here so that
 // decide() stays pure and the golden suite runs in vitest's node environment
@@ -26,6 +26,7 @@
 // Server-only: imports prisma. Never import this from a client component and
 // never from resolve.test.ts (vitest resolves no "@/" alias and no database).
 
+import { aiEnabledFromSettings } from "../ai/ai-enabled";
 import { prisma } from "../prisma";
 import { getActiveModuleAppKeys } from "../entitlements";
 import {
@@ -134,6 +135,7 @@ export async function loadOrgFacts(organizationId: string): Promise<OrgFacts> {
     activeModules: new Set(activeModuleKeys),
     apps,
     peopleTeamIds: configured.length > 0 ? configured : seeded,
+    aiEnabled: aiEnabledFromSettings(settings),
   };
 }
 
@@ -977,7 +979,7 @@ async function loadSopFolderFacts(viewer: Viewer, folderId: string): Promise<Con
 // ── The entry point ───────────────────────────────────────────────
 
 /**
- * loadFacts(viewer, ref) — read exactly what decide() needs, and nothing else.
+ * loadFacts(viewer, ref), read exactly what decide() needs, and nothing else.
  *
  * Rule 2 must be answerable before the object row is loaded, so a module-owned
  * ref returns early with nothing but its module key: `can()` then short-circuits

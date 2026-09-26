@@ -8,7 +8,7 @@
 //
 // When there ARE pending migrations, we call `prisma migrate
 // deploy` with a retry loop. Between retries we also clear orphaned
-// advisory-lock holders — a killed previous deploy can leave its
+// advisory-lock holders, a killed previous deploy can leave its
 // session alive on the server, holding lock 72707369 forever, in
 // which case naive retries all fail the same way.
 //
@@ -44,7 +44,7 @@ if (!url) {
 // reading it.
 //
 // NOT IN THE MANIFEST, on purpose:
-//   2026-07-21-operating-core.sql — 35 DDL statements with ZERO
+//   2026-07-21-operating-core.sql, 35 DDL statements with ZERO
 //   IF NOT EXISTS guards, so it is additive but NOT idempotent, and it
 //   belongs to the Operating Core work which is deliberately gated. Since
 //   everything here runs on EVERY deploy, a non-idempotent file would fail
@@ -117,6 +117,12 @@ const SQL_MANIFEST = [
   // report routes answer a named 503 (the cron a no-op) until it lands. It
   // is here so the release that ships the code is the release that can use it.
   "2026-09-24-phase5b-data.sql",
+  // Phase 7, stage A: "IntegrationRequest" (Request this on /integrations)
+  // and "AppSuggestion" (Suggest an app on Marketplace). Two CREATE TABLE IF
+  // NOT EXISTS, three indexes, two guarded foreign keys, nothing else. Deploy
+  // order is free: the catalogue reads zero counts and the request routes
+  // answer a named 503 while the tables are absent.
+  "2026-09-24-phase7-requests.sql",
 ];
 
 /**
@@ -169,7 +175,7 @@ function runPrismaDeploy() {
 // Mirrors scripts/unstick-migrate-lock.mjs. Returns the number of
 // holder sessions we terminated. Safe to call when the lock is free
 // (returns 0). Best-effort: if the cleanup query itself errors we log
-// and let the retry try anyway — we don't want a transient pg blip
+// and let the retry try anyway, we don't want a transient pg blip
 // here to fail the whole build.
 async function clearStuckLockHolders() {
   const client = new Client({ connectionString: url, statement_timeout: 15_000 });

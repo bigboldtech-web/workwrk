@@ -9,11 +9,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import {
-  canManageAutomations,
-  forbidden,
-  resolveAutomationContext,
-} from "@/lib/automation/hub-access";
+import { forbidden, requireAutomation } from "@/lib/automation/gate";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 
 const WORKFLOW_STATUSES = ["DRAFT", "ACTIVE", "INACTIVE", "ERROR", "ARCHIVED"] as const;
@@ -32,7 +28,7 @@ const createSchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const sp = req.nextUrl.searchParams;
@@ -114,9 +110,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  if (!canManageAutomations(ctx)) return forbidden();
+  if (!ctx.canManage) return forbidden();
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

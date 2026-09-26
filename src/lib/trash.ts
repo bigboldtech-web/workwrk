@@ -1,5 +1,5 @@
 // Org-wide recycle bin. moveToTrash() snapshots a row (+ essential children)
-// into TrashItem, then removes it from its live table — so it disappears from
+// into TrashItem, then removes it from its live table, so it disappears from
 // every existing list with no query changes. restoreFromTrash() re-creates it
 // from the snapshot. Items are purged 60 days after deletion.
 
@@ -19,12 +19,14 @@ export type TrashType =
   // A form with every response it has received, as one snapshot (Phase 5:
   // DELETE /api/forms/[id] used to be a hard delete that cascaded responses).
   | "form"
-  // Project hierarchy — "board" is the ClickUp "List", "item" is a Task.
+  // Project hierarchy, "board" is the ClickUp "List", "item" is a Task.
   | "space" | "folder" | "board" | "item"
   // A drive folder (FileFolder) with its subfolders and files as one snapshot.
   | "file_folder"
   // A Meeting with its attendees and action items as one snapshot.
-  | "meeting";
+  | "meeting"
+  // Phase 7: a Tool with the people it was shared with, and an Asset.
+  | "tool" | "asset";
 
 /** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
 export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
@@ -41,7 +43,7 @@ async function freeFileBlob(url: unknown): Promise<void> {
       const key = new URL(url).pathname.replace(/^\/+/, "");
       if (key) await deleteObject(key).catch(() => {});
     }
-  } catch { /* best-effort — purge proceeds regardless */ }
+  } catch { /* best-effort, purge proceeds regardless */ }
 }
 
 // Free any external storage a trashed item references (currently file blobs).
@@ -63,6 +65,7 @@ export const TRASH_LABEL: Record<TrashType, string> = {
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
   file_folder: "Folder", meeting: "Meeting",
+  tool: "Tool", asset: "Asset",
 };
 
 /**
@@ -100,6 +103,8 @@ const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
   // reached from /files, so its restore href is informational like theirs.
   file_folder: "folder",
   meeting: "meeting",
+  tool: "tool",
+  asset: "asset",
 };
 
 export const TRASH_HREF: Record<TrashType, string> = Object.fromEntries(
@@ -204,7 +209,7 @@ async function captureItemSubtree(rootId: string, db: TrashDb = prisma): Promise
   return out;
 }
 
-// Capture the boards of a Space/Folder plus their items/views/members — the
+// Capture the boards of a Space/Folder plus their items/views/members, the
 // shared child bundle for the "board" / "folder" / "space" registry entries.
 async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[] }> {
   if (!boardIds.length) return { items: [], views: [], members: [], listLinks: [] };
@@ -347,6 +352,41 @@ const REGISTRY: Record<TrashType, Entry> = {
     },
   },
 
+  // A Tool with the people it was shared with (ToolShare cascades on
+  // delete). The saved login travels in the snapshot so a restore brings it
+  // back whole; the snapshot is never sent to the client.
+  tool: {
+    capture: async (id) => {
+      const row = await prisma.tool.findUnique({ where: { id } });
+      if (!row) return null;
+      const shares = await prisma.toolShare.findMany({ where: { toolId: id } });
+      return { label: row.name || "Untitled tool", snapshot: { row: row as unknown as Row, children: { shares: shares as unknown as Row[] } } };
+    },
+    restore: async (s) => {
+      await prisma.tool.create({ data: asData(s.row) });
+      const shares = s.children?.shares ?? [];
+      if (shares.length) await prisma.toolShare.createMany({ data: asData(shares), skipDuplicates: true });
+    },
+  },
+
+  // An Asset. The assignee is a nullable reference; a person who has left by
+  // the time it is restored leaves the asset unassigned rather than failing.
+  asset: {
+    capture: async (id) => {
+      const row = await prisma.asset.findUnique({ where: { id } });
+      return row ? { label: row.name || "Untitled asset", snapshot: { row: row as unknown as Row } } : null;
+    },
+    restore: async (s) => {
+      const row = { ...s.row };
+      const assignee = typeof row.assignedToId === "string" ? row.assignedToId : null;
+      if (assignee) {
+        const exists = await prisma.user.findUnique({ where: { id: assignee }, select: { id: true } });
+        if (!exists) row.assignedToId = null;
+      }
+      await prisma.asset.create({ data: asData(row) });
+    },
+  },
+
   // A Task. Snapshot the item + its whole subtask subtree; the live delete
   // cascades the subtasks (Item.parentItem onDelete: Cascade), so restore
   // rebuilds the root then its descendants parents-first.
@@ -403,7 +443,7 @@ const REGISTRY: Record<TrashType, Entry> = {
     },
   },
 
-  // A whole Space — folders + boards + all their children. Mirrors deleteSpace
+  // A whole Space, folders + boards + all their children. Mirrors deleteSpace
   // (src/lib/space.ts) but snapshots first so it's recoverable.
   space: {
     capture: async (id, db = prisma) => {
@@ -575,6 +615,9 @@ export async function moveToTrash(
     // Meeting cascades its attendees and action items; both are in the
     // snapshot above, so the row leaves the live table and comes back whole.
     case "meeting": await prisma.meeting.delete({ where: { id } }); break;
+    // A Tool cascades its ToolShare rows; they are in the snapshot above.
+    case "tool": await prisma.tool.delete({ where: { id } }); break;
+    case "asset": await prisma.asset.delete({ where: { id } }); break;
     // "item", "board", "folder" and "space" are handled above, captured and
     // deleted in one transaction under row locks (Phase 5b, their links).
     // Drive folder: files and subfolders reference it with SetNull, so remove

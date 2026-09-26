@@ -8,7 +8,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 
 const RUN_STATUSES = ["RUNNING", "SUCCESS", "FAILED", "PARTIAL", "SKIPPED"] as const;
 type RunStatus = (typeof RUN_STATUSES)[number];
@@ -23,7 +23,7 @@ function parseDate(raw: string | null): Date | null | "invalid" {
 }
 
 export async function GET(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const sp = req.nextUrl.searchParams;

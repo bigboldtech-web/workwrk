@@ -1,6 +1,6 @@
 "use client";
 
-/* /automation/usage — this month's action metering.
+/* /automation/usage, this month's action metering.
  *
  *  GET /api/automation/usage    → used/limit/blocked, zero-filled daily
  *                                 series, top workflows/actions/users
@@ -8,13 +8,14 @@
  *
  * ClickUp "Usage" tab parity: actions-used progress card with the plan
  * limit spelled out, a recharts daily bar chart (currentColor ticks off
- * a zinc wrapper, no animation — same recipe as chart-widget.tsx), and
- * top workflows / actions / users mini-tables. No upgrade button —
+ * a zinc wrapper, no animation, same recipe as chart-widget.tsx), and
+ * top workflows / actions / users mini-tables. No upgrade button
  * billing isn't wired, so none is shown.
  */
 
 import { useEffect, useState } from "react";
-import { GaugeCircle, Loader2 } from "lucide-react";
+import { GaugeCircle } from "lucide-react";
+import { SkeletonGrid } from "@/components/ui/skeleton";
 import {
   Bar,
   BarChart,
@@ -31,7 +32,8 @@ interface UsageResp {
   daily: Array<{ date: string; count: number }>;
   topWorkflows: Array<{ workflowId: string | null; name: string; count: number }>;
   topActions: Array<{ actionKey: string; count: number }>;
-  topUsers: Array<{ userId: string | null; name: string; count: number }>;
+  /** Owner and Admin only; the API omits it for everyone else. */
+  topUsers?: Array<{ userId: string | null; name: string; count: number }>;
 }
 
 const TOOLTIP_STYLE = {
@@ -121,8 +123,8 @@ export default function AutomationUsagePage() {
         {error ? (
           <div className="p-6 text-base text-zinc-500">Couldn&apos;t load automation usage.</div>
         ) : usage === null ? (
-          <div className="flex items-center gap-2 p-6 text-base text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          <div aria-busy="true" aria-label="Loading usage">
+            <SkeletonGrid count={4} />
           </div>
         ) : (
           <div className="mx-auto max-w-5xl space-y-4">
@@ -146,7 +148,7 @@ export default function AutomationUsagePage() {
               <p className="mt-2 text-sm text-zinc-500">
                 {usage.month.blocked ? (
                   <span className="font-medium text-[#E2445C]">
-                    Limit reached — automations are paused until the counter resets on the 1st.
+                    Limit reached. Automations are paused until the counter resets on the 1st.
                   </span>
                 ) : (
                   <>
@@ -226,14 +228,16 @@ export default function AutomationUsagePage() {
                   count: a.count,
                 }))}
               />
-              <MiniTable
-                title="Top users"
-                rows={usage.topUsers.map((u) => ({
-                  key: u.userId ?? u.name,
-                  label: u.name,
-                  count: u.count,
-                }))}
-              />
+              {usage.topUsers ? (
+                <MiniTable
+                  title="Top people"
+                  rows={usage.topUsers.map((u) => ({
+                    key: u.userId ?? u.name,
+                    label: u.name,
+                    count: u.count,
+                  }))}
+                />
+              ) : null}
             </div>
           </div>
         )}

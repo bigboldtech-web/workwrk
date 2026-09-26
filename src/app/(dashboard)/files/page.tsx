@@ -99,13 +99,13 @@ let jobSeq = 0;
 export default function FilesPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { rowVersion, prefs, patchPrefs, railApps } = useOsShell();
+  const { rowVersion, prefs, patchPrefs, askAiVisible } = useOsShell();
   const { boot } = useBoot();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const prompt = usePrompt();
   const fmt = useFormat();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
 
   /* ── URL state ── */
   const folderId = params.get("folder");

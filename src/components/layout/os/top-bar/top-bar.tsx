@@ -107,9 +107,9 @@ function Crumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: boolean }) {
   const pathname = usePathname() || "";
-  const { openPalette, hubHref, toggleSidekick, sidekickOpen, railApps } = useOsShell();
+  const { openPalette, hubHref, toggleSidekick, sidekickOpen, askAiVisible, memberTeamsHub } = useOsShell();
   const tools = usePersonalTools();
-  const aiVisible = railApps.some((a) => a.key === "ai");
+  const aiVisible = askAiVisible;
   const { canBack, canForward, back, forward } = useNavHistory();
   const declared = useDeclaredBreadcrumb();
   const [createOpen, setCreateOpen] = useState(false);
@@ -127,7 +127,11 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
   // static directories), minus a first crumb that would only repeat the hub.
   // On a hub the viewer cannot open, its ancestor crumbs are text, not links:
   // every one of them is a page behind the same gate.
-  const trail = resolveCrumbTrail(pathname).map((c) => (hubVisible ? c : { label: c.label }));
+  // A plain Member holds only the Teams hub's Member branch: its crumb links
+  // to their own career home, and the ancestor crumbs stay text (/people and
+  // most Teams pages are manager-gated).
+  const ancestorsLink = hubVisible && !(hub === "teams" && memberTeamsHub);
+  const trail = resolveCrumbTrail(pathname).map((c) => (ancestorsLink ? c : { label: c.label }));
   const fallback = trail.length > 0 && trail[0].label === HUB_LABELS[hub] ? trail.slice(1) : trail;
   // Inside the takeover SettingsShell declares the whole trail, including its
   // own root crumb: the workspace door is "Settings › Workspace settings ›

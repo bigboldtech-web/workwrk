@@ -24,7 +24,7 @@ export interface ActionContext {
   recordType: string | null;
   workflowId: string;
   runId: string;
-  /** Automation chain depth — re-dispatched events carry depth + 1. */
+  /** Automation chain depth: re-dispatched events carry depth + 1. */
   depth: number;
 }
 
@@ -109,7 +109,7 @@ async function resolveUser(
 /** Load an org-owned board item (the automation's target record). */
 async function resolveItem(ctx: ActionContext, params: Record<string, unknown>) {
   const itemId = paramString(params, "itemId", ctx.payload) ?? ctx.recordId;
-  if (!itemId) throw new Error("No target task — the trigger payload has no record id");
+  if (!itemId) throw new Error("No target task: the trigger payload has no record id");
   const item = await prisma.item.findFirst({
     where: { id: itemId, organizationId: ctx.organizationId },
     select: { id: true, boardId: true, title: true, status: true, ownerId: true, priority: true, archivedAt: true },
@@ -375,7 +375,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     category: "Notify",
     description: "Message a customer or teammate on WhatsApp.",
     safeToRetry: false, // retrying an unconnected channel can never succeed
-    available: false, // catalog stub — no send channel yet
+    available: false, // catalog stub, no send channel yet
     requiresConnection: "WHATSAPP",
     params: [
       { key: "to", label: "To (phone)", type: "string", required: true },
@@ -391,7 +391,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       }
       // Honest stub: the connection row exists but the send channel
       // ships in a later wave — fail loudly rather than pretend.
-      throw new Error("WhatsApp sending is not available yet — the send channel ships in a later wave.");
+      throw new Error("WhatsApp sending is not available yet.");
     },
   },
 ];

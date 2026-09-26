@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import { plainLine, resultError, runDurationMs, runStatus, runSummary, runToolCalls, runTrigger } from "./run-view";
+
+const start = "2026-09-25T09:00:00.000Z";
+const end = "2026-09-25T09:00:04.500Z";
+
+describe("run-view", () => {
+  it("reads the trigger from either row shape", () => {
+    expect(runTrigger({ trigger: "SCHEDULED", prompt: "x" })).toBe("SCHEDULED");
+    expect(runTrigger({ trigger: "MANUAL" })).toBe("MANUAL");
+    expect(runTrigger({ toolName: "create_task", input: {} })).toBe("CHAT");
+    expect(runTrigger(null)).toBe("CHAT");
+  });
+
+  it("maps the stored statuses to three", () => {
+    expect(runStatus("SUCCEEDED")).toBe("SUCCEEDED");
+    expect(runStatus("FAILED")).toBe("FAILED");
+    expect(runStatus("PENDING")).toBe("RUNNING");
+  });
+
+  it("measures a finished run only", () => {
+    expect(runDurationMs(start, end)).toBe(4500);
+    expect(runDurationMs(start, null)).toBeNull();
+  });
+
+  it("lists an autonomous run's tool calls with their errors", () => {
+    const calls = runToolCalls({
+      input: { trigger: "SCHEDULED" },
+      output: {
+        text: "Done",
+        toolCalls: [
+          { name: "create_task", input: { title: "A" }, result: { ok: true, task: { id: "t1" } }, errorText: null, durationMs: 120 },
+          { name: "search_tasks", input: {}, result: { error: "No access" }, errorText: null, durationMs: 40 },
+          { bogus: true },
+        ],
+      },
+      error: null,
+      startedAt: start,
+      endedAt: end,
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ name: "create_task", error: null, durationMs: 120 });
+    expect(calls[1].error).toBe("No access");
+  });
+
+  it("turns a chat-originated row into one call", () => {
+    const calls = runToolCalls({ input: { toolName: "send_kudos", input: { receiverEmail: "a@b.c" } }, output: { ok: true }, error: null, startedAt: start, endedAt: end });
+    expect(calls).toEqual([{ name: "send_kudos", input: { receiverEmail: "a@b.c" }, result: { ok: true }, error: null, durationMs: 4500 }]);
+  });
+
+  it("summarises with the agent's own first line, or the tool sentence", () => {
+    expect(runSummary({ status: "SUCCEEDED", startedAt: start, endedAt: end, input: { trigger: "MANUAL" }, output: { text: "## Weekly check\n\n- **3** tasks are late" }, error: null })).toBe("Weekly check");
+    expect(runSummary({ status: "SUCCEEDED", startedAt: start, endedAt: end, input: { toolName: "create_task", input: { title: "Fix PDF" } }, output: { ok: true }, error: null })).toBe('Created task "Fix PDF"');
+    expect(runSummary({ status: "FAILED", startedAt: start, endedAt: end, input: { trigger: "MANUAL" }, output: null, error: "boom" })).toBe("The run didn't finish.");
+    expect(runSummary({ status: "PENDING", startedAt: start, endedAt: null, input: { trigger: "SCHEDULED" }, output: null, error: null })).toBe("Running now.");
+  });
+
+  it("strips markdown to one line and caps it", () => {
+    expect(plainLine("> **Hello** `there` [link](http://x)")).toBe("Hello there link");
+    expect(plainLine("x".repeat(200), 10)).toBe("xxxxxxxxx…");
+    expect(resultError({ error: "  nope " })).toBe("nope");
+    expect(resultError({ ok: true })).toBeNull();
+  });
+});

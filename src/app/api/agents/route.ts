@@ -1,27 +1,23 @@
-// GET  /api/agents — list this org's installed (and enabled) agents +
-// indicate which catalog slugs are NOT yet installed (for the "Install"
-// CTA in the /agents page).
-// POST /api/agents — create a custom agent for this org (manager+).
+// GET  /api/agents: this org's agents (every one not archived) plus the
+// catalog agents that can still be added. Every Member reads (app key ai).
+// POST /api/agents: create a custom agent (Owner and Admin, the Apps
+// settings gate, access section 9; spec-ai-automation 1.4).
+//
+// `available` lists only agents whose product is in the PPMS scope: the CRM,
+// ITSM, procurement, books, helpdesk and campaigns agents stay in the
+// catalog (an org that already added one keeps it) but are not offered.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { AGENT_CATALOG } from "@/lib/agents/catalog";
+import { PRODUCT_TOOL_NAMES } from "@/lib/agents/tools";
+import { isOwnerOrAdmin, requireApp, requireManageApps } from "@/lib/app-gate";
 import { z } from "zod";
 
-const ADMIN_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
-  "MANAGER", "TEAM_LEAD", "HR",
-]);
-
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const userId = (session.user as { id?: string }).id;
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
-  if (!user?.organizationId) return NextResponse.json({ error: "no organization" }, { status: 400 });
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
+  const user = { organizationId: gate.viewer.organizationId };
 
   const installed = await prisma.agent.findMany({
     where: { organizationId: user.organizationId, status: { not: "ARCHIVED" } },
@@ -44,8 +40,25 @@ export async function GET() {
     orderBy: { createdAt: "asc" },
   });
 
+  // The Last run column links to the run itself (/agents?agent=&run=): the
+  // newest autonomous run per agent, the same run lastRunAt records, and one
+  // every Member may open (run-query.ts).
+  const lastRuns = installed.length
+    ? await prisma.agentRun.findMany({
+        where: {
+          agentId: { in: installed.map((a) => a.id) },
+          OR: [{ input: { path: ["trigger"], equals: "SCHEDULED" } }, { input: { path: ["trigger"], equals: "MANUAL" } }],
+        },
+        orderBy: [{ agentId: "asc" }, { startedAt: "desc" }],
+        distinct: ["agentId"],
+        select: { id: true, agentId: true, status: true },
+      })
+    : [];
+  const lastRunBy = new Map(lastRuns.map((r) => [r.agentId, r]));
+
   const installedSlugs = new Set(installed.map((a) => a.slug));
-  const available = AGENT_CATALOG.filter((a) => !installedSlugs.has(a.slug)).map((a) => ({
+  const inScope = new Set(Object.keys(PRODUCT_TOOL_NAMES));
+  const available = AGENT_CATALOG.filter((a) => !installedSlugs.has(a.slug) && inScope.has(a.productSlug)).map((a) => ({
     slug: a.slug,
     name: a.name,
     persona: a.persona,
@@ -64,10 +77,12 @@ export async function GET() {
       hue: catalog?.hue ?? "violet",
       examplePrompts: catalog?.examplePrompts ?? [],
       isFlagship: catalog?.isFlagship ?? false,
+      lastRunId: lastRunBy.get(a.id)?.id ?? null,
+      lastRunStatus: lastRunBy.get(a.id)?.status ?? null,
     };
   });
 
-  return NextResponse.json({ installed: hydrated, available });
+  return NextResponse.json({ installed: hydrated, available, canManage: isOwnerOrAdmin(gate.viewer) });
 }
 
 const createSchema = z.object({
@@ -83,16 +98,10 @@ function slugify(name: string): string {
 }
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const userId = (session.user as { id?: string }).id;
-  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!ADMIN_LEVELS.has(accessLevel)) {
-    return NextResponse.json({ error: "Manager-level access required to create agents." }, { status: 403 });
-  }
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
-  if (!user?.organizationId) return NextResponse.json({ error: "no organization" }, { status: 400 });
+  const gate = await requireManageApps();
+  if ("error" in gate) return gate.error;
+  const userId = gate.viewer.userId;
+  const user = { organizationId: gate.viewer.organizationId };
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

@@ -1003,8 +1003,8 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const { toast, dismiss: dismissToast } = useOsToast();
   const confirm = useConfirm();
   const promptDialog = usePrompt();
-  const { prefs, patchPrefs, railApps, bumpRowVersion } = useOsShell();
-  const aiEntitled = railApps.some((a) => a.key === "ai");
+  const { prefs, patchPrefs, askAiVisible, bumpRowVersion } = useOsShell();
+  const aiEntitled = askAiVisible;
   const [tableId, setTableId] = useState<string | null>(null);
   // The Share dialog, About, the in-place CSV import, full screen.
   const [shareMode, setShareMode] = useState<"share" | "who" | null>(null);

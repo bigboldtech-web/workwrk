@@ -211,7 +211,7 @@ const devSprintStarter: CatalogTemplate = {
 
     await prisma.roadmapItem.createMany({
       data: [
-        { organizationId: ctx.orgId, title: "AI-assisted onboarding (Maya handoff to Sidekick)", description: "Maya completes day-1 plan + escalates to Sidekick for ongoing questions.", theme: "AI", priority: "P1", status: "COMMITTED", quarter: "2026-Q2", impactScore: 8, effortPoints: 21, ownerId: ctx.userId, publicVisible: false },
+        { organizationId: ctx.orgId, title: "AI-assisted onboarding (Maya hands off to Ask AI)", description: "Maya completes the day-1 plan and hands ongoing questions to Ask AI.", theme: "AI", priority: "P1", status: "COMMITTED", quarter: "2026-Q2", impactScore: 8, effortPoints: 21, ownerId: ctx.userId, publicVisible: false },
         { organizationId: ctx.orgId, title: "Mobile push for approvals", description: "Native push when an approval lands in your queue.", theme: "Mobile", priority: "P2", status: "EXPLORING", quarter: "2026-Q3", impactScore: 6, effortPoints: 13, ownerId: ctx.userId, publicVisible: true },
         { organizationId: ctx.orgId, title: "Bulk CSV import for People + CRM", description: "First-class import path with field mapping + dry-run preview.", theme: "Performance", priority: "P2", status: "IN_PROGRESS", quarter: "2026-Q2", impactScore: 7, effortPoints: 8, ownerId: ctx.userId, publicVisible: false },
       ],
@@ -313,7 +313,7 @@ const personalTodoStarter: CatalogTemplate = {
     const inAWeek = new Date(today.getTime() + 7 * 86400000);
 
     const seed: Array<{ title: string; description: string; priority: string; dueAt: Date }> = [
-      { title: "Review pull request #421", description: "Review the new Sidekick agent persistence logic", priority: "HIGH", dueAt: today },
+      { title: "Review pull request #421", description: "Review the new Ask AI agent persistence logic", priority: "HIGH", dueAt: today },
       { title: "1:1 prep, agenda for Friday", description: "Pull last week's action items and draft this week's topics", priority: "NORMAL", dueAt: tomorrow },
       { title: "Write retrospective notes from last sprint", description: "What went well · What didn't · What we'll try next sprint", priority: "NORMAL", dueAt: tomorrow },
       { title: "Update OKR mid-quarter check-in", description: "Confidence scores and risks for each KR", priority: "NORMAL", dueAt: inAWeek },

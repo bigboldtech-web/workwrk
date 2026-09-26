@@ -7,7 +7,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 
 const DEFAULT_WINDOW_MS = 30 * 86_400_000;
 
@@ -18,7 +18,7 @@ function parseDate(raw: string | null): Date | null | "invalid" {
 }
 
 export async function GET(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const sp = req.nextUrl.searchParams;

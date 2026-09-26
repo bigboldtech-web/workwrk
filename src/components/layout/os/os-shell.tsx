@@ -216,6 +216,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
   const settingsMode = isSettingsRoute(pathname);
   const overlay = useOverlaySidebar();
+  const { askAiVisible } = useOsShell();
 
   return (
     <div className="workwrk-os grid h-screen overflow-hidden bg-app text-ink" style={settingsMode ? SETTINGS_GRID_STYLE : GRID_STYLE}>
@@ -255,9 +256,15 @@ function Frame({ children }: { children: React.ReactNode }) {
           <main id={MAIN_ID} tabIndex={-1} className="col-start-3 row-start-3 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-app outline-none">
             {children}
           </main>
-          <div className="col-start-4 row-start-3 flex min-h-0">
-            <OsSidekickPanel />
-          </div>
+          {/* The Ask AI panel. Below 1024 it does not render at all (there is
+              no room for 360 beside the content and it never overlays; the
+              entry points navigate to /sidekick instead), and it never
+              renders for a viewer who has no Ask AI (spec-ai-automation 1.6). */}
+          {askAiVisible ? (
+            <div className="col-start-4 row-start-3 flex min-h-0 max-lg:hidden">
+              <OsSidekickPanel />
+            </div>
+          ) : null}
         </>
       )}
       <NavigationAnnouncer />

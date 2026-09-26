@@ -456,10 +456,10 @@ export default function MeetingDetailPage() {
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   // The meeting call runs in the shell-level CallDock so it survives leaving
   // this page. callOpen just derives whether THIS meeting is the active call.
-  const { activeCall, startCall: startGlobalCall, setCallMinimized, railApps } = useOsShell();
+  const { activeCall, startCall: startGlobalCall, setCallMinimized, askAiVisible } = useOsShell();
   const callOpen = activeCall?.meetingId === id;
   /** Is the AI module entitled for this org? The rail is the one read. */
-  const aiEntitled = railApps.some((a) => a.key === "ai");
+  const aiEntitled = askAiVisible;
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserLite[]>([]);
   // The clock, sampled in an effect and refreshed once a minute. Nothing on

@@ -1,19 +1,25 @@
 "use client";
 
-// Generated Build app — Phase D4 render. Loads the App + its rows
-// from /api/build/apps/[slug], renders a table with the generated
-// fields as columns, and lets the user add/edit/delete rows inline.
+// A Build app (spec-tools-misc 2.4). Loads the App and its rows from
+// /api/build/apps/[slug], renders them through BoardView (table, board,
+// calendar, gallery), and lets an Owner or Admin add and delete rows. An
+// archived app opens read only with Restore; a missing one is the in-shell
+// 404 with the way back, never a silent redirect.
 
-import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  Hammer,
   Plus,
   Trash2,
   Wand2,
   X,
   Zap,
 } from "lucide-react";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { BackButton } from "@/components/ui/back-button";
@@ -40,6 +46,7 @@ interface AppRecord {
   description: string | null;
   iconKey: string | null;
   hue: string | null;
+  status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
   schema: { fields?: AppField[] };
   ui: { rows?: AppRow[] };
 }
@@ -52,6 +59,13 @@ export default function BuildAppPage() {
   const [loading, setLoading] = useState(true);
   const [showNewRow, setShowNewRow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "missing" is the in-shell 404 (spec-tools-misc 2.4: "That app does not
+  // exist, or it was deleted."), "failed" a load error with Retry. Before,
+  // a 404 silently pushed to /build and any other failure left a blank page.
+  const [loadState, setLoadState] = useState<"ok" | "missing" | "failed">("ok");
+  // Archive and Restore: Owner and Admin, or the app's creator (the API's
+  // canManage). A Member using an app someone else built fills its rows only.
+  const [canManage, setCanManage] = useState(false);
 
   const load = useCallback(async () => {
     if (!params?.slug) return;
@@ -59,15 +73,19 @@ export default function BuildAppPage() {
     try {
       const res = await fetch(`/api/build/apps/${params.slug}`);
       if (!res.ok) {
-        if (res.status === 404) router.push("/build");
+        setLoadState(res.status === 404 ? "missing" : "failed");
         return;
       }
       const data = await res.json();
+      setLoadState("ok");
       setApp(data.app);
+      setCanManage(data.canManage === true);
+    } catch {
+      setLoadState("failed");
     } finally {
       setLoading(false);
     }
-  }, [params?.slug, router]);
+  }, [params?.slug]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -111,15 +129,31 @@ export default function BuildAppPage() {
     if (res.ok) router.push("/build");
   }
 
-  if (loading) {
+  async function restoreApp() {
+    if (!app) return;
+    const res = await fetch(`/api/build/apps/${app.slug}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "PUBLISHED" }) });
+    if (res.ok) await load();
+    else setError("Couldn't restore the app");
+  }
+
+  if (loading && !app) {
     return (
-      <div className="p-6 text-center text-xs text-zinc-500">
-        <Dots variant="pending" />
-        Loading app…
+      <div className="p-6">
+        <SkeletonRows rows={6} />
       </div>
     );
   }
-  if (!app) return null;
+  if (loadState === "missing") {
+    return (
+      <OsEmptyView title="That app does not exist, or it was deleted.">
+        <BackButton fallbackHref="/build" label="Build apps" />
+      </OsEmptyView>
+    );
+  }
+  if (loadState === "failed" || !app) {
+    return <OsEmptyView variant="error" title="Couldn't load this app" action={{ label: "Try again", onClick: () => void load() }} />;
+  }
+  const archived = app.status === "ARCHIVED";
 
   const fields = app.schema.fields ?? [];
   const rows = app.ui.rows ?? [];
@@ -130,18 +164,19 @@ export default function BuildAppPage() {
 
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-start gap-4">
-          <div className={`w-14 h-14 rounded-2xl bg-${app.hue ?? "blue"}-100 text-${app.hue ?? "blue"}-600 flex items-center justify-center font-semibold text-lg flex-shrink-0`}>
-            {app.name.charAt(0).toUpperCase()}
-          </div>
+          <EntityTile size="lg" icon={Hammer} {...NEUTRAL_TILE} />
           <div>
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs font-medium mb-1">
-              <Wand2 size={10} /> Built with Vibe
-            </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
             {app.description && <p className="text-xs text-zinc-500">{app.description}</p>}
             <p className="text-xs text-zinc-500 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
           </div>
         </div>
+        {archived ? (
+          <div className="flex items-center gap-3 text-sm text-ink-2">
+            This app is archived, so its rows are read only.
+            {canManage ? <button type="button" onClick={() => void restoreApp()} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover">Restore</button> : null}
+          </div>
+        ) : (
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -150,7 +185,7 @@ export default function BuildAppPage() {
           >
             <Plus size={14} /> New row
           </button>
-          <button
+          {canManage ? <button
             type="button"
             onClick={deleteApp}
             className="p-2 rounded-lg text-zinc-500 hover:text-[#E2445C] hover:bg-red-50 dark:hover:bg-red-950/40"
@@ -158,8 +193,9 @@ export default function BuildAppPage() {
             title="Archive app"
           >
             <Trash2 size={14} />
-          </button>
+          </button> : null}
         </div>
+        )}
       </div>
 
       {error && (
@@ -168,19 +204,19 @@ export default function BuildAppPage() {
         </div>
       )}
 
-      {/* Multi-view rendering — Table / Kanban / Calendar / Gallery */}
+      {/* Multi-view rendering, Table / Kanban / Calendar / Gallery */}
       {rows.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white text-center py-16">
           <Wand2 size={32} className="mx-auto mb-2 text-zinc-500" />
           <p className="font-medium text-xs mb-1">No rows yet</p>
-          <p className="text-xs text-zinc-500 mb-4">Add the first row to populate your app.</p>
-          <button
+          <p className="text-xs text-zinc-500 mb-4">{archived ? "This app is archived." : "Add the first row to populate your app."}</p>
+          {archived ? null : <button
             type="button"
             onClick={() => setShowNewRow(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0073EA] hover:bg-[#0060B9] text-white text-xs font-medium"
           >
             <Plus size={11} /> Add first row
-          </button>
+          </button>}
         </div>
       ) : (
         <BoardView
@@ -195,6 +231,7 @@ export default function BuildAppPage() {
           getValue={(r, key) => (r as Record<string, unknown>)[key]}
           selectable
           onChangeField={async (id, fieldKey, value) => {
+            if (archived) { setError("Restore the app to change its rows."); return; }
             const idx = Number(id);
             const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
               method: "PATCH",
@@ -202,29 +239,42 @@ export default function BuildAppPage() {
               body: JSON.stringify({ index: idx, row: { [fieldKey]: value } }),
             });
             if (res.ok) await load();
+            else setError("Couldn't save that change. Try again.");
           }}
           onBulkChange={async (ids, fieldKey, value) => {
-            // Patch each row by index. Indexes are stable for a single
-            // load (we re-render after each batch).
-            await Promise.all(ids.map((id) => fetch(`/api/build/apps/${app.slug}/rows`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index: Number(id), row: { [fieldKey]: value } }),
-            })));
+            if (archived) { setError("Restore the app to change its rows."); return; }
+            // Patch each row by index, one at a time. Indexes are stable for
+            // a single load (we re-render after the batch). The route locks
+            // the app row per write, so nothing is lost either way; a write
+            // that fails is counted and said, never swallowed.
+            let failed = 0;
+            for (const id of ids) {
+              const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ index: Number(id), row: { [fieldKey]: value } }),
+              }).catch(() => null);
+              if (!res?.ok) failed++;
+            }
+            if (failed > 0) setError(`Couldn't save ${failed} of ${ids.length} rows. Try again.`);
             await load();
           }}
           onBulkDelete={async (ids) => {
+            if (archived) { setError("Restore the app to change its rows."); return; }
             // Delete in DESC order so prior deletes don't shift later
             // indexes. The rows API deletes by index against the live
             // app.ui.rows array.
             const desc = [...ids].map(Number).sort((a, b) => b - a);
+            let failed = 0;
             for (const idx of desc) {
-              await fetch(`/api/build/apps/${app.slug}/rows`, {
+              const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
                 method: "DELETE",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ index: idx }),
-              });
+              }).catch(() => null);
+              if (!res?.ok) failed++;
             }
+            if (failed > 0) setError(`Couldn't delete ${failed} of ${desc.length} rows. Try again.`);
             await load();
           }}
         />
@@ -241,37 +291,6 @@ export default function BuildAppPage() {
   );
 }
 
-function CellValue({ field, value }: { field: AppField; value: unknown }) {
-  if (value == null) return <span className="text-zinc-500">—</span>;
-  switch (field.fieldType) {
-    case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-zinc-500"}>{value ? "✓" : "—"}</span>;
-    case "DATE":
-      return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
-    case "MULTI_SELECT": {
-      const arr = Array.isArray(value) ? (value as string[]) : [];
-      return (
-        <div className="flex flex-wrap gap-1">
-          {arr.map((v) => (
-            <span key={v} className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
-          ))}
-        </div>
-      );
-    }
-    case "SELECT": {
-      const label = field.options?.choices?.find((c) => c.value === value)?.label ?? String(value);
-      return <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
-    }
-    case "URL":
-      return <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;
-    case "EMAIL":
-      return <a href={`mailto:${String(value)}`} className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;
-    case "TEXTAREA":
-      return <span className="line-clamp-2 text-xs text-zinc-500">{String(value)}</span>;
-    default:
-      return <span>{String(value)}</span>;
-  }
-}
 
 function NewRowModal({
   fields,
@@ -331,7 +350,7 @@ function NewRowModal({
               </label>
             ) : f.fieldType === "SELECT" ? (
               <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs">
-                <option value="">— None —</option>
+                <option value="">None</option>
                 {(f.options?.choices ?? []).map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
               </select>
             ) : f.fieldType === "MULTI_SELECT" ? (

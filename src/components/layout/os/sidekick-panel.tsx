@@ -1,551 +1,133 @@
 "use client";
 
-/* Ask AI, the right-dock AI panel.
+/* The Ask AI panel (spec-ai-automation section 2, "Ask AI panel").
  *
- * naming-canon section 2.3 retires "Brain" as a product name, "Board" as an
- * object and "Item" in favour of "Task". This panel opens straight off the
- * Work page headers, so it is the first AI surface a Work user meets and it
- * speaks the same vocabulary as the pages behind it.
+ * Ask the assistant without leaving the page you are on. The container is
+ * the shell's (spec-shell 2.1): 360 wide at the inline end, it PUSHES the
+ * content column and never overlays it, never on a scrim. Below 1024 it does
+ * not render at all (os-shell.tsx) and every entry point navigates to
+ * /sidekick instead (shell-context openSidekick).
  *
- * Distinct from the left-side agents shell: this panel is the system-
- * wide knowledge oracle. It answers questions about the workspace
- * (lists, tasks, KRAs, KPIs, SOPs, weekly reviews, team alignment)
- * via /api/sidekick/chat/stream, which runs Claude with tools wired to
- * the org's read-only data through resolveAccess.
+ * ONE SESSION. The body is AskAiThread, the same component the /sidekick
+ * page renders, over the same useAiSession() store, so this panel and the
+ * page are one thread: "Open full page" lands on ?session=<id> with the
+ * answer still arriving, closing the panel does not end the chat, and the
+ * shell closes the panel on /sidekick so two threads are never on screen.
  *
- * The panel hosts two views — chat + history — toggled from the top
- * bar. Sessions are persisted server-side (ChatSession + ChatMessage),
- * so reopening a chat from history re-renders the saved thread.
+ * Its own 48px header is its whole chrome: the title and three ghost icons,
+ * New chat, Open full page and Close. The model pill, the "More" menu, the
+ * History toggle (history is the AI hub sidebar's CHATS section), Attach,
+ * "All sources" and the Suggested / Featured / Search lists that advertised
+ * things the backend cannot do are gone.
  *
- * Page context: usePathname() drives the productContext / boardContext
- * we pass on session creation, so the model already knows "the user is
- * on /spaces/marketing" without having to ask.
+ * A layer in the shell's LayerStack: Esc closes it (and Cmd+J, from anywhere
+ * including its own composer). Focus moves into the composer on open, Tab
+ * stays inside the panel while it is open, and focus goes back to whatever
+ * opened it on close. Closed, it is `inert` and aria-hidden.
+ *
+ * Page context: a chat started here carries the first two segments of the
+ * page under the panel (productContext / boardContext), so the model knows
+ * "the user is on /spaces/marketing" without asking.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import {
-  Edit3, Clock, ChevronDown, MoreHorizontal,
-  ChevronsRight, ArrowUp, Plus, Globe, Search, Lightbulb,
-  Wand2, ListChecks, Image as ImageIcon, CalendarDays, MessageCircle, HelpCircle,
-  FileSearch, Globe2, Wrench,
-} from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Maximize2, Plus, X } from "lucide-react";
+import { AskAiThread } from "@/components/ai/ask-ai-thread";
+import { useAiSession } from "@/lib/ai/session-store";
+import { contextFromPath } from "@/lib/ai/thread";
 import { useLayer, useOsShell } from "./shell-context";
 import { SHELL_LABELS } from "@/lib/nav/labels";
-import { OsMarkdown } from "./markdown";
-import { BloomMark } from "./bloom-mark";
-import { SkeletonLines } from "@/components/ui/skeleton";
-import { Dots } from "@/components/ui/dots";
 
-type View = "chat" | "history";
-
-type SessionRow = {
-  id: string;
-  title: string | null;
-  pinned: boolean;
-  updatedAt: string;
-  createdAt: string;
-};
-
-type ToolEvent = { name: string; isError: boolean };
-
-type Msg = {
-  id: string;
-  role: "USER" | "ASSISTANT";
-  content: string;
-  toolEvents?: ToolEvent[];
-  streaming?: boolean;
-};
-
-/** Map the current URL into the productContext / boardContext slugs the
- *  /api/sidekick chat API understands. Unknown segments pass through;
- *  buildContextPrefix on the server bails gracefully when the slug
- *  isn't in the catalog, so we don't have to whitelist here. */
-function deriveContext(pathname: string): { productContext: string | null; boardContext: string | null } {
-  if (!pathname || pathname === "/") return { productContext: null, boardContext: null };
-  const parts = pathname.replace(/^\/+/, "").split("/");
-  return { productContext: parts[0] ?? null, boardContext: parts[1] ?? null };
-}
-
-function groupByDate(rows: SessionRow[]): { label: string; rows: SessionRow[] }[] {
-  const today: SessionRow[] = [];
-  const yesterday: SessionRow[] = [];
-  const older: SessionRow[] = [];
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfYesterday = startOfToday - 86_400_000;
-  for (const r of rows) {
-    const t = new Date(r.updatedAt).getTime();
-    if (t >= startOfToday) today.push(r);
-    else if (t >= startOfYesterday) yesterday.push(r);
-    else older.push(r);
-  }
-  const out: { label: string; rows: SessionRow[] }[] = [];
-  if (today.length) out.push({ label: "Today", rows: today });
-  if (yesterday.length) out.push({ label: "Yesterday", rows: yesterday });
-  if (older.length) out.push({ label: "Older", rows: older });
-  return out;
-}
-
-const SUGGESTED = [
-  { icon: ListChecks,  label: "What's on my plate this week?" },
-  { icon: Lightbulb,   label: "Summarize my team's progress" },
-  { icon: HelpCircle,  label: "Who is at risk on KPI compliance?" },
-];
-
-const FEATURED: Array<{ icon: typeof Wand2; label: string; tag?: string }> = [
-  { icon: Wand2,         label: "Create a list",         tag: "New" },
-  { icon: ImageIcon,     label: "Generate an image",     tag: "New" },
-  { icon: CalendarDays,  label: "Today's calendar",      tag: "New" },
-  { icon: MessageCircle, label: "Ask about my notes",    tag: "New" },
-  { icon: HelpCircle,    label: "Help using WorkwrK" },
-];
-
-const SEARCH: Array<{ icon: typeof Search; label: string; tag?: string }> = [
-  { icon: FileSearch, label: "Deep search",       tag: "New" },
-  { icon: Search,     label: "Search WorkwrK" },
-  { icon: Globe2,     label: "Search the web" },
-];
+const ICON_BTN = "inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink";
 
 export function OsSidekickPanel() {
   const { sidekickOpen, closeSidekick, consumeSidekickInitialPrompt } = useOsShell();
   const pathname = usePathname() ?? "/";
-  // The panel is a layer (spec-shell 2.1: "Ask AI panel (360, ⌘J, ✕/Esc)"),
-  // so Esc closes it through the shell's one listener.
+  const router = useRouter();
+  const ai = useAiSession();
+  const asideRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   useLayer(sidekickOpen, { id: "ask-ai-panel", kind: "panel", close: closeSidekick });
 
-  const [view, setView] = useState<View>("chat");
-  const [sessions, setSessions] = useState<SessionRow[] | null>(null);
-  const [historySearch, setHistorySearch] = useState("");
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
-  const sessionsLoadedRef = useRef(false);
+  const context = useMemo(() => contextFromPath(pathname), [pathname]);
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sidekick/sessions", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data?.sessions)) setSessions(data.sessions);
-    } catch {}
-  }, []);
-
+  // Open: remember who opened it, take a prompt handed over by the caller
+  // (the palette's "Ask AI about", a page's Ask AI with a prompt) into the
+  // composer, and focus it. Close: focus goes back.
   useEffect(() => {
-    if (sidekickOpen && !sessionsLoadedRef.current) {
-      sessionsLoadedRef.current = true;
-      void loadSessions();
+    if (sidekickOpen) {
+      const active = document.activeElement;
+      returnFocusRef.current = active instanceof HTMLElement && !asideRef.current?.contains(active) ? active : null;
+      const t = window.setTimeout(() => composerRef.current?.focus(), 60);
+      return () => window.clearTimeout(t);
     }
-  }, [sidekickOpen, loadSessions]);
-
-  // Consume an initial prompt handed off from the palette's Ask AI pill
-  // (or any other caller of openSidekick(prompt)).
+    const back = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (back && document.contains(back)) back.focus();
+    return undefined;
+  }, [sidekickOpen]);
+  // A prompt handed over while the panel is open (or as it opens) lands in
+  // the composer; consumeSidekickInitialPrompt changes identity with it.
+  const { setDraft } = ai;
   useEffect(() => {
     if (!sidekickOpen) return;
     const seed = consumeSidekickInitialPrompt();
     if (seed) {
-      setInput(seed);
-      setView("chat");
-      requestAnimationFrame(() => inputRef.current?.focus());
+      setDraft(seed);
+      requestAnimationFrame(() => composerRef.current?.focus());
     }
-  }, [sidekickOpen, consumeSidekickInitialPrompt]);
+  }, [sidekickOpen, consumeSidekickInitialPrompt, setDraft]);
 
-  useEffect(() => {
-    if (!threadRef.current) return;
-    threadRef.current.scrollTop = threadRef.current.scrollHeight;
-  }, [messages]);
+  // Tab and Shift+Tab stay inside the open panel.
+  function trapTab(e: React.KeyboardEvent<HTMLElement>) {
+    if (e.key !== "Tab" || !asideRef.current) return;
+    const focusables = Array.from(
+      asideRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+    ).filter((el) => el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
 
-  const newChat = useCallback(() => {
-    setCurrentSessionId(null);
-    setMessages([]);
-    setInput("");
-    setError(null);
-    setView("chat");
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
+  function newChat() {
+    ai.reset();
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
 
-  const openSession = useCallback(async (id: string) => {
-    setCurrentSessionId(id);
-    setView("chat");
-    setMessages([]);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sidekick/sessions/${id}`, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data?.messages)) {
-        const msgs: Msg[] = data.messages
-          .filter((m: { role: string }) => m.role === "USER" || m.role === "ASSISTANT")
-          .map((m: { id: string; role: "USER" | "ASSISTANT"; content: string; toolCalls?: { name: string }[] }) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            toolEvents: m.toolCalls?.map((t) => ({ name: t.name, isError: false })),
-          }));
-        setMessages(msgs);
-      }
-    } catch {}
-  }, []);
-
-  const send = useCallback(async () => {
-    const message = input.trim();
-    if (!message || busy) return;
-    setError(null);
-    setBusy(true);
-    setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
-
-    let sid = currentSessionId;
-    if (!sid) {
-      const { productContext, boardContext } = deriveContext(pathname);
-      try {
-        const res = await fetch("/api/sidekick/sessions", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ productContext, boardContext }),
-        });
-        if (!res.ok) throw new Error("Could not start a new chat session.");
-        const data = await res.json();
-        sid = data.session.id as string;
-        setCurrentSessionId(sid);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to start session");
-        setBusy(false);
-        return;
-      }
-    }
-
-    const tempUserId = `u-${Date.now()}`;
-    const tempAiId = `a-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      { id: tempUserId, role: "USER", content: message },
-      { id: tempAiId, role: "ASSISTANT", content: "", streaming: true, toolEvents: [] },
-    ]);
-
-    try {
-      const res = await fetch("/api/sidekick/chat/stream", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, message }),
-      });
-      if (!res.ok || !res.body) throw new Error(`Stream failed (${res.status})`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          try {
-            const evt = JSON.parse(payload);
-            if (evt.type === "text_delta") {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === tempAiId ? { ...m, content: m.content + evt.text } : m)),
-              );
-            } else if (evt.type === "tool_use") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === tempAiId
-                    ? { ...m, toolEvents: [...(m.toolEvents ?? []), { name: evt.name, isError: false }] }
-                    : m,
-                ),
-              );
-            } else if (evt.type === "tool_result") {
-              setMessages((prev) =>
-                prev.map((m) => {
-                  if (m.id !== tempAiId) return m;
-                  const events = [...(m.toolEvents ?? [])];
-                  // Mark the most-recent pending chip for this tool as resolved.
-                  for (let i = events.length - 1; i >= 0; i--) {
-                    if (events[i].name === evt.name) {
-                      events[i] = { name: evt.name, isError: !!evt.isError };
-                      break;
-                    }
-                  }
-                  return { ...m, toolEvents: events };
-                }),
-              );
-            } else if (evt.type === "error") {
-              setError(evt.message ?? "An error occurred");
-            } else if (evt.type === "done") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === tempAiId
-                    ? {
-                        ...m,
-                        id: evt.message?.id ?? m.id,
-                        content: evt.message?.content ?? m.content,
-                        streaming: false,
-                      }
-                    : m,
-                ),
-              );
-            }
-          } catch {
-            /* malformed SSE line — skip */
-          }
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Stream failed");
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempAiId ? { ...m, streaming: false } : m)),
-      );
-    } finally {
-      setBusy(false);
-      void loadSessions();
-    }
-  }, [busy, currentSessionId, input, pathname, loadSessions]);
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
-    }
-  };
-
-  const filteredSessions = useMemo(() => {
-    if (!sessions) return null;
-    const q = historySearch.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) => (s.title ?? "").toLowerCase().includes(q));
-  }, [sessions, historySearch]);
-
-  const grouped = useMemo(
-    () => (filteredSessions ? groupByDate(filteredSessions) : null),
-    [filteredSessions],
-  );
+  function openFullPage() {
+    const href = ai.sessionId ? `/sidekick?session=${ai.sessionId}` : "/sidekick";
+    closeSidekick();
+    router.push(href);
+  }
 
   return (
     <aside
-      className={`os-sk ${sidekickOpen ? "is-open" : ""}`}
-      // Closed, the panel is width 0 but still mounted: `inert` takes every
-      // control inside out of the tab order and the accessibility tree, so
-      // a keyboard user never lands on an invisible button (spec-shell 1.8,
-      // design-system 4.7; aria-hidden alone left them focusable).
+      ref={asideRef}
+      onKeyDown={sidekickOpen ? trapTab : undefined}
+      className={`flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-app transition-[width] duration-200 ease-out motion-reduce:transition-none ${sidekickOpen ? "w-[360px] border-s border-line" : "w-0"}`}
       inert={!sidekickOpen}
       aria-hidden={!sidekickOpen}
       aria-label={SHELL_LABELS.askAi}
     >
-      <div className="os-sk__inner">
-        <div className="os-sk__topbar">
-          <button type="button" className="os-sk__iconbtn" onClick={newChat} title="New chat" aria-label="New chat">
-            <Edit3 />
+      <div className="flex h-full w-[360px] min-h-0 flex-col">
+        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
+          <h2 className="min-w-0 flex-1 truncate ps-1 text-row font-medium text-ink">{SHELL_LABELS.askAi}</h2>
+          <button type="button" className={ICON_BTN} onClick={newChat} title="New chat" aria-label="New chat">
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
           </button>
-          <button
-            type="button"
-            className={`os-sk__iconbtn ${view === "history" ? "is-on" : ""}`}
-            onClick={() => setView((v) => (v === "history" ? "chat" : "history"))}
-            title="Chat history"
-            aria-label="Chat history"
-          >
-            <Clock />
+          <button type="button" className={ICON_BTN} onClick={openFullPage} title="Open full page" aria-label="Open full page">
+            <Maximize2 className="h-4 w-4" strokeWidth={1.5} />
           </button>
-          <div className="os-sk__topbar-spacer" />
-          {view === "chat" ? (
-            <button type="button" className="os-sk__model-pill" title="Change model">
-              <BloomMark size={14} />
-              <span>Max</span>
-              <ChevronDown />
-            </button>
-          ) : (
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--os-ink)" }}>All chats</div>
-          )}
-          <div className="os-sk__topbar-spacer" />
-          <button type="button" className="os-sk__iconbtn" title="More" aria-label="More">
-            <MoreHorizontal />
-          </button>
-          <button
-            type="button"
-            className="os-sk__iconbtn"
-            onClick={closeSidekick}
-            title="Close (Esc)"
-            aria-label={`Close ${SHELL_LABELS.askAi}`}
-          >
-            <ChevronsRight className="rtl:rotate-180" />
+          <button type="button" className={ICON_BTN} onClick={closeSidekick} title="Close · Esc" aria-label={`Close ${SHELL_LABELS.askAi}`}>
+            <X className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
-
-        {view === "history" ? (
-          <>
-            <div className="os-sk__hist-search">
-              <Search />
-              <input
-                type="text"
-                placeholder="Search conversations"
-                value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value)}
-              />
-            </div>
-            <div className="os-sk__hist-list">
-              {grouped === null ? (
-                <SkeletonLines lines={3} className="px-3" />
-              ) : grouped.length === 0 ? (
-                <div className="os-sk__hist-empty">
-                  {historySearch ? "No chats match that search." : "No chats yet. Start one below."}
-                </div>
-              ) : (
-                grouped.map((g) => (
-                  <div key={g.label}>
-                    <div className="os-sk__hist-group-title">{g.label}</div>
-                    {g.rows.map((row) => (
-                      <button
-                        key={row.id}
-                        type="button"
-                        className="os-sk__hist-item"
-                        onClick={() => openSession(row.id)}
-                      >
-                        <MessageCircle style={{ width: 13, height: 13, color: "var(--os-ink-3)", flexShrink: 0 }} />
-                        <span className="os-sk__hist-item-title">{row.title ?? "Untitled chat"}</span>
-                      </button>
-                    ))}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : messages.length === 0 ? (
-          <div style={{ flex: 1, overflowY: "auto" }}>
-            <div className="os-sk__greet">
-              <div className="os-sk__greet-row">
-                <span className="os-sk__greet-avatar">
-                  <BloomMark size={26} animated />
-                </span>
-                <div>
-                  <div className="os-sk__greet-eyebrow">Ask AI</div>
-                  <div className="os-sk__greet-title">What can I help with?</div>
-                </div>
-              </div>
-              <div className="os-sk__greet-body">
-                I know your lists, tasks, KRAs, KPIs, SOPs, weekly reviews, and team alignment. Ask me anything about what&apos;s happening in your workspace.
-              </div>
-            </div>
-            <div className="os-sk__sec">
-              <div className="os-sk__sec-title">Suggested</div>
-              {SUGGESTED.map((s) => (
-                <button key={s.label} type="button" className="os-sk__sec-row" onClick={() => setInput(s.label)}>
-                  <span className="os-sk__sec-icon"><s.icon /></span>
-                  <span className="os-sk__sec-row-label">{s.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="os-sk__sec">
-              <div className="os-sk__sec-title">Featured</div>
-              {FEATURED.map((s) => (
-                <button key={s.label} type="button" className="os-sk__sec-row" onClick={() => setInput(s.label)}>
-                  <span className="os-sk__sec-icon"><s.icon /></span>
-                  <span className="os-sk__sec-row-label">{s.label}</span>
-                  {s.tag ? (
-                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 600 }}>
-                      {s.tag}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-            <div className="os-sk__sec">
-              <div className="os-sk__sec-title">Search</div>
-              {SEARCH.map((s) => (
-                <button key={s.label} type="button" className="os-sk__sec-row" onClick={() => setInput(s.label)}>
-                  <span className="os-sk__sec-icon"><s.icon /></span>
-                  <span className="os-sk__sec-row-label">{s.label}</span>
-                  {s.tag ? (
-                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 600 }}>
-                      {s.tag}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="os-sk__thread" ref={threadRef}>
-            {messages.map((m) => (
-              <div key={m.id} style={{ display: "contents" }}>
-                {m.role === "USER" ? (
-                  <div className="os-sk__bubble os-sk__bubble--user">{m.content}</div>
-                ) : (
-                  <>
-                    {(m.toolEvents ?? []).map((t, i) => (
-                      <span
-                        key={`${m.id}-t${i}`}
-                        className={`os-sk__tool-chip ${t.isError ? "os-sk__tool-chip--err" : ""}`}
-                        title={t.name}
-                      >
-                        <Wrench /> Ran <code style={{ fontSize: 11 }}>{t.name}</code>
-                      </span>
-                    ))}
-                    {m.content ? (
-                      <div className="os-sk__bubble os-sk__bubble--ai">
-                        <OsMarkdown text={m.content} />
-                      </div>
-                    ) : m.streaming ? (
-                      <span className="os-sk__typing">
-                        <span className="os-sk__typing-dot" />
-                        <span className="os-sk__typing-dot" />
-                        <span className="os-sk__typing-dot" />
-                      </span>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            ))}
-            {error ? (
-              <div className="os-sk__bubble os-sk__bubble--ai" style={{ color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FCA5A5" }}>
-                {error}
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        <div className="os-sk__composer">
-          <div className="os-sk__composer-shell">
-            <textarea
-              ref={inputRef}
-              className="os-sk__composer-input"
-              placeholder={messages.length === 0 ? "Ask, create, search, @ to mention" : "What next?"}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                const t = e.currentTarget;
-                t.style.height = "auto";
-                t.style.height = Math.min(t.scrollHeight, 160) + "px";
-              }}
-              onKeyDown={onKeyDown}
-              rows={1}
-            />
-            <div className="os-sk__composer-foot">
-              <button type="button" className="os-sk__composer-side" title="Attach">
-                <Plus />
-              </button>
-              <span className="os-sk__composer-sources">
-                <Globe />
-                All sources
-                <ChevronDown style={{ width: 11, height: 11 }} />
-              </span>
-              <button
-                type="button"
-                className="os-sk__composer-send"
-                onClick={() => void send()}
-                disabled={busy || input.trim().length === 0}
-                title="Send (Enter)"
-              >
-                {busy ? <Dots variant="pending" /> : <ArrowUp />}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AskAiThread width="panel" context={context} active={sidekickOpen} composerRef={composerRef} />
       </div>
     </aside>
   );

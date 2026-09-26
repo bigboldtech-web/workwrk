@@ -165,6 +165,7 @@ interface FactOverrides {
   activeModules?: string[];
   apps?: AccessFacts["org"]["apps"];
   peopleTeamIds?: string[];
+  aiEnabled?: boolean;
   app?: AppKey;
   settingsPage?: SettingsPageKey;
   orgAction?: OrgAction;
@@ -183,6 +184,7 @@ function facts(o: FactOverrides = {}): AccessFacts {
       activeModules: new Set(o.activeModules ?? ["chat", "tables"]),
       apps: o.apps ?? {},
       peopleTeamIds: o.peopleTeamIds ?? [],
+      ...(o.aiEnabled === undefined ? {} : { aiEnabled: o.aiEnabled }),
     },
     now: o.now ?? NOW,
     app: o.app,
@@ -325,6 +327,19 @@ describe("rule 2: module off, before the Admin rule", () => {
   it("returns app-off when the org hid the app", () => {
     const d = decide(facts({ app: "kudos", apps: { hidden: ["kudos"] } }), "view");
     expect(d).toMatchObject({ via: "app-off", allowed: false, discoverable: true });
+  });
+
+  it("turns the ai app key off, and only that key, when AI features are off", () => {
+    // spec-ai-automation 1.4: the one line asked of rule 2.
+    const off = decide(facts({ app: "ai", aiEnabled: false }), "view");
+    expect(off).toMatchObject({ via: "app-off", allowed: false, discoverable: true });
+    expect(off.context).toEqual({ app: "ai" });
+    // An Admin is off too: it is a workspace switch, not a role.
+    expect(decide(facts({ viewer: viewer({ orgRole: "ADMIN" }), app: "ai", aiEnabled: false }), "view").via).toBe("app-off");
+    // Automations are not AI.
+    expect(decide(facts({ app: "automation", aiEnabled: false }), "view").allowed).toBe(true);
+    // Absent reads as on.
+    expect(decide(facts({ app: "ai" }), "view").allowed).toBe(true);
   });
 
   it("never floors an alwaysPinned app", () => {

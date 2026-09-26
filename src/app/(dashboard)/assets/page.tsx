@@ -1,6 +1,6 @@
 "use client";
 
-/* Asset register — finance lens.
+/* Asset register, finance lens.
  *
  * The org's fixed-asset register: every physical thing the org owns, with
  * purchase cost, depreciation lens, warranty state, current owner.
@@ -14,9 +14,11 @@
 
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Box, Search, AlertTriangle, Calendar, Hash } from "lucide-react";
+import { Box, Search, AlertTriangle, Calendar } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { apiFetch } from "@/lib/api-fetch";
+import { useOrgCurrency } from "@/lib/org/use-org-currency";
 
 import { useOsShell } from "@/components/layout/os/shell-context";
 import {
@@ -27,11 +29,6 @@ import { AssetFormDialog } from "./asset-form-dialog";
 import { AssignDialog } from "./assign-dialog";
 import { AssetRowMenu } from "./asset-row-menu";
 
-function fmtMoney(n: number, ccy = "USD"): string {
-  if (n >= 1_000_000) return `${ccy} ${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${ccy} ${(n / 1_000).toFixed(1)}k`;
-  return `${ccy} ${n.toFixed(0)}`;
-}
 
 const MS_DAY = 86_400_000;
 function warrantyDays(iso?: string | null): number | null {
@@ -48,37 +45,34 @@ export default function AssetsPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const { rowVersion } = useOsShell();
 
-  // Page-owned dialog state — the row menu asks the page to open these so
+  // Page-owned dialog state, the row menu asks the page to open these so
   // the dialogs don't live inside the (portalled) menu panel.
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ApiAsset | null>(null);
   const [assigning, setAssigning] = useState<ApiAsset | null>(null);
 
+  // The org currency (settings.currency) instead of a hard-coded USD.
+  const { format: fmtMoney } = useOrgCurrency();
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/assets");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setAssets(data.data ?? (Array.isArray(data) ? data : []));
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+    const r = await apiFetch<ApiAsset[] | { data?: ApiAsset[] }>("/api/assets", { cache: "no-store" });
+    if (!r.ok) { setLoadError(r.error); return; }
+    setLoadError(null);
+    setAssets(Array.isArray(r.data) ? r.data : r.data.data ?? []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
   const v = rowVersion("assets");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [v, load]);
 
+  // The filter row's counts (the four stat tiles are gone, spec 2.2).
   const stats = useMemo(() => {
     const list = assets ?? [];
-    const totalValue = list.reduce((acc, a) => acc + (a.purchaseCost ?? 0), 0);
-    const assigned = list.filter((a) => a.status === "ASSIGNED").length;
     const expiring = list.filter((a) => {
       const d = warrantyDays(a.warrantyExpiry);
       return d != null && d >= 0 && d < 60;
     }).length;
-    const broken = list.filter((a) => a.status === "IN_REPAIR" || a.status === "LOST").length;
-    const total = list.length;
-    return { totalValue, assigned, expiring, broken, total };
+    return { expiring, total: list.length };
   }, [assets]);
 
   const filtered = useMemo(() => {
@@ -105,59 +99,19 @@ export default function AssetsPage() {
 
   return (<>
     <OsPageHeader
-      title="Asset register"
-      actions={
-        <div className="ast__head-actions">
-          <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-        </div>
-      }
+      title="Assets"
       primary={{ label: "Add asset", onClick: () => setCreateOpen(true) }}
     />
 
-    {/* Actions column + row-menu styling. Scoped to this page's table via the
-        higher-specificity `.ast__table--actions` selector so it overrides the
-        base grid in os.css without editing that shared file. */}
-    <style>{`
-      .ast__table--actions .ast__row { grid-template-columns: 1fr 100px 140px 100px 80px 120px 90px 36px; }
-      .ast__row-actions { display: flex; align-items: center; justify-content: flex-end; }
-      .ast__more { position: relative; display: inline-flex; }
-      .ast__more-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; color: var(--os-ink-3); background: transparent; cursor: pointer; transition: background .12s, color .12s; }
-      .ast__more-btn:hover { background: var(--os-surface-1); color: var(--os-ink); }
-      .ast__more-btn:disabled { opacity: .5; cursor: default; }
-      .ast__more-btn svg { width: 15px; height: 15px; }
-      .ast__status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
-      .ast__soon { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--os-ink-3); background: var(--os-surface-1); border: 1px solid var(--os-line); padding: 1px 5px; border-radius: 4px; }
-      @media (max-width: 1100px) {
-        .ast__table--actions .ast__row { grid-template-columns: 1fr; }
-      }
-    `}</style>
 
     <div className="ast">
 
       {loadError ? (
-        <div className="ast__error">{loadError}</div>
+        <OsEmptyView variant="error" title="Couldn't load Assets" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
       ) : assets === null ? (
         <SkeletonRows />
       ) : (
         <>
-          <section className="ast__stats">
-            <div className="ast-stat">
-              <span>Total value</span>
-              <strong>{fmtMoney(stats.totalValue)}</strong>
-            </div>
-            <div className="ast-stat">
-              <span>Assigned</span>
-              <strong>{stats.assigned}<small>/{stats.total}</small></strong>
-            </div>
-            <div className={`ast-stat ${stats.expiring > 0 ? "is-warn" : ""}`}>
-              <span>Warranty expiring &lt;60d</span>
-              <strong>{stats.expiring}</strong>
-            </div>
-            <div className={`ast-stat ${stats.broken > 0 ? "is-alert" : ""}`}>
-              <span>In repair / lost</span>
-              <strong>{stats.broken}</strong>
-            </div>
-          </section>
 
           <div className="ast__toolbar">
             <div className="ast__search">
@@ -205,7 +159,7 @@ export default function AssetsPage() {
                   <div key={a.id} className="ast__row">
                     <div>
                       <div className="ast__name">{a.name}</div>
-                      <div className="ast__sub-line">{[a.brand, a.model].filter(Boolean).join(" ") || "—"}{a.serialNumber && ` · S/N ${a.serialNumber.slice(-8)}`}</div>
+                      <div className="ast__sub-line">{[a.brand, a.model].filter(Boolean).join(" ") || "No model"}{a.serialNumber && ` · S/N ${a.serialNumber.slice(-8)}`}</div>
                     </div>
                     <span className="ast__type">{typeLabel(a.type)}</span>
                     <span className="ast__owner">
@@ -214,9 +168,9 @@ export default function AssetsPage() {
                     <span className="ast__status" style={{ background: STATUS_HUE[a.status] }}>{STATUS_LABEL[a.status]}</span>
                     <span className="ast__cond" style={{ color: CONDITION_HUE[a.condition] }}>{a.condition.toLowerCase()}</span>
                     <span className={`ast__warranty ast__warranty--${wState}`}>
-                      {wState === "none" ? "—" : wState === "expired" ? `expired ${-wDays!}d ago` : wState === "warn" ? `${wDays}d left` : <span><Calendar style={{ width: 11, height: 11 }} /> {wDays}d</span>}
+                      {wState === "none" ? "No warranty" : wState === "expired" ? `expired ${-wDays!}d ago` : wState === "warn" ? `${wDays}d left` : <span><Calendar style={{ width: 11, height: 11 }} /> {wDays}d</span>}
                     </span>
-                    <span className="ast__value">{a.purchaseCost != null ? fmtMoney(a.purchaseCost) : "—"}</span>
+                    <span className="ast__value">{a.purchaseCost != null ? fmtMoney(a.purchaseCost) : "No cost"}</span>
                     <div className="ast__row-actions">
                       <AssetRowMenu
                         asset={a}
@@ -228,6 +182,12 @@ export default function AssetsPage() {
                   </div>
                 );
               })}
+              {/* The value line (spec-tools-misc 2.2): the stat tiles are gone
+                  and the money lives here, for the rows in view. */}
+              <div className="ast__foot">
+                <span>Total records {filtered.length}</span>
+                <span>Total value {fmtMoney(filtered.reduce((acc, x) => acc + (x.purchaseCost ?? 0), 0))}</span>
+              </div>
             </div>
           )}
         </>

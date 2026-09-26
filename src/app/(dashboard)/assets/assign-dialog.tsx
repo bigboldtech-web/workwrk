@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { personName, type ApiAsset } from "./types";
 
@@ -137,7 +138,7 @@ export function AssignDialog({
 
         <div className="max-h-[46vh] overflow-y-auto -mx-1 px-1">
           {people === null && !loadErr ? (
-            <div className="py-8 text-center text-base text-muted-2">Loading people…</div>
+            <div aria-busy="true" aria-label="Loading people"><SkeletonRows rows={5} /></div>
           ) : loadErr ? (
             <div className="py-8 text-center text-base text-[#E2445C]">Could not load people.</div>
           ) : filtered.length === 0 ? (

@@ -1,6 +1,6 @@
 "use client";
 
-/* /automation/workflows/[id] — the form-based recipe builder.
+/* /automation/workflows/[id], the form-based recipe builder.
  *
  * Monday-style sentence recipe ("When [trigger] … then [actions]"), per
  * the Mobbin refs (2026-08-07):
@@ -17,7 +17,7 @@
  *  DELETE .../[id]                            → useConfirm'd delete
  *
  * Conditions: the builder edits ONE flat AND/OR group (the engine also
- * accepts nested groups authored via the API — those are preserved as
+ * accepts nested groups authored via the API, those are preserved as
  * opaque rows here, never silently dropped).
  */
 
@@ -45,14 +45,15 @@ import { CONDITION_OPERATORS } from "@/lib/automation/conditions";
 import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS } from "@/lib/board-items-shared";
 import {
   CARD,
-  DARK_PILL,
+  PRIMARY_PILL,
+  useAutomationRights,
   RUN_STATUS_COLORS,
   StatusPill,
   WORKFLOW_STATUS_META,
   relTime,
 } from "../../shared";
 import { BackButton } from "@/components/ui/back-button";
-import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { ComingSoonRow, UpcomingOnly, useShowUpcoming } from "@/components/ui/coming-soon-row";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -68,6 +69,8 @@ interface ApiTrigger {
   category: string;
   description: string;
   isEmitting: boolean;
+  /** Behind the legacy-triggers product flag: listed for names, not offered. */
+  hidden?: boolean;
   fields: ApiTriggerField[];
 }
 
@@ -117,7 +120,7 @@ interface ApiWorkflowDetail {
 
 interface CondRow {
   _id: number;
-  /** Opaque nested group (authored via API) — preserved verbatim. */
+  /** Opaque nested group (authored via API), preserved verbatim. */
   opaque?: unknown;
   field: string;
   operator: string;
@@ -172,16 +175,22 @@ function TriggerToken({
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const selected = value ? triggers.find((t) => t.key === value) : undefined;
+  const showUpcoming = useShowUpcoming();
 
   const byCategory = useMemo(() => {
     const map = new Map<string, ApiTrigger[]>();
-    for (const t of triggers) {
+    // A trigger hidden behind the product flag (the Cashkr-era leads,
+    // quotes, pickups and payments) is not offered, unless it is the one this
+    // workflow already uses, which stays visible and selected. A trigger that
+    // does not fire yet is listed only under Show upcoming features, so a
+    // category never renders as a bare label.
+    for (const t of triggers.filter((x) => (!x.hidden || x.key === value) && (x.isEmitting || showUpcoming))) {
       const list = map.get(t.category) ?? [];
       list.push(t);
       map.set(t.category, list);
     }
     return [...map.entries()];
-  }, [triggers]);
+  }, [triggers, value, showUpcoming]);
 
   return (
     <>
@@ -210,20 +219,25 @@ function TriggerToken({
                 <div key={category}>
                   {i > 0 ? <MenuSeparator /> : null}
                   <MenuSectionLabel>{category}</MenuSectionLabel>
-                  {list.map((t) => (
-                    <MenuItem
-                      key={t.key}
-                      label={t.name}
-                      title={t.description}
-                      selected={t.key === value}
-                      disabled={!t.isEmitting}
-                      trailing={!t.isEmitting ? <NotEmittingChip /> : undefined}
-                      onClick={() => {
-                        onChange(t.key);
-                        setOpen(false);
-                      }}
-                    />
-                  ))}
+                  {list.map((t) =>
+                    // A trigger that never fires is not built yet: it shows
+                    // only under Show upcoming features, as a ComingSoonRow,
+                    // the same rule the action picker follows.
+                    !t.isEmitting ? (
+                      <UpcomingOnly key={t.key}><ComingSoonRow label={t.name} /></UpcomingOnly>
+                    ) : (
+                      <MenuItem
+                        key={t.key}
+                        label={t.name}
+                        title={t.description}
+                        selected={t.key === value}
+                        onClick={() => {
+                          onChange(t.key);
+                          setOpen(false);
+                        }}
+                      />
+                    ),
+                  )}
                 </div>
               ))}
             </MenuList>
@@ -564,6 +578,11 @@ export default function AutomationBuilderPage() {
   const router = useRouter();
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  // Every Member reads automations; only a viewer the write routes accept
+  // gets the editor. Everyone else sees the recipe read-only, with no
+  // control that could only fail with a 403.
+  const rights = useAutomationRights();
+  const readOnly = !rights.canManage;
 
   const [wf, setWf] = useState<ApiWorkflowDetail | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -615,7 +634,7 @@ export default function AutomationBuilderPage() {
             value: n.value === undefined || n.value === null ? "" : String(n.value),
           });
         } else if (n) {
-          // Nested group / unknown shape — keep it verbatim, never drop it.
+          // Nested group / unknown shape, keep it verbatim, never drop it.
           rows.push({ _id: uid(), opaque: node, field: "", operator: "", value: "" });
         }
       }
@@ -680,7 +699,7 @@ export default function AutomationBuilderPage() {
     };
   }, [id, hydrate]);
 
-  // Picker data (people + boards) — loaded once, non-blocking.
+  // Picker data (people + boards), loaded once, non-blocking.
   useEffect(() => {
     let alive = true;
     fetch("/api/users?scope=all&limit=100", { cache: "no-store" })
@@ -793,8 +812,18 @@ export default function AutomationBuilderPage() {
         toast(data?.error ?? "Couldn't publish the automation");
         return;
       }
-      setWf((prev) => (prev ? { ...prev, ...data.workflow, runs: prev.runs, versions: prev.versions } : prev));
-      toast("Published — the automation is live");
+      // The new snapshot joins the version list at once, so the Versions
+      // count is right without a reload; only it carries isPublished now.
+      const v = data.version as { id: string; versionNumber: number; isPublished: boolean; createdAt: string } | undefined;
+      setWf((prev) => (prev ? {
+        ...prev,
+        ...data.workflow,
+        runs: prev.runs,
+        versions: v
+          ? [{ id: v.id, versionNumber: v.versionNumber, isPublished: true, createdAt: v.createdAt }, ...prev.versions.filter((x) => x.id !== v.id).map((x) => ({ ...x, isPublished: false }))]
+          : prev.versions,
+      } : prev));
+      toast("Published. The automation is live.");
     } catch {
       toast("Couldn't publish the automation");
     } finally {
@@ -846,7 +875,7 @@ export default function AutomationBuilderPage() {
         toast(data?.error ?? "Couldn't delete the automation");
         return;
       }
-      toast(data?.archived ? "Archived — run history preserved" : "Automation deleted");
+      toast(data?.archived ? "Archived. Its run history is kept." : "Automation deleted");
       router.push("/automation/workflows");
     } catch {
       toast("Couldn't delete the automation");
@@ -926,11 +955,15 @@ export default function AutomationBuilderPage() {
           }}
           aria-label="Automation name"
           placeholder="Name this automation"
+          readOnly={readOnly}
           className="h-7 w-full min-w-0 max-w-md rounded-md border border-transparent bg-transparent px-1.5 text-base font-semibold text-zinc-900 outline-none placeholder:font-normal placeholder:text-zinc-400 hover:border-zinc-200 focus:border-zinc-300"
         />
         <StatusPill color={statusMeta.color} label={statusMeta.label} />
         {dirty ? <span className="shrink-0 text-xs text-zinc-400">Unsaved changes</span> : null}
 
+        {readOnly ? (
+          <span className="ml-auto shrink-0 text-sm text-zinc-500">View only</span>
+        ) : (
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <label
             className="flex items-center gap-1.5 text-sm text-zinc-500"
@@ -944,15 +977,17 @@ export default function AutomationBuilderPage() {
               aria-label="Toggle automation active"
             />
           </label>
-          <button
-            type="button"
-            onClick={() => void remove()}
-            aria-label="Delete automation"
-            title="Delete automation"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-red-50 hover:text-[#E2445C]"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {rights.isAdmin ? (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              aria-label="Delete automation"
+              title="Delete automation"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-red-50 hover:text-[#E2445C]"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void saveDraft().then((ok) => ok && toast("Draft saved"))}
@@ -966,18 +1001,19 @@ export default function AutomationBuilderPage() {
             type="button"
             onClick={() => void publish()}
             disabled={saving || publishing}
-            className={DARK_PILL}
+            className={PRIMARY_PILL}
           >
             {publishing ? <Dots variant="pending" /> : null}
             {wf.publishedVersionId ? "Republish" : "Publish"}
           </button>
         </div>
+        )}
       </div>
 
       {/* Body: recipe center + right rail */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-y-auto px-8 py-10">
-          <div className="mx-auto max-w-2xl">
+          <fieldset disabled={readOnly} className="mx-auto min-w-0 max-w-2xl">
             {/* WHEN sentence */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <span className="text-xl font-semibold leading-tight text-zinc-900">When</span>
@@ -1031,16 +1067,16 @@ export default function AutomationBuilderPage() {
                       className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-2.5"
                     >
                       <span className="flex-1 truncate text-sm text-zinc-500">
-                        Nested condition group (edited via the API) — kept as-is
+                        Nested condition group, kept as it is
                       </span>
-                      <button
+                      {readOnly ? null : <button
                         type="button"
                         onClick={() => removeCondRow(row._id)}
                         aria-label="Remove condition group"
                         className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   ) : (
                     <div key={row._id} className="flex items-center gap-1.5">
@@ -1085,25 +1121,29 @@ export default function AutomationBuilderPage() {
                       ) : (
                         <span className="flex-1" />
                       )}
-                      <button
+                      {readOnly ? null : <button
                         type="button"
                         onClick={() => removeCondRow(row._id)}
                         aria-label="Remove condition"
                         className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   ),
                 )}
               </div>
-              <button
-                type="button"
-                onClick={addCondRow}
-                className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-zinc-500 hover:text-zinc-900"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add condition
-              </button>
+              {readOnly ? (
+                condRows.length === 0 ? <p className="mt-2 text-sm text-zinc-400">No conditions</p> : null
+              ) : (
+                <button
+                  type="button"
+                  onClick={addCondRow}
+                  className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-zinc-500 hover:text-zinc-900"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add condition
+                </button>
+              )}
             </div>
 
             {/* Arrow */}
@@ -1141,14 +1181,14 @@ export default function AutomationBuilderPage() {
                           value={row.key}
                           onChange={(key) => updateActionRow(row._id, { key, params: {} })}
                         />
-                        <button
+                        {readOnly ? null : <button
                           type="button"
                           onClick={() => removeActionRow(row._id)}
                           aria-label="Remove action"
                           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button>}
                       </div>
                       {catalog ? (
                         <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 rounded-xl border border-zinc-200 p-3 sm:grid-cols-2">
@@ -1182,7 +1222,7 @@ export default function AutomationBuilderPage() {
                   );
                 })
               )}
-              {actionRows.length > 0 ? (
+              {actionRows.length > 0 && !readOnly ? (
                 <button
                   type="button"
                   onClick={addActionRow}
@@ -1192,7 +1232,7 @@ export default function AutomationBuilderPage() {
                 </button>
               ) : null}
             </div>
-          </div>
+          </fieldset>
         </div>
 
         {/* Right rail */}
@@ -1202,6 +1242,7 @@ export default function AutomationBuilderPage() {
             <label className="mt-2 block text-xs font-medium text-zinc-500">Description</label>
             <textarea
               value={description}
+              readOnly={readOnly}
               onChange={(e) => {
                 setDescription(e.target.value);
                 markDirty();
@@ -1215,6 +1256,7 @@ export default function AutomationBuilderPage() {
             </label>
             <select
               value={severity}
+              disabled={readOnly}
               onChange={(e) => {
                 setSeverity(e.target.value);
                 markDirty();

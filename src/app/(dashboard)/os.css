@@ -12099,9 +12099,8 @@ table.os-tbl {
 .ast__search input:focus { outline: none; border-color: var(--os-brand); background: white; }
 .ast__filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .ast__filters button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--os-surface-1); color: var(--os-ink-2); }
-.ast__filters button.is-active { background: var(--os-brand); color: white; }
+.ast__filters button.is-active { background: white; color: var(--os-ink); box-shadow: inset 0 0 0 1px var(--os-line); }
 .ast__filters em { font-style: normal; color: var(--os-ink-3); font-weight: 500; font-size: 12px; }
-.ast__filters button.is-active em { color: rgba(255,255,255,0.75); }
 .ast__filter-dot { width: 7px; height: 7px; border-radius: 50%; }
 
 .ast__table { background: white; border: 1px solid var(--os-line); border-radius: 10px; overflow: hidden; }
@@ -12120,10 +12119,24 @@ table.os-tbl {
 .ast__warranty--expired { color: var(--os-c-red); font-weight: 700; }
 .ast__warranty--none { color: var(--os-ink-3); }
 .ast__value { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--os-ink); text-align: right; }
+/* The actions column and row menu, moved here from an injected style block
+   on the Assets page (spec-tools-misc 2.2). */
+.ast__table--actions .ast__row { grid-template-columns: 1fr 100px 140px 100px 80px 120px 90px 36px; }
+.ast__row-actions { display: flex; align-items: center; justify-content: flex-end; }
+.ast__more { position: relative; display: inline-flex; }
+.ast__more-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; color: var(--os-ink-3); background: transparent; cursor: pointer; transition: background .12s, color .12s; }
+.ast__more-btn:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.ast__more-btn:disabled { opacity: .5; cursor: default; }
+.ast__more-btn svg { width: 15px; height: 15px; }
+.ast__status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.ast__soon { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--os-ink-3); background: var(--os-surface-1); border: 1px solid var(--os-line); padding: 1px 5px; border-radius: 4px; }
+/* The value line under the table: the record count and the money. */
+.ast__foot { display: flex; align-items: center; gap: 16px; min-height: 44px; padding: 0 14px; font-size: 13px; font-weight: 500; color: var(--os-ink-2); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 1100px) {
   .ast__stats { grid-template-columns: repeat(2, 1fr); }
   .ast__row { grid-template-columns: 1fr; gap: 6px; padding: 14px; }
+  .ast__table--actions .ast__row { grid-template-columns: 1fr; }
   .ast__row--head { display: none; }
 }
 

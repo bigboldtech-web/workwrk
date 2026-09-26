@@ -5,7 +5,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { logActivity } from "@/lib/activity";
 import type { Prisma, AssetStatus, AssetType } from "@/generated/prisma";
 
-// Enum allowlists — the register UI is now a live caller, so reject bad
+// Enum allowlists, the register UI is now a live caller, so reject bad
 // values with a 400 instead of letting Prisma throw a 500.
 const ASSET_TYPES = new Set(["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM", "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER"]);
 const ASSET_CONDITIONS = new Set(["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"]);
@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status");
   const type = searchParams.get("type");
   const assignedToId = searchParams.get("assignedToId");
-  const search = searchParams.get("search");
+  // ?q= is the row search (spec-tools-misc 2.2); ?search= stays as its alias.
+  const search = searchParams.get("q") ?? searchParams.get("search");
   // scope: "all" / "team" / "own". Defaults to "own" for non-managers
   // so an employee browsing /assets only sees what's assigned to them.
   const requestedScope = searchParams.get("scope");
@@ -38,14 +39,19 @@ export async function GET(req: NextRequest) {
   const where: Prisma.AssetWhereInput = { organizationId: orgId };
   if (status) where.status = status as AssetStatus;
   if (type) where.type = type as AssetType;
-  if (assignedToId) where.assignedToId = assignedToId;
-
-  if (effectiveScope !== "all" && !assignedToId) {
+  if (effectiveScope !== "all") {
     const userIds =
       effectiveScope === "team"
-        ? await getTeamUserIds(orgId, callerId)
+        ? [...new Set([callerId, ...(await getTeamUserIds(orgId, callerId))])]
         : [callerId];
-    where.assignedToId = { in: userIds };
+    // ?assignedToId= narrows WITHIN the caller's scope. It used to skip the
+    // scope altogether, so any employee could read any colleague's assets by
+    // passing their id (the profile Assets tab passes exactly that).
+    where.assignedToId = assignedToId
+      ? (userIds.includes(assignedToId) ? assignedToId : { in: [] })
+      : { in: userIds };
+  } else if (assignedToId) {
+    where.assignedToId = assignedToId;
   }
   if (search) {
     where.OR = [
