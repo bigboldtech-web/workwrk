@@ -27,6 +27,7 @@
 // lint lets read the member tables.
 
 import { prisma } from "@/lib/prisma";
+import { readDocLocks } from "../doc-lock";
 import {
   emptyGrants,
   emptyRows,
@@ -201,15 +202,22 @@ export async function loadRows(organizationId: string, seeds: WorldSeeds, opts: 
     }
   }
 
-  // Round 2: tasks and tables.
-  const [items, tables] = await Promise.all([
+  // Round 2: tasks and tables, and the page locks of the docs (read by the
+  // create rule alone: a locked page takes sub-pages from Full holders only).
+  const lockIds = [...rows.docs.keys()];
+  const [items, tables, locks] = await Promise.all([
     want.items.size
       ? prisma.item.findMany({ where: { id: { in: [...want.items] }, organizationId }, select: { id: true, organizationId: true, boardId: true } })
       : Promise.resolve([]),
     want.tables.size
       ? prisma.dataTable.findMany({ where: { id: { in: [...want.tables] }, organizationId }, select: { id: true, organizationId: true, spaceId: true, createdById: true, name: true, description: true } })
       : Promise.resolve([]),
+    lockIds.length ? readDocLocks(lockIds) : Promise.resolve(new Map<string, unknown>()),
   ]);
+  for (const id of locks.keys()) {
+    const d = rows.docs.get(id);
+    if (d) rows.docs.set(id, { ...d, locked: true });
+  }
   for (const i of items) rows.items.set(i.id, i as ItemFact);
   for (const t of tables) rows.tables.set(t.id, t as TableFact);
   if (!opts.rowsOnly) {

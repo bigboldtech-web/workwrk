@@ -265,10 +265,15 @@ describe("P2 a move needs Full access on the node and where it is now, and Can e
   });
 
   it("out of every Space (the org root, which opens it to the whole org) also needs Full access on the Space it leaves", () => {
-    const w = new W().space("S").folder("F", "S").canvas("C", "S", "F").on("folder", "F", "ADMIN");
+    const w = new W().space("S").folder("F", "S").canvas("C", "S", "F", ME).on("folder", "F", "ADMIN");
     expect(w.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: false, failure: "source" });
+    // Its owner who manages the Space takes it out; a Space manager who does
+    // not own it cannot (their Full access ends at the Space's edge: the
+    // one-way door, see "out of every Space, Full access goes with the node").
+    const owner = new W().space("S").folder("F", "S").canvas("C", "S", "F", ME).on("space", "S", "ADMIN");
+    expect(owner.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: true, same: false });
     const manager = new W().space("S").folder("F", "S").canvas("C", "S", "F").on("space", "S", "ADMIN");
-    expect(manager.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: true, same: false });
+    expect(manager.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: false, failure: "landing" });
   });
 
   it("P7: the Full holders of both ends inside one Space move as before", () => {
@@ -329,9 +334,9 @@ describe("P2 a move needs Full access on the node and where it is now, and Can e
   });
 
   it("a canvas out of every Space (the whole org opens it) needs Full access on its Folder and on its Space", () => {
-    const folderOnly = world().canvas("C", "S", "F").on("folder", "F", "ADMIN");
+    const folderOnly = world().canvas("C", "S", "F", ME).on("folder", "F", "ADMIN");
     expect(folderOnly.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: false, failure: "source" });
-    const spaceToo = world().canvas("C", "S", "F").on("space", "S", "ADMIN");
+    const spaceToo = world().canvas("C", "S", "F", ME).on("space", "S", "ADMIN");
     expect(spaceToo.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: true, same: false });
     const contributor = world().canvas("C", "S", "F").on("space", "S", "MEMBER", OLD);
     expect(contributor.move({ kind: "canvas", id: "C" }, null).ok).toBe(false);

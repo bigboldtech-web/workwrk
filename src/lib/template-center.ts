@@ -348,6 +348,24 @@ export async function snapshotBoard(boardId: string): Promise<{ name: string; pa
   return { name: board.name, payload };
 }
 
+/**
+ * Which Lists a Folder or Space snapshot may carry. A template is published
+ * to the whole org, so it carries only the Lists the saver could save as a
+ * template one by one: Full access on each (the LIST source's own gate). A
+ * Private List the saver cannot open, or only reads, is someone else's
+ * structure; it used to be captured with the Folder, its name and fields
+ * shown to everyone, and a copy made on apply. `canSaveList` answers for a
+ * batch of List ids; without it every List is kept (a system caller).
+ */
+export interface SnapshotOptions {
+  canSaveList?: (boardIds: string[]) => Promise<ReadonlySet<string>>;
+}
+
+async function keptLists(boardIds: string[], opts: SnapshotOptions): Promise<ReadonlySet<string>> {
+  if (!opts.canSaveList) return new Set(boardIds);
+  return boardIds.length ? opts.canSaveList(boardIds) : new Set<string>();
+}
+
 /** Snapshot a Space (its workflow settings + each child Board's structure)
  *  into a SPACE payload. Returns null if the space is missing. */
 /**
@@ -359,14 +377,19 @@ export async function snapshotBoard(boardId: string): Promise<{ name: string; pa
  * real in the spec (section 1, row 10) and applyFolderTemplate has always
  * known how to materialize one; only the snapshot half was missing.
  */
-export async function snapshotFolder(folderId: string): Promise<{ name: string; payload: FolderTemplatePayload } | null> {
+export async function snapshotFolder(
+  folderId: string,
+  opts: SnapshotOptions = {},
+): Promise<{ name: string; payload: FolderTemplatePayload } | null> {
   const folder = await prisma.folder.findUnique({
     where: { id: folderId },
     include: { boards: { where: { archivedAt: null }, select: { id: true } } },
   });
   if (!folder) return null;
   const lists: Array<{ name: string } & ListTemplatePayload> = [];
+  const keep = await keptLists(folder.boards.map((b) => b.id), opts);
   for (const b of folder.boards) {
+    if (!keep.has(b.id)) continue;
     const snap = await snapshotBoard(b.id);
     if (snap) lists.push({ name: snap.name, ...snap.payload });
   }
@@ -379,7 +402,10 @@ export async function snapshotFolder(folderId: string): Promise<{ name: string; 
   return { name: folder.name, payload };
 }
 
-export async function snapshotSpace(spaceId: string): Promise<{ name: string; payload: SpaceTemplatePayload } | null> {
+export async function snapshotSpace(
+  spaceId: string,
+  opts: SnapshotOptions = {},
+): Promise<{ name: string; payload: SpaceTemplatePayload } | null> {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
     include: { boards: { where: { archivedAt: null }, select: { id: true } } },
@@ -387,7 +413,9 @@ export async function snapshotSpace(spaceId: string): Promise<{ name: string; pa
   if (!space) return null;
   const settings = (space.settings ?? {}) as { workflow?: Record<string, unknown> };
   const lists: Array<{ name: string } & ListTemplatePayload> = [];
+  const keep = await keptLists(space.boards.map((b) => b.id), opts);
   for (const b of space.boards) {
+    if (!keep.has(b.id)) continue;
     const snap = await snapshotBoard(b.id);
     if (snap) lists.push({ name: snap.name, ...snap.payload });
   }

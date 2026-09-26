@@ -101,17 +101,21 @@ export function TableRowMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
   const [rootMove, setRootMove] = useState(false);
-  // Opened straight at the picker: load the Spaces once, in a tick.
+  // Opened straight at the picker: load the places once, in a tick, from
+  // the same endpoint openMove asks (the placement rule, P5), never the whole
+  // Space list: that offered every Space the person could read.
   useEffect(() => {
     if (initialMode !== "move") return;
     let alive = true;
     const t = setTimeout(() => {
-      void apiFetch<{ spaces?: SpaceRow[] }>("/api/spaces", { cache: "no-store" }).then((r) => {
-        if (alive) setSpaces(r.ok ? (r.data.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
+      void apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=table&id=${encodeURIComponent(table.id)}`, { cache: "no-store" }).then((r) => {
+        if (!alive) return;
+        setRootMove(r.ok && r.data.root?.pickable === true);
+        setSpaces(r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
       });
     }, 0);
     return () => { alive = false; clearTimeout(t); };
-  }, [initialMode]);
+  }, [initialMode, table.id]);
 
   // A host that knows the manage right passes it; otherwise it is resolved on
   // open, and until it lands only the rows every reader holds are rendered.

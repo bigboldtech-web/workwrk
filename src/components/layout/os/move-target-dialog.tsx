@@ -7,7 +7,8 @@
 //   kind="space"  -> a new parent Space, or "Top level".
 //
 // WHAT IT OFFERS IS WHAT THE MOVE ACCEPTS (the placement rule, node-rules P5).
-// For a List or a Folder the places come from GET /api/move/destinations,
+// For every kind the places come from GET /api/move/destinations (a Space's
+// parents and its Top level from the same verdict spaces/[id]/move applies),
 // which asks the one move rule per place (Full access on the node and where it
 // is now, Can edit where it goes). So a Folder grantee sees their Folder under
 // the Space they only pass through, and no Space is listed where the move
@@ -36,7 +37,12 @@ export type MoveKind = "board" | "folder" | "space";
 
 type DestFolder = { id: string; name: string; parentFolderId: string | null; pickable: boolean; current: boolean };
 type DestSpace = { id: string; name: string; pickable: boolean; current: boolean; folders: DestFolder[] };
-type SpaceRow = { id: string; name: string; role?: string | null };
+/** GET /api/move/destinations: the move shape, and for a Space its Top level choice. */
+type DestReply = {
+  spaces?: Array<Omit<DestSpace, "folders"> & { folders?: DestFolder[] }>;
+  top?: { pickable: boolean; current: boolean };
+  refusal?: string;
+};
 
 /** Depth of each listed Folder under its Space, for the indent. */
 function depthsOf(folders: DestFolder[]): Map<string, number> {
@@ -75,29 +81,31 @@ export function MoveTargetDialog({
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [refusal, setRefusal] = useState<{ key: string; message: string } | null>(null);
+  // A Space's Top level choice (null for every other kind), and why nothing can be picked when the node cannot move anywhere.
+  const [top, setTop] = useState<{ pickable: boolean; current: boolean } | null>(null);
+  const [nowhere, setNowhere] = useState<string | null>(null);
   const busyRef = useRef(false);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     let alive = true;
-    if (kind === "space") {
-      // Nesting a Space needs Full access on the parent (spaces/[id]/move):
-      // only the Spaces the viewer manages are places it can go.
-      fetch("/api/spaces?paths=0&counts=0", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (!alive) return;
-          const rows: SpaceRow[] = Array.isArray(d?.spaces) ? d.spaces : [];
-          setSpaces(rows.filter((s) => s.id !== entityId && s.role === "full").map((s) => ({ id: s.id, name: s.name, pickable: true, current: false, folders: [] })));
-        })
-        .catch(() => { if (alive) setSpaces([]); });
-    } else {
-      fetch(`/api/move/destinations?kind=${kind === "board" ? "list" : "folder"}&id=${encodeURIComponent(entityId)}`, { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (alive) setSpaces(Array.isArray(d?.spaces) ? d.spaces : []); })
-        .catch(() => { if (alive) setSpaces([]); });
-    }
+    // Every kind asks the one endpoint the move routes answer to. A Space's
+    // parents come from the same verdict spaces/[id]/move applies (Full
+    // access on the Space, on the parent it leaves and on the one it goes
+    // under): the dialog used to build them here from every Space the viewer
+    // manages plus an always-present Top level, and each pick was refused.
+    const destKind = kind === "board" ? "list" : kind;
+    fetch(`/api/move/destinations?kind=${destKind}&id=${encodeURIComponent(entityId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: DestReply | null) => {
+        if (!alive) return;
+        const rows = Array.isArray(d?.spaces) ? d.spaces : [];
+        setSpaces(rows.map((s) => ({ ...s, folders: Array.isArray(s.folders) ? s.folders : [] })));
+        setTop(kind === "space" && d?.top ? d.top : null);
+        setNowhere(typeof d?.refusal === "string" && d.refusal ? d.refusal : null);
+      })
+      .catch(() => { if (alive) { setSpaces([]); setTop(null); } });
     return () => { alive = false; };
   }, [kind, entityId]);
 
@@ -148,6 +156,10 @@ export function MoveTargetDialog({
     return void doMove(key, `/api/folders/${entityId}/move`, { parentFolderId: folderId });
   };
 
+  const nothingPickable = spaces !== null
+    && !top?.pickable
+    && !spaces.some((s) => s.pickable || s.folders.some((f) => f.pickable));
+
   const toggle = (spaceId: string) =>
     setCollapsed((cur) => {
       const next = new Set(cur);
@@ -185,7 +197,7 @@ export function MoveTargetDialog({
             <SkeletonLines lines={4} className="px-2" />
           ) : (
             <>
-              {kind === "space" ? (
+              {kind === "space" && top?.pickable ? (
                 <>
                   <button type="button" className={`${rowBtn} ${refusal?.key === "top" ? marked : ""}`} disabled={busy} onClick={() => void doMove("top", `/api/spaces/${entityId}/move`, { parentSpaceId: null })}>
                     <ArrowUpToLine className="h-4 w-4 shrink-0 text-ink-3" />
@@ -193,6 +205,12 @@ export function MoveTargetDialog({
                   </button>
                   {refusalLine("top")}
                 </>
+              ) : kind === "space" && top?.current ? (
+                <div className={rowLabel}>
+                  <ArrowUpToLine className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 font-medium">Top level</span>
+                  <span className="shrink-0 text-xs">Here now</span>
+                </div>
               ) : null}
 
               {spaces.map((s) => {
@@ -257,11 +275,12 @@ export function MoveTargetDialog({
                 );
               })}
 
-              {spaces.length === 0 && kind !== "space" ? (
-                <div className="px-2 py-6 text-sm text-ink-3">There is nowhere you can move this. Moving needs Full access where it is now and Can edit where it goes.</div>
-              ) : null}
-              {spaces.length === 0 && kind === "space" ? (
-                <div className="px-2 py-6 text-sm text-ink-3">No other Space you manage.</div>
+              {nothingPickable ? (
+                <div className="px-2 py-6 text-sm text-ink-3">
+                  {nowhere ?? (kind === "space"
+                    ? "There is nowhere you can move this Space. Moving it needs Full access on it, on the Space it sits in now and on the Space it goes into."
+                    : "There is nowhere you can move this. Moving needs Full access where it is now and Can edit where it goes.")}
+                </div>
               ) : null}
             </>
           )}

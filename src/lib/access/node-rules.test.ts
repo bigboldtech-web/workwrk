@@ -935,8 +935,13 @@ describe("moves (moveDecision)", () => {
     const w = canvasWorld().onFolder("F", "ADMIN");
     w.g.since?.set("folder:F", CUTOFF + 1);
     expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
+    // The Space manager who owns it takes it out; one who does not cannot,
+    // because their Full access would not go with it (the one-way door).
+    const owner = new World("legacy").space("S", "PRIVATE").folder("F", "S").canvas("C", "S", "F", ME).onSpace("S", "ADMIN");
+    owner.rows.legacyBefore = CUTOFF;
+    expect(moveDecision(owner.rows, owner.g, { kind: "canvas", id: "C" }, null)).toBe(true);
     const manager = canvasWorld().onSpace("S", "ADMIN");
-    expect(moveDecision(manager.rows, manager.g, { kind: "canvas", id: "C" }, null)).toBe(true);
+    expect(moveDecision(manager.rows, manager.g, { kind: "canvas", id: "C" }, null)).toBe(false);
   });
   it("a Space contributor from before the cutoff no longer does: a move needs Full access on the canvas and where it is (P2, delta M6)", () => {
     const w = canvasWorld().onSpace("S", "MEMBER");

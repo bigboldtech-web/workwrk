@@ -168,6 +168,8 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   const [name, setName] = useState(doc.title);
   const [fav, setFav] = useState(!!doc.favorite);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  // "No location" when the caps could not be read: set from the move rule's own answer (openMove).
+  const [rootPick, setRootPick] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   // A host that knows the role passes it; otherwise it is resolved on open.
@@ -302,11 +304,12 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     setMode("move");
     if (offers.moveSpaces) { setSpaces(offers.moveSpaces); return; }
     if (spaces === null) {
-      // The caps could not be read: list the Spaces the viewer can open
-      // (paths=0 leaves out the ones seen only on the way to a grant, where
-      // no move can land); the PUT stays the gate.
-      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces?paths=0&counts=0", { cache: "no-store" });
-      const list = r.ok ? (Array.isArray(r.data) ? r.data : r.data.spaces ?? r.data.data ?? []) : [];
+      // The caps could not be read: ask the move rule itself for the places
+      // (the placement rule, P5), never the whole Space list, which offered
+      // Spaces the PUT then refused. "No location" too only when it is taken.
+      const r = await apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=doc&id=${encodeURIComponent(doc.id)}`, { cache: "no-store" });
+      const list = r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable) : [];
+      setRootPick(r.ok && r.data.root?.pickable === true);
       setSpaces(list.map((s) => ({ id: s.id, name: s.name, slug: s.slug, icon: s.icon ?? null, color: s.color ?? null })));
     }
   }
@@ -392,7 +395,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
           onSelect={(v) => void moveTo(v)}
           emptyLabel="No Spaces"
           sections={[
-            ...(offers.moveNone ? [{ options: [{ value: "none", label: "No location", description: "A standalone doc" }] }] : []),
+            ...((offers.moveSpaces ? offers.moveNone : rootPick) ? [{ options: [{ value: "none", label: "No location", description: "A standalone doc" }] }] : []),
             { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
           ]}
         />

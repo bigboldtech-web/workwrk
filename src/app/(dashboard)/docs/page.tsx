@@ -48,6 +48,7 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { DOCS_COLUMNS, readDocsColumns, type DocsColumnKey } from "@/lib/docs-prefs";
 import type { DocsSort, DocsView } from "@/lib/docs-list";
 import { cn } from "@/lib/utils";
+import { commonMoveDestinations, type CommonDestinations } from "@/lib/work/bulk-destinations";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -317,10 +318,17 @@ export default function DocsPage() {
     dispatchDocsChanged();
     void load();
   }
-  useEffect(() => {
-    if (!bulkMoveOpen || spaces !== null) return;
-    void (async () => { const s = await apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }); setSpaces(s.ok ? s.data.spaces ?? [] : []); })();
-  }, [bulkMoveOpen, spaces]);
+  // THE BULK MOVE OFFERS WHAT EVERY SELECTED DOC'S MOVE ACCEPTS (the
+  // placement rule's P5): the intersection of each managed doc's
+  // destinations, asked when the picker opens, "No location" included only
+  // when every doc may leave every place. It listed every Space the person
+  // could read, and the server refused the picks one doc at a time.
+  const [bulkDests, setBulkDests] = useState<CommonDestinations | null>(null);
+  const toggleBulkMove = useCallback(() => {
+    setBulkMoveOpen((o) => !o);
+    setBulkDests(null);
+    void commonMoveDestinations("doc", selectedRows.filter((r) => r.canManage).map((r) => r.id)).then(setBulkDests);
+  }, [selectedRows]);
 
   /* ── columns (Display) ── */
   const cols = readDocsColumns(prefs.home);
@@ -527,9 +535,12 @@ export default function DocsPage() {
               bulkActions={
                 <>
                   <span className="relative">
-                    <BulkAction icon={FolderInput} label="Move to…" onClick={() => setBulkMoveOpen((o) => !o)} />
+                    <BulkAction icon={FolderInput} label="Move to…" onClick={toggleBulkMove} />
                     <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected docs" side="top" onSelect={(v) => void bulkMove(v)}
-                      sections={[{ options: [{ value: "none", label: "No location" }] }, { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) }]} />
+                      sections={[
+                        ...(bulkDests?.root ? [{ options: [{ value: "none", label: "No location" }] }] : []),
+                        { label: "Spaces", options: (bulkDests?.spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+                      ]} />
                   </span>
                   <BulkAction icon={Star} label="Add to favorites" onClick={() => void bulkFavorite()} />
                   <BulkAction icon={Trash2} label="Move to Trash" destructive onClick={() => void bulkTrash()} />

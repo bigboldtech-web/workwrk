@@ -25,7 +25,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   // Un-archiving is a doc-level mutation — edit-gated.
   const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
+  if (role === "view") {
+    // P6: one plain sentence naming what is needed (it answered "read-only").
+    const message = "You need Can edit on this doc to restore it.";
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
+  }
   if (!doc.archivedAt) return NextResponse.json({ ok: true, alreadyLive: true });
 
   // Restoring puts the doc back INTO its place, so the placement rule holds

@@ -13,7 +13,7 @@ import { captureListLinks, listLinksAvailable, reconcileListLinks } from "@/lib/
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
 import { retargetTaskSnapshot } from "@/lib/trash-retarget";
-import { canvasesHaveFolders, folderBranch } from "@/lib/access/node-placement";
+import { canvasesHaveFolders, folderBranch, lockFolderBranch } from "@/lib/access/node-placement";
 
 export type TrashType =
   | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
@@ -652,8 +652,11 @@ export async function moveToTrash(
         // A Folder takes its whole subtree (the folder registry entry), so its
         // Folders are locked first (a sub-folder or a List created inside it
         // meanwhile waits, then fails its key), then every List in any of them.
-        const folderIds = type === "folder" ? [id, ...(await folderBranch(tx, ctx.organizationId, id)).map((f) => f.id)] : [];
-        if (type === "folder") await tx.$queryRaw`SELECT id FROM "Folder" WHERE id = ANY(${folderIds}::text[]) FOR UPDATE`;
+        // The branch is the one lockFolderBranch answers, read again after
+        // each lock: a sub-folder committed while this delete waited on its
+        // parent is locked and captured too, never left behind to drop to the
+        // Space root when its parent row goes (the move's race, round three).
+        const folderIds = type === "folder" ? await lockFolderBranch(tx, ctx.organizationId, id) : [];
         const boards = type === "board"
           ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE id = ${id} FOR UPDATE`
           : type === "folder"

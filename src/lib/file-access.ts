@@ -24,7 +24,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { nodeCtxFromLevel } from "@/lib/access/node-access";
-import { NodeEvaluator, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
+import { NodeEvaluator, roleAtLeast, type NodeCtx, type NodeRef } from "@/lib/access/node-rules";
 import { loadWorld } from "@/lib/access/node-world";
 
 type FileRow = { id: string; spaceId: string | null; spaceFolderId: string | null };
@@ -33,13 +33,17 @@ async function readableSubset(
   files: FileRow[],
   viewer: { organizationId: string; userId: string; accessLevel?: string | null },
 ): Promise<FileRow[]> {
+  return readableSubsetFor(files, nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel ?? "EMPLOYEE"));
+}
+
+/** The rule over one world for a resolved viewer (a NodeCtx), for callers that hold one. */
+async function readableSubsetFor(files: FileRow[], ctx: NodeCtx): Promise<FileRow[]> {
   const refs: NodeRef[] = [];
   for (const f of files) {
     if (f.spaceId) refs.push({ kind: "space", id: f.spaceId });
     if (f.spaceFolderId) refs.push({ kind: "folder", id: f.spaceFolderId });
   }
   if (refs.length === 0) return files;
-  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel ?? "EMPLOYEE");
   const { rows, grants } = await loadWorld(ctx, refs);
   const ev = new NodeEvaluator(rows, grants);
   const reads = (ref: NodeRef) => roleAtLeast(ev.effective(ref).role, "VIEW");
@@ -110,5 +114,18 @@ export async function canReadFile(
     (await prisma.space.findUnique({ where: { id: file.spaceId }, select: { organizationId: true } }))?.organizationId;
   if (!orgId) return false;
   const [ok] = await readableSubset([{ id: "file", spaceId: file.spaceId, spaceFolderId: file.spaceFolderId }], { organizationId: orgId, userId, accessLevel });
+  return !!ok;
+}
+
+/**
+ * The same rule for ONE file, for a viewer the caller already resolved (a
+ * NodeCtx from the session), so a route asks it without reading the session's
+ * access level itself: the file Move dialog's places (GET
+ * /api/move/destinations?kind=file) answer only for a file the person can read.
+ */
+export async function canReadFileAs(ctx: NodeCtx, file: { spaceId: string | null; spaceFolderId: string | null }): Promise<boolean> {
+  if (ctx.denied) return false;
+  if (!file.spaceId) return true;
+  const [ok] = await readableSubsetFor([{ id: "file", spaceId: file.spaceId, spaceFolderId: file.spaceFolderId }], ctx);
   return !!ok;
 }

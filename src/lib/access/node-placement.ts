@@ -35,6 +35,7 @@ import {
   currentPlace,
   derivePlacement,
   docAnchorPlace,
+  docNestLoops,
   emptyGrants,
   folderDeleteAllowed,
   folderMoveAllowed,
@@ -42,6 +43,7 @@ import {
   emptyRows,
   fileEditDecision,
   fileMoveVerdict,
+  filePlace,
   moveRefusal,
   moveVerdict,
   placeHolds,
@@ -52,10 +54,12 @@ import {
   type DocHome,
   type NodeCtx,
   type NodeRef,
+  type NodeRows,
   type Place,
   type PlaceKind,
   type Placement,
   type PlacementFolderFact,
+  type ViewerGrants,
 } from "./node-rules";
 import { loadWorld } from "./node-world";
 import { listVisibleSpaces, viewerPathContainers } from "./node-access";
@@ -352,15 +356,18 @@ export async function moveFolder(
     return fail(400, `Folders can only nest ${MAX_FOLDER_DEPTH} levels deep.`);
   }
 
-  const dest: NodeRef = destFolderId ? { kind: "folder", id: destFolderId } : { kind: "space", id: destSpaceId };
-  const check = await checkMove(ctx, { kind: "folder", id: folder.id }, dest);
-  if (!check.ok) return check;
-
   const spaceChanges = destSpaceId !== folder.spaceId;
   const parentChanges = destFolderId !== folder.parentFolderId || spaceChanges;
+  // A request that names exactly where the Folder already sits, with no new
+  // position, writes nothing, so it asks nothing of the rule: a rename that
+  // carries the Folder's own Space is no move (P3 refuses only a Space that
+  // disagrees with the parent).
   if (!parentChanges && req.position === undefined) {
     return { ok: true, folder: { id: folder.id, name: folder.name, spaceId: folder.spaceId, parentFolderId: folder.parentFolderId, position: folder.position }, moved: false, movedFolders: 0 };
   }
+  const dest: NodeRef = destFolderId ? { kind: "folder", id: destFolderId } : { kind: "space", id: destSpaceId };
+  const check = await checkMove(ctx, { kind: "folder", id: folder.id }, dest);
+  if (!check.ok) return check;
   // P2: a Folder that changes parent carries everything beneath it, so the
   // mover needs Full access on all of it (folderMoveAllowed). Asked here so a
   // refusal costs no transaction, and again under the locks below, where the
@@ -594,11 +601,39 @@ export async function docDescendants(db: RawDb, organizationId: string, docId: s
 }
 
 /**
+ * The advisory lock every doc re-parent in one org takes, as the pair
+ * (DOC_TREE_LOCK, hashtext(organizationId)): a transaction lock, released at
+ * commit or rollback.
+ */
+export const DOC_TREE_LOCK = 482901;
+
+/** The page chain above `startId` (it first), as ids, bounded: a chain that loops repeats an id. */
+async function docChainIds(db: RawDb, organizationId: string, startId: string): Promise<string[]> {
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE up AS (
+      SELECT d."id", d."parentId", 0 AS depth FROM "Doc" d WHERE d."id" = ${startId} AND d."organizationId" = ${organizationId}
+      UNION ALL
+      SELECT p."id", p."parentId", u.depth + 1 FROM "Doc" p JOIN up u ON p."id" = u."parentId"
+      WHERE u.depth < 64 AND p."organizationId" = ${organizationId}
+    )
+    SELECT "id" FROM up ORDER BY depth`;
+  return rows.map((r) => r.id);
+}
+
+/**
  * The write of a doc tree move (P3): the doc's own placement fields and, in
  * the same transaction, the anchor of every page beneath it that carries a
  * place of its own (node-rules subtreeAnchorPlan), so the page tree moves
  * whole. A tree whose new home is no place while a page beneath it has one is
  * refused (409), and nothing is written.
+ *
+ * A new parent page never makes a loop (node-rules docNestLoops). The
+ * route asks it before, but two moves that each passed that read (A under B,
+ * B under A) both committed and left a cycle no one could reach (round three,
+ * break 2). So every re-parent in the org waits for the one before it on one
+ * advisory lock, and the chain above the new parent is read again under it:
+ * the doc on that chain, or a chain that already loops, is a 400 with
+ * nothing written.
  */
 export async function writeDocTreeMove(
   organizationId: string,
@@ -609,6 +644,12 @@ export async function writeDocTreeMove(
   const homeAfter = after ? await docHomeOf(organizationId, after) : null;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (data.parentId) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${DOC_TREE_LOCK}::int, hashtext(${organizationId}))::text AS locked`;
+        if (docNestLoops(docId, await docChainIds(tx, organizationId, data.parentId))) {
+          throw new PlacementConflict("A page can't go inside itself or one of its own sub-pages.", 400);
+        }
+      }
       let rewrite: string[] = [];
       if (homeAfter) {
         const plan = subtreeAnchorPlan(homeAfter, await docDescendants(tx, organizationId, docId));
@@ -650,34 +691,75 @@ export async function docAnchorPlaceOf(organizationId: string, anchor: { entityT
   return docAnchorPlace(rows, anchor.entityType, anchor.entityId);
 }
 
+/** Is this Space in the org and not archived? */
+async function spaceLive(organizationId: string, spaceId: string): Promise<boolean> {
+  return !!(await prisma.space.findFirst({ where: { id: spaceId, organizationId, archivedAt: null }, select: { id: true } }));
+}
+
+/** Is this Folder in the org, out of Trash with every Folder above it, and in a Space that is not archived? */
+async function folderLive(organizationId: string, folderId: string): Promise<boolean> {
+  const f = await folderPlacementFact(organizationId, folderId);
+  return !!f && !f.inTrash && (await spaceLive(organizationId, f.spaceId));
+}
+
+/** Is this List in the org, not archived, and is every container it sits in live? A List in no Space (a personal List) has none. */
+async function listLive(organizationId: string, boardId: string): Promise<boolean> {
+  const b = await prisma.board.findFirst({ where: { id: boardId, organizationId, archivedAt: null }, select: { spaceId: true, folderId: true } });
+  if (!b) return false;
+  if (b.folderId && !(await folderLive(organizationId, b.folderId))) return false;
+  if (b.spaceId && !(await spaceLive(organizationId, b.spaceId))) return false;
+  return true;
+}
+
 /**
- * Is the place a doc would come back to still there? Its anchor (a Space not
- * archived, a Folder not in Trash, a List or a task not archived) and its
- * parent page (not archived), in this org. A doc restored in place into a
- * container that is gone would point at nothing, or at a Folder another
- * Space now holds.
+ * Is the place a doc is made, copied, moved or restored into still live
+ * (node-rules P1: nothing is added to a place in Trash or archived)? Its
+ * parent page and every page above it up to the first anchored one must be
+ * there and out of Trash, and the anchor that settles its place (its own, or
+ * that first anchored page's) must be live all the way up: a Space not
+ * archived; a Folder out of Trash, with every Folder above it, in a Space not
+ * archived; a List not archived, in a live Folder and Space; a task not
+ * archived, on a live List. A chain that loops, runs too deep or names a
+ * parent that is gone reads as no place (R6 reads it as closed). The org's
+ * anchors (a note, any other type) stay open. A doc anchored in a Folder of
+ * an archived Space once went through while every other create there was
+ * refused (round three, break 5).
  */
 export async function docPlaceLive(
   organizationId: string,
   doc: { entityType: string | null; entityId: string | null; parentId: string | null },
 ): Promise<boolean> {
+  let anchor = { entityType: doc.entityType, entityId: doc.entityId };
   if (doc.parentId) {
-    const parent = await prisma.doc.findFirst({ where: { id: doc.parentId, organizationId }, select: { archivedAt: true } });
-    if (!parent || parent.archivedAt) return false;
+    const chain = await prisma.$queryRaw<Array<{ parentId: string | null; entityType: string | null; entityId: string | null; archivedAt: Date | null }>>`
+      WITH RECURSIVE up AS (
+        SELECT d."id", d."parentId", d."entityType", d."entityId", d."archivedAt", 0 AS depth
+        FROM "Doc" d WHERE d."id" = ${doc.parentId} AND d."organizationId" = ${organizationId}
+        UNION ALL
+        SELECT p."id", p."parentId", p."entityType", p."entityId", p."archivedAt", u.depth + 1
+        FROM "Doc" p JOIN up u ON p."id" = u."parentId"
+        WHERE u.depth < 16 AND p."organizationId" = ${organizationId} AND (u."entityType" IS NULL OR u."entityId" IS NULL)
+      )
+      SELECT "parentId", "entityType", "entityId", "archivedAt" FROM up ORDER BY depth`;
+    if (chain.length === 0 || chain.some((p) => p.archivedAt !== null)) return false;
+    const top = chain[chain.length - 1];
+    const topAnchored = !!(top.entityType && top.entityId);
+    if (!topAnchored && top.parentId) return false;
+    if (!(anchor.entityType && anchor.entityId) && topAnchored) anchor = { entityType: top.entityType, entityId: top.entityId };
   }
-  const id = doc.entityId;
-  if (!doc.entityType || !id) return true;
-  switch (doc.entityType) {
+  const id = anchor.entityId;
+  if (!anchor.entityType || !id) return true;
+  switch (anchor.entityType) {
     case "SPACE":
-      return !!(await prisma.space.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
-    case "FOLDER": {
-      const f = await folderPlacementFact(organizationId, id);
-      return !!f && !f.inTrash;
-    }
+      return spaceLive(organizationId, id);
+    case "FOLDER":
+      return folderLive(organizationId, id);
     case "BOARD":
-      return !!(await prisma.board.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
-    case "BOARD_ITEM":
-      return !!(await prisma.item.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
+      return listLive(organizationId, id);
+    case "BOARD_ITEM": {
+      const item = await prisma.item.findFirst({ where: { id, organizationId, archivedAt: null }, select: { boardId: true } });
+      return !!item && (await listLive(organizationId, item.boardId));
+    }
     default:
       return true;
   }
@@ -745,6 +827,52 @@ export async function checkFileMove(
     return fail(404, "That place no longer exists.");
   }
   return fail(403, moveRefusal("file", verdict.failure));
+}
+
+/**
+ * P3 then P2 for a file's place in the Space tree (PATCH /api/files/[id]).
+ * Where the request lands is derived from its destination, never taken from
+ * the request (resolvePlacement): a Space folder settles the Space, and a
+ * spaceId that disagrees with it (null included) is a 400, as is a folder in
+ * Trash or in an archived Space; a Space alone is its root (archived: a 400);
+ * neither is the org's. A named place the viewer can neither open nor pass
+ * through is a 404 before anything else is said about it, so a guessed id
+ * confirms nothing. Then fileMoveVerdict (checkFileMove). The write reads the
+ * folder's Space again under the share lock (lockFolderPlacement), inside the
+ * update's own transaction.
+ */
+export async function resolveFileMove(
+  ctx: NodeCtx,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+  req: { spaceFolderId: string | null; spaceId?: string | null },
+): Promise<{ ok: true; spaceId: string | null; spaceFolderId: string | null; same: boolean } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const named: NodeRef | null = req.spaceFolderId ? { kind: "folder", id: req.spaceFolderId } : req.spaceId ? { kind: "space", id: req.spaceId } : null;
+  if (named) {
+    const { rows, grants } = await loadWorld(ctx, [named], { chain: true });
+    if (!(await seesPlace(ctx, new NodeEvaluator(rows, grants), named))) return fail(404, "That place no longer exists.");
+  }
+  if (req.spaceFolderId && req.spaceId === null) return fail(400, "A file in a Space folder is in that folder's Space.");
+  const placed = await resolvePlacement(ctx.organizationId, { spaceId: req.spaceId, folderId: req.spaceFolderId }, { root: true });
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const check = await checkFileMove(ctx, file, filePlace({ spaceId: placed.spaceId, spaceFolderId: placed.folderId }));
+  if (!check.ok) return check;
+  return { ok: true, spaceId: placed.spaceId, spaceFolderId: placed.folderId, same: check.same };
+}
+
+/**
+ * The write half of P3 for a node a move puts in a Space folder (a file):
+ * inside the write's transaction, the folder's Space read again under the
+ * share lock every create takes (lockParentFolder). A move of that folder
+ * then either waits for this write and carries it with the branch, or has
+ * already committed, and this write is refused with nothing written. Without
+ * it a file moved in while its folder changed Space kept the old Space under
+ * a folder in the new one (round three, break 1).
+ */
+export async function lockFolderPlacement(tx: Tx, organizationId: string, placed: { spaceId: string | null; folderId: string | null }): Promise<void> {
+  if (!placed.folderId) return;
+  const parent = await lockParentFolder(tx, organizationId, placed.folderId);
+  if (!parent || parent.spaceId !== placed.spaceId) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
 }
 
 /**
@@ -959,6 +1087,42 @@ export async function moveDestinations(ctx: NodeCtx, ref: NodeRef): Promise<Move
  * through is named.
  */
 export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise<MoveDestinations> {
+  return placeDestinations(ctx, what, (rows, grants, place) => createDecision(rows, grants, place, what));
+}
+
+/**
+ * P5 for a file (node-rules fileMoveVerdict): the places a move of this file
+ * would land, for the file Move dialog, in the same shape. The file's own
+ * place is marked current and is never a destination. The caller has checked
+ * that the viewer can read the file.
+ */
+export async function fileMoveDestinations(
+  ctx: NodeCtx,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+): Promise<MoveDestinations> {
+  const here = filePlace(file);
+  return placeDestinations(
+    ctx,
+    "file",
+    (rows, grants, place) => {
+      const v = fileMoveVerdict(rows, grants, file, place);
+      return v.ok && !v.same;
+    },
+    { here, extraRefs: here ? [here] : [] },
+  );
+}
+
+/**
+ * The walk both pickers share: every Space the viewer can open or pass
+ * through, each Folder in it the viewer can open, and `accepts` asked of each
+ * place (and of the org root when `what` may live there) in one world.
+ */
+async function placeDestinations(
+  ctx: NodeCtx,
+  what: PlaceKind,
+  accepts: (rows: NodeRows, grants: ViewerGrants, place: Place) => boolean,
+  opts: { here?: Place; extraRefs?: NodeRef[] } = {},
+): Promise<MoveDestinations> {
   if (ctx.denied) return { root: null, spaces: [] };
   const org = ctx.organizationId;
   const spaces = await listVisibleSpaces(ctx, { paths: true });
@@ -970,7 +1134,11 @@ export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise
         select: { id: true, name: true, parentFolderId: true, spaceId: true, icon: true, color: true },
       })
     : [];
-  const refs: NodeRef[] = [...spaces.map((s) => ({ kind: "space" as const, id: s.id })), ...folderRows.map((f) => ({ kind: "folder" as const, id: f.id }))];
+  const refs: NodeRef[] = [
+    ...(opts.extraRefs ?? []),
+    ...spaces.map((s) => ({ kind: "space" as const, id: s.id })),
+    ...folderRows.map((f) => ({ kind: "folder" as const, id: f.id })),
+  ];
   const { rows, grants } = refs.length
     ? await loadWorld(ctx, refs, { chain: true })
     : { rows: emptyRows(org), grants: emptyGrants(viewerOf(ctx)) };
@@ -978,6 +1146,8 @@ export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise
   const paths = ctx.orgAdmin ? new Set<string>() : await viewerPathContainers(ctx);
   const sees = (r: NodeRef) => roleAtLeast(ev.effective(r).role, "VIEW") || paths.has(refKey(r));
   const byId = new Map(folderRows.map((f) => [f.id, f]));
+  const here = opts.here;
+  const isHere = (p: Place) => here !== undefined && (p === null ? here === null : here !== null && here.kind === p.kind && here.id === p.id);
 
   const out: DestinationSpace[] = [];
   for (const s of spaces) {
@@ -988,10 +1158,10 @@ export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise
     for (const f of inSpace) {
       const fr: NodeRef = { kind: "folder", id: f.id };
       if (!roleAtLeast(ev.effective(fr).role, "VIEW")) continue;
-      if (createDecision(rows, grants, fr, what)) pick.add(f.id);
+      if (accepts(rows, grants, fr)) pick.add(f.id);
     }
     const keep = new Set<string>();
-    for (const id of pick) {
+    const keepUp = (id: string) => {
       let cursor: string | null = id;
       const seen = new Set<string>();
       while (cursor && !seen.has(cursor)) {
@@ -1000,24 +1170,25 @@ export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise
         keep.add(cursor);
         cursor = byId.get(cursor)?.parentFolderId ?? null;
       }
-    }
-    const rootPick = placeHolds(spaceRef, what) && createDecision(rows, grants, spaceRef, what);
-    if (!rootPick && keep.size === 0) continue;
+    };
+    for (const id of pick) keepUp(id);
+    if (here?.kind === "folder" && byId.get(here.id)?.spaceId === s.id) keepUp(here.id);
+    const rootPick = placeHolds(spaceRef, what) && accepts(rows, grants, spaceRef);
+    const current = isHere(spaceRef);
+    if (!rootPick && keep.size === 0 && !current) continue;
     const ordered: DestinationFolder[] = [];
     const visit = (parent: string | null) => {
       for (const f of inSpace) {
         if (!keep.has(f.id)) continue;
         const p = f.parentFolderId && keep.has(f.parentFolderId) ? f.parentFolderId : null;
         if (p !== parent) continue;
-        ordered.push({ id: f.id, name: f.name, parentFolderId: p, icon: f.icon, color: f.color, pickable: pick.has(f.id), current: false });
+        ordered.push({ id: f.id, name: f.name, parentFolderId: p, icon: f.icon, color: f.color, pickable: pick.has(f.id), current: isHere({ kind: "folder", id: f.id }) });
         visit(f.id);
       }
     };
     visit(null);
-    out.push({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: rootPick, current: false, folders: ordered });
+    out.push({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: rootPick, current, folders: ordered });
   }
-  const root = placeHolds(null, what)
-    ? { pickable: createDecision(emptyRows(org), emptyGrants(viewerOf(ctx)), null, what), current: false }
-    : null;
+  const root = placeHolds(null, what) ? { pickable: accepts(rows, grants, null), current: isHere(null) } : null;
   return { root, spaces: out };
 }

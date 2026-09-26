@@ -81,6 +81,9 @@ describe("the doc routes answer the menu with the write's own rules", () => {
     expect(menu).toMatch(/\/api\/docs\/\$\{doc\.id\}\?menu=1/);
     expect(menu).toMatch(/\{offers\.duplicate \? <MenuItem icon=\{Copy\} label="Duplicate"/);
     expect(menu).toMatch(/\{offers\.move \? <MenuItem icon=\{FolderInput\} label="Move to…"/);
-    expect(menu).toMatch(/\.\.\.\(offers\.moveNone \? \[\{ options: \[\{ value: "none", label: "No location"/);
+    // "No location": the caps' answer when they were read, else the move
+    // rule's own answer (GET /api/move/destinations?kind=doc), never a guess.
+    expect(menu).toMatch(/\.\.\.\(\(offers\.moveSpaces \? offers\.moveNone : rootPick\) \? \[\{ options: \[\{ value: "none", label: "No location"/);
+    expect(menu).toMatch(/setRootPick\(r\.ok && r\.data\.root\?\.pickable === true\);/);
   });
 });

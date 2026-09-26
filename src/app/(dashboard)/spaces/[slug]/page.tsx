@@ -249,9 +249,11 @@ export default async function SpacePage(props: {
     tree.spaceRole === "full" ? "full" : tree.spaceRole === "edit" ? "edit" : "view";
   const spaceCanEdit = spaceRole === "full" || spaceRole === "edit";
   const bookmarksCanEdit = spaceRole === "full";
-  // POST /api/folders and POST /api/boards at the Space root need Full access
-  // on the Space, so the "+" on the Folders and Lists cards is theirs alone.
-  const spaceCanCreate = spaceRole === "full";
+  // The placement rule's create half (node-rules P1): Can edit or higher on
+  // the Space makes Folders and Lists at its root, exactly what POST
+  // /api/folders and POST /api/boards accept, so the "+" on the Folders and
+  // Lists cards shows for Can edit too. Can view never creates.
+  const spaceCanCreate = spaceCanEdit;
   const spaceBookmarks = readBookmarks(space.settings);
 
   const workflow = readWorkflow(space.settings);
@@ -837,7 +839,7 @@ export default async function SpacePage(props: {
                 folders: (
                   <OverviewCard title="Folders" action={spaceCanCreate ? <FolderCardCreate spaceId={space.id} /> : null}>
                     {visibleFolders.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No folders yet." : "No folders yet. Creating one needs Full access on this space."}</p>
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No folders yet." : "No folders yet. Creating one needs Can edit on this Space."}</p>
                     ) : (
                       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {visibleFolders.map((f) => (
@@ -870,7 +872,7 @@ export default async function SpacePage(props: {
                 lists: (
                   <OverviewCard title="Lists" action={spaceCanCreate ? <ListCardCreate spaceId={space.id} /> : null}>
                     {allBoards.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Full access on this space."}</p>
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Can edit on this Space."}</p>
                     ) : (
                       <div className="rounded-lg border border-line overflow-hidden">
                         <div className="grid grid-cols-[minmax(0,1fr)_64px_150px_88px_150px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">

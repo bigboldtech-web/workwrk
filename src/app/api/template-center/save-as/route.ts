@@ -26,7 +26,7 @@ import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { snapshotBoard, snapshotFolder, snapshotSpace } from "@/lib/template-center";
 import { templatesAppGate } from "@/lib/templates/gate";
 import { docAccess } from "@/lib/doc-access";
-import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRole, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 const COMPLEXITY = ["BEGINNER", "INTERMEDIATE", "ADVANCED"] as const;
@@ -60,6 +60,13 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return jsonError("Invalid body", 400);
   const input = parsed.data;
   const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
+  // A Folder or Space template carries only the Lists the saver could save
+  // one by one (Full access on each, the LIST branch's gate below): a Private
+  // List they cannot open, or only read, never reaches the whole org.
+  const fullLists = async (boardIds: string[]): Promise<ReadonlySet<string>> => {
+    const roles = await nodeRoles(nodeCtx, boardIds.map((id) => ({ kind: "list" as const, id })));
+    return new Set(boardIds.filter((id) => roleAtLeast(roles.get(`list:${id}`)?.role ?? "none", "FULL")));
+  };
 
   let kind: "LIST" | "FOLDER" | "SPACE" | "DOC" | "WHITEBOARD";
   let snap: { name: string; payload: object } | null;
@@ -110,14 +117,14 @@ export async function POST(req: NextRequest) {
     if (!folder || !folderRole || !roleAtLeast(folderRole.role, "VIEW")) return jsonError("Folder not found", 404);
     if (!roleAtLeast(folderRole.role, "FULL")) return jsonError("Forbidden", 403);
     kind = "FOLDER";
-    snap = await snapshotFolder(input.folderId);
+    snap = await snapshotFolder(input.folderId, { canSaveList: fullLists });
   } else {
     if (!input.spaceId) return jsonError("spaceId is required", 400);
     const space = await getSpaceForReader(input.spaceId, userId, accessLevel);
     if (!space) return jsonError("Space not found", 404);
     if (!(await canEditSpace(input.spaceId, userId, accessLevel))) return jsonError("Forbidden", 403);
     kind = "SPACE";
-    snap = await snapshotSpace(input.spaceId);
+    snap = await snapshotSpace(input.spaceId, { canSaveList: fullLists });
   }
 
   if (!snap) return jsonError("Source not found", 404);

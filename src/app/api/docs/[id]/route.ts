@@ -13,7 +13,7 @@ import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
 import { anchorAgreesWithParent, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
-import { checkMove, docAnchorPlaceOf, docHomeOf, moveDestinations, writeDocTreeMove } from "@/lib/access/node-placement";
+import { checkMove, docAnchorPlaceOf, docHomeOf, docPlaceLive, moveDestinations, writeDocTreeMove } from "@/lib/access/node-placement";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
@@ -128,6 +128,13 @@ async function treeMoveRefusal(
   }
   const check = await checkMove(nodeCtx, { kind: "doc", id }, dest);
   if (!check.ok) return refusal(check.status, check.status === 404 ? "not found" : "forbidden", check.status === 404 ? MOVE_OUT_OF_REACH : check.error);
+  // P1: nothing lands in a place that is archived or in Trash (a Folder of an
+  // archived Space, a List in a trashed Folder, a page in Trash), the same
+  // check a new doc there answers. Asked once the viewer is known to reach
+  // the place, so a probe learns nothing about one they cannot open.
+  if (!(await docPlaceLive(ctx.orgId, after))) {
+    return refusal(400, "place_gone", "That place is archived or in Trash, so nothing can be moved into it.");
+  }
   if (after.parentId && !after.entityType) {
     const [homeBefore, homeAfter] = await Promise.all([docHomeOf(ctx.orgId, existing), docHomeOf(ctx.orgId, after)]);
     if (homeAfter.kind === "anchor" && !sameHome(homeBefore, homeAfter)
@@ -354,7 +361,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       ...(parsed.data.entityType !== undefined ? { entityType: parsed.data.entityType } : {}),
       ...(parsed.data.entityId !== undefined ? { entityId: parsed.data.entityId } : {}),
     }, placeChanges ? after : null);
-    if (!written.ok) return NextResponse.json(refusal(written.status, "split_tree", written.error).body, { status: written.status });
+    if (!written.ok) return NextResponse.json(refusal(written.status, written.status === 400 ? "cannot_nest" : "split_tree", written.error).body, { status: written.status });
     return NextResponse.json({ doc: written.doc, movedPages: written.rewritten });
   }
 

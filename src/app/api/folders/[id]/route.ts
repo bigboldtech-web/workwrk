@@ -1,11 +1,14 @@
 // PATCH  /api/folders/[id]: rename, re-parent, re-position, restrict
 // DELETE /api/folders/[id]: archive (soft); ?hard=1 moves it to Trash
 //
-// The placement rule (node-rules P1 to P7): a new parent goes through the one
-// move helper (node-placement moveFolder), which takes the Space from the new
-// parent and carries the whole subtree in one transaction. A `spaceId` field
-// is refused: a Folder's Space is never a field of its own (P3), and writing
-// one here is how a sub-folder once jumped to another Space's root under a
+// The placement rule (node-rules P1 to P7): a new parent or a `spaceId` goes
+// through the one move helper (node-placement moveFolder), which takes the
+// Space from the parent and carries the whole subtree in one transaction. A
+// `spaceId` is never written as a field of its own (P3): it is checked
+// against the parent the Folder ends under (the one named, else the one it
+// has), and one that disagrees is a 400 with nothing written. For a Folder at
+// a Space's root, the Space named is the root it goes to. Writing it straight
+// through is how a sub-folder once jumped to another Space's root under a
 // parent that stayed behind. A delete takes the whole subtree, so it needs
 // Full access on everything in it (node-placement checkFolderDelete).
 
@@ -17,7 +20,7 @@ import { archiveFolder, updateFolder, type UpdateFolderInput } from "@/lib/folde
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
-import { checkFolderDelete, moveFolder } from "@/lib/access/node-placement";
+import { PlacementConflict, checkFolderDelete, moveFolder } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { recordGeneralAccessChange } from "@/lib/access/grants";
 
@@ -41,7 +44,7 @@ async function ctx() {
 async function loadFolderAndGate(folderId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const folder = await prisma.folder.findUnique({
     where: { id: folderId },
-    select: { id: true, spaceId: true, organizationId: true, visibility: true },
+    select: { id: true, spaceId: true, parentFolderId: true, organizationId: true, visibility: true },
   });
   if (!folder || folder.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
@@ -77,10 +80,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  if (parsed.data.spaceId !== undefined) {
-    return NextResponse.json({ error: "A folder's Space comes from where it sits. Use Move to put it in another Space." }, { status: 400 });
-  }
-  const { parentFolderId, position, ...fields } = parsed.data;
+  const { parentFolderId, position, spaceId, ...fields } = parsed.data;
   const rest: UpdateFolderInput = {
     name: fields.name, description: fields.description, icon: fields.icon, color: fields.color, visibility: fields.visibility,
   };
@@ -88,16 +88,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (rest.name !== undefined && !rest.name.trim()) {
     return NextResponse.json({ error: "Folder name cannot be empty" }, { status: 400 });
   }
-  // A new parent is a move (P2, P4): the one move helper, before anything
-  // else is written, so a refused move writes nothing at all.
+  // A new parent or a Space is a move (P2, P3, P4): the one move helper,
+  // before anything else is written, so a refused move writes nothing at all.
+  // With a Space and no parent named, the parent is the one the Folder has.
+  const placing = parentFolderId !== undefined || spaceId !== undefined;
   let moved: Awaited<ReturnType<typeof moveFolder>> | null = null;
-  if (parentFolderId !== undefined) {
-    moved = await moveFolder(gate.ctx, id, { parentFolderId, position });
+  if (placing) {
+    moved = await moveFolder(gate.ctx, id, {
+      spaceId,
+      parentFolderId: parentFolderId !== undefined ? parentFolderId : gate.folder.parentFolderId,
+      position,
+    });
     if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: moved.status });
   }
   try {
     const before = gate.folder.visibility;
-    const patch = { ...rest, ...(parentFolderId === undefined && position !== undefined ? { position } : {}) };
+    const patch = { ...rest, ...(!placing && position !== undefined ? { position } : {}) };
     const updated = Object.keys(patch).length === 0 && moved?.ok
       ? await prisma.folder.findUnique({ where: { id } })
       : await prisma.$transaction(async (tx) => {
@@ -129,7 +135,13 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const hard = new URL(req.url).searchParams.get("hard") === "1";
   if (hard) {
     // Recoverable delete: the Folder and its whole subtree as one Trash row.
-    await moveToTrash("folder", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+    try {
+      await moveToTrash("folder", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+    } catch (err) {
+      // A branch that kept growing under its locks: nothing was written.
+      if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });
+      throw err;
+    }
     return NextResponse.json({ ok: true });
   }
   const archived = await archiveFolder(id, c.userId);

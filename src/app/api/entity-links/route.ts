@@ -22,7 +22,7 @@ import {
   listLinksFrom,
   listLinksTo,
 } from "@/lib/entity-link";
-import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
+import { canMutateLinkFromSource, linkWriteRefusalFor } from "@/lib/entity-link-authz";
 import { logActivity } from "@/lib/item-thread";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeKind } from "@/lib/access/node-rules";
@@ -317,6 +317,14 @@ export async function POST(req: Request) {
   if (!(await canMutateLinkFromSource(session, c.organizationId, parsed.data.source))) {
     return NextResponse.json({ error: "You can't edit links on this item." }, { status: 403 });
   }
+  // The placement rule (node-rules P1): a link on a node is content added to
+  // it, so Can edit on the source and Can view on the target. It checked
+  // nothing here, and a Can view grantee attached files to tasks.
+  const refused = await linkWriteRefusalFor(c, {
+    sourceType: parsed.data.source.type, sourceId: parsed.data.source.id,
+    targetType: parsed.data.target.type, targetId: parsed.data.target.id,
+  });
+  if (refused) return NextResponse.json({ error: refused.error }, { status: refused.status });
 
   const link = await createEntityLink({
     organizationId: c.organizationId,

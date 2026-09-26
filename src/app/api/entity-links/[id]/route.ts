@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
+import { canMutateLinkFromSource, linkWriteRefusalFor } from "@/lib/entity-link-authz";
 import { logActivity } from "@/lib/item-thread";
 
 async function ctx() {
@@ -37,6 +37,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     id: existing.sourceId,
   });
   if (!allowed) return NextResponse.json({ error: "You can't edit links on this item." }, { status: 403 });
+  // Removing a link takes content off its source, so it needs what adding one
+  // does (node-rules P1): Can edit on the source and Can view on the target.
+  const refused = await linkWriteRefusalFor(c, existing);
+  if (refused) return NextResponse.json({ error: refused.error }, { status: refused.status });
 
   await prisma.entityLink.delete({ where: { id } });
 

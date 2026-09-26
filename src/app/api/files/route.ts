@@ -143,7 +143,12 @@ export async function GET(req: NextRequest) {
     // Map each file back to one of its source items for "open task".
     const itemByFile = new Map<string, string>();
     for (const l of links) if (!itemByFile.has(l.targetId)) itemByFile.set(l.targetId, l.sourceId);
-    const fresh = await withFreshFileUrls(files);
+    // A link on a task never opens the file it names: each file answers to
+    // the file read rule, as it does everywhere else (gateFiles). A reader of
+    // the List saw every linked file with a fresh download URL, one in a
+    // Space they cannot open included.
+    const readable = await gateFiles(files, { organizationId: orgId, userId: getUserId(session), accessLevel: accessLevelB });
+    const fresh = await withFreshFileUrls(readable);
     return jsonSuccess(fresh.map((f) => ({ ...f, itemId: itemByFile.get(f.id) ?? null })));
   }
 

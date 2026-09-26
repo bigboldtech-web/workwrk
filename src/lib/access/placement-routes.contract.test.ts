@@ -19,10 +19,11 @@ describe("Folders", () => {
     expect(route).toMatch(/await moveFolder\(ctx, movedId,/);
     expect(route).not.toMatch(/updateFolder\(/);
   });
-  it("PATCH refuses a spaceId field and moves a new parent through the helper", () => {
+  it("PATCH moves a new parent or a spaceId through the helper, which checks the Space against the parent", () => {
     const route = read("src/app/api/folders/[id]/route.ts");
-    expect(route).toMatch(/if \(parsed\.data\.spaceId !== undefined\) \{\s*return NextResponse\.json\(\{ error: "A folder's Space comes from where it sits/);
-    expect(route).toMatch(/moved = await moveFolder\(gate\.ctx, id, \{ parentFolderId, position \}\)/);
+    expect(route).toMatch(/const placing = parentFolderId !== undefined \|\| spaceId !== undefined;/);
+    expect(route).toMatch(/moved = await moveFolder\(gate\.ctx, id, \{\s*spaceId,\s*parentFolderId: parentFolderId !== undefined \? parentFolderId : gate\.folder\.parentFolderId,/);
+    expect(route).not.toMatch(/comes from where it sits/);
   });
   it("both deletes take the whole subtree and ask checkFolderDelete first", () => {
     const route = read("src/app/api/folders/[id]/route.ts");
@@ -112,7 +113,8 @@ describe("Tables, canvases, files", () => {
   });
   it("files: an upload into a Folder or a Space's root, and a move in the Space tree, ask the rule", () => {
     expect(read("src/app/api/files/route.ts")).toMatch(/const placed = await resolveCreate\(nodeCtx, \{ spaceId, folderId: spaceFolderId \}, "file"\)/);
-    expect(read("src/app/api/files/[id]/route.ts")).toMatch(/const check = await checkFileMove\(/);
+    expect(read("src/app/api/files/[id]/route.ts")).toMatch(/const move = await resolveFileMove\(/);
+    expect(read("src/lib/access/node-placement.ts")).toMatch(/const check = await checkFileMove\(ctx, file, filePlace\(/);
   });
 });
 

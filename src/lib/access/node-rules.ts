@@ -171,6 +171,14 @@ export interface DocFact {
    * before the cutoff.
    */
   createdAt?: Date | null;
+  /**
+   * The page is locked (Doc.lockedById set). The lock is no access rule and
+   * never reaches the pages below (applyDocLock), but the page's own list of
+   * sub-pages is part of the page: as a container it takes a new or a
+   * moved-in sub-page only from a Full holder (createAllowed). Absent reads
+   * as unlocked.
+   */
+  locked?: boolean;
 }
 
 export interface ItemFact { id: string; organizationId: string; boardId: string }
@@ -1211,10 +1219,15 @@ export class NodeEvaluator {
 // people depend on, and a person with Can view creating content.
 //
 //   P1  CREATE inside a container needs Can edit or higher on that
-//       container. Can view and Can comment never create. At the org root (no
-//       Space) the kinds that may live there keep today's rule: a doc, a
-//       table and a form for anyone signed in, a canvas and a file for
-//       Members. (createDecision)
+//       container. Can view and Can comment never create, and a locked page
+//       reads as Can comment below Full access, so only a Full holder adds a
+//       sub-page to it. Nothing is made in a Folder in Trash or in an archived
+//       Space (derivePlacement, docPlaceLive). At the org root (no Space) the
+//       kinds that may live there keep today's rule: a doc, a table and a form
+//       for anyone signed in, a canvas and a file for Members. A copy is made
+//       where its source lives, and a copy of a restricted doc keeps the
+//       restriction and needs the role that may change who opens the source
+//       (docCopyVerdict). (createDecision)
 //   P2  MOVE needs Full access on the node, Full access on the container it
 //       leaves, and Can edit or higher on the container it goes to. Nothing
 //       more: a Full holder of a Folder in one Space and of a Folder in
@@ -1296,7 +1309,11 @@ function createAllowed(ev: NodeEvaluator, place: Place, what: PlaceKind): boolea
   if (v.denied || !placeHolds(place, what)) return false;
   if (!place) return what === "doc" || what === "table" || what === "form" ? true : v.orgAdmin || !v.orgGuest;
   if (place.kind === "folder" && folderInTrash(rows, place.id)) return false;
-  if (roleAtLeast(ev.effective(place).role, "EDIT")) return true;
+  // A locked page reads as Can comment below Full access (applyDocLock), and
+  // Can comment never creates: a new sub-page, a copy of one or a page moved
+  // in is content added to the locked page itself (round three, break 3).
+  const role = place.kind === "doc" ? applyDocLock(ev.effective(place).role, rows.docs.get(place.id)?.locked === true) : ev.effective(place).role;
+  if (roleAtLeast(role, "EDIT")) return true;
   // P7: a Space OWNER or ADMIN from before the cutoff made Lists and Folders
   // in every Folder of their Space, a Private one that does not name them
   // included (A8). Only those two kinds: nothing else was theirs to make there.
@@ -1715,6 +1732,58 @@ export function derivePlacement(
 export function anchorAgreesWithParent(anchor: { entityType: string | null; entityId: string | null } | null, parentHome: DocHome): boolean {
   if (!anchor?.entityType || !anchor.entityId) return true;
   return parentHome.kind === "anchor" && parentHome.entityType === anchor.entityType && parentHome.entityId === anchor.entityId;
+}
+
+export type DocCopyVerdict = { ok: true; carry: DocSharingFact | null } | { ok: false };
+
+/**
+ * P1 for a copy of a doc made beside it (POST /api/docs/[id]/duplicate). The
+ * copy is content added where the source lives, so the caller also asks the
+ * create rule there (Can edit). A source restricted on its own entry hides
+ * its content from the place it lives in, and an open copy would hand that
+ * content to everyone the restriction keeps it from: a Can view holder once
+ * copied a restricted salary table into a copy the whole Folder read (round
+ * three, break 4). So:
+ *   - the copy keeps the restriction and the people listed (`carry`), with
+ *     the source's creator kept at Full access, so the owner of restricted
+ *     content never loses sight of a copy of it; the public link never
+ *     carries;
+ *   - only someone who may change who opens the source makes one: Can edit on
+ *     the source before its lock (MANAGE_BAR for a doc). Its copier is its
+ *     creator, with Full access on the copy, so a Can view or Can comment
+ *     holder would otherwise hold a copy they could open to everyone.
+ * A page under a restricted parent is not itself restricted: its copy sits
+ * under the same parent, and keeps the same readers without a carry.
+ */
+export function docCopyVerdict(
+  source: DocSharingFact | undefined,
+  sourceRole: NodeRole,
+  who: { sourceCreatorId: string | null; copierId: string },
+): DocCopyVerdict {
+  if (!source?.restricted) return { ok: true, carry: null };
+  if (!roleAtLeast(sourceRole, "EDIT")) return { ok: false };
+  const carry: DocSharingFact = { restricted: true };
+  if (source.members && Object.keys(source.members).length) carry.members = { ...source.members };
+  const roles: Record<string, ObjectRole> = { ...(source.roles ?? {}) };
+  if (who.sourceCreatorId && who.sourceCreatorId !== who.copierId) roles[who.sourceCreatorId] = "FULL";
+  if (Object.keys(roles).length) carry.roles = roles;
+  return { ok: true, carry };
+}
+
+/** P6: the sentence a refused copy of a restricted doc answers with. */
+export const RESTRICTED_COPY_REFUSAL = "This doc is restricted, so only people with Can edit on it can copy it. A copy keeps the restriction.";
+
+/**
+ * P3 for a page's new parent: would the doc end up under itself? `chain` is
+ * the page chain above the new parent, the parent first, read under the lock
+ * every re-parent in the org takes (node-placement writeDocTreeMove). The doc
+ * on that chain is a loop. A chain that repeats a page already loops, and a
+ * page put under it would reach nobody (R6 reads a loop as closed), so it is
+ * refused the same way. Never an orphan, never a cycle.
+ */
+export function docNestLoops(docId: string, chain: readonly string[]): boolean {
+  if (chain.includes(docId)) return true;
+  return new Set(chain).size !== chain.length;
 }
 
 /** The doc anchors that are places in the Space tree: the ones a move writes and P3 keeps in step. */

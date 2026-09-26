@@ -22,6 +22,11 @@
 // current }, spaces: [{ id, name, slug, icon, color, pickable, current }],
 // refusal? }.
 //
+// kind=file: the places a move of this file would land (node-rules
+// fileMoveVerdict, the rule PATCH /api/files/[id] applies; node-placement
+// fileMoveDestinations), in the move shape, for the file Move dialog. 404 when
+// the person cannot read the file.
+//
 // create=<kind>: the places the person may make that kind in (P1, Can edit or
 // higher; node-placement createDestinations), in the move shape, for the
 // create pickers: a Can view holder is offered nothing, a Can edit grantee of
@@ -31,13 +36,15 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { nodeCtxFromSession } from "@/lib/access/node-access";
-import { createDestinations, moveDestinations } from "@/lib/access/node-placement";
+import { createDestinations, fileMoveDestinations, moveDestinations } from "@/lib/access/node-placement";
+import { canReadFileAs } from "@/lib/file-access";
+import { prisma } from "@/lib/prisma";
 import { spaceNestDestinations } from "@/lib/space";
 import type { NodeRef, PlaceKind } from "@/lib/access/node-rules";
 
 export const dynamic = "force-dynamic";
 
-const KINDS = new Set(["folder", "list", "canvas", "table", "doc", "space"]);
+const KINDS = new Set(["folder", "list", "canvas", "table", "doc", "space", "file"]);
 const CREATE_KINDS = new Set<PlaceKind>(["folder", "list", "doc", "canvas", "table"]);
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -53,6 +60,17 @@ export async function GET(req: Request) {
   const kind = url.searchParams.get("kind") ?? "";
   const id = url.searchParams.get("id") ?? "";
   if (!KINDS.has(kind) || !id) return NextResponse.json({ error: "kind and id are required" }, { status: 400 });
+  if (kind === "file") {
+    if (ctx.denied) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const file = await prisma.fileEntry.findFirst({
+      where: { id, organizationId: ctx.organizationId },
+      select: { spaceId: true, spaceFolderId: true, uploadedById: true },
+    });
+    if (!file || !(await canReadFileAs(ctx, file))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    return NextResponse.json(await fileMoveDestinations(ctx, file), { headers: NO_STORE });
+  }
   if (kind === "space") {
     if (ctx.denied) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const session = await getServerSession(authOptions);
