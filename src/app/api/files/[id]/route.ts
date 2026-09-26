@@ -10,6 +10,8 @@ import {
 } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { canReadFile } from "@/lib/file-access";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { checkFileMove } from "@/lib/access/node-placement";
 
 /**
  * One file row.
@@ -116,6 +118,22 @@ export async function PATCH(
     }
   }
   if (typeof body.description === "string" || body.description === null) data.description = body.description?.slice?.(0, 500) ?? null;
+
+  // A change of place in the Space tree is a move under the placement rule
+  // (node-rules P2, fileMoveVerdict): its uploader or Full access where it is
+  // now, Full access on the place it leaves (and its Space when it leaves the
+  // Space), and Can edit where it goes. Without this any reader of a file
+  // could drop it into any Space folder in the org, or take a private
+  // Space's file out to the whole org. A drive folder (folderId) is not a
+  // Space container and keeps its own rule.
+  if (data.spaceFolderId !== undefined || data.spaceId !== undefined) {
+    const nextFolder = data.spaceFolderId !== undefined ? (data.spaceFolderId as string | null) : existing.spaceFolderId;
+    const nextSpace = data.spaceId !== undefined ? (data.spaceId as string | null) : existing.spaceId;
+    const dest = nextFolder ? { kind: "folder" as const, id: nextFolder } : nextSpace ? { kind: "space" as const, id: nextSpace } : null;
+    const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
+    const check = await checkFileMove(nodeCtxFromLevel(getUserId(session), orgId, accessLevel), existing, dest);
+    if (!check.ok) return jsonError(check.error, check.status);
+  }
 
   const updated = await prisma.fileEntry.update({ where: { id }, data });
   return jsonSuccess(await withFreshFileUrl(updated));

@@ -122,15 +122,30 @@ function isFolderDrag(e: DragEvent): boolean {
   return e.dataTransfer.types.includes(`${DND_MIME}-folder`);
 }
 
-// Reorder a folder to sit directly before/after `targetId` as a sibling.
-async function reorderFolder(movedId: string, targetId: string, place: "before" | "after"): Promise<boolean> {
-  const res = await fetch("/api/folders/reorder", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ movedId, targetId, place }),
-    keepalive: true,
-  });
-  return res.ok;
+/** What a tree write answered: ok, or the one sentence the server refused it with (the placement rule, P6). */
+type TreeWrite = { ok: true } | { ok: false; error: string };
+
+async function treeWrite(url: string, method: "POST" | "PUT", body: Record<string, unknown>, opts: { keepalive?: boolean } = {}): Promise<TreeWrite> {
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      ...(opts.keepalive ? { keepalive: true } : {}),
+    });
+    if (res.ok) return { ok: true };
+    const d = (await res.json().catch(() => null)) as { error?: unknown; message?: unknown } | null;
+    const error = typeof d?.error === "string" && d.error.includes(" ") ? d.error : typeof d?.message === "string" ? d.message : "Couldn't move it there.";
+    return { ok: false, error };
+  } catch {
+    return { ok: false, error: "Couldn't move it there." };
+  }
+}
+
+// Reorder a folder to sit directly before/after `targetId` as a sibling. Under
+// a new parent that is a move, and the server holds it to the move rule.
+async function reorderFolder(movedId: string, targetId: string, place: "before" | "after"): Promise<TreeWrite> {
+  return treeWrite("/api/folders/reorder", "POST", { movedId, targetId, place }, { keepalive: true });
 }
 
 function readTreeDrag(e: DragEvent): DragPayload | null {
@@ -166,40 +181,30 @@ function isSpaceDrag(e: DragEvent): boolean {
 }
 
 // Persist a move. dest.folderId === null means the Space root; dest.spaceId is
-// the Space the drop landed in (needed to re-anchor a doc back to the root).
-async function moveTreeItem(p: DragPayload, dest: { folderId: string | null; spaceId: string }): Promise<boolean> {
+// the Space the drop landed in. Every drop goes to a move endpoint, which
+// holds it to the placement rule (node-rules P2 and P3): Full access on the
+// item and where it is now, Can edit where it goes, and the Space taken from
+// the Folder it lands in. The drop used to PATCH a Folder id alone, so a List
+// or a Folder dropped on another Space's Folder kept its old Space.
+async function moveTreeItem(p: DragPayload, dest: { folderId: string | null; spaceId: string }): Promise<TreeWrite> {
   if (p.kind === "board") {
-    const res = await fetch(`/api/boards/${p.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ folderId: dest.folderId }),
-    });
-    return res.ok;
+    return treeWrite(`/api/boards/${p.id}/move`, "POST", dest.folderId ? { folderId: dest.folderId } : { spaceId: dest.spaceId, folderId: null });
   }
   if (p.kind === "folder") {
-    // Guard the obvious self-drop; deeper cycles are capped server-side.
-    if (p.id === dest.folderId) return false;
-    const res = await fetch(`/api/folders/${p.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ parentFolderId: dest.folderId }),
-    });
-    return res.ok;
+    // Guard the obvious self-drop; deeper cycles are refused server-side.
+    if (p.id === dest.folderId) return { ok: false, error: "A folder can't move inside itself." };
+    return treeWrite(`/api/folders/${p.id}/move`, "POST", dest.folderId ? { parentFolderId: dest.folderId } : { spaceId: dest.spaceId, parentFolderId: null });
   }
   if (p.kind === "doc") {
-    // Docs have no folderId column — they re-anchor via the polymorphic
-    // entityType/entityId pair the children API already reads.
+    // Docs have no folderId column: they re-anchor via the polymorphic
+    // entityType/entityId pair the children API already reads, and leave any
+    // parent page (a page lives where its parent lives, P3).
     const anchor = dest.folderId
       ? { entityType: "FOLDER", entityId: dest.folderId }
       : { entityType: "SPACE", entityId: dest.spaceId };
-    const res = await fetch(`/api/docs/${p.id}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(anchor),
-    });
-    return res.ok;
+    return treeWrite(`/api/docs/${p.id}`, "PUT", { ...anchor, parentId: null });
   }
-  return false;
+  return { ok: false, error: "Couldn't move it there." };
 }
 
 interface SpaceRow {
@@ -458,8 +463,9 @@ export function SpaceTreeRow({
           setRootDragOver(false);
           const p = readTreeDrag(e);
           if (!p) return;
-          const ok = await moveTreeItem(p, { folderId: null, spaceId: space.id });
-          if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
+          const moved = await moveTreeItem(p, { folderId: null, spaceId: space.id });
+          if (moved.ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
+          else toast(moved.error);
         }}
         ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
@@ -664,12 +670,14 @@ function FolderTreeRow({
           // Reorder above/below only applies folder-to-folder; everything else nests.
           if ((zone === "before" || zone === "after") && p.kind === "folder") {
             if (p.id === folder.id) return;
-            const ok = await reorderFolder(p.id, folder.id, zone);
-            if (ok) { onChanged(); refreshSidebar(); }
+            const moved = await reorderFolder(p.id, folder.id, zone);
+            if (moved.ok) { onChanged(); refreshSidebar(); }
+            else toast(moved.error);
             return;
           }
-          const ok = await moveTreeItem(p, { folderId: folder.id, spaceId });
-          if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
+          const moved = await moveTreeItem(p, { folderId: folder.id, spaceId });
+          if (moved.ok) { setExpanded(true); onChanged(); refreshSidebar(); }
+          else toast(moved.error);
         }}
         ref={pillRef}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}

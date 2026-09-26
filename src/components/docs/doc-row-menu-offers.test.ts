@@ -56,15 +56,18 @@ describe("the doc routes answer the menu with the write's own rules", () => {
   const route = read("src/app/api/docs/[id]/route.ts");
   const dup = read("src/app/api/docs/[id]/duplicate/route.ts");
 
-  it("GET ?menu=1 builds the caps on canCreateDocAt and the PUT's move gate", () => {
+  it("GET ?menu=1 builds the caps on canCreateDocAt and the move rule's own destinations", () => {
     expect(route).toMatch(/searchParams\.get\("menu"\) === "1"/);
     expect(route).toMatch(/const canDuplicate = await canCreateDocAt\(nodeCtx, anchor, doc\.parentId\)/);
-    expect(route.match(/treeMoveRefusal\(ctx, nodeCtx, doc\.id, doc, access,/g)?.length).toBe(2);
-    expect(route).toMatch(/paths: false/);
+    // The places the menu offers are moveDestinations', the same verdict
+    // (moveVerdict) the PUT's checkMove asks, so nothing offered can fail.
+    expect(route).toMatch(/const dests = await moveDestinations\(nodeCtx, \{ kind: "doc", id: doc\.id \}\)/);
+    expect(route).toMatch(/if \(!access\.canManage \|\| doc\.entityType === "NOTEPAD"\) return \{ canDuplicate, move: nothing \}/);
   });
 
-  it("PUT refuses through the same treeMoveRefusal", () => {
-    expect(route).toMatch(/const refused = await treeMoveRefusal\(ctx, nodeCtx, id, existing, access, after, parentChanges\)/);
+  it("PUT refuses through treeMoveRefusal, which is checkMove", () => {
+    expect(route).toMatch(/const refused = await treeMoveRefusal\(ctx, nodeCtx, id, existing, after\)/);
+    expect(route).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\)/);
   });
 
   it("a refusal the menu toasts carries its sentence in error, the code in code", () => {

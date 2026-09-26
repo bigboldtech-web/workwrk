@@ -13,8 +13,9 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { canCreateDocAt } from "@/lib/doc-access";
 import { getDocSharingMap } from "@/lib/doc-sharing";
-import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
-import { applyDocLock, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
+import { canReadDocPlace, nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { anchorAgreesWithParent, applyDocLock, createRefusal, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
+import { docAnchorPlaceOf, docHomeOf, docPlaceLive } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilters, matchesView, parseDocsListQuery, slicePage, sortDocs, type DocsCandidate } from "@/lib/docs-list";
 import { resolveDocLocations } from "@/lib/doc-location";
@@ -327,16 +328,33 @@ export async function POST(req: Request) {
 
   const content = (parsed.data.content as object) ?? {};
 
-  // Block pinning to an entity the viewer can't see, and nesting under a
-  // page they can't read (a sub-page follows its parent, A6), or under
-  // someone else's note. Without this, a probe with a guessed boardId or
-  // parentId could mint a doc where the viewer has no reach.
-  const ok = await canCreateDocAt(
-    nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel),
-    { entityType: parsed.data.entityType ?? null, entityId: parsed.data.entityId ?? null },
-    parsed.data.parentId ?? null,
-  );
-  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // The placement rule (node-rules P1 and P3). A doc is made only where the
+  // viewer can edit: Can edit or higher on its anchor (a Space, a Folder, a
+  // List, a task's List) and on its parent page; Can view and Can comment
+  // never create. A place the viewer cannot even read is the same 404 as one
+  // that does not exist, so a guessed id confirms nothing. A sub-page lives
+  // where its parent page lives: an anchor that disagrees with the parent's
+  // is refused (a page of a Folder in one Space anchored to another Space).
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const anchor = { entityType: parsed.data.entityType ?? null, entityId: parsed.data.entityId ?? null };
+  const parentId = parsed.data.parentId ?? null;
+  if (!(await canReadDocPlace(nodeCtx, anchor, parentId))) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (parentId && anchor.entityType && anchor.entityId) {
+    const parentHome = await docHomeOf(ctx.orgId, { entityType: null, entityId: null, parentId });
+    if (!anchorAgreesWithParent(anchor, parentHome)) {
+      const message = "A sub-page lives where its parent page lives. Leave out the place, or pick the parent's.";
+      return NextResponse.json({ error: message, code: "invalid_anchor", message }, { status: 400 });
+    }
+  }
+  if (!(await docPlaceLive(ctx.orgId, { ...anchor, parentId }))) {
+    const message = "That place is in Trash or gone, so nothing can be added to it.";
+    return NextResponse.json({ error: message, code: "conflict", message }, { status: 400 });
+  }
+  if (!(await canCreateDocAt(nodeCtx, anchor, parentId))) {
+    const place = parentId ? { kind: "doc" as const, id: parentId } : (await docAnchorPlaceOf(ctx.orgId, anchor)) ?? null;
+    const message = createRefusal("doc", place);
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
+  }
 
   const doc = await prisma.doc.create({
     data: {

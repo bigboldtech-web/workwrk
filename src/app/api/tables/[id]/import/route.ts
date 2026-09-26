@@ -26,18 +26,18 @@
 // engine anyway (sheet-engine-host literalAt), and long_text/email/url/...
 // are text by definition.
 //
-// Phase 36, visibility-gated. Same pattern as /api/tables/[id]/rows:
-// the table is only writable if the viewer can read its parent Space
-// (org-wide tables stay open to all org members). Phase 22b/32b
-// closed the read holes; this closes the analogous write hole on
-// bulk import, without it, any org member could blast 5K rows into
-// any private-Space table.
+// Phase 36, visibility-gated, and since the placement rule (node-rules P1)
+// Can edit on the table: an import adds columns and rows, and Can view never
+// adds content. Phase 22b/32b closed the read holes; this closes the
+// analogous write hole on bulk import, without it, any org member could
+// blast 5K rows into any private-Space table.
 
 import { NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { tableReadableBy } from "@/lib/table-gate";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { autoTypeForColumn } from "@/lib/sheet-entry";
 import { parseCsv } from "@/lib/csv";
 import { blankTail as blankTailOf, reservedKeysOf } from "@/lib/sheet-blank-tail";
@@ -54,9 +54,12 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
   if (!table) return null;
   // The one resolver's table rule (R7): a Space reader edits, a Space Full
   // holder manages, an unscoped table is org-wide for Members and a Guest's
-  // own only, and a table grant opens it on its own.
-  if (!(await tableReadableBy(table.id, orgId, userId, accessLevel))) return null;
-  return table;
+  // own only, and a table grant opens it on its own. An import writes
+  // columns and rows INTO the table, so it needs Can edit on it (the
+  // placement rule, node-rules P1): Can view never adds content.
+  const d = await nodeRole(nodeCtxFromLevel(userId, orgId, accessLevel), { kind: "table", id: table.id });
+  if (!roleAtLeast(d.role, "VIEW")) return null;
+  return { ...table, canEdit: roleAtLeast(d.role, "EDIT") };
 }
 
 const IMPORT_TYPES = new Set([
@@ -82,6 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const table = await resolveTable(id, orgId, userId, accessLevel);
   if (!table) return jsonError("not found", 404);
+  if (!table.canEdit) return jsonError("You need Can edit on this table to import into it.", 403);
 
   const parsed = parseCsv(csv);
   if (parsed.length === 0) return jsonError("CSV had no rows");

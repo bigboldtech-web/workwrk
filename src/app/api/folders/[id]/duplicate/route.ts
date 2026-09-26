@@ -17,6 +17,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { duplicateBoard } from "@/lib/board";
 import { nodeCtxFromLevel, nodeRoleMap, nodeRoles } from "@/lib/access/node-access";
+import { checkCreate } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 export const dynamic = "force-dynamic";
@@ -44,16 +45,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!src) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // Full access on the folder itself (the one resolver, never the Space's
   // rights alone: a Space ADMIN denied a PRIVATE folder cannot copy its Lists
-  // out), and the right to create where the copy lands, beside the original:
-  // Full access on the parent Folder, or on the Space at its root.
+  // out), and the one create rule where the copy lands, beside the original
+  // (node-rules P1: Can edit or higher on the parent Folder, or on the Space
+  // at its root).
   const ctx = nodeCtxFromLevel(u.id, organizationId, accessLevel);
   const parentRef = src.parentFolderId ? { kind: "folder" as const, id: src.parentFolderId } : { kind: "space" as const, id: src.spaceId };
-  const gate = await nodeRoles(ctx, [{ kind: "folder", id }, parentRef]);
+  const gate = await nodeRoles(ctx, [{ kind: "folder", id }]);
   const own = gate.get(`folder:${id}`)?.role ?? "none";
   if (own === "none") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!roleAtLeast(own, "FULL") || !roleAtLeast(gate.get(`${parentRef.kind}:${parentRef.id}`)?.role ?? "none", "FULL")) {
-    return NextResponse.json({ error: "You need Full access to duplicate this folder here." }, { status: 403 });
+  if (!roleAtLeast(own, "FULL")) {
+    return NextResponse.json({ error: "You need Full access to this folder to duplicate it." }, { status: 403 });
   }
+  const lands = await checkCreate(ctx, parentRef, "folder");
+  if (!lands.ok) return NextResponse.json({ error: lands.error }, { status: lands.status });
 
   const root = await prisma.folder.create({
     data: {

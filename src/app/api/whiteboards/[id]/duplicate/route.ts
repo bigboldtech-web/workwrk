@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { whiteboardReadable } from "@/lib/whiteboard-gate";
 import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { createRefusal } from "@/lib/access/node-rules";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,14 +20,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!source) return NextResponse.json({ error: "not found" }, { status: 404 });
   const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
   if (!(await whiteboardReadable(nodeCtx, source))) return NextResponse.json({ error: "not found" }, { status: 404 });
-  // The copy lands beside the original, so it takes the canvas create rule
-  // there: Full access on its Folder, Can view on its Space at the root, any
-  // Member for a canvas in no Space.
+  // The copy lands beside the original, so it takes the one create rule
+  // there (node-rules P1): Can edit or higher on its Folder, or on its Space
+  // at the root; any Member for a canvas in no Space. Can view never creates.
   const container = source.folderId && source.spaceId
     ? { kind: "folder" as const, id: source.folderId }
     : source.spaceId ? { kind: "space" as const, id: source.spaceId } : null;
   if (!(await canCreateAt(nodeCtx, container, "canvas"))) {
-    return NextResponse.json({ error: "You need edit access where this canvas lives." }, { status: 403 });
+    return NextResponse.json({ error: createRefusal("canvas", container) }, { status: 403 });
   }
 
   const whiteboard = await prisma.whiteboard.create({

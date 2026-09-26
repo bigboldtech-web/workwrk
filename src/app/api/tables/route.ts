@@ -18,7 +18,8 @@ import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { filledRowCounts } from "@/lib/table-counts";
@@ -88,14 +89,15 @@ export async function POST(req: NextRequest) {
     ? Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: defaultId(), type: "short_text", label: "" }))
     : body.columns;
 
-  // Cross-tenant safety: spaceId must belong to the caller's org, and a table
-  // is made in a Space the caller can open (Can view on it; it was ungated).
+  // The placement rule (node-rules P1 and P3): a table in a Space is made
+  // only by someone who can edit that Space (Can view and Can comment never
+  // create), in this org, never in an archived Space. A Space the caller
+  // cannot even open is the same 404 as one that does not exist. With no
+  // Space it is the org's, as today.
   if (spaceId) {
-    const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
-    if (!space) return jsonError("space not found", 404);
     const level = (session.user as { accessLevel?: string }).accessLevel;
-    const d = await nodeRole(nodeCtxFromLevel(userId, orgId, level), { kind: "space", id: spaceId });
-    if (!roleAtLeast(d.role, "VIEW")) return jsonError("space not found", 404);
+    const placed = await resolveCreate(nodeCtxFromLevel(userId, orgId, level), { spaceId }, "table");
+    if (!placed.ok) return jsonError(placed.status === 404 ? "space not found" : placed.error, placed.status);
   }
 
   const table = await prisma.dataTable.create({

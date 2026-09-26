@@ -31,6 +31,7 @@ import {
 import { viewerFromSession } from "@/lib/access/viewer";
 import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { formResponsesAllowed, nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { checkFormDestination } from "@/lib/access/node-placement";
 import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
@@ -194,18 +195,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
-  // A destination must be a List or a table in this org; a stale id from an
-  // old tab is refused rather than stored as a dead link.
-  if ("targetBoardId" in body) {
-    const v = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
-    if (v && v !== existing.targetBoardId && !(await prisma.board.findFirst({ where: { id: v, organizationId: orgId }, select: { id: true } }))) return jsonError("That List no longer exists", 400);
-    data.targetBoardId = v;
+  // A destination must be a List or a table in this org that the editor can
+  // write to (Can edit: every response is written into it, the placement
+  // rule, node-rules P1); a stale id from an old tab is refused rather than
+  // stored as a dead link. The builder saves the whole form every time, so a
+  // destination it repeats unchanged is not a change and is never refused.
+  const nextBoard = "targetBoardId" in body ? (typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null) : undefined;
+  const nextTable = "targetTableId" in body ? (typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null) : undefined;
+  const newBoard = nextBoard && nextBoard !== existing.targetBoardId ? nextBoard : null;
+  const newTable = nextTable && nextTable !== existing.targetTableId ? nextTable : null;
+  if ((newBoard || newTable) && editor) {
+    const dest = await checkFormDestination(nodeCtxFromViewer(editor), { boardId: newBoard, tableId: newTable });
+    if (!dest.ok) return jsonError(dest.error, dest.status);
   }
-  if ("targetTableId" in body) {
-    const v = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
-    if (v && v !== existing.targetTableId && !(await prisma.dataTable.findFirst({ where: { id: v, organizationId: orgId }, select: { id: true } }))) return jsonError("That table no longer exists", 400);
-    data.targetTableId = v;
-  }
+  if (nextBoard !== undefined) data.targetBoardId = nextBoard;
+  if (nextTable !== undefined) data.targetTableId = nextTable;
   if ("fieldMappings" in body && body.fieldMappings !== null && body.fieldMappings !== undefined) {
     const fm = validFieldMappingsInput(body.fieldMappings);
     if (!fm) return jsonError("fieldMappings must be { board?: { fieldId: key }, table?: { fieldId: columnId } }");

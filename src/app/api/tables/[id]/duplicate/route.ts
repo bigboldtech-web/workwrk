@@ -8,16 +8,19 @@
 // OFF: publishing is a separate, confirmed act by whoever holds Full access.
 // Deleted rows (the table's own Trash) are not copied.
 //
-// Gate: anyone who can open the table may copy it (read implies write stays
-// the rule for content until the access engine lands Can view). The copy's
-// rows are written in chunks inside one transaction, so a failed copy leaves
-// no half table behind.
+// Gate: anyone who can open the table, and who may make a table where the
+// copy lands, beside the original (the placement rule, node-rules P1: Can
+// edit on its Space, or the org for a table in no Space). A table grant never
+// plants a copy in a Space its holder only passes through or reads. The
+// copy's rows are written in chunks inside one transaction, so a failed copy
+// leaves no half table behind.
 
 import { NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { readableTable } from "@/lib/table-gate";
+import { readableTable, tableCtx } from "@/lib/table-gate";
+import { checkCreate } from "@/lib/access/node-placement";
 import { logActivity } from "@/lib/activity";
 import { copyName } from "@/lib/tables-forms-list";
 
@@ -32,6 +35,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const source = await readableTable(id, orgId, userId, session);
   if (!source) return jsonError("not found", 404);
+  const lands = await checkCreate(tableCtx(orgId, userId, session), source.spaceId ? { kind: "space", id: source.spaceId } : null, "table");
+  if (!lands.ok) return jsonError(lands.error, lands.status);
 
   const rows = await prisma.dataTableRow.findMany({
     where: { tableId: id, deletedAt: null },

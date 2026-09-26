@@ -1,0 +1,764 @@
+// The placement writes: where node-rules' placement rule (P1 to P7) is asked
+// for a route and where a move is written.
+//
+// Every route that makes a node inside a container, moves one, reorders one
+// under a new parent or restores one into a container goes through here, so
+// the rule is asked once, in one world, and the write is one transaction:
+//
+//   checkCreate       P1, answered as ok, a 403 with its sentence, or a 404
+//                     when the viewer can neither open the container nor pass
+//                     through it (nothing about it is confirmed)
+//   checkMove         P2 and P4, the same answers
+//   resolvePlacement  P3, the Space a request lands in, derived from its
+//                     parent Folder and checked against the org and Trash
+//   moveFolder        a Folder with its WHOLE subtree: sub-folders, Lists,
+//                     canvases and files take the new Space in the same
+//                     transaction, under row locks, or nothing is written
+//   moveList, moveCanvas, moveTable
+//   lockParentFolder  the create half of P3: a create reads its parent's
+//                     Space under a share lock, so a move of that parent can
+//                     never split it from its new child
+//   moveDestinations  P5, exactly the places checkMove accepts, for the Move
+//                     dialog and the row menus
+//
+// Docs are anchored, not placed by a column: PUT /api/docs/[id] builds its
+// destination place and asks checkMove with it.
+//
+// Server-only: prisma.
+
+import { prisma } from "../prisma";
+import type { Prisma } from "@/generated/prisma";
+import {
+  NodeEvaluator,
+  createDecision,
+  createRefusal,
+  currentPlace,
+  derivePlacement,
+  docAnchorPlace,
+  emptyGrants,
+  folderDeleteAllowed,
+  emptyRows,
+  fileMoveVerdict,
+  moveRefusal,
+  moveVerdict,
+  placeHolds,
+  placeKindOf,
+  refKey,
+  roleAtLeast,
+  type DocHome,
+  type NodeCtx,
+  type NodeRef,
+  type Place,
+  type PlaceKind,
+  type Placement,
+  type PlacementFolderFact,
+} from "./node-rules";
+import { loadWorld } from "./node-world";
+import { listVisibleSpaces, viewerPathContainers } from "./node-access";
+
+type Tx = Prisma.TransactionClient;
+/** Anything that runs a raw query: the client, a transaction, or a narrower pick of either. */
+type RawDb = Pick<Tx, "$queryRaw">;
+
+export type PlaceRefusal = { ok: false; status: 400 | 403 | 404 | 409; error: string };
+
+const fail = (status: PlaceRefusal["status"], error: string): PlaceRefusal => ({ ok: false, status, error });
+
+/** Folders nest at most six deep (the sidebar renders no deeper). */
+export const MAX_FOLDER_DEPTH = 6;
+
+function viewerOf(ctx: NodeCtx) {
+  return { userId: ctx.userId, orgAdmin: ctx.orgAdmin, orgGuest: ctx.orgGuest, isAgent: ctx.isAgent, denied: ctx.denied };
+}
+
+/** Is this Space or Folder on the viewer's way to something they were given (R10)? Lists and pages are never paths. */
+async function isPath(ctx: NodeCtx, place: NodeRef): Promise<boolean> {
+  if (place.kind !== "space" && place.kind !== "folder") return false;
+  if (ctx.orgAdmin || ctx.denied) return false;
+  return (await viewerPathContainers(ctx)).has(refKey(place));
+}
+
+/** Can the viewer at least see this container (a role, or a path through it)? */
+async function seesPlace(ctx: NodeCtx, ev: NodeEvaluator, place: NodeRef): Promise<boolean> {
+  return roleAtLeast(ev.effective(place).role, "VIEW") || (await isPath(ctx, place));
+}
+
+// ── P1 ───────────────────────────────────────────────────────────────
+
+/**
+ * P1 for a route: may the viewer create `what` in `place`? A refusal is a
+ * 403 with createRefusal's sentence, or a 404 when the viewer can neither
+ * open the container nor pass through it.
+ */
+export async function checkCreate(ctx: NodeCtx, place: Place, what: PlaceKind): Promise<{ ok: true } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  if (!placeHolds(place, what)) return fail(400, createRefusal(what, place));
+  if (!place) {
+    return createDecision(emptyRows(ctx.organizationId), emptyGrants(viewerOf(ctx)), null, what) ? { ok: true } : fail(403, createRefusal(what, null));
+  }
+  const { rows, grants } = await loadWorld(ctx, [place], { chain: true });
+  if (createDecision(rows, grants, place, what)) return { ok: true };
+  if (!(await seesPlace(ctx, new NodeEvaluator(rows, grants), place))) return fail(404, "Not found");
+  return fail(403, createRefusal(what, place));
+}
+
+// ── P2, P4 ───────────────────────────────────────────────────────────
+
+/**
+ * P2 and P4 for a route: may the viewer move `ref` to `dest` (null: the org
+ * root)? `same` is a reorder under the parent it already has. A refusal is a
+ * 403 with moveRefusal's sentence; a destination the viewer can neither open
+ * nor pass through answers 404, so a guessed id confirms nothing.
+ */
+export async function checkMove(ctx: NodeCtx, ref: NodeRef, dest: Place): Promise<{ ok: true; same: boolean } | PlaceRefusal> {
+  const what = placeKindOf(ref);
+  if (ctx.denied || !what) return fail(404, "Not found");
+  const { rows, grants } = await loadWorld(ctx, dest ? [ref, dest] : [ref], { chain: true });
+  const verdict = moveVerdict(rows, grants, ref, dest);
+  if (verdict.ok) return verdict;
+  if (verdict.failure === "destination" && dest && !(await seesPlace(ctx, new NodeEvaluator(rows, grants), dest))) {
+    return fail(404, "That place no longer exists.");
+  }
+  return fail(403, moveRefusal(what, verdict.failure));
+}
+
+// ── P3 ───────────────────────────────────────────────────────────────
+
+interface FolderChainFact extends PlacementFolderFact {
+  /** How many Folders sit above it (0 at a Space root). */
+  depth: number;
+}
+
+/** A Folder in this org, whether it or any Folder above it is in Trash, and its depth. Null when no row matches. */
+export async function folderPlacementFact(organizationId: string, folderId: string, db: RawDb = prisma): Promise<FolderChainFact | null> {
+  const chain = await db.$queryRaw<Array<{ id: string; organizationId: string; spaceId: string; archivedAt: Date | null; depth: number }>>`
+    WITH RECURSIVE up AS (
+      SELECT f."id", f."organizationId", f."spaceId", f."parentFolderId", f."archivedAt", 0 AS depth
+      FROM "Folder" f WHERE f."id" = ${folderId}
+      UNION ALL
+      SELECT p."id", p."organizationId", p."spaceId", p."parentFolderId", p."archivedAt", u.depth + 1
+      FROM "Folder" p JOIN up u ON p."id" = u."parentFolderId"
+      WHERE u.depth < 16
+    )
+    SELECT "id", "organizationId", "spaceId", "archivedAt", depth FROM up ORDER BY depth`;
+  const self = chain[0];
+  if (!self || self.organizationId !== organizationId) return null;
+  return {
+    id: self.id,
+    organizationId: self.organizationId,
+    spaceId: self.spaceId,
+    inTrash: chain.some((r) => r.archivedAt !== null),
+    depth: Math.max(0, chain.length - 1),
+  };
+}
+
+/**
+ * P3 for a route: where a request lands. A named Folder settles the Space (a
+ * Space that disagrees is a 400, a Folder in another org a 404, one in Trash
+ * a 400); with no Folder the named Space's root; with neither the org root
+ * when `root` allows it.
+ */
+export async function resolvePlacement(
+  organizationId: string,
+  req: { spaceId?: string | null; folderId?: string | null },
+  opts: { root?: boolean } = {},
+): Promise<Placement & { depth?: number }> {
+  const folderId = req.folderId || null;
+  const folder = folderId ? await folderPlacementFact(organizationId, folderId) : undefined;
+  const spaceId = folder ? folder.spaceId : req.spaceId || null;
+  const space = spaceId
+    ? await prisma.space.findFirst({ where: { id: spaceId, organizationId }, select: { id: true, organizationId: true, archivedAt: true } })
+    : null;
+  const placed = derivePlacement(
+    organizationId,
+    req,
+    { folder, space: space ? { id: space.id, organizationId: space.organizationId, archived: space.archivedAt !== null } : null },
+    opts,
+  );
+  return placed.ok && folder ? { ...placed, depth: folder.depth } : placed;
+}
+
+/**
+ * P3 then P1 for a create that names a Space and maybe a Folder: where it
+ * lands and whether the viewer may make `what` there. In that order, so a
+ * probe learns nothing: a named Folder or Space the viewer can neither open
+ * nor pass through is a 404 before anything else is said about it; then a
+ * Space that disagrees with the Folder, or a Folder in Trash, is a 400; then
+ * Can edit (P1) is the 403. With neither a Folder nor a Space, the org root
+ * when `root` allows it.
+ */
+export async function resolveCreate(
+  ctx: NodeCtx,
+  req: { spaceId?: string | null; folderId?: string | null },
+  what: PlaceKind,
+  opts: { root?: boolean } = {},
+): Promise<{ ok: true; spaceId: string | null; folderId: string | null; place: Place } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const named: NodeRef | null = req.folderId ? { kind: "folder", id: req.folderId } : req.spaceId ? { kind: "space", id: req.spaceId } : null;
+  if (named) {
+    const { rows, grants } = await loadWorld(ctx, [named], { chain: true });
+    if (!(await seesPlace(ctx, new NodeEvaluator(rows, grants), named))) return fail(404, "Not found");
+  }
+  const placed = await resolvePlacement(ctx.organizationId, req, opts);
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const place: Place = placed.folderId ? { kind: "folder", id: placed.folderId } : placed.spaceId ? { kind: "space", id: placed.spaceId } : null;
+  const gate = await checkCreate(ctx, place, what);
+  if (!gate.ok) return gate;
+  return { ok: true, spaceId: placed.spaceId, folderId: placed.folderId, place };
+}
+
+/**
+ * The create half of P3, inside the create's transaction: the parent Folder
+ * read under a share lock, so a concurrent move of it waits for this create
+ * (and this create for that move), and the Space the new row takes is the
+ * Space the parent has at that moment. Null when the parent is not in this
+ * org or is in Trash.
+ */
+export async function lockParentFolder(tx: Tx, organizationId: string, folderId: string): Promise<{ spaceId: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ spaceId: string; archivedAt: Date | null }>>`
+    SELECT "spaceId", "archivedAt" FROM "Folder" WHERE "id" = ${folderId} AND "organizationId" = ${organizationId} FOR SHARE`;
+  const row = rows[0];
+  if (!row || row.archivedAt) return null;
+  const chain = await folderPlacementFact(organizationId, folderId, tx);
+  if (!chain || chain.inTrash) return null;
+  return { spaceId: row.spaceId };
+}
+
+/** Thrown inside a placement transaction; answered as its status, with nothing written. */
+export class PlacementConflict extends Error {
+  constructor(message: string, readonly status: 400 | 409 = 409) {
+    super(message);
+  }
+}
+
+/** Every Folder beneath `rootId` (in Trash or not: all of it travels), with its depth below it. */
+export async function folderBranch(db: RawDb, organizationId: string, rootId: string): Promise<Array<{ id: string; depth: number }>> {
+  const rows = await db.$queryRaw<Array<{ id: string; depth: number }>>`
+    WITH RECURSIVE down AS (
+      SELECT f."id", 1 AS depth FROM "Folder" f WHERE f."parentFolderId" = ${rootId} AND f."organizationId" = ${organizationId}
+      UNION ALL
+      SELECT c."id", d.depth + 1 FROM "Folder" c JOIN down d ON c."parentFolderId" = d."id"
+      WHERE c."organizationId" = ${organizationId} AND d.depth < 16
+    )
+    SELECT "id", MIN(depth)::int AS depth FROM down WHERE "id" <> ${rootId} GROUP BY "id"`;
+  return rows.map((r) => ({ id: r.id, depth: Number(r.depth) }));
+}
+
+/** Whiteboard.folderId ships in its own SQL file: a database without it still moves Folders, and the probe never runs inside a transaction. */
+let canvasFolderColumn: boolean | null = null;
+export async function canvasesHaveFolders(): Promise<boolean> {
+  if (canvasFolderColumn !== null) return canvasFolderColumn;
+  try {
+    await prisma.whiteboard.findFirst({ where: { folderId: "__probe__" }, select: { id: true } });
+    canvasFolderColumn = true;
+  } catch {
+    canvasFolderColumn = false;
+  }
+  return canvasFolderColumn;
+}
+
+async function lastPosition(tx: Tx, spaceId: string, parentFolderId: string | null, exceptId: string): Promise<number> {
+  const last = await tx.folder.findFirst({
+    where: { spaceId, parentFolderId, id: { not: exceptId } },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+  return (last?.position ?? 0) + 1024;
+}
+
+// ── moves ────────────────────────────────────────────────────────────
+
+export interface MovedFolder { id: string; name: string; spaceId: string; parentFolderId: string | null; position: number }
+
+/**
+ * Move a Folder under another Folder or to a Space's root (P2, P3, P4).
+ *
+ * `parentFolderId` is the new parent, or null for the root of `spaceId` (the
+ * Folder's own Space when absent). With a parent the Space is the parent's,
+ * and a `spaceId` that disagrees is refused. The parent it already has is a
+ * reorder (P4). When the Space changes, the Folder's whole subtree goes with
+ * it in the same transaction: every sub-folder at any depth, every List in
+ * any of them, every canvas and every file placed in any of them. Docs
+ * follow their Folder and List anchors, so they need no write.
+ */
+export async function moveFolder(
+  ctx: NodeCtx,
+  folderId: string,
+  req: { spaceId?: string | null; parentFolderId: string | null; position?: number },
+): Promise<{ ok: true; folder: MovedFolder; moved: boolean; movedFolders: number } | PlaceRefusal> {
+  const org = ctx.organizationId;
+  const folder = await prisma.folder.findFirst({
+    where: { id: folderId, organizationId: org },
+    select: { id: true, name: true, spaceId: true, parentFolderId: true, position: true },
+  });
+  if (!folder) return fail(404, "Not found");
+  const placed = await resolvePlacement(org, {
+    spaceId: req.parentFolderId ? req.spaceId : req.spaceId ?? folder.spaceId,
+    folderId: req.parentFolderId,
+  });
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const destSpaceId = placed.spaceId as string;
+  const destFolderId = placed.folderId;
+  if (destFolderId === folder.id) return fail(400, "A folder can't move inside itself.");
+  const branch = await folderBranch(prisma, org, folder.id);
+  if (destFolderId && branch.some((b) => b.id === destFolderId)) return fail(400, "A folder can't move inside itself.");
+  const height = branch.reduce((m, b) => Math.max(m, b.depth), 0);
+  if (destFolderId && (placed.depth ?? 0) + 1 + height >= MAX_FOLDER_DEPTH) {
+    return fail(400, `Folders can only nest ${MAX_FOLDER_DEPTH} levels deep.`);
+  }
+
+  const dest: NodeRef = destFolderId ? { kind: "folder", id: destFolderId } : { kind: "space", id: destSpaceId };
+  const check = await checkMove(ctx, { kind: "folder", id: folder.id }, dest);
+  if (!check.ok) return check;
+
+  const spaceChanges = destSpaceId !== folder.spaceId;
+  const parentChanges = destFolderId !== folder.parentFolderId || spaceChanges;
+  if (!parentChanges && req.position === undefined) {
+    return { ok: true, folder: { id: folder.id, name: folder.name, spaceId: folder.spaceId, parentFolderId: folder.parentFolderId, position: folder.position }, moved: false, movedFolders: 0 };
+  }
+  const canvases = spaceChanges ? await canvasesHaveFolders() : false;
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      if (destFolderId) {
+        const parent = await lockParentFolder(tx, org, destFolderId);
+        if (!parent || parent.spaceId !== destSpaceId) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
+      }
+      const ids = [folder.id, ...(await folderBranch(tx, org, folder.id)).map((b) => b.id)];
+      await tx.$queryRaw`SELECT "id" FROM "Folder" WHERE "id" = ANY(${ids}::text[]) FOR UPDATE`;
+      if (destFolderId && ids.includes(destFolderId)) throw new PlacementConflict("A folder can't move inside itself.", 400);
+      const position = req.position ?? (parentChanges ? await lastPosition(tx, destSpaceId, destFolderId, folder.id) : undefined);
+      const row = await tx.folder.update({
+        where: { id: folder.id },
+        data: { spaceId: destSpaceId, parentFolderId: destFolderId, ...(position !== undefined ? { position } : {}) },
+        select: { id: true, name: true, spaceId: true, parentFolderId: true, position: true },
+      });
+      if (spaceChanges) {
+        const below = ids.slice(1);
+        if (below.length) await tx.folder.updateMany({ where: { id: { in: below } }, data: { spaceId: destSpaceId } });
+        await tx.board.updateMany({ where: { folderId: { in: ids } }, data: { spaceId: destSpaceId } });
+        if (canvases) await tx.whiteboard.updateMany({ where: { folderId: { in: ids } }, data: { spaceId: destSpaceId } });
+        await tx.fileEntry.updateMany({ where: { spaceFolderId: { in: ids } }, data: { spaceId: destSpaceId } });
+      }
+      return { row, count: spaceChanges ? ids.length - 1 : 0 };
+    }, { timeout: 30_000, maxWait: 10_000 });
+    return { ok: true, folder: result.row, moved: parentChanges, movedFolders: result.count };
+  } catch (err) {
+    if (err instanceof PlacementConflict) return fail(err.status, err.message);
+    throw err;
+  }
+}
+
+/**
+ * Move a List into a Folder, or to a Space's root (P2, P3). `folderId` null
+ * is the root of `spaceId` (the List's own Space when absent); with a Folder
+ * the Space is the Folder's. A List of one person's own (the personal List)
+ * never moves into a Space.
+ */
+export async function moveList(
+  ctx: NodeCtx,
+  listId: string,
+  req: { spaceId?: string | null; folderId: string | null },
+): Promise<{ ok: true; list: { id: string; spaceId: string | null; folderId: string | null }; moved: boolean } | PlaceRefusal> {
+  const org = ctx.organizationId;
+  const list = await prisma.board.findFirst({ where: { id: listId, organizationId: org }, select: { id: true, spaceId: true, folderId: true, productSlug: true } });
+  if (!list) return fail(404, "Not found");
+  if (list.productSlug === "personal-list") return fail(400, "Your personal List stays yours: it can't be moved into a Space.");
+  const placed = await resolvePlacement(org, { spaceId: req.folderId ? req.spaceId : req.spaceId ?? list.spaceId, folderId: req.folderId });
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const destSpaceId = placed.spaceId as string;
+  const destFolderId = placed.folderId;
+  const dest: NodeRef = destFolderId ? { kind: "folder", id: destFolderId } : { kind: "space", id: destSpaceId };
+  const check = await checkMove(ctx, { kind: "list", id: list.id }, dest);
+  if (!check.ok) return check;
+  if (destSpaceId === list.spaceId && destFolderId === list.folderId) {
+    return { ok: true, list: { id: list.id, spaceId: list.spaceId, folderId: list.folderId }, moved: false };
+  }
+  try {
+    const row = await prisma.$transaction(async (tx) => {
+      if (destFolderId) {
+        const parent = await lockParentFolder(tx, org, destFolderId);
+        if (!parent || parent.spaceId !== destSpaceId) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
+      }
+      return tx.board.update({ where: { id: list.id }, data: { spaceId: destSpaceId, folderId: destFolderId }, select: { id: true, spaceId: true, folderId: true } });
+    });
+    return { ok: true, list: row, moved: true };
+  } catch (err) {
+    if (err instanceof PlacementConflict) return fail(err.status, err.message);
+    throw err;
+  }
+}
+
+/**
+ * Move a canvas into a Folder, to a Space's root, or out of every Space
+ * (`spaceId` null and no Folder: the org's, which opens it to every Member).
+ * With a Folder the Space is the Folder's, and moving to a Space's root
+ * clears the Folder it had (P3: never a Folder of one Space under another).
+ */
+export async function moveCanvas(
+  ctx: NodeCtx,
+  canvasId: string,
+  req: { spaceId: string | null; folderId?: string | null },
+): Promise<{ ok: true; spaceId: string | null; folderId: string | null; moved: boolean } | PlaceRefusal> {
+  const org = ctx.organizationId;
+  const folders = await canvasesHaveFolders();
+  const canvas = folders
+    ? await prisma.whiteboard.findFirst({ where: { id: canvasId, organizationId: org, archivedAt: null }, select: { id: true, spaceId: true, folderId: true } })
+    : await prisma.whiteboard
+        .findFirst({ where: { id: canvasId, organizationId: org, archivedAt: null }, select: { id: true, spaceId: true } })
+        .then((c) => (c ? { ...c, folderId: null as string | null } : null));
+  if (!canvas) return fail(404, "Not found");
+  if (req.folderId && !folders) return fail(400, "Canvases can't be placed in folders yet.");
+  const placed = await resolvePlacement(org, { spaceId: req.spaceId, folderId: req.folderId ?? null }, { root: true });
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const dest: Place = placed.folderId ? { kind: "folder", id: placed.folderId } : placed.spaceId ? { kind: "space", id: placed.spaceId } : null;
+  const check = await checkMove(ctx, { kind: "canvas", id: canvas.id }, dest);
+  if (!check.ok) return check;
+  if (placed.spaceId === canvas.spaceId && placed.folderId === canvas.folderId) {
+    return { ok: true, spaceId: canvas.spaceId, folderId: canvas.folderId, moved: false };
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (placed.folderId) {
+        const parent = await lockParentFolder(tx, org, placed.folderId);
+        if (!parent || parent.spaceId !== placed.spaceId) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
+      }
+      await tx.whiteboard.update({
+        where: { id: canvas.id },
+        data: { spaceId: placed.spaceId, ...(folders ? { folderId: placed.folderId } : {}) },
+      });
+    });
+    return { ok: true, spaceId: placed.spaceId, folderId: placed.folderId, moved: true };
+  } catch (err) {
+    if (err instanceof PlacementConflict) return fail(err.status, err.message);
+    throw err;
+  }
+}
+
+/** Move a table to a Space's root, or out of every Space (null). Tables never sit in a Folder. */
+export async function moveTable(ctx: NodeCtx, tableId: string, spaceId: string | null): Promise<{ ok: true; spaceId: string | null; moved: boolean } | PlaceRefusal> {
+  const org = ctx.organizationId;
+  const table = await prisma.dataTable.findFirst({ where: { id: tableId, organizationId: org }, select: { id: true, spaceId: true } });
+  if (!table) return fail(404, "Not found");
+  const placed = await resolvePlacement(org, { spaceId }, { root: true });
+  if (!placed.ok) return fail(placed.status, placed.message);
+  const dest: Place = placed.spaceId ? { kind: "space", id: placed.spaceId } : null;
+  const check = await checkMove(ctx, { kind: "table", id: table.id }, dest);
+  if (!check.ok) return check;
+  if (placed.spaceId === table.spaceId) return { ok: true, spaceId: table.spaceId, moved: false };
+  await prisma.dataTable.update({ where: { id: table.id }, data: { spaceId: placed.spaceId } });
+  return { ok: true, spaceId: placed.spaceId, moved: true };
+}
+
+// ── docs ─────────────────────────────────────────────────────────────
+
+/**
+ * Where a page chain lives (node-rules DocHome): the first anchor on it, the
+ * org's root, or closed when R6 reads it as reaching nobody (a missing or
+ * foreign parent, a loop, deeper than eight pages above the start).
+ */
+export async function docHomeOf(
+  organizationId: string,
+  start: { entityType: string | null; entityId: string | null; parentId: string | null },
+): Promise<DocHome> {
+  if (start.entityType && start.entityId) return { kind: "anchor", entityType: start.entityType, entityId: start.entityId };
+  const seen = new Set<string>();
+  let cursor = start.parentId;
+  for (let hops = 0; cursor; hops += 1) {
+    if (hops >= 8 || seen.has(cursor)) return { kind: "closed" };
+    seen.add(cursor);
+    const row: { entityType: string | null; entityId: string | null; parentId: string | null } | null = await prisma.doc.findFirst({
+      where: { id: cursor, organizationId },
+      select: { entityType: true, entityId: true, parentId: true },
+    });
+    if (!row) return { kind: "closed" };
+    if (row.entityType && row.entityId) return { kind: "anchor", entityType: row.entityType, entityId: row.entityId };
+    cursor = row.parentId;
+  }
+  return { kind: "root" };
+}
+
+/**
+ * The place a doc anchor names, for a route (node-rules docAnchorPlace): a
+ * Space, a Folder, a List, or the List of a task (read here). Null for no
+ * anchor and for the anchor types that are the org's. Undefined for a task
+ * that is not in this org.
+ */
+export async function docAnchorPlaceOf(organizationId: string, anchor: { entityType: string | null; entityId: string | null }): Promise<Place | undefined> {
+  if (!anchor.entityType || !anchor.entityId) return null;
+  if (anchor.entityType === "BOARD_ITEM") {
+    const item = await prisma.item.findFirst({ where: { id: anchor.entityId, organizationId }, select: { boardId: true } });
+    return item ? { kind: "list", id: item.boardId } : undefined;
+  }
+  const rows = emptyRows(organizationId);
+  return docAnchorPlace(rows, anchor.entityType, anchor.entityId);
+}
+
+/**
+ * Is the place a doc would come back to still there? Its anchor (a Space not
+ * archived, a Folder not in Trash, a List or a task not archived) and its
+ * parent page (not archived), in this org. A doc restored in place into a
+ * container that is gone would point at nothing, or at a Folder another
+ * Space now holds.
+ */
+export async function docPlaceLive(
+  organizationId: string,
+  doc: { entityType: string | null; entityId: string | null; parentId: string | null },
+): Promise<boolean> {
+  if (doc.parentId) {
+    const parent = await prisma.doc.findFirst({ where: { id: doc.parentId, organizationId }, select: { archivedAt: true } });
+    if (!parent || parent.archivedAt) return false;
+  }
+  const id = doc.entityId;
+  if (!doc.entityType || !id) return true;
+  switch (doc.entityType) {
+    case "SPACE":
+      return !!(await prisma.space.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
+    case "FOLDER": {
+      const f = await folderPlacementFact(organizationId, id);
+      return !!f && !f.inTrash;
+    }
+    case "BOARD":
+      return !!(await prisma.board.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
+    case "BOARD_ITEM":
+      return !!(await prisma.item.findFirst({ where: { id, organizationId, archivedAt: null }, select: { id: true } }));
+    default:
+      return true;
+  }
+}
+
+// ── a form's destination ─────────────────────────────────────────────
+
+/**
+ * A form writes every response INTO its destination (a task on a List, a row
+ * in a table), so choosing one is content created there on the chooser's
+ * behalf: the placement rule (node-rules P1) asks Can edit on it, the role
+ * making a task or a row there needs. A List or a table in another org, or
+ * one the viewer cannot even open, reads as gone (a guessed id confirms
+ * nothing); one they can open but not edit is a 403 with its sentence.
+ */
+export async function checkFormDestination(
+  ctx: NodeCtx,
+  dest: { boardId?: string | null; tableId?: string | null },
+): Promise<{ ok: true } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const org = ctx.organizationId;
+  const [board, table] = await Promise.all([
+    dest.boardId ? prisma.board.findFirst({ where: { id: dest.boardId, organizationId: org, archivedAt: null }, select: { id: true } }) : Promise.resolve(null),
+    dest.tableId ? prisma.dataTable.findFirst({ where: { id: dest.tableId, organizationId: org }, select: { id: true } }) : Promise.resolve(null),
+  ]);
+  if (dest.boardId && !board) return fail(400, "That List no longer exists");
+  if (dest.tableId && !table) return fail(400, "That table no longer exists");
+  const refs: NodeRef[] = [
+    ...(board ? [{ kind: "list" as const, id: board.id }] : []),
+    ...(table ? [{ kind: "table" as const, id: table.id }] : []),
+  ];
+  if (refs.length === 0) return { ok: true };
+  const { rows, grants } = await loadWorld(ctx, refs);
+  const ev = new NodeEvaluator(rows, grants);
+  for (const r of refs) {
+    const role = ev.effective(r).role;
+    const noun = r.kind === "list" ? "List" : "table";
+    if (!roleAtLeast(role, "VIEW")) return fail(400, `That ${noun} no longer exists`);
+    if (!roleAtLeast(role, "EDIT")) return fail(403, `You need Can edit on that ${noun} to send responses to it.`);
+  }
+  return { ok: true };
+}
+
+// ── a file's place in the Space tree ─────────────────────────────────
+
+/**
+ * May the viewer move this file to `dest` (a Space's root, one of its
+ * Folders, or null: out of every Space)? node-rules fileMoveVerdict over one
+ * world, answered as the other moves are.
+ */
+export async function checkFileMove(
+  ctx: NodeCtx,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+  dest: Place,
+): Promise<{ ok: true; same: boolean } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const refs: NodeRef[] = [];
+  if (file.spaceFolderId) refs.push({ kind: "folder", id: file.spaceFolderId });
+  else if (file.spaceId) refs.push({ kind: "space", id: file.spaceId });
+  if (dest) refs.push(dest);
+  const { rows, grants } = refs.length ? await loadWorld(ctx, refs, { chain: true }) : { rows: emptyRows(ctx.organizationId), grants: emptyGrants(viewerOf(ctx)) };
+  const verdict = fileMoveVerdict(rows, grants, file, dest);
+  if (verdict.ok) return verdict;
+  if (verdict.failure === "destination" && dest && !(await seesPlace(ctx, new NodeEvaluator(rows, grants), dest))) {
+    return fail(404, "That place no longer exists.");
+  }
+  return fail(403, moveRefusal("file", verdict.failure));
+}
+
+// ── deletes that take a subtree ──────────────────────────────────────
+
+/**
+ * May the viewer delete (Trash or archive) this Folder with everything
+ * beneath it? node-rules folderDeleteAllowed over one world holding the whole
+ * subtree: Full access on the Folder and on every sub-folder, List and canvas
+ * inside it (in Trash or not, since all of it goes), unless they manage the
+ * Folder's Space. A narrow grant never takes away what other people were
+ * given inside it. The sentence names no node the viewer cannot open.
+ */
+export async function checkFolderDelete(ctx: NodeCtx, folderId: string): Promise<{ ok: true } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const org = ctx.organizationId;
+  const branch = await folderBranch(prisma, org, folderId);
+  const folderIds = [folderId, ...branch.map((b) => b.id)];
+  const [lists, canvases] = await Promise.all([
+    prisma.board.findMany({ where: { organizationId: org, folderId: { in: folderIds } }, select: { id: true } }),
+    (await canvasesHaveFolders())
+      ? prisma.whiteboard.findMany({ where: { organizationId: org, folderId: { in: folderIds } }, select: { id: true } })
+      : Promise.resolve([] as Array<{ id: string }>),
+  ]);
+  const refs: NodeRef[] = [
+    ...folderIds.map((id) => ({ kind: "folder" as const, id })),
+    ...lists.map((l) => ({ kind: "list" as const, id: l.id })),
+    ...canvases.map((c) => ({ kind: "canvas" as const, id: c.id })),
+  ];
+  const { rows, grants } = await loadWorld(ctx, refs, { chain: true });
+  const inside = { folders: branch.map((b) => b.id), lists: lists.map((l) => l.id), canvases: canvases.map((c) => c.id) };
+  if (folderDeleteAllowed(rows, grants, folderId, inside)) return { ok: true };
+  return fail(403, "You need Full access to everything in this folder to delete it.");
+}
+
+// ── P5 ───────────────────────────────────────────────────────────────
+
+export interface DestinationFolder {
+  id: string;
+  name: string;
+  /** Its parent among the listed Folders (null: directly under the Space). */
+  parentFolderId: string | null;
+  icon: string | null;
+  color: string | null;
+  /** A place the move would land (P2 accepts it). */
+  pickable: boolean;
+  /** Where the node is now. */
+  current: boolean;
+}
+
+export interface DestinationSpace {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string | null;
+  color: string | null;
+  /** Its root is a place the move would land. */
+  pickable: boolean;
+  current: boolean;
+  /** The pickable Folders and every Folder on the way to one, parents before children. */
+  folders: DestinationFolder[];
+}
+
+export interface MoveDestinations {
+  /** Out of every Space (the org's): only for the kinds that may live there. */
+  root: { pickable: boolean; current: boolean } | null;
+  spaces: DestinationSpace[];
+}
+
+/**
+ * P5: the places a move of `ref` would land, for this viewer, from the one
+ * rule (moveVerdict per place, in one world). Folders reached through a
+ * grant inside a Space the viewer only passes through are included, with
+ * that Space as a header that is not itself a destination. Nothing the
+ * viewer can neither open nor pass through is named, not even a Private
+ * Folder P7 would let a write land in. A Folder is never a destination for
+ * itself or for anything beneath it, nor where the nesting limit would be
+ * passed. Null when the viewer cannot open the node.
+ */
+export async function moveDestinations(ctx: NodeCtx, ref: NodeRef): Promise<MoveDestinations | null> {
+  const what = placeKindOf(ref);
+  if (!what || ctx.denied) return null;
+  const org = ctx.organizationId;
+  const spaces = await listVisibleSpaces(ctx, { paths: true });
+  const inFolders = placeHolds({ kind: "folder", id: "" }, what);
+  const folderRows = inFolders && spaces.length
+    ? await prisma.folder.findMany({
+        where: { organizationId: org, spaceId: { in: spaces.map((s) => s.id) }, archivedAt: null },
+        orderBy: [{ position: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, parentFolderId: true, spaceId: true, icon: true, color: true },
+      })
+    : [];
+  const refs: NodeRef[] = [ref, ...spaces.map((s) => ({ kind: "space" as const, id: s.id })), ...folderRows.map((f) => ({ kind: "folder" as const, id: f.id }))];
+  const { rows, grants } = await loadWorld(ctx, refs, { chain: true });
+  const ev = new NodeEvaluator(rows, grants);
+  if (!roleAtLeast(ev.effective(ref).role, "VIEW")) return null;
+
+  const here = currentPlace(rows, ref);
+  const isHere = (p: Place) => here !== undefined && (p === null ? here === null : here !== null && here.kind === p.kind && here.id === p.id);
+  const lands = (p: Place) => {
+    const v = moveVerdict(rows, grants, ref, p);
+    return v.ok && !v.same;
+  };
+
+  // A Folder never goes into itself, anything beneath it, or past the depth limit.
+  const excluded = new Set<string>();
+  let height = 0;
+  if (ref.kind === "folder") {
+    const branch = await folderBranch(prisma, org, ref.id);
+    excluded.add(ref.id);
+    for (const b of branch) excluded.add(b.id);
+    height = branch.reduce((m, b) => Math.max(m, b.depth), 0);
+  }
+  const byId = new Map(folderRows.map((f) => [f.id, f]));
+  const depthOf = (id: string): number => {
+    let d = 0;
+    let cursor = byId.get(id)?.parentFolderId ?? null;
+    const seen = new Set<string>([id]);
+    while (cursor && !seen.has(cursor) && d < 16) {
+      seen.add(cursor);
+      d += 1;
+      cursor = byId.get(cursor)?.parentFolderId ?? null;
+    }
+    return d;
+  };
+
+  const paths = ctx.orgAdmin ? new Set<string>() : await viewerPathContainers(ctx);
+  const sees = (r: NodeRef) => roleAtLeast(ev.effective(r).role, "VIEW") || paths.has(refKey(r));
+
+  const out: DestinationSpace[] = [];
+  for (const s of spaces) {
+    const spaceRef: NodeRef = { kind: "space", id: s.id };
+    const inSpace = folderRows.filter((f) => f.spaceId === s.id);
+    const pick = new Set<string>();
+    for (const f of inSpace) {
+      const fr: NodeRef = { kind: "folder", id: f.id };
+      if (excluded.has(f.id)) continue;
+      if (ref.kind === "folder" && depthOf(f.id) + 1 + height >= MAX_FOLDER_DEPTH) continue;
+      if (!roleAtLeast(ev.effective(fr).role, "VIEW")) continue;
+      if (lands(fr)) pick.add(f.id);
+    }
+    // Keep the pickable Folders, the current one, and the Folders on the way to them.
+    const keep = new Set<string>();
+    const keepUp = (id: string) => {
+      let cursor: string | null = id;
+      const seen = new Set<string>();
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        if (!sees({ kind: "folder", id: cursor })) break;
+        keep.add(cursor);
+        cursor = byId.get(cursor)?.parentFolderId ?? null;
+      }
+    };
+    for (const id of pick) keepUp(id);
+    if (here?.kind === "folder" && byId.get(here.id)?.spaceId === s.id) keepUp(here.id);
+    const rootPick = placeHolds(spaceRef, what) && lands(spaceRef);
+    const current = isHere(spaceRef);
+    if (!rootPick && keep.size === 0 && !current) continue;
+    if (!sees(spaceRef)) continue;
+    const ordered: DestinationFolder[] = [];
+    const visit = (parent: string | null) => {
+      for (const f of inSpace) {
+        if (!keep.has(f.id)) continue;
+        const p = f.parentFolderId && keep.has(f.parentFolderId) ? f.parentFolderId : null;
+        if (p !== parent) continue;
+        ordered.push({ id: f.id, name: f.name, parentFolderId: p, icon: f.icon, color: f.color, pickable: pick.has(f.id), current: isHere({ kind: "folder", id: f.id }) });
+        visit(f.id);
+      }
+    };
+    visit(null);
+    out.push({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: rootPick, current, folders: ordered });
+  }
+  const root = placeHolds(null, what) ? { pickable: lands(null), current: isHere(null) } : null;
+  return { root, spaces: out };
+}

@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { createSpace, listSpacesForUser } from "@/lib/space";
+import { canContributeSpace, createSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { createBoard } from "@/lib/board";
 import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
 
@@ -74,6 +74,15 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+  }
+  // A sub-Space is made INSIDE its parent (the placement rule, node-rules
+  // P1): the parent in this org, and Can edit or higher on it.
+  if (parsed.data.parentSpaceId) {
+    const parent = await getSpaceForReader(parsed.data.parentSpaceId, c.userId, c.accessLevel);
+    if (!parent || parent.organizationId !== c.organizationId) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!(await canContributeSpace(parsed.data.parentSpaceId, c.userId, c.accessLevel))) {
+      return NextResponse.json({ error: "You need Can edit on that Space to add a Space inside it." }, { status: 403 });
+    }
   }
   try {
     const space = await createSpace({

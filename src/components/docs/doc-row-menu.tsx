@@ -312,7 +312,9 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   }
 
   async function moveTo(value: string) {
-    const body = value === "none" ? { entityType: null, entityId: null } : { entityType: "SPACE", entityId: value };
+    // A moved doc leaves any parent page: a page lives where its parent lives
+    // (the placement rule, P3), so a place of its own means no parent.
+    const body = value === "none" ? { entityType: null, entityId: null, parentId: null } : { entityType: "SPACE", entityId: value, parentId: null };
     setBusy("move");
     const r = await apiFetch(`/api/docs/${doc.id}`, { method: "PUT", json: body });
     setBusy(null);

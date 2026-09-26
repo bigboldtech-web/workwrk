@@ -10,7 +10,8 @@ import { z } from "zod";
 import { whiteboardReadable } from "@/lib/whiteboard-gate";
 import { recordSnapshot } from "@/lib/snapshots";
 import { withArchivedBy } from "@/lib/archived-by";
-import { legacyFloorRole, moveAllowed, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { legacyFloorRole, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { moveCanvas } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 // The read gate (whiteboardReadable) lives in src/lib/whiteboard-gate.ts, so
@@ -57,8 +58,11 @@ const patchSchema = z.object({
   // for the value type and trust the client to send valid scene.
   scene: z.unknown().optional(),
   thumbnail: z.string().max(2_000_000).optional(),
-  // Move to a Space, or out of one (null). Validated below.
+  // Move to a Space's root, or out of every Space (null). Validated below.
   spaceId: z.string().min(1).nullable().optional(),
+  // Move into a Folder: its Space is the canvas's Space (the placement rule,
+  // node-rules P3), and a spaceId that disagrees is refused.
+  folderId: z.string().min(1).nullable().optional(),
   // Conflict-detection precondition (spec-docs-knowledge section 2,
   // /canvas/[id] Data): the updatedAt the client last observed. When it is
   // provided and stale, the save answers 409 { liveUpdatedAt } instead of
@@ -102,24 +106,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  // A move follows the move rule (M3): the role the canvas's container gives
-  // (never a canvas grant alone) must be Can edit, and the destination Space
-  // must be one the viewer manages; out of every Space at that same role.
-  if (parsed.data.spaceId !== undefined) {
-    const dest = parsed.data.spaceId === null ? { kind: "none" as const } : { kind: "space" as const, id: parsed.data.spaceId };
-    if (!(await moveAllowed(nodeCtx, { kind: "canvas", id }, dest))) {
-      return NextResponse.json(
-        { error: parsed.data.spaceId === null ? "You need Full access to take this canvas out of its Space." : "You need edit access to that Space." },
-        { status: 403 },
-      );
-    }
+  // A move is the placement rule's (node-rules P2 and P3), through its one
+  // helper: Full access on the canvas (never from a canvas grant alone, M3)
+  // and on the place it leaves (and its Space when it leaves the Space), Can
+  // edit where it goes (the org's, for out of every Space), and the Space
+  // taken from the Folder it goes into. Moving to another Space's root
+  // clears the Folder it had: a canvas never keeps a Folder of the Space it
+  // left. The move is written before the rest, and a refused one writes
+  // nothing at all.
+  if (parsed.data.spaceId !== undefined || parsed.data.folderId !== undefined) {
+    const moved = await moveCanvas(nodeCtx, id, {
+      spaceId: parsed.data.folderId ? parsed.data.spaceId ?? null : parsed.data.spaceId !== undefined ? parsed.data.spaceId : existing.spaceId,
+      folderId: parsed.data.folderId ?? null,
+    });
+    if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: moved.status });
   }
 
   const whiteboard = await prisma.whiteboard.update({
     where: { id },
     data: {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.spaceId !== undefined ? { spaceId: parsed.data.spaceId, ...(parsed.data.spaceId === null ? { folderId: null } : {}) } : {}),
       ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
       ...(parsed.data.scene !== undefined ? { scene: parsed.data.scene as object } : {}),
       ...(parsed.data.thumbnail !== undefined ? { thumbnail: parsed.data.thumbnail } : {}),

@@ -1,14 +1,23 @@
-// PATCH  /api/folders/[id] — rename / re-parent / re-position
-// DELETE /api/folders/[id] — archive (soft); ?hard=1 → recoverable Trash
+// PATCH  /api/folders/[id]: rename, re-parent, re-position, restrict
+// DELETE /api/folders/[id]: archive (soft); ?hard=1 moves it to Trash
+//
+// The placement rule (node-rules P1 to P7): a new parent goes through the one
+// move helper (node-placement moveFolder), which takes the Space from the new
+// parent and carries the whole subtree in one transaction. A `spaceId` field
+// is refused: a Folder's Space is never a field of its own (P3), and writing
+// one here is how a sub-folder once jumped to another Space's root under a
+// parent that stayed behind. A delete takes the whole subtree, so it needs
+// Full access on everything in it (node-placement checkFolderDelete).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveFolder, updateFolder } from "@/lib/folder";
+import { archiveFolder, updateFolder, type UpdateFolderInput } from "@/lib/folder";
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
-import { moveAllowed, nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { checkFolderDelete, moveFolder } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { recordGeneralAccessChange } from "@/lib/access/grants";
 
@@ -68,25 +77,36 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  // A re-parent or a Space change through PATCH follows the move rule: Full
-  // access on the destination Folder, or on the destination Space at its root.
-  if (parsed.data.parentFolderId !== undefined || parsed.data.spaceId !== undefined) {
-    const dest = parsed.data.parentFolderId
-      ? { kind: "folder" as const, id: parsed.data.parentFolderId }
-      : { kind: "space" as const, id: parsed.data.spaceId ?? gate.folder.spaceId };
-    if (!(await moveAllowed(gate.ctx, { kind: "folder", id }, dest))) {
-      return NextResponse.json({ error: "You need Full access where this folder is going." }, { status: 403 });
-    }
+  if (parsed.data.spaceId !== undefined) {
+    return NextResponse.json({ error: "A folder's Space comes from where it sits. Use Move to put it in another Space." }, { status: 400 });
+  }
+  const { parentFolderId, position, ...fields } = parsed.data;
+  const rest: UpdateFolderInput = {
+    name: fields.name, description: fields.description, icon: fields.icon, color: fields.color, visibility: fields.visibility,
+  };
+  for (const k of Object.keys(rest) as Array<keyof UpdateFolderInput>) if (rest[k] === undefined) delete rest[k];
+  if (rest.name !== undefined && !rest.name.trim()) {
+    return NextResponse.json({ error: "Folder name cannot be empty" }, { status: 400 });
+  }
+  // A new parent is a move (P2, P4): the one move helper, before anything
+  // else is written, so a refused move writes nothing at all.
+  let moved: Awaited<ReturnType<typeof moveFolder>> | null = null;
+  if (parentFolderId !== undefined) {
+    moved = await moveFolder(gate.ctx, id, { parentFolderId, position });
+    if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: moved.status });
   }
   try {
     const before = gate.folder.visibility;
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await updateFolder(id, parsed.data, tx);
-      if (parsed.data.visibility !== undefined && parsed.data.visibility !== before) {
-        await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "folder", id }, { visibility: { from: before, to: parsed.data.visibility } });
-      }
-      return row;
-    });
+    const patch = { ...rest, ...(parentFolderId === undefined && position !== undefined ? { position } : {}) };
+    const updated = Object.keys(patch).length === 0 && moved?.ok
+      ? await prisma.folder.findUnique({ where: { id } })
+      : await prisma.$transaction(async (tx) => {
+          const row = await updateFolder(id, patch, tx);
+          if (patch.visibility !== undefined && patch.visibility !== before) {
+            await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "folder", id }, { visibility: { from: before, to: patch.visibility } });
+          }
+          return row;
+        });
     return NextResponse.json({ folder: updated });
   } catch (err) {
     return NextResponse.json(
@@ -102,9 +122,13 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { id } = await params;
   const gate = await loadFolderAndGate(id, c);
   if ("error" in gate) return gate.error;
+  // Both deletes take the whole subtree out of the tree: Full access on
+  // everything in it, or on the Folder's Space.
+  const allowed = await checkFolderDelete(gate.ctx, id);
+  if (!allowed.ok) return NextResponse.json({ error: allowed.error }, { status: allowed.status });
   const hard = new URL(req.url).searchParams.get("hard") === "1";
   if (hard) {
-    // Recoverable delete — snapshot the folder + its lists to Trash.
+    // Recoverable delete: the Folder and its whole subtree as one Trash row.
     await moveToTrash("folder", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
     return NextResponse.json({ ok: true });
   }

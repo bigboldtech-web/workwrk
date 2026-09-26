@@ -100,6 +100,7 @@ export function TableRowMenu({
   const [fav, setFav] = useState(!!table.isFavorite);
   const [busy, setBusy] = useState<string | null>(null);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  const [rootMove, setRootMove] = useState(false);
   // Opened straight at the picker: load the Spaces once, in a tick.
   useEffect(() => {
     if (initialMode !== "move") return;
@@ -197,8 +198,12 @@ export function TableRowMenu({
   async function openMove() {
     setMode("move");
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[] }>("/api/spaces", { cache: "no-store" });
-      setSpaces(r.ok ? (r.data.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
+      // Exactly the places the move rule accepts for this person (the
+      // placement rule, P5): Space roots, and No Space only when it would be
+      // taken.
+      const r = await apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=table&id=${encodeURIComponent(table.id)}`, { cache: "no-store" });
+      setRootMove(r.ok && r.data.root?.pickable === true);
+      setSpaces(r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
     }
   }
 
@@ -207,8 +212,9 @@ export function TableRowMenu({
     setBusy("move");
     const r = await apiFetch(`/api/tables/${table.id}`, { method: "PATCH", json: { spaceId } });
     setBusy(null);
-    onClose();
+    // A refusal keeps the picker open on the choice, with the server's sentence.
     if (!r.ok) { toast(r.error || "Couldn't move the table", { tone: "danger" }); return; }
+    onClose();
     const target = spaceId ? spaces?.find((s) => s.id === spaceId)?.name ?? "the Space" : "No Space";
     toast(`Moved to ${target}`);
     dispatchTablesChanged();
@@ -274,7 +280,7 @@ export function TableRowMenu({
           emptyLabel="No Spaces"
           loading={spaces === null}
           sections={[
-            { options: [{ value: "none", label: "No Space", description: "Everyone in the workspace can open it" }] },
+            ...(rootMove ? [{ options: [{ value: "none", label: "No Space", description: "Everyone in the workspace can open it" }] }] : []),
             { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
           ]}
         />

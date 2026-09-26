@@ -1,7 +1,9 @@
 // GET  /api/folders?spaceId=...: list folders in a Space (flat), only the
 //      ones the viewer can open (the one resolver, one world for the list).
-// POST /api/folders: create a folder, with Full access on the parent Folder or
-//      on the Space at its root (a Folder grant never reads the Space).
+// POST /api/folders: create a folder. The placement rule (node-rules P1, P3):
+//      Can edit or higher on the parent Folder, or on the Space at its root
+//      (a Folder grant never reads the Space); the Space is the parent's, and
+//      a parent in another Space, another org or Trash is refused.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -9,8 +11,8 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createFolder, listFoldersInSpace } from "@/lib/folder";
 import { getSpaceForReader } from "@/lib/space";
-import { prisma } from "@/lib/prisma";
-import { containerGate, nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 async function ctx() {
@@ -62,26 +64,20 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  const space = await prisma.space.findFirst({ where: { id: parsed.data.spaceId, organizationId: c.organizationId }, select: { id: true } });
-  if (!space) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // The container the Folder is made in: the parent Folder (in the same
-  // Space and org), or the Space root. Full access on it, and only on it.
-  const parentId = parsed.data.parentFolderId ?? null;
-  if (parentId) {
-    const parent = await prisma.folder.findFirst({ where: { id: parentId, organizationId: c.organizationId, spaceId: parsed.data.spaceId }, select: { id: true } });
-    if (!parent) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const container = parentId ? { kind: "folder" as const, id: parentId } : { kind: "space" as const, id: parsed.data.spaceId };
-  // Full access on it, or (a Folder, under the legacy Private rule) today's
-  // canEditSpace on its Space (containerGate has the rule).
-  const gate = await containerGate(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), container);
-  if (gate === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (gate === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Where it lands (P3: the parent Folder settles the Space) and whether the
+  // viewer may make a Folder there (P1: Can edit or higher, or, in a Folder
+  // under the legacy Private rule, today's canEditSpace on its Space, P7).
+  const placed = await resolveCreate(
+    nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+    { spaceId: parsed.data.spaceId, folderId: parsed.data.parentFolderId ?? null },
+    "folder",
+  );
+  if (!placed.ok) return NextResponse.json({ error: placed.error }, { status: placed.status });
   try {
     const folder = await createFolder({
       organizationId: c.organizationId,
-      spaceId: parsed.data.spaceId,
-      parentFolderId: parsed.data.parentFolderId ?? undefined,
+      spaceId: placed.spaceId as string,
+      parentFolderId: placed.folderId ?? undefined,
       name: parsed.data.name,
       description: parsed.data.description,
       icon: parsed.data.icon,

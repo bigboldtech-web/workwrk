@@ -115,6 +115,23 @@ export function roleAtLeast(role: ContainerRole, floor: ContainerRole): boolean 
   return RANK[role] >= RANK[floor];
 }
 
+/** What the "New" menus make inside a container. */
+export type NewItem = "list" | "sprint" | "folder" | "doc" | "canvas" | "table";
+
+/**
+ * What this viewer can make inside this container: the one create rule
+ * (node-rules P1, createDecision) as the menus read it, so a menu offers
+ * exactly what the server accepts. Can edit or higher makes every kind a
+ * container holds (a Sprint is a List); Can view and Can comment make
+ * nothing; a table sits only at a Space's root; a List holds no children,
+ * and a path container gives no role to make anything with.
+ * container-menu.placement.test.ts proves it matches createDecision.
+ */
+export function newItemsFor(kind: ContainerKind, role: ContainerRole | null | undefined, pathOnly = false): NewItem[] {
+  if (pathOnly || kind === "list" || !roleAtLeast(role ?? "view", "edit")) return [];
+  return kind === "space" ? ["list", "sprint", "folder", "doc", "canvas", "table"] : ["list", "sprint", "folder", "doc", "canvas"];
+}
+
 function row(
   action: ContainerAction,
   label: string,
@@ -155,8 +172,9 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
   // ClickUp's Favorite > Top: a chip row under the bar (top-pins-strip.tsx).
   out.push(row("pin-top", isTopPinned ? "Unpin from top" : "Pin to top"));
 
-  // A List has no children to create, so its New submenu does not exist.
-  if (kind !== "list" && canEdit) out.push(row("new", "New", { submenu: true }));
+  // The New submenu exists when the one create rule gives this viewer
+  // something to make here (newItemsFor). A List has no children to create.
+  if (newItemsFor(kind, role).length > 0) out.push(row("new", "New", { submenu: true }));
 
   out.push(SEP);
 

@@ -8,7 +8,8 @@ import { z } from "zod";
 import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
 import { getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { prisma } from "@/lib/prisma";
-import { containerGate, nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 const VIEW_TYPES = [
@@ -184,29 +185,25 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  const space = await prisma.space.findFirst({ where: { id: parsed.data.spaceId, organizationId: c.organizationId }, select: { id: true } });
-  if (!space) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // The container the List is made in: its Folder (in this Space and org),
-  // with Full access on that Folder, or the Space root with Full access on the
-  // Space. A Folder grant never needs, and never gives, anything on the Space.
-  const folderIdIn = parsed.data.folderId ?? null;
-  if (folderIdIn) {
-    const inSpace = await prisma.folder.findFirst({ where: { id: folderIdIn, organizationId: c.organizationId, spaceId: parsed.data.spaceId }, select: { id: true } });
-    if (!inSpace) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const container = folderIdIn ? { kind: "folder" as const, id: folderIdIn } : { kind: "space" as const, id: parsed.data.spaceId };
-  // Full access on it, or (a Folder, under the legacy Private rule) today's
-  // canEditSpace on its Space (containerGate has the rule).
-  const gate = await containerGate(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), container);
-  if (gate === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (gate === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Where it lands (the placement rule, node-rules P3: its Folder settles the
+  // Space, and a Folder in another Space, another org or Trash is refused)
+  // and whether the viewer may make a List there (P1: Can edit or higher on
+  // the Folder, or on the Space at its root; in a Folder under the legacy
+  // Private rule, today's canEditSpace on its Space, P7). A Folder grant
+  // never needs, and never gives, anything on the Space.
+  const placed = await resolveCreate(
+    nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+    { spaceId: parsed.data.spaceId, folderId: parsed.data.folderId ?? null },
+    "list",
+  );
+  if (!placed.ok) return NextResponse.json({ error: placed.error }, { status: placed.status });
 
   try {
     const board = await createBoard({
       organizationId: c.organizationId,
       userId: c.userId,
-      spaceId: parsed.data.spaceId,
-      folderId: parsed.data.folderId ?? null,
+      spaceId: placed.spaceId as string,
+      folderId: placed.folderId,
       name: parsed.data.name ?? "",
       description: parsed.data.description,
       icon: parsed.data.icon,

@@ -23,18 +23,19 @@ function block(src: string, marker: string): string {
 
 describe("the doc move gate (finding 1)", () => {
   const route = read("src/app/api/docs/[id]/route.ts");
-  it("asks Full access, or today's answer, before a move that could open a doc to the org", () => {
-    expect(route).toMatch(/!access\.canManage && docMoveNeedsFull\(existing, after, confined\)/);
+  it("asks the placement rule (Full access on the doc and where it is, Can edit where it goes) before any move, one that could open a doc to the org included", () => {
+    expect(route).toMatch(/const refused = await treeMoveRefusal\(ctx, nodeCtx, id, existing, after\)/);
+    expect(route).toMatch(/await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\)/);
     expect(route).toMatch(/docHomeOf\(ctx\.orgId, existing\), docHomeOf\(ctx\.orgId, after\)/);
-    expect(route).toMatch(/legacyFloorRole\(nodeCtx, \{ kind: "doc", id \}\)/);
+    expect(read("src/lib/access/node-placement.ts")).toMatch(/const verdict = moveVerdict\(rows, grants, ref, dest\)/);
   });
 });
 
 describe("the canvas routes (findings 2 and 9)", () => {
   const route = read("src/app/api/whiteboards/[id]/route.ts");
-  it("move through moveAllowed, which is moveDecision", () => {
-    expect(route).toMatch(/moveAllowed\(nodeCtx, \{ kind: "canvas", id \}, dest\)/);
-    expect(read("src/lib/access/node-access.ts")).toMatch(/return moveDecision\(rows, grants, ref, destRef\)/);
+  it("move through the one move helper, which is moveVerdict", () => {
+    expect(route).toMatch(/const moved = await moveCanvas\(nodeCtx, id, \{/);
+    expect(read("src/lib/access/node-placement.ts")).toMatch(/const check = await checkMove\(ctx, \{ kind: "canvas", id: canvas\.id \}, dest\)/);
   });
   it("keep the Trash for today's readers through the legacy floor", () => {
     expect(route).toMatch(/!roleAtLeast\(role, "EDIT"\) && !roleAtLeast\(await legacyFloorRole\(nodeCtx, \{ kind: "canvas", id \}\), "VIEW"\)/);

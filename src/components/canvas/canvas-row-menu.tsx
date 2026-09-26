@@ -61,7 +61,13 @@ export function dispatchCanvasesChanged() {
   refreshSidebar();
 }
 
-interface SpaceRow { id: string; name: string; icon?: string | null; color?: string | null }
+interface SpaceRow { id: string; name: string; icon?: string | null; color?: string | null; pickable?: boolean; folders?: Array<{ id: string; name: string }> }
+
+/** GET /api/move/destinations: the places the move rule accepts (node-placement moveDestinations). */
+interface MoveDestinationsReply {
+  root: { pickable: boolean; current: boolean } | null;
+  spaces: Array<{ id: string; name: string; icon: string | null; color: string | null; pickable: boolean; folders: Array<{ id: string; name: string; pickable: boolean }> }>;
+}
 
 export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onShare, onRenameInline, extraRows }: {
   canvas: CanvasMenuTarget;
@@ -83,6 +89,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   const [draft, setDraft] = useState(canvas.name);
   const [fav, setFav] = useState(!!canvas.favorite);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  const [rootMove, setRootMove] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const canEdit = canvas.canEdit !== false;
   const canManage = canvas.canManage !== false;
@@ -117,18 +124,24 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   async function openMove() {
     setMode("move");
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces", { cache: "no-store" });
-      const list = r.ok ? (Array.isArray(r.data) ? r.data : r.data.spaces ?? r.data.data ?? []) : [];
-      setSpaces(list.map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })));
+      // Exactly the places the move rule accepts for this person (the
+      // placement rule, P5): Space roots, Folders, and No location only when
+      // each would be taken.
+      const r = await apiFetch<MoveDestinationsReply>(`/api/move/destinations?kind=canvas&id=${encodeURIComponent(canvas.id)}`, { cache: "no-store" });
+      const d = r.ok ? r.data : null;
+      setRootMove(d?.root?.pickable === true);
+      setSpaces((d?.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null, pickable: s.pickable, folders: s.folders.filter((f) => f.pickable) })));
     }
   }
 
   async function moveTo(value: string) {
     setBusy("move");
-    const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "PATCH", json: { spaceId: value === "none" ? null : value } });
+    const json = value === "none" ? { spaceId: null } : value.startsWith("folder:") ? { folderId: value.slice(7) } : { spaceId: value, folderId: null };
+    const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "PATCH", json });
     setBusy(null);
-    if (r.ok) { toast(value === "none" ? "Moved to No location" : "Moved"); done("moved"); router.refresh(); }
-    else toast(r.error || "Couldn't move");
+    // A refusal keeps the picker open on the choice, with the server's sentence.
+    if (!r.ok) { toast(r.error || "Couldn't move"); return; }
+    toast(value === "none" ? "Moved to No location" : "Moved"); done("moved"); router.refresh();
     onClose();
   }
 
@@ -191,8 +204,9 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
           onSelect={(v) => void moveTo(v)}
           emptyLabel="No Spaces"
           sections={[
-            { options: [{ value: "none", label: "No location", description: "A standalone canvas" }] },
-            { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+            ...(rootMove ? [{ options: [{ value: "none", label: "No location", description: "A standalone canvas" }] }] : []),
+            { label: "Spaces", options: (spaces ?? []).filter((s) => s.pickable !== false).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+            { label: "Folders", options: (spaces ?? []).flatMap((s) => (s.folders ?? []).map((f) => ({ value: `folder:${f.id}`, label: f.name, description: s.name, glyph: <EntityTile size="xs" icon={null} color={null} name={f.name} fallback="folder" /> }))) },
           ]}
         />
       </div>

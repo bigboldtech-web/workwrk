@@ -5,8 +5,9 @@
 // Table (Space only) and Browse templates, created INSIDE this container.
 // The same targets sit under the row's "..." > New submenu (two clicks deep);
 // this restores the one-hover door the old SpaceCreatePopover gave, on the
-// MenuList primitives and the tokens. Present only for roles that may write
-// (roleAtLeast "edit"), so the control is absent rather than a 403.
+// MenuList primitives and the tokens. Present only for what the one create
+// rule lets the viewer make (newItemsFor, node-rules P1: Can edit or
+// higher), so the control is absent rather than a 403.
 //
 // Every target goes through the same routes the container menu uses, and
 // tells the tree (refreshSidebar + treeChanged) so the new row appears at
@@ -18,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Brush, Files, FileText, FolderPlus, IterationCw, ListChecks, Plus, Table2 } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
-import { roleAtLeast, type ContainerRole } from "@/lib/work/container-menu";
+import { newItemsFor, type ContainerRole } from "@/lib/work/container-menu";
 import { treeChanged } from "@/lib/work/container-events";
 import { MorePortal } from "./more-portal";
 import { refreshSidebar } from "./sidebar-refresh";
@@ -133,7 +134,10 @@ export function CreateInsideTrigger({ kind, spaceId, spaceSlug, folderId, role, 
     router.push(`${objectHrefNow("table", id, spaceSlug)}?new=1`);
   };
 
-  if (!role || !roleAtLeast(role, "edit")) return null;
+  // Exactly what the one create rule lets this viewer make here (newItemsFor,
+  // node-rules P1): no door at all when it gives nothing.
+  const can = new Set(newItemsFor(kind, role));
+  if (!role || can.size === 0) return null;
 
   return (
     <>
@@ -151,12 +155,12 @@ export function CreateInsideTrigger({ kind, spaceId, spaceSlug, folderId, role, 
       </button>
       <MorePortal anchorRef={btnRef} panelRef={panelRef} width={220} open={open} placement="below">
         <MenuList aria-label={kind === "space" ? "Create inside this Space" : "Create inside this Folder"}>
-          <MenuItem icon={ListChecks} label="List" onClick={() => { close(); openCreateList(place); }} />
-          <MenuItem icon={IterationCw} label="Sprint" onClick={() => { close(); openCreateSprint(place); }} />
-          <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={() => { void createFolder(); }} />
-          <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={() => { void createDoc(); }} />
-          <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={() => { void createCanvas(); }} />
-          {kind === "space" ? <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={() => { void createTable(); }} /> : null}
+          {can.has("list") ? <MenuItem icon={ListChecks} label="List" onClick={() => { close(); openCreateList(place); }} /> : null}
+          {can.has("sprint") ? <MenuItem icon={IterationCw} label="Sprint" onClick={() => { close(); openCreateSprint(place); }} /> : null}
+          {can.has("folder") ? <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={() => { void createFolder(); }} /> : null}
+          {can.has("doc") ? <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={() => { void createDoc(); }} /> : null}
+          {can.has("canvas") ? <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={() => { void createCanvas(); }} /> : null}
+          {can.has("table") ? <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={() => { void createTable(); }} /> : null}
           <MenuSeparator />
           <MenuItem
             icon={Files}

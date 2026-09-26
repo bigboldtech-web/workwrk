@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { canvasesHaveFolders, lockParentFolder, PlacementConflict, resolveCreate } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesCanvasFilters, matchesCanvasView, parseCanvasListQuery, sortCanvases, type CanvasCandidate } from "@/lib/canvas-list";
@@ -142,32 +143,18 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  // A folder id from a request body is a claim, not a fact. Unchecked, any
-  // signed-in person with an id could plant a Canvas inside a folder they
-  // cannot open. `createBoard` validates its own folderId the same way.
-  let folderId: string | null = null;
-  let spaceId = parsed.data.spaceId ?? null;
+  // A folder id from a request body is a claim, not a fact. The placement
+  // rule (node-rules P1 and P3): the Folder settles the Space (a Space that
+  // disagrees, a Folder in another org or in Trash is refused), and a canvas
+  // is made only where the viewer can edit: Can edit or higher on the Folder,
+  // or on the Space at its root. Can view never creates. A place the viewer
+  // cannot even open is the same 404 as one that does not exist. With
+  // neither, the canvas is the org's (Members only, as the org root's rule).
   const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
-  if (parsed.data.folderId) {
-    const folder = await prisma.folder.findFirst({
-      where: { id: parsed.data.folderId, organizationId: ctx.orgId, archivedAt: null },
-      select: { id: true, spaceId: true },
-    });
-    if (!folder) return NextResponse.json({ error: "That folder no longer exists" }, { status: 404 });
-    // Full access on the Folder creates in it (W2), never the Space's rights.
-    const d = await nodeRole(nodeCtx, { kind: "folder", id: folder.id });
-    if (d.role === "none" && !d.path) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (!roleAtLeast(d.role, "FULL")) {
-      return NextResponse.json({ error: "You need Full access to that folder." }, { status: 403 });
-    }
-    folderId = folder.id;
-    // The folder settles the Space, so the two keys in one body cannot disagree.
-    spaceId = folder.spaceId;
-  } else if (spaceId) {
-    // The Space root: Can view on the Space, as today.
-    const d = await nodeRole(nodeCtx, { kind: "space", id: spaceId });
-    if (!roleAtLeast(d.role, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  const placed = await resolveCreate(nodeCtx, { spaceId: parsed.data.spaceId ?? null, folderId: parsed.data.folderId ?? null }, "canvas", { root: true });
+  if (!placed.ok) return NextResponse.json({ error: placed.error }, { status: placed.status });
+  const folderId = placed.folderId;
+  const spaceId = placed.spaceId;
 
   // The column is new (prisma/sql/2026-09-19-canvas-folder.sql). A deployment
   // that ships this code before the file is applied still creates Canvases; the
@@ -184,13 +171,23 @@ export async function POST(req: Request) {
     lastEditedAt: new Date(),
     scene: {},
   };
-  try {
-    whiteboard = await prisma.whiteboard.create({
-      data: { ...base, folderId: folderId ?? undefined },
-      select: { id: true, name: true, createdAt: true },
-    });
-  } catch (err) {
-    if (!folderId) throw err;
+  if (folderId && (await canvasesHaveFolders())) {
+    // Read the Folder's Space under a share lock in the create's transaction
+    // (P3): a move of the Folder meanwhile cannot leave the canvas behind.
+    try {
+      whiteboard = await prisma.$transaction(async (tx) => {
+        const parent = await lockParentFolder(tx, ctx.orgId, folderId);
+        if (!parent) throw new PlacementConflict("That folder just moved or went to Trash. Try again.");
+        return tx.whiteboard.create({
+          data: { ...base, spaceId: parent.spaceId, folderId },
+          select: { id: true, name: true, createdAt: true },
+        });
+      });
+    } catch (err) {
+      if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });
+      throw err;
+    }
+  } else {
     whiteboard = await prisma.whiteboard.create({
       data: base,
       select: { id: true, name: true, createdAt: true },

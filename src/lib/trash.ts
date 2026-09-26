@@ -13,6 +13,7 @@ import { captureListLinks, listLinksAvailable, reconcileListLinks } from "@/lib/
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
 import { retargetTaskSnapshot } from "@/lib/trash-retarget";
+import { canvasesHaveFolders, folderBranch } from "@/lib/access/node-placement";
 
 export type TrashType =
   | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
@@ -117,6 +118,7 @@ type Snapshot = { row: Row; children?: Record<string, Row[]> };
 type TrashDb = Pick<
   typeof prisma,
   "dataTable" | "dataTableRow" | "formDefinition" | "formSubmission" | "item" | "board" | "view" | "boardMember" | "folder" | "space" | "itemListLink"
+  | "whiteboard" | "fileEntry" | "folderMember" | "$queryRaw"
 >;
 
 // Snapshots are dynamic JSON; Prisma create inputs require statically-known
@@ -125,7 +127,7 @@ type TrashDb = Pick<
 const asData = (r: unknown): any => r;
 
 /** The client a hierarchy restore writes through: its transaction. */
-type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space">;
+type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "folderMember">;
 
 type Entry = {
   /** `db` is the client to read through: the transaction, for the types
@@ -257,7 +259,20 @@ const REGISTRY: Record<TrashType, Entry> = {
       const row = await prisma.whiteboard.findUnique({ where: { id } });
       return row ? { label: row.name || "Untitled canvas", snapshot: { row } } : null;
     },
-    restore: async (s) => { await prisma.whiteboard.create({ data: asData(s.row) }); },
+    restore: async (s) => {
+      // The placement rule (node-rules P3): a canvas comes back in its Folder's
+      // Space as the Folder is NOW, and never with a Folder that is gone (the
+      // column has no foreign key, so a stale one would read as the Space root
+      // and open the canvas to the whole Space).
+      const row = { ...(s.row as Record<string, unknown>) };
+      const folderId = typeof row.folderId === "string" ? row.folderId : null;
+      if (folderId) {
+        const folder = await prisma.folder.findUnique({ where: { id: folderId }, select: { spaceId: true } });
+        if (!folder) throw new Error("The folder this canvas lived in is gone.");
+        row.spaceId = folder.spaceId;
+      }
+      await prisma.whiteboard.create({ data: asData(row) });
+    },
   },
   table: {
     capture: async (id, db = prisma) => {
@@ -377,29 +392,83 @@ const REGISTRY: Record<TrashType, Entry> = {
       return { label: row.name || "Untitled list", snapshot: { row, children: bundle } };
     },
     restore: async (s, db = prisma) => {
-      await db.board.create({ data: asData(s.row) });
+      // P3: a List comes back in its Folder's Space as the Folder is now.
+      const row = { ...(s.row as Record<string, unknown>) };
+      const folderId = typeof row.folderId === "string" ? row.folderId : null;
+      if (folderId) {
+        const folder = await db.folder.findUnique({ where: { id: folderId }, select: { spaceId: true } });
+        if (folder) row.spaceId = folder.spaceId;
+      }
+      await db.board.create({ data: asData(row) });
       await restoreBoardChildren(s, db);
     },
   },
 
-  // A Folder + the boards it holds. Board.folder is onDelete:SetNull, so the
-  // live delete (in moveToTrash) removes the boards explicitly in a transaction.
+  // A Folder with its WHOLE subtree: every sub-folder at any depth, every List
+  // in any of them (with its tasks, views and members), every canvas and every
+  // file placed in any of them, and the Folder grants of all of it. The
+  // placement rule (node-rules P3) says a delete never leaves an orphan:
+  // Folder.parentFolder, Board.folder and FileEntry.spaceFolder are all
+  // onDelete SetNull, and Whiteboard.folderId has no key at all, so trashing
+  // the Folder row alone used to drop its sub-folders, files and canvases to
+  // the Space root (outside the snapshot, so Restore never brought them back,
+  // and a Private Folder's contents opened to the whole Space). The live
+  // delete (moveToTrash) removes every row captured here in one transaction.
+  // Docs anchored to these Folders and Lists keep their anchor ids, read as
+  // closed while the Folder is gone, and come back with it.
   folder: {
     capture: async (id, db = prisma) => {
       const row = await db.folder.findUnique({ where: { id } });
       if (!row) return null;
-      const boards = await db.board.findMany({ where: { folderId: id } });
+      const subtree = await folderBranch(db, row.organizationId, id);
+      const ids = [id, ...subtree.map((f) => f.id)];
+      const [folders, boards, canvases, files, folderMembers] = await Promise.all([
+        subtree.length ? db.folder.findMany({ where: { id: { in: subtree.map((f) => f.id) } } }) : Promise.resolve([]),
+        db.board.findMany({ where: { folderId: { in: ids } } }),
+        (await canvasesHaveFolders()) ? db.whiteboard.findMany({ where: { folderId: { in: ids } } }) : Promise.resolve([]),
+        db.fileEntry.findMany({ where: { spaceFolderId: { in: ids } } }),
+        db.folderMember.findMany({ where: { folderId: { in: ids } } }),
+      ]);
       const bundle = await captureBoardBundle(boards.map((b) => b.id), db);
       return {
         label: row.name || "Untitled folder",
-        snapshot: { row, children: { boards: boards as unknown as Row[], ...bundle } },
+        snapshot: {
+          row,
+          children: {
+            folders: folders as unknown as Row[],
+            boards: boards as unknown as Row[],
+            canvases: canvases as unknown as Row[],
+            files: files as unknown as Row[],
+            folderMembers: folderMembers as unknown as Row[],
+            ...bundle,
+          },
+        },
       };
     },
     restore: async (s, db = prisma) => {
-      await db.folder.create({ data: asData(s.row) });
+      // P3: the Folder comes back under its parent as the parent is NOW, so
+      // if the parent moved to another Space since, the whole subtree takes
+      // that Space. A parent that is gone fails on its key, and nothing lands.
+      const row = { ...(s.row as Record<string, unknown>) };
+      const parentId = typeof row.parentFolderId === "string" ? row.parentFolderId : null;
+      if (parentId) {
+        const parent = await db.folder.findUnique({ where: { id: parentId }, select: { spaceId: true } });
+        if (parent) row.spaceId = parent.spaceId;
+      }
+      const spaceId = row.spaceId;
+      const inSpace = (rows: Row[]) => rows.map((r) => ({ ...r, spaceId }));
+      await db.folder.create({ data: asData(row) });
+      const folders = s.children?.folders ?? [];
+      if (folders.length) await createFoldersParentsFirst(inSpace(folders), db);
       const boards = s.children?.boards ?? [];
-      if (boards.length) await db.board.createMany({ data: asData(boards), skipDuplicates: true });
+      if (boards.length) await db.board.createMany({ data: asData(inSpace(boards)), skipDuplicates: true });
       await restoreBoardChildren(s, db);
+      const canvases = s.children?.canvases ?? [];
+      if (canvases.length) await db.whiteboard.createMany({ data: asData(inSpace(canvases)), skipDuplicates: true });
+      const files = s.children?.files ?? [];
+      if (files.length) await db.fileEntry.createMany({ data: asData(inSpace(files)), skipDuplicates: true });
+      const folderMembers = s.children?.folderMembers ?? [];
+      if (folderMembers.length) await db.folderMember.createMany({ data: asData(folderMembers), skipDuplicates: true });
     },
   },
 
@@ -508,14 +577,21 @@ export async function moveToTrash(
     // inside a transaction waits for a second connection (the pool deadlock
     // listLinksAvailable describes). Answered here, their ask is a cache hit.
     await listLinksAvailable();
+    // The same for the canvas column probe the folder capture asks.
+    if (type === "folder") await canvasesHaveFolders();
     return prisma.$transaction(async (tx) => {
       if (type === "item") {
         await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ${id} FOR UPDATE`;
       } else {
+        // A Folder takes its whole subtree (the folder registry entry), so its
+        // Folders are locked first (a sub-folder or a List created inside it
+        // meanwhile waits, then fails its key), then every List in any of them.
+        const folderIds = type === "folder" ? [id, ...(await folderBranch(tx, ctx.organizationId, id)).map((f) => f.id)] : [];
+        if (type === "folder") await tx.$queryRaw`SELECT id FROM "Folder" WHERE id = ANY(${folderIds}::text[]) FOR UPDATE`;
         const boards = type === "board"
           ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE id = ${id} FOR UPDATE`
           : type === "folder"
-            ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "folderId" = ${id} FOR UPDATE`
+            ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "folderId" = ANY(${folderIds}::text[]) FOR UPDATE`
             : await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "spaceId" = ${id} FOR UPDATE`;
         const boardIds = boards.map((b) => b.id);
         if (boardIds.length) await tx.$queryRaw`SELECT id FROM "Item" WHERE "boardId" = ANY(${boardIds}::text[]) FOR UPDATE`;
@@ -536,10 +612,19 @@ export async function moveToTrash(
       if (type === "item") await tx.item.delete({ where: { id } });
       else if (type === "board") await tx.board.delete({ where: { id } });
       else if (type === "folder") {
-        // Boards reference folderId with onDelete:SetNull, so drop them
-        // explicitly (their own children cascade), then the folder row.
-        await tx.board.deleteMany({ where: { folderId: id } });
-        await tx.folder.delete({ where: { id } });
+        // Every row the capture took, from the snapshot just written: the
+        // Lists (their own children cascade), the canvases and files placed in
+        // the subtree, then every Folder of it (their grants cascade). Boards,
+        // files and sub-folders reference a Folder with onDelete SetNull, so
+        // leaving any of them would drop it to the Space root.
+        const snap = captured.snapshot as { children?: { folders?: Row[]; canvases?: Row[]; files?: Row[] } };
+        const ids = [id, ...(snap.children?.folders ?? []).map((f) => f.id as string)];
+        const canvasIds = (snap.children?.canvases ?? []).map((c) => c.id as string);
+        const fileIds = (snap.children?.files ?? []).map((f) => f.id as string);
+        await tx.board.deleteMany({ where: { folderId: { in: ids } } });
+        if (canvasIds.length) await tx.whiteboard.deleteMany({ where: { id: { in: canvasIds } } });
+        if (fileIds.length) await tx.fileEntry.deleteMany({ where: { id: { in: fileIds } } });
+        await tx.folder.deleteMany({ where: { id: { in: ids } } });
       } else {
         // Mirror deleteSpace: remove boards + folders first, then the space.
         await tx.board.deleteMany({ where: { spaceId: id } });

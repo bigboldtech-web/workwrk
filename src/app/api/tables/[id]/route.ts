@@ -1,5 +1,5 @@
 // GET    /api/tables/[id]   table + row count + canManage (may the viewer delete it or change its public link) + publicLinksAllowed (toggle 10)
-// PATCH  /api/tables/[id]   update name / description / columns / views / settings; isPublic and spaceId (Move to Space) only for its creator or an admin
+// PATCH  /api/tables/[id]   update name / description / columns / views / settings; isPublic for Full access; spaceId (Move to Space) under the placement rule
 // DELETE /api/tables/[id]   move to the one Trash (rows are snapshotted with it); only its creator or an admin
 //
 // Phase 5 gates (spec-tables-forms section 3 ask 1, section 4 step 1, with the
@@ -19,15 +19,16 @@ import { readableTableWithRole, tableCtx } from "@/lib/table-gate";
 import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { logAuditEvent } from "@/lib/activity";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
-import { moveAllowed } from "@/lib/access/node-access";
+import { checkMove, resolvePlacement } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
 // The gate is the one resolver's table rule (R7, lib/table-gate
 // readableTableWithRole): hide existence (404, not 403) so viewers can't
 // probe for table ids in Spaces they shouldn't see. Full access on the table
 // (its creator with reach, a Full holder of its Space, an org admin, a Full
-// table grant) deletes it and changes its public link; a move needs the
-// creator with reach or an org admin, never a table grant (M3).
+// table grant) deletes it and changes its public link; a move is the
+// placement rule's (node-rules P2): Full access on the table and on the Space
+// it leaves, Can edit where it goes, never from a table grant alone (M3).
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionAndModule("workwrk-tables");
@@ -80,22 +81,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
-  // Move to Space (the row menu's Move to Space..., the File menu's). Moving
-  // changes who can open the table, so it is the same people who may change
-  // its public link: the creator or an Owner or Admin. null = No Space. The
-  // target Space must be in this org and readable by the mover.
+  // Move to Space (the row menu's Move to Space..., the File menu's). null =
+  // No Space. The placement rule (node-rules P2 and P3) through its one move
+  // helper: Full access on the table (never from its own grant alone, M3) and
+  // on the Space it leaves, Can edit on the Space it goes to (or the org for
+  // No Space), in this org. It is checked here and written with the rest of
+  // the patch below, so a refused move writes nothing.
   if ("spaceId" in body && body.spaceId !== existing.spaceId) {
     const next = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
     if (next !== existing.spaceId) {
-      if (next) {
-        const inOrg = await prisma.space.findFirst({ where: { id: next, organizationId: orgId }, select: { id: true } });
-        if (!inOrg) return jsonError("space not found", 404);
-      }
-      const dest = next ? { kind: "space" as const, id: next } : { kind: "none" as const };
-      if (!(await moveAllowed(tableCtx(orgId, getUserId(session), session), { kind: "table", id }, dest))) {
-        return jsonError(MANAGE_REFUSAL.move, 403);
-      }
-      data.spaceId = next;
+      const placed = await resolvePlacement(orgId, { spaceId: next }, { root: true });
+      if (!placed.ok) return jsonError(placed.message, placed.status);
+      const check = await checkMove(tableCtx(orgId, getUserId(session), session), { kind: "table", id }, placed.spaceId ? { kind: "space", id: placed.spaceId } : null);
+      if (!check.ok) return jsonError(check.error, check.status);
+      data.spaceId = placed.spaceId;
     }
   }
   // Sheet settings bucket (named ranges, etc.), a plain object, replaced whole.

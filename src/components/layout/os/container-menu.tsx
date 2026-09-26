@@ -76,7 +76,7 @@ import { treeChanged } from "@/lib/work/container-events";
 import { objectHrefNow } from "./use-object-href";
 import { hydrateSidebarState, setSpaceHidden } from "@/lib/work/sidebar-expand";
 import {
-  containerMenuRows, containerPath, containerNoun,
+  containerMenuRows, containerPath, containerNoun, newItemsFor,
   type ContainerAction, type ContainerKind, type ContainerRole,
 } from "@/lib/work/container-menu";
 
@@ -891,25 +891,27 @@ function ContainerMenuBody({
           case "pin-top":
             return <MenuItem key={row.action} icon={Icon} label={row.label} iconFilled={topPinned} onClick={toggleTopPin} />;
 
-          case "new":
+          case "new": {
+            // Exactly what the one create rule lets this viewer make here
+            // (newItemsFor, node-rules P1): the server accepts every row shown.
+            const can = new Set(newItemsFor(container.kind, role, pathOnly));
             return (
               <MenuSubmenu key={row.action} icon={Icon} label="New">
-                <MenuItem icon={ListChecks} label="List" onClick={() => {
+                {can.has("list") ? <MenuItem icon={ListChecks} label="List" onClick={() => {
                   onClose();
                   openCreateList({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
+                }} /> : null}
+                {can.has("sprint") ? <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
                   onClose();
                   openCreateSprint({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} />
-                <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} />
-                <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} />
-                {container.kind === "space" ? (
-                  <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} />
-                ) : null}
+                }} /> : null}
+                {can.has("folder") ? <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} /> : null}
+                {can.has("doc") ? <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} /> : null}
+                {can.has("canvas") ? <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} /> : null}
+                {can.has("table") ? <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} /> : null}
               </MenuSubmenu>
             );
+          }
 
           case "rename":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => setMode("rename")} />;

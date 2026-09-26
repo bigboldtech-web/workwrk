@@ -8,6 +8,7 @@
 //      responseCount and canManage. Without one, the bare array every older
 //      caller (the sidebar, the board Form view picker, the doc block) reads.
 // POST /api/forms              create a form { name?, fields?, targetBoardId?, targetTableId?, fieldMappings? }
+//      A destination needs Can edit on it (responses are written into it).
 //      A Guest lists only the forms they made (GET, both shapes).
 //      A blank or absent name is "Untitled form" (every create door is promptless).
 
@@ -19,6 +20,7 @@ import {
 import { getEffectivePreferences } from "@/lib/preferences";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { checkFormDestination } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { viewerObjectGrants } from "@/lib/access/access-grant-store";
 import {
@@ -80,6 +82,15 @@ export async function POST(req: NextRequest) {
   const isPublic = false;
   const targetBoardId = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
   const targetTableId = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
+  // Every response is written INTO the destination, so choosing one needs
+  // Can edit there (the placement rule, node-rules P1), in this org. Without
+  // this a person with no access to a List made a form that fed it.
+  if (targetBoardId || targetTableId) {
+    const viewer = await viewerFromSession().catch(() => null);
+    if (!viewer) return jsonError("not found", 404);
+    const dest = await checkFormDestination(nodeCtxFromViewer(viewer), { boardId: targetBoardId, tableId: targetTableId });
+    if (!dest.ok) return jsonError(dest.error, dest.status);
+  }
   // "From a List..." sends the mapping of each mirrored field to its List
   // field; any other shape is refused rather than stored.
   let fieldMappings: { board?: Record<string, string>; table?: Record<string, string> } | undefined;

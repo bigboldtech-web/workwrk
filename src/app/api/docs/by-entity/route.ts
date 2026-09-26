@@ -11,7 +11,9 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { canCreateDocAt, docAccess } from "@/lib/doc-access";
-import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { createRefusal } from "@/lib/access/node-rules";
+import { docAnchorPlaceOf, docPlaceLive } from "@/lib/access/node-placement";
 
 const bodySchema = z.object({
   entityType: z.string().min(1).max(40),
@@ -30,8 +32,11 @@ export async function POST(req: Request) {
   // Gate the parent entity. Without this, find-or-create would let a probe
   // with a guessed parent ID either surface an existing doc on a private
   // parent or mint a new one. 404-not-403 so the gate doesn't leak existence.
+  // FINDING the one doc of an entity needs Can view where it lives; MAKING it
+  // needs Can edit there (the placement rule, node-rules P1), below.
   const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
-  const ok = await canCreateDocAt(nodeCtx, { entityType: parsed.data.entityType, entityId: parsed.data.entityId }, null);
+  const anchor = { entityType: parsed.data.entityType, entityId: parsed.data.entityId };
+  const ok = await canReadDocPlace(nodeCtx, anchor, null);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Look for an existing, non-archived doc on this entity.
@@ -48,6 +53,15 @@ export async function POST(req: Request) {
     // restricted doc on a readable anchor stays closed to the unlisted.
     if (!(await docAccess(nodeCtx, existing.id))) return NextResponse.json({ error: "not found" }, { status: 404 });
     return NextResponse.json({ doc: existing, created: false });
+  }
+
+  if (!(await docPlaceLive(ctx.orgId, { ...anchor, parentId: null }))) {
+    const message = "That place is in Trash or gone, so nothing can be added to it.";
+    return NextResponse.json({ error: message, code: "conflict", message }, { status: 400 });
+  }
+  if (!(await canCreateDocAt(nodeCtx, anchor, null))) {
+    const message = createRefusal("doc", (await docAnchorPlaceOf(ctx.orgId, anchor)) ?? null);
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
   }
 
   const title = parsed.data.title ?? "Untitled note";

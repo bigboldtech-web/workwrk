@@ -37,7 +37,9 @@ import {
 import {
   NodeEvaluator,
   applyDocLock,
+  createDecision,
   decideAll,
+  emptyGrants,
   emptyRows,
   moveDecision,
   inTrashedFolder,
@@ -474,46 +476,52 @@ export function nodePathIn(rows: NodeRows, grants: ViewerGrants, ref: NodeRef): 
 
 // ── write gates ──────────────────────────────────────────────────────
 
-export type CreateWhat = "list" | "folder" | "canvas" | "table" | "file";
+export type CreateWhat = "list" | "folder" | "canvas" | "table" | "file" | "doc";
 
 /**
- * May the viewer create `what` inside this container (null: nowhere, the
- * org)? Full access on a Folder creates Lists, sub-folders and canvases in it
- * (W2) and never reads the Space; the Space root keeps canEditSpace for Lists
- * and Folders, and Can view for canvases and tables, as today.
+ * May the viewer create `what` inside this container (null: the org root)?
+ * The one create rule, node-rules P1: Can edit or higher on the container
+ * (Can view and Can comment never create), a Space OWNER or ADMIN from before
+ * the cutoff for a List or a Folder in any Folder of their Space (P7), and the
+ * org root's own rule for the kinds that may live there. One exception is
+ * kept: a file TAGGED to a Space (a task attachment, spaceId with no Folder)
+ * is not a node in the Space's tree, so it keeps today's reach, Can view or a
+ * path to something inside.
  */
 export async function canCreateAt(ctx: NodeCtx, container: { kind: "space" | "folder"; id: string } | null, what: CreateWhat): Promise<boolean> {
   if (ctx.denied) return false;
-  if (!container) return what === "file" || what === "canvas" || what === "table" ? !ctx.orgGuest || ctx.orgAdmin : false;
-  const d = await nodeRole(ctx, container);
-  if (what === "file") {
-    if (container.kind === "folder") return roleAtLeast(d.role, "VIEW");
-    return roleAtLeast(d.role, "VIEW") || d.path;
+  if (!container) return createDecision(emptyRows(ctx.organizationId), emptyGrants(viewerOfCtx(ctx)), null, what);
+  const { rows, grants } = await loadWorld(ctx, [container], { chain: true });
+  if (what === "file" && container.kind === "space") {
+    const d = { ...new NodeEvaluator(rows, grants).decision(container) };
+    if (roleAtLeast(d.role, "VIEW")) return true;
+    await fillContainerPaths(ctx, [[container, d]]);
+    return d.path;
   }
-  if (container.kind === "folder") {
-    if (roleAtLeast(d.role, "FULL")) return true;
-    return (what === "list" || what === "folder") && (await containerGate(ctx, container)) === "ok";
-  }
-  if (what === "list" || what === "folder") return roleAtLeast(d.role, "FULL");
-  return roleAtLeast(d.role, "VIEW");
+  return createDecision(rows, grants, container, what);
+}
+
+function viewerOfCtx(ctx: NodeCtx) {
+  return { userId: ctx.userId, orgAdmin: ctx.orgAdmin, orgGuest: ctx.orgGuest, isAgent: ctx.isAgent, denied: ctx.denied };
 }
 
 /**
- * The gate for making a List or a Folder inside a container: "ok", or the
- * answer a route gives ("not_found" when the viewer can neither open the
- * container nor pass through it, "forbidden" when they can but may not
- * create there). Full access on the container, or, for a Folder under the
- * legacy Private rule, today's canEditSpace on its Space: a Space OWNER or
- * ADMIN made Lists and Folders in every Folder of their Space before
- * node-access, a Private one that does not name them included (A8).
+ * The gate for making a node inside a container: "ok", or the answer a
+ * route gives ("not_found" when the viewer can neither open the container nor
+ * pass through it, "forbidden" when they can but may not create there). The
+ * rule is node-rules P1 (createDecision): Can edit or higher on the
+ * container, or, for a List or a Folder in a Folder under the legacy Private
+ * rule, today's canEditSpace on its Space (P7).
  */
-export async function containerGate(ctx: NodeCtx, container: { kind: "space" | "folder"; id: string }): Promise<"ok" | "forbidden" | "not_found"> {
+export async function containerGate(
+  ctx: NodeCtx,
+  container: { kind: "space" | "folder"; id: string },
+  what: CreateWhat = "list",
+): Promise<"ok" | "forbidden" | "not_found"> {
   if (ctx.denied) return "not_found";
-  const { rows, grants } = await loadWorld(ctx, [container]);
-  const ev = new NodeEvaluator(rows, grants);
-  const d = { ...ev.decision(container) };
-  if (roleAtLeast(d.role, "FULL")) return "ok";
-  if (container.kind === "folder" && ev.legacyManagesSpace(rows.folders.get(container.id)?.spaceId)) return "ok";
+  const { rows, grants } = await loadWorld(ctx, [container], { chain: true });
+  if (createDecision(rows, grants, container, what)) return "ok";
+  const d = { ...new NodeEvaluator(rows, grants).decision(container) };
   if (d.role === "none") {
     await fillContainerPaths(ctx, [[container, d]]);
     if (!d.path) return "not_found";
@@ -534,14 +542,39 @@ export async function legacyFloorRole(ctx: NodeCtx, ref: NodeRef): Promise<NodeR
 }
 
 /**
- * May the viewer create a doc here? The anchor must be one they reach (a
- * note only under their own name), and a parent page must be one they can
- * read, in the same org, never under someone else's note.
+ * May the viewer create a doc here (node-rules P1)? Can edit or higher on
+ * the anchor (a Space, a Folder, a List, or the List of a task) and on the
+ * parent page, in the same org; a note only under their own name and never
+ * under someone else's; an anchor of any other type is the org's, as today.
+ * Can view and Can comment never create.
  */
 export async function canCreateDocAt(
   ctx: NodeCtx,
   anchor: { entityType: string | null; entityId: string | null } | null,
   parentId: string | null,
+): Promise<boolean> {
+  return docPlaceGate(ctx, anchor, parentId, "EDIT");
+}
+
+/**
+ * May the viewer READ where a doc lives (the anchor and the parent page)?
+ * The find half of find-or-create (/api/docs/by-entity): finding the one doc
+ * of a task or a List needs only Can view there; making it needs
+ * canCreateDocAt.
+ */
+export async function canReadDocPlace(
+  ctx: NodeCtx,
+  anchor: { entityType: string | null; entityId: string | null } | null,
+  parentId: string | null,
+): Promise<boolean> {
+  return docPlaceGate(ctx, anchor, parentId, "VIEW");
+}
+
+async function docPlaceGate(
+  ctx: NodeCtx,
+  anchor: { entityType: string | null; entityId: string | null } | null,
+  parentId: string | null,
+  floor: "VIEW" | "EDIT",
 ): Promise<boolean> {
   if (ctx.denied) return false;
   const refs: NodeRef[] = [];
@@ -555,7 +588,7 @@ export async function canCreateDocAt(
     refs.push({ kind: "list", id: item.boardId });
   }
   if (refs.length === 0) return true;
-  const { rows, grants } = await loadWorld(ctx, refs);
+  const { rows, grants } = await loadWorld(ctx, refs, { chain: true });
   const ev = new NodeEvaluator(rows, grants);
   for (const r of refs) {
     if (r.kind === "doc") {
@@ -564,7 +597,7 @@ export async function canCreateDocAt(
       const note = notepadOwnerOf(rows, parent);
       if (note !== undefined && note !== ctx.userId) return false;
     }
-    if (!roleAtLeast(ev.effective(r).role, "VIEW")) return false;
+    if (floor === "EDIT" ? !createDecision(rows, grants, r, "doc") : !roleAtLeast(ev.effective(r).role, "VIEW")) return false;
   }
   return true;
 }
@@ -589,7 +622,11 @@ function anchorRefOf(anchor: { entityType: string | null; entityId: string | nul
 
 export type MoveDest = { kind: "space"; id: string } | { kind: "folder"; id: string } | { kind: "none" };
 
-/** May the viewer move this node to `dest`? The rules are node-rules moveDecision's. */
+/**
+ * May the viewer move this node to `dest`? node-rules P2 and P4
+ * (moveVerdict), over one chain world. node-placement.ts checkMove answers
+ * the same with the sentence and the status a route sends.
+ */
 export async function moveAllowed(ctx: NodeCtx, ref: NodeRef, dest: MoveDest): Promise<boolean> {
   if (ctx.denied) return false;
   const destRef: NodeRef | null = dest.kind === "none" ? null : dest;

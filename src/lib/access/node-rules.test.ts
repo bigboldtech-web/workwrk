@@ -931,19 +931,23 @@ describe("moves (moveDecision)", () => {
     expect(w.role("canvas", "C")).toBe("EDIT");
     expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
   });
-  it("Full access on the Folder does", () => {
+  it("Full access on the Folder alone does not either: leaving the Space needs Full access on the Space it leaves (P2)", () => {
     const w = canvasWorld().onFolder("F", "ADMIN");
     w.g.since?.set("folder:F", CUTOFF + 1);
-    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(true);
+    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
+    const manager = canvasWorld().onSpace("S", "ADMIN");
+    expect(moveDecision(manager.rows, manager.g, { kind: "canvas", id: "C" }, null)).toBe(true);
   });
-  it("a Space contributor from before the cutoff still does, as today (A8)", () => {
+  it("a Space contributor from before the cutoff no longer does: a move needs Full access on the canvas and where it is (P2, delta M6)", () => {
     const w = canvasWorld().onSpace("S", "MEMBER");
     w.g.since?.set("space:S", CUTOFF - 1);
-    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(true);
+    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
   });
-  it("a canvas already outside every Space moves at Can edit", () => {
+  it("a canvas already outside every Space: a move to where it is is a reorder (P4), Full access on the canvas, and the route writes nothing for it", () => {
     const w = new World("legacy").canvas("C", null);
-    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(true);
+    expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
+    const owner = new World("legacy").canvas("C", null, null, ME);
+    expect(moveDecision(owner.rows, owner.g, { kind: "canvas", id: "C" }, null)).toBe(true);
   });
   it("an Agent who is a Space admin moves a List like anyone else (A8)", () => {
     const w = new World("legacy").space("S").space("T").list("L", "S", null).onSpace("S", "ADMIN").onSpace("T", "ADMIN").as({ isAgent: true });

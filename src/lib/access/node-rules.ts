@@ -41,6 +41,12 @@
 // Roles never climb: nothing on this page reads a grant upward, so a Folder
 // grant (Full included) gives nothing on its Space or on sibling nodes.
 //
+// THE PLACEMENT RULE (P1 to P7, its own section below) is the one answer to
+// "may this person create a node here, or move one there": Can edit creates
+// inside a container, a move needs Full access on the node and on what it
+// leaves and Can edit where it goes, and a node's Space always comes from
+// its parent. Every create, move, reorder and restore route asks it.
+//
 // Pure: imports ./types, ./access-panel, ./legacy-floor, ./legacy-levels and
 // ./org-role. No prisma, no clock.
 
@@ -1171,102 +1177,415 @@ export class NodeEvaluator {
   }
 }
 
+// ── THE PLACEMENT RULE (the founder's rule, 2026-09-25) ──────────────
+//
+// Every write that creates a node or changes where one lives asks the
+// functions below, and nothing else: a Folder's Space or parent, a List's
+// Folder, a doc's anchor or parent page, a canvas's or a table's Space or
+// Folder, a form's destination, a restore into a container, and any reorder
+// that changes a parent. It is planned by the worst case of each situation:
+// a person with a narrow grant reshaping or breaking a structure other
+// people depend on, and a person with Can view creating content.
+//
+//   P1  CREATE inside a container needs Can edit or higher on that
+//       container. Can view and Can comment never create. At the org root (no
+//       Space) the kinds that may live there keep today's rule: a doc, a
+//       table and a form for anyone signed in, a canvas and a file for
+//       Members. (createDecision)
+//   P2  MOVE needs Full access on the node, Full access on the container it
+//       leaves, and Can edit or higher on the container it goes to. A node
+//       that leaves its Space leaves the Space too, so that also needs Full
+//       access on the Space it leaves. A canvas's or a table's own grant
+//       never moves it (M3). (moveVerdict)
+//   P3  The Space of anything is derived from its destination parent, never
+//       taken from the request: a Space that disagrees with the parent Folder
+//       is refused, a parent in another org or in Trash is refused
+//       (derivePlacement), a sub-page's anchor must be its parent page's
+//       (anchorAgreesWithParent), and a Folder moves with its whole subtree
+//       in one transaction (node-placement.ts writes it).
+//   P4  A change of position under the same parent is a reorder, not a move:
+//       it needs what reordering needs today, Full access on the node and on
+//       the parent (moveVerdict answers `same`). A reorder that changes the
+//       parent is a move under P2.
+//   P5  The Move dialog offers exactly the destinations P2 accepts
+//       (node-placement.ts moveDestinations asks moveVerdict per place).
+//   P6  A refusal is a 403 with one plain sentence naming what is needed
+//       (moveRefusal, createRefusal), and nothing is written.
+//   P7  Org admins keep Full access everywhere (R1). A Space OWNER or ADMIN
+//       row from before the cutoff keeps making and moving Lists and Folders
+//       into every Folder of that Space (A8, legacyManagesSpace). A Full
+//       holder of both ends moves as before.
+
+/** What a create or a move places. */
+export type PlaceKind = "folder" | "list" | "doc" | "canvas" | "table" | "form" | "file";
+
 /**
- * May this viewer move `ref` to `destRef` (null: out of every Space, or no
- * parent)? The pure half of node-access moveAllowed, over one chain world.
- *
- *   Folder, List  Full access on itself, and Full access on the destination
- *                 (a Folder, or the Space at its root), or today's
- *                 canEditSpace on the destination Folder's Space (A8); and,
- *                 when it leaves its container, the source gate
- *                 (sourceReleases): a role on the node never acts on the
- *                 Space or Folder it leaves (A4).
- *   Canvas        the role its container gives (never its own grant, M3) at
- *                 Can edit or better; into a Space only with Full access
- *                 there; out of every Space (which opens it to the whole
- *                 org) only with Full access, or with today's answer (a
- *                 Space contributor before this release). A Can edit grant
- *                 on its Folder alone never publishes it.
- *   Table         its creator with reach, or an org admin, into a Space they
- *                 can read.
- *
- * An Agent moves like anyone else, as every move gate before node-access did
- * (A8): the Agent clamp is Phase 8's to decide.
+ * Where a node lives or goes: a Space (its root), a Folder, a List (a doc on
+ * a List or on one of its tasks), a parent page, or null for the org root.
  */
-export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, destRef: NodeRef | null): boolean {
-  const v = grants.viewer;
-  if (v.denied) return false;
-  const ev = new NodeEvaluator(rows, grants);
-  const destRole = destRef ? ev.effective(destRef).role : "none";
-  switch (ref.kind) {
+export type Place = NodeRef | null;
+
+const HOLDS: Readonly<Record<PlaceKind, ReadonlySet<NodeKind | "root">>> = {
+  folder: new Set(["space", "folder"]),
+  list: new Set(["space", "folder"]),
+  doc: new Set(["space", "folder", "list", "doc", "root"]),
+  canvas: new Set(["space", "folder", "root"]),
+  table: new Set(["space", "root"]),
+  form: new Set(["root"]),
+  file: new Set(["space", "folder", "root"]),
+};
+
+/** Can this kind live in this place at all (a table never sits in a Folder, a List never at the org root)? */
+export function placeHolds(place: Place, what: PlaceKind): boolean {
+  return HOLDS[what].has(place ? place.kind : "root");
+}
+
+/** The kind a node ref places as, or null for a Space (Space nesting is spaces/[id]/move's). */
+export function placeKindOf(ref: NodeRef): PlaceKind | null {
+  return ref.kind === "space" ? null : ref.kind;
+}
+
+/** Is a Folder, or any Folder above it, in Trash? Nothing is made or moved into one. */
+function folderInTrash(rows: NodeRows, folderId: string): boolean {
+  const f = rows.folders.get(folderId);
+  if (!f) return false;
+  if (f.archived) return true;
+  return folderAncestors(rows, f).some((a) => a.archived === true);
+}
+
+/** P1 over one evaluator. */
+function createAllowed(ev: NodeEvaluator, place: Place, what: PlaceKind): boolean {
+  const rows = ev.rows;
+  const v = ev.grants.viewer;
+  if (v.denied || !placeHolds(place, what)) return false;
+  if (!place) return what === "doc" || what === "table" || what === "form" ? true : v.orgAdmin || !v.orgGuest;
+  if (place.kind === "folder" && folderInTrash(rows, place.id)) return false;
+  if (roleAtLeast(ev.effective(place).role, "EDIT")) return true;
+  // P7: a Space OWNER or ADMIN from before the cutoff made Lists and Folders
+  // in every Folder of their Space, a Private one that does not name them
+  // included (A8). Only those two kinds: nothing else was theirs to make there.
+  return place.kind === "folder" && (what === "list" || what === "folder") && ev.legacyManagesSpace(rows.folders.get(place.id)?.spaceId);
+}
+
+/**
+ * P1. May this viewer create `what` in `place` (null: the org root)? Can edit
+ * or higher on the container; Can view and Can comment never create.
+ */
+export function createDecision(rows: NodeRows, grants: ViewerGrants, place: Place, what: PlaceKind): boolean {
+  return createAllowed(new NodeEvaluator(rows, grants), place, what);
+}
+
+/** The Space a place is in, or null (the org root, or a place this world does not hold). */
+export function spaceOfPlace(rows: NodeRows, place: Place): string | null {
+  if (!place) return null;
+  switch (place.kind) {
+    case "space":
+      return rows.spaces.has(place.id) ? place.id : null;
     case "folder":
+      return rows.folders.get(place.id)?.spaceId ?? null;
+    case "list":
+      return rows.lists.get(place.id)?.spaceId ?? null;
+    case "doc": {
+      const top = placementContainers(rows, place);
+      const last = top[top.length - 1];
+      return last?.kind === "space" ? last.id : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The Space a node sits in now, from the chain the resolver reads (a stale parent reads as the Space it names). */
+function spaceOfNode(rows: NodeRows, ref: NodeRef): string | null {
+  const chain = placementContainers(rows, ref);
+  const last = chain[chain.length - 1];
+  return last?.kind === "space" ? last.id : null;
+}
+
+/**
+ * Where a node lives now: the container P2 calls "what it leaves". A Folder's
+ * parent Folder or its Space root; a List's, a canvas's Folder or Space (or
+ * null: no Space); a table's Space; a doc's parent page, else its anchor
+ * (a task's doc lives on the task's List), else the org root. Undefined when
+ * the world does not hold the node, and for what never moves this way (a
+ * Space, a note).
+ */
+export function currentPlace(rows: NodeRows, ref: NodeRef): Place | undefined {
+  switch (ref.kind) {
+    case "space":
+      return undefined;
+    case "folder": {
+      const f = rows.folders.get(ref.id);
+      if (!f) return undefined;
+      const parent = folderParentOf(rows, f);
+      return parent ? { kind: "folder", id: parent.id } : { kind: "space", id: f.spaceId };
+    }
     case "list": {
-      if (!roleAtLeast(ev.effective(ref).role, "FULL") || !destRef) return false;
-      const destOk = roleAtLeast(destRole, "FULL") || (destRef.kind === "folder" && ev.legacyManagesSpace(rows.folders.get(destRef.id)?.spaceId));
-      return destOk && sourceReleases(rows, ev, ref, destRef);
+      const l = rows.lists.get(ref.id);
+      if (!l) return undefined;
+      const f = listFolderOf(rows, l);
+      return f ? { kind: "folder", id: f.id } : l.spaceId ? { kind: "space", id: l.spaceId } : null;
     }
     case "canvas": {
-      const bare: ViewerGrants = { ...grants, object: new Map([...grants.object].filter(([k]) => k !== objectGrantKey("canvas", ref.id))) };
-      const moveRole = new NodeEvaluator(rows, bare).effective(ref).role;
-      if (!roleAtLeast(moveRole, "EDIT")) return false;
-      if (!destRef) {
-        const canvas = rows.canvases.get(ref.id);
-        if (!canvas?.spaceId && !canvas?.folderId) return true;
-        return roleAtLeast(moveRole, "FULL") || roleAtLeast(ev.floorRole(ref), "EDIT");
-      }
-      return destRef.kind === "space" && roleAtLeast(destRole, "FULL");
+      const c = rows.canvases.get(ref.id);
+      if (!c) return undefined;
+      const f = canvasFolderOf(rows, c);
+      return f ? { kind: "folder", id: f.id } : c.spaceId ? { kind: "space", id: c.spaceId } : null;
     }
     case "table": {
       const t = rows.tables.get(ref.id);
-      if (!t) return false;
-      const creatorWithReach = t.createdById === v.userId && (!t.spaceId || ev.strict({ kind: "space", id: t.spaceId }).role !== "none");
-      if (!v.orgAdmin && !creatorWithReach) return false;
-      if (!destRef) return true;
-      return destRef.kind === "space" && roleAtLeast(destRole, "VIEW");
+      if (!t) return undefined;
+      return t.spaceId ? { kind: "space", id: t.spaceId } : null;
     }
-    default:
-      return false;
+    case "form":
+      return rows.forms.has(ref.id) ? null : undefined;
+    case "doc": {
+      const d = rows.docs.get(ref.id);
+      if (!d) return undefined;
+      if (notepadOwnerOf(rows, d) !== undefined) return undefined;
+      if (d.parentId) {
+        const parent = rows.docs.get(d.parentId);
+        if (parent && parent.organizationId === d.organizationId) return { kind: "doc", id: parent.id };
+      }
+      return docAnchorPlace(rows, d.entityType, d.entityId);
+    }
   }
 }
 
 /**
- * The source half of a Folder or List move (A4, roles never climb). Full
- * access on a Folder or List manages that node, never the container it sits
- * in: taking it out of its parent changes the parent's tree for everyone who
- * reads it. So a move that changes the container also needs, on the side it
- * leaves:
- *   - Full access on the current parent (the parent Folder, or the Space for
- *     a node at the Space's root), or today's canEditSpace on the source
- *     Space (A8, a Space editor moves as before);
- *   - and, when the Space changes, Full access on the source Space (or that
- *     same canEditSpace): a Full holder of a parent Folder may reparent
- *     within the Space, never carry the branch into another one.
- * A "move" to the container it already sits in releases nothing and needs
- * nothing here. A List with no Space leaves no Space tree behind.
+ * The place a doc anchor names: a Space, a Folder, a List, or the List of a
+ * task. Null for no anchor and for every other anchor type (today's open
+ * fallback, the org's). A task this world does not hold reads as null.
  */
-function sourceReleases(rows: NodeRows, ev: NodeEvaluator, ref: NodeRef, destRef: NodeRef): boolean {
-  let parent: NodeRef | null;
-  let spaceId: string | null;
-  if (ref.kind === "folder") {
-    const f = rows.folders.get(ref.id);
-    if (!f) return false;
-    const pf = folderParentOf(rows, f);
-    spaceId = f.spaceId;
-    parent = pf ? { kind: "folder", id: pf.id } : { kind: "space", id: f.spaceId };
-  } else {
-    const l = rows.lists.get(ref.id);
-    if (!l) return false;
-    const lf = listFolderOf(rows, l);
-    spaceId = l.spaceId;
-    parent = lf ? { kind: "folder", id: lf.id } : l.spaceId ? { kind: "space", id: l.spaceId } : null;
+export function docAnchorPlace(rows: NodeRows, entityType: string | null, entityId: string | null): Place {
+  if (!entityType || !entityId) return null;
+  switch (entityType) {
+    case "SPACE":
+      return { kind: "space", id: entityId };
+    case "FOLDER":
+      return { kind: "folder", id: entityId };
+    case "BOARD":
+      return { kind: "list", id: entityId };
+    case "BOARD_ITEM": {
+      const item = rows.items.get(entityId);
+      return item ? { kind: "list", id: item.boardId } : null;
+    }
+    default:
+      return null;
   }
-  if (!parent || !spaceId) return true;
-  if (sameRef(parent, destRef)) return true;
-  if (ev.legacyManagesSpace(spaceId)) return true;
-  if (!roleAtLeast(ev.effective(parent).role, "FULL")) return false;
-  const destSpaceId = destRef.kind === "space" ? destRef.id : rows.folders.get(destRef.id)?.spaceId ?? null;
-  if (destSpaceId === spaceId) return true;
-  return roleAtLeast(ev.effective({ kind: "space", id: spaceId }).role, "FULL");
+}
+
+function samePlace(a: Place, b: Place): boolean {
+  if (!a || !b) return a === b;
+  return sameRef(a, b);
+}
+
+/** Full access on a container, or (a Folder) today's canEditSpace on its Space under the legacy rule (P7). */
+function managesPlace(ev: NodeEvaluator, place: NodeRef): boolean {
+  if (roleAtLeast(ev.effective(place).role, "FULL")) return true;
+  return place.kind === "folder" && ev.legacyManagesSpace(ev.rows.folders.get(place.id)?.spaceId);
+}
+
+/** The containers a move from `from` to `dest` leaves (P2): the one it sits in, and its Space when the Space changes. */
+function leftContainers(rows: NodeRows, ref: NodeRef, from: Place, dest: Place): NodeRef[] {
+  if (!from) return [];
+  const out: NodeRef[] = [from];
+  const source = spaceOfNode(rows, ref);
+  if (source && source !== spaceOfPlace(rows, dest) && !(from.kind === "space" && from.id === source)) {
+    out.push({ kind: "space", id: source });
+  }
+  return out;
+}
+
+/** Why a move is refused: the node itself, the place it leaves, or the place it goes. */
+export type MoveFailure = "node" | "source" | "destination";
+
+export type MoveVerdict =
+  | { ok: true; same: boolean }
+  | { ok: false; failure: MoveFailure };
+
+/**
+ * P2 and P4. May this viewer move `ref` to `dest` (null: the org root, out of
+ * every Space)? `same` is a reorder under the parent it already has (P4),
+ * which needs Full access on the node and on that parent, as reordering does
+ * today. Anything else is a move: Full access on the node, Full access on
+ * the container it leaves (and on its Space when it leaves the Space), and
+ * Can edit or higher where it goes (P1's create rule). Org admins pass on
+ * R1; a Space OWNER or ADMIN from before the cutoff on P7.
+ *
+ * An Agent moves like anyone else, as every move gate before node-access did
+ * (A8): the Agent clamp is Phase 8's to decide.
+ */
+export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, dest: Place): MoveVerdict {
+  const what = placeKindOf(ref);
+  if (grants.viewer.denied || !what) return { ok: false, failure: "node" };
+  const from = currentPlace(rows, ref);
+  if (from === undefined) return { ok: false, failure: "node" };
+  const ev = new NodeEvaluator(rows, grants);
+  // The node itself. M3: a canvas's or a table's own grant never moves it.
+  let nodeEv = ev;
+  if (ref.kind === "canvas" || ref.kind === "table") {
+    const key = objectGrantKey(ref.kind, ref.id);
+    if (grants.object.has(key)) {
+      nodeEv = new NodeEvaluator(rows, { ...grants, object: new Map([...grants.object].filter(([k]) => k !== key)) });
+    }
+  }
+  if (!roleAtLeast(nodeEv.effective(ref).role, "FULL")) return { ok: false, failure: "node" };
+  // P4: the parent it already has.
+  if (samePlace(from, dest)) {
+    if (from && !managesPlace(ev, from)) return { ok: false, failure: "source" };
+    return { ok: true, same: true };
+  }
+  // P2: what it leaves, then where it goes.
+  for (const c of leftContainers(rows, ref, from, dest)) {
+    if (!managesPlace(ev, c)) return { ok: false, failure: "source" };
+  }
+  if (!createAllowed(ev, dest, what)) return { ok: false, failure: "destination" };
+  return { ok: true, same: false };
+}
+
+/**
+ * The boolean form of moveVerdict, for the callers that only branch on it
+ * (null: out of every Space). A reorder under the same parent reads as
+ * allowed only when P4 allows it.
+ */
+export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, destRef: NodeRef | null): boolean {
+  return moveVerdict(rows, grants, ref, destRef).ok;
+}
+
+/**
+ * P2 for a file placed in the Space tree (a Space's root or one of its
+ * Folders). A file has no role of its own, so "Full access on the node" is
+ * its uploader, an org admin, or Full access on where it is now; the rest is
+ * P2 as for every node: Full access on the place it leaves (and its Space
+ * when it leaves the Space) and Can edit where it goes (P1's create rule for
+ * a file). A file in no Space moves by its uploader (or an admin) alone.
+ */
+export function fileMoveVerdict(
+  rows: NodeRows,
+  grants: ViewerGrants,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+  dest: Place,
+): MoveVerdict {
+  const v = grants.viewer;
+  if (v.denied) return { ok: false, failure: "node" };
+  const ev = new NodeEvaluator(rows, grants);
+  const from: Place = file.spaceFolderId ? { kind: "folder", id: file.spaceFolderId } : file.spaceId ? { kind: "space", id: file.spaceId } : null;
+  const own = v.orgAdmin || (!!file.uploadedById && file.uploadedById === v.userId);
+  if (!own && !(from && managesPlace(ev, from))) return { ok: false, failure: "node" };
+  if (samePlace(from, dest)) return { ok: true, same: true };
+  if (from) {
+    if (!managesPlace(ev, from)) return { ok: false, failure: "source" };
+    const source = spaceOfPlace(rows, from);
+    if (source && source !== spaceOfPlace(rows, dest) && from.kind !== "space" && !managesPlace(ev, { kind: "space", id: source })) {
+      return { ok: false, failure: "source" };
+    }
+  }
+  if (!createAllowed(ev, dest, "file")) return { ok: false, failure: "destination" };
+  return { ok: true, same: false };
+}
+
+const PLACE_NOUN: Readonly<Record<PlaceKind, string>> = {
+  folder: "folder", list: "List", doc: "doc", canvas: "canvas", table: "table", form: "form", file: "file",
+};
+
+const CONTAINER_NOUN: Readonly<Partial<Record<NodeKind, string>>> = {
+  space: "Space", folder: "folder", list: "List", doc: "page",
+};
+
+/** P6: the one sentence a refused move answers with. */
+export function moveRefusal(what: PlaceKind, failure: MoveFailure): string {
+  const noun = PLACE_NOUN[what];
+  if (failure === "node") return `You need Full access to this ${noun} to move it.`;
+  return `You need Full access where this ${noun} is now and Can edit where it is going.`;
+}
+
+/** P6: the one sentence a refused create answers with. */
+export function createRefusal(what: PlaceKind, place: Place): string {
+  const noun = PLACE_NOUN[what];
+  const article = /^[aeiou]/i.test(noun) ? "an" : "a";
+  if (!place) return `Only members of the workspace can add ${article} ${noun} outside a Space.`;
+  if (!placeHolds(place, what)) return `${article === "an" ? "An" : "A"} ${noun} can't be added there.`;
+  return `You need Can edit on this ${CONTAINER_NOUN[place.kind] ?? "place"} to add ${article} ${noun} to it.`;
+}
+
+/** A container row as P3 checks it: its org, its Space (a Folder's) and whether it is in Trash. */
+export interface PlacementFolderFact { id: string; organizationId: string; spaceId: string; inTrash: boolean }
+export interface PlacementSpaceFact { id: string; organizationId: string; archived: boolean }
+
+export type Placement =
+  | { ok: true; spaceId: string | null; folderId: string | null }
+  | { ok: false; status: 400 | 404; message: string };
+
+/**
+ * P3. Where a create or a move lands, derived from its parent. A named Folder
+ * settles the Space: a request Space that disagrees is refused, and so is a
+ * Folder in another org or in Trash. With no Folder the request's Space is
+ * the place (it must be in the org and not archived); with neither, the org
+ * root when the kind may live there (`root`), else a 400. `found` holds the
+ * rows the caller read for the ids the request named (a Folder, and the Space
+ * it settles or the request names), or null for an id that matched no row.
+ */
+export function derivePlacement(
+  organizationId: string,
+  req: { spaceId?: string | null; folderId?: string | null },
+  found: { folder?: PlacementFolderFact | null; space?: PlacementSpaceFact | null },
+  opts: { root?: boolean } = {},
+): Placement {
+  const folderId = req.folderId || null;
+  if (folderId) {
+    const f = found.folder;
+    if (!f || f.id !== folderId || f.organizationId !== organizationId) return { ok: false, status: 404, message: "That folder no longer exists." };
+    if (f.inTrash) return { ok: false, status: 400, message: "That folder is in Trash." };
+    if (req.spaceId && req.spaceId !== f.spaceId) return { ok: false, status: 400, message: "That folder is in another Space." };
+    const s = found.space;
+    if (!s || s.id !== f.spaceId || s.organizationId !== organizationId) return { ok: false, status: 404, message: "That Space no longer exists." };
+    if (s.archived) return { ok: false, status: 400, message: "That Space is archived." };
+    return { ok: true, spaceId: f.spaceId, folderId };
+  }
+  const spaceId = req.spaceId || null;
+  if (!spaceId) return opts.root ? { ok: true, spaceId: null, folderId: null } : { ok: false, status: 400, message: "Pick a Space." };
+  const s = found.space;
+  if (!s || s.id !== spaceId || s.organizationId !== organizationId) return { ok: false, status: 404, message: "That Space no longer exists." };
+  if (s.archived) return { ok: false, status: 400, message: "That Space is archived." };
+  return { ok: true, spaceId, folderId: null };
+}
+
+/**
+ * P3 for docs: a doc that names both a parent page and an anchor must name
+ * the anchor its parent page lives under. A sub-page lives where its parent
+ * lives; a split (a page of a Folder in one Space anchored to another Space)
+ * is refused. No anchor always agrees (the page follows its parent, A6).
+ */
+export function anchorAgreesWithParent(anchor: { entityType: string | null; entityId: string | null } | null, parentHome: DocHome): boolean {
+  if (!anchor?.entityType || !anchor.entityId) return true;
+  return parentHome.kind === "anchor" && parentHome.entityType === anchor.entityType && parentHome.entityId === anchor.entityId;
+}
+
+/**
+ * The one containment gate of a delete that takes a Folder's subtree with it
+ * (Trash or archive): Full access on the Folder, and on everything it takes
+ * (every sub-folder, List and canvas beneath it), unless the viewer manages
+ * the Folder's Space (Full access on it, or P7). A narrow grant never takes
+ * away what other people were given inside it.
+ */
+export function folderDeleteAllowed(
+  rows: NodeRows,
+  grants: ViewerGrants,
+  folderId: string,
+  inside: { folders: readonly string[]; lists: readonly string[]; canvases: readonly string[] },
+): boolean {
+  if (grants.viewer.denied) return false;
+  const ev = new NodeEvaluator(rows, grants);
+  const f = rows.folders.get(folderId);
+  if (!f || !roleAtLeast(ev.effective({ kind: "folder", id: folderId }).role, "FULL")) return false;
+  if (roleAtLeast(ev.effective({ kind: "space", id: f.spaceId }).role, "FULL") || ev.legacyManagesSpace(f.spaceId)) return true;
+  const full = (ref: NodeRef) => roleAtLeast(ev.effective(ref).role, "FULL");
+  return (
+    inside.folders.every((id) => full({ kind: "folder", id })) &&
+    inside.lists.every((id) => full({ kind: "list", id })) &&
+    inside.canvases.every((id) => full({ kind: "canvas", id }))
+  );
 }
 
 /**
@@ -1452,7 +1771,7 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     id: "M3",
     mode: "always",
     kind: "api",
-    text: "Moves: a role that comes only from a grant on a canvas or a table never moves it; a sub-page leaves a restricted page tree only with Full access; a doc or a canvas leaves every place (which opens it to the whole org) only with Full access or today's answer, never on a new Can edit grant.",
+    text: "Moves: a role that comes only from a grant on a canvas or a table never moves it; a sub-page leaves a restricted page tree only with Full access; a doc or a canvas leaves every place (which opens it to the whole org) only with Full access on it and on the Space it leaves (M6), never on a Can edit grant.",
     legacySource: "api/whiteboards/[id] and api/tables/[id] PATCH read the Space only; api/docs/[id] PUT read the page role.",
   },
   {
@@ -1468,6 +1787,13 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     kind: "information",
     text: "A doc's public link address goes only to people who can change its sharing.",
     legacySource: "api/docs/[id]/sharing GET sent publicUrl to every reader.",
+  },
+  {
+    id: "M6",
+    mode: "always",
+    kind: "api",
+    text: "The placement rule (P1 to P7): making anything inside a container needs Can edit on it, so Can view and Can comment never create (a doc, a canvas or a table in a Space, a sub-page, a file in a Folder, a form's destination, a restore); a move needs Full access on the node and on the container it leaves (and on its Space when it leaves the Space) and Can edit where it goes, so a Space member who only edits no longer moves a doc, a canvas or a table out of where it is; a node's Space always comes from its parent, and a Folder moves or goes to Trash with its whole subtree. Org admins, Space managers and the Full holders of both ends keep what they had.",
+    legacySource: "api/docs POST and PUT, api/whiteboards POST and PATCH, api/tables POST and PATCH, api/forms POST and PATCH read Can view, the creator or nothing; api/folders/reorder, PATCH api/folders/[id] and PATCH api/boards/[id] wrote a parent without its Space; the Folder Trash took its direct Lists only.",
   },
   {
     id: "C1",
@@ -1494,7 +1820,7 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     id: "W2",
     mode: "always",
     kind: "widening",
-    text: "Full access on a Folder manages it and creates Lists, sub-folders and canvases in it.",
+    text: "Full access on a Folder manages it; Can edit on a Folder or a Space makes Lists, sub-folders, docs and canvases in it (and tables at a Space root), the placement rule's P1.",
     legacySource: "POST /api/boards and /api/folders needed canEditSpace.",
   },
   {

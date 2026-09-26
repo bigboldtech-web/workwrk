@@ -28,7 +28,9 @@
 import { prisma } from "./prisma";
 import type { Viewer } from "./access/types";
 import { nodeCtxFromViewer, nodeRole, nodeRoles } from "./access/node-access";
-import { refKey, roleAtLeast, type NodeRef } from "./access/node-rules";
+import { refKey, roleAtLeast, type NodeRef, type Place, type PlaceKind } from "./access/node-rules";
+import { canvasesHaveFolders, checkCreate, docPlaceLive, folderPlacementFact } from "./access/node-placement";
+import { canCreateDocAt } from "./access/node-access";
 import { freeTrashStorage, restoreFromTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
@@ -749,6 +751,11 @@ export async function restoreTrashRow(
   if (parsed.archive) {
     const { type, id } = parsed.archive;
     const orgId = viewer.organizationId;
+    // A restore puts the row back INTO its container, so the placement rule
+    // holds (node-rules P1): Can edit there now, whoever deleted it or owns
+    // it. A grant revoked since never brings it back into the Space.
+    const landing = await archiveLanding(viewer, type, id);
+    if (!landing.ok) return landing;
     switch (type) {
       case "space": await prisma.space.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
       case "folder": await prisma.folder.updateMany({ where: { id, space: { organizationId: orgId } }, data: { archivedAt: null } }); return { ok: true };
@@ -769,6 +776,13 @@ export async function restoreTrashRow(
   if (!snap) return { ok: false, status: 404, message: "Not found" };
 
   const targetBoardId = target?.targetBoardId ?? null;
+  if (!targetBoardId) {
+    // The same rule for a row re-created from its snapshot (P1), and P3: a
+    // Folder, a List or a canvas comes back in its parent's Space as the
+    // parent is now (restoreFromTrash re-derives it).
+    const landing = await snapshotLanding(viewer, snap.entityType, snap.snapshot);
+    if (!landing.ok) return landing;
+  }
   if (targetBoardId) {
     if (snap.entityType !== "item") {
       return { ok: false, status: 409, message: "Only a task can be restored into a different list." };
@@ -792,6 +806,120 @@ export async function restoreTrashRow(
     // The usual cause is a parent that is itself gone; the page prints the
     // same sentence on the row so this is the stale-tab path, not the norm.
     return { ok: false, status: 409, message: "Couldn't restore. The list or folder it lived in may be gone." };
+  }
+}
+
+const CANT_RESTORE_HERE = "You need Can edit where this lived to bring it back there.";
+const PARENT_IN_TRASH = "The folder it lived in is in Trash. Restore that folder first.";
+
+const PLACE_GONE = "Couldn't restore. The list or folder it lived in may be gone.";
+
+/** P1 for a restore into `place`: ok, or the refusal the Trash page shows. A container that is gone or in Trash is its own sentence. */
+async function landingCheck(viewer: Viewer, place: Place, what: PlaceKind): Promise<TrashActionResult> {
+  if (place?.kind === "folder") {
+    const f = await folderPlacementFact(viewer.organizationId, place.id);
+    if (!f) return { ok: false, status: 409, message: PLACE_GONE };
+    if (f.inTrash) return { ok: false, status: 409, message: PARENT_IN_TRASH };
+  }
+  if (place?.kind === "space") {
+    const space = await prisma.space.findFirst({ where: { id: place.id, organizationId: viewer.organizationId }, select: { archivedAt: true } });
+    if (!space) return { ok: false, status: 409, message: PLACE_GONE };
+    if (space.archivedAt) return { ok: false, status: 409, message: "The Space it lived in is archived. Restore that Space first." };
+  }
+  const gate = await checkCreate(nodeCtxFromViewer(viewer), place, what);
+  return gate.ok ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** A task comes back into its List: Can edit on it, the rule every task write reads. A List that is gone is the restore's own 409 (or "Restore to..."). */
+async function listLanding(viewer: Viewer, boardId: string | null): Promise<TrashActionResult> {
+  if (!boardId) return { ok: true };
+  const list = await prisma.board.findFirst({ where: { id: boardId, organizationId: viewer.organizationId }, select: { id: true } });
+  if (!list) return { ok: true };
+  const role = (await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: boardId })).role;
+  return roleAtLeast(role, "EDIT") ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** A doc comes back to its anchor and its parent page: they must be live, and the viewer able to add docs there. */
+async function docLanding(viewer: Viewer, doc: { entityType: string | null; entityId: string | null; parentId: string | null }): Promise<TrashActionResult> {
+  if (doc.entityType === "NOTEPAD") return { ok: true };
+  if (!(await docPlaceLive(viewer.organizationId, doc))) {
+    return { ok: false, status: 409, message: "The place this doc lived in is gone or in Trash, so it can't come back there." };
+  }
+  const ok = await canCreateDocAt(nodeCtxFromViewer(viewer), { entityType: doc.entityType, entityId: doc.entityId }, doc.parentId);
+  return ok ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** Where an archived row comes back to, in place, and P1 there. */
+async function archiveLanding(viewer: Viewer, type: TrashTypeKey, id: string): Promise<TrashActionResult> {
+  const org = viewer.organizationId;
+  switch (type) {
+    case "folder": {
+      const r = await prisma.folder.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, parentFolderId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return landingCheck(viewer, r.parentFolderId ? { kind: "folder", id: r.parentFolderId } : { kind: "space", id: r.spaceId }, "folder");
+    }
+    case "list": {
+      const r = await prisma.board.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, folderId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      if (!r.spaceId) return { ok: true };
+      return landingCheck(viewer, r.folderId ? { kind: "folder", id: r.folderId } : { kind: "space", id: r.spaceId }, "list");
+    }
+    case "task": {
+      const r = await prisma.item.findFirst({ where: { id, organizationId: org }, select: { boardId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return listLanding(viewer, r.boardId);
+    }
+    case "doc": {
+      const r = await prisma.doc.findFirst({ where: { id, organizationId: org }, select: { entityType: true, entityId: true, parentId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return docLanding(viewer, r);
+    }
+    case "canvas": {
+      const folders = await canvasesHaveFolders();
+      const r = folders
+        ? await prisma.whiteboard.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, folderId: true } })
+        : await prisma.whiteboard.findFirst({ where: { id, organizationId: org }, select: { spaceId: true } }).then((w) => (w ? { ...w, folderId: null as string | null } : null));
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      const place: Place = r.folderId && r.spaceId ? { kind: "folder", id: r.folderId } : r.spaceId ? { kind: "space", id: r.spaceId } : null;
+      return landingCheck(viewer, place, "canvas");
+    }
+    default:
+      return { ok: true };
+  }
+}
+
+/** Where a snapshot row comes back to (its parent as it is now, P3), and P1 there. */
+async function snapshotLanding(viewer: Viewer, entityType: string, snapshot: unknown): Promise<TrashActionResult> {
+  const row = ((snapshot as SnapshotShape)?.row ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof row[k] === "string" && row[k] ? (row[k] as string) : null);
+  switch (entityType) {
+    case "folder": {
+      const parent = str("parentFolderId");
+      const space = str("spaceId");
+      if (!parent && !space) return { ok: true };
+      return landingCheck(viewer, parent ? { kind: "folder", id: parent } : { kind: "space", id: space as string }, "folder");
+    }
+    case "board": {
+      const folder = str("folderId");
+      const space = str("spaceId");
+      if (!folder && !space) return { ok: true };
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : { kind: "space", id: space as string }, "list");
+    }
+    case "whiteboard": {
+      const folder = str("folderId");
+      const space = str("spaceId");
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null, "canvas");
+    }
+    case "table": {
+      const space = str("spaceId");
+      return landingCheck(viewer, space ? { kind: "space", id: space } : null, "table");
+    }
+    case "item":
+      return listLanding(viewer, str("boardId"));
+    case "note":
+      return docLanding(viewer, { entityType: str("entityType"), entityId: str("entityId"), parentId: str("parentId") });
+    default:
+      return { ok: true };
   }
 }
 

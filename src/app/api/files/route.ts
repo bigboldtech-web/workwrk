@@ -13,6 +13,7 @@ import {
 import { canReadBoard } from "@/lib/board";
 import { readableFileRows } from "@/lib/file-access";
 import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { checkCreate } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilesFilters, matchesFilesView, parseFilesListQuery, sortFiles, type FileCandidate } from "@/lib/files-list";
 import { sliceByCursor } from "@/lib/list-query";
@@ -249,20 +250,20 @@ export async function POST(req: NextRequest) {
     spaceId = sf.spaceId ?? spaceId;
   }
 
-  // The upload gate (the one resolver): a file in a Space folder needs Can
-  // view on that Folder; a file tagged to a Space needs Can view on the Space,
-  // or the Space being on the viewer's way to something they were given (a
-  // List member attaching a file to a task); an unscoped file is the org's.
-  // Refused as not found, like every other container the viewer cannot open.
+  // The upload gate (the one resolver). A file placed in a Space folder is a
+  // node of that Folder, so it takes the placement rule (node-rules P1): Can
+  // edit or higher on the Folder; Can view never adds content. A file TAGGED
+  // to a Space (a task attachment) needs Can view on the Space, or the Space
+  // being on the viewer's way to something they were given (a List member
+  // attaching a file to a task); an unscoped file is the org's. A container
+  // the viewer cannot open is refused as not found.
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
   const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
-  const container = spaceFolderId
-    ? { kind: "folder" as const, id: spaceFolderId }
-    : spaceId
-      ? { kind: "space" as const, id: spaceId }
-      : null;
-  if (container && !(await canCreateAt(nodeCtx, container, "file"))) {
-    return jsonError(container.kind === "folder" ? "space folder not found" : "space not found", 404);
+  if (spaceFolderId) {
+    const gate = await checkCreate(nodeCtx, { kind: "folder", id: spaceFolderId }, "file");
+    if (!gate.ok) return jsonError(gate.status === 404 ? "space folder not found" : gate.error, gate.status);
+  } else if (spaceId && !(await canCreateAt(nodeCtx, { kind: "space", id: spaceId }, "file"))) {
+    return jsonError("space not found", 404);
   }
 
   const entry = await prisma.fileEntry.create({

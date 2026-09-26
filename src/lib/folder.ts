@@ -10,6 +10,7 @@ import { withArchivedBy } from "@/lib/archived-by";
 import { loadPathEvidence } from "@/lib/access/node-world";
 import { NodeEvaluator, placementContainers, roleAtLeast } from "@/lib/access/node-rules";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { lockParentFolder } from "@/lib/access/node-placement";
 
 const MAX_FOLDER_DEPTH = 6;
 
@@ -308,6 +309,14 @@ export interface CreateFolderInput {
   userId: string;
 }
 
+/**
+ * Make a Folder. The placement rule (node-rules P3): a Folder's Space is its
+ * parent's, never the request's. The parent is read under a share lock inside
+ * the create's transaction (node-placement lockParentFolder), so a concurrent
+ * move of the parent can never leave the new Folder in the Space the parent
+ * just left; a parent in another org or in Trash, or one in a different Space
+ * from `spaceId`, is refused. The caller checks who may create here (P1).
+ */
 export async function createFolder(input: CreateFolderInput): Promise<FolderSummary> {
   const trimmed = input.name.trim();
   if (!trimmed) throw new Error("Folder name is required");
@@ -319,46 +328,65 @@ export async function createFolder(input: CreateFolderInput): Promise<FolderSumm
     }
   }
 
-  // Drop new folder at the end of its parent group (max position + 1024).
-  // Fractional ordering — Linear pattern — so insertions between two
-  // folders pick the midpoint without renumbering.
-  const last = await prisma.folder.findFirst({
-    where: { spaceId: input.spaceId, parentFolderId: input.parentFolderId ?? null },
-    orderBy: { position: "desc" },
-    select: { position: true },
-  });
-  const position = (last?.position ?? 0) + 1024;
+  const created = await prisma.$transaction(async (tx) => {
+    let spaceId = input.spaceId;
+    if (input.parentFolderId) {
+      const parent = await lockParentFolder(tx, input.organizationId, input.parentFolderId);
+      if (!parent) throw new Error("That folder no longer exists or is in Trash.");
+      if (parent.spaceId !== input.spaceId) throw new Error("That folder is in another Space.");
+      spaceId = parent.spaceId;
+    } else {
+      const space = await tx.space.findFirst({ where: { id: input.spaceId, organizationId: input.organizationId }, select: { id: true } });
+      if (!space) throw new Error("Space not found");
+    }
 
-  const created = await prisma.folder.create({
-    data: {
-      organizationId: input.organizationId,
-      spaceId: input.spaceId,
-      parentFolderId: input.parentFolderId ?? null,
-      name: trimmed,
-      description: input.description ?? null,
-      icon: input.icon ?? null,
-      color: input.color ?? null,
-      ownerId: input.userId,
-      visibility: input.visibility ?? "WORKSPACE",
-      position,
-    },
-    select: {
-      id: true, name: true, description: true, icon: true, color: true,
-      spaceId: true, parentFolderId: true, ownerId: true, visibility: true, position: true,
-      archivedAt: true,
-    },
+    // Drop new folder at the end of its parent group (max position + 1024).
+    // Fractional ordering (the Linear pattern), so insertions between two
+    // folders pick the midpoint without renumbering.
+    const last = await tx.folder.findFirst({
+      where: { spaceId, parentFolderId: input.parentFolderId ?? null },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    const position = (last?.position ?? 0) + 1024;
+
+    return tx.folder.create({
+      data: {
+        organizationId: input.organizationId,
+        spaceId,
+        parentFolderId: input.parentFolderId ?? null,
+        name: trimmed,
+        description: input.description ?? null,
+        icon: input.icon ?? null,
+        color: input.color ?? null,
+        ownerId: input.userId,
+        visibility: input.visibility ?? "WORKSPACE",
+        position,
+      },
+      select: {
+        id: true, name: true, description: true, icon: true, color: true,
+        spaceId: true, parentFolderId: true, ownerId: true, visibility: true, position: true,
+        archivedAt: true,
+      },
+    });
   });
 
   return { ...created, visibility: created.visibility as FolderVisibility, childCount: 0, boardCount: 0 };
 }
 
+/**
+ * What a Folder edit may change. Never its Space or its parent: those are a
+ * move, and a move goes through node-placement moveFolder (the placement
+ * rule, node-rules P2 and P3), which takes the Space from the new parent and
+ * carries the whole subtree. This type used to take both, and writing them
+ * here is how a sub-folder once landed in another Space's root under a parent
+ * that stayed behind.
+ */
 export interface UpdateFolderInput {
   name?: string;
   description?: string | null;
   icon?: string | null;
   color?: string | null;
-  spaceId?: string;
-  parentFolderId?: string | null;
   position?: number;
   /**
    * access-model Broken #10: a Folder made PRIVATE at creation could never be
@@ -405,25 +433,6 @@ export async function updateFolder(folderId: string, patch: UpdateFolderInput, d
   if (patch.description !== undefined) data.description = patch.description;
   if (patch.icon !== undefined) data.icon = patch.icon;
   if (patch.color !== undefined) data.color = patch.color;
-  if (patch.spaceId !== undefined) data.spaceId = patch.spaceId;
-  if (patch.parentFolderId !== undefined) {
-    if (patch.parentFolderId === folderId) {
-      throw new Error("Folder cannot be its own parent");
-    }
-    if (patch.parentFolderId) {
-      // A folder may not move inside its own subtree: the branch would leave
-      // every tree query at once and there would be no page left to move it
-      // back from.
-      if (await isFolderDescendant(folderId, patch.parentFolderId)) {
-        throw new Error("A folder can't move inside itself");
-      }
-      const targetDepth = await getFolderDepth(patch.parentFolderId);
-      if (targetDepth + 1 >= MAX_FOLDER_DEPTH) {
-        throw new Error(`Folders can only nest ${MAX_FOLDER_DEPTH} levels deep`);
-      }
-    }
-    data.parentFolderId = patch.parentFolderId;
-  }
   if (patch.position !== undefined) data.position = patch.position;
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
 

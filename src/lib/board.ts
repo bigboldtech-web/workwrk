@@ -19,6 +19,7 @@ import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { withArchivedBy } from "@/lib/archived-by";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { lockParentFolder } from "@/lib/access/node-placement";
 import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { mergeJsonObject, type ListDefaultsInput, type RowColorRule } from "@/lib/list-comfort";
 import {
@@ -294,6 +295,13 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
       : {};
 
   const created = await prisma.$transaction(async (tx) => {
+    // The placement rule (node-rules P3): the List takes its Folder's Space,
+    // read under a share lock so a move of the Folder cannot split them.
+    if (input.folderId) {
+      const parent = await lockParentFolder(tx, input.organizationId, input.folderId);
+      if (!parent) throw new Error("That folder no longer exists or is in Trash.");
+      if (parent.spaceId !== input.spaceId) throw new Error("Folder not found in this Space");
+    }
     const board = await tx.board.create({
       data: {
         organizationId: input.organizationId,
@@ -446,7 +454,6 @@ export interface UpdateBoardInput {
   icon?: string | null;
   color?: string | null;
   visibility?: Visibility;
-  folderId?: string | null;
   /** Per-List statuses (backbone #1). null = reset to the default trio. */
   statuses?: StatusOption[] | null;
   /** Sprint date edit — only valid on boards that already carry
@@ -472,7 +479,8 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
   if (patch.icon !== undefined) data.icon = patch.icon;
   if (patch.color !== undefined) data.color = patch.color;
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
-  if (patch.folderId !== undefined) data.folderId = patch.folderId;
+  // A List's Folder and Space are a move, never an edit: node-placement
+  // moveList takes the Space from the Folder (the placement rule, P3).
   // SQL NULL (DbNull) means "use the default set" — distinct from a
   // stored JSON null, which parseBoardStatuses would also reject.
   if (patch.statuses !== undefined) data.statuses = patch.statuses === null ? Prisma.DbNull : patch.statuses;

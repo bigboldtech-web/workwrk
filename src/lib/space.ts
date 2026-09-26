@@ -201,6 +201,42 @@ export async function canContributeSpace(spaceId: string, userId: string, access
   return roleAtLeast(role, "EDIT");
 }
 
+/**
+ * The one check for nesting a Space under another (POST /api/spaces/[id]/move
+ * and a parentSpaceId in PATCH /api/spaces/[id]): the parent is in the same
+ * org, the mover manages it (canEditSpace, Full access), and it is not the
+ * Space itself or one of its own sub-Spaces. Managing the Space being moved
+ * is the caller's gate. Null (top level) needs nothing more.
+ */
+export async function spaceReparentRefusal(
+  spaceId: string,
+  parentSpaceId: string | null,
+  viewer: { userId: string; organizationId: string; accessLevel?: string },
+): Promise<{ status: 400 | 403 | 404; error: string } | null> {
+  if (!parentSpaceId) return null;
+  if (parentSpaceId === spaceId) return { status: 400, error: "A Space can't be moved into itself." };
+  const parent = await prisma.space.findFirst({ where: { id: parentSpaceId, organizationId: viewer.organizationId }, select: { id: true } });
+  if (!parent) return { status: 404, error: "Destination Space not found." };
+  if (!(await canEditSpace(parentSpaceId, viewer.userId, viewer.accessLevel))) {
+    return { status: 403, error: "You need Full access on that Space to put a Space inside it." };
+  }
+  // Walk UP from the proposed parent; reaching this Space means the parent is
+  // one of its own descendants.
+  let cursor: string | null = parentSpaceId;
+  const seen = new Set<string>();
+  while (cursor) {
+    if (cursor === spaceId) return { status: 400, error: "Can't move a Space into one of its own sub-Spaces." };
+    if (seen.has(cursor)) break;
+    seen.add(cursor);
+    const p: { parentSpaceId: string | null } | null = await prisma.space.findFirst({
+      where: { id: cursor, organizationId: viewer.organizationId },
+      select: { parentSpaceId: true },
+    });
+    cursor = p?.parentSpaceId ?? null;
+  }
+  return null;
+}
+
 export interface CreateSpaceInput {
   organizationId: string;
   userId: string;

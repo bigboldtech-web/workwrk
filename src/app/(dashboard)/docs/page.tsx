@@ -304,8 +304,12 @@ export default function DocsPage() {
   }
   async function bulkMove(value: string) {
     setBulkMoveOpen(false);
-    const ids = selectedRows.filter((r) => r.myRole !== "view").map((r) => r.id);
-    const body = value === "none" ? { entityType: null, entityId: null } : { entityType: "SPACE", entityId: value };
+    // A move needs Full access on the doc (the placement rule, P2): only the
+    // docs the viewer manages are sent; the server still checks each one.
+    const ids = selectedRows.filter((r) => r.canManage).map((r) => r.id);
+    if (ids.length === 0) { toast("You need Full access to a doc to move it"); return; }
+    // A place of its own means no parent page (the placement rule, P3).
+    const body = value === "none" ? { entityType: null, entityId: null, parentId: null } : { entityType: "SPACE", entityId: value, parentId: null };
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "PUT", json: body })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;
     toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : `Moved ${ids.length} doc${ids.length === 1 ? "" : "s"}`, failed ? { tone: "danger" } : undefined);

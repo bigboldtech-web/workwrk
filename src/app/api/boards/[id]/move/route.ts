@@ -1,16 +1,21 @@
-// POST /api/boards/[id]/move — move a List/Board to a different Space or
-// Folder. Body: { spaceId, folderId? }. Picking a Space makes the board
-// space-direct (folderId=null); picking a Folder nests it there (the folder's
-// space is used). Requires edit access to the source board AND the target
-// space. A WORKSPACE-visibility board inherits the target space's membership.
+// POST /api/boards/[id]/move: move a List to a different Space or Folder.
+// Body: { spaceId, folderId? }. Picking a Space makes the List sit at the
+// Space's root (folderId null); picking a Folder nests it there, and the
+// Folder's Space is the List's Space.
+//
+// The placement rule (node-rules P1 to P7) through its one move helper
+// (node-placement moveList): Full access on the List and on the place it
+// leaves (and on its Space when it leaves the Space), Can edit where it goes,
+// and the Space derived from the Folder (a Space that disagrees is a 400). A
+// refusal is a 403 with one sentence naming what is needed. The Move dialog
+// lists only the destinations this accepts (GET /api/move/destinations).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { boardRoleOf } from "@/lib/board";
-import { moveAllowed, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { roleAtLeast } from "@/lib/access/node-rules";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { moveList } from "@/lib/access/node-placement";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -30,42 +35,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!board || board.organizationId !== c.organizationId || role === "none") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (!roleAtLeast(role, "FULL")) {
-    return NextResponse.json({ error: "You don't have permission to move this List." }, { status: 403 });
-  }
 
   const body = await req.json().catch(() => null);
-  const spaceId = typeof body?.spaceId === "string" ? body.spaceId : null;
-  const folderId = typeof body?.folderId === "string" ? body.folderId : null;
-  if (!spaceId) return NextResponse.json({ error: "Pick a destination Space." }, { status: 400 });
+  const spaceId = typeof body?.spaceId === "string" && body.spaceId ? body.spaceId : null;
+  const folderId = typeof body?.folderId === "string" && body.folderId ? body.folderId : null;
+  if (!spaceId && !folderId) return NextResponse.json({ error: "Pick a destination Space." }, { status: 400 });
 
-  // Target space must be in this org and editable by the actor.
-  const space = await prisma.space.findFirst({
-    where: { id: spaceId, organizationId: c.organizationId },
-    select: { id: true },
-  });
-  if (!space) return NextResponse.json({ error: "Destination Space not found." }, { status: 404 });
-  // A target folder must live inside the target space.
-  if (folderId) {
-    const folder = await prisma.folder.findFirst({
-      where: { id: folderId, spaceId, archivedAt: null },
-      select: { id: true },
-    });
-    if (!folder) return NextResponse.json({ error: "That folder isn't in the chosen Space." }, { status: 400 });
-  }
-  // Full access where it lands: on the Folder, or on the Space at its root.
-  const dest = folderId ? { kind: "folder" as const, id: folderId } : { kind: "space" as const, id: spaceId };
-  if (!(await moveAllowed(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id }, dest))) {
-    return NextResponse.json({ error: "You don't have permission to move it there." }, { status: 403 });
-  }
-
-  try {
-    await prisma.board.update({ where: { id }, data: { spaceId, folderId } });
-    return NextResponse.json({ board: { id, spaceId, folderId } });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Couldn't move the List" },
-      { status: 400 },
-    );
-  }
+  const result = await moveList(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), id, { spaceId, folderId });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+  return NextResponse.json({ board: result.list });
 }

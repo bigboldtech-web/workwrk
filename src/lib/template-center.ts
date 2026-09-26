@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { createBoard } from "@/lib/board";
 import { createSpace } from "@/lib/space";
 import { createFolder } from "@/lib/folder";
+import { lockParentFolder } from "@/lib/access/node-placement";
 import { createBoardItem } from "@/lib/board-items";
 import type { ViewType, Prisma } from "@/generated/prisma";
 import type { StatusOption } from "@/lib/board-items-shared";
@@ -209,15 +210,17 @@ export interface DocTemplatePayload {
 
 export async function applyDocTemplate(
   payload: DocTemplatePayload,
-  ctx: { organizationId: string; userId: string; spaceId: string | null; name: string },
+  ctx: { organizationId: string; userId: string; spaceId: string | null; folderId?: string | null; name: string },
 ): Promise<{ docId: string }> {
+  // Anchored where it was applied: the Folder when there is one, else the
+  // Space (the caller has checked the placement rule for that container).
   const doc = await prisma.doc.create({
     data: {
       organizationId: ctx.organizationId,
       title: ctx.name,
       content: (payload.content ?? {}) as Prisma.InputJsonValue,
-      entityType: ctx.spaceId ? "SPACE" : null,
-      entityId: ctx.spaceId,
+      entityType: ctx.folderId ? "FOLDER" : ctx.spaceId ? "SPACE" : null,
+      entityId: ctx.folderId ?? ctx.spaceId,
       position: Date.now(),
       createdById: ctx.userId,
       // Every Doc has at least one version, the same invariant POST /api/docs holds.
@@ -251,10 +254,17 @@ export async function applyWhiteboardTemplate(
   // has not had it applied yet must still get its Canvas, so the folder anchor
   // is the part that degrades, never the create.
   try {
-    const wb = await prisma.whiteboard.create({
-      data: { ...base, folderId: ctx.folderId ?? undefined },
-      select: { id: true },
-    });
+    // The placement rule (node-rules P3): with a Folder, the canvas takes the
+    // Folder's Space, read under a share lock, so a move of the Folder
+    // meanwhile cannot leave the canvas behind.
+    const folderId = ctx.folderId ?? null;
+    const wb = folderId
+      ? await prisma.$transaction(async (tx) => {
+          const parent = await lockParentFolder(tx, ctx.organizationId, folderId);
+          if (!parent) throw new Error("That folder no longer exists or is in Trash.");
+          return tx.whiteboard.create({ data: { ...base, spaceId: parent.spaceId, folderId }, select: { id: true } });
+        })
+      : await prisma.whiteboard.create({ data: base, select: { id: true } });
     return { whiteboardId: wb.id };
   } catch (err) {
     // Only the ONE failure this retry is for. A bare catch turned a transient
