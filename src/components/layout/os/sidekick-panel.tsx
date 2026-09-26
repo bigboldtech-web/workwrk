@@ -14,6 +14,9 @@
  * answer still arriving, closing the panel does not end the chat, and the
  * shell closes the panel on /sidekick so two threads are never on screen.
  *
+ * .os-chrome: drawn on the px grid like the rest of the frame, so its 48px
+ * header, 32px icon buttons and 36px starters are those sizes.
+ *
  * Its own 48px header is its whole chrome: the title and three ghost icons,
  * New chat, Open full page and Close. The model pill, the "More" menu, the
  * History toggle (history is the AI hub sidebar's CHATS section), Attach,
@@ -109,7 +112,7 @@ export function OsSidekickPanel() {
     <aside
       ref={asideRef}
       onKeyDown={sidekickOpen ? trapTab : undefined}
-      className={`flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-app transition-[width] duration-200 ease-out motion-reduce:transition-none ${sidekickOpen ? "w-[360px] border-s border-line" : "w-0"}`}
+      className={`os-chrome flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-app transition-[width] duration-200 ease-out motion-reduce:transition-none ${sidekickOpen ? "w-[360px] border-s border-line" : "w-0"}`}
       inert={!sidekickOpen}
       aria-hidden={!sidekickOpen}
       aria-label={SHELL_LABELS.askAi}

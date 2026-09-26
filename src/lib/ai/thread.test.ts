@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callFromLog, contextFromPath, messageFromApi, settleDone, splitSse, titleFromFirstMessage, withToolResult, withToolUse, type AiMessage } from "./thread";
+import { callFromLog, contextFromPath, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
 
 describe("splitSse", () => {
   it("returns whole events and keeps the unfinished tail", () => {
@@ -84,5 +84,22 @@ describe("isStoppedAnswer", () => {
     expect(isStoppedAnswer("Sorry, I hit an error reaching the model.\n\n`401`")).toBe(true);
     expect(isStoppedAnswer("Sorry \u2014 I hit an error reaching the model.\n\n`x`")).toBe(true);
     expect(isStoppedAnswer("Sorry, I can't find that task.")).toBe(false);
+  });
+});
+
+describe("unansweredQuestion", () => {
+  const q = (createdAt: string) => ({ id: "u", role: "USER" as const, content: "What is due?", toolCalls: [], createdAt });
+  const a = { id: "a", role: "ASSISTANT" as const, content: "Two tasks.", toolCalls: [], createdAt: "2026-09-26T10:00:05Z" };
+  const now = new Date("2026-09-26T10:10:00Z").getTime();
+  it("finds a question with no answer after it", () => {
+    expect(unansweredQuestion([q("2026-09-26T10:00:00Z")], { streaming: false, now })).toEqual({ text: "What is due?", recent: false });
+  });
+  it("calls a question under two minutes old recent", () => {
+    expect(unansweredQuestion([q("2026-09-26T10:09:00Z")], { streaming: false, now })?.recent).toBe(true);
+  });
+  it("is null when the chat ends in an answer, or while one arrives", () => {
+    expect(unansweredQuestion([q("2026-09-26T10:00:00Z"), a], { streaming: false, now })).toBeNull();
+    expect(unansweredQuestion([q("2026-09-26T10:00:00Z")], { streaming: true, now })).toBeNull();
+    expect(unansweredQuestion([], { streaming: false, now })).toBeNull();
   });
 });

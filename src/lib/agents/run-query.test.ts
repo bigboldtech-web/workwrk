@@ -41,7 +41,17 @@ describe("parseRunQuery", () => {
 describe("agentRunsWhere", () => {
   it("scopes every query to the org", () => {
     const w = agentRunsWhere(parseRunQuery(p("")), admin);
-    expect(w).toEqual({ AND: [{ agent: { organizationId: "org1" } }] });
+    expect(w.AND).toContainEqual({ agent: { organizationId: "org1" } });
+  });
+  it("never gives an Admin another person's chat rows", () => {
+    const w = agentRunsWhere(parseRunQuery(p("")), admin);
+    expect(w.AND).toContainEqual({
+      OR: [
+        { input: { path: ["trigger"], equals: "SCHEDULED" } },
+        { input: { path: ["trigger"], equals: "MANUAL" } },
+        { triggeredBy: "u1" },
+      ],
+    });
   });
   it("gives a Member the autonomous runs and their own, with positive matches only", () => {
     const w = agentRunsWhere(parseRunQuery(p("")), member);

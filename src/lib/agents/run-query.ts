@@ -3,10 +3,12 @@
 // &take=&sort=). Pure, so the route and the tests build the same WHERE.
 //
 // Who reads which runs (the rows carry tool results):
-//   Owner and Admin   every run in the workspace
-//   everyone else     the autonomous runs (a schedule or Run now) and the
-//                     runs they triggered themselves; never another person's
-//                     chat-originated tool calls.
+//   everyone, the Owner and Admins included, reads the autonomous runs (a
+//   schedule or Run now) and the runs they triggered themselves. The rows a
+//   chat with an agent writes (one per tool call, with its input and raw
+//   result) are that person's chat, and nobody reads another person's chats
+//   (spec-ai-automation 1.4). What a Member may see INSIDE an autonomous run
+//   somebody else started is narrower again (run-view.ts redactRunFor).
 //
 // An autonomous run stores its trigger in input.trigger; a chat run has
 // none. Every JSON filter here is a positive match, because a negated JSON
@@ -76,10 +78,10 @@ const autonomous = (t: RunTriggerFilter): Prisma.AgentRunWhereInput => ({ input:
 export function agentRunsWhere(q: RunQuery, viewer: { organizationId: string; userId: string; admin: boolean }): Prisma.AgentRunWhereInput {
   const and: Prisma.AgentRunWhereInput[] = [
     { agent: { organizationId: viewer.organizationId, ...(q.agentSlug ? { slug: q.agentSlug } : {}) } },
+    // The same for every role: `admin` no longer widens it to other
+    // people's chat rows.
+    { OR: [autonomous("SCHEDULED"), autonomous("MANUAL"), { triggeredBy: viewer.userId }] },
   ];
-  if (!viewer.admin) {
-    and.push({ OR: [autonomous("SCHEDULED"), autonomous("MANUAL"), { triggeredBy: viewer.userId }] });
-  }
   if (q.trigger) and.push(autonomous(q.trigger));
   if (q.statuses.length > 0) and.push({ status: { in: q.statuses.flatMap((s) => STATUS_VALUES[s]) } });
   if (q.from || q.to) and.push({ startedAt: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } });

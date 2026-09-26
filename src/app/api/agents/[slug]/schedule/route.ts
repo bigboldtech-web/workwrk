@@ -9,7 +9,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { requireManageApps } from "@/lib/app-gate";
+import { requireApp, requireManageApps } from "@/lib/app-gate";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
 import { isValidSchedule } from "@/lib/agents/schedule-words";
 import { auditAgent } from "@/lib/agents/audit";
@@ -95,8 +96,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
 }
 
 export async function POST(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  // Run now calls the model, so it answers to the same switch the scheduled
+  // path does: with the ai app key off (AI features turned off for the
+  // workspace, or the app hidden) it is refused, never run.
+  const app = await requireApp("ai");
+  if ("error" in app) return app.error;
   const c = await ctx();
   if ("error" in c) return c.error;
+  const off = await aiOffResponse(c.organizationId);
+  if (off) return off;
   const { slug } = await params;
   const agent = await resolveAgent(slug, c.organizationId);
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });

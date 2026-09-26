@@ -12,9 +12,19 @@ import { deepMergePatch, type PreferencesPatch } from "@/lib/preferences-schema"
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import type { EffectivePreferences } from "@/lib/preferences";
 import { useBoot } from "./boot-context";
-import { ASK_AI_FOCUS_EVENT, askAiTarget } from "@/lib/ai/ask-ai-route";
+import { ASK_AI_FOCUS_EVENT, ASK_AI_PANEL_MIN_WIDTH, askAiTarget } from "@/lib/ai/ask-ai-route";
 import { appAudienceAllows } from "@/lib/nav/app-audience";
 import type { AppKey } from "@/lib/access/types";
+
+const PANEL_FITS_QUERY = `(min-width: ${ASK_AI_PANEL_MIN_WIDTH}px)`;
+function subscribePanelFits(cb: () => void) {
+  const mq = window.matchMedia(PANEL_FITS_QUERY);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+function readPanelFits() {
+  return window.matchMedia(PANEL_FITS_QUERY).matches;
+}
 
 /** The folded keys whose launcher entry follows APP_RULES rather than a tier. */
 const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation"]);
@@ -128,6 +138,11 @@ type ShellState = {
    * and the viewer is not a Guest. Every entry point reads this one fact.
    */
   askAiVisible: boolean;
+  /**
+   * The window is 1024 or wider, so the 360 panel fits beside the content.
+   * Below it the panel is not in the DOM at all and cannot be open.
+   */
+  askAiPanelFits: boolean;
   openSidekick: (initialPrompt?: string) => void;
   closeSidekick: () => void;
   toggleSidekick: () => void;
@@ -489,6 +504,16 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("workwrk:os:ask-sidekick", onAsk);
   }, [openSidekick]);
   const closeSidekick = useCallback(() => setSidekickOpen(false), []);
+  // Below 1024 the panel does not render. Shrinking the window past the
+  // breakpoint closes it outright, so no invisible layer is left to swallow
+  // the next Esc or Cmd+J, and widening again does not pop it back open.
+  const askAiPanelFits = useSyncExternalStore(subscribePanelFits, readPanelFits, () => false);
+  useEffect(() => {
+    const mq = window.matchMedia(PANEL_FITS_QUERY);
+    const onChange = () => { if (!mq.matches) setSidekickOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   const toggleSidekick = useCallback(() => {
     if (sidekickOpenRef.current) { setSidekickOpen(false); return; }
     openSidekick();
@@ -576,7 +601,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // /sidekick page, whose own thread would make two on screen. Derived, not
   // written back, so losing the right or arriving on /sidekick closes it.
   const onAskAiPage = pathname === "/sidekick" || Boolean(pathname?.startsWith("/sidekick/"));
-  const panelOpen = sidekickOpen && askAiVisible && !onAskAiPage;
+  const panelOpen = sidekickOpen && askAiVisible && !onAskAiPage && askAiPanelFits;
   useEffect(() => { sidekickOpenRef.current = panelOpen; }, [panelOpen]);
   const manageableOffModules = boot.manageableOffModules;
   const canCreateSpace = accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
@@ -596,11 +621,12 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
           talkModuleOn: activeModuleKeys.includes("chat"),
           tablesModuleOn: activeModuleKeys.includes("tables"),
           canManageWorkspace: accessLevel === undefined ? true : canAccessTier("org-admin", accessLevel),
+          askAiOn: askAiVisible,
         });
       }
       return getApp(appKey)?.defaultHref ?? "/";
     },
-    [activeModuleKeys, accessLevel, memberTeamsHub],
+    [activeModuleKeys, accessLevel, memberTeamsHub, askAiVisible],
   );
   const launcherKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
   const isHubVisible = useCallback((hubKey: string): boolean => railKeys.has(hubKey), [railKeys]);
@@ -659,7 +685,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ShellState>(
     () => ({
       paletteOpen, openPalette, closePalette,
-      sidekickOpen: panelOpen, askAiVisible, openSidekick, closeSidekick, toggleSidekick,
+      sidekickOpen: panelOpen, askAiVisible, askAiPanelFits, openSidekick, closeSidekick, toggleSidekick,
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate,
@@ -679,7 +705,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       routePending, setRoutePending,
       lastAppPath,
     }),
-    [paletteOpen, openPalette, closePalette, panelOpen, askAiVisible, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, memberTeamsHub, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
+    [paletteOpen, openPalette, closePalette, panelOpen, askAiVisible, askAiPanelFits, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, memberTeamsHub, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

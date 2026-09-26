@@ -10,8 +10,48 @@
 // (the classic cron rule). Pure, so the scheduler, the drawer's words and
 // the tests read the same thing.
 //
-// Times are the server's local clock, the same clock the keyword schedules
-// ("daily" runs at 9:00) have always used.
+// THE ZONE. A schedule may lead with "CRON_TZ=<IANA zone> " (the prefix
+// cronie and most cron readers use), and then its times are that zone's wall
+// clock: "CRON_TZ=Asia/Kolkata 0 9 * * 1-5" is 9:00 in Kolkata on weekdays,
+// whatever clock the server runs on. The drawer writes the prefix with the
+// zone of the person who picks the schedule. A schedule with no prefix (every
+// one saved before the prefix existed, and the keywords "daily" and
+// "weekly") keeps the server's local clock, as it always has; the page names
+// that zone next to the words so nobody reads it as their own.
+
+import { isValidTimeZone, zonedParts, zonedTimeToUtc } from "@/lib/reports/schedule";
+
+const ZONE_PREFIX = /^\s*CRON_TZ=(\S+)\s+/i;
+
+/** The zone a schedule names with a CRON_TZ= prefix (null when none or invalid), and the rest. */
+export function splitScheduleZone(schedule: string | null | undefined): { zone: string | null; body: string } {
+  const raw = schedule ?? "";
+  const m = ZONE_PREFIX.exec(raw);
+  if (!m) return { zone: null, body: raw.trim() };
+  return { zone: isValidTimeZone(m[1]) ? m[1] : null, body: raw.slice(m[0].length).trim() };
+}
+
+/** Whether the text carries a CRON_TZ= prefix at all (valid or not). */
+export function hasZonePrefix(schedule: string | null | undefined): boolean {
+  return ZONE_PREFIX.test(schedule ?? "");
+}
+
+/**
+ * The text to save for a schedule a person picked: a bare five-field cron
+ * gets the picker's zone; a schedule that already names a zone, or is not a
+ * cron at all ("every 15 minutes"), is saved as typed.
+ */
+export function scheduleForSave(schedule: string, zone: string | null | undefined): string {
+  const t = schedule.trim();
+  if (hasZonePrefix(t)) return t;
+  return parseCron(t) ? withScheduleZone(t, zone) : t;
+}
+
+/** "0 9 * * 1-5" in `zone`, as the text the scheduler stores. */
+export function withScheduleZone(cron: string, zone: string | null | undefined): string {
+  const body = splitScheduleZone(cron).body;
+  return zone && isValidTimeZone(zone) ? `CRON_TZ=${zone} ${body}` : body;
+}
 
 export interface CronSpec {
   minutes: ReadonlySet<number>;
@@ -66,6 +106,10 @@ function parseField(raw: string, [lo, hi]: [number, number]): Set<number> | null
 /** The parsed schedule, or null when the text is not a five-field cron. */
 export function parseCron(expr: string | null | undefined): CronSpec | null {
   if (!expr) return null;
+  if (hasZonePrefix(expr)) {
+    const { zone, body } = splitScheduleZone(expr);
+    return zone ? parseCron(body) : null;
+  }
   const fields = expr.trim().split(/\s+/);
   if (fields.length !== 5) return null;
   const parsed = fields.map((f, i) => parseField(f, RANGES[i]));
@@ -104,6 +148,8 @@ function dayMatches(spec: CronSpec, d: Date): boolean {
 export function nextCronRun(expr: string, from: Date = new Date()): Date | null {
   const spec = parseCron(expr);
   if (!spec) return null;
+  const { zone } = splitScheduleZone(expr);
+  if (zone) return nextZonedRun(spec, from, zone);
   const t = new Date(from);
   t.setSeconds(0, 0);
   t.setMinutes(t.getMinutes() + 1);
@@ -128,6 +174,45 @@ export function nextCronRun(expr: string, from: Date = new Date()): Date | null 
       continue;
     }
     return new Date(t);
+  }
+  return null;
+}
+
+/**
+ * The same walk on the wall clock of `zone`: `w` is a Date whose UTC fields
+ * ARE that wall clock, and each match converts back to the real instant. A
+ * wall time that a DST change skips lands just after the gap; one that it
+ * repeats runs once, at its first instant.
+ */
+function nextZonedRun(spec: CronSpec, from: Date, zone: string): Date | null {
+  const p = zonedParts(from, zone);
+  const w = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute + 1, 0, 0));
+  const limit = Date.UTC(p.year, p.month - 1, p.day) + 367 * 24 * 60 * 60 * 1000;
+  while (w.getTime() <= limit) {
+    if (!spec.months.has(w.getUTCMonth() + 1)) {
+      w.setUTCMonth(w.getUTCMonth() + 1, 1);
+      w.setUTCHours(0, 0, 0, 0);
+      continue;
+    }
+    const dom = spec.days.has(w.getUTCDate());
+    const dow = spec.weekdays.has(w.getUTCDay());
+    const dayOk = spec.daysRestricted && spec.weekdaysRestricted ? dom || dow : spec.daysRestricted ? dom : spec.weekdaysRestricted ? dow : true;
+    if (!dayOk) {
+      w.setUTCDate(w.getUTCDate() + 1);
+      w.setUTCHours(0, 0, 0, 0);
+      continue;
+    }
+    if (!spec.hours.has(w.getUTCHours())) {
+      w.setUTCHours(w.getUTCHours() + 1, 0, 0, 0);
+      continue;
+    }
+    if (!spec.minutes.has(w.getUTCMinutes())) {
+      w.setUTCMinutes(w.getUTCMinutes() + 1, 0, 0);
+      continue;
+    }
+    const instant = zonedTimeToUtc(w.getUTCFullYear(), w.getUTCMonth() + 1, w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), zone);
+    if (instant.getTime() > from.getTime()) return instant;
+    w.setUTCMinutes(w.getUTCMinutes() + 1, 0, 0);
   }
   return null;
 }

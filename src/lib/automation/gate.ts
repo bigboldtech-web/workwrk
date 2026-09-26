@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApp } from "@/lib/app-gate";
 import { legacySessionTiers } from "@/lib/access/legacy-session";
+import type { Viewer } from "@/lib/access/types";
 
 /**
  * The one gate for every /api/automation/* route (spec-ai-automation 1.4 and
@@ -26,6 +27,25 @@ export interface AutomationContext {
   canManage: boolean;
   /** Owner or Admin: delete a workflow, connections, per-person usage. */
   isAdmin: boolean;
+  /** The access viewer, for the per-object reads (which Lists a name may show). */
+  viewer: Viewer;
+}
+
+/** What the viewer may do to one workflow, sent with every row so no control 403s. */
+export interface WorkflowRights {
+  /** Save, publish, activate, deactivate, rename, restore a version, retry its runs. */
+  edit: boolean;
+  /** Archive, and bring an archived one back. */
+  archive: boolean;
+}
+
+/**
+ * Delegated until the access engine flips (spec-ai-automation 1.4 names the
+ * creator, Owner and Admin): today the write routes accept a manager or
+ * above for edits and Owner or Admin for archive, so that is what renders.
+ */
+export function workflowRights(ctx: AutomationContext): WorkflowRights {
+  return { edit: ctx.canManage, archive: ctx.isAdmin };
 }
 
 export async function requireAutomation(): Promise<{ error: NextResponse } | AutomationContext> {
@@ -35,7 +55,7 @@ export async function requireAutomation(): Promise<{ error: NextResponse } | Aut
   const tiers = await legacySessionTiers();
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
   const canManage = isAdmin || tiers.manager;
-  return { userId: viewer.userId, orgId: viewer.organizationId, canManage, isAdmin };
+  return { userId: viewer.userId, orgId: viewer.organizationId, canManage, isAdmin, viewer };
 }
 
 export function forbidden(message = "You need edit access to change automations."): NextResponse {

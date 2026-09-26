@@ -26,6 +26,8 @@ export interface ActionContext {
   runId: string;
   /** Automation chain depth: re-dispatched events carry depth + 1. */
   depth: number;
+  /** The workflow's creator: the author of a comment it adds. */
+  workflowCreatorId?: string | null;
 }
 
 export interface ActionParamField {

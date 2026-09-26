@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { plainLine, resultError, runDurationMs, runStatus, runSummary, runToolCalls, runTrigger } from "./run-view";
+import { canReadRunDetail, plainLine, resultError, runDurationMs, runStatus, runSummary, runSummaryWithheld, runToolCalls, runTrigger, withheldToolCalls } from "./run-view";
 
 const start = "2026-09-25T09:00:00.000Z";
 const end = "2026-09-25T09:00:04.500Z";
@@ -60,5 +60,28 @@ describe("run-view", () => {
     expect(plainLine("x".repeat(200), 10)).toBe("xxxxxxxxx…");
     expect(resultError({ error: "  nope " })).toBe("nope");
     expect(resultError({ ok: true })).toBeNull();
+  });
+});
+
+describe("withholding a run from a Member", () => {
+  const row = {
+    status: "SUCCEEDED",
+    startedAt: "2026-09-25T10:00:00Z",
+    endedAt: "2026-09-25T10:00:02Z",
+    input: { trigger: "MANUAL", prompt: "Check payroll" },
+    output: { text: "Found 3 people on leave in the private HR Space", toolCalls: [{ name: "search_employees", input: { q: "leave" }, result: { rows: [{ name: "A" }] }, durationMs: 12 }] },
+    error: null,
+  };
+  it("lets the Owner, Admins and the person who ran it read it", () => {
+    expect(canReadRunDetail({ triggeredBy: "u1" }, { userId: "u9", admin: true })).toBe(true);
+    expect(canReadRunDetail({ triggeredBy: "u2" }, { userId: "u2", admin: false })).toBe(true);
+    expect(canReadRunDetail({ triggeredBy: "u1" }, { userId: "u2", admin: false })).toBe(false);
+    expect(canReadRunDetail({ triggeredBy: null }, { userId: "u2", admin: false })).toBe(false);
+  });
+  it("keeps the words and results out of the summary and tool rows", () => {
+    expect(runSummaryWithheld(row)).toBe("Finished \u00b7 1 action");
+    expect(runSummaryWithheld(row)).not.toContain("leave");
+    const calls = withheldToolCalls(row);
+    expect(calls).toEqual([{ name: "search_employees", input: null, result: null, error: null, durationMs: 12 }]);
   });
 });

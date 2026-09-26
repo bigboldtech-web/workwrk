@@ -1283,7 +1283,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               onChange={handleEditorChange}
               docId={docId}
               onComment={(blockId) => setPanel({ kind: "comments", blockId })}
-              onAskAI={() => setPanel({ kind: "ask" })}
+              // Only with Ask AI on: the block menu's Ask AI row and the "/ai"
+              // slash item both read this.
+              onAskAI={aiOn ? () => setPanel({ kind: "ask" }) : undefined}
             />
           </div>
         )}

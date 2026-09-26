@@ -1,5 +1,7 @@
 // POST /api/agents/[slug]/install, install a prebuilt catalog agent
-// into the current org. Idempotent: re-install just re-enables.
+// into the current org. Idempotent: re-install just re-enables. A removed
+// agent that is not in the catalog (a custom one) is added back as it was:
+// its own prompt and settings, turned back on.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +18,20 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   const user = { id: gate.viewer.userId, organizationId: gate.viewer.organizationId };
 
   const catalog = AGENTS_BY_SLUG[slug];
-  if (!catalog) return NextResponse.json({ error: "unknown agent" }, { status: 404 });
+  if (!catalog) {
+    const removed = await prisma.agent.findFirst({
+      where: { organizationId: user.organizationId, slug, status: "ARCHIVED" },
+      select: { id: true },
+    });
+    if (!removed) return NextResponse.json({ error: "unknown agent" }, { status: 404 });
+    const agent = await prisma.agent.update({
+      where: { id: removed.id },
+      data: { status: "ENABLED" },
+      select: { id: true, slug: true, name: true, status: true },
+    });
+    await auditAgent({ organizationId: user.organizationId, actorId: user.id, agent, action: "added" });
+    return NextResponse.json({ agent });
+  }
 
   const agent = await prisma.agent.upsert({
     where: { organizationId_slug: { organizationId: user.organizationId, slug } },

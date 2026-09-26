@@ -5,7 +5,7 @@
 //   /sidekick                     the landing, or the chat this tab already has open
 //   /sidekick?new=1               a fresh landing, composer focused
 //   /sidekick?session=<id>        that chat
-//   /sidekick?q=<text>            a new chat, the text sent at once
+//   /sidekick?q=<text>            a new chat with the text in the composer (never sent on arrival)
 //   /sidekick?agent=<slug>        a new chat bound to that agent (&new=1 too)
 //   /sidekick?view=all            All chats
 //   /sidekick?pinned=1            All chats, pinned (implies view=all)

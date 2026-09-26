@@ -21,7 +21,12 @@ export function starterWantsMore(s: string): boolean {
   return s.endsWith(" ");
 }
 
-/** The label a starter button shows. */
+/**
+ * The label a starter button shows. One that wants more typed ends in an
+ * ellipsis ("Find the SOP for…"), so it reads as "fill this in", not as a
+ * question that sends on click.
+ */
 export function starterLabel(s: string): string {
-  return s.trim().replace(/:$/, "");
+  const base = s.trim().replace(/:$/, "");
+  return starterWantsMore(s) ? `${base}\u2026` : base;
 }

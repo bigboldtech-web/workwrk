@@ -442,6 +442,13 @@ export function resolveCrumbTrail(pathname: string): { label: string; href?: str
 /** What a hub's landing URL may depend on. The only two branches in the table. */
 export type HubHrefContext = {
   /**
+   * Whether Ask AI renders for the viewer (the ai app, AI features on for the
+   * workspace, not a Guest). With it off the AI hub's front door is its
+   * Workflows page, which still works, never an Ask AI page that answers
+   * "AI is off". Undefined is read as "on".
+   */
+  askAiOn?: boolean;
+  /**
    * Whether the org has the Talk premium module on. Talk is the one hub whose
    * landing is conditional, and it is conditional on module state alone:
    * Announcements is not module-gated, so the hub must stay reachable with the
@@ -470,7 +477,7 @@ export function hubDefaultHref(hub: HubKey, ctx: HubHrefContext = {}): string {
     case "planner":
       return "/planner";
     case "ai":
-      return "/sidekick";
+      return ctx.askAiOn === false ? "/automation/workflows" : "/sidekick";
     case "chat":
       // Module off: Announcements is the hub's only content, so it is the door.
       return ctx.talkModuleOn === false ? "/announcements" : "/tlk";

@@ -15,7 +15,7 @@
 // (access section 5.4), and it is never rendered in `host="panel"`, because
 // the Inbox pane's actions belong to the notification.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
@@ -30,6 +30,7 @@ import type { ItemRole } from "@/lib/item-role";
 import type { StatusOption } from "@/lib/board-items-shared";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useItemTypes } from "./use-item-types";
+import { OsShellContext } from "@/components/layout/os/shell-context";
 
 export interface ItemMoreMenuItem {
   id: string;
@@ -115,6 +116,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   const prompt = usePrompt();
   const { toast } = useOsToast();
   const types = useItemTypes();
+  // Outside the shell (none today) there is no Ask AI to open.
+  const shell = useContext(OsShellContext);
+  const askAi = Boolean(shell?.askAiVisible);
+  const openSidekick = shell?.openSidekick;
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);
   const [lists, setLists] = useState<{ id: string; name: string; spaceName: string | null }[]>([]);
@@ -209,6 +214,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     isAgent,
     isGuest,
     archived,
+    askAi,
   });
 
   const close = useCallback(() => setOpen(false), []);
@@ -219,6 +225,12 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         case "open":
           close();
           onOpen?.();
+          return;
+        case "ask-ai":
+          // The same prompt as the task strip's Ask AI; it lands in the
+          // composer (panel at 1024 and wider, the page below) to be sent.
+          close();
+          openSidekick?.(`Help me with the task: ${item.title}`);
           return;
         case "open-new-tab":
           close();
@@ -372,7 +384,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     [
       close, item, isDone, statuses, onPatch, currentUserId, onRenameRequested, toast, onOpen,
       onDuplicated, isWatching, watcherIds, timerRunning, prompt, onShare, confirm, onArchived,
-      onDeleted, onRestored,
+      onDeleted, onRestored, openSidekick,
     ],
   );
 

@@ -16,6 +16,7 @@ import { z } from "zod";
 import { canContributeBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { notifyItemAssigned } from "@/lib/notify-item";
+import { dispatchEvent } from "@/services/webhookDispatcher";
 import { unknownUserIds } from "@/lib/assignable";
 import { prisma } from "@/lib/prisma";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -217,6 +218,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ownerId: parsed.data.ownerId ?? (peopleSent ? null : item.ownerId ?? null),
       actorId: c.userId,
     });
+    // The automation event for a task made in the app (until now only the
+    // v1 API and the ingest route emitted it, so "When a task is created"
+    // never fired for a task made in a List). Flat payload, the same fields
+    // the other task events carry. Fire and forget, never throws.
+    dispatchEvent({
+      organizationId: c.organizationId,
+      event: "task.created",
+      payload: {
+        id: item.id,
+        boardId: item.boardId,
+        title: item.title,
+        status: item.status,
+        ownerId: item.ownerId,
+        assigneeId: item.ownerId,
+        priority: item.priority,
+        dueAt: item.dueAt,
+        actorId: c.userId,
+        createdAt: item.createdAt,
+      },
+    }).catch(() => {});
     // Respond with the FULL enriched row (counts/links/time/creator — the
     // exact listBoardItems shape): clients append this straight into their
     // cached list, and a lean row there diverges from refetched rows.

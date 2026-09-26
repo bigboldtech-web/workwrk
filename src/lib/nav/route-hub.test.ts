@@ -487,3 +487,11 @@ describe("resolveActiveRow", () => {
     }
   });
 });
+
+describe("the AI hub's front door with Ask AI off", () => {
+  it("is Workflows, which still works, not the Ask AI page", () => {
+    expect(hubDefaultHref("ai")).toBe("/sidekick");
+    expect(hubDefaultHref("ai", { askAiOn: false })).toBe("/automation/workflows");
+    expect(resolveHub(hubDefaultHref("ai", { askAiOn: false }))).toBe("ai");
+  });
+});

@@ -83,7 +83,11 @@ const APPS_ROWS: Row[] = [
 const CHAT_ROWS_SHOWN = 15;
 const CHATS_KEY = "ai.chats";
 const AUTOMATION_KEY = "ai.automation";
-const APPS_KEY = "ai.apps";
+// APPS is collapsed by default (spec-ai-automation 1.2), so the stored list
+// records the person OPENING it, under its own key; everything else in
+// collapsedSections records a close, as before. (The old "ai.apps" close
+// entry is simply no longer read: closed is the default now.)
+const APPS_OPEN_KEY = "ai.apps.open";
 
 export function AiSidebar() {
   const router = useRouter();
@@ -141,7 +145,7 @@ export function AiSidebar() {
 
   const chatsCollapsed = isSectionCollapsed(prefs.sidebar, CHATS_KEY);
   const automationCollapsed = isSectionCollapsed(prefs.sidebar, AUTOMATION_KEY);
-  const appsCollapsed = isSectionCollapsed(prefs.sidebar, APPS_KEY);
+  const appsOpened = isSectionCollapsed(prefs.sidebar, APPS_OPEN_KEY);
   const toggleSection = useCallback((key: string) => {
     void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, key) } });
   }, [prefs.sidebar, patchPrefs]);
@@ -162,6 +166,10 @@ export function AiSidebar() {
     [top, chats, automation, apps],
   );
   const activeHref = useActiveRowHref(candidates);
+  // Collapsed unless opened, and always open while one of its rows is the
+  // page you are on, so the lit row is never hidden inside a closed section.
+  const appsHoldActive = apps.some((r) => r.href === activeHref);
+  const appsCollapsed = !appsOpened && !appsHoldActive;
 
   const [menu, setMenu] = useState<{ chat: Chat; anchor: RefObject<HTMLElement | null> } | null>(null);
 
@@ -269,7 +277,16 @@ export function AiSidebar() {
 
       {apps.length > 0 ? (
         <>
-          <SidebarSectionLabel collapsed={appsCollapsed} onToggle={() => toggleSection(APPS_KEY)}>Apps</SidebarSectionLabel>
+          <SidebarSectionLabel
+            collapsed={appsCollapsed}
+            onToggle={() => {
+              // A section held open by the page you are on has nothing to toggle.
+              if (appsHoldActive && !appsOpened) return;
+              toggleSection(APPS_OPEN_KEY);
+            }}
+          >
+            Apps
+          </SidebarSectionLabel>
           {!appsCollapsed ? <ul className="flex flex-col gap-0.5">{renderRows(apps)}</ul> : null}
         </>
       ) : null}

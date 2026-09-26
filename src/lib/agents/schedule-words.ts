@@ -6,7 +6,7 @@
 // shown as typed, because it is what the person saved and hiding it would be
 // worse than showing it.
 
-import { parseCron } from "./cron";
+import { parseCron, splitScheduleZone } from "./cron";
 
 const WEEKDAY_PLURAL = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
 
@@ -54,7 +54,58 @@ export function describeSchedule(schedule: string | null | undefined, enabled: b
   if (min) return Number(min[1]) === 1 ? "Every minute" : `Every ${Number(min[1])} minutes`;
   const hr = s.match(/^every\s+(\d+)\s+hour/);
   if (hr) return Number(hr[1]) === 1 ? "Every hour" : `Every ${Number(hr[1])} hours`;
-  return cronWords(schedule) ?? schedule.trim();
+  return cronWords(schedule) ?? splitScheduleZone(schedule).body;
+}
+
+/** "Kolkata time", "New York time", "UTC": a zone the way a person says it. */
+const ZONE_ALIAS: Record<string, string> = {
+  "Asia/Calcutta": "Asia/Kolkata",
+  "Asia/Saigon": "Asia/Ho_Chi_Minh",
+  "Asia/Katmandu": "Asia/Kathmandu",
+  "Asia/Rangoon": "Asia/Yangon",
+  "Europe/Kiev": "Europe/Kyiv",
+  "America/Buenos_Aires": "America/Argentina/Buenos_Aires",
+};
+
+export function zoneName(zone: string): string {
+  if (zone === "UTC" || zone === "GMT" || zone.startsWith("Etc/")) return "UTC";
+  const city = (ZONE_ALIAS[zone] ?? zone).split("/").pop() ?? zone;
+  return `${city.replace(/_/g, " ")} time`;
+}
+
+/**
+ * The zone a schedule's times are read in: its CRON_TZ= prefix, else the
+ * server's clock (every schedule saved before the prefix, and the keywords).
+ */
+export function scheduleZone(schedule: string | null | undefined, serverZone: string): string {
+  return splitScheduleZone(schedule).zone ?? serverZone;
+}
+
+/**
+ * The words with the zone named when it is not the viewer's own, so a person
+ * in New York never reads "Weekdays at 9:00" as their 9:00 when it is 9:00 in
+ * Kolkata: "Weekdays at 9:00, Kolkata time". Schedules with no clock time
+ * ("Every hour", "When you ask") are left as they are.
+ */
+export function wordsInZone(words: string, zone: string | null, viewerZone: string | null): string {
+  if (!zone || !/\d:\d\d/.test(words)) return words;
+  if (viewerZone && sameZone(zone, viewerZone)) return words;
+  return `${words}, ${zoneName(zone)}`;
+}
+
+/** Whether two zone names are the same clock. */
+export function sameZone(a: string, b: string): boolean {
+  if (a === b) return true;
+  // Two names for one clock (Asia/Calcutta and Asia/Kolkata) compare equal
+  // when they agree on the offset now and six months from now.
+  try {
+    const at = (tz: string, t: number) => new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(t);
+    const now = Date.now();
+    const later = now + 182 * 24 * 60 * 60 * 1000;
+    return at(a, now) === at(b, now) && at(a, later) === at(b, later);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -88,7 +139,7 @@ export const SCHEDULE_PRESETS: ReadonlyArray<{ key: "weekday" | "monday" | "mont
 
 /** Which preset a saved schedule is, or "custom" for anything else. */
 export function presetFor(schedule: string | null | undefined): "weekday" | "monday" | "month" | "custom" | null {
-  const s = (schedule ?? "").trim().replace(/\s+/g, " ");
+  const s = splitScheduleZone(schedule).body.replace(/\s+/g, " ");
   if (!s) return null;
   return SCHEDULE_PRESETS.find((p) => p.cron === s)?.key ?? "custom";
 }

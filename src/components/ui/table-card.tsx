@@ -433,7 +433,9 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
       {extra ? <span className="text-ink-2">{extra}</span> : null}
       <span className="flex-1" />
       {onPageSize && pageSize ? (
-        <label className="hidden items-center gap-1 text-xs text-ink-2 group-hover/foot:inline-flex">
+        // Shown on hover, and to the keyboard: opacity (not display:none),
+        // so Tab still reaches the select and it shows while it has focus.
+        <label className="inline-flex items-center gap-1 text-xs text-ink-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/foot:opacity-100">
           Rows
           <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} className="h-7 rounded-md border border-line bg-raised px-1.5 text-xs text-ink">
             {pageSizes.map((n) => <option key={n} value={n}>{n}</option>)}

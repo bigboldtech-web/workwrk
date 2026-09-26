@@ -115,3 +115,29 @@ export function runSummary(row: RunRowLike): string {
   const calls = runToolCalls(row);
   return calls.length > 0 ? `${calls.length} ${calls.length === 1 ? "action" : "actions"}` : "Nothing to report.";
 }
+
+/**
+ * Whether this viewer may read what an autonomous run found: its words, the
+ * inputs it searched with and the raw results. An autonomous run acts with
+ * the rights of the admin who started or created the agent, so its results
+ * can hold work (private Spaces, people data) a Member cannot open. The
+ * Owner, Admins and the person who pressed Run now read it all; everyone
+ * else reads that it ran, when, how it went and which tools it used.
+ */
+export function canReadRunDetail(run: { triggeredBy: string | null }, viewer: { userId: string; admin: boolean }): boolean {
+  return viewer.admin || (run.triggeredBy !== null && run.triggeredBy === viewer.userId);
+}
+
+/** The one-line summary for a viewer who may not read the run's words. */
+export function runSummaryWithheld(row: RunRowLike): string {
+  const status = runStatus(row.status);
+  if (status === "FAILED") return "The run didn't finish.";
+  if (status === "RUNNING") return "Running now.";
+  const calls = runToolCalls(row);
+  return calls.length > 0 ? `Finished · ${calls.length} ${calls.length === 1 ? "action" : "actions"}` : "Finished";
+}
+
+/** The tool rows with what went in and what came back taken out. */
+export function withheldToolCalls(row: Pick<RunRowLike, "input" | "output" | "error" | "startedAt" | "endedAt">): RunToolCall[] {
+  return runToolCalls(row).map((c) => ({ name: c.name, input: null, result: null, error: c.error ? "It failed." : null, durationMs: c.durationMs }));
+}

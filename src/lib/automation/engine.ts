@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { evaluateConditions } from "./conditions";
+import { isEverywhere, liveDefinition, readScope, readWhen, scopeMatches, whenMatches, type ScopePlace } from "./definition";
+import { readAutomationSettings } from "./settings";
 import { buildIdempotencyKey, extractEventTimestamp, extractRecordId } from "./idempotency";
 import { getAction, type ActionContext } from "./registry-actions";
 import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
+import { triggerDisplayName } from "./registry-triggers";
 
 /**
  * Automation engine entry point — called by `dispatchEvent` in
@@ -23,6 +26,13 @@ import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
  *   conditions  — no match → run logged SKIPPED, nothing charged.
  *   usage       — monthly action limit blocks execution (run FAILED,
  *                 admins notified once per month).
+ *   paused      — settings.work.automationsPaused stops every automation
+ *                 in the workspace: nothing runs, nothing is charged.
+ *   published   — a workflow runs its PUBLISHED version (the snapshot
+ *                 publishedVersionId names), never the draft the builder
+ *                 is editing; a row with no version runs its definition.
+ *   scope       — definition.scope limits a workflow to Lists, Folders or
+ *                 Spaces; a missing scope reads as Everywhere.
  *   retry       — failed retry-safe steps get `__retryState` seeded on
  *                 the run's triggerPayload; /api/cron/automation-retry
  *                 re-runs them with immediate → 5m → 30m backoff.
@@ -83,65 +93,149 @@ export interface RunAutomationsInput {
   payload: unknown;
 }
 
+interface MatchedWorkflow {
+  id: string;
+  name: string;
+  severity: "CRITICAL" | "MAJOR" | "MINOR";
+  definition: Prisma.JsonValue;
+  publishedVersionId: string | null;
+  createdById: string | null;
+}
+
+const MATCH_SELECT = {
+  id: true,
+  name: true,
+  severity: true,
+  definition: true,
+  publishedVersionId: true,
+  createdById: true,
+} as const;
+
 export async function runAutomationsForEvent(input: RunAutomationsInput): Promise<void> {
   try {
     const { organizationId, event } = input;
     if (!organizationId || !event) return;
-    const payload = toJsonSafe(asRecord(input.payload));
 
-    // Anti-loop 1: chain depth. Events re-dispatched by automation
-    // actions carry __automationDepth = parent depth + 1.
-    const depth = typeof payload.__automationDepth === "number" ? payload.__automationDepth : 0;
-    if (depth >= MAX_CHAIN_DEPTH) return;
-
-    // Matcher — hot index (organizationId, triggerEvent, status).
+    // Matcher — hot index (organizationId, triggerEvent, status). The
+    // column is the LIVE trigger (a draft trigger waits for Republish).
     const workflows = await prisma.automationWorkflow.findMany({
       where: { organizationId, triggerEvent: event, status: "ACTIVE" },
-      select: { id: true, name: true, severity: true, definition: true, publishedVersionId: true },
+      select: MATCH_SELECT,
       orderBy: { createdAt: "asc" },
     });
-    if (workflows.length === 0) return;
-
-    const recordId = extractRecordId(payload);
-    const recordType = event.includes(".") ? event.slice(0, event.indexOf(".")) : event;
-
-    // Anti-loop 2: per-record runs/hour cap. Counts every run row for
-    // the record (including SKIPPED), so a ping-pong pair of workflows
-    // burns out fast and quietly.
-    if (recordId) {
-      const recent = await prisma.automationRun.count({
-        where: { organizationId, recordId, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
-      });
-      if (recent >= MAX_RUNS_PER_RECORD_PER_HOUR) return;
-    }
-
-    const idempotencyKey = buildIdempotencyKey({
-      organizationId,
-      eventKey: event,
-      recordId,
-      eventTimestamp: extractEventTimestamp(payload),
-    });
-
-    // Sequential per workflow — keeps per-record write ordering sane and
-    // the DB load bounded. Each workflow's failure is isolated.
-    for (const wf of workflows) {
-      try {
-        await runWorkflow({
-          workflow: wf,
-          organizationId,
-          event,
-          payload,
-          recordId,
-          recordType,
-          idempotencyKey,
-          depth,
-        });
-      } catch {
-        // One workflow's crash never blocks its siblings.
-      }
-    }
+    await runMatched({ organizationId, event, payload: input.payload, workflows });
   } catch {
     // NEVER throw into product write-paths.
+  }
+}
+
+/**
+ * Run ONE workflow for an event the caller already matched to it (the
+ * schedule cron: "a task's date arrives", "on a schedule"). Every guard the
+ * event path applies (status, pause, scope, idempotency, usage) applies here.
+ * Never throws.
+ */
+export async function runAutomationForWorkflow(input: RunAutomationsInput & { workflowId: string }): Promise<void> {
+  try {
+    const workflows = await prisma.automationWorkflow.findMany({
+      where: { id: input.workflowId, organizationId: input.organizationId, triggerEvent: input.event, status: "ACTIVE" },
+      select: MATCH_SELECT,
+    });
+    await runMatched({ organizationId: input.organizationId, event: input.event, payload: input.payload, workflows });
+  } catch {
+    // Never throws.
+  }
+}
+
+async function runMatched(args: {
+  organizationId: string;
+  event: string;
+  payload: unknown;
+  workflows: MatchedWorkflow[];
+}): Promise<void> {
+  const { organizationId, event } = args;
+  if (args.workflows.length === 0) return;
+  const payload = toJsonSafe(asRecord(args.payload));
+
+  // Anti-loop 1: chain depth. Events re-dispatched by automation
+  // actions carry __automationDepth = parent depth + 1.
+  const depth = typeof payload.__automationDepth === "number" ? payload.__automationDepth : 0;
+  if (depth >= MAX_CHAIN_DEPTH) return;
+
+  // Pause all automations (Settings > Apps and modules > Automations).
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+  if (readAutomationSettings(org?.settings).paused) return;
+
+  // The published snapshot each workflow runs.
+  const versionIds = args.workflows.map((w) => w.publishedVersionId).filter((v): v is string => !!v);
+  const versions = versionIds.length
+    ? await prisma.automationWorkflowVersion.findMany({
+        where: { id: { in: versionIds }, organizationId },
+        select: { id: true, definitionJson: true },
+      })
+    : [];
+  const versionById = new Map(versions.map((v) => [v.id, v]));
+
+  // Where the record lives, looked up once and only when a workflow is scoped.
+  let place: ScopePlace | null | undefined;
+  const placeOf = async (): Promise<ScopePlace | null> => {
+    if (place !== undefined) return place;
+    const boardId = typeof payload.boardId === "string" && payload.boardId ? payload.boardId : null;
+    if (!boardId) return (place = null);
+    const board = await prisma.board.findFirst({
+      where: { id: boardId, organizationId },
+      select: { id: true, folderId: true, spaceId: true },
+    });
+    return (place = board ? { boardId: board.id, folderId: board.folderId, spaceId: board.spaceId } : null);
+  };
+
+  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue }> = [];
+  for (const wf of args.workflows) {
+    const live = liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null) as Prisma.JsonValue;
+    if (!whenMatches(event, readWhen(live), payload)) continue;
+    const scope = readScope(live);
+    if (!isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
+    runnable.push({ ...wf, live });
+  }
+  if (runnable.length === 0) return;
+
+  const recordId = extractRecordId(payload);
+  const recordType = event.includes(".") ? event.slice(0, event.indexOf(".")) : event;
+
+  // Anti-loop 2: per-record runs/hour cap. Counts every run row for
+  // the record (including SKIPPED), so a ping-pong pair of workflows
+  // burns out fast and quietly.
+  if (recordId) {
+    const recent = await prisma.automationRun.count({
+      where: { organizationId, recordId, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
+    });
+    if (recent >= MAX_RUNS_PER_RECORD_PER_HOUR) return;
+  }
+
+  const idempotencyKey = buildIdempotencyKey({
+    organizationId,
+    eventKey: event,
+    recordId,
+    eventTimestamp: extractEventTimestamp(payload),
+  });
+
+  // Sequential per workflow — keeps per-record write ordering sane and
+  // the DB load bounded. Each workflow's failure is isolated.
+  for (const wf of runnable) {
+    try {
+      await runWorkflow({
+        workflow: { ...wf, definition: wf.live },
+        organizationId,
+        event,
+        payload,
+        recordId,
+        recordType,
+        idempotencyKey,
+        depth,
+      });
+    } catch {
+      // One workflow's crash never blocks its siblings.
+    }
   }
 }
 
@@ -152,6 +246,7 @@ async function runWorkflow(args: {
     severity: "CRITICAL" | "MAJOR" | "MINOR";
     definition: Prisma.JsonValue;
     publishedVersionId: string | null;
+    createdById: string | null;
   };
   organizationId: string;
   event: string;
@@ -253,7 +348,7 @@ async function runWorkflow(args: {
     await logStep({
       stepType: "TRIGGER",
       stepKey: event,
-      stepName: `Trigger: ${event}`,
+      stepName: triggerDisplayName(event),
       status: "SUCCESS",
       inputJson: payload,
       startedAt,
@@ -302,6 +397,7 @@ async function runWorkflow(args: {
       workflowId: workflow.id,
       runId,
       depth,
+      workflowCreatorId: workflow.createdById,
     };
 
     let succeeded = 0;

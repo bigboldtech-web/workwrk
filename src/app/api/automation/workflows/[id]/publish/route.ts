@@ -6,12 +6,14 @@
 // can never go live: it needs a known trigger, at least one action, and
 // every action must exist in the registry and be available today.
 
+import type { Prisma } from "@/generated/prisma";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { forbidden, requireAutomation } from "@/lib/automation/gate";
 import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
 import { getTrigger } from "@/lib/automation/registry-triggers";
+import { draftTrigger } from "@/lib/automation/definition";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -28,32 +30,29 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Archived workflows cannot be published" }, { status: 400 });
   }
 
-  if (!workflow.triggerEvent) {
-    return NextResponse.json({ error: "Pick a trigger before publishing" }, { status: 400 });
+  // The DRAFT trigger goes live with this publish (the column is the live one).
+  const trigger = draftTrigger(workflow.definition, workflow.triggerEvent);
+  if (!trigger) {
+    return NextResponse.json({ error: "Choose what starts this automation", section: "when" }, { status: 400 });
   }
-  if (!getTrigger(workflow.triggerEvent)) {
-    return NextResponse.json(
-      { error: `Unknown trigger event: ${workflow.triggerEvent}` },
-      { status: 400 },
-    );
+  if (!getTrigger(trigger)) {
+    return NextResponse.json({ error: "That trigger no longer exists. Choose another.", section: "when" }, { status: 400 });
   }
 
   const def = parseDefinition(workflow.definition);
   if (def.actions.length === 0) {
-    return NextResponse.json({ error: "Add at least one action before publishing" }, { status: 400 });
+    return NextResponse.json({ error: "Add at least one action", section: "then" }, { status: 400 });
   }
-  for (const action of def.actions) {
+  for (const [index, action] of def.actions.entries()) {
     const impl = getAction(action.key);
     if (!impl) {
-      return NextResponse.json({ error: `Unknown action: ${action.key}` }, { status: 400 });
+      return NextResponse.json({ error: "One of the actions no longer exists. Remove it.", section: "then", index }, { status: 400 });
     }
     if (!impl.available) {
-      return NextResponse.json(
-        { error: `The action "${impl.name}" is not available yet` },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index }, { status: 400 });
     }
   }
+  const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger };
 
   const result = await prisma.$transaction(async (tx) => {
     const latest = await tx.automationWorkflowVersion.aggregate({
@@ -67,7 +66,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         organizationId: ctx.orgId,
         workflowId: workflow.id,
         versionNumber,
-        definitionJson: workflow.definition ?? {},
+        definitionJson: snapshot as Prisma.InputJsonValue,
         isPublished: true,
         createdById: ctx.userId,
       },
@@ -84,6 +83,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       data: {
         publishedVersionId: version.id,
         publishedAt: new Date(),
+        triggerEvent: trigger,
         status: "ACTIVE",
         updatedById: ctx.userId,
       },

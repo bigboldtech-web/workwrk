@@ -14,6 +14,10 @@
 //
 // A row the role cannot use is ABSENT, never disabled (access section 5.4).
 //
+// "Ask AI about this task" (AI inline, Phase 7) is on every host alike when
+// the viewer has Ask AI: it opens the Ask AI panel with the task in the
+// composer, never sends on its own.
+//
 // Pure module: no imports, so vitest loads it in the node environment and a
 // client component can import it without pulling the server in.
 
@@ -22,6 +26,7 @@ import type { ItemRole } from "./item-role";
 export const ITEM_MENU_KEYS = [
   "open",
   "open-new-tab",
+  "ask-ai",
   "complete",
   "assign-to-me",
   "rename",
@@ -83,6 +88,12 @@ export interface ItemMenuContext {
   isGuest: boolean;
   /** An archived task is capped at Can view unless the viewer is Full. */
   archived: boolean;
+  /**
+   * Ask AI renders for the viewer (the ai app, AI features on, not a Guest):
+   * the "Ask AI about this task" row, AI inline on every task menu. Absent
+   * reads as off.
+   */
+  askAi?: boolean;
 }
 
 function rank(role: ItemRole): number {
@@ -111,6 +122,7 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
 
   if (ctx.host === "row" && canView) rows.push({ key: "open", label: "Open" });
   if (ctx.host !== "page" && canView) rows.push({ key: "open-new-tab", label: "Open in new tab" });
+  if (canView && ctx.askAi) rows.push({ key: "ask-ai", label: "Ask AI about this task" });
   if (canEdit) rows.push({ key: "complete", label: ctx.isDone ? "Reopen" : "Mark complete" });
   if (canEdit && !ctx.isAssignee) rows.push({ key: "assign-to-me", label: "Assign to me" });
   if (canEdit) rows.push({ key: "rename", label: "Rename" });

@@ -14,7 +14,9 @@
 //   /sidekick                      the landing, or the chat this tab already has open
 //   /sidekick?new=1                a fresh landing, composer focused
 //   /sidekick?session=<id>         that chat
-//   /sidekick?q=<text>             a new chat, the text sent at once
+//   /sidekick?q=<text>             a new chat with the text in the composer,
+//                                  never sent on arrival (a link anyone can
+//                                  post must not run tools as the reader)
 //   /sidekick?agent=<slug>         a new chat bound to that agent
 //   /sidekick?view=all             All chats; &pinned=1, &archived=1 filter it
 //   /sidekick?pinned=1             All chats, pinned (the Favorites target)
@@ -28,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Pin, PinOff, Pencil, Link2, Archive, ArchiveRestore, MessageSquare, Search, Columns3 } from "lucide-react";
 import { OsPageHeader, type HeaderMenuEntry } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { TableCard, BulkAction, RowMoreButton, type TableColumn } from "@/components/ui/table-card";
@@ -36,6 +39,7 @@ import { Picker } from "@/components/ui/picker";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { AskAiThread } from "@/components/ai/ask-ai-thread";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
 import { ASK_AI_FOCUS_EVENT } from "@/lib/ai/ask-ai-route";
@@ -101,9 +105,13 @@ function ChatView() {
       return;
     }
     if (intent.kind === "ask") {
-      // The chat's URL (?session=) replaces ?q= once it exists, so a reload
-      // never asks the same question twice.
+      // The text waits in the composer for the person to read and send; the
+      // address drops ?q= so a reload does not put it back after a send.
       void aiSession.start({ q: intent.q, agentSlug: intent.agent });
+      const clean = intent.agent ? agentChatHref(intent.agent) : "/sidekick";
+      handledRef.current = clean.split("?")[1] ?? "";
+      router.replace(clean, { scroll: false });
+      focusComposer();
       return;
     }
     if (intent.kind === "new") {
@@ -195,12 +203,14 @@ function ChatView() {
     : undefined;
 
   const landing = !s.sessionId && s.messages.length === 0 && !s.loading;
-  const title = s.meta?.title || (s.agent?.name ?? (landing ? "Ask AI" : "New chat"));
+  const title = s.meta?.title || (s.agent?.name ?? (landing || s.missing ? "Ask AI" : "New chat"));
 
   return (
     // The page fills <main> so the composer sits at the foot of the column
     // and only the thread scrolls. No Ask AI slot: this page is Ask AI.
     <div className="flex h-full min-h-0 flex-col">
+      {/* The thread state adds the chat's title as the last crumb: AI > Ask AI > {title}. */}
+      {s.meta?.title ? <Breadcrumb items={[{ label: "Ask AI", href: "/sidekick" }, { label: s.meta.title }]} /> : null}
       <OsPageHeader title={title} more={more} />
       <AskAiThread width="page" composerRef={composerRef} />
     </div>
@@ -293,21 +303,35 @@ function AllChats({ tab }: { tab: AllChatsTab }) {
       destructive: true,
     });
     if (!ok) return;
+    await archiveNow(ids);
+  }
+  // Each chat's own answer decides what happens to it: the open thread only
+  // reads "archived" when its own archive worked, and the ones that failed
+  // stay selected with a Try again that retries just them.
+  async function archiveNow(ids: string[]) {
+    const one = ids.length === 1;
     const results = await Promise.all(ids.map((id) => apiFetch(`/api/sidekick/sessions/${id}`, { method: "DELETE" })));
-    const failed = results.filter((r) => !r.ok).length;
-    if (failed) toast(failed === ids.length ? "Couldn't archive the chats" : `Couldn't archive ${failed} of ${ids.length}`, { tone: "danger" });
-    else toast(one ? "Chat archived" : `${ids.length} chats archived`);
-    if (ids.includes(aiSession.getState().sessionId ?? "")) aiSession.patchMeta({ archived: true });
-    setSelected(new Set());
+    const failedIds = ids.filter((_, i) => !results[i].ok);
+    const live = aiSession.getState().sessionId;
+    if (live && ids.includes(live) && !failedIds.includes(live)) aiSession.patchMeta({ archived: true });
+    if (failedIds.length) {
+      toast(failedIds.length === ids.length ? (one ? "Couldn't archive the chat" : "Couldn't archive the chats") : `Couldn't archive ${failedIds.length} of ${ids.length}`, {
+        tone: "danger",
+        action: { label: "Try again", onClick: () => void archiveNow(failedIds) },
+      });
+    } else toast(one ? "Chat archived" : `${ids.length} chats archived`);
+    setSelected(new Set(failedIds));
     refresh();
   }
   async function patchMany(ids: string[], body: Record<string, unknown>, done: string) {
     const results = await Promise.all(ids.map((id) => apiFetch(`/api/sidekick/sessions/${id}`, { method: "PATCH", json: body })));
-    const failed = results.filter((r) => !r.ok).length;
-    if (failed) toast(`Couldn't update ${failed} of ${ids.length}`, { tone: "danger" });
-    else toast(done);
-    if (body.archived === false && ids.includes(aiSession.getState().sessionId ?? "")) aiSession.patchMeta({ archived: false });
-    setSelected(new Set());
+    const failedIds = ids.filter((_, i) => !results[i].ok);
+    const live = aiSession.getState().sessionId;
+    if (body.archived === false && live && ids.includes(live) && !failedIds.includes(live)) aiSession.patchMeta({ archived: false });
+    if (failedIds.length) {
+      toast(`Couldn't update ${failedIds.length} of ${ids.length}`, { tone: "danger", action: { label: "Try again", onClick: () => void patchMany(failedIds, body, done) } });
+    } else toast(done);
+    setSelected(new Set(failedIds));
     refresh();
   }
 
@@ -392,6 +416,14 @@ function AllChats({ tab }: { tab: AllChatsTab }) {
             Couldn&apos;t load your chats ·
             <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => void load(pages[pageIndex] ?? null)}>Try again</button>
           </div>
+        ) : rows && rows.length === 0 && !q.trim() && pageIndex === 0 ? (
+          // Nothing in this tab: the quiet four-dot empty state, no table
+          // header and no select-all over zero rows.
+          <OsEmptyView
+            title={tab === "archived" ? "No archived chats" : tab === "pinned" ? "No pinned chats" : "No chats yet"}
+            hint={tab === "pinned" ? "Pin a chat from its menu to keep it here." : tab === "archived" ? "Chats you archive show here, ready to restore." : undefined}
+            action={{ label: "Start a chat", href: "/sidekick?new=1" }}
+          />
         ) : (
           <TableCard
             ariaLabel="Chats"

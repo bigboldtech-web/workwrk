@@ -103,21 +103,42 @@ export interface StatusChipProps
  * component.
  */
 const StatusChip = React.forwardRef<HTMLButtonElement, StatusChipProps>(
-  ({ className, color, label, ...props }, ref) => (
-    <button
-      ref={ref}
-      type="button"
-      className={cn(
-        "inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md text-xs font-medium transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-focus)]/60 disabled:opacity-50",
-        className,
-      )}
-      style={{ backgroundColor: `${color}1F`, color, border: `1px solid ${color}33` }}
-      {...props}
-    >
-      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      {label}
-    </button>
-  ),
+  ({ className, color, label, ...props }, ref) => {
+    // A StatusChip with no click handler only LABELS a status, so it is a
+    // span at full strength. It used to be a `disabled` button, which drew
+    // every printed status at half opacity (well under readable contrast)
+    // and, without `disabled`, a tab stop that did nothing.
+    if (!props.onClick) {
+      const rest = { ...props } as Record<string, unknown>;
+      delete rest.disabled;
+      return (
+        <span
+          ref={ref as unknown as React.Ref<HTMLSpanElement>}
+          className={cn("inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md text-xs font-medium whitespace-nowrap", className)}
+          style={{ backgroundColor: `${color}1F`, color, border: `1px solid ${color}33` }}
+          {...(rest as React.HTMLAttributes<HTMLSpanElement>)}
+        >
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+          {label}
+        </span>
+      );
+    }
+    return (
+      <button
+        ref={ref}
+        type="button"
+        className={cn(
+          "inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md text-xs font-medium transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-focus)]/60 disabled:opacity-50",
+          className,
+        )}
+        style={{ backgroundColor: `${color}1F`, color, border: `1px solid ${color}33` }}
+        {...props}
+      >
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        {label}
+      </button>
+    );
+  },
 );
 StatusChip.displayName = "StatusChip";
 

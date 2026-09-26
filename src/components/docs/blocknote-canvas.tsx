@@ -38,7 +38,7 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, filterSu
 import type { PartialBlock } from "@blocknote/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon, Film } from "lucide-react";
+import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon, Film, Sparkles } from "lucide-react";
 
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
@@ -206,6 +206,20 @@ function workspaceSlashItems(
         insert({ type: "subpage", props: { childDocId: "", title: "", emoji: "" } } as OurPartialBlock),
     },
   ];
+}
+
+// "/ai", "/ask": the doc's Ask AI panel from the slash menu, the same panel
+// the toolbar and the block menu open. Offered only when Ask AI is on for
+// the viewer (the parent passes onAskAI then and only then).
+function askAiSlashItem(onAskAI: () => void): DefaultReactSuggestionItem {
+  return {
+    title: "Ask AI",
+    subtext: "Summarise this doc, pull out a table, or ask about it",
+    aliases: ["ai", "ask", "ask ai", "summarize", "summarise", "assistant"],
+    group: "AI",
+    icon: <Sparkles size={18} />,
+    onItemClick: () => onAskAI(),
+  };
 }
 
 // ───────── @-mention suggestion items ─────────
@@ -515,6 +529,9 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
                 // and handles links, embed code, and file URLs.
                 ...getDefaultReactSlashMenuItems(editor).filter((it) => it.title !== "Video"),
                 ...workspaceSlashItems(editor, slashDocId, onPageCreated),
+                // AI inline: "/ai" opens this doc's Ask AI panel (summarise,
+                // extract a table, ask about it), only when Ask AI is on.
+                ...(onAskAI ? [askAiSlashItem(onAskAI)] : []),
               ],
               query,
             )

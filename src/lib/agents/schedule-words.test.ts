@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentState, cronWords, describeSchedule, isValidSchedule, presetFor, runsOnWords, SCHEDULE_PRESETS } from "./schedule-words";
+import { agentState, cronWords, describeSchedule, isValidSchedule, presetFor, runsOnWords, scheduleZone, SCHEDULE_PRESETS, wordsInZone, zoneName } from "./schedule-words";
 
 describe("describeSchedule", () => {
   it("reads the keywords the scheduler understands", () => {
@@ -76,5 +76,28 @@ describe("isValidSchedule", () => {
       expect(isValidSchedule(s)).toBe(false);
     }
     expect(isValidSchedule(null)).toBe(false);
+  });
+});
+
+describe("the zone beside the words", () => {
+  it("reads a zoned cron in words and as its preset", () => {
+    expect(describeSchedule("CRON_TZ=Asia/Kolkata 0 9 * * 1-5", true)).toBe("Weekdays at 9:00");
+    expect(presetFor("CRON_TZ=Asia/Kolkata 0 9 * * 1-5")).toBe("weekday");
+    expect(isValidSchedule("CRON_TZ=Asia/Kolkata 0 9 * * 1-5")).toBe(true);
+    expect(isValidSchedule("CRON_TZ=Nowhere/Land 0 9 * * 1-5")).toBe(false);
+  });
+  it("names the zone only when it is not the viewer's", () => {
+    expect(wordsInZone("Weekdays at 9:00", "Asia/Kolkata", "America/New_York")).toBe("Weekdays at 9:00, Kolkata time");
+    expect(wordsInZone("Weekdays at 9:00", "Asia/Kolkata", "Asia/Kolkata")).toBe("Weekdays at 9:00");
+    expect(wordsInZone("Weekdays at 9:00", "Asia/Calcutta", "Asia/Kolkata")).toBe("Weekdays at 9:00");
+    expect(wordsInZone("Every hour", "Asia/Kolkata", "America/New_York")).toBe("Every hour");
+    expect(wordsInZone("When you ask", "Asia/Kolkata", null)).toBe("When you ask");
+  });
+  it("falls back to the server's zone for a schedule saved without one", () => {
+    expect(scheduleZone("0 9 * * 1-5", "Europe/London")).toBe("Europe/London");
+    expect(scheduleZone("CRON_TZ=Asia/Kolkata 0 9 * * 1-5", "Europe/London")).toBe("Asia/Kolkata");
+    expect(zoneName("America/New_York")).toBe("New York time");
+    expect(zoneName("Etc/UTC")).toBe("UTC");
+    expect(zoneName("Asia/Calcutta")).toBe("Kolkata time");
   });
 });

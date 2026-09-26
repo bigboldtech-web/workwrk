@@ -5,7 +5,8 @@
 //
 // The inventory is REAL: every row of the module registry (src/lib/modules.ts,
 // today Talk and Tables) with this workspace's state from GET /api/products,
-// plus two link cards to the neighbouring AI rows. What went: the fixture
+// plus link cards to the neighbouring AI rows (Agents, Build apps,
+// Integrations). What went: the fixture
 // catalogue (getAllModules, which listed CRM, Helpdesk, ITSM, Legal,
 // Financials, Procurement and Marketing, all out of scope), the constant
 // INSTALLED set behind the "N apps installed" count, the 13 category buttons
@@ -18,11 +19,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Hammer, Plug, Plus } from "lucide-react";
+import { Bot, Hammer, Plug, Plus } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { ModuleCard } from "@/components/modules/module-card";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { SkeletonCard } from "@/components/ui/skeleton";
@@ -37,6 +39,7 @@ type Tab = "all" | "on" | "off";
 export default function MarketplacePage() {
   const { boot } = useBoot();
   const { toast } = useOsToast();
+  const { askAiVisible } = useOsShell();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [canManage, setCanManage] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +104,12 @@ export default function MarketplacePage() {
             ))}
             {tab === "all" ? (
               <>
+                {/* The AI entry to Agents (spec-ai-automation /agents Entry
+                    points: the Marketplace category "AI"), for anyone who
+                    has Ask AI. */}
+                {askAiVisible ? (
+                  <LinkCard href="/agents" icon={Bot} title="Agents" blurb="AI teammates that do one job for you, on a schedule or when you ask." />
+                ) : null}
                 {showBuild ? (
                   <LinkCard href="/build" icon={Hammer} title="Build apps" blurb="Describe a small app of your own and WorkwrK drafts it for you." />
                 ) : null}

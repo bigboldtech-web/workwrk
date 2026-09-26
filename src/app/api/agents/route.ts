@@ -1,5 +1,8 @@
 // GET  /api/agents: this org's agents (every one not archived) plus the
-// catalog agents that can still be added. Every Member reads (app key ai).
+// catalog agents that can still be added, plus `removed`: the agents that
+// were removed (ARCHIVED), so their kept run history still opens under their
+// name and an Owner or Admin can add one back, a custom agent or one whose
+// product is no longer offered included. Every Member reads (app key ai).
 // POST /api/agents: create a custom agent (Owner and Admin, the Apps
 // settings gate, access section 9; spec-ai-automation 1.4).
 //
@@ -56,6 +59,13 @@ export async function GET() {
     : [];
   const lastRunBy = new Map(lastRuns.map((r) => [r.agentId, r]));
 
+  const removed = await prisma.agent.findMany({
+    where: { organizationId: user.organizationId, status: "ARCHIVED" },
+    select: { id: true, slug: true, name: true, persona: true, description: true, isPrebuilt: true },
+    orderBy: { name: "asc" },
+    take: 200,
+  });
+
   const installedSlugs = new Set(installed.map((a) => a.slug));
   const inScope = new Set(Object.keys(PRODUCT_TOOL_NAMES));
   const available = AGENT_CATALOG.filter((a) => !installedSlugs.has(a.slug) && inScope.has(a.productSlug)).map((a) => ({
@@ -82,7 +92,15 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ installed: hydrated, available, canManage: isOwnerOrAdmin(gate.viewer) });
+  return NextResponse.json({
+    installed: hydrated,
+    available,
+    removed: removed.map((a) => ({ ...a, status: "ARCHIVED" as const })),
+    canManage: isOwnerOrAdmin(gate.viewer),
+    // The clock a schedule saved without a CRON_TZ= zone runs on, so the page
+    // can name it beside the words (src/lib/agents/cron.ts).
+    serverZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  });
 }
 
 const createSchema = z.object({

@@ -14,22 +14,26 @@
 //
 // Every Member reads on the ai app key; what they read is narrower than the
 // org because the rows carry tool results (src/lib/agents/run-query.ts):
-// Owner and Admin read every run, everyone else the autonomous runs and the
-// runs they triggered themselves. Every filter is in the database query, so
-// `total` is the real count and a page is never short because of a filter.
+// everyone reads the autonomous runs and the runs they triggered
+// themselves, and nobody reads another person's chat rows. Inside an
+// autonomous run somebody else started, a Member reads that it ran and how
+// it went, never its words or results (run-view.ts canReadRunDetail): it
+// acted with an admin's rights. `detailHidden` says so. Every filter is in
+// the database query, so `total` is the real count.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { agentRunsOrder, agentRunsWhere, parseRunQuery } from "@/lib/agents/run-query";
-import { runDurationMs, runSummary, runTrigger } from "@/lib/agents/run-view";
+import { canReadRunDetail, runDurationMs, runSummary, runSummaryWithheld, runTrigger } from "@/lib/agents/run-view";
 
 export async function GET(req: Request) {
   const gate = await requireApp("ai");
   if ("error" in gate) return gate.error;
   const { viewer } = gate;
   const q = parseRunQuery(new URL(req.url).searchParams);
-  const where = agentRunsWhere(q, { organizationId: viewer.organizationId, userId: viewer.userId, admin: isOwnerOrAdmin(viewer) });
+  const admin = isOwnerOrAdmin(viewer);
+  const where = agentRunsWhere(q, { organizationId: viewer.organizationId, userId: viewer.userId, admin });
 
   // A cursor that no longer names a row this viewer can read starts again
   // at the first page rather than erroring.
@@ -42,7 +46,7 @@ export async function GET(req: Request) {
       ...(q.cursor && cursorValid ? { cursor: { id: q.cursor }, skip: 1 } : {}),
       select: {
         id: true, status: true, startedAt: true, endedAt: true, tokensIn: true, tokensOut: true,
-        input: true, output: true, error: true,
+        input: true, output: true, error: true, triggeredBy: true,
         agent: { select: { name: true, slug: true } },
       },
     }),
@@ -52,25 +56,29 @@ export async function GET(req: Request) {
   const nextCursor = rows.length > q.take ? page[page.length - 1]?.id ?? null : null;
 
   return NextResponse.json({
-    runs: page.map((r) => ({
-      id: r.id,
-      agentName: r.agent.name,
-      agentSlug: r.agent.slug,
-      trigger: runTrigger(r.input),
-      status: r.status,
-      startedAt: r.startedAt.toISOString(),
-      endedAt: r.endedAt?.toISOString() ?? null,
-      durationMs: runDurationMs(r.startedAt, r.endedAt),
-      summary: runSummary(r),
-      // AgentRun has no chat link today; the field is in the envelope so a
-      // reader can rely on it when one is added.
-      sessionId: null as string | null,
-      error: r.error,
-      tokensIn: r.tokensIn,
-      tokensOut: r.tokensOut,
-      // Kept for the Work home "Agent runs" card, which reads output.text.
-      output: r.output,
-    })),
+    runs: page.map((r) => {
+      const readable = canReadRunDetail(r, { userId: viewer.userId, admin });
+      return {
+        id: r.id,
+        agentName: r.agent.name,
+        agentSlug: r.agent.slug,
+        trigger: runTrigger(r.input),
+        status: r.status,
+        startedAt: r.startedAt.toISOString(),
+        endedAt: r.endedAt?.toISOString() ?? null,
+        durationMs: runDurationMs(r.startedAt, r.endedAt),
+        summary: readable ? runSummary(r) : runSummaryWithheld(r),
+        detailHidden: !readable,
+        // AgentRun has no chat link today; the field is in the envelope so a
+        // reader can rely on it when one is added.
+        sessionId: null as string | null,
+        error: readable ? r.error : r.error ? "The run didn't finish." : null,
+        tokensIn: r.tokensIn,
+        tokensOut: r.tokensOut,
+        // Kept for the Work home "Agent runs" card, which reads output.text.
+        output: readable ? r.output : null,
+      };
+    }),
     total,
     nextCursor,
     restarted: Boolean(q.cursor) && !cursorValid,

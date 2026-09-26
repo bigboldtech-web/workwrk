@@ -11,22 +11,30 @@
  *                       change needed.
  *
  * Real emitters today (grep `dispatchEvent` from @/services/webhookDispatcher):
- *   task.created        , api/v1/tasks POST, api/integrations/ingest
- *   task.status_changed , api/items/[id] PATCH (board items)
- *   task.assignee_changed, api/items/[id] PATCH (board items)
- *   kpi.recorded        , api/v1/kpi-records POST, api/integrations/ingest
- *   kudos.created       , api/v1/kudos POST, api/integrations/ingest
+ *   task.created         api/boards/[id]/items POST, api/v1/tasks POST,
+ *                        api/integrations/ingest
+ *   task.status_changed  api/items/[id] PATCH (board items)
+ *   task.assignee_changed api/items/[id] PATCH (board items)
+ *   task.field_changed   api/items/[id] PATCH (one event per changed field)
+ *   task.date_arrives    the automation-schedule cron (lib/automation/schedule.ts)
+ *   schedule.every       the automation-schedule cron (lib/automation/schedule.ts)
+ *   kpi.recorded         api/v1/kpi-records POST, api/integrations/ingest
+ *   kudos.created        api/v1/kudos POST, api/integrations/ingest
  */
 
 export interface TriggerField {
   key: string;
   label: string;
-  type: "string" | "number" | "date" | "user" | "boolean";
+  type: "string" | "number" | "date" | "user" | "boolean" | "status" | "priority" | "list";
+  /** Kept so an older condition on it still reads, but not offered for new ones. */
+  legacy?: boolean;
 }
 
 export interface AutomationTrigger {
   key: string;
   name: string;
+  /** Reads after "When": "a task is created". The display name everywhere a run or row names its trigger. */
+  phrase: string;
   category: string;
   description: string;
   isEmitting: boolean;
@@ -35,14 +43,15 @@ export interface AutomationTrigger {
 }
 
 const TASK_FIELDS: TriggerField[] = [
-  { key: "id", label: "Task id", type: "string" },
   { key: "title", label: "Title", type: "string" },
-  { key: "status", label: "Status", type: "string" },
-  { key: "priority", label: "Priority", type: "string" },
+  { key: "status", label: "Status", type: "status" },
+  { key: "priority", label: "Priority", type: "priority" },
   { key: "ownerId", label: "Assignee", type: "user" },
-  { key: "assigneeId", label: "Assignee (alias)", type: "user" },
-  { key: "boardId", label: "Board id", type: "string" },
   { key: "dueAt", label: "Due date", type: "date" },
+  { key: "boardId", label: "List", type: "list" },
+  { key: "actorId", label: "Who did it", type: "user" },
+  { key: "id", label: "Task", type: "string", legacy: true },
+  { key: "assigneeId", label: "Assignee", type: "user", legacy: true },
 ];
 
 export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
@@ -50,22 +59,25 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "task.created",
     name: "Task created",
+    phrase: "a task is created",
     category: "Tasks",
-    description: "A task is created via the API or an integration ingest.",
+    description: "A task is created in a List, through the API or by an integration.",
     isEmitting: true,
     fields: TASK_FIELDS,
   },
   {
     key: "task.status_changed",
     name: "Task status changes",
+    phrase: "a task's status changes",
     category: "Tasks",
     description: "A board task moves to a different status.",
     isEmitting: true,
-    fields: [...TASK_FIELDS, { key: "previousStatus", label: "Previous status", type: "string" }],
+    fields: [...TASK_FIELDS, { key: "previousStatus", label: "Previous status", type: "status" }],
   },
   {
     key: "task.assignee_changed",
     name: "Task assignee changes",
+    phrase: "a task's assignee changes",
     category: "Tasks",
     description: "A board task is assigned, reassigned, or unassigned.",
     isEmitting: true,
@@ -74,6 +86,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "kpi.recorded",
     name: "KPI reading recorded",
+    phrase: "a KPI reading is recorded",
     category: "Performance",
     description: "A KPI actual is recorded for a person and period.",
     isEmitting: true,
@@ -90,6 +103,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "kudos.created",
     name: "Kudos given",
+    phrase: "someone gives kudos",
     category: "People",
     description: "Someone posts kudos to a teammate.",
     isEmitting: true,
@@ -101,10 +115,47 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
     ],
   },
 
+  {
+    key: "task.field_changed",
+    name: "Task field changes",
+    phrase: "a task field changes",
+    category: "Tasks",
+    description: "A task's priority, dates, title or one of its List's fields changes. Pick which field under When.",
+    isEmitting: true,
+    fields: [
+      ...TASK_FIELDS,
+      { key: "field", label: "Changed field", type: "string" },
+      { key: "value", label: "New value", type: "string" },
+      { key: "previousValue", label: "Previous value", type: "string" },
+    ],
+  },
+  {
+    key: "task.date_arrives",
+    name: "Task date arrives",
+    phrase: "a task's date arrives",
+    category: "Time",
+    description: "A task's due date or start date arrives, or a set number of days before or after it.",
+    isEmitting: true,
+    fields: [...TASK_FIELDS, { key: "startAt", label: "Start date", type: "date" }, { key: "dateField", label: "Which date", type: "string" }],
+  },
+  {
+    key: "schedule.every",
+    name: "On a schedule",
+    phrase: "the scheduled time comes",
+    category: "Time",
+    description: "Every day, every week on a chosen day, or every month on a chosen date, at a set time.",
+    isEmitting: true,
+    fields: [
+      { key: "firedAt", label: "Time it ran", type: "date" },
+      { key: "period", label: "Period", type: "string" },
+    ],
+  },
+
   // ── Catalog-only (not yet emitting) ───────────────────────────────
   {
     key: "review.completed",
     name: "Review completed",
+    phrase: "a review is completed",
     category: "Performance",
     description: "A performance review cycle entry is finalized.",
     isEmitting: false,
@@ -117,6 +168,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "sop.published",
     name: "SOP published",
+    phrase: "an SOP is published",
     category: "Docs",
     description: "A standard operating procedure is published to the org.",
     isEmitting: false,
@@ -128,6 +180,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "lead.created",
     name: "Lead created",
+    phrase: "a lead is created",
     category: "Leads",
     description: "A new lead lands in the pipeline.",
     isEmitting: false,
@@ -141,19 +194,21 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "lead.status_changed",
     name: "Lead status changes",
+    phrase: "a lead's status changes",
     category: "Leads",
     description: "A lead moves to a different pipeline stage.",
     isEmitting: false,
     fields: [
       { key: "id", label: "Lead id", type: "string" },
       { key: "status", label: "Status", type: "string" },
-      { key: "previousStatus", label: "Previous status", type: "string" },
+      { key: "previousStatus", label: "Previous status", type: "status" },
       { key: "ownerId", label: "Owner", type: "user" },
     ],
   },
   {
     key: "lead.owner_changed",
     name: "Lead owner changes",
+    phrase: "a lead's owner changes",
     category: "Leads",
     description: "A lead is claimed or handed to a different owner.",
     isEmitting: false,
@@ -166,6 +221,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "quote.generated",
     name: "Quote generated",
+    phrase: "a quote is generated",
     category: "Cashkr Ops",
     description: "A buyback quote is generated for a device.",
     isEmitting: false,
@@ -178,6 +234,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "quote.accepted",
     name: "Quote accepted",
+    phrase: "a quote is accepted",
     category: "Cashkr Ops",
     description: "A customer accepts a buyback quote.",
     isEmitting: false,
@@ -189,6 +246,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "pickup.scheduled",
     name: "Pickup scheduled",
+    phrase: "a pickup is scheduled",
     category: "Cashkr Ops",
     description: "A device pickup is scheduled.",
     isEmitting: false,
@@ -201,6 +259,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "pickup.completed",
     name: "Pickup completed",
+    phrase: "a pickup is completed",
     category: "Cashkr Ops",
     description: "A device pickup is completed by the field agent.",
     isEmitting: false,
@@ -212,6 +271,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "payment.successful",
     name: "Payment successful",
+    phrase: "a payment succeeds",
     category: "Cashkr Ops",
     description: "A customer payout or payment succeeds.",
     isEmitting: false,
@@ -223,6 +283,7 @@ export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
   {
     key: "payment.failed",
     name: "Payment failed",
+    phrase: "a payment fails",
     category: "Cashkr Ops",
     description: "A customer payout or payment fails.",
     isEmitting: false,
@@ -270,4 +331,19 @@ export function legacyTriggersEnabled(settings: unknown): boolean {
  */
 export function triggersForOrg(showLegacy: boolean): Array<AutomationTrigger & { hidden?: boolean }> {
   return AUTOMATION_TRIGGERS.map((t) => (!showLegacy && isLegacyTrigger(t.key) ? { ...t, hidden: true } : t));
+}
+
+/**
+ * The trigger as people read it: "When a task is created". A key that is no
+ * longer in the catalog reads as words too, never as the raw key.
+ */
+export function triggerDisplayName(key: string | null | undefined): string {
+  if (!key) return "No trigger";
+  const t = TRIGGER_BY_KEY.get(key);
+  return t ? `When ${t.phrase}` : "A trigger that no longer exists";
+}
+
+/** The trigger fields a condition can test, by key. */
+export function triggerFieldsFor(key: string | null | undefined): TriggerField[] {
+  return (key && TRIGGER_BY_KEY.get(key)?.fields) || [];
 }

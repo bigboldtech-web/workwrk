@@ -42,7 +42,8 @@ import { SchedulePicker } from "@/components/ai/schedule-picker";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { RunStatusChip, RunStatusDot } from "@/components/automation/run-status-chip";
 import { apiFetch } from "@/lib/api-fetch";
-import { agentState, runsOnWords } from "@/lib/agents/schedule-words";
+import { agentState, runsOnWords, scheduleZone, wordsInZone } from "@/lib/agents/schedule-words";
+import { scheduleForSave } from "@/lib/agents/cron";
 import { toolOutcome } from "@/lib/agents/tool-verbs";
 import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
 import { formatDate, formatRelative } from "@/lib/format/date";
@@ -66,7 +67,9 @@ type Agent = {
   nextRunAt: string | null;
   lastRunId: string | null;
 };
-type Available = { slug: string; name: string; persona: string | null; description: string };
+type Available = { slug: string; name: string; persona: string | null; description: string; removed?: boolean };
+/** An agent that was removed: its run history is kept and still opens. */
+type RemovedAgent = { id: string; slug: string; name: string; persona: string | null; description: string; isPrebuilt: boolean };
 type RunRow = {
   id: string;
   agentName: string;
@@ -78,6 +81,8 @@ type RunRow = {
   summary: string;
   sessionId: string | null;
   error: string | null;
+  /** A Member reading a run somebody else started: status and tools only. */
+  detailHidden?: boolean;
 };
 type RunDetail = RunRow & {
   endedAt: string | null;
@@ -111,6 +116,7 @@ function AgentsInner() {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
+  const viewerZone = useViewerZone();
 
   const tab: "agents" | "runs" = sp?.get("tab") === "runs" ? "runs" : "agents";
   const openSlug = sp?.get("agent") ?? null;
@@ -128,6 +134,8 @@ function AgentsInner() {
 
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [available, setAvailable] = useState<Available[]>([]);
+  const [removed, setRemoved] = useState<RemovedAgent[]>([]);
+  const [serverZone, setServerZone] = useState<string>("UTC");
   const [canManage, setCanManage] = useState(false);
   const [error, setError] = useState(false);
   const [menu, setMenu] = useState<{ agent: Agent; anchor: { current: HTMLElement | null } } | null>(null);
@@ -143,11 +151,13 @@ function AgentsInner() {
   const activeFilters = (sp?.get("agentSlug") ? 1 : 0) + (sp?.get("status") ? 1 : 0) + (sp?.get("from") || sp?.get("to") ? 1 : 0);
 
   const load = useCallback(async () => {
-    const r = await apiFetch<{ installed: Agent[]; available: Available[]; canManage: boolean }>("/api/agents", { cache: "no-store" });
+    const r = await apiFetch<{ installed: Agent[]; available: Available[]; removed?: RemovedAgent[]; canManage: boolean; serverZone?: string }>("/api/agents", { cache: "no-store" });
     if (!r.ok) { setError(true); return; }
     setError(false);
     setAgents(r.data.installed);
     setAvailable(r.data.available);
+    setRemoved(r.data.removed ?? []);
+    if (r.data.serverZone) setServerZone(r.data.serverZone);
     setCanManage(r.data.canManage);
   }, []);
   useEffect(() => {
@@ -202,13 +212,11 @@ function AgentsInner() {
         {a.persona ? <span className="min-w-0 truncate text-sm font-normal text-ink-2">· {a.persona}</span> : null}
       </span>
     ) },
-    { key: "status", label: "Status", width: "130px", render: (a) => {
-      const st = agentState(a);
-      return st === "on" ? <StatusChip disabled color={RUN_TONE_COLOR.success} label="On" />
-        : st === "needs-setup" ? <StatusChip disabled color={RUN_TONE_COLOR.warning} label="Needs setup" />
-        : <StatusChip disabled color={RUN_TONE_COLOR.neutral} label="Paused" />;
+    { key: "status", label: "Status", width: "130px", render: (a) => <AgentStatusChip agent={a} /> },
+    { key: "runsOn", label: "Runs on", width: "minmax(160px,1fr)", render: (a) => {
+      const words = wordsInZone(runsOnWords(a.scheduleCron, a.autonomousEnabled), scheduleZone(a.scheduleCron, serverZone), viewerZone);
+      return <span className="truncate text-sm text-ink-2" title={words}>{words}</span>;
     } },
-    { key: "runsOn", label: "Runs on", width: "minmax(160px,1fr)", render: (a) => <span className="truncate text-sm text-ink-2">{runsOnWords(a.scheduleCron, a.autonomousEnabled)}</span> },
     { key: "last", label: "Last run", width: "130px", render: (a) => a.lastRunAt && a.lastRunId ? (
       <Link
         href={`/agents?agent=${encodeURIComponent(a.slug)}&run=${encodeURIComponent(a.lastRunId)}`}
@@ -218,13 +226,17 @@ function AgentsInner() {
         {formatRelative(a.lastRunAt, datePrefs)}
       </Link>
     ) : a.lastRunAt ? <span className="text-sm text-ink-2">{formatRelative(a.lastRunAt, datePrefs)}</span> : <span className="text-sm text-ink-2">Never</span> },
-    { key: "next", label: "Next run", width: "140px", render: (a) => a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled
-      ? <span className="text-sm text-ink-2" title={formatDate(a.nextRunAt, datePrefs, "datetime")}>{formatDate(a.nextRunAt, datePrefs, "smart")}</span>
+    // The date AND the time, in the viewer's zone: beside a schedule read in
+    // another zone the date alone looked like a contradiction (a Sunday next
+    // to "Weekdays").
+    { key: "next", label: "Next run", width: "160px", render: (a) => a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled
+      ? <span className="truncate text-sm text-ink-2" title={formatDate(a.nextRunAt, datePrefs, "datetime")}>{formatDate(a.nextRunAt, datePrefs, "smart")}, {formatDate(a.nextRunAt, datePrefs, "time")}</span>
       : <span className="text-sm text-ink-3">Not scheduled</span> },
-  ], [datePrefs]);
+  ], [datePrefs, serverZone, viewerZone]);
 
   const openAgent = openSlug ? agents?.find((a) => a.slug === openSlug) ?? null : null;
-  const agentMissing = Boolean(openSlug) && agents !== null && !openAgent;
+  const openRemoved = openSlug && !openAgent ? removed.find((a) => a.slug === openSlug) ?? null : null;
+  const agentMissing = Boolean(openSlug) && agents !== null && !openAgent && !openRemoved;
 
   return (
     <>
@@ -237,7 +249,9 @@ function AgentsInner() {
             <ViewTab label="Run history" active={tab === "runs"} href="/agents?tab=runs" />
           </>
         }
-        toolbar={{
+        // A Member on Your agents has nothing for the toolbar row, so it does
+        // not render (no empty 44px band above the table).
+        toolbar={tab !== "runs" && !canManage ? undefined : {
           ...(tab === "runs" ? {
             filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeFilters },
             sort: { onClick: () => setSortOpen((o) => !o), label: RUN_SORT_LABEL[sort], active: true },
@@ -262,6 +276,7 @@ function AgentsInner() {
       {tab === "runs" ? (
         <RunHistory
           agents={agents ?? []}
+          removed={removed}
           filterOpen={filterOpen}
           onCloseFilter={() => setFilterOpen(false)}
           sort={sort}
@@ -331,7 +346,10 @@ function AgentsInner() {
       <AgentDrawer
         slug={openSlug}
         agent={openAgent}
+        removedAgent={openRemoved}
         missing={agentMissing}
+        serverZone={serverZone}
+        viewerZone={viewerZone}
         runId={openRun}
         canManage={canManage}
         busy={busy === openSlug}
@@ -349,7 +367,8 @@ function AgentsInner() {
         open={addOpen}
         onOpenChange={setAddOpen}
         available={available}
-        onAdded={() => void load()}
+        removed={removed}
+        onAdded={() => { void load(); setRunsVersion((v) => v + 1); }}
       />
     </>
   );
@@ -357,8 +376,9 @@ function AgentsInner() {
 
 /* ─────────────────────────── Run history ─────────────────────────── */
 
-function RunHistory({ agents, filterOpen, onCloseFilter, sort, pageSize, onPageSize, version, onOpenRun }: {
+function RunHistory({ agents, removed, filterOpen, onCloseFilter, sort, pageSize, onPageSize, version, onOpenRun }: {
   agents: Agent[];
+  removed: RemovedAgent[];
   filterOpen: boolean;
   onCloseFilter: () => void;
   sort: (typeof RUN_SORTS)[number];
@@ -442,7 +462,11 @@ function RunHistory({ agents, filterOpen, onCloseFilter, sort, pageSize, onPageS
 
   return (
     <>
-      <div className="os-chrome flex min-h-0 gap-4 px-6 pb-10 pt-2">
+      {/* The padding sits outside .os-chrome so this card lines up with the
+          Your agents card (both 24 at the 14px page root); only the row
+          inside is on the px grid. */}
+      <div className="px-6 pb-10 pt-2">
+      <div className="os-chrome flex min-h-0 gap-4">
         <FilterPanel
           open={filterOpen}
           onClose={onCloseFilter}
@@ -453,9 +477,17 @@ function RunHistory({ agents, filterOpen, onCloseFilter, sort, pageSize, onPageS
         >
           {fieldMatch("agent") ? (
             <FilterGroup label="Agent">
-              {agents.length === 0 ? <span className="px-2 text-sm text-ink-3">No agents yet</span> : agents.map((a) => (
-                <FilterRow key={a.slug} label={a.name} checked={agentSlug === a.slug} onCheckedChange={(on) => setParams({ agentSlug: on ? a.slug : null })} />
-              ))}
+              {agents.length + removed.length === 0 ? <span className="px-2 text-sm text-ink-3">No agents yet</span> : (
+                <>
+                  {agents.map((a) => (
+                    <FilterRow key={a.slug} label={a.name} checked={agentSlug === a.slug} onCheckedChange={(on) => setParams({ agentSlug: on ? a.slug : null })} />
+                  ))}
+                  {/* A removed agent's runs are kept, so it stays filterable. */}
+                  {removed.filter((r) => !agents.some((a) => a.slug === r.slug)).map((a) => (
+                    <FilterRow key={a.slug} label={`${a.name} (removed)`} checked={agentSlug === a.slug} onCheckedChange={(on) => setParams({ agentSlug: on ? a.slug : null })} />
+                  ))}
+                </>
+              )}
             </FilterGroup>
           ) : null}
           {fieldMatch("status") ? (
@@ -509,6 +541,7 @@ function RunHistory({ agents, filterOpen, onCloseFilter, sort, pageSize, onPageS
           )}
         </div>
       </div>
+      </div>
     </>
   );
 }
@@ -516,16 +549,20 @@ function RunHistory({ agents, filterOpen, onCloseFilter, sort, pageSize, onPageS
 /* ─────────────────────────── the agent drawer ─────────────────────────── */
 
 function AgentDrawer({
-  slug, agent, missing, runId, canManage, busy, version,
+  slug, agent, removedAgent, missing, runId, canManage, busy, version, serverZone, viewerZone,
   onClose, onRun, onCloseRun, onChanged, onSetStatus, onRunNow, onOpenChat,
 }: {
   slug: string | null;
   agent: Agent | null;
+  /** The drawer names a removed agent: its kept run history, and Add back. */
+  removedAgent: RemovedAgent | null;
   missing: boolean;
   runId: string | null;
   canManage: boolean;
   busy: boolean;
   version: number;
+  serverZone: string;
+  viewerZone: string | null;
   onClose: () => void;
   onRun: (id: string) => void;
   onCloseRun: () => void;
@@ -541,6 +578,7 @@ function AgentDrawer({
   const [runsError, setRunsError] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
   const [savingPrompt, setSavingPrompt] = useState(false);
+  const [addingBack, setAddingBack] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const loadRuns = useCallback(async (s: string) => {
@@ -606,6 +644,16 @@ function AgentDrawer({
     onClose();
   }
 
+  async function addBack() {
+    if (!removedAgent) return;
+    setAddingBack(true);
+    const r = await apiFetch(`/api/agents/${encodeURIComponent(removedAgent.slug)}/install`, { method: "POST" });
+    setAddingBack(false);
+    if (!r.ok) { toast(`Couldn't add ${removedAgent.name} back`, { tone: "danger", action: { label: "Try again", onClick: () => void addBack() } }); return; }
+    toast(`${removedAgent.name} is back`);
+    onChanged();
+  }
+
   function copyLink() {
     if (!slug) return;
     void navigator.clipboard?.writeText(`${window.location.origin}/agents?agent=${encodeURIComponent(slug)}`).then(
@@ -616,6 +664,45 @@ function AgentDrawer({
 
   const runInList = Boolean(runId && runs?.some((r) => r.id === runId));
   const on = agent?.status === "ENABLED";
+  const shown = agent ?? removedAgent;
+  const zone = agent ? scheduleZone(agent.scheduleCron, serverZone) : null;
+
+  const recentRuns = (agentSlug: string, emptyText: string) => (
+    <section aria-label="Recent runs" className="flex flex-col">
+      <h3 className="mb-1 text-sm font-medium text-ink-2">Recent runs</h3>
+      {runId && runs !== null && !runInList ? (
+        <RunDetail id={runId} agentSlug={agentSlug} onClose={onCloseRun} />
+      ) : null}
+      {runsError ? (
+        <div className="flex h-9 items-center gap-2 text-sm text-ink-2">
+          Couldn&apos;t load the runs ·
+          <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => void loadRuns(agentSlug)}>Try again</button>
+        </div>
+      ) : runs === null ? (
+        <SkeletonRows rows={3} />
+      ) : runs.length === 0 ? (
+        <p className="flex h-9 items-center text-sm text-ink-2">{emptyText}</p>
+      ) : (
+        <ul className="flex flex-col">
+          {runs.map((r) => (
+            <li key={r.id}>
+              <button
+                type="button"
+                onClick={() => (runId === r.id ? onCloseRun() : onRun(r.id))}
+                aria-expanded={runId === r.id}
+                className={`flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-start text-sm hover:bg-hover ${runId === r.id ? "bg-active" : ""}`}
+              >
+                <RunStatusDot status={r.status} />
+                <span className="min-w-0 flex-1 truncate text-ink">{r.summary}</span>
+                <span className="shrink-0 text-ink-2" title={formatDate(r.startedAt, datePrefs, "datetime")}>{formatRelative(r.startedAt, datePrefs)}</span>
+              </button>
+              {runId === r.id ? <RunDetail id={r.id} agentSlug={agentSlug} onClose={onCloseRun} /> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 
   return (
     <Drawer
@@ -623,12 +710,19 @@ function AgentDrawer({
       onClose={() => void close()}
       ariaLabel="Agent"
       layerId="agent-drawer"
-      // Esc collapses an expanded run first, then closes the drawer.
-      canClose={() => { if (runId) { onCloseRun(); return false; } return !dirty; }}
+      // Esc collapses an expanded run first, then closes the drawer; with
+      // unsaved instructions it asks, the same as the close button.
+      canClose={() => {
+        if (runId) { onCloseRun(); return false; }
+        if (dirty) { void close(); return false; }
+        return true;
+      }}
       header={
         <>
-          <span className="min-w-0 flex-1 truncate text-sm text-ink-2">Agents › <span className="text-ink">{agent?.name ?? ""}</span></span>
-          {agent ? (
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
+            {shown ? <>Agents › <span className="text-ink">{shown.name}</span></> : "Agents"}
+          </span>
+          {shown ? (
             <button type="button" aria-label="Copy link" title="Copy link" onClick={copyLink} className={GHOST_ICON}>
               <Link2 className="h-4 w-4" strokeWidth={1.5} />
             </button>
@@ -649,20 +743,46 @@ function AgentDrawer({
             <MessageSquare className="h-4 w-4" strokeWidth={1.5} /> Open chat
           </button>
         </div>
+      ) : removedAgent && canManage ? (
+        <div className="flex items-center gap-2 px-4 py-3">
+          <button type="button" disabled={addingBack} onClick={() => void addBack()} className={SECONDARY}>
+            <Plus className="h-4 w-4" strokeWidth={1.5} /> Add back
+          </button>
+        </div>
       ) : undefined}
     >
       {missing ? (
-        <OsEmptyView title="This agent isn't here any more." compact />
+        <div className="flex flex-col gap-1 p-4">
+          <p className="flex min-h-9 items-center text-base text-ink">This agent isn&apos;t here any more.</p>
+          <Link href="/agents" className="text-sm font-medium text-brand-deep hover:underline">See all agents</Link>
+        </div>
+      ) : removedAgent ? (
+        <div className="flex flex-col gap-6 p-4">
+          <div className="flex items-center gap-3">
+            <EntityTile size="md" name={removedAgent.name} {...NEUTRAL_TILE} />
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-lg font-semibold text-ink">{removedAgent.name}</h2>
+              {removedAgent.persona ? <p className="truncate text-sm text-ink-2">{removedAgent.persona}</p> : null}
+            </div>
+            <StatusChip color={RUN_TONE_COLOR.neutral} label="Removed" />
+          </div>
+          <p className="text-base text-ink-2">
+            This agent was removed, so it doesn&apos;t run. Its run history is kept.
+            {canManage ? " Add it back to turn it on again." : ""}
+          </p>
+          {recentRuns(removedAgent.slug, "It never ran.")}
+        </div>
       ) : !agent ? (
         <div className="p-4"><SkeletonLines lines={5} /></div>
       ) : (
         <div className="flex flex-col gap-6 p-4">
           <div className="flex items-center gap-3">
             <EntityTile size="md" name={agent.name} {...NEUTRAL_TILE} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h2 className="truncate text-lg font-semibold text-ink">{agent.name}</h2>
               {agent.persona ? <p className="truncate text-sm text-ink-2">{agent.persona}</p> : null}
             </div>
+            {canManage ? null : <AgentStatusChip agent={agent} />}
           </div>
 
           <section aria-label="What it does">
@@ -670,36 +790,27 @@ function AgentDrawer({
             <p className="text-base text-ink">{agent.description}</p>
           </section>
 
-          <section className="flex flex-col" aria-label="Settings">
-            <FieldRow label="On">
-              {canManage ? (
+          {canManage ? (
+            <section className="flex flex-col" aria-label="Settings">
+              <FieldRow label="On">
                 <Switch checked={on} aria-label={on ? `Pause ${agent.name}` : `Turn on ${agent.name}`} onChange={(next) => void onSetStatus(agent, next ? "ENABLED" : "DISABLED")} />
-              ) : (
-                <span className="text-base text-ink">{on ? "On" : "Paused"}</span>
-              )}
-            </FieldRow>
-            <FieldRow label="Runs by itself">
-              {canManage ? (
-                <Switch
-                  checked={agent.autonomousEnabled}
-                  aria-label="Runs by itself"
-                  onChange={(next) => void patchSchedule({ autonomousEnabled: next }, next ? `${agent.name} runs on its schedule` : `${agent.name} runs only when you ask`)}
-                />
-              ) : (
-                <span className="text-base text-ink">{agent.autonomousEnabled ? "Yes" : "Only when asked"}</span>
-              )}
-            </FieldRow>
-            {agent.autonomousEnabled || !canManage ? (
-              <FieldRow label="Runs on">
-                {canManage ? (
-                  <SchedulePicker cron={agent.scheduleCron} onChange={(cron) => patchSchedule({ scheduleCron: cron }, "Schedule saved")} />
-                ) : (
-                  <span className="text-base text-ink">{runsOnWords(agent.scheduleCron, agent.autonomousEnabled)}</span>
-                )}
               </FieldRow>
-            ) : null}
-            <FieldRow label="What to do each run" top>
-              {canManage ? (
+              {/* One control for whether it runs by itself and when: Only
+                  when you ask, or a schedule (saved in this person's zone). */}
+              <FieldRow label="Runs on">
+                <SchedulePicker
+                  cron={agent.scheduleCron}
+                  autonomous={agent.autonomousEnabled}
+                  zone={zone}
+                  viewerZone={viewerZone}
+                  onChange={(cron) => patchSchedule(
+                    { autonomousEnabled: true, scheduleCron: scheduleForSave(cron, viewerZone) },
+                    agent.autonomousEnabled ? "Schedule saved" : `${agent.name} runs on its schedule`,
+                  )}
+                  onManual={() => patchSchedule({ autonomousEnabled: false }, `${agent.name} runs only when you ask`)}
+                />
+              </FieldRow>
+              <FieldRow label="What to do each run" top>
                 <div className="flex min-w-0 flex-col gap-2">
                   <textarea
                     ref={promptRef}
@@ -718,50 +829,40 @@ function AgentDrawer({
                     </div>
                   ) : null}
                 </div>
-              ) : (
-                <span className={`whitespace-pre-wrap text-base ${savedPrompt ? "text-ink" : "text-ink-3"}`}>{savedPrompt || "Not set"}</span>
-              )}
-            </FieldRow>
-          </section>
+              </FieldRow>
+            </section>
+          ) : (
+            // A Member's drawer is the description, the schedule as words
+            // and the run history (spec-ai-automation section 2, /agents).
+            <section className="flex flex-col" aria-label="Schedule">
+              <FieldRow label="Runs on">
+                <span className="text-base text-ink">{wordsInZone(runsOnWords(agent.scheduleCron, agent.autonomousEnabled), zone, viewerZone)}</span>
+              </FieldRow>
+            </section>
+          )}
 
-          <section aria-label="Recent runs" className="flex flex-col">
-            <h3 className="mb-1 text-sm font-medium text-ink-2">Recent runs</h3>
-            {runId && runs !== null && !runInList ? (
-              <RunDetail id={runId} agentSlug={agent.slug} onClose={onCloseRun} />
-            ) : null}
-            {runsError ? (
-              <div className="flex h-9 items-center gap-2 text-sm text-ink-2">
-                Couldn&apos;t load the runs ·
-                <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => void loadRuns(agent.slug)}>Try again</button>
-              </div>
-            ) : runs === null ? (
-              <SkeletonRows rows={3} />
-            ) : runs.length === 0 ? (
-              <p className="flex h-9 items-center text-sm text-ink-2">{on ? "It hasn't run yet." : "It hasn't run yet. Turn it on to run it."}</p>
-            ) : (
-              <ul className="flex flex-col">
-                {runs.map((r) => (
-                  <li key={r.id}>
-                    <button
-                      type="button"
-                      onClick={() => (runId === r.id ? onCloseRun() : onRun(r.id))}
-                      aria-expanded={runId === r.id}
-                      className={`flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-start text-sm hover:bg-hover ${runId === r.id ? "bg-active" : ""}`}
-                    >
-                      <RunStatusDot status={r.status} />
-                      <span className="min-w-0 flex-1 truncate text-ink">{r.summary}</span>
-                      <span className="shrink-0 text-ink-2" title={formatDate(r.startedAt, datePrefs, "datetime")}>{formatRelative(r.startedAt, datePrefs)}</span>
-                    </button>
-                    {runId === r.id ? <RunDetail id={r.id} agentSlug={agent.slug} onClose={onCloseRun} /> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {recentRuns(agent.slug, on ? "It hasn't run yet." : canManage ? "It hasn't run yet. Turn it on to run it." : "It hasn't run yet.")}
         </div>
       )}
     </Drawer>
   );
+}
+
+/** On, Paused or Needs setup: a pale label, never a disabled button. */
+function AgentStatusChip({ agent }: { agent: Pick<Agent, "status" | "autonomousEnabled" | "scheduleCron"> }) {
+  const st = agentState(agent);
+  return st === "on" ? <StatusChip color={RUN_TONE_COLOR.success} label="On" />
+    : st === "needs-setup" ? <StatusChip color={RUN_TONE_COLOR.warning} label="Needs setup" />
+    : <StatusChip color={RUN_TONE_COLOR.neutral} label="Paused" />;
+}
+
+/** The viewer's zone: their saved preference, else the browser's. */
+function useViewerZone(): string | null {
+  const prefs = useDatePrefs();
+  return useMemo(() => {
+    if (prefs.timezone) return prefs.timezone;
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
+  }, [prefs.timezone]);
 }
 
 function FieldRow({ label, children, top }: { label: string; children: React.ReactNode; top?: boolean }) {
@@ -823,7 +924,7 @@ function RunDetail({ id, agentSlug, onClose }: { id: string; agentSlug: string; 
           <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-2">
             <span>Trigger: <span className="text-ink">{TRIGGER_LABEL[run.trigger] ?? "From a chat"}</span></span>
             <span aria-hidden>·</span>
-            <span title={formatRelative(run.startedAt, datePrefs)}>Started <span className="text-ink">{formatDate(run.startedAt, datePrefs, "datetime")}</span></span>
+            <span title={formatRelative(run.startedAt, datePrefs)}>Started <span className="text-ink">{formatDate(run.startedAt, datePrefs, "date")}, {formatDate(run.startedAt, datePrefs, "time")}</span></span>
             {formatDuration(run.durationMs) ? (
               <>
                 <span aria-hidden>·</span>
@@ -832,6 +933,9 @@ function RunDetail({ id, agentSlug, onClose }: { id: string; agentSlug: string; 
             ) : null}
           </div>
           <p className="text-base text-ink">{run.summary}</p>
+          {run.detailHidden ? (
+            <p className="text-sm text-ink-2">It ran with an admin&apos;s access, so what it found shows only to admins and the person who ran it.</p>
+          ) : null}
           {run.status === "FAILED" && run.error ? (
             <div className="flex min-h-9 items-center text-sm text-danger-text">{run.error.slice(0, 300)}</div>
           ) : null}
@@ -854,25 +958,33 @@ function RunDetail({ id, agentSlug, onClose }: { id: string; agentSlug: string; 
 
 /* ─────────────────────────── Add agent ─────────────────────────── */
 
-function AddAgentDialog({ open, onOpenChange, available, onAdded }: {
+function AddAgentDialog({ open, onOpenChange, available, removed, onAdded }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   available: Available[];
+  /** Removed agents: every one can be added back, custom ones included. */
+  removed: RemovedAgent[];
   onAdded: () => void;
 }) {
   const { toast } = useOsToast();
   const [q, setQ] = useState("");
   const [added, setAdded] = useState<Available[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // The list stays put while the modal is open: an agent that was just added
   // keeps its row, reading "Added", instead of jumping out from under you.
   const rows = useMemo(() => {
     const seen = new Set(available.map((a) => a.slug));
-    const all = [...available, ...added.filter((a) => !seen.has(a.slug))];
+    const back: Available[] = removed
+      .filter((r) => !seen.has(r.slug))
+      .map((r) => ({ slug: r.slug, name: r.name, persona: r.persona, description: r.description, removed: true }));
+    for (const b of back) seen.add(b.slug);
+    const all = [...available.map((a) => (removed.some((r) => r.slug === a.slug) ? { ...a, removed: true } : a)), ...back, ...added.filter((a) => !seen.has(a.slug))];
     const needle = q.trim().toLowerCase();
     return needle ? all.filter((a) => `${a.name} ${a.persona ?? ""} ${a.description}`.toLowerCase().includes(needle)) : all;
-  }, [available, added, q]);
+  }, [available, removed, added, q]);
   const addedSlugs = new Set(added.map((a) => a.slug));
 
   async function add(a: Available) {
@@ -880,21 +992,33 @@ function AddAgentDialog({ open, onOpenChange, available, onAdded }: {
     const r = await apiFetch(`/api/agents/${a.slug}/install`, { method: "POST" });
     setBusy(null);
     if (!r.ok) { toast(`Couldn't add ${a.name}`, { tone: "danger", action: { label: "Try again", onClick: () => void add(a) } }); return; }
+    if (a.removed) toast(`${a.name} is back`);
     setAdded((prev) => [...prev, a]);
     onAdded();
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) { setQ(""); setAdded([]); } }}>
-      <DialogContent className="max-w-[560px]">
+      <DialogContent
+        ref={contentRef}
+        // .os-chrome: on the px grid like the rest of the frame (32px Add,
+        // 36px rows). Opening focuses the search, or the dialog itself, never
+        // the first Add button, whose focus ring read as a second primary.
+        className="os-chrome max-w-[560px] outline-none focus:outline-none focus-visible:outline-none"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          if (searchRef.current) searchRef.current.focus();
+          else contentRef.current?.focus();
+        }}
+      >
         <DialogHeader>
-          <DialogTitle>Add an agent</DialogTitle>
+          <DialogTitle className="text-lg">Add an agent</DialogTitle>
           <DialogDescription>Each agent does one job. You can pause or remove it at any time.</DialogDescription>
         </DialogHeader>
-        {available.length + added.length > 8 ? (
+        {rows.length + (q ? 1 : 0) > 8 || q ? (
           <label className="flex h-9 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base text-ink">
             <Search className="h-4 w-4 text-ink-2" aria-hidden />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents" aria-label="Search agents" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3" />
+            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents" aria-label="Search agents" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3" />
           </label>
         ) : null}
         {rows.length === 0 ? (
@@ -911,7 +1035,7 @@ function AddAgentDialog({ open, onOpenChange, available, onAdded }: {
                 {addedSlugs.has(a.slug) ? (
                   <span className="shrink-0 text-sm text-ink-2">Added</span>
                 ) : (
-                  <button type="button" disabled={busy === a.slug} onClick={() => void add(a)} className={SECONDARY}>Add</button>
+                  <button type="button" disabled={busy === a.slug} onClick={() => void add(a)} className={SECONDARY}>{a.removed ? "Add back" : "Add"}</button>
                 )}
               </li>
             ))}

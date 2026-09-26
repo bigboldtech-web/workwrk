@@ -53,8 +53,10 @@ export interface AiStatus {
  *   stopped       the server has the question and the answer broke off
  *   start_failed  the chat could not be created
  *   agent_off     ?agent= named an agent that is not turned on
+ *   gone          the chat was archived or removed (elsewhere) before this
+ *                 send; the text is back in the composer for a new chat
  */
-export type AiSendError = "not_sent" | "stopped" | "start_failed" | "agent_off";
+export type AiSendError = "not_sent" | "stopped" | "start_failed" | "agent_off" | "gone";
 
 export interface AiSessionMeta {
   id: string;
@@ -77,7 +79,7 @@ export interface AiSessionState {
   error: AiSendError | null;
   draft: string;
   /** The agent the next new chat is bound to (?agent=<slug>). */
-  agent: { slug: string; name: string | null } | null;
+  agent: { slug: string; name: string | null; examplePrompts?: string[] } | null;
   status: AiStatus | null;
   offline: boolean;
 }
@@ -199,24 +201,47 @@ async function open(id: string): Promise<void> {
 }
 
 /**
- * A new chat: the landing, optionally bound to an agent, optionally sending
- * `q` at once (?q=, a starter, the palette's "Ask AI about").
+ * Re-read the open chat in place (no skeleton): after an answer broke off,
+ * the server may still have saved the whole of it. Resolves true when the
+ * chat now ends in an answer. Never runs while an answer is arriving.
  */
-async function start(opts: { agentSlug?: string | null; q?: string | null; context?: ChatContext } = {}): Promise<void> {
+async function refresh(id: string): Promise<boolean> {
+  if (state.sessionId !== id || state.streaming) return false;
+  const gen = generation;
+  const r = await apiFetch<{ session: AiSessionMeta; messages: Array<{ id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }> }>(
+    `/api/sidekick/sessions/${encodeURIComponent(id)}`,
+    { cache: "no-store" },
+  );
+  if (gen !== generation || state.streaming || !r.ok) return false;
+  const messages = r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null);
+  set((s) => ({
+    messages,
+    meta: s.meta ? { ...s.meta, title: r.data.session.title ?? s.meta.title, pinned: r.data.session.pinned, archived: Boolean(r.data.session.archived) } : s.meta,
+  }));
+  return messages.length > 0 && messages[messages.length - 1].role === "ASSISTANT";
+}
+
+/**
+ * A new chat: the landing, optionally bound to an agent, optionally with
+ * `q` (?q=, a caller's prompt) waiting in the composer. It is NEVER sent
+ * on arrival: a link anyone can post would otherwise run write tools as
+ * whoever opened it. The person reads it and presses Send.
+ */
+async function start(opts: { agentSlug?: string | null; q?: string | null } = {}): Promise<void> {
   reset();
+  if (opts.q && opts.q.trim()) set({ draft: opts.q.trim() });
   const gen = generation;
   if (opts.agentSlug) {
     set({ agent: { slug: opts.agentSlug, name: null } });
-    const r = await apiFetch<{ installed: Array<{ slug: string; name: string; status: string }> }>("/api/agents", { cache: "no-store" });
+    const r = await apiFetch<{ installed: Array<{ slug: string; name: string; status: string; examplePrompts?: string[] }> }>("/api/agents", { cache: "no-store" });
     if (gen !== generation) return;
     const found = r.ok ? r.data.installed.find((a) => a.slug === opts.agentSlug && a.status === "ENABLED") : null;
     if (r.ok && !found) {
       set({ agent: null, error: "agent_off" });
       return;
     }
-    if (found) set({ agent: { slug: found.slug, name: found.name } });
+    if (found) set({ agent: { slug: found.slug, name: found.name, examplePrompts: found.examplePrompts ?? [] } });
   }
-  if (opts.q && opts.q.trim()) await send(opts.q, opts.context);
 }
 
 export interface ChatContext {
@@ -271,6 +296,17 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   let sawDone = false;
   const fail = (kind: AiSendError) => {
     if (gen !== generation) return;
+    if (serverHasMessage && kind === "stopped" && sessionId) {
+      // The route saves the answer even after the connection drops, so read
+      // the chat again before offering Try again (which would ask twice).
+      const id = sessionId;
+      window.setTimeout(() => {
+        void refresh(id).then((answered) => {
+          if (!answered || gen !== generation) return;
+          set((s) => ({ error: s.error === "stopped" ? null : s.error, draft: s.draft === text ? "" : s.draft }));
+        });
+      }, 2500);
+    }
     if (serverHasMessage) {
       // The question is saved: keep it, drop an answer that never started,
       // keep the tool rows of one that did.
@@ -301,6 +337,12 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
     });
     if (res.status === 401) markSessionExpired({ reason: "expired" });
     if (res.status === 403) void loadStatus(true);
+    if (res.status === 404) {
+      // Archived or gone (another tab, All chats): the question was not
+      // written. It goes back to the composer, and the thread says why.
+      fail("gone");
+      return;
+    }
     if (!res.ok || !res.body) {
       fail("not_sent");
       return;
@@ -391,6 +433,7 @@ export const aiSession = {
   loadStatus,
   reset,
   open,
+  refresh,
   start,
   send,
   retry,

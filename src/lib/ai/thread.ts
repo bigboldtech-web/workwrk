@@ -168,3 +168,21 @@ export function contextFromPath(pathname: string | null | undefined): { productC
 export function isStoppedAnswer(content: string): boolean {
   return /^Sorry(,| \u2014) I hit an error reaching the model\./.test(content.trim());
 }
+
+/**
+ * A saved chat whose last turn is a question with no answer after it: the
+ * answer broke off before the server saved it, or (when the question is a
+ * couple of minutes old at most) is still being written. Null while an
+ * answer is arriving in this tab, or when the chat ends in an answer.
+ */
+export function unansweredQuestion(
+  messages: readonly AiMessage[],
+  opts: { streaming: boolean; now?: number },
+): { text: string; recent: boolean } | null {
+  if (opts.streaming || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  if (last.role !== "USER") return null;
+  const at = new Date(last.createdAt).getTime();
+  const now = opts.now ?? Date.now();
+  return { text: last.content, recent: Number.isFinite(at) && now - at < 2 * 60_000 };
+}

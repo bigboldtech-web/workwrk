@@ -132,3 +132,13 @@ describe("buildItemMenu", () => {
     expect(rows.find((r) => r.key === "delete")?.destructive).toBe(true);
   });
 });
+
+describe("Ask AI about this task", () => {
+  it("shows for anyone who can view, only when Ask AI is on, on every host", () => {
+    for (const host of ["page", "drawer", "row"] as ItemMenuHost[]) {
+      expect(keys(ctx({ host, role: "VIEW", askAi: true }))).toContain("ask-ai");
+      expect(keys(ctx({ host, role: "EDIT" }))).not.toContain("ask-ai");
+    }
+    expect(buildItemMenu(ctx({ role: "none", askAi: true }))).toEqual([]);
+  });
+});

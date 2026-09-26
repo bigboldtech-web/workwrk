@@ -66,7 +66,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const c = await ctxAndSession(id);
   if ("error" in c) return c.error;
-  await prisma.chatSession.update({ where: { id }, data: { archivedAt: new Date() } });
+  // updatedAt is kept as it was: it is the chat's "Last message" time and
+  // its place in the recent sort, and archiving sends no message.
+  await prisma.chatSession.update({ where: { id }, data: { archivedAt: new Date(), updatedAt: c.session.updatedAt } });
   return NextResponse.json({ ok: true });
 }
 
@@ -91,6 +93,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
       ...(parsed.data.pinned !== undefined ? { pinned: parsed.data.pinned } : {}),
       ...(parsed.data.archived === false ? { archivedAt: null } : {}),
+      // Rename, pin and restore send no message, so the chat keeps its
+      // "Last message" time and its place in the recent sort.
+      updatedAt: c.session.updatedAt,
     },
   });
   return NextResponse.json({ session: { id: updated.id, title: updated.title, pinned: updated.pinned, archived: updated.archivedAt !== null } });
