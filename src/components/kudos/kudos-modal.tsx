@@ -59,13 +59,17 @@ export function KudosModal({
   const orgValues = useCultureValues();
   const values = orgValues.length ? orgValues : FALLBACK_VALUES;
 
-  const fetchPeople = useCallback(async () => {
+  // Phase 6: the org-wide people picker (GET /api/people/pick, every Member,
+  // never the viewer themself, searched on the server). The old read was
+  // /api/users, which is the caller's own reporting tree, so an employee
+  // with no reports could only find themself, whom kudos refuses.
+  const fetchPeople = useCallback(async (q: string) => {
     setLoadingPeople(true);
     try {
-      const res = await fetch("/api/users?limit=200");
+      const res = await fetch(`/api/people/pick?limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}`);
       if (!res.ok) throw new Error();
       const json = await res.json();
-      const list = json.data || json.users || json || [];
+      const list = json?.data?.people ?? json?.people ?? [];
       setPeople(Array.isArray(list) ? list : []);
     } catch {
       setPeople([]);
@@ -76,32 +80,37 @@ export function KudosModal({
 
   useEffect(() => {
     if (open) {
-      fetchPeople();
       setStep(preselectedUserId ? "compose" : "select");
       setMessage("");
       setSelectedValue(null);
       setSelectedPerson(null);
     }
-  }, [open, preselectedUserId, fetchPeople]);
+  }, [open, preselectedUserId]);
 
-  // If preselected, find that person
+  // Server-side search, debounced; the list below also filters what it holds.
   useEffect(() => {
-    if (preselectedUserId && people.length > 0) {
-      const found = people.find((p) => p.id === preselectedUserId);
-      if (found) setSelectedPerson(found);
-    }
-  }, [preselectedUserId, people]);
+    if (!open) return;
+    const t = window.setTimeout(() => { void fetchPeople(search.trim()); }, 200);
+    return () => window.clearTimeout(t);
+  }, [open, search, fetchPeople]);
 
-  const filtered = people.filter((p) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      p.firstName.toLowerCase().includes(q) ||
-      p.lastName.toLowerCase().includes(q) ||
-      p.role?.title?.toLowerCase().includes(q) ||
-      p.department?.name?.toLowerCase().includes(q)
-    );
-  });
+  // A preselected person (?to= or a profile's Give kudos) is read by id, so
+  // they are found even when they are not in the first page of the picker.
+  useEffect(() => {
+    if (!open || !preselectedUserId) return;
+    let alive = true;
+    fetch(`/api/users/${encodeURIComponent(preselectedUserId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const u = d?.data ?? d;
+        if (alive && u?.id) setSelectedPerson({ id: u.id, firstName: u.firstName ?? "", lastName: u.lastName ?? "", avatar: u.avatar ?? null, role: u.role ?? null });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [open, preselectedUserId]);
+
+  // The server already searched (name and email); nothing to filter again.
+  const filtered = people;
 
   const handleSelectPerson = (person: Person) => {
     setSelectedPerson(person);

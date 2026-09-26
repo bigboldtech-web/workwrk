@@ -21,7 +21,7 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useRole } from "@/hooks/use-role";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 import { TeamStatTile, TeamCard, TeamAvatar } from "@/components/team/ui";
 
 type ApiUser = {
@@ -33,11 +33,6 @@ type ApiUser = {
   role?: { id: string; title: string } | null;
   department?: { id: string; name: string } | null;
 };
-
-// Mirrors ORG_WIDE_ALIGNMENT_LEVELS (lib/alignment-scope is server-only):
-// these levels get org-wide data from /api/users; everyone else gets
-// their own reporting tree — the header should say which one is shown.
-const ORG_WIDE_LEVELS = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
 type ApiDept = { id: string; name: string; color?: string | null; _count?: { members?: number }; parentId?: string | null };
 type ApiOffice = { id: string; name?: string | null; city?: string | null; country?: string | null; isHeadquarters?: boolean };
@@ -115,14 +110,16 @@ export default function OrganizationPage() {
   // collapse set below (XOR) to get the effective collapsed set.
   const [toggledNodes, setToggledNodes] = useState<Set<string>>(new Set());
   const { rowVersion } = useOsShell();
-  const { accessLevel } = useRole();
-  const orgWide = ORG_WIDE_LEVELS.has(accessLevel);
+  // Owner and Admin get the Structure link (spec-teams-people section 0).
+  const { isAdmin: canOpenStructure } = useViewerRole();
 
   // setState happens inside .then callbacks (async continuations), never
   // synchronously inside the effect body — react-hooks/set-state-in-effect.
   const load = useCallback(() => {
     Promise.all([
-      fetch("/api/users?limit=500"),
+      // Every Member reads the whole tree (Phase 6): the directory card
+      // projection, never people data.
+      fetch("/api/users?limit=500&scope=directory"),
       fetch("/api/departments"),
       fetch("/api/offices"),
       fetch("/api/roles"),
@@ -223,15 +220,17 @@ export default function OrganizationPage() {
           </span>
           <h1 className="text-base font-semibold text-zinc-900">Org chart</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">
-            {orgWide ? `${orgName} — full reporting hierarchy` : "Your reporting tree — you and the people below you"}
+            {orgName ? `${orgName} · reporting hierarchy` : "Reporting hierarchy"}
           </span>
           <div className="flex-1" />
           <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
           </Link>
-          <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <SettingsIcon className="w-3.5 h-3.5 text-zinc-400" /> Org settings
-          </Link>
+          {canOpenStructure ? (
+            <Link href="/settings/structure" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+              <SettingsIcon className="w-3.5 h-3.5 text-zinc-400" /> Structure settings
+            </Link>
+          ) : null}
         </div>
       </div>
 

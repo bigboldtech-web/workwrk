@@ -107,12 +107,15 @@ export function SurveyBuilder({
   survey,
   onClose,
   onSaved,
+  questionsLocked = false,
 }: {
   open: boolean;
   mode: "create" | "edit";
   survey?: EditableSurvey | null;
   onClose: () => void;
   onSaved: (msg: string) => void;
+  /** People have answered: the questions freeze (their answers point at them). */
+  questionsLocked?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState<BuilderQuestion[]>([blankQuestion()]);
@@ -276,7 +279,7 @@ export function SurveyBuilder({
 
     const payload: Record<string, unknown> = {
       title: title.trim(),
-      questions: cleaned,
+      ...(questionsLocked ? {} : { questions: cleaned }),
       audienceType,
       officeIds: audienceType === "OFFICES" ? officeIds : [],
       departmentIds: audienceType === "DEPARTMENTS" ? departmentIds : [],
@@ -295,7 +298,7 @@ export function SurveyBuilder({
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        if (res.status === 403) { setError("You need manager access to build surveys."); return; }
+        if (res.status === 403) { setError("Only the person who made this survey, the People team or an Admin can change it."); return; }
         let msg = "Couldn't save the survey.";
         try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* keep default */ }
         setError(msg);
@@ -304,7 +307,7 @@ export function SurveyBuilder({
       onSaved(mode === "edit" ? "Survey updated" : "Survey published");
       onClose();
     } catch {
-      setError("Network error — couldn't save.");
+      setError("Not saved. Check your connection and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -340,6 +343,10 @@ export function SurveyBuilder({
           {/* Questions */}
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium text-[var(--os-ink-2)]">Questions</span>
+            {questionsLocked ? (
+              <span className="text-sm text-[var(--os-ink-3)]">People have already answered, so the questions stay as they are. You can still change the title, audience and close date.</span>
+            ) : null}
+            <fieldset disabled={questionsLocked} className="contents">
             <div className="flex flex-col gap-2.5">
               {questions.map((q, qi) => {
                 const meta = Q_TYPES.find((t) => t.value === q.type);
@@ -432,6 +439,7 @@ export function SurveyBuilder({
             >
               <Plus className="w-3.5 h-3.5" /> Add question
             </button>
+            </fieldset>
           </div>
 
           {/* Audience */}

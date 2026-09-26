@@ -22,7 +22,7 @@
 import { NotFoundView } from "@/components/access/not-found-view";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { BackButton } from "@/components/ui/back-button";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -444,7 +444,7 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
         {alignment ? <span className="text-xs text-zinc-400">{alignment.quarter}</span> : null}
         <div className="flex-1" />
         <Link
-          href={my ? "/okrs?mine=1" : "/okrs"}
+          href="/okrs"
           className="text-sm text-[#0073EA] hover:underline"
         >
           All goals
@@ -693,6 +693,9 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
 
 /* ═══════════════════════════ Page body ═══════════════════════════ */
 
+/** The ?tab= values the strip owns; `kras` scrolls to the KRAs section. */
+const PROFILE_TABS: ReadonlySet<string> = new Set(["reviews", "history", "skills", "kudos", "checkins", "assets", "reports"]);
+
 export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) {
   const router = useRouter();
   const { isAdmin } = useRole();
@@ -703,7 +706,20 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   const [user, setUser] = useState<any>(null);
   const [alignment, setAlignment] = useState<AlignmentPayload | null>(null);
   const [alignLoading, setAlignLoading] = useState(mode !== "peer");
-  const [tab, setTab] = useState("reviews");
+  // The tab is addressed by ?tab= (spec-goals section 2, the
+  // /people/me?tab=kras contract): a search param, so every link into a tab
+  // is URL-derived and survives a reload. `kras` is not a tab strip entry:
+  // it is the KRAs & KPIs section above the strip, so it scrolls there.
+  const searchParams = useSearchParams();
+  const urlTab = searchParams?.get("tab") ?? null;
+  const [tab, setTabState] = useState(() => (urlTab && PROFILE_TABS.has(urlTab) ? urlTab : "reviews"));
+  const setTab = useCallback((next: string) => {
+    setTabState(next);
+    const qs = new URLSearchParams(searchParams?.toString() ?? "");
+    qs.set("tab", next);
+    router.replace(`?${qs.toString()}`, { scroll: false });
+  }, [router, searchParams]);
+  const krasRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
 
@@ -910,6 +926,12 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
 
   useEffect(() => { loadUser(); }, [loadUser]);
 
+  // ?tab=kras: bring the KRAs & KPIs section into view once it has rendered.
+  useEffect(() => {
+    if (urlTab !== "kras" || loading || alignLoading) return;
+    krasRef.current?.scrollIntoView({ block: "start" });
+  }, [urlTab, loading, alignLoading]);
+
   if (loading) {
     return (
       <div className="px-6 py-4 space-y-4 max-w-[1100px] mx-auto animate-fade-in">
@@ -981,7 +1003,10 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
       <div className="rounded-xl border border-zinc-200 bg-white p-5">
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-3">
           {my ? (
-            <span>My Profile</span>
+            <>
+              <BackButton fallbackHref="/people" label="Directory" />
+              <span>My profile</span>
+            </>
           ) : (
             <>
               <BackButton fallbackHref="/people" label="Directory" />
@@ -1286,7 +1311,9 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
       </div>
 
       {/* ── what I own and how it reads: KRAs + KPI gauges ───────── */}
-      <AlignmentSection id={id} mode={mode} alignment={alignment} loading={alignLoading} onChanged={loadAlignment} />
+      <div ref={krasRef} id="kras" className="scroll-mt-4">
+        <AlignmentSection id={id} mode={mode} alignment={alignment} loading={alignLoading} onChanged={loadAlignment} />
+      </div>
 
       {/* ── goals ────────────────────────────────────────────────── */}
       <GoalsSection mode={mode} alignment={alignment} loading={alignLoading} />

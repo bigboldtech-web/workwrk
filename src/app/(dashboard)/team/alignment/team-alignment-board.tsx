@@ -5,15 +5,19 @@
 // already-computed members here. This adds:
 //   - sort (name / KPI compliance / SOP read-rate / review status)
 //   - filter (all / dotted / submitted reviews / mandatory-SOP pending)
-//   - inline weekly-review Approve / Request-changes (POST manager-review)
+//   - inline weekly-review Approve / Request changes (PATCH manager-review
+//     with { decision, notes }; Request changes asks for its note in a
+//     popover, Approve offers Undo)
 // Type-only import of TeamMember — no prisma leaks into the client bundle.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Target, ChartLine, BookOpenCheck, AlertCircle, ChevronRight, GitBranchPlus,
-  ClipboardCheck, Clock, CheckCircle2, ArrowUpDown, Loader2, Check, RotateCcw,
+  ClipboardCheck, Clock, CheckCircle2, ArrowUpDown, Check, RotateCcw,
 } from "lucide-react";
+import { useOsToast } from "@/components/layout/os/toast";
+import { RequestChangesPopover } from "@/components/team/request-changes-popover";
 import type { TeamMember } from "@/lib/team-alignment";
 
 type SortKey = "name" | "kpi" | "sop" | "review";
@@ -162,7 +166,7 @@ function MemberCard({
       </div>
 
       {review.status === "SUBMITTED" && review.id ? (
-        <ReviewActions userId={m.id} reviewId={review.id} onActed={onActed} />
+        <ReviewActions userId={m.id} reviewId={review.id} firstName={m.firstName || "them"} onActed={onActed} />
       ) : null}
 
       {weightsOff ? (
@@ -186,54 +190,98 @@ function MemberCard({
 }
 
 function ReviewActions({
-  userId, reviewId, onActed,
-}: { userId: string; reviewId: string; onActed: (userId: string, o: ReviewOverride) => void }) {
-  const [busy, setBusy] = useState<null | "approve" | "request_changes">(null);
-  const [err, setErr] = useState(false);
+  userId, reviewId, firstName, onActed,
+}: { userId: string; reviewId: string; firstName: string; onActed: (userId: string, o: ReviewOverride) => void }) {
+  // PO-1: the ONE route and payload both entry points use (the route exports
+  // PATCH only; this island used to POST, so every click 405ed).
+  //   PATCH /api/weekly-reviews/[id]/manager-review { decision, notes }
+  // Request changes needs a note (the popover); Approve needs no dialog and
+  // offers Undo, which is decision REOPEN on the same route.
+  const [busy, setBusy] = useState<null | "approve" | "changes">(null);
+  const [asking, setAsking] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { toast } = useOsToast();
 
-  const act = async (action: "approve" | "request_changes") => {
-    setBusy(action);
-    setErr(false);
+  const decide = async (decision: "APPROVED" | "CHANGES_REQUESTED" | "REOPEN", notes?: string): Promise<boolean> => {
+    setErr(null);
     try {
       const res = await fetch(`/api/weekly-reviews/${reviewId}/manager-review`, {
-        method: "POST",
+        method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ decision, notes }),
       });
-      if (!res.ok) { setErr(true); setBusy(null); return; }
-      onActed(userId, {
-        status: "ACKNOWLEDGED",
-        managerStatus: action === "approve" ? "APPROVED" : "CHANGES_REQUESTED",
-      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setErr(body?.error ?? "Couldn't save");
+        return false;
+      }
+      return true;
     } catch {
-      setErr(true);
-    } finally {
-      setBusy(null);
+      setErr("Couldn't save");
+      return false;
     }
   };
 
+  const approve = async () => {
+    setBusy("approve");
+    const ok = await decide("APPROVED");
+    setBusy(null);
+    if (!ok) return;
+    onActed(userId, { status: "ACKNOWLEDGED", managerStatus: "APPROVED" });
+    toast(`Approved ${firstName}'s review`, {
+      onUndo: () => {
+        void decide("REOPEN").then((undone) => {
+          if (undone) onActed(userId, { status: "SUBMITTED", managerStatus: "PENDING" });
+          else toast("Couldn't undo the approval", { tone: "danger" });
+        });
+      },
+    });
+  };
+
+  const requestChanges = async (note: string): Promise<boolean> => {
+    setBusy("changes");
+    const ok = await decide("CHANGES_REQUESTED", note);
+    setBusy(null);
+    if (!ok) return false;
+    setAsking(false);
+    onActed(userId, { status: "ACKNOWLEDGED", managerStatus: "CHANGES_REQUESTED" });
+    toast(`Asked ${firstName} for changes`);
+    return true;
+  };
+
   return (
-    <div className="px-4 py-2 border-t border-zinc-200 flex items-center gap-2">
+    <div className="px-4 py-2 border-t border-line flex items-center gap-2">
       <button
         type="button"
-        onClick={() => void act("approve")}
+        onClick={() => void approve()}
         disabled={busy !== null}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:opacity-50 hover:bg-emerald-700"
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line bg-surface text-sm font-medium text-ink disabled:opacity-50 hover:bg-hover"
       >
-        {busy === "approve" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-        Approve
+        <Check className="w-3.5 h-3.5" />
+        {busy === "approve" ? "Approving" : "Approve"}
       </button>
-      <button
-        type="button"
-        onClick={() => void act("request_changes")}
-        disabled={busy !== null}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-sm text-zinc-700 disabled:opacity-50 hover:bg-zinc-50"
-      >
-        {busy === "request_changes" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-        Request changes
-      </button>
-      <Link href="/team/reviews" className="ml-auto text-xs text-zinc-400 hover:text-zinc-700">Open review →</Link>
-      {err ? <span className="text-xs text-red-600">Couldn&apos;t save</span> : null}
+      <span className="relative inline-flex">
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          disabled={busy !== null}
+          aria-expanded={asking}
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-sm text-ink-2 disabled:opacity-50 hover:bg-hover hover:text-ink"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Request changes
+        </button>
+        {asking ? (
+          <RequestChangesPopover
+            personFirstName={firstName}
+            busy={busy === "changes"}
+            onSend={requestChanges}
+            onCancel={() => setAsking(false)}
+          />
+        ) : null}
+      </span>
+      <Link href="/team/reviews" className="ml-auto text-xs text-ink-2 hover:text-ink">Open review</Link>
+      {err ? <span className="text-xs text-danger-text">{err}</span> : null}
     </div>
   );
 }

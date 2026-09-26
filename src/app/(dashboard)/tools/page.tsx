@@ -38,6 +38,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useRole } from "@/hooks/use-role";
 
 type ToolCredentials = { username?: string; password?: string; apiKey?: string; notes?: string } & Record<string, string | undefined>;
 type ApiTool = {
@@ -80,6 +81,10 @@ export default function ToolsPage() {
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   const promptDialog = usePrompt();
+  // Phase 6: every Member opens Tools (the tools shared with them). Adding a
+  // tool and editing its credentials stay with the tier POST and PATCH
+  // /api/tools ask, so a Member never sees a control that 403s.
+  const { isManager: canManage } = useRole();
 
   const load = useCallback(async () => {
     try {
@@ -157,11 +162,13 @@ export default function ToolsPage() {
       <OsPageHeader
         title="Tools"
         actions={
-          <div className="tls__head-actions">
-            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-          </div>
+          canManage ? (
+            <div className="tls__head-actions">
+              <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
+            </div>
+          ) : undefined
         }
-        primary={{ label: "Add tool", onClick: quickAdd }}
+        primary={canManage ? { label: "Add tool", onClick: quickAdd } : undefined}
       />
 
       <div className="tls">
@@ -208,8 +215,8 @@ export default function ToolsPage() {
           <OsEmptyView
             context="list"
             title="No tools yet"
-            hint="Add the tools your team uses and share access with the right people."
-            action={{ label: "Add tool", onClick: quickAdd }}
+            hint={canManage ? "Add the tools your team uses and share access with the right people." : "Nobody has shared a tool with you yet."}
+            action={canManage ? { label: "Add tool", onClick: quickAdd } : undefined}
           />
         ) : grouped.length === 0 ? (
           <div className="tls__no-match"><Search /> No tools match.</div>
@@ -271,12 +278,12 @@ export default function ToolsPage() {
         )}
       </div>
 
-      {openTool ? <ToolDetailModal tool={openTool} onClose={() => setOpenTool(null)} onChanged={load} /> : null}
+      {openTool ? <ToolDetailModal tool={openTool} canEdit={canManage} onClose={() => setOpenTool(null)} onChanged={load} /> : null}
     </>
   );
 }
 
-function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose: () => void; onChanged: () => void }) {
+function ToolDetailModal({ tool, canEdit, onClose, onChanged }: { tool: ApiTool; canEdit: boolean; onClose: () => void; onChanged: () => void }) {
   const [creds, setCreds] = useState<ToolCredentials>(tool.credentials ?? {});
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -324,7 +331,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
             <div className="truncate text-base font-semibold text-zinc-900">{tool.name}</div>
             {tool.url ? <div className="truncate text-sm text-zinc-400">{getDomain(tool.url)}</div> : null}
           </div>
-          {!editing ? (
+          {!editing && canEdit ? (
             <button type="button" onClick={() => setEditing(true)} title="Edit credentials" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><Pencil className="h-4 w-4" /></button>
           ) : null}
           <button type="button" onClick={onClose} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><X className="h-4 w-4" /></button>
@@ -363,10 +370,12 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
                 </div>
               ) : null}
             </div>
-          ) : (
+          ) : canEdit ? (
             <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-base text-zinc-500 hover:border-blue-300 hover:bg-blue-50/40">
-              No credentials yet — click to add an ID &amp; password.
+              No credentials yet. Click to add an ID and password.
             </button>
+          ) : (
+            <p className="px-1 py-2 text-base text-zinc-500">No credentials on this tool.</p>
           )}
         </div>
 

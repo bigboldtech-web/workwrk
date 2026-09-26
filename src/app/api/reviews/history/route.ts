@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { isInReportTree } from "@/lib/reporting-line";
 
 // GET: Get review history for a user across all cycles
 export async function GET(req: NextRequest) {
@@ -11,6 +13,19 @@ export async function GET(req: NextRequest) {
   const userId = new URL(req.url).searchParams.get("userId");
 
   if (!userId) return jsonError("userId required");
+
+  // Phase 6 (an IDOR): any signed-in colleague could read anyone's completed
+  // reviews, outcomes and score history. Performance data is people data:
+  // the person themself, anyone above them in the chain, the People team
+  // and Admin. Anyone else gets the same 404 as a person who does not exist.
+  const callerId = getUserId(session);
+  if (
+    userId !== callerId &&
+    !(await isPeopleTeamOrAdmin(session)) &&
+    !(await isInReportTree(callerId, userId))
+  ) {
+    return jsonError("Not found", 404);
+  }
 
   const reviews = await prisma.review.findMany({
     where: {

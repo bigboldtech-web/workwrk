@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -39,12 +40,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Create anonymous response — NO userId, IP, or device is stored, ever.
   // The row has only { sessionId, answers } (see CandorResponse model — it has
   // no user column), so a response can never be traced back to a person.
-  await prisma.candorResponse.create({
-    data: {
-      sessionId: id,
-      answers,
-    },
-  });
+  //
+  // Phase 6: WHO answered is recorded separately in CandorRespondent (one row
+  // per session and person), which replaces the browser-only "already
+  // responded" flag, stops one person answering many times, and drives the
+  // sidebar's Candor count. It carries no answer, a random (not
+  // time-ordered) id and only the DAY of the answer, so it cannot be lined
+  // up with the response row by id or by timestamp. Both rows are written in
+  // one transaction: a failed answer never marks the person as answered.
+  const day = new Date();
+  day.setUTCHours(0, 0, 0, 0);
+  try {
+    const already = await prisma.candorRespondent.findUnique({
+      where: { sessionId_userId: { sessionId: id, userId } },
+      select: { id: true },
+    });
+    if (already) return jsonError("You've already answered this session", 409);
+    await prisma.$transaction([
+      prisma.candorRespondent.create({ data: { id: randomUUID(), sessionId: id, userId, respondedAt: day } }),
+      prisma.candorResponse.create({ data: { sessionId: id, answers } }),
+    ]);
+  } catch (e) {
+    // A duplicate that raced past the check above.
+    if ((e as { code?: string })?.code === "P2002") return jsonError("You've already answered this session", 409);
+    // The table is absent for one release on a database that has not had
+    // prisma/sql/2026-09-26-phase6-people.sql yet: answer as before.
+    if ((e as { code?: string })?.code === "P2021") {
+      await prisma.candorResponse.create({ data: { sessionId: id, answers } });
+    } else {
+      throw e;
+    }
+  }
 
   return jsonSuccess({ message: "Thank you for your honest feedback!" }, 201);
 }

@@ -4,6 +4,9 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSucces
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { resolveUserIdsByTags, getUserTagIds } from "@/lib/user-tags";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { canManageSurvey } from "@/lib/people/survey-audience";
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"]);
 
@@ -18,7 +21,8 @@ export async function GET() {
     where: { id: userId },
     select: { id: true, officeId: true, departmentId: true, accessLevel: true },
   });
-  const viewerIsManager = isManager(session);
+  const viewerIsManager = await cultureOrganiserFromSession(session);
+  const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
   // The viewer's own person-tags — decides membership in a TAGS survey.
   const viewerTagIds = await getUserTagIds(orgId, userId);
 
@@ -58,7 +62,9 @@ export async function GET() {
 
   const shaped = surveys
     .map((s, i) => ({ survey: s, size: sizes[i] }))
-    .filter(({ survey }) => viewerIsManager || viewerIsInAudience(survey))
+    // A respondent sees the surveys sent to them once they are live, never
+    // a DRAFT (which is not theirs to launch, and not yet a question).
+    .filter(({ survey }) => viewerIsManager || (survey.status !== "DRAFT" && viewerIsInAudience(survey)))
     .map(({ survey: s, size }) => ({
       ...s,
       hasResponded: s.responses.length > 0,
@@ -67,6 +73,12 @@ export async function GET() {
       responseRate: size > 0 ? Math.round((s._count.responses / size) * 100) : 0,
       totalResponses: s._count.responses,
       totalUsers,
+      canManage: canManageSurvey({
+        callerId: userId,
+        createdById: s.createdById,
+        peopleTeamOrAdmin: peopleOrAdmin,
+        legacyManagerTier: isManager(session),
+      }),
     }));
 
   return jsonSuccess(shaped);
@@ -75,7 +87,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
   const body = await req.json();
@@ -146,6 +158,8 @@ export async function POST(req: NextRequest) {
       anonymous: anonymous === false ? false : true,
       closesAt: resolvedClosesAt,
       organizationId: orgId,
+      // The creator owns the survey (access-model-spec 3.3).
+      createdById: getUserId(session),
     },
   });
 

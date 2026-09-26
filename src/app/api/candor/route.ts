@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -11,7 +12,7 @@ export async function GET() {
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const userIsManager = isManager(session);
+  const userIsManager = await cultureOrganiserFromSession(session);
 
   // Get user's department
   const me = await prisma.user.findUnique({
@@ -62,7 +63,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Only managers can create Candor sessions", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Only managers, the People team and Admins can create Candor sessions", 403);
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);

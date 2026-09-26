@@ -172,8 +172,22 @@ export async function saveWeeklyReviewDraft(
   if (patch.highlights !== undefined) data.highlights = patch.highlights;
   if (patch.blockers !== undefined) data.blockers = patch.blockers;
   if (patch.plan !== undefined) data.plan = patch.plan;
-  const updated = await prisma.weeklyReview.update({ where: { id: reviewId }, data });
+  // Guarded on the status the decision starts from, so two people deciding
+  // at once cannot both win: the second finds the row already moved and
+  // gets WeeklyDecisionConflict (the route answers 409).
+  const from = decision === "REOPEN" ? ("ACKNOWLEDGED" as const) : ("SUBMITTED" as const);
+  const res = await prisma.weeklyReview.updateMany({ where: { id: reviewId, status: from }, data });
+  if (res.count === 0) throw new WeeklyDecisionConflict();
+  const updated = await prisma.weeklyReview.findUniqueOrThrow({ where: { id: reviewId } });
   return shapeFromRow(updated);
+}
+
+/** Someone else decided (or reopened) this review first. */
+export class WeeklyDecisionConflict extends Error {
+  constructor() {
+    super("Someone else decided this review a moment ago");
+    this.name = "WeeklyDecisionConflict";
+  }
 }
 
 /**
@@ -182,12 +196,21 @@ export async function saveWeeklyReviewDraft(
  * so the manager's queue shows it.
  */
 export async function submitWeeklyReview(reviewId: string): Promise<WeeklyReviewDoc> {
+  // The recorded manager is re-stamped from the person's CURRENT manager at
+  // submit (Phase 6 worst case: someone who changed manager, or who had none
+  // when the draft was created, submitted into a queue nobody reads). A
+  // person with no manager keeps whatever was recorded.
+  const row = await prisma.weeklyReview.findUnique({ where: { id: reviewId }, select: { userId: true } });
+  const person = row
+    ? await prisma.user.findUnique({ where: { id: row.userId }, select: { managerId: true } })
+    : null;
   const updated = await prisma.weeklyReview.update({
     where: { id: reviewId },
     data: {
       status: "SUBMITTED",
       submittedAt: new Date(),
       managerStatus: "PENDING",
+      ...(person?.managerId ? { managerId: person.managerId } : {}),
     },
   });
   return shapeFromRow(updated);
@@ -222,6 +245,15 @@ export async function listMyWeeklyReviews(userId: string, opts: { take?: number 
 
 export interface ManagerReviewQueueItem extends WeeklyReviewDoc {
   subject: { id: string; firstName: string; lastName: string; email: string; avatar: string | null } | null;
+}
+
+/**
+ * How many weekly reviews await `managerId`'s decision: the SAME where clause
+ * listReviewsForManager runs for the /team/reviews queue (status SUBMITTED),
+ * uncapped, so the sidebar badge and the queue can never disagree.
+ */
+export async function countReviewsAwaitingManager(managerId: string): Promise<number> {
+  return prisma.weeklyReview.count({ where: { managerId, status: "SUBMITTED" } });
 }
 
 /**
@@ -276,32 +308,37 @@ export async function getReviewForViewer(
 }
 
 /**
- * Manager action on a SUBMITTED review.
+ * A manager's decision on a weekly review (src/lib/people/weekly-decision.ts
+ * is the payload and the transition rule; the API layer is the gate).
  *
- *   action = "approve"          → managerStatus=APPROVED, status=ACKNOWLEDGED
- *   action = "request_changes"  → managerStatus=CHANGES_REQUESTED, status=ACKNOWLEDGED
+ *   APPROVED           managerStatus=APPROVED, status=ACKNOWLEDGED
+ *   CHANGES_REQUESTED  managerStatus=CHANGES_REQUESTED, status=ACKNOWLEDGED
+ *   REOPEN             managerStatus=PENDING, status=SUBMITTED (the Undo)
  *
- * Callers must already be verified as the review's manager (or have
- * org-admin override). We don't re-check ownership here; the API
- * layer is the gate.
+ * `managerId` is NOT overwritten with the actor any more. It is the recorded
+ * manager the queue and the badge are keyed on, so a skip-level decision
+ * used to move the row out of the direct manager's history and badge. The
+ * actor is recorded in the activity log by the route instead.
+ *
+ * The retired `{ action }` argument is still accepted for one release.
  */
 export async function actOnReview(
   reviewId: string,
-  args: { action: "approve" | "request_changes"; notes?: string; actorId: string },
+  args:
+    | { decision: "APPROVED" | "CHANGES_REQUESTED" | "REOPEN"; notes?: string | null; actorId: string }
+    | { action: "approve" | "request_changes"; notes?: string; actorId: string },
 ): Promise<WeeklyReviewDoc> {
-  const next = args.action === "approve" ? "APPROVED" : "CHANGES_REQUESTED";
-  const updated = await prisma.weeklyReview.update({
-    where: { id: reviewId },
-    data: {
-      managerStatus: next,
-      managerNotes: args.notes ?? null,
-      reviewedAt: new Date(),
-      status: "ACKNOWLEDGED",
-      // Preserve the actor as managerId even if the original record
-      // was assigned to a different manager — keeps audit honest when
-      // a director acts on a manager's behalf.
-      managerId: args.actorId,
-    },
-  });
+  const decision =
+    "decision" in args ? args.decision : args.action === "approve" ? "APPROVED" : "CHANGES_REQUESTED";
+  const data =
+    decision === "REOPEN"
+      ? { managerStatus: "PENDING" as const, managerNotes: null, reviewedAt: null, status: "SUBMITTED" as const }
+      : {
+          managerStatus: decision,
+          managerNotes: args.notes ?? null,
+          reviewedAt: new Date(),
+          status: "ACKNOWLEDGED" as const,
+        };
+  const updated = await prisma.weeklyReview.update({ where: { id: reviewId }, data });
   return shapeFromRow(updated);
 }

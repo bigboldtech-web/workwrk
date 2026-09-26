@@ -10,19 +10,21 @@
 // done rule (isDoneStatus + name fallback — the same rule /api/me/items
 // applies), resolved against each board's OWN status set.
 //
-// Gate mirrors the /team siblings: the central access resolver's
-// manager+ module check first, then "do you actually have reports".
+// Gate (Phase 6): the `workload` APP_RULES row, anyone with reports (solid
+// or dotted), the People team, Owner, Admin; a Member with nobody reporting
+// to them gets the sanctioned LockedPage without Request access
+// (src/lib/people/team-gate.ts). The rows are the viewer's reporting tree,
+// solid plus dotted, so a dotted-line manager who passes the gate sees the
+// people who got them in.
 // Settings persist client-side in localStorage (no View row exists at
 // workspace scope) — see team-workload-view.tsx.
 
-import { notFound, redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { GaugeCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getTeamUserIds } from "@/lib/team";
 import { getBoardForReader } from "@/lib/board";
-import { resolveAccess, meets } from "@/lib/access";
+import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { teamAppGate, WORKLOAD_LOCKED_SENTENCE } from "@/lib/people/team-gate";
 import {
   getBoardStatuses,
   isDoneStatus,
@@ -34,31 +36,23 @@ import { LockedPage } from "@/components/access";
 export const dynamic = "force-dynamic";
 
 export default async function TeamWorkloadPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
-  if (!u.id || !u.organizationId) redirect("/login");
-
-  // Central access resolver — same manager+ tier as /team/alignment.
-  const decision = await resolveAccess(
-    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
-    { type: "module", name: "team/alignment" },
+  const gate = await teamAppGate("workload", "/team/workload");
+  const locked = (
+    <LockedPage name="Workload" sentence={WORKLOAD_LOCKED_SENTENCE} back={{ fallbackHref: "/people", label: "Directory" }} />
   );
-  if (!meets(decision, "read")) notFound();
+  if (gate.status === "locked") return locked;
+  const u = gate.user;
 
-  const teamIds = await getTeamUserIds(u.organizationId, u.id);
-  // The one sanctioned app-key LockedPage (consistency-report C29): a
-  // manager-tier viewer with nobody reporting to them. No Request access,
-  // because nobody can grant a report.
-  if (teamIds.length <= 1) {
-    return (
-      <LockedPage
-        name="Workload"
-        sentence="Workload shows the capacity of the people who report to you. Nobody reports to you yet."
-        back={{ fallbackHref: "/people", label: "Directory" }}
-      />
-    );
-  }
+  // Solid tree (self included) plus direct dotted reports, the engine's own
+  // tree (src/lib/access/viewer.ts), so the grid never disagrees with the
+  // gate that let the viewer in.
+  const solid = await getTeamUserIds(u.organizationId, u.id);
+  const effective = await getEffectiveReportTree(u.id, { maxDepth: 6 });
+  const teamIds = Array.from(new Set([...solid, ...effective]));
+  // The People team or an Admin with nobody reporting to them passes the
+  // row but has no rows to show yet (their org-wide view is spec T6): the
+  // same sentence rather than an empty grid.
+  if (teamIds.length <= 1) return locked;
 
   // Readable boards (per-board visibility composed the same way the
   // Everything feed does it) — carrying each board's status set so the

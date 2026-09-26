@@ -518,3 +518,38 @@ describe("Phase 4 preference keys (spec-planner section 2, spec-talk step 10)", 
     expect(preferencesPatchSchema.safeParse({ home: { locale: { weekStart: -1 } } }).success).toBe(false);
   });
 });
+
+describe("Phase 6 people preference keys", () => {
+  const ok = (body: unknown) => preferencesPatchSchema.safeParse(body).success;
+
+  it("home.work.workload takes the five Workload settings and nothing else", () => {
+    expect(ok({ home: { work: { workload: { mode: "hours", windowDays: 28, countWeekends: true, showAllPeople: true, dailyTasks: 4 } } } })).toBe(true);
+    expect(ok({ home: { work: { workload: { windowDays: 10 } } } })).toBe(false);
+    expect(ok({ home: { work: { workload: { mode: "points" } } } })).toBe(false);
+    // Per-person hours are a column (User.weeklyCapacityHours), never a pref.
+    expect(ok({ home: { work: { workload: { perPersonHours: { u1: 20 } } } } })).toBe(false);
+  });
+
+  it("the six goals-unit Display switches parse, and a stray key in any of them is a 400", () => {
+    expect(ok({ home: { goals: { showCompleted: true, showEffort: false } } })).toBe(true);
+    expect(ok({ home: { kraKpi: { showEmptyTitles: false } } })).toBe(true);
+    expect(ok({ home: { alignment: { showKraNames: true, showDirectIcs: false } } })).toBe(true);
+    expect(ok({ home: { kpiReviews: { showDescriptions: true } } })).toBe(true);
+    expect(ok({ home: { goals: { star: true } } })).toBe(false);
+    expect(ok({ home: { alignment: { showKraNames: "yes" } } })).toBe(false);
+  });
+
+  it("sidebar.groups.goals (and the work-home myWork / favorites groups) parse", () => {
+    expect(ok({ sidebar: { groups: { goals: true } } })).toBe(true);
+    expect(ok({ sidebar: { groups: { myWork: false, favorites: true } } })).toBe(true);
+    expect(ok({ sidebar: { groups: { spaces: true } } })).toBe(false);
+  });
+
+  it("home.teams.surface takes only the seven Teams surface keys", () => {
+    expect(ok({ home: { teams: { surface: { kudos: { viewOptions: { showValueChip: false, showReactions: true } } } } } })).toBe(true);
+    expect(ok({ home: { teams: { surface: { "weekly-reviews": { viewOptions: { scope: "chain" } } } } } })).toBe(true);
+    expect(ok({ home: { teams: { surface: { reviews: { viewOptions: { columns: { progress: false } } } } } } })).toBe(true);
+    expect(ok({ home: { teams: { surface: { payroll: { viewOptions: {} } } } } })).toBe(false);
+    expect(ok({ home: { teams: { surface: { kudos: { viewOptions: { scope: "org" } } } } } })).toBe(false);
+  });
+});

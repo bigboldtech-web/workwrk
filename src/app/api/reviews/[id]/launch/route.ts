@@ -1,6 +1,8 @@
+import { canManageReviewCycle, chainOf, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { launchAudience } from "@/lib/people/review-cycle-rules";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
 
@@ -10,7 +12,6 @@ export async function POST(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
@@ -20,6 +21,10 @@ export async function POST(
     include: { reviews: true },
   });
   if (!cycle) return jsonError("Review cycle not found", 404);
+  // Phase 6: the People team and Admin, or the manager who started it.
+  if (!(await canManageReviewCycle(session, cycle))) {
+    return jsonError("Only the People team, an Admin or the manager who started this cycle can launch it", 403);
+  }
 
   // Launchable states: DRAFT (the normal path) and ACTIVE-with-no-reviews
   // (heals legacy cycles whose status was flipped before this route had a
@@ -32,14 +37,25 @@ export async function POST(
     return jsonError("Reviews already generated for this cycle. Delete existing reviews first.");
   }
 
-  // Get all active employees in the org
-  const employees = await prisma.user.findMany({
-    where: {
-      organizationId: orgId,
-      status: "ACTIVE",
-    },
-    select: { id: true, managerId: true },
+  // The active people the cycle covers (review-cycle-rules.ts): the cycle's
+  // own audience for the People team and Admin; a manager's cycle is always
+  // clipped to their chain. Removed people are never reviewed.
+  const people = await prisma.user.findMany({
+    where: { organizationId: orgId, status: "ACTIVE", deletedAt: null },
+    select: { id: true, managerId: true, departmentId: true },
   });
+  const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
+  const covered = new Set(
+    launchAudience({
+      peopleTeamOrAdmin: peopleOrAdmin,
+      audienceType: cycle.audienceType,
+      departmentIds: cycle.departmentIds,
+      userIds: cycle.userIds,
+      chainIds: peopleOrAdmin ? [] : await chainOf(getUserId(session)),
+      people,
+    }),
+  );
+  const employees = people.filter((p) => covered.has(p.id));
 
   if (employees.length === 0) {
     return jsonError("No active employees found");
@@ -68,7 +84,7 @@ export async function POST(
   const notifications = employees.map((emp) => ({
     title: "Review Cycle Started",
     message: `${cycle.name} has been launched. Please complete your self-assessment.`,
-    type: "review",
+    type: "review_open",
     link: `/reviews/${id}`,
     userId: emp.id,
   }));

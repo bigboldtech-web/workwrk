@@ -1,3 +1,4 @@
+import { orgRoleOf } from "@/lib/access/org-role";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { seedKraToRoleHolders } from "@/lib/alignment-assign";
@@ -64,11 +65,22 @@ export async function GET(req: NextRequest) {
   if (category) where.category = category;
   if (roleId) where.roleId = roleId;
 
-  const effectiveScope = isOrgWide
-    ? (requestedScope || "all")
-    : isManagerLevel
-      ? "team"
-      : "own";
+  // scope=library (Phase 6, spec-goals section 0): the KRAs & KPIs library
+  // by job title. KRA and KPI DEFINITIONS are Can view for every Member
+  // (access section 9 `kras.view`), so any Member may read every definition
+  // in the org through this scope. It carries definitions only (names,
+  // descriptions, KPI targets as defined on the job title), never a
+  // person's KPI number, which stays behind /api/kpi-records.
+  if (requestedScope === "library" && orgRoleOf({ accessLevel: callerLevel || null }) === "GUEST") {
+    return jsonError("Not found", 404);
+  }
+  const effectiveScope = requestedScope === "library"
+    ? "all"
+    : isOrgWide
+      ? (requestedScope || "all")
+      : isManagerLevel
+        ? "team"
+        : "own";
 
   if (effectiveScope !== "all") {
     const userIds =

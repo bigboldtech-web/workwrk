@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Target, Plus, TrendingUp, AlertTriangle, CheckCircle2, Trophy,
-  Building2, Users, User as UserIcon, X, Clock, Activity,
+  Building2, Users, User as UserIcon, Clock, Activity,
   ChevronRight, ChevronDown,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +40,7 @@ import { GoalRowMoreMenu } from "@/components/okrs/goal-row-more-menu";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { GOALS_VIEW_HREF, type GoalsView } from "@/lib/nav/goals-view";
 
 type OkrStatus = "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED";
 type OkrLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
@@ -187,17 +188,31 @@ function buildPersonRollups(okrs: ApiOkr[]): PersonRollup[] {
   return rollups;
 }
 
-export default function OkrsClient({ initialNew = false, mine = false, team = false, level }: {
+export default function OkrsClient({ initialNew = false, view, legacyLevel, canonicalHref, notice }: {
   /** ?new=1 — open the create modal on load (profile hero / sidebar link). */
   initialNew?: boolean;
-  /** ?mine=1 — only goals the viewer carries (owner or resolved member). */
-  mine?: boolean;
-  /** ?team=1 — a manager's report tree. */
-  team?: boolean;
-  /** ?level=company — only company-level objectives. */
-  level?: string;
+  /** The one view this URL names (src/lib/nav/goals-view.ts). */
+  view: GoalsView;
+  /** The never-printed ?level=department|individual narrowing. */
+  legacyLevel?: string;
+  /** The canon URL when this one is a retired form; replaced once on mount. */
+  canonicalHref?: string;
+  /** Access 5.5 rule 4: a requested view the viewer does not hold. */
+  notice?: string;
 }) {
+  const mine = view === "mine";
+  const team = view === "team";
+  const level = view === "company" ? "company" : view === "level" ? legacyLevel : undefined;
   const router = useRouter();
+  // One URL per view: a retired ?mine=1 / ?team=1 / ?level=company, or a
+  // stripped ?view=team, is rewritten in place once (no history entry).
+  // window.history.replaceState, not router.replace: the URL is corrected
+  // in place without re-rendering the server page, so the notice line the
+  // server decided stays until the viewer's next navigation (Next.js syncs
+  // native history calls with useSearchParams).
+  useEffect(() => {
+    if (canonicalHref && typeof window !== "undefined") window.history.replaceState(null, "", canonicalHref);
+  }, [canonicalHref]);
   const [okrs, setOkrs] = useState<ApiOkr[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // "Need attention" stat card toggles this — narrows the grid to at-risk /
@@ -255,7 +270,7 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
     setCreating(null);
     if (fromQuery) {
       setFromQuery(false);
-      router.replace(mine ? "/okrs?mine=1" : "/okrs", { scroll: false });
+      router.replace(team ? GOALS_VIEW_HREF.team : view === "company" ? GOALS_VIEW_HREF.company : GOALS_VIEW_HREF.mine, { scroll: false });
     }
   }
 
@@ -314,6 +329,9 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
         primary={{ label: "New goal", onClick: () => newGoal("INDIVIDUAL"), disabled: creating !== null }}
       />
 
+      {/* Access 5.5 rule 4: one 13/400 notice line under the header when a
+          requested view was not the viewer's (it cleared on the rewrite). */}
+      {notice ? <p className="px-6 pb-2 text-sm text-ink-2">{notice}</p> : null}
       {loadError ? (
         <OsEmptyView variant="error" title="Couldn't load goals" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { setLoadError(null); void load(); } }} />
       ) : okrs === null ? (
@@ -326,14 +344,6 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
         )
       ) : (
         <div className="okrs">
-          {mine && (
-            <div className="okrs__filter">
-              <span className="okrs__filter-chip">
-                <Trophy /> My Goals — owner or member
-                <Link href="/okrs" aria-label="Show all goals" title="Show all goals"><X /></Link>
-              </span>
-            </div>
-          )}
 
           {/* Stats strip */}
           <section className="okrs__stats">

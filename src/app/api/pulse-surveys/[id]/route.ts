@@ -3,6 +3,9 @@ import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { resolveUserIdsByTags, getUserTagIds } from "@/lib/user-tags";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { canManageSurvey, surveyQuestionsLocked } from "@/lib/people/survey-audience";
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"]);
 const STATUSES = new Set(["DRAFT", "ACTIVE", "CLOSED"]);
@@ -34,7 +37,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: { id: userId },
     select: { officeId: true, departmentId: true },
   });
-  const manager = isManager(session);
+  const manager = await cultureOrganiserFromSession(session);
   const viewerTagIds = survey.audienceType === "TAGS" ? await getUserTagIds(orgId, userId) : [];
 
   const inAudience =
@@ -84,7 +87,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       closedAt: survey.closedAt,
       createdAt: survey.createdAt,
     },
-    viewer: { inAudience, isManager: manager, hasResponded: !!myResponse },
+    viewer: {
+      inAudience,
+      isManager: manager,
+      hasResponded: !!myResponse,
+      canManage: manager && canManageSurvey({
+        callerId: userId,
+        createdById: survey.createdById,
+        peopleTeamOrAdmin: await isPeopleTeamOrAdmin(session),
+        legacyManagerTier: isManager(session),
+      }),
+      questionsLocked: surveyQuestionsLocked(totalResponses),
+    },
     myAnswers: myResponse ? myResponse.answers : null,
     stats: {
       audienceSize,
@@ -97,16 +111,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
   const { id } = await params;
 
   const existing = await prisma.pulseSurvey.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true },
+    select: { id: true, createdById: true, questions: true, _count: { select: { responses: true } } },
   });
   if (!existing) return jsonError("Survey not found", 404);
+  const mayManage = canManageSurvey({
+    callerId: getUserId(session),
+    createdById: existing.createdById,
+    peopleTeamOrAdmin: await isPeopleTeamOrAdmin(session),
+    legacyManagerTier: isManager(session),
+  });
+  if (!mayManage) return jsonError("Only the person who made this survey, the People team or an Admin can change it", 403);
 
   const body = await req.json();
   const data: Prisma.PulseSurveyUpdateInput = {};
@@ -120,7 +141,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return typeof text === "string" && text.trim().length > 0;
     });
     if (cleaned.length === 0) return jsonError("At least one question is required");
-    data.questions = cleaned as Prisma.InputJsonValue;
+    const changed = JSON.stringify(cleaned) !== JSON.stringify(existing.questions);
+    // The editor sends the questions with every save; an unchanged set is
+    // not an edit, so a title or close-date change still saves.
+    if (changed && surveyQuestionsLocked(existing._count.responses)) {
+      return jsonError("People have already answered this survey, so its questions can no longer change", 409);
+    }
+    if (changed) data.questions = cleaned as Prisma.InputJsonValue;
   }
 
   if (typeof body.frequency === "string" || body.frequency === null) {

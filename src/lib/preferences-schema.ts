@@ -105,6 +105,17 @@ export const sidebarPatchSchema = z.strictObject({
   // collapsed: "absent means collapsed" and "absent means expanded" cannot
   // both be true of one list.
   docsFilesOpen: z.boolean().optional(),
+  // Collapsible sidebar GROUP rows (spec-work-home section 1 names the
+  // namespace for `myWork` and `favorites`; spec-goals section 1 adds
+  // `goals`). `true` = expanded. Strict: a group this file does not name is
+  // a 400 rather than a key nobody reads.
+  groups: z
+    .strictObject({
+      goals: z.boolean().optional(),
+      myWork: z.boolean().optional(),
+      favorites: z.boolean().optional(),
+    })
+    .optional(),
   // ORG-ONLY: the rail config lives on OrgPreference.sidebarDefault.apps and
   // getEffectivePreferences re-stamps it from the org row. Accepted here so
   // a typed client body that carries it is not a 400, then DROPPED by the
@@ -320,6 +331,80 @@ export const workPatchSchema = z.strictObject({
   itemFields: z.record(z.string(), stringList).optional(),
   /** Task drawer width in pixels; the design system clamps it to 480..720. */
   drawerWidth: z.number().int().min(480).max(720).optional(),
+  /**
+   * /team/workload settings (spec-teams-people section 2 `/team/workload`
+   * Data). Replaces localStorage["workwrk:team-workload:v1"]. Per-person
+   * weekly hours are NOT here: they are User.weeklyCapacityHours, the one
+   * column the Members drawer, the person record and the Capacity modal all
+   * write.
+   */
+  workload: z
+    .strictObject({
+      mode: z.enum(["tasks", "hours"]).optional(),
+      windowDays: z.union([z.literal(7), z.literal(14), z.literal(28)]).optional(),
+      countWeekends: z.boolean().optional(),
+      showAllPeople: z.boolean().optional(),
+      dailyTasks: z.number().int().min(1).max(50).optional(),
+    })
+    .optional(),
+});
+
+// ── Phase 6 people surfaces ───────────────────────────────────────
+//
+// spec-goals section 4 "Where these seven live": surface options, written by
+// the Display menu of the surface they change and read per field with the
+// default in src/lib/people-prefs.ts. They get no rows in My settings.
+
+export const goalsSurfaceSchema = z.strictObject({
+  /** /okrs Display: Show completed goals. Default off. */
+  showCompleted: z.boolean().optional(),
+  /** /okrs Team goals Display: Show effort. Default on. */
+  showEffort: z.boolean().optional(),
+});
+
+export const kraKpiSurfaceSchema = z.strictObject({
+  /** /kra-kpi Display: Show job titles with no KRAs. Default on. */
+  showEmptyTitles: z.boolean().optional(),
+});
+
+export const alignmentSurfaceSchema = z.strictObject({
+  /** /team/alignment Display: Show KRA names. Default off. */
+  showKraNames: z.boolean().optional(),
+  /** /team/rollup Display: Include direct reports without a team. Default on. */
+  showDirectIcs: z.boolean().optional(),
+});
+
+export const kpiReviewsSurfaceSchema = z.strictObject({
+  /** /team/kpi-reviews Display: Show KPI descriptions. Default off. */
+  showDescriptions: z.boolean().optional(),
+});
+
+/**
+ * The Teams performance surfaces' Display menus (spec-teams-performance
+ * section 1 "Where a visible option is stored"): which columns a table
+ * shows, the two /kudos switches, and the weekly queue's remembered scope.
+ */
+export const TEAMS_SURFACE_KEYS = [
+  "reviews",
+  "review-cycle",
+  "weekly-reviews",
+  "talent",
+  "candor",
+  "kudos",
+  "surveys",
+] as const;
+
+const teamsViewOptionsSchema = z.strictObject({
+  columns: boolRecord.optional(),
+  showValueChip: z.boolean().optional(),
+  showReactions: z.boolean().optional(),
+  scope: z.enum(["direct", "chain"]).optional(),
+});
+
+export const teamsSurfaceSchema = z.strictObject({
+  surface: z
+    .partialRecord(z.enum(TEAMS_SURFACE_KEYS), z.strictObject({ viewOptions: teamsViewOptionsSchema.optional() }))
+    .optional(),
 });
 
 // ── Planner and Timesheets display options (Phase 4) ──────────────
@@ -424,6 +509,13 @@ export const homePatchSchema = z.strictObject({
   // Tables hub surfaces (spec-tables-forms section 2, Phase 5).
   tables: tablesSurfaceSchema.optional(),
   forms: formsSurfaceSchema.optional(),
+  // Phase 6 people surfaces (spec-goals section 4, spec-teams-performance
+  // section 1).
+  goals: goalsSurfaceSchema.optional(),
+  kraKpi: kraKpiSurfaceSchema.optional(),
+  alignment: alignmentSurfaceSchema.optional(),
+  kpiReviews: kpiReviewsSurfaceSchema.optional(),
+  teams: teamsSurfaceSchema.optional(),
 });
 
 // ── theme, density ────────────────────────────────────────────────

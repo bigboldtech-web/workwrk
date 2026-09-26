@@ -294,7 +294,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/team/kpi-reviews": "KPI reviews",
   "/team/rollup": "Sub-teams",
   "/team/workload": "Workload",
-  "/kra-kpi/review": "KPI reviews",
   "/sops/new": "New SOP",
   "/sops/my-sops": "My SOPs",
   "/sops/compliance": "SOP compliance",
@@ -438,12 +437,26 @@ export function resolveCrumbFallback(pathname: string): string | null {
  * path no row owns gives `[]`, and the bar shows the hub alone. Pure, so the
  * top bar and a test read the same answer.
  */
+/**
+ * Phase 6: two corrections to "every ancestor directory is a crumb".
+ *   - /team is My team, a SIBLING row of the /team/* pages in the Teams
+ *     sidebar, not their parent: "Teams › Alignment", never
+ *     "Teams › My team › Alignment" (spec-goals section 2).
+ *   - /team/rollup is the Sub-teams VIEW of Alignment, so its trail is
+ *     "Teams › Alignment › Sub-teams".
+ */
+const CRUMB_NOT_AN_ANCESTOR: ReadonlySet<string> = new Set(["/team"]);
+const CRUMB_EXTRA_PARENT: Readonly<Record<string, string>> = { "/team/rollup": "/team/alignment" };
+
 export function resolveCrumbTrail(pathname: string): { label: string; href?: string }[] {
   if (!resolveHubPrefix(pathname)) return [];
   const path = normalisePath(pathname);
-  const owned = ROUTE_TITLE_PREFIXES.filter((prefix) => prefixMatches(path, prefix)).sort(
-    (a, b) => a.length - b.length,
-  );
+  const owned = ROUTE_TITLE_PREFIXES.filter(
+    (prefix) => prefixMatches(path, prefix) && !(CRUMB_NOT_AN_ANCESTOR.has(prefix) && prefix !== path),
+  ).sort((a, b) => a.length - b.length);
+  const deepest = owned[owned.length - 1];
+  const extra = deepest ? CRUMB_EXTRA_PARENT[deepest] : undefined;
+  if (extra && ROUTE_TITLES[extra] && !owned.includes(extra)) owned.splice(owned.length - 1, 0, extra);
   return owned.map((prefix, i) =>
     i === owned.length - 1 ? { label: ROUTE_TITLES[prefix] } : { label: ROUTE_TITLES[prefix], href: prefix },
   );

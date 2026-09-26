@@ -135,7 +135,13 @@ type SubjectState = {
   draft: Map<string, { actual?: string; notes?: string }>; // pending edits
 };
 
-export default function ReviewPage() {
+/**
+ * Record KPI numbers on behalf of the people who report to you. Mounted as
+ * the "Record numbers" view of /team/kpi-reviews (the old /kra-kpi/review
+ * URL 308s there, spec-goals section 0). `embedded` drops the page header,
+ * which the host page owns.
+ */
+export default function ReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [reports, setReports] = useState<ApiUser[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [subjectMap, setSubjectMap] = useState<Map<string, SubjectState>>(new Map());
@@ -166,10 +172,14 @@ export default function ReviewPage() {
       const myId = me?.user?.id;
       if (!myId) throw new Error("Couldn't resolve current user");
 
-      const res = await fetch(`/api/users?managerId=${encodeURIComponent(myId)}&limit=100`);
+      // The viewer's reporting tree (GET /api/users ignores ?managerId=, so
+      // the old read listed the viewer themself and, for org-wide levels,
+      // the first hundred people in the org). scope=team is the same solid
+      // tree POST /api/kpi-records gates on; the viewer is filtered out.
+      const res = await fetch(`/api/users?scope=team&limit=500`);
       if (!res.ok) throw new Error(`users ${res.status}`);
       const data = await res.json();
-      const list: ApiUser[] = data?.data?.items ?? data?.data ?? [];
+      const list: ApiUser[] = (data?.data?.items ?? data?.data ?? []).filter((u: ApiUser) => u.id !== myId);
       setReports(list);
       setSelectedId((cur) => cur ?? list[0]?.id ?? null);
     } catch (e) {
@@ -196,7 +206,7 @@ export default function ReviewPage() {
       const kraIds = Array.from(new Set(assignments.map((a) => a.kraId)));
       let kraMap = new Map<string, ApiKra>();
       if (kraIds.length > 0) {
-        const krasRes = await fetch("/api/kras?limit=200");
+        const krasRes = await fetch("/api/kras?limit=500&scope=library");
         if (krasRes.ok) {
           const k = await krasRes.json();
           const kraList: ApiKra[] = k?.data?.items ?? k?.data ?? [];
@@ -221,7 +231,10 @@ export default function ReviewPage() {
         }
       }
 
-      const records: ApiRecord[] = rJson?.data?.records ?? rJson?.data ?? [];
+      // GET /api/kpi-records answers { records, total, ... } at the TOP level
+      // (jsonSuccess does not wrap). Reading data.records kept every
+      // existing actual invisible and every status dot at "not started".
+      const records: ApiRecord[] = rJson?.records ?? rJson?.data?.records ?? (Array.isArray(rJson?.data) ? rJson.data : []);
       const recordMap = new Map(records.filter((r) => r.period === period$).map((r) => [r.kpiId, r]));
 
       const user = (reports ?? []).find((u) => u.id === userId);
@@ -265,6 +278,10 @@ export default function ReviewPage() {
     if (!subject || !selectedId) return;
     setBusy(true);
     let saved = 0;
+    // DATA INTEGRITY: a row is only "saved" on a 2xx, and only saved rows
+    // leave the draft. The old loop counted every POST as saved and cleared
+    // the whole draft, so a 403 or a 500 silently threw the typing away.
+    const failed = new Map<string, { actual?: string; notes?: string }>();
     try {
       for (const [kpiId, patch] of subject.draft.entries()) {
         const existing = subject.records.get(kpiId);
@@ -273,18 +290,30 @@ export default function ReviewPage() {
           ? existing?.actualValue ?? null
           : parseFloat(patch.actual);
         const managerNotes = patch.notes ?? existing?.managerNotes ?? "";
-        await fetch("/api/kpi-records", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kpiId, userId: selectedId, period: period$,
-            targetValue: target, actualValue, managerNotes,
-          }),
-        });
-        saved += 1;
+        let ok = false;
+        try {
+          const res = await fetch("/api/kpi-records", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            keepalive: true,
+            body: JSON.stringify({
+              kpiId, userId: selectedId, period: period$,
+              targetValue: target, actualValue, managerNotes,
+            }),
+          });
+          ok = res.ok;
+        } catch {
+          ok = false;
+        }
+        if (ok) saved += 1;
+        else failed.set(kpiId, patch);
       }
-      toast(`Saved ${saved} update${saved === 1 ? "" : "s"} for ${monthLbl}`);
-      // Saved server-side — drop the local draft so it isn't re-restored.
-      persistDraft(selectedId, period$, new Map());
+      if (failed.size > 0) {
+        toast(`Not saved: ${failed.size} number${failed.size === 1 ? "" : "s"}. Your typing is kept; try Save again.`);
+      } else {
+        toast(`Saved ${saved} update${saved === 1 ? "" : "s"} for ${monthLbl}`);
+      }
+      // Only what reached the server leaves the local draft.
+      persistDraft(selectedId, period$, failed);
       // Force reload of this subject for the period
       setSubjectMap((prev) => {
         const n = new Map(prev);
@@ -314,18 +343,27 @@ export default function ReviewPage() {
 
   return (
     <>
-      <OsPageHeader
-        title="KPI reviews"
-        actions={
-          <div className="krar__head-actions">
-            <Link href="/kra-kpi" className="os-head__link"><Target /> KRA library</Link>
-            <div className="krar__period krar__period--static" title="Readings record against the current month; review as often as you like.">
-              <Calendar />
-              <span>{monthLbl}</span>
-            </div>
+      {embedded ? (
+        <div className="krar__head-actions mb-3">
+          <div className="krar__period krar__period--static" title="Readings record against the current month; review as often as you like.">
+            <Calendar />
+            <span>{monthLbl}</span>
           </div>
-        }
-      />
+        </div>
+      ) : (
+        <OsPageHeader
+          title="KPI reviews"
+          actions={
+            <div className="krar__head-actions">
+              <Link href="/kra-kpi" className="os-head__link"><Target /> KRA library</Link>
+              <div className="krar__period krar__period--static" title="Readings record against the current month; review as often as you like.">
+                <Calendar />
+                <span>{monthLbl}</span>
+              </div>
+            </div>
+          }
+        />
+      )}
       <div className="review">
 
       {loadError ? (

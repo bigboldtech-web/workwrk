@@ -1,8 +1,8 @@
+import { canManageReviewCycle, chainOf, isPeopleTeamOrAdmin, mayStartReviewCycles } from "@/lib/people/review-cycle-access";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isHrAdminLevel } from "@/lib/alignment-scope";
-import { getTeamUserIds } from "@/lib/team";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { logActivity } from "@/lib/activity";
 import type { Prisma, CycleStatus } from "@/generated/prisma";
@@ -22,17 +22,19 @@ export async function GET(req: NextRequest) {
   }
 
   // A review's scores/outcomes are between the subject, their reporting
-  // line and HR — never org-public. Below hr-admin, cycles keep their
-  // shells (names + counts render) but the review rows are filtered to
-  // ones the caller is IN: their own, ones they review, and (for
-  // managers) their report tree's.
+  // line and HR, never org-public. Below the People team and Admin, the
+  // review rows are filtered to ones the caller is IN: their own, ones they
+  // review, and their reporting chain's (solid plus dotted, whatever their
+  // access level). And the CYCLES themselves are filtered the same way: a
+  // cycle that touches none of those rows is not discoverable, the same
+  // answer as the /reviews/[id] page's 404, except to the person who
+  // started it (a Draft has no rows yet).
   let reviewsWhere: Prisma.ReviewWhereInput | undefined;
-  if (!isHrAdminLevel(session)) {
+  if (!isHrAdminLevel(session) && !(await isPeopleTeamOrAdmin(session))) {
     const callerId = getUserId(session);
-    const subjectIds = isManager(session)
-      ? await getTeamUserIds(getOrgId(session), callerId)
-      : [callerId];
+    const subjectIds = [callerId, ...(await chainOf(callerId))];
     reviewsWhere = { OR: [{ subjectId: { in: subjectIds } }, { reviewerId: callerId }] };
+    where.AND = [{ OR: [{ reviews: { some: reviewsWhere } }, { createdById: callerId }] }];
   }
 
   const [cycles, total] = await Promise.all([
@@ -64,10 +66,12 @@ export async function GET(req: NextRequest) {
   return jsonSuccess(paginatedResult(cycles, total, pagination));
 }
 
+const CYCLE_STATUSES: ReadonlySet<string> = new Set(["DRAFT", "ACTIVE", "IN_CALIBRATION", "COMPLETED", "CANCELLED"]);
+
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await mayStartReviewCycles(session))) return jsonError("Forbidden", 403);
 
   const body = await req.json();
   const { name, type, startDate, endDate } = body;
@@ -76,6 +80,10 @@ export async function POST(req: NextRequest) {
     return jsonError("Name, type, start date and end date are required");
   }
 
+  // Phase 6: the cycle records who started it. A manager's cycle covers
+  // their chain (review-cycle-rules.ts launchAudience clips it at launch);
+  // the People team and Admin start org cycles.
+  const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
   const cycle = await prisma.reviewCycle.create({
     data: {
       name,
@@ -83,6 +91,8 @@ export async function POST(req: NextRequest) {
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       organizationId: getOrgId(session),
+      createdById: getUserId(session),
+      ...(peopleOrAdmin ? {} : { audienceType: "USERS", userIds: await chainOf(getUserId(session)) }),
     },
   });
 
@@ -102,7 +112,6 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
   const { id, name, type, startDate, endDate, status } = body;
@@ -113,6 +122,11 @@ export async function PATCH(req: NextRequest) {
     where: { id, organizationId: getOrgId(session) },
   });
   if (!existing) return jsonError("Review cycle not found", 404);
+  // Phase 6: the People team and Admin, or the manager who started it.
+  if (!(await canManageReviewCycle(session, existing))) {
+    return jsonError("Only the People team, an Admin or the manager who started this cycle can change it", 403);
+  }
+  if (status !== undefined && !CYCLE_STATUSES.has(status)) return jsonError("Unknown status", 400);
 
   // A cycle only leaves DRAFT through POST /api/reviews/[id]/launch — the
   // sole creator of per-person Review rows. Flipping status directly used
@@ -168,7 +182,6 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -178,8 +191,21 @@ export async function DELETE(req: NextRequest) {
     where: { id, organizationId: getOrgId(session) },
   });
   if (!existing) return jsonError("Review cycle not found", 404);
+  // Deleting a cycle deletes every review in it: the People team and Admin
+  // only, never the manager who started it (Cancel is theirs).
+  if (!(await isPeopleTeamOrAdmin(session))) {
+    return jsonError("Only the People team or an Admin can delete a review cycle", 403);
+  }
 
   await prisma.reviewCycle.delete({ where: { id } });
+  logActivity({
+    type: "review_cycle.delete",
+    actorId: getUserId(session),
+    organizationId: getOrgId(session),
+    description: `Deleted review cycle: ${existing.name}`,
+    targetId: existing.id,
+    targetType: "ReviewCycle",
+  });
 
   return jsonSuccess({ message: "Review cycle deleted" });
 }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import bcrypt from "bcryptjs";
+import { grantableAccessLevel } from "@/lib/people/grantable-level";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -11,6 +12,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const actorId = getUserId(session);
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel;
   const body = await req.json();
   const { rows, dryRun } = body;
 
@@ -46,6 +48,12 @@ export async function POST(req: NextRequest) {
     if (seenEmails.has(email)) { errors.push({ row: rowNum, field: "email", message: "Duplicate email in import" }); continue; }
     seenEmails.add(email);
 
+    // Never take the level from the file on trust (grantable-level.ts): a
+    // row asking for a level the importer cannot give is an error the dry
+    // run shows, never a silent downgrade and never an escalation.
+    const level = grantableAccessLevel(callerLevel, row.accessLevel);
+    if (!level) { errors.push({ row: rowNum, field: "accessLevel", message: "You can't give that access level" }); continue; }
+
     const deptId = row.department ? deptMap.get(row.department.trim().toLowerCase()) : undefined;
     const roleId = row.role ? roleMap.get(row.role.trim().toLowerCase()) : undefined;
 
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
       passwordHash,
       departmentId: deptId || null,
       roleId: roleId || null,
-      accessLevel: row.accessLevel || "EMPLOYEE",
+      accessLevel: level,
       organizationId: orgId,
     });
   }

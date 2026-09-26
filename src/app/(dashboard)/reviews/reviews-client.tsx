@@ -36,6 +36,8 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NewReviewCycleDialog } from "./new-review-dialog";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { useRole } from "@/hooks/use-role";
 
 type CycleStatus = "DRAFT" | "ACTIVE" | "IN_CALIBRATION" | "COMPLETED" | "CANCELLED";
 
@@ -48,6 +50,8 @@ type ApiCycle = {
   endDate: string;
   reviews?: { id: string; status: string }[];
   _count?: { reviews?: number };
+  /** Phase 6: who started it (null for cycles made before it was recorded). */
+  createdById?: string | null;
 };
 
 const STATUS_LABELS: Record<CycleStatus, string> = {
@@ -97,14 +101,27 @@ export default function ReviewsPage() {
   // the param still in the URL re-opened the dialog).
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Phase 6: the page opens to anyone with reports, the People team and
+  // Admin. Starting a cycle asks POST /api/reviews's manager tier as well;
+  // launching, moving and finalizing one is the People team's, Admin's, or
+  // the manager's who started it (review-cycle-rules.ts), so no control
+  // renders for a cycle the viewer cannot change.
+  const { boot } = useBoot();
+  const { isManager: legacyManagerTier } = useRole();
+  const peopleOrAdmin = boot.viewer.peopleTeam || boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
+  const canCreate = peopleOrAdmin || (boot.viewer.hasReports && legacyManagerTier);
+  const canManage = useCallback(
+    (c: ApiCycle) => peopleOrAdmin || (!!c.createdById && c.createdById === boot.viewer.id),
+    [peopleOrAdmin, boot.viewer.id],
+  );
   const newArmed = useRef(true);
   useEffect(() => {
     if (searchParams.get("new") !== "1") { newArmed.current = true; return; }
     if (!newArmed.current) return;
     newArmed.current = false;
     router.replace("/reviews", { scroll: false });
-    setNewOpen(true);
-  }, [searchParams, router]);
+    if (canCreate) setNewOpen(true);
+  }, [searchParams, router, canCreate]);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -131,7 +148,7 @@ export default function ReviewsPage() {
         body: JSON.stringify({ id, ...body }),
       });
       if (!res.ok) {
-        if (res.status === 403) toast("Only HR can move review cycles");
+        if (res.status === 403) toast("Only the People team, an Admin or the manager who started this cycle can move it");
         else {
           const data = await res.json().catch(() => null);
           toast(data?.error || "Couldn't update");
@@ -210,7 +227,7 @@ export default function ReviewsPage() {
             <Link href="/talent" className="os-head__link"><Users /> Talent</Link>
           </div>
         }
-        primary={{ label: "New cycle", onClick: () => setNewOpen(true) }}
+        primary={canCreate ? { label: "New cycle", onClick: () => setNewOpen(true) } : undefined}
       />
 
       <div className="rvw">
@@ -223,11 +240,11 @@ export default function ReviewsPage() {
             context="goals"
             title="No review cycles yet"
             hint="Plan a review cycle: pulse, quarterly, annual, probation or PIP."
-            action={{ label: "New cycle", onClick: () => setNewOpen(true) }}
+            action={canCreate ? { label: "New cycle", onClick: () => setNewOpen(true) } : undefined}
           />
         ) : (
           <>
-            <FeaturedCycle cycle={featured} onAdvance={patch} onLaunch={launch} />
+            <FeaturedCycle cycle={featured} onAdvance={patch} onLaunch={launch} canManage={canManage(featured)} />
 
             <div className="rvw__kpis">
               <KpiTile accent="var(--os-c-orange)" Icon={Activity}      label="Active"     value={`${stats.activeCount}`}                                  sub={`${stats.byStatus.IN_CALIBRATION} in calibration`} />
@@ -259,7 +276,7 @@ export default function ReviewsPage() {
               </div>
             ) : (
               <div className="rvw__list">
-                {filtered.map((c) => <CycleRow key={c.id} cycle={c} onLaunch={launch} />)}
+                {filtered.map((c) => <CycleRow key={c.id} cycle={c} onLaunch={launch} canManage={canManage(c)} />)}
               </div>
             )}
           </>
@@ -276,8 +293,9 @@ export default function ReviewsPage() {
   );
 }
 
-function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
+function FeaturedCycle({ cycle: c, onAdvance, onLaunch, canManage }: {
   cycle: ApiCycle;
+  canManage: boolean;
   onAdvance: (id: string, body: Record<string, unknown>) => Promise<boolean>;
   onLaunch: (id: string) => Promise<boolean>;
 }) {
@@ -328,7 +346,7 @@ function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
         </div>
 
         <div className="rvw__hero-actions">
-          {c.status === "DRAFT" && (
+          {canManage && c.status === "DRAFT" && (
             <button
               type="button"
               className="rvw__hero-advance"
@@ -341,7 +359,7 @@ function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
               <Rocket /> {launching ? "Launching…" : "Launch cycle"}
             </button>
           )}
-          {next && (
+          {canManage && next && (
             <button type="button" className="rvw__hero-advance" onClick={() => onAdvance(c.id, { status: next })}>
               <ChevronRight /> Move to {STATUS_LABELS[next]}
             </button>
@@ -380,7 +398,7 @@ function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
   );
 }
 
-function CycleRow({ cycle: c, onLaunch }: { cycle: ApiCycle; onLaunch: (id: string) => Promise<boolean> }) {
+function CycleRow({ cycle: c, onLaunch, canManage }: { cycle: ApiCycle; onLaunch: (id: string) => Promise<boolean>; canManage: boolean }) {
   const [launching, setLaunching] = useState(false);
   const statusColor = STATUS_COLORS[c.status];
   const typeColor = TYPE_COLORS[c.type] ?? C.gray;
@@ -412,7 +430,7 @@ function CycleRow({ cycle: c, onLaunch }: { cycle: ApiCycle; onLaunch: (id: stri
           <div className="rvw__row-bar-fill" style={{ width: `${progress}%`, background: statusColor }} />
         </div>
       </div>
-      {c.status === "DRAFT" && (
+      {canManage && c.status === "DRAFT" && (
         <button
           type="button"
           className="rvw__hero-advance"

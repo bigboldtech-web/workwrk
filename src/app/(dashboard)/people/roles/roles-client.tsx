@@ -27,6 +27,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt, useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useRole } from "@/hooks/use-role";
 
 // Every AccessLevel the schema knows today, plus "OTHER" — a safe bucket
 // for levels a future migration adds before this page learns about them.
@@ -87,6 +88,11 @@ export default function RolesPage() {
   const { toast } = useOsToast();
   const promptDialog = usePrompt();
   const router = useRouter();
+  // Phase 6: every Member reads Job titles. The create and delete controls
+  // render only for the viewer POST and DELETE /api/roles admit (the manager
+  // tier today), never as a button that 403s.
+  // The legacy client helper's manager tier, the one POST/DELETE ask today.
+  const { isManager: canEdit } = useRole();
 
   const load = useCallback(async () => {
     try {
@@ -162,12 +168,12 @@ export default function RolesPage() {
   const searchParams = useSearchParams();
   const didAutoAdd = useRef(false);
   useEffect(() => {
-    if (!didAutoAdd.current && searchParams.get("new") === "1") {
+    if (!didAutoAdd.current && searchParams.get("new") === "1" && canEdit) {
       didAutoAdd.current = true;
       void quickAdd();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, canEdit]);
 
   // ─── Filter + group ──────────────────────────────────────
   const filtered = useMemo(() => {
@@ -224,13 +230,13 @@ export default function RolesPage() {
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
           <Link href="/team" className="hover:text-zinc-900">Teams</Link>
           <span className="text-zinc-300">/</span>
-          <span>Roles</span>
+          <span>Job titles</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
             <Briefcase className="h-5 w-5 text-[#0073EA]" />
           </span>
-          <h1 className="text-base font-semibold text-zinc-900">Roles</h1>
+          <h1 className="text-base font-semibold text-zinc-900">Job titles</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">
             {roles === null
               ? "loading…"
@@ -246,9 +252,11 @@ export default function RolesPage() {
           <Link href="/people/skills" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <GraduationCap className="w-3.5 h-3.5 text-zinc-400" /> Skills
           </Link>
-          <button type="button" onClick={quickAdd} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060c2]">
-            <Plus className="w-3.5 h-3.5" /> New role
-          </button>
+          {canEdit ? (
+            <button type="button" onClick={quickAdd} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060c2]">
+              <Plus className="w-3.5 h-3.5" /> New job title
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -315,7 +323,8 @@ export default function RolesPage() {
           <OsEmptyView
             context="list"
             title="No roles defined yet"
-            hint="Job titles carry the access level their holders get."
+            hint={canEdit ? "Add the job titles people hold. A job title carries its KRAs, KPIs and SOPs; access is set per person in Members." : "Nobody has added job titles yet."}
+            action={canEdit ? { label: "New job title", onClick: () => { void quickAdd(); } } : undefined}
           />
         ) : grouped.length === 0 ? (
           <div className="rls__empty">
@@ -340,7 +349,7 @@ export default function RolesPage() {
                 <span className="rls__group-line" />
               </header>
               <div className="rls__grid">
-                {g.items.map((r) => <RoleCard key={r.id} role={r} onDelete={() => void deleteRole(r)} />)}
+                {g.items.map((r) => <RoleCard key={r.id} role={r} onDelete={canEdit ? () => void deleteRole(r) : undefined} />)}
               </div>
             </section>
           ))
@@ -350,7 +359,7 @@ export default function RolesPage() {
   );
 }
 
-function RoleCard({ role: r, onDelete }: { role: ApiRole; onDelete: () => void }) {
+function RoleCard({ role: r, onDelete }: { role: ApiRole; onDelete?: () => void }) {
   const count = r._count?.users ?? 0;
   const isUnfilled = count === 0;
   const level = normalizeLevel(r.level);
@@ -360,15 +369,17 @@ function RoleCard({ role: r, onDelete }: { role: ApiRole; onDelete: () => void }
       <header className="rls__card-head">
         <h3 className="rls__card-title">{r.title}</h3>
         <span className="inline-flex items-center gap-1">
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
-            title={count > 0 ? "Reassign holders first, then delete" : "Delete role"}
-            aria-label={`Delete role ${r.title}`}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-300 hover:bg-red-50 hover:text-red-500"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+              title={count > 0 ? "Reassign holders first, then delete" : "Delete job title"}
+              aria-label={`Delete job title ${r.title}`}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-300 hover:bg-red-50 hover:text-red-500"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           <span className={`rls__card-count${isUnfilled ? " is-zero" : ""}`}>
             <Users /> {count}
           </span>

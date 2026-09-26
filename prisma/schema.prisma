@@ -505,6 +505,22 @@ model User {
   manager       User?   @relation("ManagerReports", fields: [managerId], references: [id])
   directReports User[]  @relation("ManagerReports")
 
+  // Phase 6 (prisma/sql/2026-09-26-phase6-people.sql). All nullable, all
+  // additive; every reader treats null as "not set" and falls back.
+  //   weeklyCapacityHours: the person's own weekly hours for Workload (null =
+  //     the org schedule, WorkSchedule.hoursPerDay x workdays).
+  //   presenceStatus / presenceUntil: the avatar dot and Do not disturb
+  //     ("active" | "away" | "meeting" | "dnd" | "ooo"); null draws no dot.
+  //   workSchedule: a per-person override of the org WorkSchedule,
+  //     { workdays: number[], hoursPerDay: number }, null = the org's.
+  //   customFields: values of the org's custom profile fields, keyed by the
+  //     field key defined in Organization.settings.people.profileFields.
+  weeklyCapacityHours Float?
+  presenceStatus      String?
+  presenceUntil       DateTime?
+  workSchedule        Json?
+  customFields        Json?
+
   skills                  UserSkill[]
   certifications          Certification[]
   kraAssignments          KRAAssignment[]
@@ -1023,6 +1039,10 @@ model Threshold {
   value             Float
   unit              String?
   businessHoursOnly Boolean      @default(true)
+  // Phase 6: who the escalation goes to (spec-teams-people T9). Null = the
+  // holder's manager. Nothing enforces a threshold yet; the reader is a
+  // report only (scripts/report-escalation-thresholds.ts).
+  escalatedToId     String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -1204,6 +1224,9 @@ model KPIRecord {
   managerNotes String?
   evidence     String?
   status       KPIRecordStatus @default(PENDING)
+  // Phase 6: the manager who recorded or approved this number (spec-goals
+  // section 4). Null for employee-recorded rows awaiting approval.
+  reviewedById String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
@@ -1746,6 +1769,13 @@ model ReviewCycle {
   startDate      DateTime
   endDate        DateTime
   status         CycleStatus  @default(DRAFT)
+  // Phase 6 (spec-teams-performance section 4). Who started the cycle and
+  // who it covers: ALL, DEPARTMENTS (departmentIds) or USERS (userIds, a
+  // manager's chain). A null creator reads as "People team and Admin only".
+  createdById    String?
+  audienceType   String       @default("ALL")
+  departmentIds  String[]     @default([])
+  userIds        String[]     @default([])
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   reviews        Review[]
@@ -1801,6 +1831,11 @@ model Review {
   // Calibration
   calibratedScore    Float?
   calibrationNotes   String?
+  // Phase 6: the 9-box potential (1 to 3) set in calibration, and who
+  // calibrated the row and when.
+  potential          Int?
+  calibratedById     String?
+  calibratedAt       DateTime?
 
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -2836,6 +2871,10 @@ model TalentAssessment {
   action         String? // "Promote", "Develop", "Retain", "Coach", "PIP", "Exit"
   notes          String?
   assessedBy     String
+  // Phase 6: MANUAL (placed by a person), SCORES (filled from performance
+  // scores) or CALIBRATION (from a review cycle, cycleId set).
+  source         String   @default("MANUAL")
+  cycleId        String?
   organizationId String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -2866,6 +2905,9 @@ model PulseSurvey {
   // attributed mode at create time when the context calls for it (e.g.
   // post-review pulse tied to a 1:1 follow-up).
   anonymous      Boolean          @default(true)
+  // Phase 6: the survey's creator (null for surveys that predate it; a null
+  // creator falls back to People team and Admin only).
+  createdById    String?
   organizationId String
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      SurveyResponse[]
@@ -3035,6 +3077,7 @@ model CandorSession {
   organizationId String
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      CandorResponse[]
+  respondents    CandorRespondent[]
   launchedAt     DateTime?
   closedAt       DateTime?
   createdAt      DateTime         @default(now())
@@ -3052,6 +3095,21 @@ model CandorResponse {
   createdAt DateTime      @default(now())
 
   @@index([sessionId])
+}
+
+// Phase 6: WHO has answered a candor session, never WHAT they answered.
+// CandorResponse deliberately has no user column, and this table has no
+// response column, so the two can never be joined back into an attributed
+// answer. It replaces the browser-only "already responded" flag.
+model CandorRespondent {
+  id          String        @id @default(cuid())
+  sessionId   String
+  session     CandorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  respondedAt DateTime      @default(now())
+
+  @@unique([sessionId, userId])
+  @@index([userId])
 }
 
 // ==========================================

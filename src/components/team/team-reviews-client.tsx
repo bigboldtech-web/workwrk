@@ -44,7 +44,9 @@ export function TeamReviewsClient({ pending, acted }: Props) {
       const res = await fetch(`/api/weekly-reviews/${id}/manager-review`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, notes }),
+        // The one payload both entry points write (spec-teams-performance
+        // section 0, PO-1): { decision, notes }.
+        body: JSON.stringify({ decision: action === "approve" ? "APPROVED" : "CHANGES_REQUESTED", notes }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -209,7 +211,7 @@ function PendingCard({
           </div>
 
           <div className="border-t border-zinc-200 pt-3 space-y-2">
-            <label className="text-xs font-medium block">Notes to {review.subject?.firstName ?? "report"} <span className="text-zinc-500">(optional, sent with your decision)</span></label>
+            <label className="text-xs font-medium block">Notes to {review.subject?.firstName ?? "report"} <span className="text-zinc-500">(sent with your decision; needed to request changes)</span></label>
             <textarea
               rows={2}
               value={notes}
@@ -220,7 +222,10 @@ function PendingCard({
               <button
                 type="button"
                 onClick={() => onRequestChanges(notes.trim() || undefined)}
-                disabled={busy}
+                // A request for changes needs a note, here and on the
+                // Alignment board: the person must know what to change.
+                disabled={busy || notes.trim().length === 0}
+                title={notes.trim().length === 0 ? "Write what should change first" : undefined}
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs border border-red-500/40 text-red-700 hover:bg-red-500/10 disabled:opacity-50"
               >
                 <MessageSquareWarning className="w-3.5 h-3.5" />

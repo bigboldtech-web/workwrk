@@ -117,6 +117,13 @@ const SQL_MANIFEST = [
   // report routes answer a named 503 (the cron a no-op) until it lands. It
   // is here so the release that ships the code is the release that can use it.
   "2026-09-24-phase5b-data.sql",
+  // Phase 6, people. ADD COLUMN IF NOT EXISTS on User, Threshold, KPIRecord,
+  // ReviewCycle, Review, TalentAssessment and PulseSurvey (every one nullable
+  // or defaulted) plus the new "CandorRespondent" table. The new scalar
+  // columns are on the Prisma models, so a findMany with no select asks for
+  // them: this file MUST be applied before the release starts, which is what
+  // this manifest does. The backfills are separate dry-run scripts.
+  "2026-09-26-phase6-people.sql",
 ];
 
 /**

@@ -9,7 +9,22 @@ import { requireSessionUser } from "@/lib/page-gates";
 
 export const dynamic = "force-dynamic";
 
-export default async function MyProfilePage() {
+export default async function MyProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireSessionUser();
-  redirect(`/people/${user.id}`);
+  // Carry the query across the redirect: /people/me?tab=kras is the
+  // contract the Work sidebar's "My KRAs & KPIs" row and the KPI Inbox rows
+  // link to (spec-goals section 2 `/people/me?tab=kras`), and a dropped
+  // ?tab= would land them on the wrong tab.
+  const sp = await searchParams;
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (typeof v === "string") qs.set(k, v);
+    else if (Array.isArray(v)) for (const x of v) qs.append(k, x);
+  }
+  const q = qs.toString();
+  redirect(`/people/${user.id}${q ? `?${q}` : ""}`);
 }

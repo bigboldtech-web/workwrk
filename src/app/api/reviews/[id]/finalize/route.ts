@@ -1,6 +1,7 @@
+import { canManageReviewCycle, cycleSubjectReach } from "@/lib/people/review-cycle-access";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { reviewCompletedTemplate } from "@/lib/email-templates";
@@ -14,7 +15,6 @@ export async function POST(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id: cycleId } = await params;
   const orgId = getOrgId(session);
@@ -23,6 +23,10 @@ export async function POST(
     where: { id: cycleId, organizationId: orgId },
   });
   if (!cycle) return jsonError("Review cycle not found", 404);
+  // Phase 6: the People team and Admin, or the manager who started it.
+  if (!(await canManageReviewCycle(session, cycle))) {
+    return jsonError("Only the People team, an Admin or the manager who started this cycle can finalize it", 403);
+  }
 
   const body = await req.json();
   const { outcomes } = body;
@@ -32,12 +36,29 @@ export async function POST(
     return jsonError("outcomes array is required");
   }
 
-  // Update each review with its final outcome
+  // Every outcome must be a real ReviewOutcome, and every review must
+  // belong to THIS cycle: the update used to take any review id in the
+  // database, so a finalize could complete another org's review.
+  const OUTCOMES = new Set(["PROMOTION_ELIGIBLE", "HIKE_ELIGIBLE", "STATUS_QUO", "PIP_REQUIRED", "EXIT_RECOMMENDATION"]);
+  for (const o of outcomes as { outcome?: unknown }[]) {
+    if (typeof o?.outcome !== "string" || !OUTCOMES.has(o.outcome)) return jsonError("Unknown outcome", 400);
+  }
+  // A runner who is not the People team or Admin decides outcomes only for
+  // the people who report to them NOW (a PIP or an exit is never set by a
+  // former manager).
+  const reach = await cycleSubjectReach(session);
+  if (reach) {
+    const ids = (outcomes as { reviewId?: unknown }[]).map((o) => String(o?.reviewId ?? ""));
+    const rows = await prisma.review.findMany({ where: { id: { in: ids }, cycleId }, select: { subjectId: true } });
+    if (rows.some((r) => !reach.has(r.subjectId))) {
+      return jsonError("Some of these people no longer report to you, so their outcome is the People team's", 403);
+    }
+  }
   const updates = outcomes.map((o: { reviewId: string; outcome: string; overallScore?: number }) =>
-    prisma.review.update({
-      where: { id: o.reviewId },
+    prisma.review.updateMany({
+      where: { id: o.reviewId, cycleId, ...(reach ? { subjectId: { in: [...reach] } } : {}) },
       data: {
-        outcome: o.outcome as any,
+        outcome: o.outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION",
         overallScore: o.overallScore ?? undefined,
         status: "COMPLETED",
       },

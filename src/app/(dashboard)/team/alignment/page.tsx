@@ -11,11 +11,13 @@
 // Gate: central access resolver (Phase 6) — module "team/alignment"
 // requires manager+. Employees / agents redirect home.
 
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { resolveAccess, meets } from "@/lib/access";
+import { gatePage } from "@/lib/access/gate";
 import { getTeamAlignment } from "@/lib/team-alignment";
+import { prisma } from "@/lib/prisma";
+import { ViewTab } from "@/components/ui/view-tabs";
 import Link from "next/link";
 import {
   Target, ChartLine, BookOpenCheck, Users as UsersIcon, ClipboardCheck, BarChart3,
@@ -33,13 +35,18 @@ export default async function TeamAlignmentPage() {
   if (!u.id || !u.organizationId) redirect("/login");
 
   // Phase 6 — central access resolver gate.
-  const decision = await resolveAccess(
-    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
-    { type: "module", name: "team/alignment" },
-  );
-  if (!meets(decision, "read")) notFound();
+  // The one gate shape (Phase 6): the `alignment` APP_RULES row, anyone with
+  // reports (solid or dotted) over their chain, the People team and Admin
+  // over the org; anyone else gets the in-shell 404.
+  await gatePage("view", { type: "app", key: "alignment" }, { callbackUrl: "/team/alignment" });
 
   const data = await getTeamAlignment({ managerId: u.id, organizationId: u.organizationId });
+  // The Sub-teams pill renders only when it applies: one of the viewer's
+  // direct reports has reports of their own (getDirectorRollup's sub-teams).
+  const hasSubTeams =
+    (await prisma.user.count({
+      where: { organizationId: u.organizationId, deletedAt: null, manager: { managerId: u.id, deletedAt: null } },
+    })) > 0;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -48,22 +55,26 @@ export default async function TeamAlignmentPage() {
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
           <Link href="/team" className="hover:text-zinc-900">Teams</Link>
           <span className="text-zinc-300">/</span>
-          <span>Alignment board</span>
+          <span>Alignment</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
             <Target className="h-5 w-5 text-[#0073EA]" />
           </span>
-          <h1 className="text-base font-semibold text-zinc-900">Alignment board</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">your reports — what they own, how they&rsquo;re tracking</span>
+          <h1 className="text-base font-semibold text-zinc-900">Alignment</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">your reports: what they own and how they&rsquo;re tracking</span>
           <div className="flex-1" />
-          <Link href="/team/rollup" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <BarChart3 className="w-3.5 h-3.5 text-zinc-400" /> Rollup
-          </Link>
-          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <ClipboardCheck className="w-3.5 h-3.5 text-zinc-400" /> Reviews
-          </Link>
         </div>
+        {/* The views row (spec-goals section 2): My reports and, when one of
+            the viewer's people manages people, Sub-teams (/team/rollup, the
+            retired Rollup row's destination). Weekly reviews is its sidebar
+            row, so the old header link is gone. */}
+        {hasSubTeams ? (
+          <div className="mt-3 flex items-center gap-1" role="tablist">
+            <ViewTab label="My reports" active href="/team/alignment" />
+            <ViewTab label="Sub-teams" href="/team/rollup" />
+          </div>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-[1280px]">

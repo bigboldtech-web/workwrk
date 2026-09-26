@@ -1,10 +1,12 @@
-// Teams — Overview. The landing for the Teams app: how the team is doing at
-// a glance, what needs the viewer (review/KPI approvals, people missing KRAs),
-// and a shortcut into every section. Server component; all read-only counts.
+// Teams > My team: how the viewer's people are doing at a glance, what needs
+// the viewer (review and KPI approvals, people missing KRAs), and a shortcut
+// into every section. Server component; all read-only counts.
 //
-// Three-door scoping: manager tiers see THEIR recursive report tree, not the
-// org; org-wide levels (admin / exec / HR) keep org counts. Employees never
-// land here — the gate sends them to their own career home (/people/me).
+// Gate (Phase 6): the `team` APP_RULES row, anyone with reports (solid or
+// dotted), the People team, Owner, Admin. A Member with nobody reporting to
+// them gets the sanctioned LockedPage without Request access
+// (src/lib/people/team-gate.ts). Scoping is unchanged: a manager sees their
+// recursive report tree; org-wide levels keep org counts.
 
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
@@ -15,16 +17,20 @@ import {
 import { TeamStatTile, TeamCard } from "@/components/team/ui";
 import { TeamPulse } from "@/components/team/team-pulse";
 import { TAUPE } from "@/components/ui/accent";
-import { requireManagerPage } from "@/lib/page-gates";
+import { teamAppGate, TEAM_LOCKED_SENTENCE } from "@/lib/people/team-gate";
+import { LockedPage } from "@/components/access";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
-import { isDirectorOrAbove } from "@/lib/access";
 import { listKpiReviewsForManager } from "@/lib/kpi-record";
 
 export const dynamic = "force-dynamic";
 
 export default async function TeamOverviewPage() {
-  const u = await requireManagerPage();
+  const gate = await teamAppGate("team", "/team");
+  if (gate.status === "locked") {
+    return <LockedPage name="My team" sentence={TEAM_LOCKED_SENTENCE} back={{ fallbackHref: "/people", label: "Directory" }} />;
+  }
+  const u = gate.user;
   const orgId = u.organizationId;
   const me = u.id;
 
@@ -59,9 +65,17 @@ export default async function TeamOverviewPage() {
   ]);
   const kpiToApprove = kpiReviewQueue.length;
 
-  // Rollup is director-gated (same set the sidebar + /team/rollup use);
-  // don't render a shortcut whose page bounces the viewer.
-  const canRollup = isDirectorOrAbove({ userId: me, organizationId: orgId, accessLevel: u.accessLevel });
+  // Sub-teams (/team/rollup, the second view of Alignment) only when at
+  // least one of the viewer's people manages people of their own, so the
+  // shortcut never lands on the "none of your reports manage people" state.
+  const canRollup =
+    (await prisma.user.count({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        manager: { deletedAt: null, ...(teamIds ? { id: { in: teamIds.filter((id) => id !== me) } } : {}) },
+      },
+    })) > 0;
 
   const queue = [
     { n: reviewsToApprove, label: "weekly review", plural: "weekly reviews", verb: "awaiting your approval", href: "/team/reviews", icon: ClipboardCheck, accent: "#dc2626" },
@@ -77,8 +91,8 @@ export default async function TeamOverviewPage() {
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
             <Users className="h-5 w-5 text-[#0073EA]" />
           </span>
-          <h1 className="text-base font-semibold text-zinc-900">Overview</h1>
-          <span className="text-xs text-zinc-400">{people} people · {roles} roles</span>
+          <h1 className="text-base font-semibold text-zinc-900">My team</h1>
+          <span className="text-xs text-zinc-400">{people} people · {roles} job titles</span>
         </div>
       </div>
 
@@ -86,7 +100,7 @@ export default async function TeamOverviewPage() {
         {/* Headline stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="People" value={people} sub={orgWide ? "in the org" : "in your reporting tree"} accent="#0073EA" href="/people" />
-          <TeamStatTile icon={Briefcase} label="Roles" value={roles} sub="definitions" accent="#F59E0B" href="/people/roles" />
+          <TeamStatTile icon={Briefcase} label="Job titles" value={roles} sub="definitions" accent="#F59E0B" href="/people/roles" />
           <TeamStatTile icon={Star} label="KRAs" value={kras} sub="result areas" accent={TAUPE.soft} href="/kra-kpi" />
           <TeamStatTile icon={Gauge} label="KPIs" value={kpis} sub="metrics" accent="#16a34a" href="/kra-kpi" />
         </div>
@@ -126,16 +140,17 @@ export default async function TeamOverviewPage() {
           <ShortcutCard title="People" links={[
             { label: "Directory", href: "/people", icon: Users },
             { label: "Org chart", href: "/organization", icon: Building2 },
-            { label: "Roles", href: "/people/roles", icon: Briefcase },
+            { label: "Job titles", href: "/people/roles", icon: Briefcase },
           ]} />
           <ShortcutCard title="Alignment" links={[
             { label: "KRAs & KPIs", href: "/kra-kpi", icon: Star },
-            { label: "Alignment board", href: "/team/alignment", icon: Target },
+            { label: "Alignment", href: "/team/alignment", icon: Target },
           ]} />
           <ShortcutCard title="Performance" links={[
-            { label: "Reviews", href: "/team/reviews", icon: ClipboardCheck },
-            { label: "KPI approvals", href: "/team/kpi-reviews", icon: Award },
-            ...(canRollup ? [{ label: "Rollup", href: "/team/rollup", icon: BarChart3 }] : []),
+            { label: "Weekly reviews", href: "/team/reviews", icon: ClipboardCheck },
+            { label: "KPI reviews", href: "/team/kpi-reviews", icon: Award },
+            { label: "Workload", href: "/team/workload", icon: Gauge },
+            ...(canRollup ? [{ label: "Sub-teams", href: "/team/rollup", icon: BarChart3 }] : []),
           ]} />
         </div>
       </div>

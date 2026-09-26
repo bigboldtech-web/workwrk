@@ -9,6 +9,8 @@ import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
+import { orgRoleOf } from "@/lib/access/org-role";
+import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -42,12 +44,31 @@ export async function GET(req: NextRequest) {
   if (!includeDeleted) where.deletedAt = null;
   if (departmentId) where.departmentId = departmentId;
   if (status) where.status = status as UserStatus;
-  if (accessLevel) where.accessLevel = accessLevel as AccessLevel;
+  // The directory card carries no access level, so it cannot be filtered on
+  // one either (a filter is a read).
+  if (accessLevel && !(searchParams.get("scope") === "directory" && !ORG_WIDE_ALIGNMENT_LEVELS.has((session.user as { accessLevel?: string }).accessLevel ?? ""))) {
+    where.accessLevel = accessLevel as AccessLevel;
+  }
+
+  // scope=directory (Phase 6, spec-teams-people section 1 Access): the
+  // Directory and the Org chart are open to every Member (person_card VIEW
+  // org-wide, access 3.5 and 9 `people.view`), so any Member may list the
+  // whole org, but a caller who is not org-wide gets the directory CARD only
+  // (below): no phone, no access level, no KRA count, and never a removed
+  // person. Guests never list the directory (access 11 invariant 3).
+  const callerRole = orgRoleOf({ accessLevel: callerLevel || null });
+  const directoryCard = requestedScope === "directory" && !orgWide;
+  if (requestedScope === "directory" && callerRole === "GUEST") return jsonError("Not found", 404);
+  if (directoryCard) where.deletedAt = null;
 
   // Enforce scope. Non-org-wide callers can never escape team scope,
-  // regardless of what they pass. Stops a line manager from seeing
-  // org-wide data.
-  const effectiveScope = orgWide ? (requestedScope || "all") : "team";
+  // regardless of what they pass, except into the directory card above.
+  // Stops a line manager from seeing org-wide people data.
+  const effectiveScope = orgWide
+    ? (requestedScope === "directory" ? "all" : requestedScope || "all")
+    : directoryCard
+      ? "directory"
+      : "team";
   if (effectiveScope === "team") {
     const teamIds = await getTeamUserIds(orgId, callerId);
     where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
@@ -83,9 +104,9 @@ export async function GET(req: NextRequest) {
         lastName: true,
         email: true,
         avatar: true,
-        phone: true,
+        phone: !directoryCard,
         status: true,
-        accessLevel: true,
+        accessLevel: !directoryCard,
         managerId: true,
         joinDate: true,
         deletedAt: true,
@@ -93,7 +114,7 @@ export async function GET(req: NextRequest) {
         role: { select: { id: true, title: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
         // Filtered count — soft-deleted reports don't inflate "N reports".
-        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: true } },
+        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
       },
       orderBy,
       ...skipTake(pagination),
@@ -125,6 +146,10 @@ export async function POST(req: NextRequest) {
     return jsonError("First name, last name, and email are required");
   }
 
+  // Never take the level from the body on trust (grantable-level.ts).
+  const level = grantableAccessLevel((session.user as { accessLevel?: string }).accessLevel, accessLevel);
+  if (!level) return jsonError("You can't give that access level. An admin sets it in Members.", 403);
+
   const existing = await prisma.user.findFirst({
     where: { email, organizationId: getOrgId(session) },
   });
@@ -140,7 +165,7 @@ export async function POST(req: NextRequest) {
       passwordHash,
       departmentId,
       roleId,
-      accessLevel: accessLevel || "EMPLOYEE",
+      accessLevel: level,
       managerId,
       organizationId: getOrgId(session),
     },

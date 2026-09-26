@@ -88,7 +88,7 @@ export default function PeopleDirectoryPage() {
       // includeDeleted feeds the "Former" tab only — every other view
       // works off the active split below, so removed people never leak
       // into headcount, department chips, or the grouped grid.
-      const res = await fetch("/api/users?limit=500&includeDeleted=true");
+      const res = await fetch("/api/users?limit=500&includeDeleted=true&scope=directory");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: ApiUser[] = data?.data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);

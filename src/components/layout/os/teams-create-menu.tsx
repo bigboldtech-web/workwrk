@@ -1,78 +1,93 @@
 "use client";
 
-// TeamsCreateMenu — the Teams app's "+" menu. Replaces the global create menu
-// (Task/List/Space/Doc…) with people-operation creates, each routing to the
-// surface that owns it (with ?new=1 to auto-open its create dialog where one
-// exists). Wired via AppEntry.CreateMenu on the Teams app entry.
+// TeamsCreateMenu: the Teams hub's "+" (spec-teams-people section 1 and
+// sidebar-map section 5). Each row routes to the surface that owns the
+// create, with a `?new=` latch that opens its dialog there. A row renders
+// only for the viewer whose create would succeed (no control without a
+// handler), and a section with no renderable row is not rendered.
+//
+//   People       Invite person      /settings/members?invite=1   Owner, Admin (the workspace menu's rule)
+//                New job title      /people/roles?new=1          Owner, Admin, People team
+//                New department     /people/departments?new=1    Owner, Admin
+//   Alignment    New KRA            /kra-kpi?new=kra             the kras.create permission POST /api/kras asks
+//                New KPI            /kra-kpi?new=kpi             the same permission
+//   Performance  Start review cycle /reviews?new=1               reports (at the manager tier POST /api/reviews asks), People team, Admin
+//   Culture      Give kudos         /kudos?new=1                 every Member
+//
+// "New SOP" left this menu for the Docs hub "+" (its "New SOP" kind chooser),
+// one create per hub. Neutral icons, no coloured tiles, no TAUPE.
 
-import { useRef, type RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Briefcase, Target, FileText, ClipboardCheck, type LucideIcon } from "lucide-react";
+import { Briefcase, Building2, ClipboardList, Gauge, Heart, Target, UserPlus, type LucideIcon } from "lucide-react";
 import { MorePortal } from "./more-portal";
 import { MenuList, MenuItem, MenuSectionLabel } from "@/components/ui/menu";
-import { TAUPE } from "@/components/ui/accent";
+import { usePermission } from "@/hooks/use-permission";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { useBoot } from "./boot-context";
+import { useRole } from "@/hooks/use-role";
 
-interface Row { label: string; description: string; icon: LucideIcon; href: string; iconColor: string }
-
-const SECTIONS: { label: string; rows: Row[] }[] = [
-  {
-    label: "People",
-    rows: [
-      { label: "Invite person", description: "Add someone + set access & manager", icon: UserPlus, href: "/settings/members?invite=1", iconColor: "#0073EA" },
-      { label: "New job title", description: "Define a job title (owns, KRAs, KPIs, SOPs)", icon: Briefcase, href: "/people/roles?new=1", iconColor: "#F59E0B" },
-    ],
-  },
-  {
-    label: "Alignment",
-    rows: [
-      // A KPI is created inside its KRA on /kra-kpi (the sidebar row); a "+"
-      // row that only opened the list was a link dressed as a create.
-      { label: "New KRA", description: "A key result area (KPIs live inside it)", icon: Target, href: "/kra-kpi?new=1", iconColor: TAUPE.soft },
-      { label: "New SOP", description: "A procedure attached to a role", icon: FileText, href: "/sops/new", iconColor: "#3b82f6" },
-    ],
-  },
-  {
-    label: "Performance",
-    rows: [
-      { label: "Start review cycle", description: "Kick off a formal review", icon: ClipboardCheck, href: "/reviews?new=1", iconColor: "#dc2626" },
-    ],
-  },
-];
+interface Row { label: string; description: string; icon: LucideIcon; href: string; settings?: boolean }
 
 export function TeamsCreateMenu({ anchorRef, open, onClose }: { anchorRef: RefObject<HTMLButtonElement | null>; open: boolean; onClose: () => void }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
-  if (!open) return null;
+  const { openSettings } = useSettingsNav();
+  const { boot } = useBoot();
+  const { isManager: legacyManagerTier } = useRole();
+  const canCreateKra = usePermission("kras", "create") === true;
 
-  const go = (href: string) => { onClose(); router.push(href); };
+  const v = boot.viewer;
+  const isAdmin = v.orgRole === "OWNER" || v.orgRole === "ADMIN";
+  const isGuest = v.orgRole === "GUEST";
+  // POST /api/reviews still asks the manager tier (isManager), so the row
+  // needs both the fact the page gate reads (reports) and that tier, or it
+  // would open a dialog whose submit 403s.
+  const canStartCycle = isAdmin || v.peopleTeam || (v.hasReports && legacyManagerTier);
+
+  const sections = useMemo(() => {
+    const out: { label: string; rows: Row[] }[] = [];
+    const people: Row[] = [];
+    if (isAdmin) people.push({ label: "Invite person", description: "Add someone and set their access and manager", icon: UserPlus, href: "/settings/members?invite=1", settings: true });
+    if (isAdmin || v.peopleTeam) people.push({ label: "New job title", description: "What the role owns, its KRAs, KPIs and SOPs", icon: Briefcase, href: "/people/roles?new=1" });
+    if (isAdmin) people.push({ label: "New department", description: "A department and its head", icon: Building2, href: "/people/departments?new=1" });
+    if (people.length) out.push({ label: "People", rows: people });
+    if (canCreateKra) {
+      out.push({
+        label: "Alignment",
+        rows: [
+          { label: "New KRA", description: "A key result area on a job title", icon: Target, href: "/kra-kpi?new=kra" },
+          { label: "New KPI", description: "A measured number under a KRA", icon: Gauge, href: "/kra-kpi?new=kpi" },
+        ],
+      });
+    }
+    if (canStartCycle) out.push({ label: "Performance", rows: [{ label: "Start review cycle", description: "Kick off a formal review", icon: ClipboardList, href: "/reviews?new=1" }] });
+    if (!isGuest) out.push({ label: "Culture", rows: [{ label: "Give kudos", description: "Thank someone for their work", icon: Heart, href: "/kudos?new=1" }] });
+    return out;
+  }, [isAdmin, isGuest, v.peopleTeam, canCreateKra, canStartCycle]);
+
+  if (!open || sections.length === 0) return null;
+
+  const go = (r: Row) => {
+    onClose();
+    if (r.settings) openSettings(r.href);
+    else router.push(r.href);
+  };
 
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} aria-hidden />
       <MorePortal anchorRef={anchorRef} panelRef={panelRef} width={288} open={open} placement="below">
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_14px_34px_rgba(0,0,0,0.14)] p-2">
-          {SECTIONS.map((section) => (
+        <MenuList className="px-1">
+          {sections.map((section) => (
             <div key={section.label} className="pb-1 last:pb-0">
-              <MenuSectionLabel className="px-2">{section.label}</MenuSectionLabel>
-              <MenuList>
-                {section.rows.map((r) => (
-                  <MenuItem
-                    key={r.label}
-                    variant="inset"
-                    leading={
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md shrink-0" style={{ background: `${r.iconColor}1a` }}>
-                        <r.icon className="h-3.5 w-3.5" style={{ color: r.iconColor }} />
-                      </span>
-                    }
-                    label={r.label}
-                    description={r.description}
-                    onClick={() => go(r.href)}
-                  />
-                ))}
-              </MenuList>
+              <MenuSectionLabel>{section.label}</MenuSectionLabel>
+              {section.rows.map((r) => (
+                <MenuItem key={r.label} icon={r.icon} label={r.label} description={r.description} onClick={() => go(r)} />
+              ))}
             </div>
           ))}
-        </div>
+        </MenuList>
       </MorePortal>
     </>
   );

@@ -5,7 +5,6 @@ import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,13 +32,13 @@ import {
   UserPlus,
   TrendingUp,
   Shield,
-  Cloud,
-  CloudOff,
   Rocket,
   FileText,
   Download,
 } from "lucide-react";
 import { useAutosave } from "@/hooks/use-autosave";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import { NotFoundView } from "@/components/access/not-found-view";
 
 /* ── API payload shapes (the fields this page actually touches) ────
@@ -260,12 +259,26 @@ function downloadLetter(l: AppraisalLetter) {
   URL.revokeObjectURL(url);
 }
 
-// Mirror of the API's isManager() tier (lib/api-helpers) — POST /launch
-// 403s below this, so the DRAFT launch banner must not render a button
-// that can only fail for the viewer.
-const MANAGER_TIER = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
-]);
+/**
+ * Which sections this viewer gets (Phase 6: "review cycles whose sections
+ * come from who you are in the cycle"). Decided on the server page from the
+ * viewer's rows in the cycle (reviews/[id]/page.tsx); a section the viewer
+ * has no part in is not rendered at all.
+ */
+export interface CycleFaces {
+  /** The viewer is the subject of a review in this cycle. */
+  self: boolean;
+  /** The viewer reviews at least one person in this cycle. */
+  team: boolean;
+  /** The viewer was asked for peer feedback in this cycle. */
+  peer: boolean;
+  /** People team, Admin, or the manager who started the cycle. */
+  canManage: boolean;
+  /** Someone in the viewer's reporting chain is in this cycle. */
+  chain: boolean;
+}
+
+const ALL_FACES: CycleFaces = { self: true, team: true, peer: true, canManage: true, chain: true };
 
 const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
   quality: { label: "Quality of Work", anchors: ["Consistently below standard", "Sometimes meets standard", "Meets expectations", "Often exceeds expectations", "Exceptional quality"] },
@@ -275,11 +288,18 @@ const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
   growth: { label: "Growth & Learning", anchors: ["No growth", "Slow learner", "Steady growth", "Fast learner", "Continuous self-improvement"] },
 };
 
-export default function ReviewCycleDetailPage() {
+export default function ReviewCycleDetailPage({ faces = ALL_FACES }: { faces?: CycleFaces } = {}) {
   const { id: cycleId } = useParams();
-  
-  const { data: session } = useSession();
-  const canLaunch = MANAGER_TIER.has(session?.user?.accessLevel ?? "");
+
+  // Launch, calibrate and finalize are the cycle owner's (review-cycle-rules.ts).
+  const canLaunch = faces.canManage;
+  const tabs = [
+    faces.self ? "self-assessment" : null,
+    faces.team ? "manager-review" : null,
+    faces.peer ? "peer-feedback" : null,
+    faces.canManage ? "calibration" : null,
+    faces.canManage || faces.chain ? "dashboard" : null,
+  ].filter((t): t is string => t !== null);
 
   const [cycle, setCycle] = useState<CycleData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -290,6 +310,11 @@ export default function ReviewCycleDetailPage() {
   const [kraRatings, setKraRatings] = useState<Record<string, { rating: number; achievements: string }>>({});
   const [reflection, setReflection] = useState({ wentWell: "", couldImprove: "", goals: "" });
   const [savingSelf, setSavingSelf] = useState(false);
+  // A save that did not land says so, in words, next to the buttons: a self
+  // review or a manager comment is never lost silently.
+  const [selfSaveError, setSelfSaveError] = useState<string | null>(null);
+  const [mgrSaveError, setMgrSaveError] = useState<string | null>(null);
+  const [peerSaveError, setPeerSaveError] = useState<string | null>(null);
 
   // Manager review state
   const [teamReviews, setTeamReviews] = useState<ReviewRow[]>([]);
@@ -425,16 +450,23 @@ export default function ReviewCycleDetailPage() {
         })),
         reflection,
       };
-      const res = await fetch(`/api/reviews/${cycleId}/self-assessment`, {
+      const res = await fetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selfRatings, submit }),
       });
-      if (res.ok) {
-        await fetchSelfAssessment();
-        await fetchCycle();
+      if (!res.ok) {
+        setSelfSaveError(await saveRefusal(res, submit ? "Your self review was not submitted." : "Your draft was not saved."));
+        return;
       }
-    } catch {} finally { setSavingSelf(false); }
+      setSelfSaveError(null);
+      await fetchSelfAssessment();
+      await fetchCycle();
+    } catch {
+      setSelfSaveError(submit
+        ? "Your self review was not submitted. Check your connection and try again; your answers are still here."
+        : "Your draft was not saved. Check your connection and try again; your answers are still here.");
+    } finally { setSavingSelf(false); }
   };
 
   // Autosave hook for the self-assessment. Saves the draft (submit=false)
@@ -460,11 +492,14 @@ export default function ReviewCycleDetailPage() {
         })),
         reflection,
       };
-      await fetch(`/api/reviews/${cycleId}/self-assessment`, {
+      // Throws on any refusal, so the hook shows "Not saved, retrying" and
+      // keeps the local backup, instead of calling a 401 or a 500 "Saved".
+      const res = await fetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selfRatings, submit: false }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
   });
 
@@ -482,17 +517,24 @@ export default function ReviewCycleDetailPage() {
         overallComments: mgrComments,
         recommendation: mgrOutcome,
       };
-      const res = await fetch(`/api/reviews/${cycleId}/manager-review`, {
+      const res = await fetchWithRetry(`/api/reviews/${cycleId}/manager-review`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviewId, managerAssessment, outcome: submit ? mgrOutcome : undefined, managerComments: mgrComments, submit }),
       });
-      if (res.ok) {
-        setSelectedReview(null);
-        await fetchTeamReviews();
-        await fetchCycle();
+      if (!res.ok) {
+        setMgrSaveError(await saveRefusal(res, submit ? "Your review was not submitted." : "Your draft was not saved."));
+        return;
       }
-    } catch {} finally { setSavingMgr(false); }
+      setMgrSaveError(null);
+      setSelectedReview(null);
+      await fetchTeamReviews();
+      await fetchCycle();
+    } catch {
+      setMgrSaveError(submit
+        ? "Your review was not submitted. Check your connection and try again; your comments are still here."
+        : "Your draft was not saved. Check your connection and try again; your comments are still here.");
+    } finally { setSavingMgr(false); }
   };
 
   // Autosave for the manager review while a reviewee is selected.
@@ -516,28 +558,34 @@ export default function ReviewCycleDetailPage() {
         overallComments: mgrComments,
         recommendation: mgrOutcome,
       };
-      await fetch(`/api/reviews/${cycleId}/manager-review`, {
+      const res = await fetchWithRetry(`/api/reviews/${cycleId}/manager-review`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviewId: selectedReview.id, managerAssessment, managerComments: mgrComments, submit: false }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
   });
 
   const handlePeerSubmit = async (feedbackId: string) => {
     setSavingPeer(true);
     try {
-      const res = await fetch(`/api/reviews/${cycleId}/peer-feedback`, {
+      const res = await fetchWithRetry(`/api/reviews/${cycleId}/peer-feedback`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ feedbackId, strengths: peerStrengths, improvements: peerImprovements, collaborationRating: peerCollabRating, comments: peerComments }),
       });
-      if (res.ok) {
-        setShowPeerDialog(null);
-        setPeerStrengths(""); setPeerImprovements(""); setPeerCollabRating(0); setPeerComments("");
-        await fetchPeerFeedback();
+      if (!res.ok) {
+        setPeerSaveError(await saveRefusal(res, "Your feedback was not submitted."));
+        return;
       }
-    } catch {} finally { setSavingPeer(false); }
+      setPeerSaveError(null);
+      setShowPeerDialog(null);
+      setPeerStrengths(""); setPeerImprovements(""); setPeerCollabRating(0); setPeerComments("");
+      await fetchPeerFeedback();
+    } catch {
+      setPeerSaveError("Your feedback was not submitted. Check your connection and try again; your answers are still here.");
+    } finally { setSavingPeer(false); }
   };
 
   const handleAssignPeers = async (reviewId: string) => {
@@ -671,7 +719,11 @@ export default function ReviewCycleDetailPage() {
     <div className="space-y-3 animate-fade-in">
       <section className="rvwd__hero" style={{ ["--hero-c" as unknown as string]: cycleStatusColor }}>
         <span className="rvwd__hero-accent" aria-hidden="true" />
-        <BackButton fallbackHref="/reviews" label="Review cycles" />
+        {/* A subject with no Review cycles row goes back to My profile, so
+            the button never points at a page that 404s for them. */}
+        {faces.canManage || faces.chain || faces.team
+          ? <BackButton fallbackHref="/reviews" label="Review cycles" />
+          : <BackButton fallbackHref="/people/me" label="My profile" />}
         <div className="rvwd__hero-meta">
           <span className="rvwd__hero-status">{cycle.status.replace(/_/g, " ")}</span>
           <span className="rvwd__hero-type">{cycle.type.replace(/_/g, " ")}</span>
@@ -718,13 +770,13 @@ export default function ReviewCycleDetailPage() {
       </section>
 
       {/* Tabs */}
-      <Tabs defaultValue="self-assessment">
+      <Tabs defaultValue={tabs[0] ?? "dashboard"}>
         <TabsList>
-          <TabsTrigger value="self-assessment" className="gap-2"><Star size={14} /> My Review</TabsTrigger>
-          <TabsTrigger value="manager-review" className="gap-2"><Users size={14} /> Team Reviews</TabsTrigger>
-          <TabsTrigger value="peer-feedback" className="gap-2"><Send size={14} /> Peer Feedback</TabsTrigger>
-          <TabsTrigger value="calibration" className="gap-2"><BarChart3 size={14} /> Calibration</TabsTrigger>
-          <TabsTrigger value="dashboard" className="gap-2"><TrendingUp size={14} /> Dashboard</TabsTrigger>
+          {faces.self ? <TabsTrigger value="self-assessment" className="gap-2"><Star size={14} /> My review</TabsTrigger> : null}
+          {faces.team ? <TabsTrigger value="manager-review" className="gap-2"><Users size={14} /> Manager reviews</TabsTrigger> : null}
+          {faces.peer ? <TabsTrigger value="peer-feedback" className="gap-2"><Send size={14} /> Peer feedback</TabsTrigger> : null}
+          {faces.canManage ? <TabsTrigger value="calibration" className="gap-2"><BarChart3 size={14} /> Calibration</TabsTrigger> : null}
+          {faces.canManage || faces.chain ? <TabsTrigger value="dashboard" className="gap-2"><TrendingUp size={14} /> Dashboard</TabsTrigger> : null}
         </TabsList>
 
         {/* ===== SELF-ASSESSMENT TAB ===== */}
@@ -744,19 +796,7 @@ export default function ReviewCycleDetailPage() {
                 )}
                 {/* Autosave indicator. Visible while the draft is editable. */}
                 {canSelfAssessAutosave && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-zinc-500">
-                    {autosaveSelf.status === "saving" ? (
-                      <><Cloud size={11} className="animate-pulse" /> Saving…</>
-                    ) : autosaveSelf.status === "saved" ? (
-                      <><Cloud size={11} className="text-green-400" /> Saved {autosaveSelf.lastSavedAt ? `at ${autosaveSelf.lastSavedAt.toLocaleTimeString()}` : ""}</>
-                    ) : autosaveSelf.status === "error" ? (
-                      <><CloudOff size={11} className="text-red-400" /> Save failed — retrying</>
-                    ) : autosaveSelf.status === "dirty" ? (
-                      <><Cloud size={11} /> Unsaved changes</>
-                    ) : (
-                      <><Cloud size={11} /> Autosave on</>
-                    )}
-                  </span>
+                  <AutosaveIndicator className="ml-auto" status={autosaveSelf.status} lastSavedAt={autosaveSelf.lastSavedAt} labels={{ idle: "Autosave on" }} onRetry={autosaveSelf.retriesExhausted ? autosaveSelf.retryNow : undefined} />
                 )}
               </div>
 
@@ -893,6 +933,9 @@ export default function ReviewCycleDetailPage() {
               </Card>
 
               {/* Submit buttons */}
+              {canSelfAssess && selfSaveError ? (
+                <p role="alert" className="text-sm text-danger-text text-right">{selfSaveError}</p>
+              ) : null}
               {canSelfAssess && (
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => handleSelfAssessment(false)} disabled={savingSelf}>
@@ -1122,19 +1165,8 @@ export default function ReviewCycleDetailPage() {
               </Card>
 
               <div className="flex justify-end gap-2 items-center">
-                <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-zinc-500">
-                  {autosaveMgr.status === "saving" ? (
-                    <><Cloud size={11} className="animate-pulse" /> Saving draft…</>
-                  ) : autosaveMgr.status === "saved" ? (
-                    <><Cloud size={11} className="text-green-400" /> Draft saved {autosaveMgr.lastSavedAt ? `at ${autosaveMgr.lastSavedAt.toLocaleTimeString()}` : ""}</>
-                  ) : autosaveMgr.status === "error" ? (
-                    <><CloudOff size={11} className="text-red-400" /> Save failed</>
-                  ) : autosaveMgr.status === "dirty" ? (
-                    <><Cloud size={11} /> Unsaved changes</>
-                  ) : (
-                    <><Cloud size={11} /> Autosave on</>
-                  )}
-                </span>
+                <AutosaveIndicator className="mr-auto" status={autosaveMgr.status} lastSavedAt={autosaveMgr.lastSavedAt} labels={{ idle: "Autosave on" }} onRetry={autosaveMgr.retriesExhausted ? autosaveMgr.retryNow : undefined} />
+                {mgrSaveError ? <p role="alert" className="basis-full order-first text-sm text-danger-text">{mgrSaveError}</p> : null}
                 <Button variant="outline" onClick={() => handleManagerReview(selectedReview.id, false)} disabled={savingMgr}>
                   {savingMgr ? "Saving..." : "Save Draft"}
                 </Button>
@@ -1370,6 +1402,7 @@ export default function ReviewCycleDetailPage() {
               <Textarea placeholder="Any other feedback..." value={peerComments} onChange={(e) => setPeerComments(e.target.value)} />
             </div>
           </div>
+          {peerSaveError ? <p role="alert" className="text-sm text-danger-text">{peerSaveError}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPeerDialog(null)}>Cancel</Button>
             <Button onClick={() => { if (showPeerDialog) void handlePeerSubmit(showPeerDialog.id); }} disabled={savingPeer || !peerStrengths.trim()}>
@@ -1522,4 +1555,15 @@ export default function ReviewCycleDetailPage() {
       </Dialog>
     </div>
   );
+}
+
+/** The words for a refused save: the server's own reason when it gave one. */
+async function saveRefusal(res: Response, lead: string): Promise<string> {
+  let reason = "";
+  try {
+    const j = (await res.json()) as { error?: unknown };
+    if (typeof j?.error === "string") reason = j.error;
+  } catch { /* no body */ }
+  if (res.status === 401) return `${lead} Your session ended; sign in again and your answers will still be here.`;
+  return reason ? `${lead} ${reason}.`.replace(/\.\.$/, ".") : `${lead} Try again.`;
 }

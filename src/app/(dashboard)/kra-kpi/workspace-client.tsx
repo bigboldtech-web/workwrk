@@ -21,8 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  Target, Plus, Search, ChevronRight, Briefcase, Users, Activity,
-  Award, AlertTriangle, Gauge, Star,
+  Target, Plus, Search, ChevronRight, Briefcase, Users,
+  AlertTriangle, Gauge, Star,
 } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -30,6 +30,9 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 import { KraDialog } from "@/components/alignment/kra-dialog";
+import { KpiDialog } from "@/components/alignment/kpi-dialog";
+import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
+import { usePermission } from "@/hooks/use-permission";
 
 type ApiRole = {
   id: string;
@@ -71,6 +74,19 @@ const LEVEL_SHORT: Record<string, string> = {
 
 const NO_DEPT = "No department";
 
+/** The "Which KRA?" rows, grouped by job title (orphans last). */
+function kraPickerSections(kras: ApiKra[]): PickerSectionDef[] {
+  const byRole = new Map<string, PickerOption[]>();
+  for (const k of kras) {
+    const label = k.role?.title ?? "Needs a job title";
+    if (!byRole.has(label)) byRole.set(label, []);
+    byRole.get(label)!.push({ value: k.id, label: k.name, keywords: label });
+  }
+  return Array.from(byRole.entries())
+    .sort(([a], [b]) => (a === "Needs a job title" ? 1 : b === "Needs a job title" ? -1 : a.localeCompare(b)))
+    .map(([label, options]) => ({ label, options }));
+}
+
 export default function KraKpiPage() {
   const [roles, setRoles] = useState<ApiRole[] | null>(null);
   const [kras, setKras] = useState<ApiKra[]>([]);
@@ -78,19 +94,36 @@ export default function KraKpiPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  // New KPI: "Which KRA?" first (a Picker), then KpiDialog under that KRA
+  // (spec-goals section 2 `/kra-kpi`, PO-17: the Teams "+" New KPI finally
+  // lands on a KPI control).
+  const [kraPickOpen, setKraPickOpen] = useState(false);
+  const [kpiFor, setKpiFor] = useState<{ id: string; name: string } | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   const router = useRouter();
+  // Every Member reads the library (Phase 6, the `kra-kpi` APP_RULES row);
+  // the create controls render only for the kras.create permission the
+  // routes ask. While the matrix loads nothing write-shaped renders.
+  const canCreate = usePermission("kras", "create") === true;
 
-  // The Teams "+" → New KRA routes here with ?new=1; open the dialog once.
+  // The Teams "+" routes here with ?new=kra (New KRA) or ?new=kpi (New KPI);
+  // ?new=1 is the retired form of ?new=kra. Each opens once, and closing
+  // clears the param so a refresh does not re-open it.
   const searchParams = useSearchParams();
-  const didAutoOpen = useRef(false);
+  const newParam = searchParams.get("new");
+  const didAutoOpen = useRef<string | null>(null);
   useEffect(() => {
-    if (!didAutoOpen.current && searchParams.get("new") === "1") {
-      didAutoOpen.current = true;
-      setNewOpen(true);
-    }
-  }, [searchParams]);
+    if (!canCreate || !newParam || didAutoOpen.current === newParam) return;
+    didAutoOpen.current = newParam;
+    if (newParam === "kra" || newParam === "1") setNewOpen(true);
+    else if (newParam === "kpi") setKraPickOpen(true);
+  }, [newParam, canCreate]);
+  const clearNewParam = useCallback(() => {
+    if (!newParam) return;
+    didAutoOpen.current = null;
+    router.replace("/kra-kpi", { scroll: false });
+  }, [newParam, router]);
 
   const load = useCallback(async () => {
     try {
@@ -103,7 +136,8 @@ export default function KraKpiPage() {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
     // Best-effort extras — never block the role list.
-    fetch("/api/kras?limit=500")
+    // scope=library: every definition in the org, for every Member.
+    fetch("/api/kras?limit=500&scope=library")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const list: ApiKra[] = d?.data?.items ?? d?.data?.data ?? (Array.isArray(d?.data) ? d.data : []);
@@ -112,7 +146,10 @@ export default function KraKpiPage() {
       .catch(() => {});
     fetch("/api/kras/orphans")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setOrphans(d?.data?.orphans ?? null))
+      // The route answers { orphans, total } at the TOP level (jsonSuccess
+      // does not wrap); reading d.data.orphans kept this section hidden for
+      // everyone, editors included.
+      .then((d) => setOrphans(d?.orphans ?? d?.data?.orphans ?? null))
       .catch(() => setOrphans(null));
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -214,23 +251,46 @@ export default function KraKpiPage() {
               : `${stats.jobTitles} job title${stats.jobTitles === 1 ? "" : "s"} · ${stats.kras} KRA${stats.kras === 1 ? "" : "s"} · ${stats.kpis} KPI${stats.kpis === 1 ? "" : "s"}`}
           </span>
           <div className="flex-1" />
-          <Link href="/kra-kpi/review" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <Activity className="w-3.5 h-3.5 text-zinc-400" /> KPI review cycle
-          </Link>
-          <Link href="/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <Award className="w-3.5 h-3.5 text-zinc-400" /> Reviews
-          </Link>
-          <button
-            type="button"
-            onClick={() => setNewOpen(true)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060c2]"
-          >
-            <Plus className="w-3.5 h-3.5" /> New KRA
-          </button>
+          {/* "KPI review cycle" and "Reviews" left the header: they are the
+              Teams sidebar rows KPI reviews (/team/kpi-reviews, which the old
+              /kra-kpi/review now 308s to) and Review cycles (/reviews). */}
+          {canCreate ? (
+            <span className="relative inline-flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setKraPickOpen(true)}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50"
+              >
+                <Gauge className="w-3.5 h-3.5 text-zinc-400" /> New KPI
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewOpen(true)}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060c2]"
+              >
+                <Plus className="w-3.5 h-3.5" /> New KRA
+              </button>
+              <Picker
+                open={kraPickOpen}
+                onClose={() => { setKraPickOpen(false); if (newParam === "kpi") clearNewParam(); }}
+                align="end"
+                ariaLabel="Which KRA?"
+                searchPlaceholder="Which KRA?"
+                alwaysSearch
+                emptyLabel={kras.length === 0 ? "No KRAs yet. Create a KRA first." : "No matches"}
+                sections={kraPickerSections(kras)}
+                onSelect={(value) => {
+                  const k = kras.find((x) => x.id === value);
+                  setKraPickOpen(false);
+                  if (k) setKpiFor({ id: k.id, name: k.name });
+                }}
+              />
+            </span>
+          ) : null}
         </div>
         <p className="mt-2 text-base text-zinc-500 max-w-[720px]">
-          KRAs and KPIs live inside job titles. Pick a role to define what it
-          owns — every person holding that title inherits the template, and
+          KRAs and KPIs live inside job titles. Pick a job title to see what
+          it owns: every person holding that title inherits the template, and
           quarterly targets live on each person&rsquo;s goals.
         </p>
       </div>
@@ -241,13 +301,17 @@ export default function KraKpiPage() {
           <TeamStatTile icon={Briefcase} label="Job titles" value={stats.jobTitles} accent="#0073EA" sub="each owns its template" />
           <TeamStatTile icon={Target} label="KRAs" value={stats.kras} accent="#14B8A6" sub="areas of responsibility" />
           <TeamStatTile icon={Gauge} label="KPI gauges" value={stats.kpis} accent="#71717A" sub="running measures" />
-          <TeamStatTile
-            icon={AlertTriangle}
-            label="Needs a job title"
-            value={stats.orphanCount}
-            accent={stats.orphanCount > 0 ? "#F59E0B" : "#00C875"}
-            sub={orphans === null ? "admin-only view" : stats.orphanCount > 0 ? "orphan KRAs to attach" : "every KRA has a home"}
-          />
+          {/* Editors only (the orphans route asks kras.edit): a tile that
+              read "admin-only view" to everyone else carried nothing. */}
+          {orphans !== null ? (
+            <TeamStatTile
+              icon={AlertTriangle}
+              label="Needs a job title"
+              value={stats.orphanCount}
+              accent={stats.orphanCount > 0 ? "#F59E0B" : "#00C875"}
+              sub={stats.orphanCount > 0 ? "orphan KRAs to attach" : "every KRA has a home"}
+            />
+          ) : null}
         </div>
 
         {/* Search */}
@@ -296,7 +360,7 @@ export default function KraKpiPage() {
             context="goals"
             title="No job titles yet"
             hint="KRAs and KPIs live inside job titles, so create those first."
-            action={{ label: "Create roles", onClick: () => router.push("/people/roles?new=1") }}
+            action={canCreate ? { label: "New job title", onClick: () => router.push("/people/roles?new=1") } : undefined}
           />
         ) : filteredRoles.length === 0 && definitionMatches.length === 0 ? (
           <div className="py-16 text-center text-base text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>
@@ -342,9 +406,18 @@ export default function KraKpiPage() {
         ) : null}
       </div>
 
+      {kpiFor ? (
+        <KpiDialog
+          open
+          onOpenChange={(o) => { if (!o) { setKpiFor(null); if (newParam === "kpi") clearNewParam(); } }}
+          kraId={kpiFor.id}
+          kraName={kpiFor.name}
+          onSaved={(msg) => { toast(msg); void load(); }}
+        />
+      ) : null}
       <KraDialog
         open={newOpen}
-        onOpenChange={setNewOpen}
+        onOpenChange={(o) => { setNewOpen(o); if (!o && (newParam === "kra" || newParam === "1")) clearNewParam(); }}
         roles={(roles ?? []).map((r) => ({ id: r.id, title: r.title }))}
         onSaved={(msg) => { toast(msg); void load(); }}
       />

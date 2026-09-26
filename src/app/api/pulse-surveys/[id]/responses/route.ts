@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, getUserId } from "@/lib/api-helpers";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { canManageSurvey } from "@/lib/people/survey-audience";
 
 /**
  * Manager-only aggregate view of a pulse survey's responses.
@@ -40,7 +43,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
@@ -52,10 +55,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id, organizationId: orgId },
     select: {
       id: true, title: true, questions: true, status: true,
-      createdAt: true, closedAt: true, anonymous: true,
+      createdAt: true, closedAt: true, anonymous: true, createdById: true,
     },
   });
   if (!survey) return jsonError("Survey not found", 404);
+  // Results belong to the creator, the People team and Admin
+  // (access-model-spec 3.3 Survey); a survey with no recorded creator stays
+  // with the manager tier that could read it yesterday.
+  if (!canManageSurvey({
+    callerId: getUserId(session),
+    createdById: survey.createdById,
+    peopleTeamOrAdmin: await isPeopleTeamOrAdmin(session),
+    legacyManagerTier: isManager(session),
+  })) return jsonError("Forbidden", 403);
 
   // Build the response filter. We need to join SurveyResponse → User so
   // we can scope by office/department.

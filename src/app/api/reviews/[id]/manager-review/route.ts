@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 // GET: Get all reviews where current user is the reviewer (team reviews)
 export async function GET(
@@ -35,7 +35,14 @@ export async function GET(
     orderBy: { subject: { firstName: "asc" } },
   });
 
-  return jsonSuccess(reviews);
+  // An anonymous peer stays anonymous to the manager too: the client hid the
+  // name only by convention, while the payload carried it.
+  return jsonSuccess(
+    reviews.map((r) => ({
+      ...r,
+      peerFeedback: r.peerFeedback.map((pf) => (pf.anonymous ? { ...pf, giver: null } : pf)),
+    })),
+  );
 }
 
 // PATCH: Submit manager review for a specific reviewee
@@ -45,7 +52,10 @@ export async function PATCH(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // The gate is the row itself: only the reviewer recorded on this review
+  // (the subject's manager at launch) may write it, whatever their access
+  // level. An access-level check here used to refuse an EMPLOYEE-level
+  // person with a direct report, who the launch had made the reviewer.
 
   const { id: cycleId } = await params;
   const userId = getUserId(session);

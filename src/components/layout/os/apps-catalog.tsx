@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { TalkSidebar } from "./talk-sidebar";
-import { canAccessTier, MANAGER_LEVELS, type AccessTier } from "./access-tiers";
+import { canAccessTier, type AccessTier } from "./access-tiers";
 import type { PermissionModule } from "@/lib/permissions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Re-exported so existing consumers (rail-apps.ts) keep importing the access
@@ -25,20 +25,21 @@ import {
   Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
-  Award, ThumbsUp, FileSpreadsheet, Star,
+  FileSpreadsheet, Star,
   HardDrive, Boxes, Layers, Upload, ClipboardList, Import as ImportIcon,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   ListChecks,
-  Activity, LayoutTemplate, Plug, LineChart,
+  Activity, LayoutTemplate, Plug,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2, LayoutDashboard,
   Target, GaugeCircle, BookUser, Network, Heart,
+  Scale, Zap, Gauge, CalendarCheck, Grid3x3,
   type LucideIcon,
   MessageCircle, Hash, Table2 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
@@ -57,6 +58,7 @@ import { useSidebarSearch } from "./sidebar-search-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsShell } from "./shell-context";
 import { readSidebarCards } from "@/lib/home-prefs";
+import { goalsGroupExpanded } from "@/lib/people-prefs";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
@@ -67,6 +69,9 @@ import { objectHref, type ObjectKind } from "@/lib/nav/object-href";
 import { useFavoritePill, useOpenObject, useOpenRevealKey } from "./work-placement";
 import { readOpenObject } from "@/lib/nav/open-object";
 import { useActiveRowHref } from "./use-active-row";
+import {
+  TEAMS_SECTION_LABELS, teamsActiveHref, teamsRowCount, visibleTeamsRows, type TeamsRow,
+} from "@/lib/nav/teams-rows";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
@@ -332,26 +337,41 @@ function GroupRow({
 }
 
 function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
-  const isManager = canAccessTier("manager", accessLevel);
-  const [expanded, setExpanded] = useState(Boolean(activeHref && activeHref.startsWith("/okrs")));
+  // spec-goals section 1, the Work hub's Goals group. The parent row reads as
+  // the parent and never lights on its own: "My goals" is the child that
+  // lights on /okrs, so one URL still lights exactly one row. The gates are
+  // the boot facts (hasReports solid or dotted, the People team, Admin), not
+  // an accessLevel tier. Expanded while the URL is under /okrs; otherwise the
+  // chevron's last choice, persisted as sidebar.groups.goals.
+  const { boot, counts } = useBoot();
+  const { prefs, patchPrefs } = useOsShell();
+  const pathname = usePathname() || "";
+  const v = boot.viewer;
+  const seesTeam = v.hasReports || v.peopleTeam || v.orgRole === "OWNER" || v.orgRole === "ADMIN";
+  const expanded = goalsGroupExpanded(prefs.sidebar, pathname);
+  const onToggle = () => {
+    void patchPrefs({ sidebar: { groups: { goals: !expanded } } });
+  };
   return (
     <>
-      <GroupRow href="/okrs" label="Goals" Icon={Target} active={activeHref === "/okrs"} expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+      <GroupRow href="/okrs" label="Goals" Icon={Target} active={false} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <>
-          {/* spec-goals section 1 owns these hrefs. The retired `?mine=1`,
-              `?team=1` and `?level=company` forms are never printed again:
-              `/okrs` IS My goals, which is why there is no separate "My goals"
-              child: the group row is that destination, and printing it twice
-              would light two rows for one URL. */}
-          {isManager ? <SidebarRow depth={1} href="/okrs?view=team" icon={Users} label="Team goals" active={activeHref === "/okrs?view=team"} /> : null}
+          <SidebarRow depth={1} href="/okrs" icon={Trophy} label="My goals" active={activeHref === "/okrs"} />
+          {seesTeam ? <SidebarRow depth={1} href="/okrs?view=team" icon={Users} label="Team goals" active={activeHref === "/okrs?view=team"} /> : null}
           <SidebarRow depth={1} href="/okrs?view=company" icon={Building2} label="Company goals" active={activeHref === "/okrs?view=company"} />
-          {/* sidebar-map 1 row 5d ("My KRAs & KPIs" as a jump to
-              /people/me?tab=kras) waits for the profile page to grow a KRAs
-              tab; until then it would be a second row to the My profile
-              destination, which spec-shell 1.3 retires. */}
+          {/* A jump out of the hub: it opens a Teams route, so it never
+              carries an active state and shows the ArrowUpRight so the jump
+              is visible before the click (spec-goals section 1 row 1d). */}
+          <SidebarRow
+            depth={1}
+            href="/people/me?tab=kras"
+            icon={Gauge}
+            label="My KRAs & KPIs"
+            active={false}
+            jump
+            count={counts.myKpisDue}
+          />
         </>
       ) : null}
     </>
@@ -439,8 +459,8 @@ interface SpaceRow {
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
 const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
-// The person record row (naming-canon 2.18): "My profile" everywhere.
-const PROFILE_NAV_LABEL = "My profile";
+// The person record row (naming-canon 2.18) reads "My profile" everywhere;
+// the Teams sidebar takes the label from src/lib/nav/teams-rows.ts.
 
 function FavSubLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -1469,127 +1489,73 @@ function AiSidebar() {
 
 /* ───────────────────────── Teams sidebar ───────────────────────── */
 
-// Teams: a people-operation cockpit. Three buckets: who (People), what they
-// own & are measured on (Alignment), how they're doing (Performance), plus an
-// Overview landing. Every item has one clear job.
-//
-// The app entry is manager-gated, but this sidebar can still render for an
-// employee (route match on /people/[id]: their own career home), so it is
-// access-aware: below manager tier it shows only the personal door, and the
-// director-gated Rollup row is hidden below director (no dead controls).
-const DIRECTOR_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR"]);
-
-// Every static row of the Teams sidebar in one list, so the resolver lights
-// exactly one (spec-shell §1.1). Tools and Assets are re-parented here from the
-// Settings sidebar: ROUTE_HUB puts both routes in this hub, and Settings is a
-// takeover with no sidebar of its own.
-const TEAMS_ROWS = [
-  { href: "/team", match: "exact" as const },
-  { href: "/people/me", match: "exact" as const },
-  { href: "/people", match: "exact" as const },
-  { href: "/organization" },
-  { href: "/people/roles" },
-  { href: "/kra-kpi" },
-  { href: "/team/alignment", match: "exact" as const },
-  { href: "/team/reviews", match: "exact" as const },
-  { href: "/team/kpi-reviews", match: "exact" as const },
-  { href: "/team/rollup", match: "exact" as const },
-  { href: "/team/workload", match: "exact" as const },
-  { href: "/analytics", match: "exact" as const },
-  { href: "/reviews" },
-  { href: "/talent" },
-  { href: "/candor" },
-  { href: "/kudos" },
-  { href: "/surveys" },
-  { href: "/tools" },
-  { href: "/assets" },
-];
+// The Teams hub sidebar: the 20 rows of spec-teams-people section 1 and
+// sidebar-map section 5, from the one pure table in src/lib/nav/teams-rows.ts
+// (rows, gates, counts, the URL-derived active row). Gates are the APP_RULES
+// audiences over the boot facts (hasReports solid or dotted, the People team,
+// the org role), never an accessLevel tier, so a row renders exactly when its
+// page lets the viewer in. The retired Rollup row lives on as the Sub-teams
+// view of Alignment (/team/rollup still lights Alignment).
+const TEAMS_ICONS: Record<TeamsRow["icon"], LucideIcon> = {
+  CircleUser, Users, Scale, BookUser, Network, Building2, Briefcase, Zap,
+  Gauge, Target, ClipboardCheck, CalendarCheck, ClipboardList, Grid3x3,
+  BarChart3, Heart, MessageSquare, ListChecks, Wrench, Boxes,
+};
 
 function TeamsSidebar() {
-  const activeHref = useActiveRowHref(TEAMS_ROWS);
+  const { boot, counts } = useBoot();
   const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isManagerTier = MANAGER_LEVELS.has(accessLevel);
-  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
+  // The one tier read left here, for the Assets bridge (teams-rows.ts).
+  const legacyManagerTier = canAccessTier("manager", (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? null);
+  const pathname = usePathname() || "";
+  const searchParams = useSearchParams();
+  const { query } = useSidebarSearch();
+  const v = boot.viewer;
+  const rows = useMemo(
+    () =>
+      visibleTeamsRows({
+        userId: v.id,
+        orgRole: v.orgRole,
+        isAgent: v.isAgent,
+        hasReports: v.hasReports,
+        peopleTeam: v.peopleTeam,
+        candorInvited: v.candorInvited,
+        surveyTargeted: v.surveyTargeted,
+        legacyManagerTier,
+      }),
+    [v.id, v.orgRole, v.isAgent, v.hasReports, v.peopleTeam, v.candorInvited, v.surveyTargeted, legacyManagerTier],
+  );
+  const activeHref = teamsActiveHref(pathname, searchParams?.toString() ?? "", v.id, rows);
+  const q = query.trim().toLowerCase();
+  const shown = q ? rows.filter((r) => r.label.toLowerCase().includes(q)) : rows;
 
-  // THE MEMBER BRANCH IS ONE ROW, AND THAT IS THE PRODUCT'S OWN DOOR MODEL,
-  // not an oversight. /people and /organization both call
-  // requireManagerPage() (src/lib/page-gates.ts: "Door 1 EMPLOYEE / AGENT ->
-  // their own career home"), so a Directory or Org chart row here would land
-  // a Member on the in-shell 404. sidebar-map.md section 5 reads the other
-  // way ("the Directory is the one Teams page every Member holds"); opening
-  // the Directory to Members is a change to those two page gates and to what
-  // the whole organization can browse, which is the access engine's decision
-  // and not a menu change. Until that is taken, the row that renders is the
-  // one that opens. /people/me is every person's own career home and is
-  // reachable for everybody.
-  if (!isManagerTier) {
-    return (
-      <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
-      </ul>
-    );
+  // Section labels render only when at least one of their rows does.
+  const groups: { section: TeamsRow["section"]; rows: TeamsRow[] }[] = [];
+  for (const r of shown) {
+    const last = groups[groups.length - 1];
+    if (last && last.section === r.section) last.rows.push(r);
+    else groups.push({ section: r.section, rows: [r] });
   }
 
   return (
     <>
-      <ul>
-        <NavItem href="/team" Icon={Users} label="My team" active={activeHref === "/team"} />
-        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
-      </ul>
-      <SectionLabel>People</SectionLabel>
-      <ul>
-        <NavItem href="/people" Icon={BookUser} label="Directory" active={activeHref === "/people"} />
-        <NavItem href="/organization" Icon={Network} label="Org chart" active={activeHref === "/organization"} />
-        <NavItem href="/people/roles" Icon={Briefcase} label="Job titles" active={activeHref === "/people/roles"} />
-      </ul>
-      <SectionLabel>Alignment</SectionLabel>
-      <ul>
-        <NavItem href="/kra-kpi" Icon={GaugeCircle} label="KRAs & KPIs" active={activeHref === "/kra-kpi"} />
-        <NavItem href="/team/alignment" Icon={Target} label="Alignment" active={activeHref === "/team/alignment"} />
-      </ul>
-      <SectionLabel>Performance</SectionLabel>
-      <ul>
-        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Weekly reviews" active={activeHref === "/team/reviews"} />
-        <NavItem href="/team/kpi-reviews" Icon={ClipboardCheck} label="KPI reviews" active={activeHref === "/team/kpi-reviews"} />
-        {DIRECTOR_LEVELS.has(accessLevel) ? (
-          <NavItem href="/team/rollup" Icon={BarChart3} label="Sub-teams" active={activeHref === "/team/rollup"} />
-        ) : null}
-        <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={activeHref === "/team/workload"} />
-        {/* spec-work-home section 1 row 15, and a hard precondition on W6: a
-            rebuilt /analytics with no row is the orphan that work names. The
-            gate is the `analytics` app key (access 5.2.1): anyone with reports
-            over their chain, the People team and Admin over the org, which is
-            exactly the manager tier this sidebar already renders inside. */}
-        <NavItem href="/analytics" Icon={LineChart} label="Analytics" active={activeHref === "/analytics"} />
-        {isHrAdmin ? (
-          <>
-            <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={activeHref === "/reviews"} />
-            <NavItem href="/talent" Icon={Award} label="Talent (9-box)" active={activeHref === "/talent"} />
-          </>
-        ) : null}
-      </ul>
-      {isHrAdmin ? (
-        <>
-          <SectionLabel>Culture</SectionLabel>
+      {groups.map((g) => (
+        <div key={g.section}>
+          {g.section === "personal" ? null : <SectionLabel>{TEAMS_SECTION_LABELS[g.section]}</SectionLabel>}
           <ul>
-            <NavItem href="/candor" Icon={MessageSquare} label="Candor" active={activeHref === "/candor"} />
-            <NavItem href="/kudos" Icon={Heart} label="Kudos" active={activeHref === "/kudos"} />
-            <NavItem href="/surveys" Icon={ListChecks} label="Surveys" active={activeHref === "/surveys"} />
+            {g.rows.map((r) => (
+              <NavItem
+                key={r.key}
+                href={r.href}
+                Icon={TEAMS_ICONS[r.icon]}
+                label={r.label}
+                active={r.href === activeHref}
+                badge={teamsRowCount(r, counts)}
+              />
+            ))}
           </ul>
-        </>
-      ) : null}
-      {isHrAdmin ? (
-        <>
-          {/* Re-parented from the Settings sidebar. Same hr-admin gate they
-              carried there. */}
-          <SectionLabel>Resourcing</SectionLabel>
-          <ul>
-            <NavItem href="/tools" Icon={Wrench} label="Tools" active={activeHref === "/tools"} />
-            <NavItem href="/assets" Icon={Boxes} label="Assets" active={activeHref === "/assets"} />
-          </ul>
-        </>
-      ) : null}
+        </div>
+      ))}
     </>
   );
 }
@@ -1763,9 +1729,11 @@ export const APPS: AppEntry[] = [
   // /people (the Directory), not /team: /team is gated on having reports, so a
   // rail pill pointed at it would land a plain Member on a denial. My team is
   // the second row of the hub sidebar (spec-shell §1.1).
+  // Every Member (Phase 6, sidebar-map section 5): the Directory is the one
+  // Teams page every Member holds, so the pill can never land on a locked
+  // page. Guests never get the rows (TeamsSidebar renders none for them).
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/people",
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
-    requiredAccess: "manager",
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
@@ -1876,23 +1844,28 @@ export const APPS: AppEntry[] = [
   // ── People ──────────────────────────────────────────────────
   // "Review cycles", not "Reviews": the Teams sidebar's weekly "Reviews"
   // queue keeps that name, and the two colliding was the confusion.
-  { key: "reviews", label: "Review cycles", Icon: ClipboardCheck, defaultHref: "/reviews", category: "People", requiredAccess: "hr-admin",
+  // Phase 6: the page gate is app:reviews (anyone with reports, the People
+  // team, Admin), so the palette row follows the manager tier instead of
+  // hr-admin. The two-row linksSidebar is unreachable (reviews folds into
+  // the Teams hub, whose sidebar renders), kept only as the entry's shape.
+  { key: "reviews", label: "Review cycles", Icon: ClipboardList, defaultHref: "/reviews", category: "People", requiredAccess: "manager",
     // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
     // reviews-client.tsx, so repeat "+" clicks re-open it).
-    createActions: [{ label: "Start review cycle", icon: ClipboardCheck, href: "/reviews?new=1", requiredAccess: "manager" }],
+    createActions: [{ label: "Start review cycle", icon: ClipboardList, href: "/reviews?new=1", requiredAccess: "manager" }],
     Sidebar: linksSidebar([
-      { href: "/reviews", label: "Review cycles", Icon: ClipboardCheck },
-      { href: "/talent",  label: "Talent (9-box)", Icon: Award },
+      { href: "/reviews", label: "Review cycles", Icon: ClipboardList },
+      { href: "/talent",  label: "Talent (9-box)", Icon: Grid3x3 },
     ]) },
-  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People", requiredAccess: "hr-admin",
+  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People", requiredAccess: "manager",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
   // Every Member reads announcements (sidebar-map section 4 row 4; the page
   // renders read-only below manager). Ungated here so the Talk hub and its
   // Announcements row stay reachable with the Talk module off.
   { key: "announcements", label: "Announcements", Icon: Megaphone, defaultHref: "/announcements", category: "People",
     Sidebar: linksSidebar([{ href: "/announcements", label: "Announcements", Icon: Megaphone }]) },
-  { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos", category: "People", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: ThumbsUp }]) },
+  // Every Member gives and reads kudos (access 5.2.1 `kudos`).
+  { key: "kudos", label: "Kudos", Icon: Heart, defaultHref: "/kudos", category: "People",
+    Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: Heart }]) },
   { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
@@ -1901,9 +1874,11 @@ export const APPS: AppEntry[] = [
   // Assets = physical equipment (laptops, monitors, keys, badges).
   // Both are per-employee provisioning surfaces: natural fit under
   // People. Tied to joiner (grant) and offboarding (revoke) flows.
-  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools", category: "People", requiredAccess: "hr-admin",
+  // Every Member: the tools shared with them (access 5.2.1 widens this row;
+  // GET /api/tools already scopes a Member to their shares).
+  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools", category: "People",
     Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
-  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets", category: "People", requiredAccess: "hr-admin",
+  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets", category: "People", requiredAccess: "manager",
     Sidebar: linksSidebar([{ href: "/assets", label: "Assets & equipment", Icon: Boxes }]) },
 
   // ── Knowledge ───────────────────────────────────────────────

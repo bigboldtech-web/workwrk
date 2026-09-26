@@ -25,6 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Building2,
   Users,
@@ -269,6 +270,19 @@ export default function DepartmentsPage() {
     setDialog({ mode: "create", presetParentId });
   }, []);
   const openEdit = useCallback((dept: ApiDept) => setDialog({ mode: "edit", dept }), []);
+
+  // The Teams "+" New department lands here with ?new=1 (Phase 6). It opens
+  // the create dialog once the permission check says the viewer may create,
+  // and closing clears the param so a refresh does not reopen it.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const wantsNew = searchParams.get("new") === "1";
+  const didAutoOpen = useRef(false);
+  useEffect(() => {
+    if (!wantsNew || !canManage || didAutoOpen.current) return;
+    didAutoOpen.current = true;
+    setDialog({ mode: "create", presetParentId: null });
+  }, [wantsNew, canManage]);
   const openAddSub = useCallback((parentId: string) => setDialog({ mode: "create", presetParentId: parentId }), []);
 
   const deleteDept = useCallback(async (dept: ApiDept) => {
@@ -279,7 +293,7 @@ export default function DepartmentsPage() {
     }
     const ok = await confirm({
       title: `Delete "${dept.name}"?`,
-      description: "This removes the function. Sub-departments become top-level. This can't be undone.",
+      description: "This removes the department. Sub-departments become top-level. This can't be undone.",
       confirmLabel: "Delete",
       destructive: true,
     });
@@ -291,10 +305,10 @@ export default function DepartmentsPage() {
         toast(body?.error ?? `Couldn't delete (HTTP ${res.status})`);
         return;
       }
-      toast("Function deleted");
+      toast("Department deleted");
       void load();
     } catch {
-      toast("Couldn't delete function");
+      toast("Couldn't delete department");
     }
   }, [confirm, load, toast]);
 
@@ -397,8 +411,8 @@ export default function DepartmentsPage() {
           state={dialog}
           allDepts={depts ?? []}
           members={members}
-          onClose={() => setDialog(null)}
-          onSaved={() => { setDialog(null); void load(); }}
+          onClose={() => { setDialog(null); if (wantsNew) router.replace("/people/departments", { scroll: false }); }}
+          onSaved={() => { setDialog(null); if (wantsNew) router.replace("/people/departments", { scroll: false }); void load(); }}
           toast={toast}
         />
       )}
@@ -427,7 +441,7 @@ function RowMenu({ dept, actions }: { dept: ApiDept; actions: DeptActions }) {
           <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} aria-hidden />
           <MorePortal anchorRef={anchorRef} width={210} open={open} placement="below">
             <MenuList>
-              <MenuItem icon={Pencil} label="Edit function" onClick={() => { setOpen(false); actions.onEdit(dept); }} />
+              <MenuItem icon={Pencil} label="Edit department" onClick={() => { setOpen(false); actions.onEdit(dept); }} />
               <MenuItem icon={CornerDownRight} label="Add sub-department" onClick={() => { setOpen(false); actions.onAddSub(dept.id); }} />
               <MenuSeparator />
               <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { setOpen(false); actions.onDelete(dept); }} />
@@ -762,10 +776,10 @@ function DeptDialog({
         setSaving(false);
         return;
       }
-      toast(editing ? "Function updated" : "Function created");
+      toast(editing ? "Department updated" : "Department created");
       onSaved();
     } catch {
-      toast("Couldn't save function");
+      toast("Couldn't save department");
       setSaving(false);
     }
   }
@@ -774,9 +788,9 @@ function DeptDialog({
     <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit function" : "New function"}</DialogTitle>
+          <DialogTitle>{editing ? "Edit department" : "New department"}</DialogTitle>
           <DialogDescription>
-            Functions (departments) organise people and route policies, announcements, and ownership.
+            Departments organise people and route policies, announcements and ownership.
           </DialogDescription>
         </DialogHeader>
 
@@ -800,7 +814,7 @@ function DeptDialog({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What this function owns…"
+              placeholder="What this department owns"
               rows={2}
               className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-base text-zinc-900 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
@@ -867,7 +881,7 @@ function DeptDialog({
             disabled={saving || !name.trim()}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0073EA] px-3.5 text-base font-medium text-white hover:bg-[#0068d6] disabled:opacity-50"
           >
-            {saving ? "Saving…" : editing ? "Save changes" : "Create function"}
+            {saving ? "Saving…" : editing ? "Save changes" : "Create department"}
           </button>
         </DialogFooter>
       </DialogContent>

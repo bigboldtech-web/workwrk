@@ -93,8 +93,10 @@ export async function GET(req: NextRequest) {
     ];
     if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
     visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
-    if (isManager(session)) {
-      const teamIds = await getTeamUserIds(orgId, callerId);
+    // A manager at any tier, or anyone with people reporting to them.
+    const treeIds = await getTeamUserIds(orgId, callerId);
+    if (isManager(session) || treeIds.length > 1) {
+      const teamIds = treeIds;
       visible.push({ ownerId: { in: teamIds } });
       visible.push({ ownerId: null });
       visible.push(...(await teamAudienceVisibilityOr(teamIds)));
@@ -102,16 +104,32 @@ export async function GET(req: NextRequest) {
     and.push({ OR: visible });
   }
   if (mineOnly) {
+    // My goals (Phase 6: bare /okrs). Also the viewer's own department's
+    // DEPARTMENT goals, which the retired unfiltered default showed them:
+    // until the department-goal GoalAssignee backfill has run in an org,
+    // those goals have no audience row, and dropping them here would lose
+    // them from the one view that should carry them.
     and.push({
       OR: [
         { ownerId: callerId },
+        ...(me?.departmentId ? [{ level: "DEPARTMENT" as const, departmentId: me.departmentId }] : []),
         ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }),
       ],
     });
   }
-  if (teamOnly && (isManager(session) || orgWide)) {
+  if (teamOnly && orgWide) {
+    // Team goals for an org-wide level is the org (spec-goals section 1:
+    // "People team and Admin over the org"), the list their unfiltered
+    // default used to be. No narrowing beyond visibility.
+  } else if (teamOnly) {
     const teamIds = await getTeamUserIds(orgId, callerId);
-    and.push({ OR: [{ ownerId: { in: teamIds } }, ...(await teamAudienceVisibilityOr(teamIds))] });
+    // A manager at any tier, or anyone with people reporting to them (the
+    // fact the sidebar row and the page read). Unowned goals stay in the
+    // manager's view, as they were in the retired default: managers create
+    // them and must be able to find them.
+    if (isManager(session) || teamIds.length > 1) {
+      and.push({ OR: [{ ownerId: { in: teamIds } }, { ownerId: null }, ...(await teamAudienceVisibilityOr(teamIds))] });
+    }
   }
   if (and.length > 0) where.AND = and;
 

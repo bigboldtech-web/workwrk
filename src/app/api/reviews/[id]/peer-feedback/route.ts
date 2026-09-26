@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
+import { canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { isInReportTree } from "@/lib/reporting-line";
 
 // GET: Get peer feedback requests for current user (to give) or for a review (as manager)
 export async function GET(
@@ -17,6 +20,23 @@ export async function GET(
 
   // If reviewId provided, get feedback for that review (manager viewing)
   if (reviewId) {
+    // Phase 6 (a live anonymity leak): this branch returned every peer
+    // feedback row for ANY review id, giver identity included, to any
+    // signed-in user. The review must now be in this cycle and this org,
+    // the caller must be its reviewer, above its subject in the chain, the
+    // cycle's owner (People team, Admin, the manager who started it); the
+    // subject never reads this list (they see the aggregate rating on the
+    // cycle page), and an anonymous giver stays anonymous to everyone but
+    // the People team and Admin.
+    const review = await prisma.review.findFirst({
+      where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
+      select: { id: true, subjectId: true, reviewerId: true, cycle: { select: { createdById: true } } },
+    });
+    if (!review || review.subjectId === userId) return jsonError("Not found", 404);
+    const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
+    const owner = await canManageReviewCycle(session, review.cycle);
+    const allowed = owner || review.reviewerId === userId || (await isInReportTree(userId, review.subjectId));
+    if (!allowed) return jsonError("Not found", 404);
     const feedback = await prisma.peerFeedback.findMany({
       where: { reviewId },
       include: {
@@ -24,7 +44,9 @@ export async function GET(
         receiver: { select: { id: true, firstName: true, lastName: true } },
       },
     });
-    return jsonSuccess(feedback);
+    return jsonSuccess(
+      feedback.map((f) => (f.anonymous && !peopleOrAdmin ? { ...f, giverId: null, giver: null } : f)),
+    );
   }
 
   // Otherwise, get feedback requests where current user is the giver
@@ -49,7 +71,6 @@ export async function POST(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id: cycleId } = await params;
   const body = await req.json();
@@ -64,6 +85,14 @@ export async function POST(
     include: { cycle: { select: { name: true } }, subject: { select: { firstName: true, lastName: true } } },
   });
   if (!review) return jsonError("Review not found", 404);
+  // Who picks the peers: the review's reviewer, anyone with the subject in
+  // their reporting chain, or the People team and Admin, whatever their
+  // access level (the same facts the /reviews/[id] team face reads).
+  const callerId = getUserId(session);
+  if (review.reviewerId !== callerId) {
+    const reach = await cycleSubjectReach(session);
+    if (reach && !reach.has(review.subjectId)) return jsonError("Forbidden", 403);
+  }
 
   // Create peer feedback records
   const feedbackData = peerIds.map((peerId: string) => ({

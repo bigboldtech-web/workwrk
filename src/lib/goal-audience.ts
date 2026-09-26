@@ -264,9 +264,12 @@ export async function canSeeGoal(
   const members = await resolveGoalMembers(okr.id);
   if (members.includes(callerId)) return true;
 
-  if (isManager(session)) {
+  // A manager at any tier, or anyone with people reporting to them (Phase 6:
+  // "manager" is a fact about the org chart). The same rule GET /api/okrs
+  // lists by, so a Team goals row never opens onto a 404.
+  const teamIds = new Set(await getTeamUserIds(getOrgId(session), callerId));
+  if (isManager(session) || teamIds.size > 1) {
     if (!okr.ownerId) return true; // unowned objectives stay manager-visible
-    const teamIds = new Set(await getTeamUserIds(getOrgId(session), callerId));
     if (teamIds.has(okr.ownerId)) return true;
     if (members.some((id) => teamIds.has(id))) return true;
   }

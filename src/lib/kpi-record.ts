@@ -141,6 +141,20 @@ export async function listKpiReviewsForManager(
 }
 
 /**
+ * How many KPI numbers await `managerId`'s approval: the SAME where clause
+ * as listKpiReviewsForManager with status SUBMITTED, uncapped, so the Teams
+ * sidebar's KPI reviews badge and the page's queue can never disagree.
+ */
+export async function countKpiReviewsForManager(managerId: string, organizationId: string): Promise<number> {
+  const tree = await getEffectiveReportTree(managerId);
+  const reportIds = tree.filter((id) => id !== managerId);
+  if (reportIds.length === 0) return 0;
+  return prisma.kPIRecord.count({
+    where: { userId: { in: reportIds }, kpi: { organizationId }, status: "SUBMITTED" },
+  });
+}
+
+/**
  * Transition a SUBMITTED KPI record to APPROVED / REJECTED, store the
  * manager note, and notify the report. (Caller authorizes.) REJECTED
  * records re-surface in the IC's "to score" list so they can resubmit.

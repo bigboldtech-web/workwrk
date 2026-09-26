@@ -10,11 +10,12 @@
 //   - Direct ICs section — reports who don't have reports of their
 //     own, in a compact list with the three personal metrics.
 
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getDirectorRollup, type SubTeam, type DirectIcSummary } from "@/lib/team-rollup";
-import { resolveAccess, meets } from "@/lib/access";
+import { gatePage } from "@/lib/access/gate";
+import { ViewTab } from "@/components/ui/view-tabs";
 import Link from "next/link";
 import {
   ChartLine, BookOpenCheck, Users as UsersIcon, ChevronRight,
@@ -30,14 +31,10 @@ export default async function TeamRollupPage() {
   const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
   if (!u.id || !u.organizationId) redirect("/login");
 
-  // Phase 6 — central access resolver. Non-directors who land here
-  // bounce to /team/alignment so they still get the manager-level
-  // view they're entitled to.
-  const decision = await resolveAccess(
-    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
-    { type: "module", name: "team/rollup" },
-  );
-  if (!meets(decision, "read")) notFound();
+  // The one gate shape (Phase 6): the `rollup` APP_RULES row, anyone with
+  // reports (solid or dotted) over their chain, the People team and Admin
+  // over the org; anyone else gets the in-shell 404.
+  await gatePage("view", { type: "app", key: "rollup" }, { callbackUrl: "/team/rollup" });
 
   const data = await getDirectorRollup({
     directorId: u.id,
@@ -50,18 +47,21 @@ export default async function TeamRollupPage() {
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
           <Link href="/team" className="hover:text-zinc-900">Teams</Link>
           <span className="text-zinc-300">/</span>
-          <span>Rollup</span>
+          <span>Alignment</span>
+          <span className="text-zinc-300">/</span>
+          <span>Sub-teams</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
             <BarChart3 className="h-5 w-5 text-[#0073EA]" />
           </span>
-          <h1 className="text-base font-semibold text-zinc-900">Rollup</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">two levels below you — every sub-team&rsquo;s health</span>
-          <div className="flex-1" />
-          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <Target className="w-3.5 h-3.5 text-zinc-400" /> Alignment
-          </Link>
+          <h1 className="text-base font-semibold text-zinc-900">Alignment</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">each manager under you and their direct reports</span>
+        </div>
+        {/* Sub-teams is the second view of Alignment (spec-goals section 1). */}
+        <div className="mt-3 flex items-center gap-1" role="tablist">
+          <ViewTab label="My reports" href="/team/alignment" />
+          <ViewTab label="Sub-teams" active href="/team/rollup" />
         </div>
       </div>
 

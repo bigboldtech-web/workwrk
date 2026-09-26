@@ -14,10 +14,9 @@ import { ChevronDown } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { KPI_ORDER } from "@/lib/alignment";
 import { RoleWorkspace } from "./role-workspace";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 
 export const dynamic = "force-dynamic";
-
-const MANAGER_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"]);
 
 export default async function RolePage(props: {
   params: Promise<{ id: string }>;
@@ -32,7 +31,10 @@ export default async function RolePage(props: {
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
   if (!u.id || !u.organizationId) redirect("/login");
   const orgId = u.organizationId;
-  const canEdit = MANAGER_LEVELS.has(u.accessLevel ?? "EMPLOYEE");
+  // The one shared ladder (PO-43: this file carried its own MANAGER_LEVELS
+  // copy). It is the tier PUT /api/roles/[id] and the workspace's write
+  // routes ask, so the page never renders a control whose save 403s.
+  const canEdit = legacyIsManagerLevel(u.accessLevel ?? "EMPLOYEE");
 
   const role = await prisma.role.findFirst({
     where: { id, organizationId: orgId },

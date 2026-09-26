@@ -17,6 +17,7 @@ import { notFound } from "next/navigation";
 import { resolveAccess } from "@/lib/access";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { requireSessionUser } from "@/lib/page-gates";
+import { orgRoleOf } from "@/lib/access/org-role";
 import ProfileClient from "./profile-client";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,9 @@ export default async function PersonProfilePage({ params }: { params: Promise<{ 
     { type: "user", id },
   );
   if (decision.permission === "none") notFound();
+  // A Guest never sees the Teams hub (access 2.3): their own record is
+  // My settings > Profile, so a person record is the in-shell 404 for them.
+  if (orgRoleOf({ accessLevel: viewer.accessLevel }) === "GUEST") notFound();
 
   const mode =
     id === viewer.id

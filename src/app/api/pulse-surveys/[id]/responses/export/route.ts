@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, getUserId } from "@/lib/api-helpers";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { canManageSurvey } from "@/lib/people/survey-audience";
 
 /**
  * CSV export of all responses to a single pulse survey.
@@ -45,7 +48,7 @@ function csvEscape(val: unknown): string {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
@@ -55,9 +58,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const survey = await prisma.pulseSurvey.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, title: true, questions: true, anonymous: true },
+    select: { id: true, title: true, questions: true, anonymous: true, createdById: true },
   });
   if (!survey) return jsonError("Survey not found", 404);
+  // Results belong to the creator, the People team and Admin (the same rule
+  // as the responses route).
+  if (!canManageSurvey({
+    callerId: getUserId(session),
+    createdById: survey.createdById,
+    peopleTeamOrAdmin: await isPeopleTeamOrAdmin(session),
+    legacyManagerTier: isManager(session),
+  })) return jsonError("Forbidden", 403);
 
   // Anonymity guard (mirrors the responses route): segment filters are a
   // de-anonymization vector, so they are honored only on non-anonymous

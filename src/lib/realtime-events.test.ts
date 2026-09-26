@@ -62,6 +62,8 @@ describe("realtime event contract", () => {
       // workwrk:realtime, not to a second name.
       [{ type: "calendar.changed" }, []],
       [{ type: "item", itemId: "i1", boardId: "b1" }, [WINDOW_EVENTS.itemChanged]],
+      // Phase 6: its consumers subscribe to workwrk:realtime directly.
+      [{ type: "review.decided", reviewId: "r1" }, []],
     ];
     for (const [ev, expected] of cases) expect(legacyWindowEventsFor(ev)).toEqual(expected);
     // Exhaustive: every named type has a mapping (the switch returns an array).
