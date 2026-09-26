@@ -8,6 +8,7 @@ import {
   homeStatusForBoardStatus,
   homeStatusTarget,
   linkedStatusNote,
+  linkedStatusShort,
   linkedStatusRefusal,
   planBulkStatus,
   reconcilePoll,
@@ -117,6 +118,10 @@ describe("a linked row filed under a status that is not its own", () => {
     expect(linkedStatusNote(c, SHARED, SHARED_STATUSES)).toBe(
       "This task is In review in ML walk Open Home. This List has no In review status, so it shows under To Do.",
     );
+  });
+  it("has a few words for a Board card, seen without a hover", () => {
+    expect(linkedStatusShort(shared("REVIEW"), SHARED, SHARED_STATUSES)).toBe("In review in ML walk Open Home");
+    expect(linkedStatusShort(shared("DONE"), SHARED, SHARED_STATUSES)).toBeNull();
   });
   it("says nothing when the List holds the status itself, or for a home row", () => {
     expect(linkedStatusNote(shared("DONE"), SHARED, SHARED_STATUSES)).toBeNull();

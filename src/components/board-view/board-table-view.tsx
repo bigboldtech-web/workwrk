@@ -3799,8 +3799,9 @@ function StatusCell({
   current?: StatusOption | null;
   /**
    * Phase 5b: why a row shown here through a link sits under a status that is
-   * not its own (a home "In review" under this List's To Do), as the pill's
-   * tooltip, so the placement can be explained.
+   * not its own (a home "In review" under this List's To Do): the pill's
+   * tooltip, the head of its menu, and on a pill the viewer cannot change a
+   * box that a tap opens, so touch gets the explanation too.
    */
   note?: string | null;
   /** Monday-style Table variant: status fills the whole cell with the
@@ -3832,12 +3833,31 @@ function StatusCell({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
 
+  // The placement note must reach touch too, where a tooltip never shows:
+  // it heads the status menu, and a pill the viewer cannot change opens a
+  // small box with just the note when tapped.
+  const noteLine = note ? (
+    <p role="note" className="mb-1 border-b border-zinc-100 px-2 pb-1.5 pt-1 text-xs leading-snug text-zinc-500">{note}</p>
+  ) : null;
+  const noteOnly = (trigger: React.ReactNode, className: string) => (
+    <div className={`relative ${className}`} ref={ref}>
+      <button type="button" onClick={() => setOpen((v) => !v)} title={note ?? undefined} aria-expanded={open} className="block w-full h-full text-left">
+        {trigger}
+      </button>
+      {open && menuPos ? (
+        <div style={{ position: "fixed", left: menuPos.left, width: 224, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white p-2 text-xs leading-snug text-zinc-600 shadow-lg" role="note">
+          {note}
+        </div>
+      ) : null}
+    </div>
+  );
+
   // Dot variant — the ClickUp status circle shown before the title when
   // the Status column is hidden (grouped by status). Ring for not-started
   // (ACTIVE), filled with a check for DONE/CLOSED.
   if (dot) {
     const circle = <StatusGlyph current={current} statuses={statuses} />;
-    if (!canEdit) return note ? <span className="shrink-0 leading-none" title={note}>{circle}</span> : circle;
+    if (!canEdit) return note ? noteOnly(circle, "shrink-0 leading-none") : circle;
     const activeTypeId = row.itemTypeId ?? itemTypes.default?.id ?? null;
     return (
       <div className="relative shrink-0 leading-none" ref={ref}>
@@ -3853,6 +3873,7 @@ function StatusCell({
             </div>
             {tab === "status" ? (
               <div className="max-h-[240px] overflow-y-auto">
+                {noteLine}
                 {statuses.map((opt) => {
                   const active = opt.value === row.status;
                   return (
@@ -3914,14 +3935,15 @@ function StatusCell({
     ) : (
       <span className="flex items-center justify-center w-full h-full bg-zinc-100 text-xs text-zinc-400">—</span>
     );
-    if (!canEdit) return fill;
+    if (!canEdit) return note ? noteOnly(fill, "w-full h-full") : fill;
     return (
       <div className="relative w-full h-full" ref={ref}>
         <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full h-full min-h-[34px]">
           {fill}
         </button>
         {open && menuPos ? (
-          <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+          <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(note ? { maxWidth: 260 } : {}), ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+            {noteLine}
             {statuses.map((opt) => {
               const active = opt.value === row.status;
               return (
@@ -3956,7 +3978,7 @@ function StatusCell({
     <span className="text-xs text-zinc-500">—</span>
   );
 
-  if (!canEdit) return pill;
+  if (!canEdit) return note ? noteOnly(pill, "inline-block") : pill;
 
   return (
     <div className="relative" ref={ref}>
@@ -3969,7 +3991,8 @@ function StatusCell({
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open && menuPos ? (
-        <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+        <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(note ? { maxWidth: 260 } : {}), ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+          {noteLine}
           {statuses.map((opt) => {
             const active = opt.value === row.status;
             return (

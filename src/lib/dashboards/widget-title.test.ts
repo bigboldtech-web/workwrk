@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultWidgetTitle, newWidgetInput } from "./widget-kinds";
+import { defaultWidgetTitle, isUntouchedWidgetTitle, newWidgetInput } from "./widget-kinds";
 import type { WidgetInput } from "./widgets";
 
 // A card's default title says what the card shows, whatever its settings.
@@ -61,5 +61,35 @@ describe("defaultWidgetTitle", () => {
   it("stays within the write schema's 120 characters", () => {
     const long = new Map([["points", "P".repeat(200)]]);
     expect(defaultWidgetTitle(stat({ metric: { op: "sum", fieldKey: "points" } }), long).length).toBe(120);
+  });
+});
+
+describe("isUntouchedWidgetTitle (a saved card opened for editing)", () => {
+  const sum = (title: string) => stat({ title, scope: "open", metric: { op: "sum", fieldKey: "points" } } as Partial<Stat>);
+  it("is not frozen as typed while the Lists' fields are still loading", () => {
+    expect(isUntouchedWidgetTitle(sum("Sum of Points (open tasks)"), new Map())).toBe(true);
+    expect(isUntouchedWidgetTitle(sum("Sum of Points (open tasks)"), labels)).toBe(true);
+    const byTeam = chart({ title: "Tasks by Team", groupBy: { field: "team" } } as Partial<Chart>);
+    expect(isUntouchedWidgetTitle(byTeam, new Map())).toBe(true);
+  });
+  it("follows a card whose field is gone", () => {
+    expect(isUntouchedWidgetTitle(sum("Sum of Old field (open tasks)"), new Map([["other", "Other"]]))).toBe(true);
+  });
+  it("follows the older fallback titles and another setting's default", () => {
+    expect(isUntouchedWidgetTitle(stat({ title: "Calculation" }))).toBe(true);
+    expect(isUntouchedWidgetTitle(stat({ title: "Open tasks", scope: "completed" }))).toBe(true);
+    expect(isUntouchedWidgetTitle(chart({ title: "Workload by Status" }))).toBe(true);
+    expect(isUntouchedWidgetTitle(chart({ title: "Chart" }))).toBe(true);
+    const list = newWidgetInput("list", { id: "w_3", layout }) as List;
+    expect(isUntouchedWidgetTitle({ ...list, title: "Task List" })).toBe(true);
+    expect(isUntouchedWidgetTitle({ ...list, title: "Tasks by due date", sort: "updated" })).toBe(true);
+  });
+  it("never touches a title a person typed", () => {
+    expect(isUntouchedWidgetTitle(stat({ title: "Q3 launch blockers" }))).toBe(false);
+    // Once Points is known, another label is somebody's own words.
+    expect(isUntouchedWidgetTitle(sum("Sum of Revenue (open tasks)"), labels)).toBe(false);
+    const byTeam = chart({ title: "Tasks by owner team", groupBy: { field: "team" } } as Partial<Chart>);
+    expect(isUntouchedWidgetTitle(byTeam, labels)).toBe(false);
+    expect(isUntouchedWidgetTitle(chart({ title: "Tasks by owner team" }), labels)).toBe(false);
   });
 });

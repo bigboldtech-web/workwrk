@@ -299,6 +299,21 @@ export interface ConnectionRef {
   done: boolean;
 }
 
+/** Everything a chip draws, per connection, so a rename or a status change is seen. */
+export function connectionsDisplayKey(refs: readonly ConnectionRef[]): string {
+  return JSON.stringify(refs.map((c) => [c.id, c.title, c.statusLabel, c.statusColor, c.done]));
+}
+
+/**
+ * A cell's own selection, with every chip the server also sent redrawn from
+ * the server's newest copy. Membership and order never change here: a task
+ * the server did not send (just picked, not yet saved) keeps its own copy.
+ */
+export function refreshConnectionRefs(selection: readonly ConnectionRef[], fresh: readonly ConnectionRef[]): ConnectionRef[] {
+  const byId = new Map(fresh.map((c) => [c.id, c]));
+  return selection.map((c) => byId.get(c.id) ?? c);
+}
+
 /** The readable connected tasks, in stored order. Unknown ids contribute nothing. */
 export function buildConnections(ids: readonly string[], info: ReadonlyMap<string, ConnectionRef>): ConnectionRef[] {
   const out: ConnectionRef[] = [];

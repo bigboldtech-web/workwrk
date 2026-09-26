@@ -70,3 +70,16 @@ describe("a view's Schedule report dialog names its List", () => {
     expect(target).toMatch(/name:\s*boardName \? `\$\{boardName\}: \$\{view\.name\}` : view\.name/);
   });
 });
+
+describe("the Active switch never loops on a private view", () => {
+  it("a private_view_recipients refusal offers Edit, not a Try again that is refused forever", () => {
+    const s = code("components/reports/schedule-report-dialog.tsx");
+    const start = s.indexOf("const setActive = async");
+    const end = s.indexOf("const remove = async", start);
+    expect(start).toBeGreaterThan(-1);
+    const fn = s.slice(start, end);
+    const branch = fn.slice(fn.indexOf(`"private_view_recipients"`), fn.lastIndexOf("Try again"));
+    expect(branch).toMatch(/label:\s*"Edit",\s*onClick:\s*\(\)\s*=>\s*startEdit\(s\)/);
+    expect(branch).toMatch(/return;/);
+  });
+});

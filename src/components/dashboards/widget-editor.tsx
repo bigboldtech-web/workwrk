@@ -52,7 +52,7 @@ import { OsShellContext, useLayer } from "@/components/layout/os/shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { previewKey } from "@/lib/dashboards/dashboard-editor";
-import { defaultWidgetTitle, kindMeta, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
+import { defaultWidgetTitle, isUntouchedWidgetTitle, kindMeta, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
 import { EMPTY_FILTER, widgetInputSchema, type WidgetFilter, type WidgetInput } from "@/lib/dashboards/widgets";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
 import type { StatusOption } from "@/lib/board-items-shared";
@@ -160,9 +160,10 @@ export function WidgetEditor({
   // "typed": the person's own title, never overwritten. "cleared": they
   // emptied the field, which stays empty until a setting changes. "auto":
   // the title is the settings' default. "saved": an edited card, auto only
-  // while its saved title is its saved settings' default; read against
-  // `initial` on every render, so it settles once the Lists' field labels
-  // load (a "Sum of Points" title cannot match before "Points" is known).
+  // while its saved title is one its settings gave it
+  // (isUntouchedWidgetTitle). A label not loaded yet counts as any label, so
+  // a change made before the Lists' fields arrive still re-derives the title
+  // instead of freezing "Sum of Points (open tasks)" on a completed count.
   const [titleMode, setTitleMode] = useState<"auto" | "typed" | "cleared" | "saved">(mode === "add" ? "auto" : "saved");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -178,7 +179,7 @@ export function WidgetEditor({
   const fieldLabels = useMemo(() => new Map(facts.fields.map((f) => [f.key, f.label])), [facts.fields]);
   const autoTitle =
     isData(draft) &&
-    (titleMode === "auto" || (titleMode === "saved" && "title" in initial && initial.title === defaultWidgetTitle(initial, fieldLabels)));
+    (titleMode === "auto" || (titleMode === "saved" && isUntouchedWidgetTitle(initial, fieldLabels)));
   const input = useMemo<WidgetInput>(() => {
     if (!autoTitle || !("title" in draft)) return draft;
     const t = defaultWidgetTitle(draft, fieldLabels);

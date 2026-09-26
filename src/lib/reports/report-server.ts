@@ -132,6 +132,22 @@ export async function readableTarget(kind: string, targetId: string, c: LinkView
 }
 
 /**
+ * The owner of a private view, decided from the view row itself and never
+ * from who is asking, or null (a shared view, a dashboard, a view that is
+ * gone). An org admin who cannot read someone's private view must still be
+ * held to "its owner only" when editing that view's schedule.
+ */
+export async function privateViewOwner(kind: string, targetId: string, organizationId: string): Promise<string | null> {
+  if (kind !== "view") return null;
+  const view = await prisma.view.findUnique({
+    where: { id: targetId },
+    select: { isShared: true, ownerId: true, board: { select: { organizationId: true } } },
+  });
+  if (!view || view.board.organizationId !== organizationId) return null;
+  return !view.isShared && view.ownerId ? view.ownerId : null;
+}
+
+/**
  * Whether a target still exists, regardless of who reads it: live, archived
  * or in Trash (both of which only skip a run, so a restore resumes the
  * schedule), or gone for good (the only state that stops it).
@@ -261,7 +277,8 @@ export async function buildRecipientReport(
 export interface ScheduleDTO {
   id: string;
   targetKind: string;
-  targetId: string;
+  /** Null when this viewer cannot read the target. */
+  targetId: string | null;
   targetName: string | null;
   cadence: string;
   weekday: number | null;
@@ -303,7 +320,9 @@ export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<Schedu
     out.push({
       id: r.id,
       targetKind: r.targetKind,
-      targetId: r.targetId,
+      // A target this viewer cannot read (an org admin looking at someone's
+      // private view) is named by neither its words nor its id.
+      targetId: target ? r.targetId : null,
       targetName: target?.name ?? null,
       cadence: r.cadence,
       weekday: r.weekday,

@@ -94,7 +94,8 @@ export function boardStatusPlacement(row: BoardItemRow, boardId: string, statuse
  * The walk found a home "In review" task filed under B's "To Do" with nothing
  * on screen saying why. The placement stays (B has no "In review" column to
  * put it in, and inventing one per foreign status would be a new surface), so
- * the row's status pill carries this as its tooltip.
+ * the row's status pill carries this as its tooltip and at the head of its
+ * menu, and a Board card shows linkedStatusShort under its title.
  */
 export function linkedStatusNote(row: BoardItemRow, boardId: string, statuses: readonly StatusOption[]): string | null {
   const p = boardStatusPlacement(row, boardId, statuses);
@@ -102,6 +103,17 @@ export function linkedStatusNote(row: BoardItemRow, boardId: string, statuses: r
   const shownUnder = statuses.find((s) => s.value === p.status)?.label ?? p.status;
   const where = row.listLink?.homeList?.name ?? "its home List";
   return `This task is ${p.home.label} in ${where}. This List has no ${p.home.label} status, so it shows under ${shownUnder}.`;
+}
+
+/**
+ * The few words a Board card shows under its title for the same case ("In
+ * review in Home"), so a card in To Do says why without a hover. Null when
+ * linkedStatusNote is null.
+ */
+export function linkedStatusShort(row: BoardItemRow, boardId: string, statuses: readonly StatusOption[]): string | null {
+  const p = boardStatusPlacement(row, boardId, statuses);
+  if (p.exact || !p.home || !p.status) return null;
+  return `${p.home.label} in ${row.listLink?.homeList?.name ?? "its home List"}`;
 }
 
 /**

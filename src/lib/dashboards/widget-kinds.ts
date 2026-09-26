@@ -142,6 +142,59 @@ export function defaultWidgetTitle(input: WidgetInput, fieldLabels: ReadonlyMap<
   return title.slice(0, 120);
 }
 
+/** The fallback titles cards were given before defaultWidgetTitle (parseWidgets). */
+const LEGACY_TITLES: Partial<Record<WidgetInput["kind"], readonly string[]>> = {
+  stat: ["Calculation"],
+  chart: ["Chart", "Workload by Status"],
+  list: ["Task List"],
+};
+
+const SCOPE_TITLE = /^Sum(?: of (.+))? \((all|open|completed|overdue) tasks\)$/;
+
+/**
+ * Whether a SAVED card's title is still one the settings gave it, so the
+ * editor may keep it in step with them. True for its own default, and also
+ * for any default title of its kind that no person had to type:
+ *   - a label the editor does not know yet (its Lists' fields are still
+ *     loading) or no longer knows (the field is gone, the List was dropped),
+ *     so "Sum of Points (open tasks)" is not frozen as typed by a slow fetch;
+ *   - another setting's default, as on a card saved before titles followed
+ *     the settings ("Open tasks" on a card that counts completed ones);
+ *   - the fallback words older cards were saved with ("Calculation").
+ * A title in none of these shapes is the person's own and is never touched.
+ */
+export function isUntouchedWidgetTitle(input: WidgetInput, fieldLabels: ReadonlyMap<string, string> = new Map()): boolean {
+  if (!("title" in input) || typeof input.title !== "string") return false;
+  const title = input.title;
+  if (title === defaultWidgetTitle(input, fieldLabels)) return true;
+  if (LEGACY_TITLES[input.kind]?.includes(title)) return true;
+  const known = new Set(Array.from(fieldLabels.values(), (l) => l.trim()).filter(Boolean));
+  switch (input.kind) {
+    case "stat": {
+      if (Object.values(SCOPE_WORDS).some((w) => cap(w) === title)) return true;
+      const m = SCOPE_TITLE.exec(title);
+      if (!m) return false;
+      if (m[1] === undefined) return true;
+      if (known.has(m[1])) return true;
+      // A Sum over a field whose label is not known here: its default could
+      // have named any label.
+      const metric = input.metric;
+      return metric?.op === "sum" && !fieldLabels.get(metric.fieldKey)?.trim();
+    }
+    case "chart": {
+      if (!title.startsWith("Tasks by ")) return false;
+      const word = title.slice("Tasks by ".length);
+      if (word === "field" || Object.values(GROUP_WORDS).includes(word) || known.has(word)) return true;
+      const g = input.groupBy;
+      return typeof g === "object" && !fieldLabels.get(g.field)?.trim();
+    }
+    case "list":
+      return Object.values(SORT_TITLES).includes(title);
+    default:
+      return false;
+  }
+}
+
 /**
  * The input a new card of `kind` starts from. A card added to a Space's
  * Overview starts on that Space; one added to a dashboard starts on every

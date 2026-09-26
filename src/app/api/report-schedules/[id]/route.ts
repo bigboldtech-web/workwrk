@@ -15,7 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkApp } from "@/lib/dashboards/dashboard-server";
 import { nextReportRunAt, parseRunLog, reportRecipientProblems, runLogForViewer, validateSchedulePatch } from "@/lib/reports/schedule";
 import { recipientRows, viewerIsOrgAdmin } from "@/lib/list-links-server";
-import { canEditSchedule, readableTarget, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
+import { canEditSchedule, privateViewOwner, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
 
@@ -79,10 +79,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     //     the answer carries the trimmed list. Refused only when that leaves
     //     nobody, because a schedule cannot run with no one to send to.
     //   - Left out, on a paused schedule: untouched. Pausing always works.
-    const target = await readableTarget(row.targetKind, row.targetId, c);
+    //   Privacy comes from the view row, never from who is editing: an org
+    //   admin who cannot read the owner's private view is held to the same
+    //   rule, so no colleague is ever stored on it.
+    const privateOwner = await privateViewOwner(row.targetKind, row.targetId, c.organizationId);
     let recipientUserIds = v.recipientUserIds;
-    if (target?.privateOwnerId) {
-      const owner = target.privateOwnerId;
+    if (privateOwner) {
+      const owner = privateOwner;
       if (v.patch.recipientUserIds) {
         if (recipientUserIds.some((uid) => uid !== owner)) {
           return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });

@@ -36,6 +36,7 @@ import {
   mergeRefetchedRow,
   optimisticLinkedStatus,
   linkedStatusNote,
+  linkedStatusShort,
   linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
@@ -696,6 +697,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     listContext={listContext}
                     homeBoardId={card.listLink?.homeList?.id ?? null}
                     statusNote={kind === "linked-root" ? linkedStatusNote(card, boardId, statuses) : null}
+                    statusShort={kind === "linked-root" ? linkedStatusShort(card, boardId, statuses) : null}
                     currentUserId={currentUserId ?? null}
                     canDelete={
                       kind !== "home" || canDeleteTasks === undefined
@@ -785,6 +787,7 @@ function KanbanCard({
   listContext,
   homeBoardId,
   statusNote = null,
+  statusShort = null,
   currentUserId,
   canDelete,
   onDragStart,
@@ -824,6 +827,8 @@ function KanbanCard({
    * status (a home "In review" in this List's To Do), as the title's tooltip.
    */
   statusNote?: string | null;
+  /** The same, in a few words shown under the title, so touch sees it too. */
+  statusShort?: string | null;
   /** undefined = the host could not work it out; the menu leaves Delete alone. */
   /** The viewer, for the card menu's "Assign to me" and "Watch". */
   currentUserId: string | null;
@@ -955,6 +960,11 @@ function KanbanCard({
                   aria-label="Recurring task"
                 >
                   <Repeat className="w-3 h-3" />
+                </span>
+              ) : null}
+              {statusShort ? (
+                <span className="mt-0.5 block text-xs font-normal leading-snug text-zinc-500" title={statusNote ?? undefined}>
+                  {statusShort}
                 </span>
               ) : null}
             </div>

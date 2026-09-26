@@ -126,7 +126,13 @@ type Tab = "create" | "existing";
 
 export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true, fields, hiddenFields, extraColumns, onToggleColumn, onClose, onFieldsChanged }: FieldShelfProps) {
   const confirm = useConfirm();
-  const [tab, setTab] = useState<Tab>(customFieldsEnabled ? "create" : "existing");
+  // A person who cannot create fields (a List contributor, or the Space's
+  // Custom Fields module is off) opens on Add existing, where show and hide
+  // work for them, never on a tab of tiles they cannot use. Derived until
+  // they pick a tab, so a permission that arrives after mount still counts.
+  const canCreate = canEdit && customFieldsEnabled;
+  const [pickedTab, setTab] = useState<Tab | null>(null);
+  const tab: Tab = pickedTab ?? (canCreate ? "create" : "existing");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -372,8 +378,22 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
                       Enable the Custom Fields module in the Space&apos;s settings (Space &ldquo;&hellip;&rdquo; &rarr; Modules) to create new field types. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
                     </p>
                   </div>
+                ) : !canEdit ? (
+                  <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
+                    <p className="text-base text-zinc-600 font-medium">Only people with Full access to this List create fields</p>
+                    <p className="mt-1 text-sm text-zinc-400 leading-snug">
+                      Ask someone with Full access to add one. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setTab("existing")}
+                      className="mt-3 inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Go to Add existing
+                    </button>
+                  </div>
                 ) : (
-                /* Create new — the field-type catalog only (Popular + All). */
+                /* Create new: the field-type catalog only (Popular + All). */
                 <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={pickEntry} />
                 )
               ) : (

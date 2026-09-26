@@ -79,7 +79,8 @@ export const SCHEDULABLE_VIEW_TYPES: ReadonlySet<string> = new Set([
 interface ScheduleRow {
   id: string;
   targetKind: string;
-  targetId: string;
+  /** Null when the viewer cannot read the target (never this dialog's own). */
+  targetId: string | null;
   targetName: string | null;
   cadence: string;
   weekday: number | null;
@@ -308,6 +309,16 @@ function ScheduleReportBody({ target, onOpenChange }: { target: ScheduleReportTa
         const fresh = await load();
         const row = fresh?.own.find((x) => x.id === s.id);
         if (row && row.active !== active) return setActive(row, active, 1);
+        return;
+      }
+      // A private view whose only recipients are colleagues can never resume
+      // from the switch: resending the same request would be refused again
+      // every time. Point the person at the form, where Send only to me is.
+      if ((body as { error?: unknown } | null)?.error === "private_view_recipients") {
+        toast(`${dashboardMessage(body, "Couldn't change the schedule.")} Edit the schedule to send it to its owner.`, {
+          tone: "danger",
+          action: { label: "Edit", onClick: () => startEdit(s) },
+        });
         return;
       }
       toast(dashboardMessage(body, "Couldn't change the schedule."), { tone: "danger", action: { label: "Try again", onClick: () => void setActive(s, active) } });

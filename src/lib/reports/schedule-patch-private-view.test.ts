@@ -19,6 +19,7 @@ const ORG = "org-1";
 const state = vi.hoisted(() => ({
   row: null as Record<string, unknown> | null,
   privateOwnerId: null as string | null,
+  callerCanRead: true,
   writes: [] as Array<Record<string, unknown>>,
 }));
 
@@ -45,7 +46,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/reports/report-server", () => ({
   canEditSchedule: () => true,
-  readableTarget: async () => ({ name: "List: View", link: "/boards/x?view=v", privateOwnerId: state.privateOwnerId }),
+  // What THIS caller can read: null models an org admin who is not the
+  // private view's owner. Privacy must never depend on it.
+  readableTarget: async () => (state.callerCanRead ? { name: "List: View", link: "/boards/x?view=v", privateOwnerId: state.privateOwnerId } : null),
+  // Privacy from the view row itself, whoever asks.
+  privateViewOwner: async () => state.privateOwnerId,
   specOf: (r: Record<string, unknown>) => ({
     cadence: r.cadence,
     weekday: r.weekday,
@@ -89,6 +94,7 @@ beforeEach(() => {
   };
   // Scheduled while shared, then the view was made private.
   state.privateOwnerId = OWNER;
+  state.callerCanRead = true;
   state.writes = [];
 });
 
@@ -135,6 +141,20 @@ describe("PATCH a schedule on a view that went private", () => {
     expect(state.writes).toHaveLength(0);
     // Pausing that same schedule still works.
     expect((await patch({ active: false })).status).toBe(200);
+  });
+
+  it("holds an org admin who cannot read the private view to owner only", async () => {
+    state.callerCanRead = false;
+    state.row = { ...state.row, recipientUserIds: [OWNER] };
+    const res = await patch({ recipientUserIds: [COLLEAGUE, "admin-3"] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "private_view_recipients" });
+    expect(state.writes).toHaveLength(0);
+    // A timing edit from that admin still trims to the owner.
+    state.row = { ...state.row, recipientUserIds: [OWNER, COLLEAGUE] };
+    const ok = await patch({ timeOfDay: "11:00" });
+    expect(ok.status).toBe(200);
+    expect(state.writes[0]).toMatchObject({ recipientUserIds: [OWNER] });
   });
 
   it("leaves a shared view's recipients untouched", async () => {

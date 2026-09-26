@@ -30,7 +30,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { formatDate } from "@/lib/format/date";
 import { openTask } from "@/lib/nav/open-task";
-import { MAX_CONNECTIONS, connectTargets, mirrorOptionsOf, type ConnectionRef, type MirrorValue as MirrorData } from "@/lib/list-connect";
+import { MAX_CONNECTIONS, connectTargets, connectionsDisplayKey, mirrorOptionsOf, refreshConnectionRefs, type ConnectionRef, type MirrorValue as MirrorData } from "@/lib/list-connect";
 import { PRIORITY_LOOKUP } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { accessMessage } from "@/lib/access-message";
@@ -126,6 +126,17 @@ export function ConnectValue({
     setSyncedKey(serverKey);
     setSelection(connections);
     committed.current = connections.map((c) => c.id);
+  }
+  // A connected task renamed, moved to another status or done elsewhere keeps
+  // the same ids, so the block above never runs for it. Refresh how each chip
+  // reads from the server's newest copy, by id, at any time (open, saving or
+  // not): it only redraws chips, it never adds or drops a connection, so a
+  // selection the person is still making is never undone.
+  const displayKey = connectionsDisplayKey(connections);
+  const [syncedDisplay, setSyncedDisplay] = useState(displayKey);
+  if (syncedDisplay !== displayKey) {
+    setSyncedDisplay(displayKey);
+    setSelection((sel) => refreshConnectionRefs(sel, connections));
   }
 
   const send = useCallback(async (ids: string[]): Promise<void> => {
