@@ -111,10 +111,12 @@ describe("the source gate on a Folder or List move (A4)", () => {
     expect(w.move({ kind: "folder", id: "A" }, { kind: "space", id: "S" })).toBe(false);
   });
 
-  it("a Full holder of the parent Folder still cannot carry a child into another Space", () => {
+  it("a Full holder of the parent Folder carries a child into another Space's Folder they hold Full on (rule 2 as stated: nothing is asked of either Space; round two, break 11)", () => {
     const w = world().on("folder", "F", "ADMIN", NEW).on("folder", "TF", "ADMIN", NEW);
-    expect(w.move({ kind: "folder", id: "A" }, { kind: "folder", id: "TF" })).toBe(false);
-    expect(w.move({ kind: "list", id: "LF" }, { kind: "folder", id: "TF" })).toBe(false);
+    expect(w.move({ kind: "folder", id: "A" }, { kind: "folder", id: "TF" })).toBe(true);
+    expect(w.move({ kind: "list", id: "LF" }, { kind: "folder", id: "TF" })).toBe(true);
+    // The Folder they were given is the top of their tree: it stays put.
+    expect(w.move({ kind: "folder", id: "F" }, { kind: "folder", id: "TF" })).toBe(false);
   });
 
   it("a move to the container it already sits in needs nothing on the source", () => {

@@ -241,12 +241,34 @@ describe("P2 a move needs Full access on the node and where it is now, and Can e
     expect(w.move(fo("A"), fo("G"))).toEqual({ ok: false, failure: "node" });
   });
 
-  it("leaving the Space also needs Full access on the Space it leaves", () => {
-    const w = world().on("folder", "F", "ADMIN").on("folder", "TF", "ADMIN");
-    expect(w.move(fo("A"), fo("TF"))).toEqual({ ok: false, failure: "source" });
-    expect(w.move(li("LF"), fo("TF"))).toEqual({ ok: false, failure: "source" });
+  it("the Full holder of both ends moves across Spaces: Full on the node and on where it is now, Can edit where it goes, and nothing on either Space (round two, break 11)", () => {
+    for (const rule of ["legacy", "strict"] as const) {
+      // Full on F (so on A and LF inside it) and Full on TF in Space T.
+      const w = world(rule).on("folder", "F", "ADMIN").on("folder", "TF", "ADMIN");
+      expect(w.move(fo("A"), fo("TF"))).toEqual({ ok: true, same: false });
+      expect(w.move(li("LF"), fo("TF"))).toEqual({ ok: true, same: false });
+      // Can edit is enough where it lands.
+      const edit = world(rule).on("folder", "F", "ADMIN").on("folder", "TF", "MEMBER");
+      expect(edit.move(li("LF"), fo("TF"))).toEqual({ ok: true, same: false });
+      // Can view where it lands never is.
+      const view = world(rule).on("folder", "F", "ADMIN").on("folder", "TF", "GUEST");
+      expect(view.move(li("LF"), fo("TF"))).toEqual({ ok: false, failure: "destination" });
+    }
     const both = world().on("space", "S", "ADMIN").on("folder", "TF", "MEMBER");
     expect(both.move(fo("A"), fo("TF"))).toEqual({ ok: true, same: false });
+  });
+
+  it("the top of a Folder tree still needs Full on the Space it sits in: the Folder grantee never drags their own Folder out", () => {
+    const w = world().on("folder", "F", "ADMIN").on("folder", "TF", "ADMIN");
+    expect(w.move(fo("F"), fo("TF"))).toEqual({ ok: false, failure: "source" });
+    expect(w.move(li("LROOT"), fo("TF"))).toEqual({ ok: false, failure: "node" });
+  });
+
+  it("out of every Space (the org root, which opens it to the whole org) also needs Full access on the Space it leaves", () => {
+    const w = new W().space("S").folder("F", "S").canvas("C", "S", "F").on("folder", "F", "ADMIN");
+    expect(w.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: false, failure: "source" });
+    const manager = new W().space("S").folder("F", "S").canvas("C", "S", "F").on("space", "S", "ADMIN");
+    expect(manager.move({ kind: "canvas", id: "C" }, null)).toEqual({ ok: true, same: false });
   });
 
   it("P7: the Full holders of both ends inside one Space move as before", () => {
@@ -482,10 +504,10 @@ describe("P2 for a file in a Space or one of its Folders", () => {
     expect(fileMoveVerdict(w.rows, w.g, inF(ME), fo("G"))).toEqual({ ok: false, failure: "source" });
   });
 
-  it("Full access on its Folder moves it within the Space, never out of it or out to the whole org", () => {
+  it("Full access on its Folder moves it to any place they can edit, another Space's Folder included, but never out to the whole org", () => {
     const w = world().on("folder", "F", "ADMIN").on("folder", "G", "MEMBER").on("folder", "TF", "ADMIN");
     expect(fileMoveVerdict(w.rows, w.g, inF(), fo("G"))).toEqual({ ok: true, same: false });
-    expect(fileMoveVerdict(w.rows, w.g, inF(), fo("TF"))).toEqual({ ok: false, failure: "source" });
+    expect(fileMoveVerdict(w.rows, w.g, inF(), fo("TF"))).toEqual({ ok: true, same: false });
     expect(fileMoveVerdict(w.rows, w.g, inF(), null)).toEqual({ ok: false, failure: "source" });
   });
 

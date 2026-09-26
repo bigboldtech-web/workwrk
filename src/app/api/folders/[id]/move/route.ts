@@ -8,7 +8,7 @@
 //
 // The placement rule (node-rules P1 to P7) through its one move helper
 // (node-placement moveFolder): Full access on the Folder and on the place it
-// leaves (and on its Space when it leaves the Space), Can edit where it goes,
+// leaves (and on its Space when it leaves every Space), Can edit where it goes,
 // the Space taken from the destination parent (a Space that disagrees is a
 // 400), and the whole subtree (sub-folders at any depth, their Lists, canvases
 // and files) moved in one transaction, or nothing is written. A refusal is a

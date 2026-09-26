@@ -11,7 +11,7 @@ import {
 import { moveToTrash } from "@/lib/trash";
 import { canReadFile } from "@/lib/file-access";
 import { nodeCtxFromLevel } from "@/lib/access/node-access";
-import { checkFileMove } from "@/lib/access/node-placement";
+import { checkFileEdit, checkFileMove } from "@/lib/access/node-placement";
 
 /**
  * One file row.
@@ -77,6 +77,17 @@ export async function PATCH(
   // so a viewer can't probe for the presence of files in Spaces they
   // shouldn't see.
   if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
+
+  // A change to the file itself (its name, description or drive folder) is
+  // a write in the container it sits in: Can edit there (node-rules
+  // fileEditDecision), never a Can view grant. Starring stays a reader's
+  // mark, as it always was.
+  const accessLevelFor = (session.user as { accessLevel?: string }).accessLevel;
+  const editsFile = typeof body.name === "string" || body.folderId !== undefined || typeof body.description === "string" || body.description === null;
+  if (editsFile) {
+    const edit = await checkFileEdit(nodeCtxFromLevel(getUserId(session), orgId, accessLevelFor), existing);
+    if (!edit.ok) return jsonError(edit.error, edit.status);
+  }
 
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
@@ -154,6 +165,11 @@ export async function DELETE(
   if (!existing) return jsonError("not found", 404);
 
   if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
+  // Trash takes the file away from everyone who reads it there: Can edit on
+  // where it sits (node-rules fileEditDecision), never Can view. A Can view
+  // grantee used to Trash another person's file out of a Folder they only read.
+  const edit = await checkFileEdit(nodeCtxFromLevel(getUserId(session), orgId, (session.user as { accessLevel?: string }).accessLevel), existing);
+  if (!edit.ok) return jsonError(edit.error, edit.status);
 
   await moveToTrash("file", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

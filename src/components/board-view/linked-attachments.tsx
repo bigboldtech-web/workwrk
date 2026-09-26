@@ -14,6 +14,7 @@ import {
 import { Dots } from "@/components/ui/dots";
 import { LinkExistingPicker } from "./link-existing-picker";
 import { sectionHrefNow } from "@/components/layout/os/use-object-href";
+import { useOsToast } from "@/components/layout/os/toast";
 
 interface PickerCandidate { id: string; title: string; subtitle?: string | null }
 
@@ -512,6 +513,7 @@ function FileLinkSection({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useOsToast();
 
   const upload = async (file: File) => {
     setUploading(true);
@@ -534,7 +536,14 @@ function FileLinkSection({
           spaceId: spaceId ?? undefined,
         }),
       });
-      if (!entryRes.ok) return;
+      if (!entryRes.ok) {
+        // The placement rule's refusal (a file tagged to the Space sits at
+        // its root, which needs Can edit there) is one plain sentence: show
+        // it rather than dropping the file without a word.
+        const refused = await entryRes.json().catch(() => null);
+        toast(typeof refused?.error === "string" ? refused.error : "Couldn't attach that file.");
+        return;
+      }
       const entryData = await entryRes.json();
       const fileId = entryData?.id ?? entryData?.data?.id;
       if (!fileId) return;

@@ -12,8 +12,8 @@ import {
 } from "@/lib/api-helpers";
 import { canReadBoard } from "@/lib/board";
 import { readableFileRows } from "@/lib/file-access";
-import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { checkCreate } from "@/lib/access/node-placement";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { PlacementConflict, lockParentFolder, resolveCreate } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilesFilters, matchesFilesView, parseFilesListQuery, sortFiles, type FileCandidate } from "@/lib/files-list";
 import { sliceByCursor } from "@/lib/list-query";
@@ -232,44 +232,45 @@ export async function POST(req: NextRequest) {
     if (!folder) return jsonError("folder not found", 404);
   }
 
-  // Cross-tenant safety: the spaceId must belong to the caller's org. The
-  // viewer's reach into it is checked below, once the folder is known.
-  if (spaceId) {
-    const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
-    if (!space) return jsonError("space not found", 404);
-  }
-
-  // Space-folder anchor: validate in-org and DERIVE spaceId from the folder,
-  // so Library space filters + Space visibility gating apply automatically.
-  if (spaceFolderId) {
-    const sf = await prisma.folder.findFirst({
-      where: { id: spaceFolderId, space: { organizationId: orgId } },
-      select: { id: true, spaceId: true },
-    });
-    if (!sf) return jsonError("space folder not found", 404);
-    spaceId = sf.spaceId ?? spaceId;
-  }
-
-  // The upload gate (the one resolver). A file placed in a Space folder is a
-  // node of that Folder, so it takes the placement rule (node-rules P1): Can
-  // edit or higher on the Folder; Can view never adds content. A file TAGGED
-  // to a Space (a task attachment) needs Can view on the Space, or the Space
-  // being on the viewer's way to something they were given (a List member
-  // attaching a file to a task); an unscoped file is the org's. A container
-  // the viewer cannot open is refused as not found.
+  // THE PLACEMENT RULE (node-rules P1 and P3), one call for both places a
+  // file sits in the Space tree. A file in a Space folder is a node of that
+  // Folder; a file with a Space and no folder sits at the Space's root, which
+  // is what the Space page's Files card lists (every file tagged to the
+  // Space, a task attachment included). Either way it is content added in a
+  // container: Can edit or higher there, and Can view, Can comment or a path
+  // through the Space never add one. The Space comes from the folder, never
+  // from the request: a spaceId that disagrees with the folder is a 400, a
+  // folder in Trash a 400, a container in another org or out of the
+  // viewer's sight a 404. A file in no Space is the org's.
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
   const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
-  if (spaceFolderId) {
-    const gate = await checkCreate(nodeCtx, { kind: "folder", id: spaceFolderId }, "file");
-    if (!gate.ok) return jsonError(gate.status === 404 ? "space folder not found" : gate.error, gate.status);
-  } else if (spaceId && !(await canCreateAt(nodeCtx, { kind: "space", id: spaceId }, "file"))) {
-    return jsonError("space not found", 404);
+  if (spaceFolderId || spaceId) {
+    const placed = await resolveCreate(nodeCtx, { spaceId, folderId: spaceFolderId }, "file");
+    if (!placed.ok) {
+      return jsonError(placed.status === 404 ? (spaceFolderId ? "space folder not found" : "space not found") : placed.error, placed.status);
+    }
+    spaceId = placed.spaceId;
   }
 
-  const entry = await prisma.fileEntry.create({
-    data: { organizationId: orgId, name, mimeType, size, url,
-      s3Key, folderId, spaceId, spaceFolderId, uploadedById: userId, description },
-  });
-
-  return jsonSuccess(entry, 201);
+  try {
+    // The create half of P3: the folder's Space is read under a share lock
+    // inside the write, so a move of that folder can never leave this file in
+    // the Space the folder just left.
+    const entry = await prisma.$transaction(async (tx) => {
+      let landedSpaceId = spaceId;
+      if (spaceFolderId) {
+        const parent = await lockParentFolder(tx, orgId, spaceFolderId);
+        if (!parent) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
+        landedSpaceId = parent.spaceId;
+      }
+      return tx.fileEntry.create({
+        data: { organizationId: orgId, name, mimeType, size, url,
+          s3Key, folderId, spaceId: landedSpaceId, spaceFolderId, uploadedById: userId, description },
+      });
+    });
+    return jsonSuccess(entry, 201);
+  } catch (err) {
+    if (err instanceof PlacementConflict) return jsonError(err.message, err.status);
+    throw err;
+  }
 }

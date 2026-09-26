@@ -594,10 +594,19 @@ export async function duplicateBoard(
   });
 
   const created = await prisma.$transaction(async (tx) => {
+    // The create half of P3 (node-placement lockParentFolder): in a Folder,
+    // the copy takes the Folder's Space as it is under a share lock, never
+    // the source row's, so a move of that Folder meanwhile never splits them.
+    let spaceId = src.spaceId;
+    if (src.folderId) {
+      const parent = await lockParentFolder(tx, organizationId, src.folderId);
+      if (!parent) throw new Error("The folder this List is in just moved or went to Trash. Try again.");
+      spaceId = parent.spaceId;
+    }
     const board = await tx.board.create({
       data: {
         organizationId,
-        spaceId: src.spaceId,
+        spaceId,
         folderId: src.folderId,
         name,
         slug,

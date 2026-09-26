@@ -5,7 +5,7 @@
 //
 // The placement rule (node-rules P1 to P7) through its one move helper
 // (node-placement moveList): Full access on the List and on the place it
-// leaves (and on its Space when it leaves the Space), Can edit where it goes,
+// leaves (and on its Space when it leaves every Space), Can edit where it goes,
 // and the Space derived from the Folder (a Space that disagrees is a 400). A
 // refusal is a 403 with one sentence naming what is needed. The Move dialog
 // lists only the destinations this accepts (GET /api/move/destinations).

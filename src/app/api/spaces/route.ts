@@ -80,6 +80,7 @@ export async function POST(req: Request) {
   if (parsed.data.parentSpaceId) {
     const parent = await getSpaceForReader(parsed.data.parentSpaceId, c.userId, c.accessLevel);
     if (!parent || parent.organizationId !== c.organizationId) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (parent.archivedAt) return NextResponse.json({ error: "That Space is archived." }, { status: 400 });
     if (!(await canContributeSpace(parsed.data.parentSpaceId, c.userId, c.accessLevel))) {
       return NextResponse.json({ error: "You need Can edit on that Space to add a Space inside it." }, { status: 403 });
     }

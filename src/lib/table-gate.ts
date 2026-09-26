@@ -47,8 +47,8 @@ export function tableCtx(orgId: string, userId: string, session: SessionLike): N
 
 /**
  * The table and the viewer's role on it when they can read it, else null. The
- * role is node-access R7: a Space reader edits (read implies write for rows),
- * a Space Full holder manages, an unscoped table is org-wide for Members and
+ * role is node-access R7: a Space member edits (a Can view Space role from
+ * this release reads only, R7b), a Space Full holder manages, an unscoped table is org-wide for Members and
  * a Guest's own only, the creator manages with reach, and a TABLE grant
  * opens the table on its own.
  */
@@ -61,9 +61,9 @@ export async function readableTableWithRole(id: string, orgId: string, userId: s
 }
 
 /**
- * Can this viewer read (and so write the rows of) this table? The one
- * resolver's R7 over the table's own id, for the table routes that load their
- * own select and only need the gate.
+ * Can this viewer read this table? The one resolver's R7 over the table's own
+ * id, for the table routes that load their own select and only need the read
+ * gate. A write asks tableRoleFor for Can edit.
  */
 export async function tableReadableBy(
   tableId: string,
@@ -73,6 +73,27 @@ export async function tableReadableBy(
 ): Promise<boolean> {
   const d = await nodeRole(nodeCtxFromLevel(userId, orgId, accessLevel), { kind: "table", id: tableId });
   return roleAtLeast(d.role, "VIEW");
+}
+
+/** P6: the one sentence a table content write refused below Can edit answers with. */
+export const TABLE_EDIT_REFUSAL = "You need Can edit on this table to change it.";
+
+/**
+ * The viewer's role on a table they can read, or null when they cannot (the
+ * route's 404). A content write (a row, a cell, a column, a view, a restore
+ * or purge of a trashed row) needs Can edit on it (node-rules P1, R7b): a
+ * Can view role, whether from a Space grant this release wrote or from a
+ * table grant, reads only. Rows from before the cutoff and the org-wide reach
+ * still give Can edit, so everyone who wrote to a table before still does.
+ */
+export async function tableRoleFor(
+  tableId: string,
+  orgId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<Exclude<NodeRole, "none"> | null> {
+  const d = await nodeRole(nodeCtxFromLevel(userId, orgId, accessLevel), { kind: "table", id: tableId });
+  return roleAtLeast(d.role, "VIEW") ? (d.role as Exclude<NodeRole, "none">) : null;
 }
 
 /** The table when the session's viewer can read it, else null. */

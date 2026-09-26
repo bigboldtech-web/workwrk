@@ -21,7 +21,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canContributeSpace, canEditSpace, getSpaceForReader, uniqueSpaceSlug } from "@/lib/space";
-import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
 import { duplicateBoard } from "@/lib/board";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
@@ -55,16 +54,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!(await canEditSpace(id, u.id, accessLevel))) {
     return NextResponse.json({ error: "You need Full access to this Space to duplicate it." }, { status: 403 });
   }
-  // A copy is a NEW Space (the placement rule, node-rules P1: the org is the
-  // container a top-level Space is made in), so it takes the same floor POST
-  // /api/spaces and a Space template take. Managing one Space never made its
-  // manager someone who creates Spaces. A copy that lands under a parent Space
-  // also needs Can edit on that parent, as a new sub-Space does.
-  if (!SPACE_CREATE_LEVELS.has(accessLevel)) {
-    return NextResponse.json({ error: "Manager-level access required to create Spaces." }, { status: 403 });
-  }
-  if (src.parentSpaceId && !(await canContributeSpace(src.parentSpaceId, u.id, accessLevel))) {
-    return NextResponse.json({ error: "You need Can edit on the Space above this one to add a copy there." }, { status: 403 });
+  // Full access on the Space duplicates it, as it always has (the placement
+  // rule's P7: nothing that works for a Space OWNER or ADMIN changes). A Space
+  // OWNER or ADMIN who is not a manager has always copied their own Space;
+  // round one asked for the manager floor POST /api/spaces takes, which broke
+  // that while the Space menu still offered Duplicate. A copy that lands
+  // under a parent Space is made INSIDE that parent (P1), so it also needs Can
+  // edit on it, and never lands under an archived one (P3).
+  if (src.parentSpaceId) {
+    const parent = await prisma.space.findFirst({ where: { id: src.parentSpaceId, organizationId }, select: { archivedAt: true } });
+    if (parent?.archivedAt) {
+      return NextResponse.json({ error: "The Space above this one is archived. Restore it first to add a copy there." }, { status: 400 });
+    }
+    if (!(await canContributeSpace(src.parentSpaceId, u.id, accessLevel))) {
+      return NextResponse.json({ error: "You need Can edit on the Space above this one to add a copy there." }, { status: 403 });
+    }
   }
 
   const name = `${src.name} (copy)`;

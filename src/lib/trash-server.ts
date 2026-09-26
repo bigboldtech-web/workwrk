@@ -29,7 +29,7 @@ import { prisma } from "./prisma";
 import type { Viewer } from "./access/types";
 import { nodeCtxFromViewer, nodeRole, nodeRoles } from "./access/node-access";
 import { refKey, roleAtLeast, type NodeRef, type Place, type PlaceKind } from "./access/node-rules";
-import { canvasesHaveFolders, checkCreate, docPlaceLive, folderPlacementFact } from "./access/node-placement";
+import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
 import { freeTrashStorage, restoreFromTrash } from "./trash";
 import {
@@ -918,9 +918,39 @@ async function snapshotLanding(viewer: Viewer, entityType: string, snapshot: unk
       return listLanding(viewer, str("boardId"));
     case "note":
       return docLanding(viewer, { entityType: str("entityType"), entityId: str("entityId"), parentId: str("parentId") });
+    case "file": {
+      // A file comes back into its Space folder (the Space re-derived from
+      // the folder as it is now, restoreFromTrash) or its Space's root: Can
+      // edit there now, whoever uploaded or deleted it. A file of the org's
+      // keeps the org root's rule.
+      const folder = str("spaceFolderId");
+      const space = str("spaceId");
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null, "file");
+    }
+    case "form":
+      return formLanding(viewer, { boardId: str("targetBoardId"), tableId: str("targetTableId") });
     default:
       return { ok: true };
   }
+}
+
+/**
+ * A form comes back with its destination, and every response it takes then
+ * writes a task or a row there on the restorer's behalf: the same Can edit
+ * the form's create and change ask (node-placement checkFormDestination). A
+ * restorer lowered to Can view since never gets a form that writes into the
+ * List. A destination that is gone is no write at all, so it does not block.
+ */
+async function formLanding(viewer: Viewer, dest: { boardId: string | null; tableId: string | null }): Promise<TrashActionResult> {
+  if (!dest.boardId && !dest.tableId) return { ok: true };
+  const [board, table] = await Promise.all([
+    dest.boardId ? prisma.board.findFirst({ where: { id: dest.boardId, organizationId: viewer.organizationId, archivedAt: null }, select: { id: true } }) : Promise.resolve(null),
+    dest.tableId ? prisma.dataTable.findFirst({ where: { id: dest.tableId, organizationId: viewer.organizationId }, select: { id: true } }) : Promise.resolve(null),
+  ]);
+  if (!board && !table) return { ok: true };
+  const gate = await checkFormDestination(nodeCtxFromViewer(viewer), { boardId: board?.id ?? null, tableId: table?.id ?? null });
+  if (gate.ok) return { ok: true };
+  return { ok: false, status: 403, message: gate.status === 403 ? `${gate.error} Ask someone who can edit it to restore this form.` : CANT_RESTORE_HERE };
 }
 
 /**
@@ -1006,16 +1036,37 @@ async function liveChildrenOf(
   organizationId: string,
 ): Promise<string | null> {
   const parts: string[] = [];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  // A purge deletes the container row alone, and canvases, tables and files
+  // name their Space (and a canvas its Folder) with no foreign key, while a
+  // sub-folder and a file drop to the Space root when their Folder goes. So
+  // every one of them still live blocks the purge (the placement rule's P3:
+  // a delete never leaves an orphan).
+  const canvasFolders = await canvasesHaveFolders();
   if (type === "space") {
-    const [folders, lists] = await Promise.all([
+    const [folders, lists, canvases, tables, files] = await Promise.all([
       prisma.folder.count({ where: { spaceId: id, archivedAt: null } }),
       prisma.board.count({ where: { spaceId: id, organizationId, archivedAt: null } }),
+      prisma.whiteboard.count({ where: { spaceId: id, organizationId, archivedAt: null } }),
+      prisma.dataTable.count({ where: { spaceId: id, organizationId } }),
+      prisma.fileEntry.count({ where: { spaceId: id, organizationId } }),
     ]);
-    if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
-    if (lists) parts.push(`${lists} list${lists === 1 ? "" : "s"}`);
+    if (folders) parts.push(plural(folders, "folder", "folders"));
+    if (lists) parts.push(plural(lists, "list", "lists"));
+    if (canvases) parts.push(plural(canvases, "canvas", "canvases"));
+    if (tables) parts.push(plural(tables, "table", "tables"));
+    if (files) parts.push(plural(files, "file", "files"));
   } else if (type === "folder") {
-    const lists = await prisma.board.count({ where: { folderId: id, organizationId, archivedAt: null } });
-    if (lists) parts.push(`${lists} list${lists === 1 ? "" : "s"}`);
+    const [lists, folders, canvases, files] = await Promise.all([
+      prisma.board.count({ where: { folderId: id, organizationId, archivedAt: null } }),
+      prisma.folder.count({ where: { parentFolderId: id, organizationId, archivedAt: null } }),
+      canvasFolders ? prisma.whiteboard.count({ where: { folderId: id, organizationId, archivedAt: null } }) : Promise.resolve(0),
+      prisma.fileEntry.count({ where: { spaceFolderId: id, organizationId } }),
+    ]);
+    if (folders) parts.push(plural(folders, "folder", "folders"));
+    if (lists) parts.push(plural(lists, "list", "lists"));
+    if (canvases) parts.push(plural(canvases, "canvas", "canvases"));
+    if (files) parts.push(plural(files, "file", "files"));
   } else {
     const tasks = await prisma.item.count({ where: { boardId: id, organizationId, archivedAt: null } });
     if (tasks) parts.push(`${tasks} task${tasks === 1 ? "" : "s"}`);

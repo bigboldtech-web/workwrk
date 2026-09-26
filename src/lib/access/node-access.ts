@@ -483,21 +483,15 @@ export type CreateWhat = "list" | "folder" | "canvas" | "table" | "file" | "doc"
  * The one create rule, node-rules P1: Can edit or higher on the container
  * (Can view and Can comment never create), a Space OWNER or ADMIN from before
  * the cutoff for a List or a Folder in any Folder of their Space (P7), and the
- * org root's own rule for the kinds that may live there. One exception is
- * kept: a file TAGGED to a Space (a task attachment, spaceId with no Folder)
- * is not a node in the Space's tree, so it keeps today's reach, Can view or a
- * path to something inside.
+ * org root's own rule for the kinds that may live there. No exception: a file
+ * with a Space and no folder sits at the Space's root (the Space page's Files
+ * card lists it), so it is content added there like any other, and a Can view
+ * role or a path through the Space never adds one (round two, break 1).
  */
 export async function canCreateAt(ctx: NodeCtx, container: { kind: "space" | "folder"; id: string } | null, what: CreateWhat): Promise<boolean> {
   if (ctx.denied) return false;
   if (!container) return createDecision(emptyRows(ctx.organizationId), emptyGrants(viewerOfCtx(ctx)), null, what);
   const { rows, grants } = await loadWorld(ctx, [container], { chain: true });
-  if (what === "file" && container.kind === "space") {
-    const d = { ...new NodeEvaluator(rows, grants).decision(container) };
-    if (roleAtLeast(d.role, "VIEW")) return true;
-    await fillContainerPaths(ctx, [[container, d]]);
-    return d.path;
-  }
   return createDecision(rows, grants, container, what);
 }
 

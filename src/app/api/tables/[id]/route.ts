@@ -15,7 +15,7 @@ import { moveToTrash } from "@/lib/trash";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { readableTableWithRole, tableCtx } from "@/lib/table-gate";
+import { TABLE_EDIT_REFUSAL, readableTableWithRole, tableCtx } from "@/lib/table-gate";
 import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { logAuditEvent } from "@/lib/activity";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
@@ -51,6 +51,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ...table,
     rowCount: table._count.rows,
     canManage: roleAtLeast(gate.role, "FULL"),
+    // Can view reads only (R7b): the grid shows a read only table.
+    canEdit: roleAtLeast(gate.role, "EDIT"),
     publicLinksAllowed: orgPublicLinksAllowed(org?.settings),
   });
 }
@@ -66,6 +68,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return jsonError("not found", 404);
   const gate = await readableTableWithRole(id, orgId, getUserId(session), session);
   if (!gate) return jsonError("not found", 404);
+
+  // A change to the table's content (its name, description, columns, views
+  // or sheet settings) is a write: Can edit on the table (R7b), never Can
+  // view. The public link and a move keep their own, higher gates below.
+  const writesContent = typeof body.name === "string" || typeof body.description === "string" || body.description === null
+    || Array.isArray(body.columns) || Array.isArray(body.views) || (!!body.settings && typeof body.settings === "object");
+  if (writesContent && !roleAtLeast(gate.role, "EDIT")) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);

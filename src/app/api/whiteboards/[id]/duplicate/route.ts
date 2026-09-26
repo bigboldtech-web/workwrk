@@ -8,6 +8,7 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { whiteboardReadable } from "@/lib/whiteboard-gate";
 import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
 import { createRefusal } from "@/lib/access/node-rules";
+import { PlacementConflict, lockParentFolder } from "@/lib/access/node-placement";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,21 +31,38 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: createRefusal("canvas", container) }, { status: 403 });
   }
 
-  const whiteboard = await prisma.whiteboard.create({
-    data: {
-      organizationId: ctx.orgId,
-      name: `Copy of ${source.name}`.slice(0, 160),
-      description: source.description,
-      productSlug: source.productSlug,
-      spaceId: source.spaceId,
-      folderId: source.folderId,
-      ownerId: ctx.userId,
-      lastEditedById: ctx.userId,
-      lastEditedAt: new Date(),
-      scene: (source.scene ?? {}) as object,
-      thumbnail: source.thumbnail,
-    },
-    select: { id: true, name: true, createdAt: true },
-  });
-  return NextResponse.json({ whiteboard });
+  // The create half of P3: in a Folder, the copy's Space is read from the
+  // Folder under a share lock inside the write, never copied from the source
+  // row, so a move of that Folder meanwhile can never split the copy from it.
+  try {
+    const whiteboard = await prisma.$transaction(async (tx) => {
+      let spaceId = source.spaceId;
+      const folderId = container?.kind === "folder" ? container.id : null;
+      if (folderId) {
+        const parent = await lockParentFolder(tx, ctx.orgId, folderId);
+        if (!parent) throw new PlacementConflict("That folder just moved or went to Trash. Try again.");
+        spaceId = parent.spaceId;
+      }
+      return tx.whiteboard.create({
+        data: {
+          organizationId: ctx.orgId,
+          name: `Copy of ${source.name}`.slice(0, 160),
+          description: source.description,
+          productSlug: source.productSlug,
+          spaceId,
+          folderId,
+          ownerId: ctx.userId,
+          lastEditedById: ctx.userId,
+          lastEditedAt: new Date(),
+          scene: (source.scene ?? {}) as object,
+          thumbnail: source.thumbnail,
+        },
+        select: { id: true, name: true, createdAt: true },
+      });
+    });
+    return NextResponse.json({ whiteboard });
+  } catch (err) {
+    if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });
+    throw err;
+  }
 }

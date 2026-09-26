@@ -13,7 +13,7 @@ import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
 import { anchorAgreesWithParent, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
-import { checkMove, docAnchorPlaceOf, docHomeOf, moveDestinations } from "@/lib/access/node-placement";
+import { checkMove, docAnchorPlaceOf, docHomeOf, moveDestinations, writeDocTreeMove } from "@/lib/access/node-placement";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
@@ -98,7 +98,7 @@ const MOVE_OUT_OF_REACH = "You can't move this doc there: you can't add docs to 
  *   - The destination is the parent page when it has one, else its anchor's
  *     Space, Folder or List (a task's doc goes on the task's List), else the
  *     org root. Moving needs Full access on the doc and on the place it
- *     leaves (and its Space when it leaves the Space), and Can edit where it
+ *     leaves (and its Space when it leaves every Space), and Can edit where it
  *     goes (P2). Full access on the doc covers what used to be gated on its
  *     own: opening it to the whole org, and leaving a restricted page tree.
  *   - Nesting under a page moves the doc into that page's container too, so
@@ -343,18 +343,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       const refused = await treeMoveRefusal(ctx, nodeCtx, id, existing, after);
       if (refused) return NextResponse.json(refused.body, { status: refused.status });
     }
-    const doc = await prisma.doc.update({
-      where: { id },
-      data: {
-        ...(parsed.data.parentId !== undefined ? { parentId: parsed.data.parentId } : {}),
-        ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
-        ...(parsed.data.isFolder !== undefined ? { isFolder: parsed.data.isFolder } : {}),
-        ...(parsed.data.entityType !== undefined ? { entityType: parsed.data.entityType } : {}),
-        ...(parsed.data.entityId !== undefined ? { entityId: parsed.data.entityId } : {}),
-      },
-      select: { id: true, parentId: true, position: true, isFolder: true, entityType: true, entityId: true },
-    });
-    return NextResponse.json({ doc });
+    // P3: a move takes the whole page tree with it. A page beneath this one
+    // that carries a place of its own takes this doc's new home in the same
+    // transaction (writeDocTreeMove), so a sub-page never stays in the old
+    // Folder or Space under a parent in the new one.
+    const written = await writeDocTreeMove(ctx.orgId, id, {
+      ...(parsed.data.parentId !== undefined ? { parentId: parsed.data.parentId } : {}),
+      ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
+      ...(parsed.data.isFolder !== undefined ? { isFolder: parsed.data.isFolder } : {}),
+      ...(parsed.data.entityType !== undefined ? { entityType: parsed.data.entityType } : {}),
+      ...(parsed.data.entityId !== undefined ? { entityId: parsed.data.entityId } : {}),
+    }, placeChanges ? after : null);
+    if (!written.ok) return NextResponse.json(refusal(written.status, "split_tree", written.error).body, { status: written.status });
+    return NextResponse.json({ doc: written.doc, movedPages: written.rewritten });
   }
 
   // Optimistic-concurrency precondition. The client sends the updatedAt

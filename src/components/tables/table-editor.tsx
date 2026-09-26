@@ -241,6 +241,8 @@ type TableSettings = { namedRanges?: NamedRangeDef[] };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null;
   /** Creator or admin (GET /api/tables/[id], lib/object-manage): may delete the table or change its public link. */
   canManage?: boolean;
+  /** Can edit or higher (GET /api/tables/[id]); false for a Can view role, which reads only (node-rules R7b). */
+  canEdit?: boolean;
   /** The org's toggle 10 (lib/public-links): whether the Share dialog's Public link row exists. */
   publicLinksAllowed?: boolean };
 
@@ -5507,8 +5509,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       barCell = {
         address: `${columnLetter(colIndex)}${rowNumber}`,
         source: src ?? cellText(activeColDef, activeCellRow),
-        readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
-        readOnlyReason: activeColDef.type === "formula"
+        readOnly: table.canEdit === false || activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
+        readOnlyReason: table.canEdit === false
+          ? "You have Can view on this table, so it reads only."
+          : activeColDef.type === "formula"
           ? "This column computes its formula. Edit it from the column menu (Edit formula)."
           : computedCol
             ? "This column is computed. Configure it from the column menu."
@@ -5523,11 +5527,11 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
 
   /* ── The sheet's chrome: role, menus, toolbar popovers ─────────────── */
 
-  // Read implies write on a table (docs/plans/tables.md 3a), so every reader
-  // is at least Can edit; Full access on the table (GET /api/tables/[id]
-  // canManage: its maker, the admins, a Space manager or a Full grant) gets
-  // Share, everyone else the chip, and both open the one Manage access dialog.
-  const shareRole = table.canManage ? "FULL" : "EDIT";
+  // Full access on the table (GET /api/tables/[id] canManage: its maker, the
+  // admins, a Space manager or a Full grant) gets Share, everyone else the
+  // chip, and both open the one Manage access dialog. A Can view role reads
+  // only (node-rules R7b), and the chip says so.
+  const shareRole = table.canManage ? "FULL" : table.canEdit === false ? "VIEW" : "EDIT";
   const tableName = table.name || UNTITLED_TABLE_NAME;
   const colIndexOf = (colId: string | undefined) => (colId ? table.columns.findIndex((c) => c.id === colId) : -1);
   const activeColIdx = colIndexOf(activeCell?.colId);
@@ -6143,7 +6147,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
                       <Plus style={{ width: 15, height: 15 }} />
                     </button>
                   }
-                  readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
+                  readOnlyCols={new Set(table.columns.filter((c) => table.canEdit === false || c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
                 />
               </div>
               {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): floats top-right

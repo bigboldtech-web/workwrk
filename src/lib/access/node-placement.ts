@@ -37,7 +37,10 @@ import {
   docAnchorPlace,
   emptyGrants,
   folderDeleteAllowed,
+  folderMoveAllowed,
+  FOLDER_SUBTREE_MOVE_REFUSAL,
   emptyRows,
+  fileEditDecision,
   fileMoveVerdict,
   moveRefusal,
   moveVerdict,
@@ -45,6 +48,7 @@ import {
   placeKindOf,
   refKey,
   roleAtLeast,
+  subtreeAnchorPlan,
   type DocHome,
   type NodeCtx,
   type NodeRef,
@@ -186,6 +190,12 @@ export async function resolvePlacement(
  * Space that disagrees with the Folder, or a Folder in Trash, is a 400; then
  * Can edit (P1) is the 403. With neither a Folder nor a Space, the org root
  * when `root` allows it.
+ *
+ * A place the rule lets the viewer create in is never a 404, even when they
+ * cannot open it: P7's Space OWNER or ADMIN from before the cutoff makes
+ * Lists and Folders in a Private Folder of their Space that does not name
+ * them, exactly as the move helper lets them move one there. The 404 came
+ * first once, which left that branch of P7 dead in every create route.
  */
 export async function resolveCreate(
   ctx: NodeCtx,
@@ -197,7 +207,9 @@ export async function resolveCreate(
   const named: NodeRef | null = req.folderId ? { kind: "folder", id: req.folderId } : req.spaceId ? { kind: "space", id: req.spaceId } : null;
   if (named) {
     const { rows, grants } = await loadWorld(ctx, [named], { chain: true });
-    if (!(await seesPlace(ctx, new NodeEvaluator(rows, grants), named))) return fail(404, "Not found");
+    if (!createDecision(rows, grants, named, what) && !(await seesPlace(ctx, new NodeEvaluator(rows, grants), named))) {
+      return fail(404, "Not found");
+    }
   }
   const placed = await resolvePlacement(ctx.organizationId, req, opts);
   if (!placed.ok) return fail(placed.status, placed.message);
@@ -226,7 +238,7 @@ export async function lockParentFolder(tx: Tx, organizationId: string, folderId:
 
 /** Thrown inside a placement transaction; answered as its status, with nothing written. */
 export class PlacementConflict extends Error {
-  constructor(message: string, readonly status: 400 | 409 = 409) {
+  constructor(message: string, readonly status: 400 | 403 | 409 = 409) {
     super(message);
   }
 }
@@ -242,6 +254,39 @@ export async function folderBranch(db: RawDb, organizationId: string, rootId: st
     )
     SELECT "id", MIN(depth)::int AS depth FROM down WHERE "id" <> ${rootId} GROUP BY "id"`;
   return rows.map((r) => ({ id: r.id, depth: Number(r.depth) }));
+}
+
+/** How many times lockFolderBranch reads the branch again before it gives up (a branch that keeps growing under it). */
+export const BRANCH_LOCK_ROUNDS = 8;
+
+/**
+ * The move half of P3: lock a Folder and every Folder beneath it FOR UPDATE,
+ * reading the branch again after each lock until no Folder appears that is
+ * not locked yet, and answer the ids of the whole branch as it stands under
+ * the locks (the Folder first).
+ *
+ * Why a second read. A create takes a share lock on its parent
+ * (lockParentFolder), so a sub-folder being made under a Folder of the
+ * branch holds that lock while this move waits for it; the create commits
+ * while the move waits, and a branch read BEFORE the wait never names the new
+ * sub-folder. Rewriting only the ids read first left that sub-folder in the
+ * Space its parent just left (a live race split 14 Folders that way). Once
+ * every Folder of the branch is locked FOR UPDATE, no create can add a child
+ * under any of them until this move commits, and then it reads the parent's
+ * new Space under its own lock and is refused if it named the old one. So a
+ * read after the last lock that finds nothing new is the whole branch.
+ */
+export async function lockFolderBranch(db: RawDb, organizationId: string, rootId: string): Promise<string[]> {
+  const locked = new Set<string>();
+  let ids = [rootId, ...(await folderBranch(db, organizationId, rootId)).map((b) => b.id)];
+  for (let round = 0; round < BRANCH_LOCK_ROUNDS; round += 1) {
+    const fresh = ids.filter((id) => !locked.has(id)).sort();
+    if (fresh.length === 0) return ids;
+    await db.$queryRaw`SELECT "id" FROM "Folder" WHERE "id" = ANY(${fresh}::text[]) FOR UPDATE`;
+    for (const id of fresh) locked.add(id);
+    ids = [rootId, ...(await folderBranch(db, organizationId, rootId)).map((b) => b.id)];
+  }
+  throw new PlacementConflict("This folder's contents kept changing while it moved. Try again.");
 }
 
 /** Whiteboard.folderId ships in its own SQL file: a database without it still moves Folders, and the probe never runs inside a transaction. */
@@ -316,16 +361,30 @@ export async function moveFolder(
   if (!parentChanges && req.position === undefined) {
     return { ok: true, folder: { id: folder.id, name: folder.name, spaceId: folder.spaceId, parentFolderId: folder.parentFolderId, position: folder.position }, moved: false, movedFolders: 0 };
   }
-  const canvases = spaceChanges ? await canvasesHaveFolders() : false;
+  // P2: a Folder that changes parent carries everything beneath it, so the
+  // mover needs Full access on all of it (folderMoveAllowed). Asked here so a
+  // refusal costs no transaction, and again under the locks below, where the
+  // branch can no longer change.
+  if (parentChanges) {
+    const whole = await checkFolderSubtreeMove(ctx, folder.id, [folder.id, ...branch.map((b) => b.id)]);
+    if (!whole.ok) return whole;
+  }
+  const canvases = spaceChanges || parentChanges ? await canvasesHaveFolders() : false;
   try {
     const result = await prisma.$transaction(async (tx) => {
       if (destFolderId) {
         const parent = await lockParentFolder(tx, org, destFolderId);
         if (!parent || parent.spaceId !== destSpaceId) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
       }
-      const ids = [folder.id, ...(await folderBranch(tx, org, folder.id)).map((b) => b.id)];
-      await tx.$queryRaw`SELECT "id" FROM "Folder" WHERE "id" = ANY(${ids}::text[]) FOR UPDATE`;
+      // P3: the whole branch as it stands under the locks, read again after
+      // each lock (lockFolderBranch), so a sub-folder made while this move
+      // waited moves with its parent instead of staying behind.
+      const ids = await lockFolderBranch(tx, org, folder.id);
       if (destFolderId && ids.includes(destFolderId)) throw new PlacementConflict("A folder can't move inside itself.", 400);
+      if (parentChanges) {
+        const whole = await checkFolderSubtreeMove(ctx, folder.id, ids, canvases);
+        if (!whole.ok) throw new PlacementConflict(whole.error, 403);
+      }
       const position = req.position ?? (parentChanges ? await lastPosition(tx, destSpaceId, destFolderId, folder.id) : undefined);
       const row = await tx.folder.update({
         where: { id: folder.id },
@@ -344,8 +403,53 @@ export async function moveFolder(
     return { ok: true, folder: result.row, moved: parentChanges, movedFolders: result.count };
   } catch (err) {
     if (err instanceof PlacementConflict) return fail(err.status, err.message);
+    if (isLockConflict(err)) return fail(409, "Someone moved these folders at the same moment. Try again.");
     throw err;
   }
+}
+
+/**
+ * A transaction Postgres ended to break a deadlock (40P01) or a serialization
+ * failure (40001), which two moves crossing each other's branches can meet.
+ * Nothing was written; the person tries again.
+ */
+function isLockConflict(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err);
+  const code = (err as { code?: string; meta?: { code?: string } } | null)?.meta?.code ?? (err as { code?: string } | null)?.code;
+  return code === "P2034" || code === "40P01" || code === "40001" || /deadlock detected|could not serialize/i.test(text);
+}
+
+/**
+ * P2 for a Folder that changes parent: node-rules folderMoveAllowed over one
+ * world holding everything it carries (`folderIds`: the Folder and its whole
+ * branch, with the Lists and canvases in any of them). The sentence names no
+ * node the viewer cannot open.
+ */
+export async function checkFolderSubtreeMove(
+  ctx: NodeCtx,
+  folderId: string,
+  folderIds: readonly string[],
+  canvasColumn?: boolean,
+): Promise<{ ok: true } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const org = ctx.organizationId;
+  const ids = [...new Set([folderId, ...folderIds])];
+  const withCanvases = canvasColumn ?? (await canvasesHaveFolders());
+  const [lists, canvases] = await Promise.all([
+    prisma.board.findMany({ where: { organizationId: org, folderId: { in: ids } }, select: { id: true } }),
+    withCanvases
+      ? prisma.whiteboard.findMany({ where: { organizationId: org, folderId: { in: ids } }, select: { id: true } })
+      : Promise.resolve([] as Array<{ id: string }>),
+  ]);
+  const refs: NodeRef[] = [
+    ...ids.map((id) => ({ kind: "folder" as const, id })),
+    ...lists.map((l) => ({ kind: "list" as const, id: l.id })),
+    ...canvases.map((c) => ({ kind: "canvas" as const, id: c.id })),
+  ];
+  const { rows, grants } = await loadWorld(ctx, refs, { chain: true });
+  const inside = { folders: ids.filter((id) => id !== folderId), lists: lists.map((l) => l.id), canvases: canvases.map((c) => c.id) };
+  if (folderMoveAllowed(rows, grants, folderId, inside)) return { ok: true };
+  return fail(403, FOLDER_SUBTREE_MOVE_REFUSAL);
 }
 
 /**
@@ -477,6 +581,59 @@ export async function docHomeOf(
   return { kind: "root" };
 }
 
+/** Every page beneath a doc, at any depth (archived ones too: all of the tree travels), with its own anchor. */
+export async function docDescendants(db: RawDb, organizationId: string, docId: string): Promise<Array<{ id: string; entityType: string | null; entityId: string | null }>> {
+  return db.$queryRaw<Array<{ id: string; entityType: string | null; entityId: string | null }>>`
+    WITH RECURSIVE down AS (
+      SELECT d."id", d."entityType", d."entityId", 1 AS depth FROM "Doc" d WHERE d."parentId" = ${docId} AND d."organizationId" = ${organizationId}
+      UNION ALL
+      SELECT c."id", c."entityType", c."entityId", w.depth + 1 FROM "Doc" c JOIN down w ON c."parentId" = w."id"
+      WHERE c."organizationId" = ${organizationId} AND w.depth < 32
+    )
+    SELECT DISTINCT "id", "entityType", "entityId" FROM down WHERE "id" <> ${docId}`;
+}
+
+/**
+ * The write of a doc tree move (P3): the doc's own placement fields and, in
+ * the same transaction, the anchor of every page beneath it that carries a
+ * place of its own (node-rules subtreeAnchorPlan), so the page tree moves
+ * whole. A tree whose new home is no place while a page beneath it has one is
+ * refused (409), and nothing is written.
+ */
+export async function writeDocTreeMove(
+  organizationId: string,
+  docId: string,
+  data: { parentId?: string | null; position?: number; isFolder?: boolean; entityType?: string | null; entityId?: string | null },
+  after: { entityType: string | null; entityId: string | null; parentId: string | null } | null,
+): Promise<{ ok: true; doc: { id: string; parentId: string | null; position: number; isFolder: boolean; entityType: string | null; entityId: string | null }; rewritten: number } | PlaceRefusal> {
+  const homeAfter = after ? await docHomeOf(organizationId, after) : null;
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      let rewrite: string[] = [];
+      if (homeAfter) {
+        const plan = subtreeAnchorPlan(homeAfter, await docDescendants(tx, organizationId, docId));
+        if (!plan.ok) {
+          throw new PlacementConflict("Pages inside this doc live in a place of their own, so it can't leave every place. Move it into a Space, a folder or a List instead.");
+        }
+        rewrite = plan.rewrite;
+      }
+      const doc = await tx.doc.update({
+        where: { id: docId },
+        data,
+        select: { id: true, parentId: true, position: true, isFolder: true, entityType: true, entityId: true },
+      });
+      if (rewrite.length && homeAfter?.kind === "anchor") {
+        await tx.doc.updateMany({ where: { id: { in: rewrite }, organizationId }, data: { entityType: homeAfter.entityType, entityId: homeAfter.entityId } });
+      }
+      return { doc, rewritten: rewrite.length };
+    });
+    return { ok: true, ...result };
+  } catch (err) {
+    if (err instanceof PlacementConflict) return fail(err.status, err.message);
+    throw err;
+  }
+}
+
 /**
  * The place a doc anchor names, for a route (node-rules docAnchorPlace): a
  * Space, a Folder, a List, or the List of a task (read here). Null for no
@@ -590,6 +747,24 @@ export async function checkFileMove(
   return fail(403, moveRefusal("file", verdict.failure));
 }
 
+/**
+ * May the viewer rename, re-describe, re-file (a drive folder) or Trash this
+ * file? node-rules fileEditDecision over one world: Can edit where it sits in
+ * the Space tree, or an org admin; a file of the org's, its uploader or any
+ * Member. A Can view grantee never removes another person's file.
+ */
+export async function checkFileEdit(
+  ctx: NodeCtx,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+): Promise<{ ok: true } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const place = file.spaceFolderId ? { kind: "folder" as const, id: file.spaceFolderId } : file.spaceId ? { kind: "space" as const, id: file.spaceId } : null;
+  const { rows, grants } = place ? await loadWorld(ctx, [place], { chain: true }) : { rows: emptyRows(ctx.organizationId), grants: emptyGrants(viewerOf(ctx)) };
+  if (fileEditDecision(rows, grants, file)) return { ok: true };
+  const where = file.spaceFolderId ? "folder" : "Space";
+  return fail(403, place ? `You need Can edit on this ${where} to change or remove its files.` : "Only members of the workspace can change this file.");
+}
+
 // ── deletes that take a subtree ──────────────────────────────────────
 
 /**
@@ -654,6 +829,8 @@ export interface MoveDestinations {
   /** Out of every Space (the org's): only for the kinds that may live there. */
   root: { pickable: boolean; current: boolean } | null;
   spaces: DestinationSpace[];
+  /** Why nothing is pickable, when the node itself cannot move anywhere (a Folder carrying what the viewer does not hold Full access on). */
+  refusal?: string;
 }
 
 /**
@@ -686,20 +863,26 @@ export async function moveDestinations(ctx: NodeCtx, ref: NodeRef): Promise<Move
 
   const here = currentPlace(rows, ref);
   const isHere = (p: Place) => here !== undefined && (p === null ? here === null : here !== null && here.kind === p.kind && here.id === p.id);
-  const lands = (p: Place) => {
-    const v = moveVerdict(rows, grants, ref, p);
-    return v.ok && !v.same;
-  };
 
-  // A Folder never goes into itself, anything beneath it, or past the depth limit.
+  // A Folder never goes into itself, anything beneath it, or past the depth
+  // limit; and it goes nowhere when it carries what the viewer does not hold
+  // Full access on (P2, folderMoveAllowed), exactly as the move refuses.
   const excluded = new Set<string>();
   let height = 0;
+  let refusal: string | undefined;
   if (ref.kind === "folder") {
     const branch = await folderBranch(prisma, org, ref.id);
     excluded.add(ref.id);
     for (const b of branch) excluded.add(b.id);
     height = branch.reduce((m, b) => Math.max(m, b.depth), 0);
+    const whole = await checkFolderSubtreeMove(ctx, ref.id, [ref.id, ...branch.map((b) => b.id)]);
+    if (!whole.ok) refusal = whole.error;
   }
+  const lands = (p: Place) => {
+    if (refusal) return false;
+    const v = moveVerdict(rows, grants, ref, p);
+    return v.ok && !v.same;
+  };
   const byId = new Map(folderRows.map((f) => [f.id, f]));
   const depthOf = (id: string): number => {
     let d = 0;
@@ -760,5 +943,81 @@ export async function moveDestinations(ctx: NodeCtx, ref: NodeRef): Promise<Move
     out.push({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: rootPick, current, folders: ordered });
   }
   const root = placeHolds(null, what) ? { pickable: lands(null), current: isHere(null) } : null;
+  return refusal ? { root, spaces: out, refusal } : { root, spaces: out };
+}
+
+/**
+ * P5 for a create (node-rules P1): the places this viewer may make `what` in,
+ * for the create pickers (Create list, a sprint, a template's landing place).
+ * The same shape as moveDestinations: every Space the viewer can open or pass
+ * through that holds a pickable place, its root pickable when P1 accepts it,
+ * and the Folders P1 accepts with every Folder on the way to one. A Folder
+ * reached through a grant inside a Space the viewer only passes through is
+ * listed under that Space, which is then a header and not itself a place. So
+ * a Can view holder is offered nothing, and a Can edit grantee of one Folder
+ * is offered that Folder. Nothing the viewer can neither open nor pass
+ * through is named.
+ */
+export async function createDestinations(ctx: NodeCtx, what: PlaceKind): Promise<MoveDestinations> {
+  if (ctx.denied) return { root: null, spaces: [] };
+  const org = ctx.organizationId;
+  const spaces = await listVisibleSpaces(ctx, { paths: true });
+  const inFolders = placeHolds({ kind: "folder", id: "" }, what);
+  const folderRows = inFolders && spaces.length
+    ? await prisma.folder.findMany({
+        where: { organizationId: org, spaceId: { in: spaces.map((s) => s.id) }, archivedAt: null },
+        orderBy: [{ position: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, parentFolderId: true, spaceId: true, icon: true, color: true },
+      })
+    : [];
+  const refs: NodeRef[] = [...spaces.map((s) => ({ kind: "space" as const, id: s.id })), ...folderRows.map((f) => ({ kind: "folder" as const, id: f.id }))];
+  const { rows, grants } = refs.length
+    ? await loadWorld(ctx, refs, { chain: true })
+    : { rows: emptyRows(org), grants: emptyGrants(viewerOf(ctx)) };
+  const ev = new NodeEvaluator(rows, grants);
+  const paths = ctx.orgAdmin ? new Set<string>() : await viewerPathContainers(ctx);
+  const sees = (r: NodeRef) => roleAtLeast(ev.effective(r).role, "VIEW") || paths.has(refKey(r));
+  const byId = new Map(folderRows.map((f) => [f.id, f]));
+
+  const out: DestinationSpace[] = [];
+  for (const s of spaces) {
+    const spaceRef: NodeRef = { kind: "space", id: s.id };
+    if (!sees(spaceRef)) continue;
+    const inSpace = folderRows.filter((f) => f.spaceId === s.id);
+    const pick = new Set<string>();
+    for (const f of inSpace) {
+      const fr: NodeRef = { kind: "folder", id: f.id };
+      if (!roleAtLeast(ev.effective(fr).role, "VIEW")) continue;
+      if (createDecision(rows, grants, fr, what)) pick.add(f.id);
+    }
+    const keep = new Set<string>();
+    for (const id of pick) {
+      let cursor: string | null = id;
+      const seen = new Set<string>();
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        if (!sees({ kind: "folder", id: cursor })) break;
+        keep.add(cursor);
+        cursor = byId.get(cursor)?.parentFolderId ?? null;
+      }
+    }
+    const rootPick = placeHolds(spaceRef, what) && createDecision(rows, grants, spaceRef, what);
+    if (!rootPick && keep.size === 0) continue;
+    const ordered: DestinationFolder[] = [];
+    const visit = (parent: string | null) => {
+      for (const f of inSpace) {
+        if (!keep.has(f.id)) continue;
+        const p = f.parentFolderId && keep.has(f.parentFolderId) ? f.parentFolderId : null;
+        if (p !== parent) continue;
+        ordered.push({ id: f.id, name: f.name, parentFolderId: p, icon: f.icon, color: f.color, pickable: pick.has(f.id), current: false });
+        visit(f.id);
+      }
+    };
+    visit(null);
+    out.push({ id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: rootPick, current: false, folders: ordered });
+  }
+  const root = placeHolds(null, what)
+    ? { pickable: createDecision(emptyRows(org), emptyGrants(viewerOf(ctx)), null, what), current: false }
+    : null;
   return { root, spaces: out };
 }

@@ -977,6 +977,28 @@ export class NodeEvaluator {
     return rankOf(legacy.role) > rankOf(capped.role) ? legacy : capped;
   }
 
+  /**
+   * R7b, the role a table's Space gives, on the same terms as R6b. Today
+   * everyone who reaches a Space edits every table in it (rows, columns, CSV
+   * import, a form pointed at it), so a Can view role on the Space climbed to
+   * Can edit on its tables. A8 keeps that for the rows that gave it: rows
+   * written before the cutoff and the org-wide "everyone" reach. A grant this
+   * release writes follows A5 instead: the Space role is the table's role, so
+   * "Can view: Read only." holds for the tables inside too and roles never
+   * climb (delta C3). The higher of the two, so an older row keeps its reach.
+   */
+  private spaceTableRole(spaceId: string, reach: Res): Res {
+    const lift = (r: Res): Res => ({ role: roleAtLeast(r.role, "FULL") ? "FULL" : "EDIT", via: r.via });
+    if (reach.via.type === "everyone") return lift(reach);
+    const old = this.legacyEv();
+    if (!old) return lift(reach);
+    const capped: Res = { role: inheritRole(reach.role), via: reach.via };
+    const oldReach = old.strict({ kind: "space", id: spaceId });
+    if (oldReach.role === "none") return capped;
+    const legacy = lift(oldReach);
+    return rankOf(legacy.role) > rankOf(capped.role) ? legacy : capped;
+  }
+
   /** R6c for an anchored doc: what the anchor gives. */
   private anchorReach(d: DocFact): Res {
     const id = d.entityId as string;
@@ -1009,7 +1031,8 @@ export class NodeEvaluator {
       const s = this.strict({ kind: "space", id: t.spaceId });
       spaceReached = s.role !== "none";
       if (spaceReached) {
-        cands.push({ role: roleAtLeast(s.role, "FULL") ? "FULL" : "EDIT", via: inheritVia(s.via), prio: s.via.type === "everyone" ? P_EVERYONE : P_INHERITED });
+        const got = this.spaceTableRole(t.spaceId, s);
+        cands.push({ role: got.role, via: inheritVia(got.via), prio: s.via.type === "everyone" ? P_EVERYONE : P_INHERITED });
       }
     } else if (!this.grants.viewer.orgGuest) {
       cands.push({ role: "EDIT", via: { type: "everyone", node: null }, prio: P_EVERYONE });
@@ -1193,10 +1216,19 @@ export class NodeEvaluator {
 //       table and a form for anyone signed in, a canvas and a file for
 //       Members. (createDecision)
 //   P2  MOVE needs Full access on the node, Full access on the container it
-//       leaves, and Can edit or higher on the container it goes to. A node
-//       that leaves its Space leaves the Space too, so that also needs Full
-//       access on the Space it leaves. A canvas's or a table's own grant
-//       never moves it (M3). (moveVerdict)
+//       leaves, and Can edit or higher on the container it goes to. Nothing
+//       more: a Full holder of a Folder in one Space and of a Folder in
+//       another moves what is inside the first into the second. The org root
+//       is the one destination no one holds a role on, and landing there
+//       opens the node to the whole org, so a move out of every Space also
+//       needs Full access on the Space it leaves, and Full access on the node
+//       that goes with it (its owner, an org admin, a Full share on a doc):
+//       a Space manager's push of someone else's node out of every Space was
+//       a one-way door, open to the org and theirs no longer to bring back
+//       (fullWhereItLands). A Folder moves with everything beneath it, so
+//       it needs Full access on all of it, as its delete does, unless the
+//       mover manages its Space (folderMoveAllowed). A canvas's or a table's
+//       own grant never moves it (M3). (moveVerdict)
 //   P3  The Space of anything is derived from its destination parent, never
 //       taken from the request: a Space that disagrees with the parent Folder
 //       is refused, a parent in another org or in Trash is refused
@@ -1208,7 +1240,11 @@ export class NodeEvaluator {
 //       the parent (moveVerdict answers `same`). A reorder that changes the
 //       parent is a move under P2.
 //   P5  The Move dialog offers exactly the destinations P2 accepts
-//       (node-placement.ts moveDestinations asks moveVerdict per place).
+//       (node-placement.ts moveDestinations asks moveVerdict per place, and
+//       offers nothing for a Folder P2 refuses on what it carries), and a
+//       Space's Move dialog exactly the parents spaceNestVerdict accepts.
+//       A create menu or picker offers exactly the places P1 accepts
+//       (node-placement.ts createDestinations asks createDecision per place).
 //   P6  A refusal is a 403 with one plain sentence naming what is needed
 //       (moveRefusal, createRefusal), and nothing is written.
 //   P7  Org admins keep Full access everywhere (R1). A Space OWNER or ADMIN
@@ -1386,19 +1422,96 @@ function managesPlace(ev: NodeEvaluator, place: NodeRef): boolean {
   return place.kind === "folder" && ev.legacyManagesSpace(ev.rows.folders.get(place.id)?.spaceId);
 }
 
-/** The containers a move from `from` to `dest` leaves (P2): the one it sits in, and its Space when the Space changes. */
+/**
+ * The containers a move from `from` to `dest` leaves (P2): the one it sits in.
+ * A move out of every Space (dest null, the org root) also leaves its Space,
+ * because the org root is no container anyone holds a role on and landing
+ * there opens the node to the whole org. A move into another Space's tree
+ * asks nothing more of the Space it leaves: Can edit where it lands is the
+ * other end, exactly as P2 states it.
+ */
 function leftContainers(rows: NodeRows, ref: NodeRef, from: Place, dest: Place): NodeRef[] {
   if (!from) return [];
   const out: NodeRef[] = [from];
-  const source = spaceOfNode(rows, ref);
-  if (source && source !== spaceOfPlace(rows, dest) && !(from.kind === "space" && from.id === source)) {
-    out.push({ kind: "space", id: source });
+  if (dest === null) {
+    const source = spaceOfNode(rows, ref);
+    if (source && !(from.kind === "space" && from.id === source)) out.push({ kind: "space", id: source });
   }
   return out;
 }
 
-/** Why a move is refused: the node itself, the place it leaves, or the place it goes. */
-export type MoveFailure = "node" | "source" | "destination";
+/**
+ * Does this move take the node out of every Space: to the org root, or under
+ * a page (or onto a List) that lives in no Space? Such a node leaves every
+ * container a role is held on, and opens to whoever its new home opens to.
+ */
+export function leavesEverySpace(rows: NodeRows, ref: NodeRef, dest: Place): boolean {
+  return spaceOfNode(rows, ref) !== null && spaceOfPlace(rows, dest) === null;
+}
+
+/**
+ * The world with one node set down at `dest`, so the role it would carry
+ * there can be read by the one resolver. Only the kinds that can leave every
+ * Space (a canvas, a table, a doc); null for every other kind.
+ */
+function rowsWithNodeAt(rows: NodeRows, ref: NodeRef, dest: Place): NodeRows | null {
+  switch (ref.kind) {
+    case "canvas": {
+      const c = rows.canvases.get(ref.id);
+      if (!c) return null;
+      const canvases = new Map(rows.canvases);
+      canvases.set(ref.id, { ...c, spaceId: spaceOfPlace(rows, dest), folderId: dest?.kind === "folder" ? dest.id : null });
+      return { ...rows, canvases };
+    }
+    case "table": {
+      const t = rows.tables.get(ref.id);
+      if (!t) return null;
+      const tables = new Map(rows.tables);
+      tables.set(ref.id, { ...t, spaceId: dest?.kind === "space" ? dest.id : null });
+      return { ...rows, tables };
+    }
+    case "doc": {
+      const d = rows.docs.get(ref.id);
+      if (!d) return null;
+      const anchor: Readonly<Record<string, string>> = { space: "SPACE", folder: "FOLDER", list: "BOARD" };
+      const type = dest ? anchor[dest.kind] ?? null : null;
+      const at = !dest
+        ? { entityType: null, entityId: null, parentId: null }
+        : dest.kind === "doc"
+          ? { entityType: null, entityId: null, parentId: dest.id }
+          : { entityType: type, entityId: type ? dest.id : null, parentId: null };
+      const docs = new Map(rows.docs);
+      docs.set(ref.id, { ...d, ...at });
+      return { ...rows, docs };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * P2 at the edge of every Space: does the viewer hold Full access on the node
+ * where it would land, from the node itself (its owner, an org admin, or a
+ * Full share on a doc) rather than from the Space it leaves? A canvas's or a
+ * table's own grant never moves it (M3), here as everywhere.
+ */
+export function fullWhereItLands(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, dest: Place): boolean {
+  if (grants.viewer.denied) return false;
+  const moved = rowsWithNodeAt(rows, ref, dest);
+  if (!moved) return false;
+  let g = grants;
+  if (ref.kind === "canvas" || ref.kind === "table") {
+    const key = objectGrantKey(ref.kind, ref.id);
+    if (grants.object.has(key)) g = { ...grants, object: new Map([...grants.object].filter(([k]) => k !== key)) };
+  }
+  return roleAtLeast(new NodeEvaluator(moved, g).effective(ref).role, "FULL");
+}
+
+/**
+ * Why a move is refused: the node itself, the place it leaves, the place it
+ * goes, or (out of every Space) a Full access that would not go with it.
+ */
+export type MoveFailure = "node" | "source" | "destination" | "landing";
 
 export type MoveVerdict =
   | { ok: true; same: boolean }
@@ -1409,9 +1522,10 @@ export type MoveVerdict =
  * every Space)? `same` is a reorder under the parent it already has (P4),
  * which needs Full access on the node and on that parent, as reordering does
  * today. Anything else is a move: Full access on the node, Full access on
- * the container it leaves (and on its Space when it leaves the Space), and
- * Can edit or higher where it goes (P1's create rule). Org admins pass on
- * R1; a Space OWNER or ADMIN from before the cutoff on P7.
+ * the container it leaves, and Can edit or higher where it goes (P1's create
+ * rule); a move out of every Space (dest null) also needs Full access on the
+ * Space it leaves. Org admins pass on R1; a Space OWNER or ADMIN from before
+ * the cutoff on P7.
  *
  * An Agent moves like anyone else, as every move gate before node-access did
  * (A8): the Agent clamp is Phase 8's to decide.
@@ -1441,6 +1555,11 @@ export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, 
     if (!managesPlace(ev, c)) return { ok: false, failure: "source" };
   }
   if (!createAllowed(ev, dest, what)) return { ok: false, failure: "destination" };
+  // P2 out of every Space: the node's Full access must go with it. A Space
+  // manager's Full access on someone else's canvas, doc or table ends at the
+  // Space's edge, so their push would be a one-way door: the node open to
+  // the whole org and nobody but its owner able to bring it back.
+  if (leavesEverySpace(rows, ref, dest) && !fullWhereItLands(rows, grants, ref, dest)) return { ok: false, failure: "landing" };
   return { ok: true, same: false };
 }
 
@@ -1457,9 +1576,10 @@ export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef,
  * P2 for a file placed in the Space tree (a Space's root or one of its
  * Folders). A file has no role of its own, so "Full access on the node" is
  * its uploader, an org admin, or Full access on where it is now; the rest is
- * P2 as for every node: Full access on the place it leaves (and its Space
- * when it leaves the Space) and Can edit where it goes (P1's create rule for
- * a file). A file in no Space moves by its uploader (or an admin) alone.
+ * P2 as for every node: Full access on the place it leaves and Can edit
+ * where it goes (P1's create rule for a file), and out of every Space (dest
+ * null) also Full access on the Space it leaves. A file in no Space moves by
+ * its uploader (or an admin) alone.
  */
 export function fileMoveVerdict(
   rows: NodeRows,
@@ -1470,19 +1590,53 @@ export function fileMoveVerdict(
   const v = grants.viewer;
   if (v.denied) return { ok: false, failure: "node" };
   const ev = new NodeEvaluator(rows, grants);
-  const from: Place = file.spaceFolderId ? { kind: "folder", id: file.spaceFolderId } : file.spaceId ? { kind: "space", id: file.spaceId } : null;
+  const from = filePlace(file);
   const own = v.orgAdmin || (!!file.uploadedById && file.uploadedById === v.userId);
   if (!own && !(from && managesPlace(ev, from))) return { ok: false, failure: "node" };
   if (samePlace(from, dest)) return { ok: true, same: true };
   if (from) {
     if (!managesPlace(ev, from)) return { ok: false, failure: "source" };
     const source = spaceOfPlace(rows, from);
-    if (source && source !== spaceOfPlace(rows, dest) && from.kind !== "space" && !managesPlace(ev, { kind: "space", id: source })) {
+    if (dest === null && source && from.kind !== "space" && !managesPlace(ev, { kind: "space", id: source })) {
       return { ok: false, failure: "source" };
     }
   }
   if (!createAllowed(ev, dest, "file")) return { ok: false, failure: "destination" };
+  // Out of every Space a file moves by its uploader or an admin alone, so a
+  // Space manager who pushed someone else's file out could never bring it
+  // back: only the people who keep Full access on it there take it out.
+  if (from && dest === null && !own) return { ok: false, failure: "landing" };
   return { ok: true, same: false };
+}
+
+/** Where a file sits in the Space tree: its Folder, its Space's root, or null (the org's). */
+export function filePlace(file: { spaceId: string | null; spaceFolderId: string | null }): Place {
+  return file.spaceFolderId ? { kind: "folder", id: file.spaceFolderId } : file.spaceId ? { kind: "space", id: file.spaceId } : null;
+}
+
+/**
+ * May this viewer change a file's own content (its name, its description, its
+ * drive folder) or put it in Trash? A file has no role of its own, so a file
+ * in the Space tree takes the role of where it sits: Can edit on its Folder or
+ * its Space's root (P1's rule for writing in a container, the role that makes
+ * a file there), or an org admin. Uploading it once is not a standing right:
+ * a person lowered to Can view keeps their hands off what is now read only
+ * for them. A file of the org's (no Space) keeps today's rule: its uploader
+ * or any Member. Can view and Can comment never change or remove a file in a
+ * container: the worst case is a narrow grant breaking content others depend
+ * on.
+ */
+export function fileEditDecision(
+  rows: NodeRows,
+  grants: ViewerGrants,
+  file: { spaceId: string | null; spaceFolderId: string | null; uploadedById: string | null },
+): boolean {
+  const v = grants.viewer;
+  if (v.denied) return false;
+  if (v.orgAdmin) return true;
+  const place = filePlace(file);
+  if (!place) return !v.orgGuest || (!!file.uploadedById && file.uploadedById === v.userId);
+  return roleAtLeast(new NodeEvaluator(rows, grants).effective(place).role, "EDIT");
 }
 
 const PLACE_NOUN: Readonly<Record<PlaceKind, string>> = {
@@ -1497,6 +1651,7 @@ const CONTAINER_NOUN: Readonly<Partial<Record<NodeKind, string>>> = {
 export function moveRefusal(what: PlaceKind, failure: MoveFailure): string {
   const noun = PLACE_NOUN[what];
   if (failure === "node") return `You need Full access to this ${noun} to move it.`;
+  if (failure === "landing") return `You need Full access to this ${noun} itself, not only through its Space, to take it out of every Space.`;
   return `You need Full access where this ${noun} is now and Can edit where it is going.`;
 }
 
@@ -1562,6 +1717,74 @@ export function anchorAgreesWithParent(anchor: { entityType: string | null; enti
   return parentHome.kind === "anchor" && parentHome.entityType === anchor.entityType && parentHome.entityId === anchor.entityId;
 }
 
+/** The doc anchors that are places in the Space tree: the ones a move writes and P3 keeps in step. */
+export const PLACE_ANCHORS: ReadonlySet<string> = new Set(["SPACE", "FOLDER", "BOARD", "BOARD_ITEM"]);
+
+export type SubtreeAnchorPlan = { ok: true; rewrite: string[] } | { ok: false };
+
+/**
+ * P3 for a page tree that moves. A sub-page may carry its own anchor (made
+ * where its parent lived, which anchorAgreesWithParent allows), so moving the
+ * parent alone used to leave that page in the old Folder or Space under a
+ * parent in the new one: readers of the new place saw the parent and not the
+ * page, readers of the old place the page and not its parent. So every page
+ * beneath the moved doc that carries a place anchor takes the moved doc's new
+ * home in the same write (`rewrite`, the ids to change). When the new home is
+ * no place (the org root, or a chain R6 reads as closed) such a page has no
+ * consistent home, and the move is refused rather than split. A note
+ * (NOTEPAD) below is its owner's alone and is left untouched.
+ */
+export function subtreeAnchorPlan(
+  homeAfter: DocHome,
+  descendants: ReadonlyArray<{ id: string; entityType: string | null; entityId: string | null }>,
+): SubtreeAnchorPlan {
+  const placed = descendants.filter((d) => !!d.entityType && !!d.entityId && PLACE_ANCHORS.has(d.entityType));
+  if (placed.length === 0) return { ok: true, rewrite: [] };
+  if (homeAfter.kind !== "anchor" || !PLACE_ANCHORS.has(homeAfter.entityType)) return { ok: false };
+  return {
+    ok: true,
+    rewrite: placed.filter((d) => d.entityType !== homeAfter.entityType || d.entityId !== homeAfter.entityId).map((d) => d.id),
+  };
+}
+
+export type SpaceNestVerdict = { ok: true; same: boolean } | { ok: false; status: 400 | 403 | 404; error: string };
+
+/** P6 for Space nesting: the one sentence both halves of a refused move answer with. */
+export const SPACE_NEST_REFUSAL = "You need Full access on the Space this one sits in now and on the Space it is going into.";
+
+/**
+ * P2 for nesting a Space under another, or taking it to the top level (dest
+ * null). A sub-Space's place under its parent is the parent's structure, so a
+ * move needs Full access on the Space itself, Full access on the parent it
+ * leaves, and Full access on the parent it goes under (Space nesting has
+ * always asked Full access at both ends: a sub-Space is no content a Can edit
+ * holder adds). The parent it already has is no move. A parent that is the
+ * Space itself, one of its own sub-Spaces, in another org, out of the
+ * viewer's sight or archived is refused, archived as every other placement
+ * refuses it (P3).
+ */
+export function spaceNestVerdict(input: {
+  spaceId: string;
+  managesSpace: boolean;
+  /** The parent it has now, or null at the top level. */
+  current: { id: string; manages: boolean } | null;
+  /** The parent it goes under, or null for the top level. */
+  dest: { id: string; found: boolean; sees: boolean; archived: boolean; manages: boolean; cycle: boolean } | null;
+}): SpaceNestVerdict {
+  const { spaceId, current, dest } = input;
+  if (!input.managesSpace) return { ok: false, status: 403, error: "You need Full access to this Space to move it." };
+  if ((current?.id ?? null) === (dest?.id ?? null)) return { ok: true, same: true };
+  if (dest) {
+    if (dest.id === spaceId) return { ok: false, status: 400, error: "A Space can't be moved into itself." };
+    if (!dest.found || !dest.sees) return { ok: false, status: 404, error: "Destination Space not found." };
+    if (dest.archived) return { ok: false, status: 400, error: "That Space is archived." };
+    if (dest.cycle) return { ok: false, status: 400, error: "Can't move a Space into one of its own sub-Spaces." };
+  }
+  if (current && !current.manages) return { ok: false, status: 403, error: SPACE_NEST_REFUSAL };
+  if (dest && !dest.manages) return { ok: false, status: 403, error: SPACE_NEST_REFUSAL };
+  return { ok: true, same: false };
+}
+
 /**
  * The one containment gate of a delete that takes a Folder's subtree with it
  * (Trash or archive): Full access on the Folder, and on everything it takes
@@ -1587,6 +1810,28 @@ export function folderDeleteAllowed(
     inside.canvases.every((id) => full({ kind: "canvas", id }))
   );
 }
+
+/**
+ * P2 for a Folder that changes parent: it moves with everything beneath it,
+ * so the move needs what its delete needs (folderDeleteAllowed): Full access
+ * on the Folder and on every sub-folder, List and canvas it carries, unless
+ * the viewer manages the Folder's Space. A Private sub-folder (or List) the
+ * mover cannot open, or holds less than Full access on, is someone else's
+ * structure: a narrow grant never carries it into another place, where its
+ * people could lose it and the mover could not put it back. A reorder under
+ * the same parent moves nothing and never asks this (P4).
+ */
+export function folderMoveAllowed(
+  rows: NodeRows,
+  grants: ViewerGrants,
+  folderId: string,
+  inside: { folders: readonly string[]; lists: readonly string[]; canvases: readonly string[] },
+): boolean {
+  return folderDeleteAllowed(rows, grants, folderId, inside);
+}
+
+/** P6: the one sentence a Folder move refused on what it carries answers with. */
+export const FOLDER_SUBTREE_MOVE_REFUSAL = "You need Full access to everything in this folder to move it.";
 
 /**
  * Does this move take a doc out of every place? A doc with an anchor or a
@@ -1792,7 +2037,7 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     id: "M6",
     mode: "always",
     kind: "api",
-    text: "The placement rule (P1 to P7): making anything inside a container needs Can edit on it, so Can view and Can comment never create (a doc, a canvas or a table in a Space, a sub-page, a file in a Folder, a form's destination, a restore); a move needs Full access on the node and on the container it leaves (and on its Space when it leaves the Space) and Can edit where it goes, so a Space member who only edits no longer moves a doc, a canvas or a table out of where it is; a node's Space always comes from its parent, and a Folder moves or goes to Trash with its whole subtree. Org admins, Space managers and the Full holders of both ends keep what they had.",
+    text: "The placement rule (P1 to P7): making anything inside a container needs Can edit on it, so Can view and Can comment never create (a doc, a canvas or a table in a Space, a sub-page, a file in a Folder, a form's destination, a restore); a move needs Full access on the node and on the container it leaves (and on its Space when it leaves every Space for the org root) and Can edit where it goes, so a Space member who only edits no longer moves a doc, a canvas or a table out of where it is; a node's Space always comes from its parent, and a Folder moves or goes to Trash with its whole subtree. Org admins, Space managers and the Full holders of both ends keep what they had.",
     legacySource: "api/docs POST and PUT, api/whiteboards POST and PATCH, api/tables POST and PATCH, api/forms POST and PATCH read Can view, the creator or nothing; api/folders/reorder, PATCH api/folders/[id] and PATCH api/boards/[id] wrote a parent without its Space; the Folder Trash took its direct Lists only.",
   },
   {
@@ -1808,6 +2053,13 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     kind: "information",
     text: "A Can view role on a Space, Folder or List written at or after the workspace's cutoff gives Can view on the docs inside and their sub-pages, so it never edits or shares them (A5). Rows from before the cutoff and the org-wide reach keep today's Can edit (A8).",
     legacySource: "doc-access.ts resolveDocRole gave every reader of an unrestricted doc Can edit, and Can edit changes its sharing.",
+  },
+  {
+    id: "C3",
+    mode: "always",
+    kind: "information",
+    text: "A Can view role on a Space written at or after the workspace's cutoff gives Can view on the tables in it, so it never adds rows or columns, imports into them or points a form at them (A5). Rows from before the cutoff and the org-wide reach keep today's Can edit (A8).",
+    legacySource: "api/tables/[id] and its rows and import routes let every reader of the table's Space write to it.",
   },
   {
     id: "W1",

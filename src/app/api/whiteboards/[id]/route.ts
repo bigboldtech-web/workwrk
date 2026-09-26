@@ -108,7 +108,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // A move is the placement rule's (node-rules P2 and P3), through its one
   // helper: Full access on the canvas (never from a canvas grant alone, M3)
-  // and on the place it leaves (and its Space when it leaves the Space), Can
+  // and on the place it leaves (and its Space when it leaves every Space), Can
   // edit where it goes (the org's, for out of every Space), and the Space
   // taken from the Folder it goes into. Moving to another Space's root
   // clears the Folder it had: a canvas never keeps a Folder of the Space it

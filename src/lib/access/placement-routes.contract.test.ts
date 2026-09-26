@@ -110,8 +110,8 @@ describe("Tables, canvases, files", () => {
     expect(read("src/app/api/whiteboards/[id]/route.ts")).toMatch(/const moved = await moveCanvas\(nodeCtx, id, \{/);
     expect(read("src/app/api/whiteboards/[id]/duplicate/route.ts")).toMatch(/await canCreateAt\(nodeCtx, container, "canvas"\)/);
   });
-  it("files: an upload into a Folder and a move in the Space tree ask the rule", () => {
-    expect(read("src/app/api/files/route.ts")).toMatch(/await checkCreate\(nodeCtx, \{ kind: "folder", id: spaceFolderId \}, "file"\)/);
+  it("files: an upload into a Folder or a Space's root, and a move in the Space tree, ask the rule", () => {
+    expect(read("src/app/api/files/route.ts")).toMatch(/const placed = await resolveCreate\(nodeCtx, \{ spaceId, folderId: spaceFolderId \}, "file"\)/);
     expect(read("src/app/api/files/[id]/route.ts")).toMatch(/const check = await checkFileMove\(/);
   });
 });
@@ -127,11 +127,18 @@ describe("Forms, templates, Spaces", () => {
     expect(route).toMatch(/const placed = await resolveCreate\(nodeCtx, \{ spaceId, folderId \}, what\)/);
     expect(route).not.toMatch(/gateSpace\(/);
   });
-  it("Space nesting has one check, a sub-Space needs Can edit on its parent, a copy the create floor", () => {
+  it("Space nesting has one check, a sub-Space needs Can edit on a live parent, a copy Full access on its Space", () => {
     expect(read("src/app/api/spaces/[id]/route.ts")).toMatch(/await spaceReparentRefusal\(id, parsed\.data\.parentSpaceId, c\)/);
     expect(read("src/app/api/spaces/[id]/move/route.ts")).toMatch(/await spaceReparentRefusal\(id, parentSpaceId, c\)/);
-    expect(read("src/app/api/spaces/route.ts")).toMatch(/await canContributeSpace\(parsed\.data\.parentSpaceId, c\.userId, c\.accessLevel\)/);
-    expect(read("src/app/api/spaces/[id]/duplicate/route.ts")).toMatch(/if \(!SPACE_CREATE_LEVELS\.has\(accessLevel\)\)/);
+    expect(read("src/lib/space.ts")).toMatch(/const verdict = spaceNestVerdict\(\{ spaceId, managesSpace, current:/);
+    const create = read("src/app/api/spaces/route.ts");
+    expect(create).toMatch(/await canContributeSpace\(parsed\.data\.parentSpaceId, c\.userId, c\.accessLevel\)/);
+    expect(create).toMatch(/if \(parent\.archivedAt\) return NextResponse\.json\(\{ error: "That Space is archived\." \}, \{ status: 400 \}\);/);
+    // Break 10 of round one: a Space OWNER or ADMIN who is not a manager
+    // duplicates their own Space again (rule 7), so no manager floor here.
+    const dup = read("src/app/api/spaces/[id]/duplicate/route.ts");
+    expect(dup).toMatch(/if \(!\(await canEditSpace\(id, u\.id, accessLevel\)\)\)/);
+    expect(dup).not.toMatch(/SPACE_CREATE_LEVELS/);
   });
 });
 
