@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat, Pin, PinOff } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
@@ -28,7 +28,31 @@ import {
   type StatusOption,
   type ItemTag,
 } from "@/lib/board-items-shared";
-import { isBuiltinShown, FIELD_TYPE_BY_KEY, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
+import { isBuiltinShown, catalogEntryForField, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
+import { isConnectField, isMirrorField } from "@/lib/list-connect";
+import {
+  boardStatusFor,
+  bulkStatusSkipMessage,
+  computedCellValue,
+  itemsUrl,
+  linkedMenuFlags,
+  linkedRowEditable,
+  linkedRowKind,
+  mergeRefetchedRow,
+  optimisticLinkedStatus,
+  linkedStatusNote,
+  planBulkStatus,
+  refetchedFromRow,
+  statusPickerFor,
+  writeContext,
+} from "@/lib/list-link-rows";
+import { MAX_PINNED_COLUMNS, ROW_HEIGHTS, type RowColorRule, type RowHeight } from "@/lib/list-comfort";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
+import { ROW_COLOR_TINT, orderColumnsForPinning, rowHeightStyle, stickyOffsets } from "@/lib/table-comfort";
+import { viewConfigQueue } from "@/lib/view-config-queue";
+import { rowColorFor } from "@/lib/work/filter-rules";
+import { RowHeightMenu } from "./row-height-menu";
+import { fieldConfigMessage } from "./connect-field-config";
 import type { LucideIcon } from "lucide-react";
 import { AssigneePicker, MultiAssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { rowAssigneeIds } from "./board-filter-bar";
@@ -41,7 +65,8 @@ import { StatusGlyph } from "./status-glyph";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { ItemMoreMenu } from "./item-more-menu";
+import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
+import type { ItemRole } from "@/lib/item-role";
 import { accessMessage } from "@/lib/access-message";
 import { DatePlanner } from "./date-planner";
 import { BulkActionBar } from "./bulk-action-bar";
@@ -62,6 +87,13 @@ interface BoardTableViewProps {
   /** Per-List statuses (backbone #1) — the board's own set. */
   statuses: StatusOption[];
   canEdit: boolean;
+  /**
+   * May this viewer manage the List's fields (add, edit, move, delete a
+   * column)? Every fields route gates on Full access, which content write
+   * (`canEdit`) is not, so the header's field rows and its "+" follow this.
+   * Absent: `canEdit`, the old behaviour, for a host that did not work it out.
+   */
+  canManage?: boolean;
   /** Full access on the List. Only gates the row menu's Delete row, which is
    *  not an edit: it wants full access OR the task's own creator, so rendering
    *  it on `canEdit` gave every Member a control that always 403'd. */
@@ -115,6 +147,16 @@ interface BoardTableViewProps {
   /** Everything view — renders after the title inside the Name cell
    *  (e.g. the source-List chip on cross-board surfaces). */
   renderTitleSuffix?: (row: BoardItemRow) => React.ReactNode;
+  /** Phase 5b, List comfort: the List's Conditional colors rules. */
+  rowColorRules?: RowColorRule[];
+  /** The List's defaults, keyed by the List they were read for (null until read). */
+  loadedSettings?: LoadedListSettings | null;
+  /** May this viewer save the view (Pin column, Row height)? */
+  canSaveView?: boolean;
+  /** The status a row has in THIS List (a linked row's home status, remapped). */
+  statusOf?: (row: BoardItemRow) => string | null;
+  /** The owner's Personal List: its tasks are never added to other Lists. */
+  personalList?: boolean;
 }
 
 /** Patch shape rows can emit. `owner`/`tags` only update the local
@@ -182,7 +224,11 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
 // Header-menu sort — compares any column (built-in or custom field). Returns a
 // signed number; the caller flips it for descending. Missing values sort last
 // for ascending (Infinity / "" handled per type).
-function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[]): number {
+//
+// `computedKeys` names this List's Connect and Mirror columns: what they show
+// is not in `metadata` (list-link-rows.ts computedCellValue), so they are read
+// from the row's computed cells and never from the stored ids.
+function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[], computedKeys?: ReadonlySet<string>): number {
   const val = (row: BoardItemRow): string | number => {
     switch (key) {
       case "name": return row.title.toLowerCase();
@@ -213,6 +259,7 @@ function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses
       case "type": return row.itemTypeId ?? "￿";
       case "tags": return (row.tags ?? []).map((t) => t.name).join(",").toLowerCase() || "￿";
       default: {
+        if (computedKeys?.has(key)) return computedCellValue(row, key) ?? "￿";
         const v = row.metadata?.[key];
         if (v == null || v === "") return "￿";
         return typeof v === "number" ? v : String(v).toLowerCase();
@@ -250,6 +297,9 @@ type ColMenuCtx = {
   onEditField?: () => void;
   onDeleteField?: () => void;
   onAddColumn?: () => void;
+  /** Phase 5b: Pin / Unpin (only for a viewer who may save the view). */
+  pinned?: boolean;
+  onTogglePin?: () => void;
 };
 
 function csvCell(v: unknown): string {
@@ -261,9 +311,26 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
+// Phase 5b: what a bulk refusal of a row shown here THROUGH A LINK means.
+const LINKED_ARCHIVE_REFUSED = "Tasks shown here from other Lists can't be archived or deleted from this List. Remove them from this List instead, or open their home List.";
+
+/** The two Phase 5b per-row bulk refusals, as sentences for the banner. */
+function bulkReasonSentences(reasons: string[]): string {
+  const out: string[] = [];
+  if (reasons.includes("invalid_status")) out.push("Some tasks from other Lists weren't changed because that status isn't one of their home List's statuses.");
+  if (reasons.includes("use_list_link")) out.push(LINKED_ARCHIVE_REFUSED);
+  return out.length ? ` ${out.join(" ")}` : "";
+}
+
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canManage: canManageProp, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
+  // The status a row has IN THIS LIST. A row shown here through a link keeps
+  // its HOME status, remapped into this List's set for grouping and colour.
+  const statusOf = useCallback(
+    (row: BoardItemRow) => (statusOfProp ? statusOfProp(row) : boardStatusFor(row, boardId, statuses)),
+    [statusOfProp, boardId, statuses],
+  );
   // Custom-field columns, ordered by their saved `position` (matches the Fields
   // shelf) so the header "Move to start / end" reorders visibly. Memoized so it
   // doesn't churn the many downstream useMemo deps on every render.
@@ -271,6 +338,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     () => [...(initialFields ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     [initialFields],
   );
+  // The Connect and Mirror columns, whose sort and group read the computed
+  // cells rather than metadata (compareByColumn, the group-by below).
+  const computedKeys = useMemo(
+    () => new Set(customFields.filter((f) => isConnectField(f) || isMirrorField(f)).map((f) => f.key)),
+    [customFields],
+  );
+  // Field management is the List's schema, a step above content write.
+  const canManage = canManageProp ?? canEdit;
   const { byId: itemTypeMap, list: itemTypeList, default: defaultItemType } = useItemTypes();
   // Built-in column visibility — one model shared with the Fields panel
   // (isBuiltinShown): Assignee/Due/Priority default-on (hide via hiddenFields);
@@ -297,7 +372,20 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const showSops = isBuiltinShown("__builtin_sops", hideBuiltin, extraSet);
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
+  // The List's default status and task type, once its settings have loaded
+  // for THIS List, so the add row shows what a new task will get.
+  const listDefaults = loadedSettings && loadedSettings.boardId === boardId ? loadedSettings.defaults : null;
+  const listDefaultStatus = listDefaults?.status && loadedSettings?.statuses.some((st) => st.value === listDefaults.status)
+    ? listDefaults.status
+    : null;
+  const listDefaultTypeId = listDefaults?.itemTypeId && itemTypeList.some((t) => t.id === listDefaults.itemTypeId)
+    ? listDefaults.itemTypeId
+    : null;
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
+  // The rows as they are NOW, for the write handlers below: a row's kind (home
+  // or shown through a link) decides what its write carries.
+  const itemsRef = useRef<BoardItemRow[]>(initialItems);
+  useEffect(() => { itemsRef.current = items; }, [items]);
   // Set while a create request is in flight (the inline add rows show their own
   // busy state, so we only need the setter here).
   const [, setAdding] = useState(false);
@@ -414,20 +502,48 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   })();
   const [groupDirection, setGroupDirectionState] = useState<"asc" | "desc">(initialGroupDir);
 
+  // Every view setting this table saves (group by and its direction, sort,
+  // widths, pins, row height) goes through the view's ONE save queue, the same
+  // one BoardCanvas saves filters and columns through: patches merge, one is
+  // in flight at a time, and a failed key stays dirty until it lands (the
+  // canvas shows the failure with a Try again). The local Object.assign
+  // mirror stays, so a renderer that writes the whole config still carries
+  // every key saved here.
+  const viewQueue = useMemo(() => (viewId ? viewConfigQueue(boardId, viewId) : null), [boardId, viewId]);
+  // Someone who may not save this view still sorts, groups and resizes for
+  // themselves (as before), but nothing is sent: the server would refuse it.
   const persistView = useCallback((patch: Record<string, unknown>) => {
-    if (!viewId) return;
-    // Merge into the shared config object (the same one BoardCanvas
-    // spreads from) — the server PATCH replaces the whole blob, so a
-    // stale spread here would drop keys other persist paths just wrote
-    // (filters / savedFilters / hiddenFields).
+    if (!viewQueue) return;
     const cfg = viewConfig ?? {};
     Object.assign(cfg, patch);
-    void fetch(`/api/boards/${boardId}/views/${viewId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ config: { ...cfg } }),
-    }).catch(() => {});
-  }, [viewId, boardId, viewConfig]);
+    if (!canSaveView) return;
+    viewQueue.enqueue(patch);
+  }, [viewQueue, viewConfig, canSaveView]);
+
+  // ── View comfort (Phase 5b, gap 14): pinned columns and row height ────
+  // Read from the view for everyone; written only by someone who may save the
+  // view. Nothing pinned and the default height is exactly today's table.
+  const [pinnedColumns, setPinnedColumns] = useState<string[]>(() => {
+    const raw = (viewConfig as { pinnedColumns?: unknown } | undefined)?.pinnedColumns;
+    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string").slice(0, MAX_PINNED_COLUMNS) : [];
+  });
+  const [rowHeight, setRowHeight] = useState<RowHeight>(() => {
+    const raw = (viewConfig as { rowHeight?: unknown } | undefined)?.rowHeight;
+    return typeof raw === "string" && (ROW_HEIGHTS as readonly string[]).includes(raw) ? (raw as RowHeight) : "default";
+  });
+  // The save runs OUTSIDE the state updater: React may call an updater twice
+  // (it does in development), and a save inside one was sent twice.
+  const togglePin = useCallback((key: string) => {
+    const next = pinnedColumns.includes(key)
+      ? pinnedColumns.filter((k) => k !== key)
+      : [...pinnedColumns, key].slice(0, MAX_PINNED_COLUMNS);
+    setPinnedColumns(next);
+    persistView({ pinnedColumns: next.length ? next : null });
+  }, [persistView, pinnedColumns]);
+  const changeRowHeight = useCallback((next: RowHeight) => {
+    setRowHeight(next);
+    persistView({ rowHeight: next === "default" ? null : next });
+  }, [persistView]);
 
   const setGroupBy = useCallback((next: string | null) => {
     setGroupByState(next);
@@ -480,9 +596,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (!ok) return;
     try {
       const res = await fetch(`/api/boards/${boardId}/fields/${encodeURIComponent(key)}`, { method: "DELETE" });
-      if (res.ok) onFieldsChanged?.();
-    } catch { /* ignore — parent refetch is best-effort */ }
-  }, [boardId, confirm, onFieldsChanged]);
+      if (res.ok) {
+        onFieldsChanged?.();
+        return;
+      }
+      // A refusal is a sentence: a Connect column that a Mirror reads
+      // through names the Mirrors to remove first.
+      const data = await res.json().catch(() => null);
+      setError(fieldConfigMessage(data, "Couldn't delete that field.", customFields));
+    } catch {
+      setError("Couldn't reach the server. The field was not deleted.");
+    }
+  }, [boardId, confirm, onFieldsChanged, customFields]);
 
   // Column-header "Move to start / end" — set the field's position just past the
   // current extreme so the position-sorted column order reflects it after refetch.
@@ -541,7 +666,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     const topSorted = sortCol
       ? [...topFiltered].sort((a, b) => {
-          const r = compareByColumn(a, b, sortCol.key, statuses);
+          const r = compareByColumn(a, b, sortCol.key, statuses, computedKeys);
           return sortCol.dir === "desc" ? -r : r;
         })
       : sortKey === "none"
@@ -551,7 +676,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         ? [...topFiltered].sort((a, b) => a.position - b.position)
         : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
-  }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId]);
+  }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId, computedKeys]);
 
   // CSV export of the currently visible (filtered/sorted) rows.
   function exportCsv() {
@@ -584,6 +709,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate).
   // The hand-rolled body this used to send dropped assigneeIds, tagIds, the
   // dates and the priority, so a duplicated task lost its people and its tags.
+  // Failure-path and after-write re-read of this List, with its linked rows.
+  const refetchList = useCallback(async () => {
+    const fresh = await fetch(itemsUrl(boardId), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (fresh?.items) reportRefreshed(fresh.items);
+  }, [boardId, reportRefreshed]);
+
   const handleDuplicate = useCallback(async (row: BoardItemRow) => {
     if (!canEdit) return;
     try {
@@ -593,6 +724,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         setError(accessMessage(data, "Couldn't duplicate this task."));
         return;
       }
+      // A copy of a task shown here through a link lives in the original's
+      // HOME, and appears here only if the copy was linked here too, so the
+      // List is re-read rather than guessing.
+      if (linkedRowKind(row, boardId) !== "home") {
+        await refetchList();
+        return;
+      }
       if (data?.item) {
         setItems((prev) => [...prev, data.item]);
         reportCreated(data.item as BoardItemRow);
@@ -600,7 +738,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
     }
-  }, [canEdit, reportCreated]);
+  }, [canEdit, reportCreated, boardId, refetchList]);
 
   // Type-first: the inline subtask row passes the title the user typed — no
   // "New subtask" placeholder to rename afterward. Returns {ok,error} so the
@@ -613,8 +751,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
     // Shared with the Kanban card's inline composer, so neither surface can
     // drift back to POSTing a placeholder title.
-    const body = buildSubtaskBody({ title, parentId, parentStatus, fallbackStatus: firstStatus });
-    if (!body) return { ok: false };
+    const built = buildSubtaskBody({ title, parentId, parentStatus, fallbackStatus: firstStatus });
+    if (!built) return { ok: false };
+    // A subtask under a parent shown here through a link is created in the
+    // PARENT's home (the server does that, and applies the home's defaults),
+    // so this List's defaults never touch it. A subtask at home here inherits
+    // its parent's status, which counts as chosen.
+    const parent = itemsRef.current.find((r) => r.id === parentId);
+    const parentLinked = parent ? linkedRowKind(parent, boardId) !== "home" : false;
+    const body = parentLinked
+      ? built
+      : applyDefaultsToCreateBody(built as unknown as Record<string, unknown>, loadedSettings, new Set(parentStatus ? ["status"] : []), boardId);
     setAdding(true);
     setError(null);
     try {
@@ -645,7 +792,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit, firstStatus, reportCreated]);
+  }, [boardId, canEdit, firstStatus, reportCreated, loadedSettings]);
 
   // Which parent's inline subtask input should grab focus next (set by the
   // hover "Add subtask" button, which also expands the parent).
@@ -695,10 +842,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const buckets = useMemo<Bucket[] | null>(() => {
     if (!groupBy) return null;
     const groupKeyFor = (it: BoardItemRow): string => {
-      if (groupBy === "status") return it.status ?? "__unset__";
+      if (groupBy === "status") return statusOf(it) ?? "__unset__";
       if (groupBy === "owner") return it.ownerId ?? "__unset__";
       if (groupBy === "priority") return it.priority ?? "__unset__";
       if (groupBy === "type") return it.itemTypeId ?? "__unset__";
+      // A Connect or Mirror column groups by what its cell shows (the
+      // connected titles, the mirrored value), never by the stored ids,
+      // which also named tasks the viewer cannot read.
+      if (computedKeys.has(groupBy)) {
+        const shown = computedCellValue(it, groupBy, "group");
+        return shown == null || shown === "" ? "__unset__" : String(shown);
+      }
       const raw = it.metadata?.[groupBy];
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
@@ -792,7 +946,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap]);
+  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap, statusOf, computedKeys]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -829,8 +983,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   }, [topLevel]);
   const clearSelection = useCallback(() => { setSelected(new Set()); lastSelectedRef.current = null; }, []);
   const selectAllVisible = useCallback(() => {
-    setSelected(new Set(items.map((i) => i.id)));
-  }, [items]);
+    // A row shown here through a link the viewer may only read carries no
+    // checkbox, so select-all leaves it out too.
+    setSelected(new Set(items.filter((i) => linkedRowEditable(i, canEdit)).map((i) => i.id)));
+  }, [items, canEdit]);
 
   // Bulk actions — each runs one request per id over /api/items/[id] since no
   // server-side bulk endpoint exists yet. The local (and parent-reported)
@@ -838,25 +994,42 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // AND res.ok — an HTTP error resolves fulfilled, so rejections alone lie).
   // Failed ids stay visible, unmutated and selected, and get named in the
   // error banner so the user can retry.
+  // A row shown here THROUGH A LINK is archived or trashed with `?list=` set
+  // to this List, so the server refuses it (use_list_link) rather than
+  // archiving the task everywhere from a List that only shows it; the banner
+  // then says why and what to do instead.
+  const linkedIdsOf = useCallback((ids: string[]) => {
+    const byId = new Map(itemsRef.current.map((r) => [r.id, r] as const));
+    return new Set(ids.filter((id) => { const r = byId.get(id); return r ? linkedRowKind(r, boardId) !== "home" : false; }));
+  }, [boardId]);
+
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Archive tasks", description: `Archive ${selected.size} task${selected.size === 1 ? "" : "s"}? You can restore them from Trash.`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}`, { method: "DELETE" }));
-    setError(failed.length > 0 ? bulkFailureMessage("archive", failed, ids.length, items) : null);
+    const linked = linkedIdsOf(ids);
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}${linked.has(id) ? `?list=${encodeURIComponent(boardId)}` : ""}`, { method: "DELETE" }),
+    );
+    const linkedFailed = failed.some((id) => linked.has(id));
+    setError(failed.length > 0 ? `${bulkFailureMessage("archive", failed, ids.length, items)}${linkedFailed ? ` ${LINKED_ARCHIVE_REFUSED}` : ""}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.filter((r) => !ok.has(r.id)));
     for (const id of succeeded) reportRemoved(id);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved, items]);
+  }, [selected, confirm, reportRemoved, items, linkedIdsOf, boardId]);
 
   // Drag-to-reorder. Computes fractional midpoint position so we never
   // renumber the whole list — Linear/Folder pattern. Optimistic local
   // update + PATCH.
   const reorder = useCallback(async (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
+    const dragged = items.find((r) => r.id === draggedId);
+    const kind = dragged ? linkedRowKind(dragged, boardId) : "home";
+    // A subtask shown through its linked parent has no place of its own here.
+    if (kind === "linked-subtask") return;
     const sorted = [...items].sort((a, b) => a.position - b.position);
     const draggedIdx = sorted.findIndex((r) => r.id === draggedId);
     const targetIdx = sorted.findIndex((r) => r.id === targetId);
@@ -875,20 +1048,24 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const before = candidates[candidates.length - 1];
       newPos = before ? (before.position + insertBefore.position) / 2 : insertBefore.position - 1;
     }
+    // A task shown here through a link moves its LINK's place in this List
+    // (PATCH /api/boards/[id]/links/[itemId]); the task's own position is its
+    // home List's order and is never touched from here.
+    const linkPatch = kind === "linked-root" && dragged?.listLink ? { listLink: { ...dragged.listLink, position: newPos } } : {};
     setItems((prev) =>
-      [...prev.map((r) => (r.id === draggedId ? { ...r, position: newPos } : r))]
+      [...prev.map((r) => (r.id === draggedId ? { ...r, position: newPos, ...linkPatch } : r))]
         .sort((a, b) => a.position - b.position),
     );
-    onItemPatched?.(draggedId, { position: newPos });
+    onItemPatched?.(draggedId, { position: newPos, ...linkPatch });
     // Revert (refetch the board) on ANY failure — a network throw OR a
     // non-OK response (403/400). Without the res.ok check a server-rejected
     // reorder stayed applied locally while the server kept the old order.
     const revert = async () => {
-      const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
+      const fresh = await fetch(itemsUrl(boardId)).then((r) => r.json()).catch(() => null);
       if (fresh?.items) reportRefreshed(fresh.items);
     };
     try {
-      const res = await fetch(`/api/items/${draggedId}`, {
+      const res = await fetch(kind === "linked-root" ? `/api/boards/${boardId}/links/${draggedId}` : `/api/items/${draggedId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ position: newPos }),
@@ -908,37 +1085,99 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // List the viewer can only read looked like it had worked. `/api/items/bulk`
   // gates each row on its own and returns a per-id report, which is what lets
   // the failed ids stay selected with an honest message.
-  const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
-    if (selected.size === 0) return;
-    setBulkBusy(true);
-    const ids = Array.from(selected);
-    let succeeded: string[] = [];
-    let failed: string[] = ids;
+  //
+  // Phase 5b: every bulk request names this List (`contextBoardId`), so a row
+  // shown here through a link is written in this List's context and the
+  // server can refuse what only its home may do; a row whose home is here
+  // reads the same id as its home and behaves exactly as before.
+  const runBulk = useCallback(async (ids: string[], patch: Record<string, unknown>): Promise<{ succeeded: string[]; failed: string[]; reasons: string[] }> => {
     try {
       const res = await fetch("/api/items/bulk", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids, patch: body }),
+        body: JSON.stringify({ ids, patch, contextBoardId: boardId }),
       });
       const data = (await res.json().catch(() => null)) as
-        | { results?: Array<{ id: string; ok: boolean }> }
+        | { results?: Array<{ id: string; ok: boolean; reason?: string }> }
         | null;
       if (res.ok && Array.isArray(data?.results)) {
-        succeeded = data.results.filter((r) => r.ok).map((r) => r.id);
-        failed = data.results.filter((r) => !r.ok).map((r) => r.id);
+        return {
+          succeeded: data.results.filter((r) => r.ok).map((r) => r.id),
+          failed: data.results.filter((r) => !r.ok).map((r) => r.id),
+          reasons: data.results.filter((r) => !r.ok && r.reason).map((r) => r.reason as string),
+        };
       }
     } catch {
       // Network failure: nothing applied, everything stays selected.
     }
-    setError(failed.length > 0 ? bulkFailureMessage("update", failed, ids.length, items) : null);
+    return { succeeded: [], failed: ids, reasons: [] };
+  }, [boardId]);
+
+  const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    const touchesLinked = linkedIdsOf(ids).size > 0;
+    const { succeeded, failed, reasons } = await runBulk(ids, body);
+    setError(failed.length > 0 ? `${bulkFailureMessage("update", failed, ids.length, items)}${bulkReasonSentences(reasons)}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.map((r) => (ok.has(r.id) ? { ...r, ...local } : r)));
     for (const id of succeeded) onItemPatched?.(id, local);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, onItemPatched, items]);
+    // A linked row's fields in this List live in this List's namespace, which
+    // the local patch cannot know: the List is re-read.
+    if (touchesLinked && succeeded.length > 0) await refetchList();
+  }, [selected, onItemPatched, items, runBulk, linkedIdsOf, refetchList]);
 
-  const bulkStatus = useCallback((status: string) => bulkPatch({ status }, { status }), [bulkPatch]);
+  // A status across a selection that mixes both kinds of row: home rows get
+  // this List's value, as today; each task shown here through a link gets the
+  // HOME value it maps to, one request per distinct value; a linked task whose
+  // home statuses are not shared with the viewer, or whose home has no status
+  // that lands back in this one, cannot be mapped, so it is left as it is and
+  // the banner says so.
+  const bulkStatus = useCallback(async (status: string) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const byId = new Map(itemsRef.current.map((r) => [r.id, r] as const));
+    const rows = Array.from(selected).map((id) => byId.get(id)).filter((r): r is BoardItemRow => !!r);
+    const plan = planBulkStatus(rows, status, boardId, statuses);
+    const groups: Array<{ ids: string[]; status: string }> = [
+      ...(plan.home.length ? [{ ids: plan.home, status }] : []),
+      ...plan.linked,
+    ];
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    for (const g of groups) {
+      const r = await runBulk(g.ids, { status: g.status });
+      succeeded.push(...r.succeeded);
+      failed.push(...r.failed);
+      reasons.push(...r.reasons);
+    }
+    const valueFor = new Map<string, string>();
+    for (const g of groups) for (const id of g.ids) valueFor.set(id, g.status);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.map((r) => {
+      if (!ok.has(r.id)) return r;
+      const v = valueFor.get(r.id) ?? status;
+      return linkedRowKind(r, boardId) === "home" ? { ...r, status: v } : optimisticLinkedStatus(r, v);
+    }));
+    for (const id of succeeded) {
+      const row = byId.get(id);
+      const v = valueFor.get(id) ?? status;
+      onItemPatched?.(id, row && linkedRowKind(row, boardId) !== "home" ? optimisticLinkedStatus(row, v) : { status: v });
+    }
+    const messages: string[] = [];
+    if (failed.length > 0) messages.push(`${bulkFailureMessage("update", failed, rows.length, items)}${bulkReasonSentences(reasons)}`);
+    // A linked row with no faithful home status for this one is left as it
+    // is and named, rather than saved as a status nobody picked.
+    if (plan.skipped.length > 0) messages.push(bulkStatusSkipMessage(plan, statuses.find((s) => s.value === status)?.label ?? status));
+    setError(messages.length ? messages.join(" ") : null);
+    setSelected(new Set([...failed, ...plan.skipped]));
+    setBulkBusy(false);
+    if (plan.linked.length > 0 && succeeded.length > 0) await refetchList();
+  }, [selected, boardId, statuses, runBulk, onItemPatched, items, refetchList]);
   // "Set owner" and "Clear assignees" are two different writes, because an
   // ownerId-only patch MERGES on the server: it moves the named person to the
   // front of whoever is already on the task, and a null merely drops the
@@ -958,10 +1197,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         return;
       }
       await bulkPatch({ ownerId }, { ownerId });
-      const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-      if (fresh?.items) reportRefreshed(fresh.items);
+      await refetchList();
     },
-    [bulkPatch, boardId, reportRefreshed],
+    [bulkPatch, refetchList],
   );
   const bulkDueAt = useCallback((iso: string | null) => bulkPatch({ dueAt: iso }, { dueAt: iso }), [bulkPatch]);
   const bulkPriority = useCallback((priority: string | null) => bulkPatch({ priority }, { priority }), [bulkPatch]);
@@ -971,28 +1209,35 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (!(await confirm({ title: "Delete tasks", description: `Delete ${selected.size} task${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" }));
-    setError(failed.length > 0 ? bulkFailureMessage("delete", failed, ids.length, items) : null);
+    const linked = linkedIdsOf(ids);
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}?hard=1${linked.has(id) ? `&list=${encodeURIComponent(boardId)}` : ""}`, { method: "DELETE" }),
+    );
+    const linkedFailed = failed.some((id) => linked.has(id));
+    setError(failed.length > 0 ? `${bulkFailureMessage("delete", failed, ids.length, items)}${linkedFailed ? ` ${LINKED_ARCHIVE_REFUSED}` : ""}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.filter((r) => !ok.has(r.id)));
     for (const id of succeeded) reportRemoved(id);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved, items]);
+  }, [selected, confirm, reportRemoved, items, linkedIdsOf, boardId]);
 
   // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
   // due / priority / tags) chosen inline before saving.
   const handleAddRich = useCallback(async (payload: {
     title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null;
+    /** Keys the person chose (a status group counts as choosing the status). */
+    touched?: ReadonlySet<string>;
   }): Promise<{ ok: boolean; error?: string }> => {
     if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
     setAdding(true);
     setError(null);
     try {
-      const res = await fetch(`/api/boards/${boardId}/items`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      // The List's default values fill what the person did not choose: an
+      // untouched defaulted key is left out and the server applies the
+      // default. Until the List's settings have loaded, today's body goes.
+      const body = applyDefaultsToCreateBody(
+        {
           title: payload.title.trim() || "New item",
           status: payload.status ?? firstStatus,
           ownerId: payload.ownerId ?? undefined,
@@ -1000,7 +1245,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           priority: payload.priority ?? undefined,
           tagIds: payload.tagIds.length ? payload.tagIds : undefined,
           itemTypeId: payload.itemTypeId ?? undefined,
-        }),
+        },
+        loadedSettings,
+        payload.touched ?? new Set(["status", "itemTypeId"]),
+        boardId,
+      );
+      const res = await fetch(`/api/boards/${boardId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1022,10 +1275,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit, firstStatus, reportCreated]);
+  }, [boardId, canEdit, firstStatus, reportCreated, loadedSettings]);
 
   const handleUpdate = useCallback(async (id: string, patch: RowPatch) => {
-    if (!canEdit) return;
+    const row = itemsRef.current.find((r) => r.id === id);
+    // A row shown here through a link is edited here only as far as the
+    // viewer's role on the TASK goes (list-link-rows.ts linkedRowEditable).
+    if (!canEdit || (row && !linkedRowEditable(row, canEdit))) return;
+    const linked = row ? linkedRowKind(row, boardId) !== "home" : false;
     // Optimistic (zod on the API strips unknown keys like `owner`,
     // which only exists for the local optimistic row).
     //
@@ -1035,41 +1292,122 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // It is applied to `metadata` here instead, by the same rule the server
     // uses, and dropped from what goes into local state.
     const { metadataPatch: mdPatch, ...rowFields } = patch;
-    setItems((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, ...rowFields, ...(mdPatch ? { metadata: mergeMetadata(r.metadata, mdPatch) } : {}) }
-          : r,
-      ),
-    );
+    // A linked row's status is a HOME value (its picker offers the home set),
+    // and its pill is the home status: both move together, at once.
+    const optimisticFor = (r: BoardItemRow): BoardItemRow => {
+      const next: BoardItemRow = { ...r, ...rowFields, ...(mdPatch ? { metadata: mergeMetadata(r.metadata, mdPatch) } : {}) };
+      return linked && typeof patch.status === "string" ? optimisticLinkedStatus(next, patch.status) : next;
+    };
+    setItems((prev) => prev.map((r) => (r.id === id ? optimisticFor(r) : r)));
     // The host list is told only about the row FIELDS. It holds its own copy
     // of `metadata` and merging a patch into somebody else's copy from here
     // would be the stale-blob bug again, one level up.
-    onItemPatched?.(id, rowFields);
+    onItemPatched?.(id, linked && row && typeof patch.status === "string"
+      ? { ...rowFields, listLink: optimisticLinkedStatus(row, patch.status).listLink }
+      : rowFields);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
+        // Every write from a row shown here through a link names this List,
+        // so its values land in this List's namespace and nothing it does can
+        // re-home the task or reorder its home.
+        body: JSON.stringify({ ...patch, ...writeContext(row, boardId) }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(accessMessage(data, "Couldn't save that change."));
         // Refetch on failure to revert optimistic state.
-        const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-        if (fresh?.items) reportRefreshed(fresh.items);
+        await refetchList();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      const fresh = data?.item as BoardItemRow | undefined;
+      if (linked && fresh && row) {
+        // The answer is the row as THIS List shows it (the request named the
+        // List): its link, place, home status pill and namespaced values.
+        const out = mergeRefetchedRow(optimisticFor(row), refetchedFromRow(fresh), boardId);
+        if (out.action === "merge") {
+          setItems((prev) => prev.map((r) => (r.id === id ? out.row : r)));
+          onItemPatched?.(id, out.row);
+        } else {
+          await refetchList();
+        }
         return;
       }
       // Recurring task completed → apply the server's rolled-forward row.
-      const data = await res.json().catch(() => null);
-      if (data?.recurred && data.item) {
-        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.item } : r)));
-        onItemPatched?.(id, data.item as Partial<BoardItemRow>);
+      if (data?.recurred && fresh) {
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...fresh } : r)));
+        onItemPatched?.(id, fresh as Partial<BoardItemRow>);
+        return;
+      }
+      // A List with connect or mirror columns: their computed values move with
+      // the write. A List without them gets no such keys and nothing changes.
+      if (fresh && (fresh.connections || fresh.mirrors)) {
+        const computed: Partial<BoardItemRow> = {
+          ...(fresh.connections ? { connections: fresh.connections } : {}),
+          ...(fresh.mirrors ? { mirrors: fresh.mirrors } : {}),
+        };
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...computed } : r)));
+        onItemPatched?.(id, computed);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save change");
     }
-  }, [boardId, canEdit, onItemPatched, reportRefreshed]);
+  }, [boardId, canEdit, onItemPatched, refetchList]);
+
+  // A Connect cell's commit (connect-field-value.tsx). Unlike every other
+  // cell it answers its own caller: the cell keeps its selection and offers
+  // Retry, so a failure here restores ONLY this row's previous value and
+  // chips for that column, never re-reads the whole List over the person's
+  // other in-flight edits.
+  const commitConnect = useCallback(async (id: string, key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
+    const row = itemsRef.current.find((r) => r.id === id);
+    if (!row) return { ok: false, message: "That task is no longer in this List." };
+    if (!linkedRowEditable(row, canEdit)) return { ok: false, message: "You can't change this task here." };
+    const hadValue = !!row.metadata && key in row.metadata;
+    const prevValue = row.metadata?.[key];
+    const hadConn = !!row.connections && key in row.connections;
+    const prevConn = row.connections?.[key];
+    const value = next === undefined ? null : next;
+    const restore = () => setItems((prev) => prev.map((r) => {
+      if (r.id !== id) return r;
+      const metadata = { ...(r.metadata ?? {}) };
+      if (hadValue) metadata[key] = prevValue; else delete metadata[key];
+      const connections = r.connections ? { ...r.connections } : undefined;
+      if (connections) {
+        if (hadConn && prevConn) connections[key] = prevConn; else delete connections[key];
+      }
+      return { ...r, metadata, ...(connections ? { connections } : {}) };
+    }));
+    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, metadata: mergeMetadata(r.metadata, { [key]: value }) } : r)));
+    try {
+      const res = await fetch(`/api/items/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metadataPatch: { [key]: value }, ...writeContext(row, boardId) }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        restore();
+        return { ok: false, message: accessMessage(data, "Couldn't save those connected tasks.") };
+      }
+      const fresh = data?.item as BoardItemRow | undefined;
+      if (fresh) {
+        const computed: Partial<BoardItemRow> = {
+          metadata: fresh.metadata,
+          ...(fresh.connections ? { connections: fresh.connections } : {}),
+          ...(fresh.mirrors ? { mirrors: fresh.mirrors } : {}),
+        };
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...computed } : r)));
+        onItemPatched?.(id, computed);
+      }
+      return { ok: true };
+    } catch {
+      restore();
+      return { ok: false, message: "Couldn't reach the server. Your selection is kept; try again." };
+    }
+  }, [boardId, canEdit, onItemPatched]);
 
   const handleArchive = useCallback(async (id: string) => {
     if (!canEdit) return;
@@ -1080,13 +1418,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
       if (!res.ok) {
         setError("Couldn't archive. Refreshing");
-        const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-        if (fresh?.items) reportRefreshed(fresh.items);
+        await refetchList();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to archive");
     }
-  }, [boardId, canEdit, confirm, reportRemoved, reportRefreshed]);
+  }, [canEdit, confirm, reportRemoved, refetchList]);
 
   // select + name + actions (3 fixed) + optional status/owner/priority/type/
   // tags/created + custom fields.
@@ -1189,10 +1526,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // fields can group; owner/due/priority/type/tags/created + fields can hide.
   const fieldKeys = new Set(customFields.map((f) => f.key));
   const buildColMenu = (key: string): ColMenuCtx | undefined => {
-    if (!canEdit) return undefined;
-    const isField = fieldKeys.has(key);
-    const hideKey = BUILTIN_HIDE_KEY[key] ?? (isField ? key : undefined);
-    const canGroup = key === "status" || key === "owner" || isField;
+    // A view's owner who cannot write the List's tasks may still arrange
+    // their own view: they get the view rows (sort, group, pin), never the
+    // field rows, which change the List for everybody.
+    if (!canEdit && !canSaveView) return undefined;
+    // Moving, editing and deleting a field write the List's schema, so they
+    // follow `canManage`: a contributor's header menu keeps sort, group,
+    // hide and pin, and never a field row the server would refuse.
+    const isField = canManage && fieldKeys.has(key);
+    const hideKey = BUILTIN_HIDE_KEY[key] ?? (fieldKeys.has(key) ? key : undefined);
+    const canGroup = key === "status" || key === "owner" || fieldKeys.has(key);
     return {
       sortDir: sortCol?.key === key ? sortCol.dir : null,
       grouped: groupBy === key,
@@ -1201,10 +1544,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       onHide: hideKey && onHideField ? () => onHideField(hideKey) : undefined,
       onMoveStart: isField ? () => moveField(key, true) : undefined,
       onMoveEnd: isField ? () => moveField(key, false) : undefined,
-      onEditStatuses: key === "status" ? onEditStatuses : undefined,
+      onEditStatuses: canManage && key === "status" ? onEditStatuses : undefined,
       onEditField: isField && onOpenFields ? onOpenFields : undefined,
       onDeleteField: isField ? () => deleteField(key) : undefined,
-      onAddColumn: onOpenFields,
+      onAddColumn: canManage ? onOpenFields : undefined,
+      // Name is always the first frozen column once anything is pinned, so it
+      // has no pin of its own.
+      ...(canSaveView && key !== "name" ? { pinned: pinnedColumns.includes(key), onTogglePin: () => togglePin(key) } : {}),
     };
   };
 
@@ -1215,13 +1561,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const COL_BUILTIN: Record<string, string> = { name: "__name", status: "__builtin_status", ...BUILTIN_HIDE_KEY };
   const colIcon = (key: string): { Icon: LucideIcon; color: string } | null => {
     const cf = fieldByKey.get(key);
-    if (cf) { const e = FIELD_TYPE_BY_KEY[cf.type]; return e ? { Icon: e.Icon, color: e.color } : null; }
+    // catalogEntryForField, not the type alone: a Connect column is stored as
+    // a RELATIONSHIP and must not wear the doc-link Relationship icon.
+    if (cf) { const e = catalogEntryForField(cf); return e ? { Icon: e.Icon, color: e.color } : null; }
     const bc = COL_BUILTIN[key] ? BUILTIN_COLUMN_BY_KEY[COL_BUILTIN[key]] : undefined;
     return bc ? { Icon: bc.Icon, color: bc.color } : null;
   };
 
-  // Ordered resizable columns (Name + meta).
-  const resizeCols = [
+  // Ordered resizable columns (Name + meta), with pinned columns brought
+  // forward to sit frozen after Name (table-comfort.ts). Nothing pinned:
+  // exactly the order, and no sticky cell, of the table before pinning.
+  const unpinnedCols = [
     { key: "name", label: "Name", width: nameW, pad: "px-4", icon: colIcon("name") },
     ...metaColumns.map((c) => ({
       key: c.key,
@@ -1231,6 +1581,24 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       icon: colIcon(c.key),
     })),
   ];
+  const pinning = orderColumnsForPinning(unpinnedCols.map((c) => c.key), pinnedColumns);
+  const colByKey = new Map(unpinnedCols.map((c) => [c.key, c] as const));
+  const resizeCols = pinning.ordered.map((k) => colByKey.get(k)!).filter(Boolean);
+  const metaKeys = pinning.ordered.filter((k) => k !== "name");
+  // Where each frozen cell sits: the leading checkbox cell at 0, Name after
+  // it, then each pinned column after the one before it.
+  const stickyLeft: Map<string, number> | null = (() => {
+    if (pinning.stickyCount === 0) return null;
+    const frozen = resizeCols.slice(0, pinning.stickyCount);
+    const offsets = stickyOffsets([LEADING_W, ...frozen.map((c) => c.width)]);
+    const m = new Map<string, number>([["__leading", offsets[0]]]);
+    frozen.forEach((c, i) => m.set(c.key, offsets[i + 1]));
+    return m;
+  })();
+  const stickyHeadStyle = (key: string): React.CSSProperties | undefined =>
+    // The canvas the table sits on, so a frozen header cell is invisible as a
+    // box in both themes (the surface token is lighter than it in dark).
+    stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 4, background: "var(--os-canvas)" } : undefined;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -1250,13 +1618,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           onResize={(e) => startColResize(e, c.key, c.width)}
           menu={buildColMenu(c.key)}
           icon={c.icon}
+          stickyStyle={stickyHeadStyle(c.key)}
+          pinned={pinnedColumns.includes(c.key)}
         />
       ))}
       {/* Pinned to the visible right edge: with many columns the table
           scrolls horizontally and a non-sticky "+" (add field) drifts
           off-screen — users read it as the button being gone. */}
       <th className="sticky right-0 z-[5] bg-white px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
-        {canEdit && onOpenFields ? (
+        {canManage && onOpenFields ? (
           <button
             type="button"
             onClick={onOpenFields}
@@ -1276,6 +1646,26 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const renderRowAndSubtasks = (row: BoardItemRow, indent: number): React.ReactNode[] => {
     const children = childrenByParent.get(row.id) ?? [];
     const expanded = expandedParents.has(row.id);
+    // A row shown here THROUGH A LINK (list-link-rows.ts): edited only as far
+    // as the viewer's role on the task goes, its status from its home set,
+    // its menu from the link's own flags.
+    const kind = linkedRowKind(row, boardId);
+    const rowCanEdit = linkedRowEditable(row, canEdit);
+    const flags = linkedMenuFlags(row, boardId, canEdit, currentUserId ?? null, { personalList });
+    const picker = statusPickerFor(row, boardId, statuses);
+    const colour = rowColorRules.length > 0 ? rowColorFor(row, rowColorRules, statusOf) : null;
+    const listContext: ItemMenuListContext | undefined = kind === "home"
+      ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+      : {
+          boardId,
+          kind: "linked",
+          homeBoardId: row.listLink?.homeList?.id ?? null,
+          homeStatuses: row.listLink?.homeStatuses,
+          canRemoveFromList: flags.canRemoveFromList,
+          canLinkMove: flags.canLinkMove,
+          canAddToList: flags.canAddToList,
+          linkedSubtask: flags.linkedSubtask,
+        };
     const nodes: React.ReactNode[] = [
       <Row
         key={row.id}
@@ -1285,26 +1675,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         statuses={statuses}
         itemTypeMap={itemTypeMap}
         showStatus={showStatus}
-        showOwner={showOwner}
-        showDue={showDue}
-        showPriority={showPriority}
-        showType={showType}
-        showTags={showTags}
-        showCreated={showCreated}
-        showStart={showStart}
-        showUpdated={showUpdated}
-        showTaskId={showTaskId}
-        showComments={showComments}
-        showTimeline={showTimeline}
-        showTime={showTime}
-        showCreatedBy={showCreatedBy}
-        showDocs={showDocs}
-        showLinked={showLinked}
-        showSops={showSops}
-        canEdit={canEdit}
+        canEdit={rowCanEdit}
         currentUserId={currentUserId ?? null}
         canDelete={
-          canDeleteTasks === undefined
+          kind !== "home" || canDeleteTasks === undefined
             ? undefined
             : canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId)
         }
@@ -1324,7 +1698,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           setExpandedParents((prev) => new Set(prev).add(row.id));
           setAutoFocusSubtaskFor(row.id);
         }}
-        dragEnabled={canEdit && !buckets && indent === 0}
+        // A linked subtask has no place of its own in this List to drag to.
+        dragEnabled={rowCanEdit && !buckets && indent === 0 && kind !== "linked-subtask"}
         isDragging={dragId === row.id}
         isDragOver={dragOverId === row.id && dragId !== null && dragId !== row.id}
         onDragStart={(id) => setDragId(id)}
@@ -1339,13 +1714,28 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         hasSubtasks={children.length > 0}
         expanded={expanded}
         onToggleExpand={() => toggleExpand(row.id)}
+        columnKeys={metaKeys}
+        stickyLeft={stickyLeft}
+        tint={colour ? ROW_COLOR_TINT[colour] : null}
+        rowHeight={rowHeight}
+        // The menu stays for someone who may take a shared task out of this
+        // List even when they cannot edit the task itself.
+        showMenu={canEdit || (kind !== "home" && !!row.listLink?.canRemove)}
+        menuRole={kind === "home" ? undefined : flags.role}
+        menuIsCreator={kind === "home" ? undefined : flags.isCreator}
+        listContext={listContext}
+        statusOptions={picker.options}
+        statusEditable={rowCanEdit && picker.editable}
+        statusCurrent={kind === "linked-root" ? row.listLink?.homeStatus ?? null : undefined}
+        statusNote={kind === "linked-root" ? linkedStatusNote(row, boardId, statuses) : null}
+        onCommitConnect={commitConnect}
       />,
     ];
     if (expanded) {
       for (const child of children) {
         nodes.push(...renderRowAndSubtasks(child, indent + 1));
       }
-      if (canEdit) {
+      if (rowCanEdit) {
         nodes.push(
           <AddSubtaskRow
             key={`${row.id}-add-sub`}
@@ -1354,6 +1744,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             colCount={colCount}
             autoFocus={autoFocusSubtaskFor === row.id}
             onAutoFocusHandled={() => setAutoFocusSubtaskFor(null)}
+            // A linked parent's status is its HOME value, which is exactly
+            // what the subtask (created in that home) inherits.
             onCreate={(title) => addSubtask(row.id, row.status, title)}
           />,
         );
@@ -1401,7 +1793,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             <span className="font-medium">Columns</span>
           </button>
         ) : null}
-        <span className="ml-1 text-xs text-zinc-400">
+        {/* 4. Row height (Phase 5b): only for someone who may save the view. */}
+        {canSaveView ? <RowHeightMenu value={rowHeight} onChange={changeRowHeight} /> : null}
+        <span className="ml-1 whitespace-nowrap text-xs text-zinc-400">
           {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
@@ -1479,7 +1873,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           {monday || !buckets ? (
             <thead>
               <tr className={`text-left text-xs font-medium text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 ${monday ? "uppercase tracking-wide" : ""}`}>
-                <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
+                <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W, ...(stickyHeadStyle("__leading") ?? {}) }}>
                   {canEdit ? (
                     <div className="flex items-center gap-1">
                       <span className="w-3 shrink-0" aria-hidden />
@@ -1503,7 +1897,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   <React.Fragment key={b.key}>
                     <tr className={`group/ghdr ${monday ? "bg-zinc-50/80 border-y border-zinc-100" : ""}`}>
                       <td colSpan={colCount} className={monday ? "px-3 py-1.5" : "px-3 pt-4 pb-0.5"} style={monday && b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
-                        <div className="inline-flex items-center gap-2">
+                        {/* While columns are pinned the group's name stays in
+                            view with them as the table scrolls sideways. */}
+                        <div className={`inline-flex items-center gap-2 ${stickyLeft ? "sticky left-3" : ""}`}>
                           <button
                             type="button"
                             onClick={() => toggleGroup(b.key)}
@@ -1535,7 +1931,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                           <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
                           {canEdit ? (
                             <GroupHeaderMenu
-                              canEditStatuses={!!onEditStatuses}
+                              canEditStatuses={canManage && !!onEditStatuses}
                               onEditStatuses={onEditStatuses}
                               onCollapseGroup={() => toggleGroup(b.key)}
                               onCollapseAll={() => setCollapsedGroups(new Set(buckets.map((x) => x.key)))}
@@ -1552,7 +1948,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             single global header). */}
                         {!monday ? (
                           <tr className="text-left text-xs font-medium text-zinc-400 border-b border-zinc-50 dark:border-zinc-800">
-                            <th className="pl-1 pr-0 py-1" style={{ width: LEADING_W }} aria-hidden />
+                            <th className="pl-1 pr-0 py-1" style={{ width: LEADING_W, ...(stickyHeadStyle("__leading") ?? {}) }} aria-hidden />
                             {headerCells}
                           </tr>
                         ) : null}
@@ -1564,8 +1960,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                                 statuses={statuses}
                                 // Create into this group's value when grouped by status.
                                 defaultStatus={groupBy === "status" ? b.key : firstStatus}
+                                statusChosen={groupBy === "status"}
+                                listDefaultStatus={listDefaultStatus}
                                 itemTypes={itemTypeList}
                                 defaultTypeId={defaultItemType?.id ?? null}
+                                listDefaultTypeId={listDefaultTypeId}
                                 boardId={boardId}
                                 onCreate={handleAddRich}
                               />
@@ -1577,14 +1976,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                     {/* Monday-style per-group summary footer — aggregates
                         every column (stacked bars, people, sums…). Table view only;
                         a clean List has no spreadsheet summary. */}
-                    {monday ? <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
+                    {monday ? <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} columnKeys={stickyLeft ? metaKeys : undefined} stickyLeft={stickyLeft} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
                   </React.Fragment>
                 );
               })
             ) : (
               <>
                 {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
-                {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
+                {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} columnKeys={stickyLeft ? metaKeys : undefined} stickyLeft={stickyLeft} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
               </>
             )}
             {/* Bottom "+ Add Task" — shown when ungrouped, OR when grouped but
@@ -1596,8 +1995,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   <AddTaskInline
                     statuses={statuses}
                     defaultStatus={firstStatus}
+                    listDefaultStatus={listDefaultStatus}
                     itemTypes={itemTypeList}
                     defaultTypeId={defaultItemType?.id ?? null}
+                    listDefaultTypeId={listDefaultTypeId}
                     boardId={boardId}
                     onCreate={handleAddRich}
                   />
@@ -1669,22 +2070,6 @@ function Row({
   statuses,
   itemTypeMap,
   showStatus = true,
-  showOwner,
-  showDue = true,
-  showPriority,
-  showType,
-  showTags,
-  showCreated = true,
-  showStart = false,
-  showUpdated = false,
-  showTaskId = false,
-  showComments = false,
-  showTimeline = false,
-  showTime = false,
-  showCreatedBy = false,
-  showDocs = false,
-  showLinked = false,
-  showSops = false,
   canEdit,
   currentUserId,
   canDelete,
@@ -1710,6 +2095,19 @@ function Row({
   hasSubtasks = false,
   expanded = false,
   onToggleExpand,
+  columnKeys,
+  stickyLeft = null,
+  tint = null,
+  rowHeight = "default",
+  showMenu,
+  menuRole,
+  menuIsCreator,
+  listContext,
+  statusOptions,
+  statusEditable,
+  statusCurrent,
+  statusNote = null,
+  onCommitConnect,
 }: {
   row: BoardItemRow;
   /** The list this table is showing, so the assignee picker can ask who is
@@ -1719,22 +2117,7 @@ function Row({
   statuses: StatusOption[];
   itemTypeMap: Map<string, ItemTypeLite>;
   showStatus?: boolean;
-  showOwner: boolean;
-  showDue?: boolean;
-  showPriority: boolean;
-  showType: boolean;
-  showTags: boolean;
-  showCreated?: boolean;
-  showStart?: boolean;
-  showUpdated?: boolean;
-  showTaskId?: boolean;
-  showComments?: boolean;
-  showTimeline?: boolean;
-  showTime?: boolean;
-  showCreatedBy?: boolean;
-  showDocs?: boolean;
-  showLinked?: boolean;
-  showSops?: boolean;
+  /** May this viewer edit THIS row here (a linked row: its task role too). */
   canEdit: boolean;
   /** The viewer, for the row menu's "Assign to me" and "Watch". */
   currentUserId: string | null;
@@ -1764,10 +2147,168 @@ function Row({
   hasSubtasks?: boolean;
   expanded?: boolean;
   onToggleExpand?: () => void;
+  /** The meta columns after Name, in display order (pinned ones first). */
+  columnKeys: string[];
+  /** Frozen cells' left offsets while any column is pinned; null otherwise. */
+  stickyLeft?: Map<string, number> | null;
+  /** The row's Conditional colors tint (a token mix), or null. */
+  tint?: string | null;
+  rowHeight?: RowHeight;
+  /** Render the row menu even for a row the viewer cannot edit (Remove from this List). */
+  showMenu: boolean;
+  /** The TASK role for a row shown here through a link; undefined keeps the List's. */
+  menuRole?: ItemRole | null;
+  menuIsCreator?: boolean;
+  listContext?: ItemMenuListContext;
+  /** The statuses this row's picker offers (a linked row: its home set). */
+  statusOptions?: StatusOption[];
+  statusEditable?: boolean;
+  /** A linked row's home status pill, whatever this List's set holds. */
+  statusCurrent?: StatusOption | null;
+  /** Why a linked row sits under a status that is not its own (linkedStatusNote). */
+  statusNote?: string | null;
+  onCommitConnect?: (id: string, key: string, next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   // Bumped by the hover "rename" pencil to put the title cell into edit mode.
   const [editToken, setEditToken] = useState(0);
   const moreRef = useRef<ContextMenuHandle>(null);
+  const fieldByKey = useMemo(() => new Map(customFields.map((f) => [f.key, f] as const)), [customFields]);
+  const pickerStatuses = statusOptions ?? statuses;
+  const statusCanEdit = statusEditable ?? canEdit;
+  // A row that carries a colour, or sits in a table with frozen columns, has
+  // its background drawn from ONE variable, so the frozen cells, the row and
+  // its hover and selection states always match. Every other row keeps
+  // exactly the classes it had before List comfort existed.
+  const comfort = !!tint || !!stickyLeft;
+  const stick = (key: string): React.CSSProperties | undefined =>
+    stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 2, background: "var(--row-bg)" } : undefined;
+  const tall = rowHeight === "tall";
+
+  const metaCell = (key: string): React.ReactNode => {
+    switch (key) {
+      case "status":
+        return showStatus ? (
+          <td key={key} className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-1.5"} style={stick(key)}>
+            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} note={statusNote} canEdit={statusCanEdit} onUpdate={onUpdate} monday={monday} />
+          </td>
+        ) : null;
+      case "owner":
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <OwnerCell row={row} boardId={row.boardId ?? rowBoardId ?? null} canEdit={canEdit} onUpdate={onUpdate} />
+          </MetaCell>
+        );
+      case "due":
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <DueDateCell row={row} canEdit={canEdit} statuses={statuses} onUpdate={onUpdate} />
+          </MetaCell>
+        );
+      case "priority":
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
+          </MetaCell>
+        );
+      case "type":
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
+          </MetaCell>
+        );
+      case "tags":
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
+          </MetaCell>
+        );
+      case "created":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>
+            {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
+          </td>
+        );
+      case "start":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>
+            {row.startAt ? new Date(row.startAt).toLocaleDateString() : "—"}
+          </td>
+        );
+      case "updated":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>
+            {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "—"}
+          </td>
+        );
+      case "taskid":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs font-mono text-zinc-400" style={stick(key)}>
+            {row.id.slice(-6)}
+          </td>
+        );
+      case "comments":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>
+            {row.commentCount ? (
+              <span className="inline-flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-zinc-400" />{row.commentCount}</span>
+            ) : "—"}
+          </td>
+        );
+      case "timeline":
+        return <td key={key} className="px-3 py-1.5" style={stick(key)}><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>;
+      case "time":
+        return (
+          <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>
+            {row.timeTrackedMs ? <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" />{formatDuration(row.timeTrackedMs)}</span> : "—"}
+          </td>
+        );
+      case "createdby":
+        return (
+          <td key={key} className="px-3 py-1.5" style={stick(key)}>
+            {row.createdBy ? (
+              <span className="inline-flex items-center gap-1.5">
+                <PersonAvatar person={{ ...row.createdBy, email: null }} size={18} />
+                <span className="text-xs text-zinc-600 truncate max-w-[90px]">{`${row.createdBy.firstName ?? ""} ${row.createdBy.lastName ?? ""}`.trim() || "—"}</span>
+              </span>
+            ) : <span className="text-xs text-zinc-400">—</span>}
+          </td>
+        );
+      case "docs":
+        return <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-zinc-400" />{row.linkedDocCount}</span> : "—"}</td>;
+      case "linked":
+        return <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-zinc-400" />{row.linkedTaskCount}</span> : "—"}</td>;
+      case "sops":
+        return <td key={key} className="px-3 py-1.5 text-xs text-zinc-500" style={stick(key)}>{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>;
+      default: {
+        const f = fieldByKey.get(key);
+        if (!f) return null;
+        return (
+          <MetaCell key={key} style={stick(key)}>
+            <EditableFieldCell
+              field={f}
+              value={row.metadata?.[f.key]}
+              canEdit={canEdit}
+              // The List whose schema defines the field: this table's. It
+              // scopes a USER / PEOPLE cell and a Connect cell's candidates.
+              boardId={rowBoardId ?? row.boardId ?? null}
+              itemId={row.id}
+              connections={row.connections?.[f.key]}
+              mirror={row.mirrors?.[f.key]}
+              onCommit={onCommitConnect ? (next) => onCommitConnect(row.id, f.key, next) : undefined}
+              // metadataPatch, never metadata: see the RowPatch comment. This
+              // cell used to spread the row's cached blob, which destroyed the
+              // task's description on any page that had been open while somebody
+              // else edited it.
+              onChange={(next) =>
+                onUpdate(row.id, { metadataPatch: { [f.key]: next === undefined || next === "" ? null : next } })
+              }
+            />
+          </MetaCell>
+        );
+      }
+    }
+  };
+
   return (
     <tr
       draggable={dragEnabled}
@@ -1775,6 +2316,7 @@ function Row({
         // Let inputs / editable cells keep their native menu (e.g. while
         // renaming a title inline); everywhere else opens the row menu.
         if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
+        if (!showMenu) return;
         e.preventDefault();
         moreRef.current?.openAtPoint(e.clientX, e.clientY);
       }}
@@ -1799,15 +2341,31 @@ function Row({
       // the preference said, because the height came only from cell padding and
       // nothing here read the setting. `--os-row-h` is the token
       // html[data-density] rebinds (comfortable 44 / cozy 36 / compact 32,
-      // design-system 3.2), so one variable makes the preference real.
-      style={{ height: "var(--os-row-h, 44px)" }}
-      className={`border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 group ${
-        selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""
+      // design-system 3.2), so one variable makes the preference real. A
+      // view's Row height steps off the same token (table-comfort.ts).
+      style={{
+        height: rowHeightStyle(rowHeight),
+        // An untinted row is the canvas it has always shown through to; only
+        // its frozen cells need the colour spelled out, to cover what scrolls
+        // beneath them.
+        ...(comfort ? { ["--row-base" as string]: tint ?? "var(--os-canvas)" } : {}),
+      }}
+      className={`border-b border-zinc-100 last:border-b-0 group ${
+        comfort
+          ? `bg-[var(--row-bg)] ${selected
+              ? "[--row-bg:color-mix(in_srgb,var(--os-brand)_8%,var(--row-base))]"
+              : "[--row-bg:var(--row-base)] hover:[--row-bg:color-mix(in_srgb,var(--os-ink)_5%,var(--row-base))]"}`
+          : `hover:bg-zinc-50 ${selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""}`
       } ${isDragging ? "opacity-40" : ""} ${
         isDragOver ? "outline outline-2 outline-[var(--os-brand)] outline-offset-[-2px]" : ""
+      } ${
+        // Compact trims the cells' own padding too: their content alone
+        // (a 28px control plus its padding) held the row at 40px, so the
+        // compact step would otherwise have been 4px, not 8.
+        rowHeight === "compact" ? "[&>td]:py-0.5" : ""
       }`}
     >
-      <td className="pl-1 pr-0 py-1.5 w-[34px]">
+      <td className="pl-1 pr-0 py-1.5 w-[34px]" style={stick("__leading")}>
         <div className="flex items-center gap-1">
           {canEdit ? (
             <span
@@ -1827,7 +2385,7 @@ function Row({
           ) : null}
         </div>
       </td>
-      <td className="pl-1 pr-4 py-1.5">
+      <td className="pl-1 pr-4 py-1.5" style={stick("name")}>
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
           {/* Expand caret. Top-level tasks always reserve the slot (visible when
               they have subtasks / are open, else on hover → add the first
@@ -1850,10 +2408,10 @@ function Row({
             <span className="w-4 h-4 shrink-0" aria-hidden />
           )}
           {!showStatus ? (
-            <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} dot />
+            <StatusCell row={row} statuses={pickerStatuses} current={statusCurrent} note={statusNote} canEdit={statusCanEdit} onUpdate={onUpdate} dot />
           ) : null}
           <div className="flex-1 min-w-0">
-            <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} />
+            <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} wrap={tall} />
           </div>
           {titleSuffix}
           <RowHoverActions
@@ -1866,124 +2424,37 @@ function Row({
           />
         </div>
       </td>
-      {showStatus ? (
-        <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-1.5"}>
-          <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
-        </td>
-      ) : null}
-      {showOwner ? (
-        <MetaCell>
-          <OwnerCell row={row} boardId={row.boardId ?? rowBoardId ?? null} canEdit={canEdit} onUpdate={onUpdate} />
-        </MetaCell>
-      ) : null}
-      {showDue ? (
-        <MetaCell>
-          <DueDateCell row={row} canEdit={canEdit} statuses={statuses} onUpdate={onUpdate} />
-        </MetaCell>
-      ) : null}
-      {showPriority ? (
-        <MetaCell>
-          <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
-        </MetaCell>
-      ) : null}
-      {showType ? (
-        <MetaCell>
-          <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
-        </MetaCell>
-      ) : null}
-      {showTags ? (
-        <MetaCell>
-          <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
-        </MetaCell>
-      ) : null}
-      {customFields.map((f) => (
-        <MetaCell key={f.key}>
-          <EditableFieldCell
-            field={f}
-            value={row.metadata?.[f.key]}
-            canEdit={canEdit}
-            boardId={row.boardId ?? rowBoardId ?? null}
-            // metadataPatch, never metadata: see the RowPatch comment. This
-            // cell used to spread the row's cached blob, which destroyed the
-            // task's description on any page that had been open while somebody
-            // else edited it.
-            onChange={(next) =>
-              onUpdate(row.id, { metadataPatch: { [f.key]: next === undefined || next === "" ? null : next } })
-            }
-          />
-        </MetaCell>
-      ))}
-      {showCreated ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">
-          {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
-        </td>
-      ) : null}
-      {showStart ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">
-          {row.startAt ? new Date(row.startAt).toLocaleDateString() : "—"}
-        </td>
-      ) : null}
-      {showUpdated ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">
-          {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "—"}
-        </td>
-      ) : null}
-      {showTaskId ? (
-        <td className="px-3 py-1.5 text-xs font-mono text-zinc-400">
-          {row.id.slice(-6)}
-        </td>
-      ) : null}
-      {showComments ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">
-          {row.commentCount ? (
-            <span className="inline-flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-zinc-400" />{row.commentCount}</span>
-          ) : "—"}
-        </td>
-      ) : null}
-      {showTimeline ? (
-        <td className="px-3 py-1.5"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
-      ) : null}
-      {showTime ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">
-          {row.timeTrackedMs ? <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" />{formatDuration(row.timeTrackedMs)}</span> : "—"}
-        </td>
-      ) : null}
-      {showCreatedBy ? (
-        <td className="px-3 py-1.5">
-          {row.createdBy ? (
-            <span className="inline-flex items-center gap-1.5">
-              <PersonAvatar person={{ ...row.createdBy, email: null }} size={18} />
-              <span className="text-xs text-zinc-600 truncate max-w-[90px]">{`${row.createdBy.firstName ?? ""} ${row.createdBy.lastName ?? ""}`.trim() || "—"}</span>
-            </span>
-          ) : <span className="text-xs text-zinc-400">—</span>}
-        </td>
-      ) : null}
-      {showDocs ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-zinc-400" />{row.linkedDocCount}</span> : "—"}</td>
-      ) : null}
-      {showLinked ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-zinc-400" />{row.linkedTaskCount}</span> : "—"}</td>
-      ) : null}
-      {showSops ? (
-        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
-      ) : null}
-      <td className="sticky right-0 bg-white group-hover:bg-zinc-50 px-2 py-1.5 text-right">
+      {columnKeys.map((key) => metaCell(key))}
+      {/* position:sticky makes this cell a stacking context, so the menu's
+          pickers (Move to, Add to another List), which are never portalled,
+          were painted UNDER every later row and group header, and a click on
+          their search field reached the hidden row below. While one is open
+          (the shared Picker always renders a listbox) the cell rises above
+          later rows and above the group headers' z-[5] frozen cells. */}
+      <td
+        className={`sticky right-0 px-2 py-1.5 text-right has-[[role=listbox]]:z-[8] ${comfort ? "" : "bg-white group-hover:bg-zinc-50"}`}
+        style={comfort ? { background: "var(--row-bg)" } : undefined}
+      >
         {/* The canon menu, shared with the task drawer and the task page
             (src/lib/item-menu.ts). The row knows only the LIST-level flags, so
             the role is the honest translation of those; the task's own
-            decision arrives from GET /api/items/[id] when it opens. */}
-        {canEdit ? (
+            decision arrives from GET /api/items/[id] when it opens. A row
+            shown here through a link carries its TASK role instead
+            (listLink.role), never this List's flag. */}
+        {showMenu ? (
           <ItemMoreMenu
             ref={moreRef}
             host="row"
-            role={canDelete ? "FULL" : canEdit ? "EDIT" : "VIEW"}
-            item={{ id: row.id, boardId: row.boardId ?? null, title: row.title, status: row.status, assigneeIds: row.assigneeIds, itemTypeId: row.itemTypeId ?? null }}
+            role={menuRole ?? (canDelete ? "FULL" : canEdit ? "EDIT" : "VIEW")}
+            item={{ id: row.id, boardId: row.boardId ?? null, title: row.title, status: row.status, assigneeIds: row.assigneeIds, itemTypeId: row.itemTypeId ?? null, parentItemId: row.parentItemId ?? null }}
             // Not null: ItemMoreMenu guards "Assign to me" and "Watch" on
             // this, so a null here renders both rows and makes both inert.
             currentUserId={currentUserId}
             watcherIds={rowWatcherIds(row)}
             statuses={statuses}
             timeTrackingOn={timeTrackingEnabled}
+            isCreator={menuIsCreator}
+            listContext={listContext}
             onPatch={(body) => onUpdate(row.id, body as Partial<BoardItemRow>)}
             onOpen={onOpen}
             onRenameRequested={() => setEditToken((t) => t + 1)}
@@ -1993,6 +2464,7 @@ function Row({
             // Same rule as the Kanban card: a moved task leaves this List, so
             // the row goes with it rather than lingering until a reload.
             onMoved={() => onDeleted(row.id)}
+            onRemovedFromList={() => onDeleted(row.id)}
           />
         ) : null}
       </td>
@@ -2004,16 +2476,34 @@ function Row({
 // (or no edit rights) see the compact display; editors get the field's own
 // inline editor — a dropdown for select fields, a text input for text, a date
 // picker for dates, etc. — so each column behaves like its own kind of cell.
-function EditableFieldCell({ field, value, canEdit, onChange, boardId }: {
+function EditableFieldCell({ field, value, canEdit, onChange, boardId, itemId, connections, mirror, onCommit }: {
   field: FieldDef;
   value: unknown;
   canEdit: boolean;
   onChange: (next: unknown) => void;
   /** Scopes a USER / PEOPLE cell's candidates AND the people it can draw. */
   boardId: string | null;
+  /** Phase 5b: a Connect cell excludes its own task from the picker. */
+  itemId?: string;
+  /** Phase 5b: the connected tasks THIS viewer can read, for a Connect cell. */
+  connections?: NonNullable<BoardItemRow["connections"]>[string];
+  /** Phase 5b: a Mirror cell's computed value. */
+  mirror?: NonNullable<BoardItemRow["mirrors"]>[string];
+  /** Phase 5b: a Connect cell commits and hears the answer (it keeps its selection on a failure). */
+  onCommit?: (next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
-  if (!canEdit) return <FieldValue field={field} value={value} mode="display" boardId={boardId} />;
-  return <FieldValue field={field} value={value} mode="edit" onChange={onChange} boardId={boardId} />;
+  // Only a Connect cell uses onCommit; every other type keeps onChange, so a
+  // List without connect columns renders and saves exactly as before.
+  const connect = isConnectField(field);
+  const extra = {
+    fieldListId: boardId,
+    itemId: itemId ?? null,
+    ...(connections ? { connections } : {}),
+    ...(mirror ? { mirror } : {}),
+    ...(connect && onCommit ? { onCommit } : {}),
+  };
+  if (!canEdit) return <FieldValue field={field} value={value} mode="display" boardId={boardId} {...extra} />;
+  return <FieldValue field={field} value={value} mode="edit" onChange={onChange} boardId={boardId} {...extra} />;
 }
 
 // Inline due-date cell — the full ClickUp DatePlanner (Date / Reminder / Repeat)
@@ -2206,7 +2696,7 @@ function TimelineCell({ startAt, dueAt }: { startAt?: Date | string | null; dueA
   );
 }
 
-function MetaCell({ children }: { children: React.ReactNode }) {
+function MetaCell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null);
   // Clicking anywhere in the cell (not just the icon) opens the cell's picker:
   // forward the click to the inner trigger button unless the icon/menu was hit.
@@ -2216,7 +2706,7 @@ function MetaCell({ children }: { children: React.ReactNode }) {
     if (btn && t !== btn && !btn.contains(t)) btn.click();
   };
   return (
-    <td className="px-1 py-1 align-middle overflow-hidden">
+    <td className="px-1 py-1 align-middle overflow-hidden" style={style}>
       <div
         ref={ref}
         onClick={forwardClick}
@@ -2232,7 +2722,7 @@ function MetaCell({ children }: { children: React.ReactNode }) {
 // hover (ClickUp style). Dragging resizes THIS column; every column to its
 // right shifts as a block (the trailing actions column absorbs the delta), so
 // it can never collapse the layout.
-function ResizableTh({ label, width, className, canEdit, onResize, menu, icon }: {
+function ResizableTh({ label, width, className, canEdit, onResize, menu, icon, stickyStyle, pinned = false }: {
   label: string;
   width: number;
   className?: string;
@@ -2243,6 +2733,10 @@ function ResizableTh({ label, width, className, canEdit, onResize, menu, icon }:
   menu?: ColMenuCtx;
   /** Colored field-type icon shown before the label (ClickUp parity). */
   icon?: { Icon: LucideIcon; color: string } | null;
+  /** Phase 5b: a frozen header cell's position while any column is pinned. */
+  stickyStyle?: React.CSSProperties;
+  /** Phase 5b: the column is pinned (a small pin before the label says so). */
+  pinned?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
@@ -2267,10 +2761,11 @@ function ResizableTh({ label, width, className, canEdit, onResize, menu, icon }:
   return (
     <th
       className={`relative group/th py-2 font-medium ${className ?? "px-3"}`}
-      style={{ width }}
+      style={{ width, ...(stickyStyle ?? {}) }}
       onContextMenu={menu ? (e) => { e.preventDefault(); setPoint({ x: e.clientX, y: e.clientY }); setOpen(true); } : undefined}
     >
       <div className="flex items-center gap-1.5 min-w-0">
+        {pinned ? <Pin className="w-3 h-3 shrink-0 text-ink-3" strokeWidth={1.5} aria-label="Pinned column" /> : null}
         {icon ? <icon.Icon className="w-3.5 h-3.5 shrink-0" style={{ color: icon.color }} aria-hidden /> : null}
         <span className="block truncate">{label}</span>
         {menu ? (
@@ -2318,6 +2813,12 @@ function ColumnMenu({ ctx, close }: { ctx: ColMenuCtx; close: () => void }) {
       <MenuItem icon={ArrowUp} label="Sort ascending" onClick={() => run(() => ctx.onSort("asc"))} />
       <MenuItem icon={ArrowDown} label="Sort descending" onClick={() => run(() => ctx.onSort("desc"))} />
       {ctx.sortDir ? <MenuItem icon={X} label="Clear sort" onClick={() => run(() => ctx.onSort(null))} /> : null}
+      {ctx.onTogglePin ? (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={ctx.pinned ? PinOff : Pin} label={ctx.pinned ? "Unpin column" : "Pin column"} onClick={() => run(ctx.onTogglePin)} />
+        </>
+      ) : null}
       {ctx.onGroup ? (
         <>
           <MenuSeparator />
@@ -2446,18 +2947,31 @@ function AddSubtaskRow({
 function AddTaskInline({
   statuses,
   defaultStatus,
+  statusChosen = false,
+  listDefaultStatus = null,
   itemTypes,
   defaultTypeId,
+  listDefaultTypeId = null,
   boardId,
   onCreate,
 }: {
   statuses: StatusOption[];
   defaultStatus: string;
+  /**
+   * Is `defaultStatus` the person's choice? It is inside a status group (the
+   * group is where they clicked), so the List's default status never
+   * replaces it there.
+   */
+  statusChosen?: boolean;
+  /** The List's default status (loaded and still declared), shown and applied when the status is not chosen. */
+  listDefaultStatus?: string | null;
   itemTypes: ItemTypeLite[];
   defaultTypeId: string | null;
+  /** The List's default task type, shown and applied until the person picks a type. */
+  listDefaultTypeId?: string | null;
   /** Scopes the quick-set assignee picker to this list's people. */
   boardId?: string | null;
-  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null }) => Promise<{ ok: boolean; error?: string }>;
+  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null; touched: ReadonlySet<string> }) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -2468,11 +2982,16 @@ function AddTaskInline({
   const [priority, setPriority] = useState<string | null>(null);
   const [tags, setTags] = useState<ItemTag[]>([]);
   const [typeId, setTypeId] = useState<string | null>(defaultTypeId);
+  // Did the person pick the type? Until they do, the List's default type (if
+  // it has one) is what the new task gets, so that is what the row shows.
+  const [typePicked, setTypePicked] = useState(false);
   const [typeMenu, setTypeMenu] = useState(false);
   const typeRef = useRef<HTMLSpanElement>(null);
   const [busy, setBusy] = useState(false);
-  const current = statuses.find((s) => s.value === defaultStatus) ?? null;
-  const activeType = itemTypes.find((t) => t.id === typeId) ?? itemTypes.find((t) => t.id === defaultTypeId) ?? null;
+  const shownStatus = statusChosen ? defaultStatus : (listDefaultStatus ?? defaultStatus);
+  const current = statuses.find((s) => s.value === shownStatus) ?? null;
+  const shownTypeId = typePicked ? typeId : (listDefaultTypeId ?? typeId);
+  const activeType = itemTypes.find((t) => t.id === shownTypeId) ?? itemTypes.find((t) => t.id === defaultTypeId) ?? null;
   const typeLabel = activeType?.singular ?? "Task";
 
   useEffect(() => {
@@ -2490,7 +3009,15 @@ function AddTaskInline({
     if (!t) { close(); return; }
     setBusy(true);
     setFailed(null);
-    const res = await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id), itemTypeId: typeId });
+    // What the person chose, so the List's defaults fill only the rest
+    // (list-defaults-client.ts). Due date is not a defaulted key.
+    const touched = new Set<string>();
+    if (statusChosen) touched.add("status");
+    if (owner) touched.add("ownerId");
+    if (priority) touched.add("priority");
+    if (tags.length > 0) touched.add("tagIds");
+    if (typePicked) touched.add("itemTypeId");
+    const res = await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id), itemTypeId: typeId, touched });
     setBusy(false);
     if (res.ok) {
       clearFields(); // success — keep the row open (and the type) for the next task
@@ -2500,7 +3027,7 @@ function AddTaskInline({
     }
   };
 
-  const openWithType = (id: string | null) => { setTypeId(id); setOpen(true); };
+  const openWithType = (id: string | null) => { setTypeId(id); setTypePicked(true); setOpen(true); };
 
   if (!open) {
     return (
@@ -2585,12 +3112,12 @@ function AddTaskInline({
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => { setTypeId(t.id); setTypeMenu(false); }}
+                    onClick={() => { setTypeId(t.id); setTypePicked(true); setTypeMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50"
                   >
                     {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
                     <span className="flex-1 truncate">{t.singular}</span>
-                    {t.id === typeId ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+                    {t.id === shownTypeId ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
                   </button>
                 ))}
               </div>
@@ -2762,6 +3289,8 @@ function GroupSummaryRow({
   customFields,
   statuses,
   railColor,
+  columnKeys,
+  stickyLeft = null,
   showOwner = true,
   showPriority = true,
   showType = true,
@@ -2782,6 +3311,13 @@ function GroupSummaryRow({
   customFields: FieldDef[];
   statuses: StatusOption[];
   railColor: string | null;
+  /**
+   * Phase 5b: the meta columns in display order, passed while columns are
+   * pinned so the summary lines up with the reordered columns. Absent: the
+   * summary renders exactly as it always has.
+   */
+  columnKeys?: string[];
+  stickyLeft?: Map<string, number> | null;
   showOwner?: boolean;
   showPriority?: boolean;
   showType?: boolean;
@@ -2833,6 +3369,73 @@ function GroupSummaryRow({
     for (const r of rows) for (const t of r.tags ?? []) map.set(t.id, t);
     return Array.from(map.values());
   }, [rows]);
+
+  if (columnKeys) {
+    const fieldByKey = new Map(customFields.map((f) => [f.key, f] as const));
+    const stick = (key: string): React.CSSProperties | undefined =>
+      stickyLeft?.has(key) ? { position: "sticky", left: stickyLeft.get(key), zIndex: 2, background: "var(--os-surface-1, var(--os-surface))" } : undefined;
+    const cell = (key: string): React.ReactNode => {
+      const f = fieldByKey.get(key);
+      if (f) return <td key={key} className="px-4 py-1.5" style={stick(key)}><CustomFieldSummary field={f} rows={rows} /></td>;
+      switch (key) {
+        case "status":
+          return <td key={key} className="px-4 py-1.5" style={stick(key)}><StackedBar segments={statusSegs} /></td>;
+        case "owner":
+          return (
+            <td key={key} className="px-4 py-1.5" style={stick(key)}>
+              {owners.length === 0 ? (
+                <span className="text-xs text-zinc-300">—</span>
+              ) : (
+                <span className="inline-flex items-center -space-x-1.5" title={owners.map((o) => `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim()).join(", ")}>
+                  {owners.slice(0, 5).map((o) => (
+                    <span key={o.id} className="rounded-full ring-2 ring-white">
+                      <PersonAvatar person={{ ...o, email: null }} size={20} />
+                    </span>
+                  ))}
+                  {owners.length > 5 ? <span className="pl-2.5 text-xs text-zinc-500">+{owners.length - 5}</span> : null}
+                </span>
+              )}
+            </td>
+          );
+        case "priority":
+          return (
+            <td key={key} className="px-4 py-1.5" style={stick(key)}>
+              {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-xs text-zinc-300">—</span>}
+            </td>
+          );
+        case "tags":
+          return (
+            <td key={key} className="px-4 py-1.5" style={stick(key)}>
+              {tags.length === 0 ? (
+                <span className="text-xs text-zinc-300">—</span>
+              ) : (
+                <span className="inline-flex items-center gap-1 flex-wrap">
+                  {tags.slice(0, 3).map((t) => {
+                    const c = t.color || "#71717A";
+                    return (
+                      <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: `${c}22`, color: c }}>
+                        {t.name}
+                      </span>
+                    );
+                  })}
+                  {tags.length > 3 ? <span className="text-xs text-zinc-500">+{tags.length - 3}</span> : null}
+                </span>
+              )}
+            </td>
+          );
+        default:
+          return <td key={key} className="px-4 py-1.5" style={stick(key)} />;
+      }
+    };
+    return (
+      <tr className="bg-zinc-50/60 border-b border-zinc-200 text-xs">
+        <td className="px-2 py-1.5" style={{ ...(railColor ? { boxShadow: `inset 3px 0 0 ${railColor}` } : {}), ...(stick("__leading") ?? {}) }} />
+        <td className="px-4 py-1.5 text-zinc-400" style={stick("name")}>{rows.length} item{rows.length === 1 ? "" : "s"}</td>
+        {columnKeys.map(cell)}
+        <td className="px-2 py-1.5" />
+      </tr>
+    );
+  }
 
   return (
     <tr className="bg-zinc-50/60 border-b border-zinc-200 text-xs">
@@ -2980,6 +3583,7 @@ function TitleCell({
   onUpdate,
   onOpen,
   editToken = 0,
+  wrap = false,
 }: {
   row: BoardItemRow;
   canEdit: boolean;
@@ -2987,6 +3591,8 @@ function TitleCell({
   onOpen?: () => void;
   /** Bumped externally (the hover "rename" pencil) to enter edit mode. */
   editToken?: number;
+  /** Phase 5b: a Tall row lets the title wrap to two lines. */
+  wrap?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.title);
@@ -3035,10 +3641,10 @@ function TitleCell({
             setEditing(true);
           }
         }}
-        className="w-full text-left truncate text-zinc-800 hover:text-[var(--os-brand)] transition-colors inline-flex items-center gap-2"
+        className={`w-full text-left text-zinc-800 hover:text-[var(--os-brand)] transition-colors inline-flex items-center gap-2 ${wrap ? "" : "truncate"}`}
         title={row.title}
       >
-        <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
+        <span className={`flex-1 min-w-0 font-medium ${wrap ? "line-clamp-2 whitespace-normal break-words" : "truncate"}`}>{row.title}</span>
         {row.recurRule ? (
           <span
             className="inline-flex items-center text-[var(--os-brand)] shrink-0"
@@ -3128,14 +3734,21 @@ function GroupHeaderMenu({
       </button>
       {open && menuPos ? (
         <div style={{ position: "fixed", left: menuPos.left, minWidth: 190, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-base">
-          <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
-          <div className="h-px bg-zinc-100 my-1" />
+          {/* The status rows write the List's statuses, which only its
+              managers may: for anyone else they are absent, never a greyed
+              row or an enabled one the server refuses. */}
+          {canEditStatuses ? (
+            <>
+              <GHItem label="Rename" onClick={act(onEditStatuses)} />
+              <GHItem label="New status" onClick={act(onEditStatuses)} />
+              <GHItem label="Edit statuses" onClick={act(onEditStatuses)} />
+              <div className="h-px bg-zinc-100 my-1" />
+            </>
+          ) : null}
           <GHItem label="Collapse group" onClick={act(onCollapseGroup)} />
           <GHItem label="Collapse all groups" onClick={act(onCollapseAll)} />
           <GHItem label="Select all" onClick={act(onSelectAll)} />
-          <GHItem label="Hide status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          {canEditStatuses ? <GHItem label="Hide status" onClick={act(onEditStatuses)} /> : null}
           <div className="h-px bg-zinc-100 my-1" />
           <UpcomingOnly><ComingSoonRow label="Automate status" className="h-8" /></UpcomingOnly>
         </div>
@@ -3172,11 +3785,25 @@ function StatusCell({
   onUpdate,
   monday = false,
   dot = false,
+  current: currentOverride,
+  note = null,
 }: {
   row: BoardItemRow;
   statuses: StatusOption[];
   canEdit: boolean;
   onUpdate: (id: string, patch: RowPatch) => void;
+  /**
+   * Phase 5b: a row shown here through a link shows its HOME status pill,
+   * whatever this List's own set holds. Absent: resolved from `statuses`.
+   */
+  current?: StatusOption | null;
+  /**
+   * Phase 5b: why a row shown here through a link sits under a status that is
+   * not its own (a home "In review" under this List's To Do): the pill's
+   * tooltip, the head of its menu, and on a pill the viewer cannot change a
+   * box that a tap opens, so touch gets the explanation too.
+   */
+  note?: string | null;
   /** Monday-style Table variant: status fills the whole cell with the
    *  status color + white label, instead of a soft pill. */
   monday?: boolean;
@@ -3191,8 +3818,10 @@ function StatusCell({
   const ref = useRef<HTMLDivElement>(null);
   const menuPos = useAnchorPos(ref, open, 224);
   const current = useMemo(
-    () => (row.status ? statuses.find((o) => o.value === row.status) ?? null : null),
-    [row.status, statuses],
+    () => (currentOverride !== undefined
+      ? currentOverride ?? (row.status ? statuses.find((o) => o.value === row.status) ?? null : null)
+      : row.status ? statuses.find((o) => o.value === row.status) ?? null : null),
+    [row.status, statuses, currentOverride],
   );
 
   useEffect(() => {
@@ -3204,16 +3833,35 @@ function StatusCell({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
 
+  // The placement note must reach touch too, where a tooltip never shows:
+  // it heads the status menu, and a pill the viewer cannot change opens a
+  // small box with just the note when tapped.
+  const noteLine = note ? (
+    <p role="note" className="mb-1 border-b border-zinc-100 px-2 pb-1.5 pt-1 text-xs leading-snug text-zinc-500">{note}</p>
+  ) : null;
+  const noteOnly = (trigger: React.ReactNode, className: string) => (
+    <div className={`relative ${className}`} ref={ref}>
+      <button type="button" onClick={() => setOpen((v) => !v)} title={note ?? undefined} aria-expanded={open} className="block w-full h-full text-left">
+        {trigger}
+      </button>
+      {open && menuPos ? (
+        <div style={{ position: "fixed", left: menuPos.left, width: 224, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white p-2 text-xs leading-snug text-zinc-600 shadow-lg" role="note">
+          {note}
+        </div>
+      ) : null}
+    </div>
+  );
+
   // Dot variant — the ClickUp status circle shown before the title when
   // the Status column is hidden (grouped by status). Ring for not-started
   // (ACTIVE), filled with a check for DONE/CLOSED.
   if (dot) {
     const circle = <StatusGlyph current={current} statuses={statuses} />;
-    if (!canEdit) return circle;
+    if (!canEdit) return note ? noteOnly(circle, "shrink-0 leading-none") : circle;
     const activeTypeId = row.itemTypeId ?? itemTypes.default?.id ?? null;
     return (
       <div className="relative shrink-0 leading-none" ref={ref}>
-        <button type="button" onClick={() => setOpen((v) => !v)} title={current?.label ?? "Set status"} className="block">
+        <button type="button" onClick={() => setOpen((v) => !v)} title={note ?? current?.label ?? "Set status"} className="block">
           {circle}
         </button>
         {open && menuPos ? (
@@ -3225,6 +3873,7 @@ function StatusCell({
             </div>
             {tab === "status" ? (
               <div className="max-h-[240px] overflow-y-auto">
+                {noteLine}
                 {statuses.map((opt) => {
                   const active = opt.value === row.status;
                   return (
@@ -3279,20 +3928,22 @@ function StatusCell({
       <span
         className="flex items-center justify-center w-full h-full px-2 text-sm font-medium text-white"
         style={{ background: current.color }}
+        title={note ?? undefined}
       >
         {current.label}
       </span>
     ) : (
       <span className="flex items-center justify-center w-full h-full bg-zinc-100 text-xs text-zinc-400">—</span>
     );
-    if (!canEdit) return fill;
+    if (!canEdit) return note ? noteOnly(fill, "w-full h-full") : fill;
     return (
       <div className="relative w-full h-full" ref={ref}>
         <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full h-full min-h-[34px]">
           {fill}
         </button>
         {open && menuPos ? (
-          <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+          <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(note ? { maxWidth: 260 } : {}), ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+            {noteLine}
             {statuses.map((opt) => {
               const active = opt.value === row.status;
               return (
@@ -3319,6 +3970,7 @@ function StatusCell({
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
       style={{ background: `${current.color}22`, color: current.color }}
+      title={note ?? undefined}
     >
       {current.label}
     </span>
@@ -3326,7 +3978,7 @@ function StatusCell({
     <span className="text-xs text-zinc-500">—</span>
   );
 
-  if (!canEdit) return pill;
+  if (!canEdit) return note ? noteOnly(pill, "inline-block") : pill;
 
   return (
     <div className="relative" ref={ref}>
@@ -3339,7 +3991,8 @@ function StatusCell({
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open && menuPos ? (
-        <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+        <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(note ? { maxWidth: 260 } : {}), ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+          {noteLine}
           {statuses.map((opt) => {
             const active = opt.value === row.status;
             return (

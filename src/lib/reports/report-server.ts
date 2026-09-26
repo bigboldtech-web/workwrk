@@ -29,7 +29,7 @@ import { readDashboard, viewerZone } from "@/lib/dashboards/dashboard-server";
 import { computeWidget, redactForViewer, type WidgetReader, type WidgetResult } from "@/lib/dashboards/widget-data";
 import { parseWidgets, type Widget } from "@/lib/dashboards/widgets";
 import { FILTER_OPERATORS, type FilterOperatorName } from "@/lib/list-comfort";
-import { boardForViewer, listReader, memberViewer, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
+import { boardForViewer, listReader, memberViewer, recipientRows, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
 import {
   appendRunLog,
   buildReportEmail,
@@ -129,6 +129,22 @@ export async function readableTarget(kind: string, targetId: string, c: LinkView
     };
   }
   return null;
+}
+
+/**
+ * The owner of a private view, decided from the view row itself and never
+ * from who is asking, or null (a shared view, a dashboard, a view that is
+ * gone). An org admin who cannot read someone's private view must still be
+ * held to "its owner only" when editing that view's schedule.
+ */
+export async function privateViewOwner(kind: string, targetId: string, organizationId: string): Promise<string | null> {
+  if (kind !== "view") return null;
+  const view = await prisma.view.findUnique({
+    where: { id: targetId },
+    select: { isShared: true, ownerId: true, board: { select: { organizationId: true } } },
+  });
+  if (!view || view.board.organizationId !== organizationId) return null;
+  return !view.isShared && view.ownerId ? view.ownerId : null;
 }
 
 /**
@@ -250,6 +266,9 @@ export async function buildRecipientReport(
     cadence: cadenceText(specOf(schedule)),
     sections,
     link: target.link,
+    // Not the target's page: a recipient who lost access to it still needs a
+    // way to stop receiving (the list on Settings, Notifications).
+    manageLink: absoluteUrl("/settings/notifications#reports"),
   });
 }
 
@@ -258,7 +277,8 @@ export async function buildRecipientReport(
 export interface ScheduleDTO {
   id: string;
   targetKind: string;
-  targetId: string;
+  /** Null when this viewer cannot read the target. */
+  targetId: string | null;
   targetName: string | null;
   cadence: string;
   weekday: number | null;
@@ -288,12 +308,9 @@ export function canEditSchedule(row: Pick<Row, "createdById">, c: LinkViewer): b
 
 export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<ScheduleDTO[]> {
   const userIds = Array.from(new Set(rows.flatMap((r) => r.recipientUserIds)));
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds }, organizationId: c.organizationId },
-        select: { id: true, firstName: true, lastName: true, avatar: true, deletedAt: true, status: true },
-      })
-    : [];
+  // The org's rows only, with the same eligibility the write and the cron
+  // apply, so `active` is exactly "this person still receives it".
+  const users = userIds.length ? await recipientRows(userIds, c.organizationId) : [];
   const byId = new Map(users.map((u) => [u.id, u] as const));
   const admin = viewerIsOrgAdmin(c);
   const out: ScheduleDTO[] = [];
@@ -303,7 +320,9 @@ export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<Schedu
     out.push({
       id: r.id,
       targetKind: r.targetKind,
-      targetId: r.targetId,
+      // A target this viewer cannot read (an org admin looking at someone's
+      // private view) is named by neither its words nor its id.
+      targetId: target ? r.targetId : null,
       targetName: target?.name ?? null,
       cadence: r.cadence,
       weekday: r.weekday,
@@ -314,7 +333,7 @@ export async function toScheduleDTOs(rows: Row[], c: LinkViewer): Promise<Schedu
       recipients: r.recipientUserIds
         .map((id) => byId.get(id))
         .filter((u): u is NonNullable<typeof u> => !!u)
-        .map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar, active: !u.deletedAt && u.status !== "INACTIVE" })),
+        .map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar, active: !u.deletedAt && u.status !== "INACTIVE" && !u.guest })),
       active: r.active,
       // Whether a copy went out is, with one recipient, whether they can read
       // the target; only an admin is told.

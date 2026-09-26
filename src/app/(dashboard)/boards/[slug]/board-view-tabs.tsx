@@ -10,6 +10,10 @@
 // tab and the view the bare URL opens are the same view for every viewer. The
 // default tab is not draggable, a drop on it lands second (and says why), and
 // a pinned default carries a small Pin glyph.
+//
+// Every tab's menu (view-tab-menu.tsx) opens on a right-click, a long-press
+// or the keyboard, and the ACTIVE tab also carries a "..." (Phase 5b) that
+// opens the same menu, so it is reachable without knowing to right-click.
 
 import { useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -21,7 +25,9 @@ import {
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
-import { ViewTabContextMenu, type ViewMenuGates } from "@/components/board-view/view-tab-menu";
+import {
+  ViewTabContextMenu, ViewTabMoreTrigger, viewCanSchedule, viewMenuHasRows, type ViewMenuGates,
+} from "@/components/board-view/view-tab-menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import { moveTabKeepingDefaultFirst, pinMenuRow, visibleToEveryone } from "@/lib/work/default-view";
 import { canManageView, canSaveView } from "@/lib/work/view-visibility";
@@ -74,7 +80,8 @@ const VIEW_HEX: Record<ViewType, string> = {
  * checks, so a row is drawn only when it can succeed:
  *   Rename     PATCH { name }   canSaveView (contribute, or the view's owner)
  *   Duplicate  POST /views      canContributeBoard (the strip's canManage)
- *   Delete     DELETE           canManageView (full access, or the owner)
+ *   Delete     DELETE           canManageView (full access, or the owner),
+ *                               and never the List's last view (400)
  * A view-only reader keeps all three on a private view of their own, and
  * gets none on anyone else's.
  */
@@ -83,12 +90,14 @@ export function viewTabGates(input: {
   currentUserId: string | null;
   canContribute: boolean;
   canDeleteShared: boolean;
+  /** The only tab on the strip: DELETE refuses the last view, so no row. */
+  lastView?: boolean;
 }): Required<ViewMenuGates> {
   return {
     canRename: canSaveView(input.view, input.currentUserId, input.canContribute),
     canDuplicate: input.canContribute,
     // canManageView reads only the owner; displayOrder is there for its type.
-    canDelete: canManageView({ ...input.view, displayOrder: 0 }, input.currentUserId, input.canDeleteShared),
+    canDelete: !input.lastView && canManageView({ ...input.view, displayOrder: 0 }, input.currentUserId, input.canDeleteShared),
   };
 }
 
@@ -115,6 +124,7 @@ export interface BoardViewItem {
   type: ViewType;
   isDefault: boolean;
   config: unknown;
+  /** Phase 5b: a private view is scheduled only to its owner. */
   isShared: boolean;
   ownerId: string | null;
 }
@@ -123,6 +133,7 @@ export function BoardViewTabs({
   views,
   boardId,
   boardSlug,
+  boardName,
   activeViewId,
   defaultViewId,
   defaultPinned = false,
@@ -132,11 +143,14 @@ export function BoardViewTabs({
   canManage = true,
   canDeleteShared,
   currentUserId = null,
+  scheduleReports = false,
 }: {
   /** In the page's resolved order: the default view first. */
   views: BoardViewItem[];
   boardId: string;
   boardSlug: string;
+  /** The List's name, for the Schedule report dialog's subtitle. */
+  boardName?: string;
   activeViewId: string | null;
   defaultViewId: string | null;
   /** The default is somebody's pin (listViewsForViewer's `pinned`), not the Board fallback. */
@@ -152,22 +166,28 @@ export function BoardViewTabs({
    * May this person write to the List's views: the page passes its CONTRIBUTE
    * answer. Below it a person may still SWITCH views, which is reading, but
    * not create or reorder them: "+ View" and the drag both write, and each
-   * answered 403 while still being rendered. They may pin only a view they
-   * own (see currentUserId).
+   * answered 403 while still being rendered. Pinning is on this flag alone
+   * (Can edit, no owner exception).
    */
   canManage?: boolean;
   /**
    * May this person delete a view they do not own: the List's MANAGEMENT
    * answer (canEditBoard), which DELETE checks through canManageView.
    * Defaults to `canManage`: a person who cannot contribute cannot manage
-   * either, so a reader is never offered Delete on someone else's view.
+   * either, so a reader is never offered Delete on someone else's view. The
+   * Personal List passes nothing, which is right for its owner.
    */
   canDeleteShared?: boolean;
   /**
-   * Who is looking, so the pin row follows the route's gate per view: a
-   * view's owner may pin or unpin it even without contribute (canSaveView).
+   * Who is looking, so Rename and Delete follow the routes' gates per view:
+   * a view's owner may rename or delete it even without contribute.
    */
   currentUserId?: string | null;
+  /**
+   * The viewer may schedule email reports of this List's views (the List
+   * page's strict read, and a member). The Personal List never passes it.
+   */
+  scheduleReports?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -299,7 +319,12 @@ export function BoardViewTabs({
         const showPin = isDefault && defaultPinned && manyTabs;
         const title = defaultTabTitle({ isDefault, manyTabs, defaultPinned, canPinAny });
         const pinRow = pinRowFor(v, isDefault);
-        const gates = viewTabGates({ view: v, currentUserId, canContribute: canManage, canDeleteShared: deleteShared });
+        const gates = viewTabGates({
+          view: v, currentUserId, canContribute: canManage, canDeleteShared: deleteShared, lastView: !manyTabs,
+        });
+        // The "..." is drawn only when the menu it opens has a row for this
+        // viewer; the same test decides whether a right-click opens anything.
+        const hasMenu = viewMenuHasRows(pinRow, gates, viewCanSchedule(v, scheduleReports));
         return (
           <span
             key={v.id}
@@ -312,29 +337,41 @@ export function BoardViewTabs({
           >
             <ViewTabContextMenu
               boardId={boardId}
+              boardName={boardName}
               view={v}
               pinRow={pinRow}
               pinnedByName={pinnedByName}
               personalList={personalList}
               onPinChanged={pinChanged}
               gates={gates}
+              scheduleReports={scheduleReports}
             >
-              <ViewTab
-                icon={VIcon}
-                iconTileColor={tileColor}
-                label={v.name}
-                active={active}
-                href={href}
-                title={title}
-                trailing={
-                  showPin ? (
-                    <>
-                      <Pin className="h-3 w-3 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
-                      <span className="sr-only">, pinned as the default view</span>
-                    </>
-                  ) : undefined
-                }
-              />
+              {(openMenu) => (
+                <ViewTab
+                  icon={VIcon}
+                  iconTileColor={tileColor}
+                  label={v.name}
+                  active={active}
+                  href={href}
+                  title={title}
+                  // The pin glyph first, then the active tab's own "...", on
+                  // hover and focus: the same menu a right-click opens, for a
+                  // pointer or a keyboard that cannot right-click.
+                  trailing={
+                    showPin || (active && hasMenu) ? (
+                      <>
+                        {showPin ? (
+                          <>
+                            <Pin className="h-3 w-3 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
+                            <span className="sr-only">, pinned as the default view</span>
+                          </>
+                        ) : null}
+                        {active && hasMenu ? <ViewTabMoreTrigger onOpen={openMenu} label={`${v.name} options`} /> : null}
+                      </>
+                    ) : undefined
+                  }
+                />
+              )}
             </ViewTabContextMenu>
           </span>
         );

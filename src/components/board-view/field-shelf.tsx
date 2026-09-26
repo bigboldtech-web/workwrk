@@ -16,13 +16,15 @@
 // onFieldsChanged so the board re-renders.
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Lock, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Lock, Plus, Search, Settings2, Trash2, X } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import {
   FIELD_CATALOG,
   FIELD_TYPE_BY_KEY,
   BUILTIN_COLUMNS,
+  CONNECT_CATALOG_ENTRY,
+  catalogEntryForField,
   isBuiltinShown,
   type FieldChoice,
   type FieldDef,
@@ -30,7 +32,9 @@ import {
   type FieldCatalogEntry,
   type BuiltinColumn,
 } from "@/lib/field-catalog";
+import { isConnectField, isMirrorField } from "@/lib/list-connect";
 import { ComingSoonRow, UpcomingOnly, useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { ConnectFieldConfig, fieldConfigMessage } from "./connect-field-config";
 
 const CHOICE_TYPES: ReadonlySet<string> = new Set(["DROPDOWN", "MULTI_SELECT", "LABELS", "TSHIRT_SIZE", "CUSTOM_DROPDOWN"]);
 
@@ -41,12 +45,29 @@ const POPULAR_TYPES: FieldType[] = [
   "MONEY", "PEOPLE", "CHECKBOX", "FILES", "RATING", "LINKED_DOC",
 ];
 
-// Colored, per-type field icon (aligns the Fields panel with ClickUp).
-function FieldTypeIcon({ type, className }: { type: FieldType; className?: string }) {
-  const e = FIELD_TYPE_BY_KEY[type];
+// Colored, per-type field icon (aligns the Fields panel with ClickUp). A
+// stored field is read through catalogEntryForField, so a Connect column
+// (stored as a RELATIONSHIP with target Lists) wears the Connect icon.
+function FieldTypeIcon({ type, field, className }: { type: FieldType; field?: Pick<FieldDef, "type" | "options">; className?: string }) {
+  const e = field ? catalogEntryForField(field) : FIELD_TYPE_BY_KEY[type];
   if (!e) return null;
   const I = e.Icon;
   return <I className={className ?? "w-4 h-4"} style={{ color: e.color }} />;
+}
+
+/** The key a catalog tile is known by: Connect shares RELATIONSHIP's type. */
+function tileKey(e: FieldCatalogEntry): string {
+  return e.catalogKey ?? e.type;
+}
+
+/**
+ * The tile an AI suggestion stands for. A Mirror, or a Connect column named
+ * by its catalog key, needs its configuration first, so it resolves to the
+ * entry whose `needsConfig` opens the form; anything unknown is plain text.
+ */
+function suggestionEntry(type: string): FieldCatalogEntry {
+  if (type === "CONNECT") return CONNECT_CATALOG_ENTRY;
+  return FIELD_TYPE_BY_KEY[type as FieldType] ?? FIELD_TYPE_BY_KEY.TEXT;
 }
 
 // AI field-name suggestions — cached per board per session so the "AI Suggestions"
@@ -105,13 +126,22 @@ type Tab = "create" | "existing";
 
 export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true, fields, hiddenFields, extraColumns, onToggleColumn, onClose, onFieldsChanged }: FieldShelfProps) {
   const confirm = useConfirm();
-  const [tab, setTab] = useState<Tab>(customFieldsEnabled ? "create" : "existing");
+  // A person who cannot create fields (a List contributor, or the Space's
+  // Custom Fields module is off) opens on Add existing, where show and hide
+  // work for them, never on a tab of tiles they cannot use. Derived until
+  // they pick a tab, so a permission that arrives after mount still counts.
+  const canCreate = canEdit && customFieldsEnabled;
+  const [pickedTab, setTab] = useState<Tab | null>(null);
+  const tab: Tab = pickedTab ?? (canCreate ? "create" : "existing");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  // Phase 5b: a Connect or Mirror column is configured before it exists (and
+  // an existing one is edited in the same form), in place of the tabs.
+  const [config, setConfig] = useState<{ mode: "connect" | "mirror"; existing?: FieldDef; label?: string } | null>(null);
 
   const showUpcoming = useShowUpcoming();
   const hidden = useMemo(() => new Set(hiddenFields ?? []), [hiddenFields]);
@@ -164,7 +194,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Failed to add field");
+        setError(fieldConfigMessage(data, "Couldn't add that field.", fields));
         return;
       }
       await refetchFields();
@@ -173,6 +203,17 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
     } finally {
       setBusy(false);
     }
+  };
+
+  // A tile (or a suggestion) that needs configuring opens its form; every
+  // other one creates its field at once, exactly as before.
+  const pickEntry = (entry: FieldCatalogEntry, label: string) => {
+    if (entry.needsConfig) {
+      setError(null);
+      setConfig({ mode: entry.type === "MIRROR" ? "mirror" : "connect", label: label === entry.label ? undefined : label });
+      return;
+    }
+    void addField(entry.type, label);
   };
 
   const patchField = async (key: string, patch: Record<string, unknown>) => {
@@ -185,7 +226,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data?.error ?? "Failed to update field");
+        setError(fieldConfigMessage(data, "Couldn't update that field.", fields));
         return;
       }
       await refetchFields();
@@ -201,7 +242,8 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
       const res = await fetch(`/api/boards/${boardId}/fields/${key}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data?.error ?? "Failed to remove field");
+        // A Connect column a Mirror reads through says which Mirrors.
+        setError(fieldConfigMessage(data, "Couldn't remove that field.", fields));
         return;
       }
       await refetchFields();
@@ -250,6 +292,10 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
     onRename: (label: string) => patchField(f.key, { label }),
     onOptionsChange: (choices: FieldChoice[]) => patchField(f.key, { options: { ...(f.options ?? {}), choices } }),
     onRemove: () => removeField(f.key),
+    // A Connect or Mirror column opens the same form it was built with.
+    onConfigure: isConnectField(f) || isMirrorField(f)
+      ? () => { setError(null); setConfig({ mode: isMirrorField(f) ? "mirror" : "connect", existing: f }); }
+      : undefined,
     dragging: dragKey === f.key,
     dragOver: dragOverKey === f.key,
     onDragStart: () => setDragKey(f.key),
@@ -312,7 +358,19 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
             ) : null}
 
             <div className="flex-1 overflow-y-auto px-3 pb-4">
-              {tab === "create" ? (
+              {config ? (
+                <ConnectFieldConfig
+                  key={`${config.mode}:${config.existing?.key ?? "new"}`}
+                  boardId={boardId}
+                  mode={config.mode}
+                  fields={fields}
+                  existing={config.existing ?? null}
+                  initialLabel={config.label}
+                  onCancel={() => setConfig(null)}
+                  onSaved={async () => { await refetchFields(); setConfig(null); }}
+                  onSwitchToConnect={() => setConfig({ mode: "connect" })}
+                />
+              ) : tab === "create" ? (
                 !customFieldsEnabled ? (
                   <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
                     <p className="text-base text-zinc-600 font-medium">Custom Fields are turned off for this Space</p>
@@ -320,9 +378,23 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
                       Enable the Custom Fields module in the Space&apos;s settings (Space &ldquo;&hellip;&rdquo; &rarr; Modules) to create new field types. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
                     </p>
                   </div>
+                ) : !canEdit ? (
+                  <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
+                    <p className="text-base text-zinc-600 font-medium">Only people with Full access to this List create fields</p>
+                    <p className="mt-1 text-sm text-zinc-400 leading-snug">
+                      Ask someone with Full access to add one. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setTab("existing")}
+                      className="mt-3 inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Go to Add existing
+                    </button>
+                  </div>
                 ) : (
-                /* Create new — the field-type catalog only (Popular + All). */
-                <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={(t, l) => void addField(t, l)} />
+                /* Create new: the field-type catalog only (Popular + All). */
+                <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={pickEntry} />
                 )
               ) : (
                 /* Add existing — ClickUp's Shown / Properties / Custom-Fields model. */
@@ -442,10 +514,12 @@ function CreateNewTab({
   catalog: FieldCatalogEntry[];
   busy: boolean;
   canEdit: boolean;
-  onPick: (type: FieldType, label: string) => void;
+  /** The WHOLE entry, never its type alone: the Connect tile and the doc-link
+   *  Relationship tile share a type and must never create each other's field. */
+  onPick: (entry: FieldCatalogEntry, label: string) => void;
 }) {
-  const inCatalog = new Set(catalog.map((e) => e.type));
-  const popular = POPULAR_TYPES.map((t) => FIELD_TYPE_BY_KEY[t]).filter((e) => e && inCatalog.has(e.type));
+  const inCatalog = new Set(catalog.map(tileKey));
+  const popular = POPULAR_TYPES.map((t) => FIELD_TYPE_BY_KEY[t]).filter((e) => e && inCatalog.has(tileKey(e)));
   const all = [...catalog].sort((a, b) => a.label.localeCompare(b.label));
 
   // AI Suggestions — contextual field names from the board (cached per session).
@@ -462,12 +536,12 @@ function CreateNewTab({
   // A type with no renderer yet (tier1:false) is absent, or a ComingSoonRow
   // behind Show upcoming features; never a disabled tile (spec-shell 1.15).
   const Row = (e: FieldCatalogEntry) => !e.tier1 ? (
-    <UpcomingOnly key={e.type}><li><ComingSoonRow label={e.label} icon={e.Icon} className="h-8 px-2" /></li></UpcomingOnly>
+    <UpcomingOnly key={tileKey(e)}><li><ComingSoonRow label={e.label} icon={e.Icon} className="h-8 px-2" /></li></UpcomingOnly>
   ) : (
-    <li key={e.type}>
+    <li key={tileKey(e)}>
       <button
         type="button"
-        onClick={() => onPick(e.type, e.label)}
+        onClick={() => onPick(e, e.label)}
         disabled={busy || !canEdit}
         title={e.description}
         className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50 disabled:hover:bg-transparent disabled:cursor-not-allowed"
@@ -493,7 +567,11 @@ function CreateNewTab({
               <li key={`${s.type}:${s.label}`}>
                 <button
                   type="button"
-                  onClick={() => onPick(s.type, s.label)}
+                  // A suggested Mirror or Connect column opens its form (it
+                  // cannot exist without one, and a suggestion names no
+                  // Lists); a suggested Relationship is the doc-link kind, as
+                  // it always was.
+                  onClick={() => onPick(suggestionEntry(s.type), s.label)}
                   disabled={busy || !canEdit}
                   title={`Create a ${FIELD_TYPE_BY_KEY[s.type]?.label ?? "field"} field`}
                   className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
@@ -583,7 +661,7 @@ function WorkspaceFieldsSection({
               onClick={() => onPick(c)}
               className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
             >
-              <FieldTypeIcon type={c.field.type as FieldType} className="w-4 h-4 shrink-0" />
+              <FieldTypeIcon type={c.field.type as FieldType} field={{ type: c.field.type as FieldType, options: c.field.options as FieldDef["options"] }} className="w-4 h-4 shrink-0" />
               <span className="text-xs flex-1 truncate">{c.field.label}</span>
               <span className="text-xs text-zinc-500 truncate max-w-[100px]">from {c.boardName}</span>
               <Plus className="w-3.5 h-3.5 text-zinc-400 opacity-0 group-hover:opacity-100" />
@@ -607,6 +685,7 @@ function FieldRow({
   onRename,
   onOptionsChange,
   onRemove,
+  onConfigure,
   dragging,
   dragOver,
   onDragStart,
@@ -623,6 +702,8 @@ function FieldRow({
   onRename: (label: string) => void;
   onOptionsChange: (choices: FieldChoice[]) => void;
   onRemove: () => void;
+  /** Phase 5b: a Connect or Mirror column's own settings. */
+  onConfigure?: () => void;
   dragging: boolean;
   dragOver: boolean;
   onDragStart: () => void;
@@ -660,7 +741,7 @@ function FieldRow({
             <GripVertical className="w-3 h-3" />
           </span>
         ) : null}
-        <FieldTypeIcon type={field.type} className="w-4 h-4 shrink-0" />
+        <FieldTypeIcon type={field.type} field={field} className="w-4 h-4 shrink-0" />
         {canEdit && editing ? (
           <input
             type="text"
@@ -683,6 +764,17 @@ function FieldRow({
             {field.label}
           </button>
         )}
+        {canEdit && onConfigure ? (
+          <button
+            type="button"
+            onClick={onConfigure}
+            className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            aria-label={`Edit ${field.label}`}
+            title="Edit column settings"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+          </button>
+        ) : null}
         {onToggleExpand ? (
           <button
             type="button"

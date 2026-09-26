@@ -3,12 +3,21 @@
 // ItemSubtasks — inline subtask mini-table in the task detail. Subtasks
 // are real Items with parentItemId = this item. Lists the children, shows
 // a status pill + owner per row, lets you add a new subtask and open one.
+//
+// The children come from GET /api/items/[id]/subtasks (the same children in
+// the same order, position then createdAt), not from a read of the whole
+// List filtered in the browser. In a List the task is shown in through a
+// link (Phase 5b) the read names that List, so each child is projected for
+// it, and a new subtask is POSTed to that List, which creates it in the
+// parent's home with its parent: it appears wherever its parent does.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, ChevronRight } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { isDoneStatus } from "@/lib/board-items-shared";
+import { accessMessage } from "@/lib/access-message";
+import { subtaskCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { PersonAvatar } from "./assignee-picker";
 
 export function ItemSubtasks({
@@ -18,6 +27,7 @@ export function ItemSubtasks({
   onOpenItem,
   onCountChange,
   autoFocus = false,
+  contextBoardId = null,
 }: {
   item: BoardItemRow;
   canEdit: boolean;
@@ -28,8 +38,13 @@ export function ItemSubtasks({
   onCountChange?: (n: number) => void;
   /** Focus the add-input on mount (used when revealed from an action row). */
   autoFocus?: boolean;
+  /**
+   * Phase 5b: the List the task is open in THROUGH A LINK, when it is. The
+   * read and the create name it; in the home the body is today's exactly.
+   */
+  contextBoardId?: string | null;
 }) {
-  const boardId = item.boardId ?? null;
+  const boardId = contextBoardId ?? item.boardId ?? null;
   const [rows, setRows] = useState<BoardItemRow[] | null>(null);
   const [draft, setDraft] = useState("");
   const [adding, setAdding] = useState(false);
@@ -42,17 +57,41 @@ export function ItemSubtasks({
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
 
   const load = useCallback(async () => {
-    if (!boardId) { setRows([]); return; }
     try {
-      const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/items/${item.id}/subtasks${contextBoardId ? `?list=${encodeURIComponent(contextBoardId)}` : ""}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) { setRows([]); return; }
       const data = await res.json();
-      const all: BoardItemRow[] = Array.isArray(data.items) ? data.items : [];
-      setRows(all.filter((r) => r.parentItemId === item.id));
+      setRows(Array.isArray(data.subtasks) ? (data.subtasks as BoardItemRow[]) : []);
     } catch { setRows([]); }
-  }, [boardId, item.id]);
+  }, [item.id, contextBoardId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // The HOME List's settings (gap 14): a subtask is created there, so its
+  // default status, and under a linked parent its statuses, come from it.
+  // Until they answer, or when the home is not readable, the body is today's
+  // (outside a link) or names no status (under one).
+  const homeBoardId = item.boardId ?? null;
+  const [homeSettings, setHomeSettings] = useState<LoadedListSettings | null>(null);
+  useEffect(() => {
+    if (!canEdit || !homeBoardId) return;
+    let alive = true;
+    fetch(`/api/boards/${homeBoardId}/settings`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d) return;
+        setHomeSettings({
+          boardId: homeBoardId,
+          defaults: d.defaults && typeof d.defaults === "object" ? d.defaults : {},
+          statuses: Array.isArray(d.statuses) ? d.statuses : [],
+        });
+      })
+      .catch(() => { /* the body stays today's */ });
+    return () => { alive = false; };
+  }, [canEdit, homeBoardId]);
 
   // Type-and-Enter: create with the typed title, append instantly, keep the
   // cursor in the box for rapid-fire entry. Errors surface instead of the old
@@ -67,11 +106,18 @@ export function ItemSubtasks({
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, parentItemId: item.id, status: statuses[0]?.value }),
+        body: JSON.stringify(subtaskCreateBody({
+          title,
+          parentItemId: item.id,
+          homeBoardId,
+          linked: !!contextBoardId && contextBoardId !== homeBoardId,
+          firstStatus: statuses[0]?.value,
+          home: homeSettings,
+        })),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Couldn't add subtask");
+        setError(accessMessage(data, "Couldn't add subtask"));
         return;
       }
       if (data?.item) setRows((prev) => [...(prev ?? []), data.item as BoardItemRow]);

@@ -1,4 +1,7 @@
-// /dashboard: a redirect to /today over a tree that was already gone.
+// /dashboard (singular): the old path, which now lands on /dashboards, the
+// dashboards list (decision 1). It went to /home while no dashboards page
+// existed; a browser that cached that 308 keeps going there until its cache
+// clears, which is the one thing a server cannot take back.
 //
 // A belt-and-braces twin of the `next.config.ts` redirect table.
 //
@@ -14,12 +17,13 @@
 // answers with a real 308 before anything paints.
 //
 // In production the config row still answers first (it runs before routing),
-// so this file is only ever reached when the table has not been loaded.
+// so this file is only ever reached when the table has not been loaded. It
+// stays forever, beside its config row.
 
 import { permanentRedirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  permanentRedirect("/home");
+  permanentRedirect("/dashboards");
 }

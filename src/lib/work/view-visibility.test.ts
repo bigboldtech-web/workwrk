@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  viewMenuRows,
   viewVisibleTo, visibleViews, orderViews, viewsForViewer,
   canManageView, canDeleteView, canSaveView, togglePinned, type ViewLike,
 } from "./view-visibility";
@@ -147,6 +148,31 @@ describe("canManageView / canDeleteView", () => {
   it("refuses to delete the last view even for Full access", () => {
     expect(canDeleteView(shared, [shared], "u1", true)).toBe(false);
     expect(canDeleteView(shared, [shared, mine], "u1", true)).toBe(true);
+  });
+});
+
+describe("viewMenuRows", () => {
+  const two = [{}, {}];
+  const shared = { ownerId: "owner", isDefault: false };
+
+  it("offers a reader who does not own the view no write row", () => {
+    expect(viewMenuRows(shared, two, { viewerId: "reader", canContribute: false, hasFullAccess: false })).toEqual({
+      rename: false,
+      setDefault: false,
+      duplicate: false,
+      delete: false,
+    });
+  });
+
+  it("lets a contributor save and duplicate, and delete only with full access", () => {
+    expect(viewMenuRows(shared, two, { viewerId: "m", canContribute: true, hasFullAccess: false })).toEqual({ rename: true, setDefault: true, duplicate: true, delete: false });
+    expect(viewMenuRows(shared, two, { viewerId: "m", canContribute: true, hasFullAccess: true }).delete).toBe(true);
+  });
+
+  it("lets an owner save and delete their own view, never the last one", () => {
+    const mine = { ownerId: "me", isDefault: true };
+    expect(viewMenuRows(mine, two, { viewerId: "me", canContribute: false, hasFullAccess: false })).toEqual({ rename: true, setDefault: false, duplicate: false, delete: true });
+    expect(viewMenuRows(mine, [{}], { viewerId: "me", canContribute: false, hasFullAccess: false }).delete).toBe(false);
   });
 });
 

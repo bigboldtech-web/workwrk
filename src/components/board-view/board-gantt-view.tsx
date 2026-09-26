@@ -28,6 +28,9 @@ import type { FieldDef } from "@/lib/field-catalog";
 import { StatusGlyph } from "./status-glyph";
 import { GanttBacklogPanel } from "./gantt-backlog-panel";
 import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
+import { accessMessage } from "@/lib/access-message";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
+import { linkedRowEditable, writeContext } from "@/lib/list-link-rows";
 
 // Zoom steps for the visible window (fewer weeks = zoomed in). ClickUp
 // exposes this as the floating +/− stack on the canvas. 4 weeks is the
@@ -70,6 +73,12 @@ interface BoardGanttViewProps {
   onItemRemoved?: (id: string) => void;
   /** Time Tracking module gate — hides "Start timer" in the context menu. */
   timeTrackingEnabled?: boolean;
+  /**
+   * The List's settings as the canvas read them (gap 14). A create here names
+   * no status of the person's own, so a List's default status applies; until
+   * they load the body is today's.
+   */
+  loadedSettings?: LoadedListSettings | null;
 }
 
 function startOfWeek(d: Date): Date {
@@ -111,6 +120,7 @@ export function BoardGanttView({
   onItemCreated,
   onItemRemoved,
   timeTrackingEnabled,
+  loadedSettings = null,
 }: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on a name row / bar / marker opens the shared item menu.
@@ -284,18 +294,19 @@ export function BoardGanttView({
       const res = await fetch(`/api/items/${item.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
+        // A bar shown here through a link names this List on its write.
+        body: JSON.stringify({ ...patch, ...writeContext(item, boardId ?? "") }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error ?? "Failed to reschedule");
+        setError(accessMessage(data, "Couldn't reschedule this task."));
         return;
       }
       onItemChanged?.(data.item as BoardItemRow);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reschedule");
     }
-  }, [onItemChanged]);
+  }, [onItemChanged, boardId]);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -328,8 +339,16 @@ export function BoardGanttView({
     };
   }, [dayWidth, commitDrag]);
 
+  // Which tasks this viewer may drag, resize or date here: every task on a
+  // List they write, and a task shown through a link only as far as its task
+  // role goes.
+  const editableIds = useMemo(
+    () => new Set(initialItems.filter((it) => linkedRowEditable(it, canEdit)).map((it) => it.id)),
+    [initialItems, canEdit],
+  );
+
   const beginDrag = (e: React.PointerEvent, id: string, mode: DragMode) => {
-    if (!canEdit) return;
+    if (!canEdit || !editableIds.has(id)) return;
     // Primary button only — right-click opens the context menu, not a drag.
     if (e.button !== 0) return;
     e.preventDefault();
@@ -342,41 +361,51 @@ export function BoardGanttView({
   // Set a due date on an undated task from a native date input.
   const scheduleDate = useCallback(async (id: string, value: string) => {
     if (!value) return;
+    const row = initialItems.find((it) => it.id === id);
+    if (row && !linkedRowEditable(row, canEdit)) return;
     setError(null);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dueAt: `${value}T00:00:00.000Z` }),
+        body: JSON.stringify({ dueAt: `${value}T00:00:00.000Z`, ...writeContext(row, boardId ?? "") }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error ?? "Failed to set date"); return; }
+      if (!res.ok) { setError(accessMessage(data, "Couldn't set that date.")); return; }
       onItemChanged?.(data.item as BoardItemRow);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set date");
     }
-  }, [onItemChanged]);
+  }, [onItemChanged, initialItems, canEdit, boardId]);
 
+  // The ref is the lock: Enter disables the input, the disable blurs it, and
+  // the blur's own add ran in the same frame, so one Enter made two tasks.
+  const addingRef = useRef(false);
   const addTask = useCallback(async () => {
     const title = newTitle.trim();
     if (!title || !boardId) { setNewTitle(""); return; }
+    if (addingRef.current) return;
+    addingRef.current = true;
     setAdding(true);
     try {
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, status: firstStatus }),
+        // The add row names no status of the person's own, so a List default
+        // status replaces the first one.
+        body: JSON.stringify(applyDefaultsToCreateBody({ title, status: firstStatus }, loadedSettings, new Set(), boardId)),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error ?? "Failed to add task"); return; }
+      if (!res.ok) { setError(accessMessage(data, "Couldn't add that task.")); return; }
       if (data?.item) onItemCreated?.(data.item as BoardItemRow);
       setNewTitle("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add task");
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
-  }, [newTitle, boardId, firstStatus, onItemCreated]);
+  }, [newTitle, boardId, firstStatus, onItemCreated, loadedSettings]);
 
   const weeks = Array.from({ length: weekCount }, (_, i) =>
     new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i * 7),
@@ -511,7 +540,7 @@ export function BoardGanttView({
                 Name
               </div>
               {rows.map(({ item, start, end }) => {
-                const current = item.status ? statusLookup[item.status] ?? null : null;
+                const current = item.listLink?.homeStatus ?? (item.status ? statusLookup[item.status] ?? null : null);
                 return (
                   <div
                     key={item.id}
@@ -528,7 +557,7 @@ export function BoardGanttView({
                     >
                       {item.title}
                     </button>
-                    {!start && !end && canEdit ? (
+                    {!start && !end && canEdit && editableIds.has(item.id) ? (
                       <label className="relative inline-flex items-center justify-center w-5 h-5 rounded text-ink-4 hover:text-ink hover:bg-hover cursor-pointer shrink-0" title="Set due date">
                         <CalendarPlus className="w-3.5 h-3.5" />
                         <input
@@ -688,7 +717,8 @@ export function BoardGanttView({
                 ) : null}
 
                 {rows.map(({ item, start, end }, rowIndex) => {
-                  const color = (item.status ? statusLookup[item.status]?.color : null) ?? "var(--os-ink-3)";
+                  const color = item.listLink?.homeStatus?.color ?? (item.status ? statusLookup[item.status]?.color : null) ?? "var(--os-ink-3)";
+                  const barEditable = canEdit && editableIds.has(item.id);
                   const top = rowIndex * ROW_H + (ROW_H - 24) / 2;
 
                   // Undated → a schedule marker parked on today (draggable / clickable).
@@ -706,9 +736,9 @@ export function BoardGanttView({
                           onOpenItem?.(item.id);
                         }}
                         onContextMenu={(e) => menu.openItemMenu(e, item)}
-                        title={`${item.title} · unscheduled${canEdit ? " · drag to schedule" : ""}`}
+                        title={`${item.title} · unscheduled${barEditable ? " · drag to schedule" : ""}`}
                         className={`absolute rounded-full border border-dashed border-line-strong bg-raised ${
-                          canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+                          barEditable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                         } ${d ? "ring-2 ring-[var(--os-brand)]" : ""}`}
                         style={{
                           left: `calc(${(markerCol / totalDays) * 100}% - 7px)`,
@@ -804,7 +834,7 @@ export function BoardGanttView({
                           {tipEnd.getTime() !== tipStart.getTime() ? ` → ${fmtDay(tipEnd)}` : ""}
                         </span>
                       ) : null}
-                      {canEdit ? (
+                      {barEditable ? (
                         <div
                           onPointerDown={(e) => beginDrag(e, item.id, "resize-start")}
                           className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-l-[6px] bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -822,7 +852,7 @@ export function BoardGanttView({
                           s.getTime() !== e.getTime() ? ` → ${e.toLocaleDateString()}` : ""
                         }`}
                         className={`w-full h-full px-2 rounded-[6px] text-xs font-medium text-white truncate hover:brightness-95 leading-[24px] text-left ${
-                          canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                          barEditable ? "cursor-grab active:cursor-grabbing" : ""
                         }`}
                         style={{ backgroundColor: color }}
                       >
@@ -833,7 +863,7 @@ export function BoardGanttView({
                           {item.title}
                         </span>
                       ) : null}
-                      {canEdit ? (
+                      {barEditable ? (
                         <div
                           onPointerDown={(e) => beginDrag(e, item.id, "resize-end")}
                           className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-r-[6px] bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"

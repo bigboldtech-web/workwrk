@@ -146,6 +146,35 @@ export function canDeleteView(
   return canManageView(view, viewerId, hasFullAccess);
 }
 
+/** Which write rows a view's menu (right-click or the tab's "...") offers. */
+export interface ViewMenuRows {
+  rename: boolean;
+  setDefault: boolean;
+  duplicate: boolean;
+  delete: boolean;
+}
+
+/**
+ * The rows mirror the routes' own gates, so a row is never offered that
+ * answers 403: Rename and Set as default are a view save (PATCH, canSaveView),
+ * Duplicate creates a view (POST, contribute on the List), Delete is
+ * canDeleteView (full access or the owner, and never the last view).
+ */
+export function viewMenuRows(
+  view: Pick<ViewLike, "ownerId" | "isDefault">,
+  allViews: readonly unknown[],
+  viewer: { viewerId: string | null; canContribute: boolean; hasFullAccess: boolean },
+): ViewMenuRows {
+  const owns = Boolean(viewer.viewerId) && view.ownerId === viewer.viewerId;
+  const canSave = viewer.canContribute || owns;
+  return {
+    rename: canSave,
+    setDefault: canSave && !view.isDefault,
+    duplicate: viewer.canContribute,
+    delete: allViews.length > 1 && (viewer.hasFullAccess || owns),
+  };
+}
+
 /** Toggle one id in a personal pin list, preserving order. */
 export function togglePinned(pinned: readonly string[], viewId: string): string[] {
   return pinned.includes(viewId) ? pinned.filter((id) => id !== viewId) : [...pinned, viewId];

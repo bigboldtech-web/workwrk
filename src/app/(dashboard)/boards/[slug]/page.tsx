@@ -33,11 +33,17 @@ import { needsCoreListViews } from "@/lib/work/list-view-seed";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
-import { canEditBoard, canContributeBoard, getBoardForReaderOrFolderGrantee, ensureCoreListViews } from "@/lib/board";
+import { canEditBoard, canContributeBoard, getBoardForReader, getBoardForReaderOrFolderGrantee, ensureCoreListViews } from "@/lib/board";
 import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { parseBoardSchema } from "@/lib/field-catalog";
+import { canSaveView } from "@/lib/work/view-visibility";
+import { LIST_LINK_CANVAS_LIVE } from "@/lib/list-links";
+import { listReader } from "@/lib/list-links-server";
+import { redactFieldsForViewer } from "@/lib/board-items-view";
+import { parseRowColorRules } from "@/lib/list-comfort";
+import { orgRoleOf } from "@/lib/access/org-role";
 
 export const dynamic = "force-dynamic";
 
@@ -147,13 +153,40 @@ export default async function BoardPage(props: {
   // The content flag is NOT called `canEdit` any more, on purpose. One name
   // covering "may write a task" and "may change the List" is what let the
   // management gate end up on the row controls in the first place.
-  const [items, canContribute, canManage] = await Promise.all([
-    listBoardItems(board.id),
-    canContributeBoard(board.id, u.id, u.accessLevel ?? "EMPLOYEE"),
-    canEditBoard(board.id, u.id, u.accessLevel ?? "EMPLOYEE"),
+  //
+  // THE FIRST PAINT IS PROJECTED FOR THIS VIEWER, and it is the same read the
+  // poll makes: the List's own rows plus the tasks linked into it (Phase 5b,
+  // while LIST_LINK_CANVAS_LIVE is on), each shown as this viewer may see it
+  // (their own connect values, no reserved key, a linked row in this List's
+  // namespace). A paint that differed from the poll would flicker rows in and
+  // out twelve seconds after load.
+  const accessLevel = u.accessLevel ?? "EMPLOYEE";
+  const viewer = { userId: u.id, organizationId: u.organizationId, accessLevel };
+  const [items, canContribute, canManage, strictReadable] = await Promise.all([
+    listBoardItems(board.id, { view: { viewer, contextBoardId: board.id }, includeLinked: LIST_LINK_CANVAS_LIVE }),
+    canContributeBoard(board.id, u.id, accessLevel),
+    canEditBoard(board.id, u.id, accessLevel),
+    getBoardForReader(board.id, u.id, accessLevel),
   ]);
   const canDeleteTasks = canManage;
-  const initialFields = parseBoardSchema(board.schema).fields;
+  // A connect column names only the Lists this viewer can read, a mirror only
+  // its lookups into them: the same redaction every fields read applies.
+  const initialFields = await redactFieldsForViewer(parseBoardSchema(board.schema).fields, listReader(viewer));
+  // Conditional row colours are display, so every reader of this page gets
+  // them on first paint; the canvas re-reads them when the List's settings
+  // change.
+  const settings = board.settings && typeof board.settings === "object" && !Array.isArray(board.settings)
+    ? (board.settings as Record<string, unknown>)
+    : {};
+  const initialRowColorRules = parseRowColorRules(settings.rowColorRules);
+  // Pin column and Row height write the view, so they render only where the
+  // PATCH would be accepted: the route's own gate, computed here.
+  const mayConfigureView = activeView ? canSaveView(activeView, u.id, canContribute) : false;
+  // Schedule report needs what the report route needs: the STRICT read
+  // (getBoardForReader; a granular folder grantee reads this page through the
+  // wider predicate and would be answered 404 there) and a member, never a
+  // Guest.
+  const scheduleReports = Boolean(strictReadable) && orgRoleOf({ accessLevel }) !== "GUEST";
   // Per-List statuses (backbone #1) — the board's own set, or the
   // canonical default trio when Board.statuses is null.
   const statuses = getBoardStatuses(board);
@@ -258,17 +291,21 @@ export default async function BoardPage(props: {
           in risk terms and is exactly the founder's "if I give some access to
           someone they are also not able to make some changes". DELETING a
           shared view stays on the management ladder, in canManageView, because
-          that destroys other people's saved work. */}
+          that destroys other people's saved work, so the management answer
+          goes in as canDeleteShared. */}
       <BoardViewTabs
-        views={views}
+        views={views.map((v) => ({ id: v.id, name: v.name, type: v.type, isDefault: v.isDefault, config: v.config, isShared: v.isShared, ownerId: v.ownerId }))}
         boardId={board.id}
         boardSlug={board.slug}
+        boardName={board.name}
         activeViewId={activeView?.id ?? null}
         defaultViewId={defaultView?.id ?? null}
         defaultPinned={pinned}
         pinnedByName={pinnedByName}
         canManage={canContribute}
+        canDeleteShared={canManage}
         currentUserId={u.id}
+        scheduleReports={scheduleReports}
       />
 
       {/* Renderer — its single toolbar row (filters + Statuses/Fields + the
@@ -281,10 +318,12 @@ export default async function BoardPage(props: {
           viewConfig={(activeView?.config as Record<string, unknown> | null) ?? {}}
           initialItems={items}
           initialFields={initialFields}
+          initialRowColorRules={initialRowColorRules}
           statuses={statuses}
           canContribute={canContribute}
           canManage={canManage}
           canDeleteTasks={canDeleteTasks}
+          canSaveView={mayConfigureView}
           currentUserId={u.id}
           sprint={sprint}
           addTaskSlot={

@@ -183,10 +183,28 @@ export function convoEventName(conversationId: string): string {
  * `gone` means archived or deleted: the host drops the row instead of
  * refetching it. `local: true` marks the event as this tab telling itself, so
  * the editor that caused it does not re-read what it already holds.
+ *
+ * `extra` (Phase 5b) carries what a link change needs a host List to know:
+ * `leftListIds` names the Lists the task just left (Remove from this List, a
+ * link Move), so exactly those Lists drop the row; `listIds` names Lists it
+ * now appears in. The three-argument call is unchanged.
  */
-export function emitItemChanged(itemId: string, boardId: string | null, gone = false): void {
+export function emitItemChanged(
+  itemId: string,
+  boardId: string | null,
+  gone = false,
+  extra?: { listIds?: string[]; leftListIds?: string[] },
+): void {
   if (typeof window === "undefined") return;
-  const detail: LocalItemChangedEvent = { type: "item", itemId, boardId, local: true, ...(gone ? { gone: true } : {}) };
+  const detail: LocalItemChangedEvent = {
+    type: "item",
+    itemId,
+    boardId,
+    local: true,
+    ...(gone ? { gone: true } : {}),
+    ...(extra?.listIds ? { listIds: extra.listIds } : {}),
+    ...(extra?.leftListIds ? { leftListIds: extra.leftListIds } : {}),
+  };
   try {
     window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.realtime, { detail }));
   } catch {

@@ -97,4 +97,33 @@ describe("openTask", () => {
     expect(() => openTask({ push }, "t9")).not.toThrow();
     expect(push).toHaveBeenCalledWith("/item/t9");
   });
+
+  // Phase 5b: a row shown in a List through a link opens the task IN that
+  // List's context, so its drawer shows that List's own fields.
+  it("pushes exactly today's URL for the two-argument call", () => {
+    const push = vi.fn();
+    openTask({ push }, "t9");
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push.mock.calls[0]).toEqual(["/item/t9"]);
+  });
+
+  it("adds ?list= when a list context is given", () => {
+    const push = vi.fn();
+    openTask({ push }, "t9", { listId: "listB" });
+    expect(push).toHaveBeenCalledWith("/item/t9?list=listB");
+  });
+
+  it("adds nothing for a null or empty list context", () => {
+    const push = vi.fn();
+    openTask({ push }, "t9", { listId: null });
+    openTask({ push }, "t9", { listId: "" });
+    openTask({ push }, "t9", {});
+    expect(push.mock.calls).toEqual([["/item/t9"], ["/item/t9"], ["/item/t9"]]);
+  });
+
+  it("encodes the list id", () => {
+    const push = vi.fn();
+    openTask({ push }, "t9", { listId: "a b" });
+    expect(push).toHaveBeenCalledWith("/item/t9?list=a%20b");
+  });
 });

@@ -32,7 +32,7 @@ import {
   ListChecks,
   Activity, LayoutTemplate, Plug, LineChart,
   ShieldCheck, FileSignature,
-  Library as LibraryIcon, Folder, Trash2,
+  Library as LibraryIcon, Folder, Trash2, LayoutDashboard,
   Target, GaugeCircle, BookUser, Network, Heart,
   type LucideIcon,
   MessageCircle, Hash, Table2 } from "lucide-react";
@@ -1144,6 +1144,14 @@ function HomeSidebar() {
           <NavItem href="/activity" Icon={Activity} label="Activity" active={activeHref === "/activity"} />
         ) : null}
         {!isGuest && cards.includes("goals") ? <GoalsGroup activeHref={activeHref} /> : null}
+        {/* Decision 1: the Dashboards list, for every Member. NOT gated on
+            `home.cards`, for the Templates and Trash reason below: that
+            preference has no UI writer any more, and a row it could take away
+            would be a door with no way back. A Guest gets no row, as every
+            dashboard page and route answers them with a 404. */}
+        {!isGuest ? (
+          <NavItem href="/dashboards" Icon={LayoutDashboard} label="Dashboards" active={activeHref === "/dashboards"} />
+        ) : null}
         {/* The rule between the personal rows and the two workspace rows. This
             hub owns the placement (spec-work-home section 1 overrides
             spec-spaces-lists section 1 for position only): the tail of the

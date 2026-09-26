@@ -35,6 +35,14 @@ export interface KanbanRow {
 export function groupCardsByStatus<T extends KanbanRow>(
   items: readonly T[],
   statusOrder: readonly string[],
+  /**
+   * The status a card has ON THIS BOARD. Absent: its own `status`, exactly as
+   * before. A card shown here through a link (Phase 5b) stores a value of its
+   * home List's set, so the canvas passes the remap into this board's set
+   * (list-link-rows.ts boardStatusFor) and the card lands in the column that
+   * means the same thing here.
+   */
+  statusOf?: (row: T) => string | null,
 ): Map<string, T[]> {
   const map = new Map<string, T[]>();
   for (const s of statusOrder) map.set(s, []);
@@ -43,7 +51,8 @@ export function groupCardsByStatus<T extends KanbanRow>(
     // Rule 1: a child of a card on this board belongs to that card.
     if (row.parentItemId && present.has(row.parentItemId)) continue;
     // Rule 2 plus the unknown-status fallback: never lose a row.
-    const bucket = row.status && map.has(row.status) ? row.status : statusOrder[0];
+    const status = statusOf ? statusOf(row) : row.status;
+    const bucket = status && map.has(status) ? status : statusOrder[0];
     if (bucket) map.get(bucket)!.push(row);
   }
   return map;

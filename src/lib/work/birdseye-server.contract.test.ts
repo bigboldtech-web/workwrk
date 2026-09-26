@@ -131,15 +131,17 @@ describe("counts", () => {
   });
 });
 
-describe("home rows only, until linked rows reach the List canvas", () => {
-  it("fails the day LIST_LINK_CANVAS_LIVE flips, until the union is added", () => {
-    const flag = join(ROOT, "src/lib/list-links.ts");
-    const live = existsSync(flag) && /LIST_LINK_CANVAS_LIVE\s*(?::\s*boolean)?\s*=\s*true/.test(readFileSync(flag, "utf8"));
-    if (live) {
-      // The List's own views now draw linked rows; Bird's eye must too.
-      expect(LOADER).toMatch(/ItemListLink/);
-    } else {
-      expect(LOADER).not.toMatch(/ItemListLink/);
-    }
+describe("home rows only, a recorded decision (2026-09-26)", () => {
+  it("reads home rows only while linked rows are live on the List canvas, until the union ships on its own", () => {
+    // Decided on the worst case. Linked rows went live with Phase 5b's
+    // screens, and Bird's eye still draws each List's own tasks only. The
+    // worst case of that: a task linked in from ANOTHER Space's List is
+    // missing from this column, while its home column and every List view
+    // still show it. The worst case of a rushed union across the loader's
+    // keyset paging, counts and focus buckets: a card moved here writes a
+    // wrong status onto another List's task, or counts what a viewer
+    // cannot read. So the union is its own reviewed change, and this test
+    // fails if part of one lands here by accident.
+    expect(LOADER).not.toMatch(/ItemListLink/);
   });
 });

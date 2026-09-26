@@ -140,6 +140,16 @@ interface BoardItemDetailProps {
   descriptionDraft?: string | null;
   commentDraft?: string;
   onDraftChange?: (patch: { title?: string; description?: string; comment?: string }) => void;
+  /**
+   * Phase 5b: the List the task is open in THROUGH A LINK, when it is. Its
+   * subtasks are read and created through it.
+   */
+  linkedContextBoardId?: string | null;
+  /**
+   * Phase 5b: a Connect field's commit, which must hear the answer (the cell
+   * keeps its selection and offers Retry on a failure).
+   */
+  onCommitField?: (key: string, next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -147,6 +157,29 @@ function isEmptyValue(v: unknown): boolean {
   if (Array.isArray(v)) return v.length === 0;
   if (typeof v === "object") return Object.keys(v as object).length === 0;
   return false;
+}
+
+/**
+ * Does one of the List's own fields carry a value on this task?
+ *
+ * Not every field keeps its value in `metadata`. A Mirror column is computed
+ * at read time from the tasks the viewer can read and arrives in
+ * `item.mirrors[key]`; it never has a metadata key at all. Reading metadata
+ * alone made every mirror count as empty, so the drawer dropped it (and the
+ * "N empty" count and the Add field hint were wrong about it) while the table
+ * showed the same values. A mirror counts when at least one of its readable
+ * values is non-empty. A Connect column keeps its ids in metadata, but the
+ * resolved `connections[key]` is checked too, so a connected task the viewer
+ * can read is never hidden if the two ever disagree.
+ */
+export function listFieldCarriesValue(
+  item: Pick<BoardItemRow, "metadata" | "mirrors" | "connections">,
+  key: string,
+): boolean {
+  if (!isEmptyValue(item.metadata?.[key])) return true;
+  const mirrored = item.mirrors?.[key]?.values;
+  if (Array.isArray(mirrored) && mirrored.some((v) => !isEmptyValue(v))) return true;
+  return (item.connections?.[key]?.length ?? 0) > 0;
 }
 
 /**
@@ -188,6 +221,8 @@ export function BoardItemDetail({
   descriptionDraft = null,
   commentDraft,
   onDraftChange,
+  linkedContextBoardId = null,
+  onCommitField,
 }: BoardItemDetailProps) {
   const canEdit = rankOf(role) >= rankOf("EDIT");
   const canComment = rankOf(role) >= rankOf("COMMENT");
@@ -206,10 +241,11 @@ export function BoardItemDetail({
 
   const { stored, storedRaw, toggle, toggleListField } = useItemFields(listContext?.id ?? item.boardId ?? null);
 
-  /** Does one of the List's own fields carry a value on this task? */
+  /** Does one of the List's own fields carry a value on this task? Mirrors included. */
   const listFieldHasValue = useCallback(
-    (key: string) => !isEmptyValue(item.metadata?.[key]),
-    [item.metadata],
+    (key: string) =>
+      listFieldCarriesValue({ metadata: item.metadata, mirrors: item.mirrors, connections: item.connections }, key),
+    [item.metadata, item.mirrors, item.connections],
   );
 
   const hasValue = useCallback(
@@ -394,7 +430,16 @@ export function BoardItemDetail({
                 mode="edit"
                 disabled={!canEdit}
                 currentUserId={currentUserId}
-                boardId={item.boardId ?? null}
+                // The List whose schema defines these fields (the body's own
+                // board: its home, or the List it is open in through a link).
+                // It scopes a USER / PEOPLE field and a Connect field's picker.
+                boardId={listContext?.id ?? item.boardId ?? null}
+                fieldListId={listContext?.id ?? item.boardId ?? null}
+                itemId={item.id}
+                connections={item.connections?.[f.key]}
+                mirror={item.mirrors?.[f.key]}
+                popover="absolute"
+                onCommit={onCommitField ? (next) => onCommitField(f.key, next) : undefined}
                 onChange={(next) => onPatch({ metadataPatch: metadataPatch({ [f.key]: next }) })}
               />
             </FieldRow>
@@ -411,6 +456,7 @@ export function BoardItemDetail({
           onOpenItem={onOpenItem}
           onCountChange={setSubtaskCount}
           autoFocus={revealed.has("subtasks")}
+          contextBoardId={linkedContextBoardId}
         />
       </div>
 

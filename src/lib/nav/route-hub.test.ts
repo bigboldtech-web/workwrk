@@ -487,3 +487,30 @@ describe("resolveActiveRow", () => {
     }
   });
 });
+
+// Decision 1 brought the dashboards back as a Work page. The rail pill, the
+// sidebar row and the crumb must hold still on the list AND on a dashboard's
+// canvas, and the old singular path stays a redirect into the list.
+describe("the dashboards routes", () => {
+  it("keeps the list and every dashboard in the Work hub", () => {
+    expect(ROUTE_HUB["/dashboards"]).toBe("home");
+    expect(resolveHub("/dashboards")).toBe("home");
+    expect(resolveHub("/dashboards/cm123")).toBe("home");
+    expect(resolveHubPrefix("/dashboards/sov_space1")).toBe("/dashboards");
+    expect(ROUTE_TITLES["/dashboards"]).toBe("Dashboards");
+  });
+
+  it("lights the Dashboards row on the list and on a canvas, and nowhere else", () => {
+    expect(resolveActiveRow(WORK_ROWS, "/dashboards")?.href).toBe("/dashboards");
+    expect(resolveActiveRow(WORK_ROWS, "/dashboards/cm123")?.href).toBe("/dashboards");
+    expect(resolveActiveRow(WORK_ROWS, "/dashboard")).toBeUndefined();
+    const okrs = WORK_ROWS.findIndex((r) => r.href.startsWith("/okrs"));
+    const dashboards = WORK_ROWS.findIndex((r) => r.href === "/dashboards");
+    expect(dashboards).toBeGreaterThan(okrs);
+  });
+
+  it("keeps /dashboard (singular) as a redirect row, not a page", () => {
+    expect(isRedirectRoute("/dashboard")).toBe(true);
+    expect(REDIRECT_ROUTES).toContain("/dashboard");
+  });
+});

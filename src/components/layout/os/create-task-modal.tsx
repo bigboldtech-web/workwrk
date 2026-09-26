@@ -47,6 +47,8 @@ import { SkeletonLines } from "@/components/ui/skeleton";
 import { Avatar as SharedAvatar } from "@/components/ui/avatar-stack";
 import { Dots } from "@/components/ui/dots";
 import { useItemFields } from "@/hooks/use-item-fields";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
+import { PRIORITY_LOOKUP } from "@/lib/board-items-shared";
 import { ITEM_FIELD_LABELS, type ItemFieldKey } from "@/lib/item-fields";
 
 // ── Task types ─────────────────────────────────────────────────────
@@ -245,6 +247,15 @@ export function CreateTaskModal() {
   const { stored: listFields, toggle: toggleListFieldPref } = useItemFields(selectedList?.id ?? null);
   const fieldOn = (key: ItemFieldKey) => listFields.includes(key);
   const [selectedStatus, setSelectedStatus] = useState<string>("TO_DO");
+  // Phase 5b, List comfort: the chosen List's default values, and which
+  // values the person has set themselves. An untouched value with a default
+  // is left out of the create, so the server fills it from the List; what the
+  // person set is always theirs.
+  const [touched, setTouched] = useState<Set<string>>(() => new Set());
+  const touch = useCallback((key: string) => {
+    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+  const [listSettings, setListSettings] = useState<LoadedListSettings | null>(null);
 
   // Toolbar values
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
@@ -400,6 +411,46 @@ export function CreateTaskModal() {
     return () => { active = false; };
   }, [createTaskOpen, listId]);
 
+  // The chosen List's defaults. An answer that arrives after the person has
+  // picked another List is thrown away, so a create is never shaped by the
+  // defaults of a List it is not going to.
+  useEffect(() => {
+    if (!createTaskOpen || !listId) { setListSettings(null); return; }
+    let alive = true;
+    const target = listId;
+    fetch(`/api/boards/${encodeURIComponent(target)}/settings`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d) return;
+        setListSettings({ boardId: target, defaults: d.defaults && typeof d.defaults === "object" ? d.defaults : {}, statuses: Array.isArray(d.statuses) ? d.statuses : [] });
+      })
+      .catch(() => { /* no defaults shown; the server still applies them */ });
+    return () => { alive = false; };
+  }, [createTaskOpen, listId]);
+  // Changing the List resets the status to that List's first one, so a
+  // status picked for the previous List is no longer the person's choice.
+  useEffect(() => {
+    setTouched((prev) => {
+      if (!prev.has("status")) return prev;
+      const next = new Set(prev);
+      next.delete("status");
+      return next;
+    });
+  }, [listId]);
+  const listDefaults = listSettings && listSettings.boardId === listId ? listSettings.defaults : null;
+  // What an untouched field will start as, for its "Default: <value>" hint.
+  const defaultStatusDef = !touched.has("status") && listDefaults?.status
+    ? listSettings?.statuses.find((st) => st.value === listDefaults.status) ?? null
+    : null;
+  const defaultPriorityLabel = !touched.has("priority") && listDefaults?.priority ? PRIORITY_LOOKUP[listDefaults.priority]?.label ?? null : null;
+  const defaultAssignee = !touched.has("ownerId") && listDefaults?.assigneeIds?.length
+    ? (people.find((p) => p.id === listDefaults.assigneeIds![0]) ?? null)
+    : null;
+  const defaultTagCount = !touched.has("tagIds") && listDefaults?.tagIds?.length ? listDefaults.tagIds.length : 0;
+  const defaultTypeLabel = !touched.has("itemTypeId") && listDefaults?.itemTypeId
+    ? itemTypes.find((t) => t.id === listDefaults.itemTypeId)?.singular ?? null
+    : null;
+
   // The creator watches their own task by default.
   useEffect(() => {
     if (me && followers.length === 0) setFollowers([me.id]);
@@ -425,6 +476,12 @@ export function CreateTaskModal() {
   }, [selectedList, statusCache]);
 
   const clearFields = useCallback((keepIdentity: boolean) => {
+    // What is cleared is untouched again; what is kept stays the person's.
+    setTouched((prev) => {
+      const next = new Set<string>();
+      if (keepIdentity) for (const k of ["itemTypeId", "ownerId"]) if (prev.has(k)) next.add(k);
+      return next;
+    });
     setStagedFiles([]);
     setTaskName("");
     setDescription("");
@@ -553,6 +610,9 @@ export function CreateTaskModal() {
         const tag: WorkspaceTag = { id: data.id, name: data.name, color: data.color };
         setOrgTags((prev) => (prev ? [...prev, tag] : [tag]));
         setTags((prev) => [...prev, tag]);
+        // A tag made here is a tag chosen here: the List's default tags must
+        // not replace it at Create.
+        touch("tagIds");
         setTagDraft("");
       }
     } finally {
@@ -667,10 +727,14 @@ export function CreateTaskModal() {
   }
 
   const applyTemplate = (cfg: Record<string, unknown>) => {
-    if (typeof cfg.itemTypeId === "string") setItemTypeId(cfg.itemTypeId as string);
-    if (typeof cfg.status === "string") setSelectedStatus(cfg.status as string);
+    // A template's values are chosen values: the List's defaults never
+    // replace them.
+    if (typeof cfg.itemTypeId === "string") { setItemTypeId(cfg.itemTypeId as string); touch("itemTypeId"); }
+    if (typeof cfg.status === "string") { setSelectedStatus(cfg.status as string); touch("status"); }
     setDescription(typeof cfg.description === "string" ? cfg.description : "");
     setPriority((cfg.priority as PriorityKey) ?? null);
+    if (cfg.priority) touch("priority");
+    if (Array.isArray(cfg.tags) && cfg.tags.length) touch("tagIds");
     // Tags stored as WorkspaceTag objects; legacy string entries (pre
     // Tag-model templates) are dropped: they have no Tag row to link.
     setTags(Array.isArray(cfg.tags) ? (cfg.tags as unknown[]).filter((t): t is WorkspaceTag => !!t && typeof t === "object" && "id" in (t as object)) : []);
@@ -814,21 +878,35 @@ export function CreateTaskModal() {
     if (!taskName.trim()) { setError("Add a name"); return null; }
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/boards/${selectedList.id}/items`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      // The List's default values fill what the person did not set: an
+      // untouched defaulted key is left out and the server applies it. With
+      // no settings loaded for THIS List, today's body goes unchanged.
+      const createBody = applyDefaultsToCreateBody(
+        {
           title: taskName.trim(),
           status: selectedStatus,
           groupKey: selectedStatus,
-          ownerId: assigneeId ?? undefined,
+          // A cleared assignee is sent as an explicit null, so the List's
+          // default people do not come back after the person removed them.
+          ownerId: assigneeId ?? (touched.has("ownerId") ? null : undefined),
           startAt: startAt ? startAt.toISOString() : null,
           dueAt: dueAt ? dueAt.toISOString() : null,
           priority: priority ?? null,
           itemTypeId: itemTypeId ?? undefined,
           tagIds: tags.map((t) => t.id),
           metadata: buildMetadata(),
-        }),
+        },
+        listSettings,
+        touched,
+        selectedList.id,
+      );
+      // groupKey follows the status: without a status of its own it would
+      // file the task under a group its default status is not.
+      if (!("status" in createBody)) delete (createBody as Record<string, unknown>).groupKey;
+      const res = await fetch(`/api/boards/${selectedList.id}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(createBody),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -874,7 +952,7 @@ export function CreateTaskModal() {
       setSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist, kraId, kpiId]);
+  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist, kraId, kpiId, listSettings, touched]);
 
   type Variant = "default" | "open" | "another" | "duplicate";
   const handleCreate = useCallback(async (variant: Variant) => {
@@ -995,7 +1073,7 @@ export function CreateTaskModal() {
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "type" ? null : "type")} active>
                 <TypeIcon size={14} className="text-zinc-500" />
-                {activeType?.singular ?? "Task"}
+                {defaultTypeLabel ? `Default: ${defaultTypeLabel}` : activeType?.singular ?? "Task"}
                 <ChevronDown size={12} className="ms-0.5 opacity-70" />
               </Chip>
               {openMenu === "type" && (
@@ -1005,7 +1083,7 @@ export function CreateTaskModal() {
                     const Icon = itemTypeIcon(t.icon);
                     const selected = (itemTypeId ?? activeType?.id) === t.id;
                     return (
-                      <button key={t.id} type="button" onClick={() => { setItemTypeId(t.id); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-start text-base ${selected ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
+                      <button key={t.id} type="button" onClick={() => { setItemTypeId(t.id); touch("itemTypeId"); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-start text-base ${selected ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
                         <Icon className="w-4 h-4 text-zinc-500" />
                         <span className="flex-1 truncate">{t.singular}</span>
                         {t.isDefault && <span className="text-xs text-zinc-400">(default)</span>}
@@ -1130,8 +1208,8 @@ export function CreateTaskModal() {
             <div className="relative">
               <StatusChip
                 onClick={() => setOpenMenu(openMenu === "status" ? null : "status")}
-                color={selectedStatusDef?.color ?? "#71717A"}
-                label={selectedStatusDef?.label ?? "TO DO"}
+                color={defaultStatusDef?.color ?? selectedStatusDef?.color ?? "#71717A"}
+                label={defaultStatusDef ? `Default: ${defaultStatusDef.label}` : selectedStatusDef?.label ?? "TO DO"}
               />
               {openMenu === "status" && (
                 <div className="absolute bottom-full start-0 mb-1 w-[240px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5 max-h-[300px] overflow-y-auto">
@@ -1142,7 +1220,7 @@ export function CreateTaskModal() {
                       <div key={group} className="pb-1">
                         <div className="px-3 py-1 text-xs font-medium text-zinc-400 uppercase tracking-wide">{STATUS_GROUP_LABEL[group]}</div>
                         {gs.map((s) => (
-                          <button key={s.key} type="button" onClick={() => { setSelectedStatus(s.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                          <button key={s.key} type="button" onClick={() => { setSelectedStatus(s.key); touch("status"); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                             <span className="flex-1 truncate">{s.label}</span>
                             {selectedStatus === s.key && <Check className="w-3.5 h-3.5 text-brand-deep" />}
@@ -1159,10 +1237,14 @@ export function CreateTaskModal() {
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")} active={!!assignee}>
                 {assignee ? <Avatar person={assignee} size={18} /> : <span className="w-4 h-4 rounded-full border border-dashed border-zinc-400 flex items-center justify-center"><Plus className="w-2.5 h-2.5 text-zinc-400" /></span>}
-                {assignee ? (me && assignee.id === me.id ? "Me" : personName(assignee).split(" ")[0]) : "Assignee"}
+                {assignee
+                  ? (me && assignee.id === me.id ? "Me" : personName(assignee).split(" ")[0])
+                  : defaultAssignee
+                    ? `Default: ${personName(defaultAssignee).split(" ")[0]}${(listDefaults?.assigneeIds?.length ?? 0) > 1 ? ` +${(listDefaults?.assigneeIds?.length ?? 1) - 1}` : ""}`
+                    : "Assignee"}
               </Chip>
               {openMenu === "assignee" && (
-                <PeoplePicker people={people} me={me} selected={assigneeId ? [assigneeId] : []} onToggle={(id) => { setAssigneeId((cur) => (cur === id ? null : id)); setOpenMenu(null); }} />
+                <PeoplePicker people={people} me={me} selected={assigneeId ? [assigneeId] : []} onToggle={(id) => { setAssigneeId((cur) => (cur === id ? null : id)); touch("ownerId"); setOpenMenu(null); }} />
               )}
             </div>
 
@@ -1235,20 +1317,20 @@ export function CreateTaskModal() {
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "priority" ? null : "priority")} active={!!priority}>
                 <Flag className="w-3.5 h-3.5" style={{ color: priority ? PRIORITIES.find((p) => p.key === priority)!.color : "#a1a1aa" }} />
-                {priority ? PRIORITIES.find((p) => p.key === priority)!.label : "Priority"}
+                {priority ? PRIORITIES.find((p) => p.key === priority)!.label : defaultPriorityLabel ? `Default: ${defaultPriorityLabel}` : "Priority"}
               </Chip>
               {openMenu === "priority" && (
                 <div className="absolute bottom-full start-0 mb-1 w-[180px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
                   <div className="px-3 py-1 text-xs font-medium text-zinc-400 uppercase tracking-wide">Priority</div>
                   {PRIORITIES.map((p) => (
-                    <button key={p.key} type="button" onClick={() => { setPriority(p.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                    <button key={p.key} type="button" onClick={() => { setPriority(p.key); touch("priority"); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                       <Flag className="w-4 h-4" style={{ color: p.color }} />
                       <span className="flex-1">{p.label}</span>
                       {priority === p.key && <Check className="w-3.5 h-3.5 text-brand-deep" />}
                     </button>
                   ))}
                   <div className="border-t border-zinc-100 mt-1 pt-1">
-                    <button type="button" onClick={() => { setPriority(null); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-500 hover:bg-zinc-50">
+                    <button type="button" onClick={() => { setPriority(null); touch("priority"); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-500 hover:bg-zinc-50">
                       <Ban className="w-4 h-4 text-zinc-400" /> Clear
                     </button>
                   </div>
@@ -1258,11 +1340,11 @@ export function CreateTaskModal() {
 
             {/* Tags: an optional field, off unless this List's set names it
                 or the person adds it from "+ Add field". */}
-            {fieldOn("tags") || tags.length > 0 ? (
+            {fieldOn("tags") || tags.length > 0 || defaultTagCount > 0 ? (
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "tags" ? null : "tags")} active={tags.length > 0}>
                 <Tag className="w-3.5 h-3.5 text-zinc-400" />
-                {tags.length ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : "Tags"}
+                {tags.length ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : defaultTagCount ? `Default: ${defaultTagCount} tag${defaultTagCount > 1 ? "s" : ""}` : "Tags"}
               </Chip>
               {openMenu === "tags" && (
                 <div className="absolute bottom-full start-0 mb-1 w-[260px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] p-2">
@@ -1278,7 +1360,7 @@ export function CreateTaskModal() {
                         if (!q) return;
                         const existing = (orgTags ?? []).find((t) => t.name.toLowerCase() === q.toLowerCase());
                         if (existing) {
-                          if (!tags.some((t) => t.id === existing.id)) setTags((p) => [...p, existing]);
+                          if (!tags.some((t) => t.id === existing.id)) { setTags((p) => [...p, existing]); touch("tagIds"); }
                           setTagDraft("");
                         } else {
                           void createWorkspaceTag(q);
@@ -1301,7 +1383,7 @@ export function CreateTaskModal() {
                             <button
                               key={t.id}
                               type="button"
-                              onClick={() => setTags((p) => (active ? p.filter((x) => x.id !== t.id) : [...p, t]))}
+                              onClick={() => { setTags((p) => (active ? p.filter((x) => x.id !== t.id) : [...p, t])); touch("tagIds"); }}
                               className="w-full flex items-center gap-2 px-2 py-1.5 text-start text-base hover:bg-zinc-50 rounded"
                             >
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: `${color}22`, color }}>{t.name}</span>
@@ -1323,7 +1405,7 @@ export function CreateTaskModal() {
                         return (
                           <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: `${color}22`, color }}>
                             {t.name}
-                            <button type="button" onClick={() => setTags((p) => p.filter((x) => x.id !== t.id))} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
+                            <button type="button" onClick={() => { setTags((p) => p.filter((x) => x.id !== t.id)); touch("tagIds"); }} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
                           </span>
                         );
                       })}

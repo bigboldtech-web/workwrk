@@ -19,7 +19,7 @@ import {
   MapPin, GaugeCircle, Gauge, Activity, Languages, FileText, ScrollText,
   CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target, BookOpen,
   Flag, Box, CircleDot, MessageSquare, GanttChart, Clock, Link2,
-  CalendarCheck, GitPullRequest, Frame,
+  CalendarCheck, GitPullRequest, Frame, Cable, FlipHorizontal2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,10 +56,7 @@ export type FieldType =
   // connection-as-field — link a Doc / SOP / Canvas to the row (mirror KRA)
   | "LINKED_DOC" | "LINKED_SOP" | "LINKED_CANVAS"
   // Phase 5b: a value computed at read time from a connect column's tasks
-  // (src/lib/list-connect.ts). Deliberately NOT in FIELD_CATALOG yet: the
-  // field shelf offers only what it can build, and the builder for this is
-  // the client run's. Every renderer already falls back to "-" for a type it
-  // has no case for, so a mirror created through the API renders safely.
+  // (src/lib/list-connect.ts), built through the field shelf's Mirror config.
   | "MIRROR";
 
 export interface FieldCatalogEntry {
@@ -72,6 +69,15 @@ export interface FieldCatalogEntry {
   /** Whether this phase ships a real renderer (true) or a stub (false). */
   tier1: boolean;
   description?: string;
+  /**
+   * A second tile for a type another entry already names. Connect stores a
+   * RELATIONSHIP (with target Lists), and the doc-link Relationship tile
+   * stores one too, so the shelf keys its tiles on `catalogKey ?? type` and a
+   * tile can never create the other's field.
+   */
+  catalogKey?: string;
+  /** Picking the tile opens its configuration instead of creating the field at once. */
+  needsConfig?: boolean;
 }
 
 export const FIELD_CATALOG: FieldCatalogEntry[] = [
@@ -121,11 +127,34 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "VOTING",           label: "Voting",          Icon: ThumbsUp,      color: C.violet, group: "Advanced", tier1: true, description: "Let people upvote the row" },
   { type: "ACTION_ITEMS",     label: "Action items",    Icon: CheckCheck,    color: C.green,  group: "Advanced", tier1: false, description: "A checklist of action items" },
   { type: "TSHIRT_SIZE",      label: "T-shirt size",    Icon: Shirt,         color: C.amber,  group: "Advanced", tier1: true, description: "Sizing from XS to XL" },
+  // Phase 5b, monday's connect-boards model. Both need a configuration step
+  // (which Lists; which connect column and which field), so the shelf opens
+  // it instead of creating a column with nothing behind it.
+  { type: "RELATIONSHIP",     catalogKey: "CONNECT", label: "Connect", Icon: Cable, color: C.amber, group: "Advanced", tier1: true, needsConfig: true, description: "Link tasks from other Lists" },
+  { type: "MIRROR",           label: "Mirror",          Icon: FlipHorizontal2, color: C.amber, group: "Advanced", tier1: true, needsConfig: true, description: "Show a field from connected tasks" },
 ];
 
+// Built from the entries WITHOUT a catalogKey, so RELATIONSHIP stays the
+// doc-link Relationship entry every stored doc-link field has always read.
 export const FIELD_TYPE_BY_KEY: Record<FieldType, FieldCatalogEntry> = Object.fromEntries(
-  FIELD_CATALOG.map((e) => [e.type, e]),
+  FIELD_CATALOG.filter((e) => !e.catalogKey).map((e) => [e.type, e]),
 ) as Record<FieldType, FieldCatalogEntry>;
+
+/** The Connect tile: a RELATIONSHIP in connect mode (list-connect.ts isConnectField). */
+export const CONNECT_CATALOG_ENTRY: FieldCatalogEntry = FIELD_CATALOG.find((e) => e.catalogKey === "CONNECT")!;
+
+/**
+ * The catalog entry a stored field reads as: its icon, label and group.
+ *
+ * A RELATIONSHIP whose options carry a `targetBoardIds` array is a Connect
+ * column, an EMPTY array included (redaction empties it for a viewer who can
+ * read none of its Lists, and it is still a connect column to them); every
+ * other field is its type's entry.
+ */
+export function catalogEntryForField(field: Pick<FieldDef, "type" | "options">): FieldCatalogEntry | undefined {
+  if (field.type === "RELATIONSHIP" && Array.isArray(field.options?.targetBoardIds)) return CONNECT_CATALOG_ENTRY;
+  return FIELD_TYPE_BY_KEY[field.type];
+}
 
 // ── Built-in columns (ClickUp "Properties") ────────────────────
 // The fixed, non-custom-field columns the table can show. Visibility per view:

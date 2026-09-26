@@ -298,6 +298,28 @@ export function recipientProblems(
   return Array.from(new Set(requested)).filter((id) => !ok.has(id));
 }
 
+/**
+ * recipientProblems for a REPORT, which also refuses a Guest.
+ *
+ * A report carries card titles, notes text and task titles computed under
+ * the recipient's access, and links back into pages a Guest is shown a 404
+ * for, so a Guest is never an eligible recipient (the cron skips one too).
+ * `guest` is the org role read from the member's row (orgRoleOf, in
+ * list-links-server.ts recipientRows), never the raw access level.
+ * recipientProblems itself is unchanged because PATCH /api/boards/[id] uses
+ * it for default assignees, where a Guest is a valid assignee.
+ */
+export function reportRecipientProblems(
+  requested: readonly string[],
+  rows: ReadonlyArray<{ id: string; organizationId: string; deletedAt: Date | string | null; status: string | null; guest: boolean }>,
+  organizationId: string,
+): string[] {
+  const guests = new Set(rows.filter((r) => r.guest).map((r) => r.id));
+  const problems = new Set(recipientProblems(requested, rows, organizationId));
+  for (const id of new Set(requested)) if (guests.has(id)) problems.add(id);
+  return Array.from(new Set(requested)).filter((id) => problems.has(id));
+}
+
 // ── The run log ──────────────────────────────────────────────────────
 
 export type RunOutcome = "sent" | "nothing_sent" | "target_unavailable" | "deactivated";
@@ -374,6 +396,11 @@ export interface ReportSection {
  * A summary and a link back, no attachments. Everything in it was computed
  * for the one recipient it goes to, so the body is safe to render as it is;
  * every string is escaped anyway, because a task title is user input.
+ *
+ * `manageLink` is the recipient's own way out, and it must not depend on the
+ * report's target: a recipient who can no longer open the dashboard or view
+ * can never reach the "Stop receiving" on its page, so the footer points at
+ * the "Reports you receive" list on Settings, Notifications instead.
  */
 export function buildReportEmail(r: {
   title: string;
@@ -381,6 +408,7 @@ export function buildReportEmail(r: {
   cadence: string;
   sections: readonly ReportSection[];
   link: string;
+  manageLink: string;
 }): { subject: string; html: string } {
   const subject = `${r.kindLabel} report: ${r.title}`.slice(0, 200);
   const sections = r.sections.length
@@ -396,7 +424,8 @@ export function buildReportEmail(r: {
     `<h2 style="font-size:16px;margin:0 0 8px">${escapeHtml(r.title)}</h2>` +
     sections +
     `<p style="margin:20px 0 0"><a href="${escapeHtml(r.link)}">Open it in WorkwrK</a></p>` +
-    `<p style="margin:12px 0 0;color:#667085;font-size:12px">${escapeHtml(r.cadence)}. You receive this because you are on its recipient list; you can remove yourself from the report's page.</p>` +
+    `<p style="margin:12px 0 0;color:#667085;font-size:12px">${escapeHtml(r.cadence)}. You receive this because you are on its recipient list. ` +
+    `<a href="${escapeHtml(r.manageLink)}" style="color:#667085">Manage the reports you receive</a></p>` +
     `</div>`;
   return { subject, html };
 }
@@ -420,4 +449,21 @@ export function isMissingReportTableError(err: unknown): boolean {
   const metaCode = e.meta && typeof e.meta === "object" ? (e.meta as { code?: unknown }).code : undefined;
   const missing = code === "P2021" || code === "42P01" || metaCode === "42P01" || /\b42P01\b/.test(text) || /does not exist/i.test(text);
   return missing && /ReportSchedule/.test(text);
+}
+
+/**
+ * A person the recipient picker was asked about BY ID, as the caller may see
+ * them. The ids door exists so a chip already on a schedule keeps its name
+ * when that colleague is no longer eligible; it must not become a directory
+ * of every account ever made. So an eligible member is named as the search
+ * would name them; an ineligible one (deleted, INACTIVE, a Guest) only when
+ * they are on a schedule the caller may manage, and never with an email.
+ */
+export function namedRecipientFor<T extends { eligible: boolean; email: string | null }>(
+  option: T,
+  onCallersSchedule: boolean,
+): T | null {
+  if (option.eligible) return option;
+  if (!onCallersSchedule) return null;
+  return { ...option, email: null };
 }

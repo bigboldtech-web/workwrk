@@ -16,6 +16,8 @@ import {
   MAX_CONNECTIONS,
   MAX_CONNECT_TARGETS,
   type ConnectionRef,
+  connectionsDisplayKey,
+  refreshConnectionRefs,
 } from "./list-connect";
 import type { FieldDef } from "./field-catalog";
 
@@ -170,5 +172,24 @@ describe("connections and mirrors", () => {
     );
     expect(m).toEqual({ values: [3, 4], rollup: 7 });
     expect(computeMirror(["a"], { linkFieldKey: "deps", lookupFieldKeys: { T1: "points" } }, () => ({ listId: "T1", read: () => 1 }))).toEqual({ values: [1] });
+  });
+});
+
+describe("refreshing a connect cell's chips", () => {
+  const a = { id: "a", title: "Alpha", statusLabel: "To Do", statusColor: "#111", done: false };
+  const b = { id: "b", title: "Beta", statusLabel: "To Do", statusColor: "#111", done: false };
+  it("sees a rename, a status change and done, not only a change of ids", () => {
+    const base = connectionsDisplayKey([a, b]);
+    expect(connectionsDisplayKey([{ ...a, title: "Alpha 2" }, b])).not.toBe(base);
+    expect(connectionsDisplayKey([{ ...a, statusLabel: "Done", statusColor: "#0a0" }, b])).not.toBe(base);
+    expect(connectionsDisplayKey([a, { ...b, done: true }])).not.toBe(base);
+    expect(connectionsDisplayKey([a, b])).toBe(base);
+  });
+  it("redraws chips from the server's copy without adding or dropping any", () => {
+    const picked = { id: "c", title: "Just picked", statusLabel: null, statusColor: null, done: false };
+    const out = refreshConnectionRefs([a, picked], [{ ...a, title: "Alpha renamed", done: true }, b]);
+    expect(out.map((c) => c.id)).toEqual(["a", "c"]);
+    expect(out[0]).toMatchObject({ title: "Alpha renamed", done: true });
+    expect(out[1]).toBe(picked);
   });
 });

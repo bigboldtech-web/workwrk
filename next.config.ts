@@ -108,12 +108,6 @@ const nextConfig: NextConfig = {
       // settings registry still carries /settings/calendar as an alias, so
       // settings search finds the page under its old name.
       { source: "/settings/calendar", destination: "/account/connections", permanent: true },
-      // The Work landing. WORK_HOME_HREF (src/lib/nav/route-hub.ts) is the one
-      // constant every in-app href reads; it cannot be imported here because
-      // next.config runs before the "@/" alias exists, so this literal is its
-      // ONE mirror and both flip in the same edit when /home ships.
-      { source: "/dashboards", destination: "/home", permanent: false },
-      { source: "/dashboards/:id", destination: "/home", permanent: false },
       // Phase 2 W0 (docs/plans/ui-refresh/spec-work-home.md section 4).
       //
       // /assigned-comments was a stub: two tabs that always rendered empty
@@ -134,7 +128,9 @@ const nextConfig: NextConfig = {
       //   /today      ran a query for the viewer's earliest readable Space and
       //               sent them into it. Not a landing, and nothing of its own
       //               to lose: the page file held that query and no UI.
-      //   /dashboard  a redirect to /today over a tree that was already gone.
+      //   /dashboard  the old singular path. It went to /home while no
+      //               dashboards page existed; it lands on /dashboards, the
+      //               dashboards list, now that decision 1 brought it back.
       //   /tasks      the "My Wrk" card grid. Of its eleven cards, four read
       //               anything; two of those (Assigned to me, Goals) are Home
       //               widgets now and the third (KRAs and KPIs) is the Weekly
@@ -143,7 +139,7 @@ const nextConfig: NextConfig = {
       //   /tasks/personal-list  a pure move: the SAME Item-backed board, at
       //               /my-work/personal, rendered by the same BoardCanvas.
       { source: "/today", destination: "/home", permanent: true },
-      { source: "/dashboard", destination: "/home", permanent: true },
+      { source: "/dashboard", destination: "/dashboards", permanent: true },
       { source: "/tasks", destination: "/home", permanent: true },
       { source: "/tasks/personal-list", destination: "/my-work/personal", permanent: true },
       //

@@ -62,7 +62,9 @@ export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/im
  *   `/today`             -> `/home`. It was never a landing: it ran a query for
  *                           the viewer's first Space and sent them into
  *                           somebody else's project list.
- *   `/dashboard`         -> `/home`.
+ *   `/dashboard`         -> `/dashboards`, the dashboards list (decision 1).
+ *                           It pointed at `/home` while no dashboards page
+ *                           existed.
  *   `/assigned-comments` -> `/inbox?tab=primary&type=task_comment`. Its stub
  *                           page is deleted (spec-work-home.md line 24) and its
  *                           sidebar row with it; the only thing left is the
@@ -111,6 +113,9 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   "/folders": "home",
   "/boards": "home",
   "/okrs": "home",
+  // Decision 1: the dashboards list and, by prefix, /dashboards/[id]. Both
+  // stay in Work, so the rail pill and the sidebar hold still on the canvas.
+  "/dashboards": "home",
   "/trash": "home",
   "/templates": "home",
   "/me/weekly-review": "home",
@@ -211,6 +216,7 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/folders": "Folder",
   "/boards": "List",
   "/okrs": "Goals",
+  "/dashboards": "Dashboards",
   "/trash": "Trash",
   "/templates": "Templates",
   "/me/weekly-review": "Weekly review",
@@ -347,8 +353,8 @@ export const FOLDED_APP_HUB: Readonly<Record<string, HubKey>> = {
  * to somebody's project list", and a person with no Space landed on /spaces.
  *
  * This constant is the one every in-app href reads. `next.config.ts` carries
- * its ONE mirror (it runs before the "@/" alias exists), and both flip in the
- * same edit.
+ * its mirror in the `/today` and `/tasks` rows (it runs before the "@/" alias
+ * exists, so it cannot import this), and they flip together in one edit.
  *
  * Whatever it points at, it points at a path the table owns: a test asserts
  * `resolveHubPrefix(WORK_HOME_HREF)` matches a row, so the Work landing can

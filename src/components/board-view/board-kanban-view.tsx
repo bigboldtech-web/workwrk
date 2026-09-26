@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Columns3, Network, Pencil, Plus, Repeat, X } from "lucide-react";
 import { PRIORITY_OPTIONS, buildSubtaskBody, isDoneStatus, splitBulkResults, bulkFailureMessage, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import type { ItemRole } from "@/lib/item-role";
 import { countSubtasksByParent, groupCardsByStatus } from "@/lib/kanban-columns";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -19,11 +20,31 @@ import { MultiAssigneePicker, type PersonRef } from "./assignee-picker";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { DatePlanner } from "./date-planner";
-import { ItemMoreMenu } from "./item-more-menu";
+import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
 import { BulkActionBar } from "./bulk-action-bar";
 import { type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { accessMessage } from "@/lib/access-message";
+import {
+  boardStatusFor,
+  bulkStatusSkipMessage,
+  homeStatusTarget,
+  itemsUrl,
+  linkedMenuFlags,
+  linkedRowEditable,
+  linkedRowKind,
+  mergeRefetchedRow,
+  optimisticLinkedStatus,
+  linkedStatusNote,
+  linkedStatusShort,
+  linkedStatusRefusal,
+  planBulkStatus,
+  refetchedFromRow,
+  statusPickerFor,
+  writeContext,
+} from "@/lib/list-link-rows";
+import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
+import { LinkedRowIndicator } from "./linked-row-indicator";
 
 interface BoardKanbanViewProps {
   boardId: string;
@@ -54,10 +75,25 @@ interface BoardKanbanViewProps {
   priorityEnabled?: boolean;
   tagsEnabled?: boolean;
   timeTrackingEnabled?: boolean;
+  /** Phase 5b: the List's defaults, keyed by the List they were read for. */
+  loadedSettings?: LoadedListSettings | null;
+  /** Phase 5b: the status a card has in THIS List (a linked card's home status, remapped). */
+  statusOf?: (row: BoardItemRow) => string | null;
+  /** The owner's Personal List: its tasks are never added to other Lists. */
+  personalList?: boolean;
 }
 
-export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true }: BoardKanbanViewProps) {
+// What a bulk refusal of a card shown here THROUGH A LINK means.
+const LINKED_ARCHIVE_REFUSED = "Tasks shown here from other Lists can't be archived or deleted from this List. Remove them from this List instead, or open their home List.";
+
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true, loadedSettings = null, statusOf: statusOfProp, personalList = false }: BoardKanbanViewProps) {
   const confirm = useConfirm();
+  // The column a card belongs to HERE: a card shown through a link stores its
+  // home status, remapped into this board's set (Done stays Done).
+  const statusOf = useCallback(
+    (row: BoardItemRow) => (statusOfProp ? statusOfProp(row) : boardStatusFor(row, boardId, statuses)),
+    [statusOfProp, boardId, statuses],
+  );
   // Show all choice-type custom fields as chips on cards (capped so a card with
   // many fields doesn't sprawl) — so switching List → Board keeps custom data
   // visible.
@@ -66,6 +102,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     [initialFields],
   );
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
+  const itemsRef = useRef<BoardItemRow[]>(initialItems);
+  useEffect(() => { itemsRef.current = items; }, [items]);
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [hoverColumn, setHoverColumn] = useState<string | null>(null);
@@ -110,17 +148,13 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
 
   const statusOrder = useMemo(() => statuses.map((o) => o.value), [statuses]);
   const firstStatus = statusOrder[0] ?? "TO_DO";
-  const doneStatusValue = useMemo(
-    () => statuses.find((s) => s.group === "DONE")?.value ?? statuses.find((s) => s.group !== "ACTIVE")?.value ?? null,
-    [statuses],
-  );
   // Columns hold TOP-LEVEL cards only. A subtask drawn loose in a column beside
   // its parent is indistinguishable from an unrelated new task, which is how
   // the card's "+" got reported as "it makes a task, not a subtask". The
   // parent's subtask count is the signal; opening the parent shows the
   // children. A subtask whose parent is not on this board is re-rooted rather
   // than hidden. See lib/kanban-columns.ts for both rules and their tests.
-  const grouped = useMemo(() => groupCardsByStatus(items, statusOrder), [items, statusOrder]);
+  const grouped = useMemo(() => groupCardsByStatus(items, statusOrder, statusOf), [items, statusOrder, statusOf]);
 
   // Visible card order (column order, top→bottom) — the axis shift-select
   // ranges over.
@@ -148,25 +182,122 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // handlers reach it through a ref rather than being reordered around it.
   const refetchRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Bulk actions — fan out over /api/items/[id] (no server bulk endpoint yet).
-  // The local (and parent-reported) mutation applies ONLY to ids whose request
-  // genuinely succeeded (fulfilled AND res.ok — an HTTP error resolves
-  // fulfilled, so rejections alone lie). Failed ids stay visible, unmutated
-  // and selected, and get named in the error banner so the user can retry.
+  // Bulk actions. A field write is one PATCH /api/items/[id] per card, as
+  // before Phase 5b, now naming this List (`contextBoardId`) so a card shown
+  // here through a link is written in this List's context. The per-card
+  // route is the one that rolls a repeating task forward when it is
+  // completed, re-anchors a scheduled series when its due date moves, and
+  // tells other tabs and open drawers; /api/items/bulk does none of these and
+  // caps a selection at 200, so a Board selection never goes there. Archive
+  // and delete are one request per card too. Either way the local (and
+  // parent-reported) change applies ONLY to the cards the server accepted;
+  // the others stay visible, unchanged and selected, and are named in the
+  // error banner for a retry.
+  const runBulk = useCallback(async (ids: string[], patch: Record<string, unknown>): Promise<{ succeeded: string[]; failed: string[]; reasons: string[] }> => {
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    const BATCH = 10;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batch = ids.slice(i, i + BATCH);
+      const answers = await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const res = await fetch(`/api/items/${id}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...patch, contextBoardId: boardId }),
+            });
+            if (res.ok) return { id, ok: true as const };
+            const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+            return { id, ok: false as const, reason: typeof data?.error === "string" ? data.error : undefined };
+          } catch {
+            // Network failure: this card is unchanged and stays selected.
+            return { id, ok: false as const, reason: undefined };
+          }
+        }),
+      );
+      for (const a of answers) {
+        if (a.ok) succeeded.push(a.id);
+        else {
+          failed.push(a.id);
+          if (a.reason) reasons.push(a.reason);
+        }
+      }
+    }
+    return { succeeded, failed, reasons };
+  }, [boardId]);
+  const reasonSentences = (reasons: string[]): string => {
+    const out: string[] = [];
+    if (reasons.includes("invalid_status")) out.push("Some tasks from other Lists weren't changed because that status isn't one of their home List's statuses.");
+    if (reasons.includes("use_list_link")) out.push(LINKED_ARCHIVE_REFUSED);
+    return out.length ? ` ${out.join(" ")}` : "";
+  };
+  const linkedIdsOf = useCallback((ids: string[]) => {
+    const byId = new Map(itemsRef.current.map((r) => [r.id, r] as const));
+    return new Set(ids.filter((id) => { const r = byId.get(id); return r ? linkedRowKind(r, boardId) !== "home" : false; }));
+  }, [boardId]);
+
   const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
     if (selected.size === 0) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
-      fetch(`/api/items/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-    );
-    setError(failed.length > 0 ? bulkFailureMessage("update", failed, ids.length, items) : null);
+    const touchesLinked = linkedIdsOf(ids).size > 0;
+    const { succeeded, failed, reasons } = await runBulk(ids, body);
+    setError(failed.length > 0 ? `${bulkFailureMessage("update", failed, ids.length, items)}${reasonSentences(reasons)}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.map((r) => (ok.has(r.id) ? { ...r, ...local } : r)));
     for (const id of succeeded) onItemPatched?.(id, local);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, onItemPatched, items]);
+    if (touchesLinked && succeeded.length > 0) await refetchRef.current?.();
+    // reasonSentences is a pure formatter recreated per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, onItemPatched, items, runBulk, linkedIdsOf]);
+
+  // Status across a mixed selection: home cards get this board's value, each
+  // card shown through a link its mapped HOME value, and a linked card whose
+  // home statuses are not shared with the viewer is skipped and named.
+  const bulkStatus = useCallback(async (status: string) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const byId = new Map(itemsRef.current.map((r) => [r.id, r] as const));
+    const rows = Array.from(selected).map((id) => byId.get(id)).filter((r): r is BoardItemRow => !!r);
+    const plan = planBulkStatus(rows, status, boardId, statuses);
+    const groups = [...(plan.home.length ? [{ ids: plan.home, status }] : []), ...plan.linked];
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    const reasons: string[] = [];
+    for (const g of groups) {
+      const r = await runBulk(g.ids, { status: g.status });
+      succeeded.push(...r.succeeded);
+      failed.push(...r.failed);
+      reasons.push(...r.reasons);
+    }
+    const valueFor = new Map<string, string>();
+    for (const g of groups) for (const id of g.ids) valueFor.set(id, g.status);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.map((r) => {
+      if (!ok.has(r.id)) return r;
+      const v = valueFor.get(r.id) ?? status;
+      return linkedRowKind(r, boardId) === "home" ? { ...r, status: v } : optimisticLinkedStatus(r, v);
+    }));
+    for (const id of succeeded) {
+      const row = byId.get(id);
+      const v = valueFor.get(id) ?? status;
+      onItemPatched?.(id, row && linkedRowKind(row, boardId) !== "home" ? optimisticLinkedStatus(row, v) : { status: v });
+    }
+    const messages: string[] = [];
+    if (failed.length > 0) messages.push(`${bulkFailureMessage("update", failed, rows.length, items)}${reasonSentences(reasons)}`);
+    // A linked card with no faithful home status for this one is left as it
+    // is and named, rather than saved as a status nobody picked.
+    if (plan.skipped.length > 0) messages.push(bulkStatusSkipMessage(plan, statuses.find((s) => s.value === status)?.label ?? status));
+    setError(messages.length ? messages.join(" ") : null);
+    setSelected(new Set([...failed, ...plan.skipped]));
+    setBulkBusy(false);
+    if (plan.linked.length > 0 && succeeded.length > 0) await refetchRef.current?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, boardId, statuses, runBulk, onItemPatched, items]);
 
   // "Set owner" and "Clear assignees" are two different writes, because an
   // ownerId-only patch MERGES on the server (the named person moves to the
@@ -188,34 +319,42 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     if (!(await confirm({ title: "Archive cards", description: `Archive ${selected.size} card${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}`, { method: "DELETE" }));
-    setError(failed.length > 0 ? bulkFailureMessage("archive", failed, ids.length, items) : null);
+    // A card shown here through a link names this List, so the server refuses
+    // it rather than archiving the task everywhere; the banner says why.
+    const linked = linkedIdsOf(ids);
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}${linked.has(id) ? `?list=${encodeURIComponent(boardId)}` : ""}`, { method: "DELETE" }),
+    );
+    setError(failed.length > 0 ? `${bulkFailureMessage("archive", failed, ids.length, items)}${failed.some((id) => linked.has(id)) ? ` ${LINKED_ARCHIVE_REFUSED}` : ""}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.filter((r) => !ok.has(r.id)));
     for (const id of succeeded) reportRemoved(id);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved, items]);
+  }, [selected, confirm, reportRemoved, items, linkedIdsOf, boardId]);
   const bulkTrash = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Delete cards", description: `Delete ${selected.size} card${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" }));
-    setError(failed.length > 0 ? bulkFailureMessage("delete", failed, ids.length, items) : null);
+    const linked = linkedIdsOf(ids);
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}?hard=1${linked.has(id) ? `&list=${encodeURIComponent(boardId)}` : ""}`, { method: "DELETE" }),
+    );
+    setError(failed.length > 0 ? `${bulkFailureMessage("delete", failed, ids.length, items)}${failed.some((id) => linked.has(id)) ? ` ${LINKED_ARCHIVE_REFUSED}` : ""}` : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.filter((r) => !ok.has(r.id)));
     for (const id of succeeded) reportRemoved(id);
     setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved, items]);
+  }, [selected, confirm, reportRemoved, items, linkedIdsOf, boardId]);
 
   // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
   const subtaskCountByParent = useMemo(() => countSubtasksByParent(items), [items]);
 
   const refetch = useCallback(async () => {
     try {
-      const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
+      const res = await fetch(itemsUrl(boardId), { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       if (data?.items) {
@@ -235,35 +374,80 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // Optimistic PATCH — merges a display patch locally, sends the API body, and
   // refetches on failure. Backs assignee / due / priority / tags / status edits.
   const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => {
-    if (!canEdit) return;
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...localPatch } : r)));
-    onItemPatched?.(id, localPatch);
+    const card = itemsRef.current.find((r) => r.id === id);
+    // A card shown here through a link is edited only as far as the viewer's
+    // role on the TASK goes.
+    if (!canEdit || (card && !linkedRowEditable(card, canEdit))) return;
+    const linked = card ? linkedRowKind(card, boardId) !== "home" : false;
+    const optimisticFor = (r: BoardItemRow): BoardItemRow => {
+      const next: BoardItemRow = { ...r, ...localPatch };
+      return linked && typeof apiBody.status === "string" ? optimisticLinkedStatus(next, apiBody.status) : next;
+    };
+    setItems((prev) => prev.map((r) => (r.id === id ? optimisticFor(r) : r)));
+    onItemPatched?.(id, linked && card ? optimisticFor(card) : localPatch);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(apiBody),
+        // Every write from a card shown here through a link names this List.
+        body: JSON.stringify({ ...apiBody, ...writeContext(card, boardId) }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); setError(accessMessage(d, "Couldn't save that change.")); await refetch(); return; }
+      const d = await res.json().catch(() => null);
+      const fresh = d?.item as BoardItemRow | undefined;
+      // A linked card takes the answer, which is the card as THIS List shows
+      // it: its home status pill, its link and this List's values.
+      if (linked && fresh && card) {
+        const out = mergeRefetchedRow(optimisticFor(card), refetchedFromRow(fresh), boardId);
+        if (out.action === "merge") {
+          setItems((prev) => prev.map((r) => (r.id === id ? out.row : r)));
+          onItemPatched?.(id, out.row);
+        } else {
+          await refetch();
+        }
+        return;
+      }
       // Recurring task completed → server rolled it forward (reset status +
       // advanced dates). Apply the returned row so the card visibly recurs.
-      const d = await res.json().catch(() => null);
-      if (d?.recurred && d.item) {
-        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...d.item } : r)));
-        onItemPatched?.(id, d.item as Partial<BoardItemRow>);
+      if (d?.recurred && fresh) {
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...fresh } : r)));
+        onItemPatched?.(id, fresh as Partial<BoardItemRow>);
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); }
-  }, [canEdit, refetch, onItemPatched]);
+  }, [canEdit, refetch, onItemPatched, boardId]);
 
+  // A drop into a column. A card shown here through a link writes the HOME
+  // status that column maps to (its status belongs to its home set); with no
+  // home set known, it cannot be dragged at all. A column its home has no
+  // status for is refused and SAID (homeStatusTarget): the old remap wrote
+  // the home's first Active status instead, so a drop on In Progress saved
+  // To Do, reopened a Done task and put the card back where it came from.
   const moveTo = useCallback((id: string, newStatus: string) => {
+    const card = itemsRef.current.find((r) => r.id === id);
+    if (card && linkedRowKind(card, boardId) !== "home") {
+      const target = homeStatusTarget(card, newStatus, statuses);
+      if (!target.ok) {
+        const label = statuses.find((s) => s.value === newStatus)?.label ?? newStatus;
+        setError(linkedStatusRefusal(card, label, target.reason));
+        return;
+      }
+      void patchCard(id, { status: target.status }, { status: target.status });
+      return;
+    }
     void patchCard(id, { status: newStatus }, { status: newStatus });
-  }, [patchCard]);
+  }, [patchCard, boardId, statuses]);
 
   const toggleComplete = useCallback((card: BoardItemRow) => {
-    const done = isDoneStatus(statuses, card.status);
-    const next = done ? firstStatus : (doneStatusValue ?? firstStatus);
+    // A card shown through a link completes in its HOME set.
+    const set = linkedRowKind(card, boardId) !== "home" ? card.listLink?.homeStatuses ?? [] : statuses;
+    if (set.length === 0) return;
+    const done = isDoneStatus(set, card.status);
+    const first = set.find((s) => s.group === "ACTIVE")?.value ?? set[0]?.value;
+    const doneValue = set.find((s) => s.group === "DONE")?.value ?? set.find((s) => s.group !== "ACTIVE")?.value ?? null;
+    const next = done ? first : (doneValue ?? first);
+    if (!next) return;
     void patchCard(card.id, { status: next }, { status: next });
-  }, [statuses, firstStatus, doneStatusValue, patchCard]);
+  }, [statuses, patchCard, boardId]);
 
   // Newly-created card/subtask id to drop straight into title-edit (with the
   // placeholder text selected) so the user types the name — no click-to-rename.
@@ -272,10 +456,13 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const addCard = useCallback(async (status: string) => {
     if (!canEdit) return;
     try {
+      // The column is the person's choice, so its status is never replaced by
+      // the List's default; the other defaults still apply on the server.
+      const body = applyDefaultsToCreateBody({ title: "New item", status }, loadedSettings, new Set(["status"]), boardId);
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "New item", status }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) { setError(accessMessage(data, "Couldn't add a card here.")); return; }
@@ -285,7 +472,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add card");
     }
-  }, [boardId, canEdit, reportCreated]);
+  }, [boardId, canEdit, reportCreated, loadedSettings]);
 
   // Type-first, same contract as the List view's inline subtask row: the title
   // the user typed is the only title ever POSTed. The old version sent the
@@ -301,8 +488,15 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     title: string,
   ): Promise<{ ok: boolean; error?: string }> => {
     if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
-    const body = buildSubtaskBody({ title, parentId, parentStatus, fallbackStatus: firstStatus });
-    if (!body) return { ok: false };
+    const built = buildSubtaskBody({ title, parentId, parentStatus, fallbackStatus: firstStatus });
+    if (!built) return { ok: false };
+    // A subtask under a card shown here through a link is created in the
+    // parent's HOME (with the home's defaults); one at home here inherits the
+    // parent's status, which counts as chosen.
+    const parent = itemsRef.current.find((r) => r.id === parentId);
+    const body = parent && linkedRowKind(parent, boardId) !== "home"
+      ? built
+      : applyDefaultsToCreateBody(built as unknown as Record<string, unknown>, loadedSettings, new Set(parentStatus ? ["status"] : []), boardId);
     try {
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
@@ -324,7 +518,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       setError(msg);
       return { ok: false, error: msg };
     }
-  }, [boardId, canEdit, firstStatus, reportCreated]);
+  }, [boardId, canEdit, firstStatus, reportCreated, loadedSettings]);
 
   // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate).
   // The body this used to send dropped the assignees, the tags, both dates and
@@ -334,6 +528,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     try {
       const res = await fetch(`/api/items/${card.id}/duplicate`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
+      // A copy of a card shown here through a link lives in its HOME, and is
+      // here only if it was linked here too: the board is re-read.
+      if (res.ok && linkedRowKind(card, boardId) !== "home") {
+        await refetch();
+        return;
+      }
       if (res.ok && data?.item) {
         setItems((prev) => [...prev, data.item as BoardItemRow]);
         reportCreated(data.item as BoardItemRow);
@@ -347,7 +547,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
     }
-  }, [canEdit, reportCreated]);
+  }, [canEdit, reportCreated, boardId, refetch]);
 
   const removeLocal = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
@@ -373,6 +573,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     }
   }, [canEdit, confirm, refetch, reportRemoved]);
 
+  // The card being dragged, read by each column to say whether it may go there.
+  const dragCard = useMemo(() => (dragId ? items.find((r) => r.id === dragId) ?? null : null), [dragId, items]);
+
   return (
     <div className="space-y-2">
       {error ? (
@@ -393,11 +596,22 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           const status = meta.value;
           const cards = grouped.get(status) ?? [];
           const isHover = hoverColumn === status;
+          // While a card shown here through a link is dragged, a column its
+          // home List has no status for is marked as one it cannot go in, so
+          // the refusal a drop there gets is never a surprise.
+          const dragTarget = dragCard && linkedRowKind(dragCard, boardId) !== "home" && statusOf(dragCard) !== status
+            ? homeStatusTarget(dragCard, status, statuses)
+            : null;
+          const refusal = dragCard && dragTarget && !dragTarget.ok ? linkedStatusRefusal(dragCard, meta.label, dragTarget.reason) : null;
+          const refusesDrag = refusal !== null;
           return (
             <div
               key={status}
-              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 p-2 transition-colors ${
-                isHover ? "outline-2 outline-dashed -outline-offset-2 outline-[var(--os-brand)]" : ""
+              title={refusal ?? undefined}
+              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 p-2 transition-[opacity,background-color] ${
+                refusesDrag
+                  ? `opacity-50 ${isHover ? "cursor-not-allowed outline-2 outline-dashed -outline-offset-2 outline-zinc-400" : ""}`
+                  : isHover ? "outline-2 outline-dashed -outline-offset-2 outline-[var(--os-brand)]" : ""
               }`}
               onDragOver={(e) => {
                 if (!canEdit || !dragId) return;
@@ -412,7 +626,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 setHoverColumn(null);
                 if (!dragId || !canEdit) return;
                 const card = items.find((r) => r.id === dragId);
-                if (card && card.status !== status) moveTo(dragId, status);
+                // "Already in this column" is the card's status HERE.
+                if (card && statusOf(card) !== status) moveTo(dragId, status);
                 setDragId(null);
               }}
             >
@@ -437,18 +652,55 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
               </div>
 
               <div className="flex-1 space-y-2 min-h-[40px]">
-                {cards.map((card) => (
+                {cards.map((card) => {
+                  // A card shown here THROUGH A LINK: edited only as far as
+                  // the task role goes, dragged only when its home set is
+                  // known (a drop writes a home status), its menu from the
+                  // link's own flags.
+                  const kind = linkedRowKind(card, boardId);
+                  const cardCanEdit = linkedRowEditable(card, canEdit);
+                  const flags = linkedMenuFlags(card, boardId, canEdit, currentUserId ?? null, { personalList });
+                  // A linked card drags only when its home set is known here:
+                  // the columns it can go in are then the ones its home maps.
+                  const draggable = cardCanEdit && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
+                  const listContext: ItemMenuListContext | undefined = kind === "home"
+                    ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+                    : {
+                        boardId,
+                        kind: "linked",
+                        homeBoardId: card.listLink?.homeList?.id ?? null,
+                        homeStatuses: card.listLink?.homeStatuses,
+                        canRemoveFromList: flags.canRemoveFromList,
+                        canLinkMove: flags.canLinkMove,
+                        canAddToList: flags.canAddToList,
+                        linkedSubtask: flags.linkedSubtask,
+                      };
+                  return (
                   <KanbanCard
                     key={card.id}
                     boardId={boardId}
                     card={card}
                     chipFields={chipFields}
                     subtaskCount={subtaskCountByParent.get(card.id) ?? 0}
-                    statuses={statuses}
-                    canEdit={canEdit}
+                    // A linked card's status is a value of its HOME set: its
+                    // done state and date planner read that set, or at least
+                    // its own home status when the set is not shared.
+                    statuses={
+                      kind === "home"
+                        ? statuses
+                        : card.listLink?.homeStatuses ?? (card.listLink?.homeStatus ? [card.listLink.homeStatus] : statuses)
+                    }
+                    canEdit={cardCanEdit}
+                    draggableCard={draggable}
+                    menuRole={kind === "home" ? undefined : flags.role}
+                    menuIsCreator={kind === "home" ? undefined : flags.isCreator}
+                    listContext={listContext}
+                    homeBoardId={card.listLink?.homeList?.id ?? null}
+                    statusNote={kind === "linked-root" ? linkedStatusNote(card, boardId, statuses) : null}
+                    statusShort={kind === "linked-root" ? linkedStatusShort(card, boardId, statuses) : null}
                     currentUserId={currentUserId ?? null}
                     canDelete={
-                      canDeleteTasks === undefined
+                      kind !== "home" || canDeleteTasks === undefined
                         ? undefined
                         : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId)
                     }
@@ -470,7 +722,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     tagsEnabled={tagsEnabled}
                     timeTrackingEnabled={timeTrackingEnabled}
                   />
-                ))}
+                  );
+                })}
                 {canEdit ? (
                   <button
                     type="button"
@@ -495,7 +748,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         priorities={PRIORITY_OPTIONS}
         onClear={clearSelection}
         onArchive={bulkArchive}
-        onStatus={(status) => bulkPatch({ status }, { status })}
+        onStatus={(status) => void bulkStatus(status)}
         onDueAt={(iso) => bulkPatch({ dueAt: iso }, { dueAt: iso })}
         onOwner={(ownerId) => void bulkOwner(ownerId)}
         boardId={boardId}
@@ -528,6 +781,13 @@ function KanbanCard({
   subtaskCount,
   statuses,
   canEdit,
+  draggableCard,
+  menuRole,
+  menuIsCreator,
+  listContext,
+  homeBoardId,
+  statusNote = null,
+  statusShort = null,
   currentUserId,
   canDelete,
   onDragStart,
@@ -554,6 +814,21 @@ function KanbanCard({
   subtaskCount: number;
   statuses: StatusOption[];
   canEdit: boolean;
+  /** Phase 5b: a linked card drags only when its home set is known. */
+  draggableCard: boolean;
+  /** The TASK role for a card shown here through a link; undefined keeps the List's. */
+  menuRole?: ItemRole | null;
+  menuIsCreator?: boolean;
+  listContext?: ItemMenuListContext;
+  /** The task's home List, when the viewer can read it. */
+  homeBoardId: string | null;
+  /**
+   * Why a card shown here through a link sits in a column that is not its own
+   * status (a home "In review" in this List's To Do), as the title's tooltip.
+   */
+  statusNote?: string | null;
+  /** The same, in a few words shown under the title, so touch sees it too. */
+  statusShort?: string | null;
   /** undefined = the host could not work it out; the menu leaves Delete alone. */
   /** The viewer, for the card menu's "Assign to me" and "Watch". */
   currentUserId: string | null;
@@ -631,7 +906,7 @@ function KanbanCard({
 
   return (
     <div
-      draggable={canEdit && !editing && !subtaskOpen}
+      draggable={draggableCard && !editing && !subtaskOpen}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing && !subtaskOpen) onOpen?.(); }}
@@ -639,7 +914,7 @@ function KanbanCard({
       className={`group relative rounded-lg border bg-white px-3 py-2 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
         selected ? "border-[var(--os-brand)] ring-1 ring-[var(--os-brand)]" : "border-zinc-200 hover:border-zinc-300"
       } ${
-        canEdit && !editing && !subtaskOpen ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
+        draggableCard && !editing && !subtaskOpen ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-[box-shadow,border-color] duration-150`}
     >
       {/* Title + action rail */}
@@ -670,8 +945,14 @@ function KanbanCard({
               className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-base font-medium text-zinc-900 focus:outline-none"
             />
           ) : (
-            <div className="break-words text-base font-medium leading-snug text-zinc-800">
+            <div className="break-words text-base font-medium leading-snug text-zinc-800" title={statusNote ?? undefined}>
               {card.title}
+              {/* Also in another List: the home List's name, after the title. */}
+              {card.listLink ? (
+                <span className="ml-1.5 inline-flex align-middle" onClick={stop}>
+                  <LinkedRowIndicator row={card} boardId={boardId} />
+                </span>
+              ) : null}
               {card.recurRule ? (
                 <span
                   className="inline-flex items-center align-middle ml-1 text-zinc-400"
@@ -679,6 +960,11 @@ function KanbanCard({
                   aria-label="Recurring task"
                 >
                   <Repeat className="w-3 h-3" />
+                </span>
+              ) : null}
+              {statusShort ? (
+                <span className="mt-0.5 block text-xs font-normal leading-snug text-zinc-500" title={statusNote ?? undefined}>
+                  {statusShort}
                 </span>
               ) : null}
             </div>
@@ -712,11 +998,18 @@ function KanbanCard({
               <Pencil className="w-3.5 h-3.5" />
             </button>
           ) : null}
+          {/* Always rendered, as it always was: a reader who may do nothing
+              else still gets Copy link, Copy task ID, reminders and Watch. */}
           <ItemMoreMenu
             ref={moreRef}
             host="row"
-            role={canDelete ? "FULL" : canEdit ? "EDIT" : "VIEW"}
-            item={{ id: card.id, boardId, title: card.title, status: card.status, assigneeIds: card.assigneeIds, itemTypeId: card.itemTypeId ?? null }}
+            role={menuRole ?? (canDelete ? "FULL" : canEdit ? "EDIT" : "VIEW")}
+            // A card shown here through a link names its HOME (when the viewer
+            // may know it): the menu's events and Move are about that task.
+            item={{ id: card.id, boardId: card.listLink ? homeBoardId : boardId, title: card.title, status: card.status, assigneeIds: card.assigneeIds, itemTypeId: card.itemTypeId ?? null, parentItemId: card.parentItemId ?? null }}
+            isCreator={menuIsCreator}
+            listContext={listContext}
+            onRemovedFromList={onDeleted}
             // Not null: ItemMoreMenu guards "Assign to me" and "Watch" on
             // this, so a null here renders both rows and makes both inert.
             currentUserId={currentUserId}

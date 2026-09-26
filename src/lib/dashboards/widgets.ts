@@ -76,9 +76,21 @@ interface Base {
   layout: WidgetLayout;
 }
 
-export type StatWidget = Base & { kind: "stat"; source: WidgetSource; filter: WidgetFilter; metric: StatMetric; scope: StatScope };
-export type ChartWidget = Base & { kind: "chart"; source: WidgetSource; filter: WidgetFilter; groupBy: ChartGroupBy; display: ChartDisplay };
-export type ListWidget = Base & { kind: "list"; source: WidgetSource; filter: WidgetFilter; sort: ListSort; limit: number };
+/**
+ * Who wrote a data card's title: a person (true) or its settings (false).
+ * The editor keeps a title the settings gave in step with them and never
+ * replaces one a person typed, however much it looks like a default ("Tasks
+ * by Owner" on a chart grouped by an Owner field). Absent on a card saved
+ * before the flag existed; for those alone the editor reads the title's
+ * shape instead (widget-kinds.ts isUntouchedWidgetTitle).
+ */
+interface TitleFlag {
+  titleEdited?: boolean;
+}
+
+export type StatWidget = Base & TitleFlag & { kind: "stat"; source: WidgetSource; filter: WidgetFilter; metric: StatMetric; scope: StatScope };
+export type ChartWidget = Base & TitleFlag & { kind: "chart"; source: WidgetSource; filter: WidgetFilter; groupBy: ChartGroupBy; display: ChartDisplay };
+export type ListWidget = Base & TitleFlag & { kind: "list"; source: WidgetSource; filter: WidgetFilter; sort: ListSort; limit: number };
 export type NotesWidget = Base & { kind: "notes"; text: string };
 export type PassthroughWidget = { id: string; kind: "passthrough"; raw: unknown; layout?: WidgetLayout };
 export type DataWidget = StatWidget | ChartWidget | ListWidget;
@@ -164,6 +176,7 @@ function parseCurrent(o: Record<string, unknown>, id: string): Widget | null {
   const source = parseSource(o.source);
   if (!source) return null;
   const filter = parseFilter(o.filter);
+  const flag: TitleFlag = typeof o.titleEdited === "boolean" ? { titleEdited: o.titleEdited } : {};
   if (o.kind === "stat") {
     const m = asObject(o.metric);
     let metric: StatMetric = { op: "count" };
@@ -172,16 +185,16 @@ function parseCurrent(o: Record<string, unknown>, id: string): Widget | null {
       metric = { op: "sum", fieldKey: m.fieldKey };
     }
     const scope = typeof o.scope === "string" && SCOPES.has(o.scope) ? (o.scope as StatScope) : "total";
-    return { id, kind: "stat", title: parseTitle(o.title, "Calculation"), source, filter, metric, scope, layout };
+    return { id, kind: "stat", title: parseTitle(o.title, "Calculation"), ...flag, source, filter, metric, scope, layout };
   }
   if (o.kind === "chart") {
     const groupBy = parseGroupBy(o.groupBy);
     if (!groupBy) return null;
-    return { id, kind: "chart", title: parseTitle(o.title, "Chart"), source, filter, groupBy, display: o.display === "donut" ? "donut" : "bar", layout };
+    return { id, kind: "chart", title: parseTitle(o.title, "Chart"), ...flag, source, filter, groupBy, display: o.display === "donut" ? "donut" : "bar", layout };
   }
   if (o.kind === "list") {
     const sort = typeof o.sort === "string" && SORTS.has(o.sort) ? (o.sort as ListSort) : "updated";
-    return { id, kind: "list", title: parseTitle(o.title, "Tasks"), source, filter, sort, limit: clampInt(o.limit, 1, MAX_LIST_ROWS, 10), layout };
+    return { id, kind: "list", title: parseTitle(o.title, "Tasks"), ...flag, source, filter, sort, limit: clampInt(o.limit, 1, MAX_LIST_ROWS, 10), layout };
   }
   return null;
 }
@@ -239,12 +252,17 @@ export function parseWidgets(raw: unknown): Widget[] {
   return out;
 }
 
+/** The flag as stored: written only when it is known, so an older card stays as it was. */
+function titleFlagOf(w: TitleFlag): TitleFlag {
+  return typeof w.titleEdited === "boolean" ? { titleEdited: w.titleEdited } : {};
+}
+
 /** The JSON to persist. A passthrough is written back exactly as it was read. */
 export function serializeWidgets(widgets: readonly Widget[]): unknown[] {
   return widgets.map((w) => {
     if (w.kind === "passthrough") return w.raw;
     if (w.kind === "notes") return { id: w.id, kind: w.kind, title: w.title, text: w.text, layout: w.layout };
-    const common = { id: w.id, kind: w.kind, title: w.title, source: w.source, filter: w.filter, layout: w.layout };
+    const common = { id: w.id, kind: w.kind, title: w.title, ...titleFlagOf(w), source: w.source, filter: w.filter, layout: w.layout };
     if (w.kind === "stat") return { ...common, metric: w.metric, scope: w.scope };
     if (w.kind === "chart") return { ...common, groupBy: w.groupBy, display: w.display };
     return { ...common, sort: w.sort, limit: w.limit };
@@ -272,12 +290,14 @@ const sourceSchema = z.union([
   z.object({ kind: z.literal("lists"), listIds: z.array(idSchema).min(1).max(MAX_WIDGET_LISTS) }),
 ]);
 const titleSchema = z.string().trim().min(1).max(120);
+const titleEditedSchema = z.boolean().optional();
 
 export const widgetInputSchema = z.discriminatedUnion("kind", [
   z.object({
     id: idSchema,
     kind: z.literal("stat"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     metric: z.union([z.object({ op: z.literal("count") }), z.object({ op: z.literal("sum"), fieldKey: z.string().min(1).max(64) })]).optional(),
@@ -288,6 +308,7 @@ export const widgetInputSchema = z.discriminatedUnion("kind", [
     id: idSchema,
     kind: z.literal("chart"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     groupBy: z.union([z.enum(["status", "assignee", "priority"]), z.object({ field: z.string().min(1).max(64) })]),
@@ -298,6 +319,7 @@ export const widgetInputSchema = z.discriminatedUnion("kind", [
     id: idSchema,
     kind: z.literal("list"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     sort: z.enum(["due", "updated", "created", "priority", "title"]).optional(),
@@ -322,8 +344,21 @@ function normalizeSource(s: z.infer<typeof sourceSchema>): WidgetSource {
 
 /**
  * Submitted cards, as stored cards. A passthrough is resolved against the
- * STORED list: it must name a stored passthrough, and it becomes that stored
- * value, so no client can write arbitrary JSON through one.
+ * STORED list: it must name a stored card, and it becomes that stored value
+ * verbatim, so no client can write arbitrary JSON through one.
+ *
+ * A data card sent without titleEdited keeps the stored card's flag while
+ * its title is unchanged. A client that does not know the flag (a tab opened
+ * before it existed, or a draft that tab left behind) would otherwise strip
+ * it just by moving the card, and a typed title would go back to being read
+ * by its shape. A changed title sent without the flag is left without one:
+ * nobody can say who wrote it.
+ *
+ * It may name ANY stored card, not only a stored passthrough: that is how an
+ * editor keeps a card they are not shown (a hidden card, whose Lists they
+ * cannot read, travels to them as `{ id, kind: "hidden" }` and comes back as
+ * `{ id, kind: "passthrough" }`). The value written is still the stored one,
+ * byte for byte, so the relaxation lets nobody write anything new.
  */
 export function resolvePassthrough(
   submitted: readonly WidgetInput[],
@@ -335,9 +370,9 @@ export function resolvePassthrough(
   for (const w of submitted) {
     if (seen.has(w.id)) return { ok: false, error: "duplicate_widget", id: w.id };
     seen.add(w.id);
+    const s = storedById.get(w.id);
     if (w.kind === "passthrough") {
-      const s = storedById.get(w.id);
-      if (!s || s.kind !== "passthrough") return { ok: false, error: "unknown_widget", id: w.id };
+      if (!s) return { ok: false, error: "unknown_widget", id: w.id };
       out.push(s);
       continue;
     }
@@ -345,7 +380,13 @@ export function resolvePassthrough(
       out.push({ id: w.id, kind: "notes", title: w.title, text: w.text, layout: { ...w.layout } });
       continue;
     }
-    const common = { id: w.id, title: w.title, source: normalizeSource(w.source), filter: normalizeFilter(w.filter), layout: { ...w.layout } };
+    const flag =
+      typeof w.titleEdited === "boolean"
+        ? { titleEdited: w.titleEdited }
+        : s && s.kind !== "notes" && s.kind !== "passthrough" && s.title === w.title
+          ? titleFlagOf(s)
+          : {};
+    const common = { id: w.id, title: w.title, ...flag, source: normalizeSource(w.source), filter: normalizeFilter(w.filter), layout: { ...w.layout } };
     if (w.kind === "stat") out.push({ ...common, kind: "stat", metric: w.metric ?? { op: "count" }, scope: w.scope ?? "total" });
     else if (w.kind === "chart") out.push({ ...common, kind: "chart", groupBy: w.groupBy, display: w.display ?? "bar" });
     else out.push({ ...common, kind: "list", sort: w.sort ?? "updated", limit: w.limit ?? 10 });
@@ -413,4 +454,122 @@ export function redactWidgetForReader(w: Widget, ctx: RedactContext): Widget | H
 
 export function redactWidgetsForReader(widgets: readonly Widget[], ctx: RedactContext): Array<Widget | HiddenWidget> {
   return widgets.map((w) => redactWidgetForReader(w, ctx));
+}
+
+// ── Redaction for editors ────────────────────────────────────────────
+//
+// An editor (the owner, an org Owner or Admin, a Space manager on the Space
+// Overview) may change a dashboard, but a stored List id is still not a grant:
+// what an editor is SHOWN of a card is exactly what they can read, like any
+// reader. The difference is that their save has to keep what they were not
+// shown. So the editor's copy says how much of each card they saw
+// (cardVisibility), and the PATCH puts the unseen parts back
+// (restoreHiddenParts) before anything is written.
+//
+//   full     every List and every filter rule of the card is readable
+//   hidden   none of its Lists is (or its Space is not, or it groups or sums a
+//            field only an unreadable List defines): the editor gets
+//            { id, kind: "hidden" } and can only keep it or remove it
+//   partial  some Lists or some rules are not readable: the editor sees the
+//            rest, and the save appends the unseen ones after theirs
+
+export type CardVisibility =
+  | { kind: "full" }
+  | { kind: "hidden" }
+  | { kind: "partial"; hiddenListIds: string[]; hiddenRules: WidgetRule[] };
+
+/** A card as an editor holds it: whole, hidden, or the visible part of a partial one. */
+export type EditorWidget = Widget | HiddenWidget | (DataWidget & { partial: true });
+
+/** How much of one stored card this viewer can read. */
+export function cardVisibility(w: Widget, ctx: RedactContext): CardVisibility {
+  // A notes card holds no List data. A passthrough is a card this release
+  // cannot interpret; an editor is shown that it exists (so they can remove
+  // it) and never its raw value (redactWidgetForEditor), and it can only
+  // round-trip untouched.
+  if (w.kind === "notes" || w.kind === "passthrough") return { kind: "full" };
+  const lists = ctx.readableListsFor(w.source);
+  if (lists === null) return { kind: "hidden" };
+  if (w.source.kind === "lists" && lists.length === 0) return { kind: "hidden" };
+  const keys = new Set<string>();
+  for (const id of lists) for (const k of ctx.fieldKeysByList.get(id) ?? []) keys.add(k);
+  if (w.kind === "chart" && typeof w.groupBy === "object" && !keys.has(w.groupBy.field)) return { kind: "hidden" };
+  if (w.kind === "stat" && w.metric.op === "sum" && !keys.has(w.metric.fieldKey)) return { kind: "hidden" };
+  const readable = new Set(lists);
+  const hiddenListIds = w.source.kind === "lists" ? w.source.listIds.filter((id) => !readable.has(id)) : [];
+  const hiddenRules = w.filter.rules.filter((r) => !BUILTIN_FIELDS.has(r.field) && !keys.has(r.field)).map((r) => ({ ...r }));
+  if (hiddenListIds.length === 0 && hiddenRules.length === 0) return { kind: "full" };
+  return { kind: "partial", hiddenListIds, hiddenRules };
+}
+
+/** One stored card as an EDITOR may see it. */
+export function redactWidgetForEditor(w: Widget, ctx: RedactContext): EditorWidget {
+  // A passthrough's raw value is unknown JSON that may name Lists this editor
+  // cannot read; the client only ever needs its id and place.
+  if (w.kind === "passthrough") return { id: w.id, kind: "passthrough", raw: null, ...(w.layout ? { layout: w.layout } : {}) };
+  const v = cardVisibility(w, ctx);
+  if (v.kind === "hidden") return hidden(w);
+  if (v.kind === "full" || w.kind === "notes") return w;
+  const hiddenLists = new Set(v.hiddenListIds);
+  const hiddenRuleSet = new Set(v.hiddenRules.map((r) => r.field));
+  const source: WidgetSource =
+    w.source.kind === "lists" ? { kind: "lists", listIds: w.source.listIds.filter((id) => !hiddenLists.has(id)) } : w.source;
+  const filter: WidgetFilter = { ...w.filter, rules: w.filter.rules.filter((r) => !hiddenRuleSet.has(r.field)) };
+  return { ...w, source, filter, partial: true };
+}
+
+function sameCard(a: Widget, b: Widget): boolean {
+  return JSON.stringify(serializeWidgets([a])) === JSON.stringify(serializeWidgets([b]));
+}
+
+/**
+ * The submitted cards (already through resolvePassthrough), with every part
+ * the editor could not see put back, or the reason the save is refused.
+ *
+ * `visibility` is cardVisibility for THIS editor over the STORED cards. A new
+ * card (no stored id) is taken as sent. A hidden card may only come back as
+ * the stored value itself (it was sent as a passthrough) or be left out and
+ * named as removed; anything else is widget_locked. A partial card keeps its
+ * stored List ids and rules the editor cannot see, appended after the
+ * submitted ones; when it had unseen Lists its source must still be a List
+ * set (source_locked), and the appended totals must stay inside the limits
+ * (too_many_lists, too_many_rules) rather than be cut.
+ */
+export function restoreHiddenParts(
+  stored: readonly Widget[],
+  submitted: readonly Widget[],
+  visibility: ReadonlyMap<string, CardVisibility>,
+):
+  | { ok: true; widgets: Widget[] }
+  | { ok: false; error: "widget_locked" | "source_locked" | "too_many_lists" | "too_many_rules"; id: string } {
+  const storedById = new Map(stored.map((w) => [w.id, w] as const));
+  const out: Widget[] = [];
+  for (const w of submitted) {
+    const s = storedById.get(w.id);
+    // A stored card with no visibility entry is treated as unseen: failing
+    // closed keeps it, where failing open would let the save replace it.
+    const v: CardVisibility = s ? visibility.get(w.id) ?? { kind: "hidden" } : { kind: "full" };
+    if (!s || v.kind === "full") {
+      out.push(w);
+      continue;
+    }
+    if (sameCard(w, s)) {
+      out.push(s);
+      continue;
+    }
+    if (v.kind === "hidden") return { ok: false, error: "widget_locked", id: w.id };
+    // Partial: the submission is the visible part, possibly edited.
+    if (w.kind === "notes" || w.kind === "passthrough") return { ok: false, error: "source_locked", id: w.id };
+    let source = w.source;
+    if (v.hiddenListIds.length > 0) {
+      if (w.source.kind !== "lists") return { ok: false, error: "source_locked", id: w.id };
+      const ids = Array.from(new Set([...w.source.listIds, ...v.hiddenListIds]));
+      if (ids.length > MAX_WIDGET_LISTS) return { ok: false, error: "too_many_lists", id: w.id };
+      source = { kind: "lists", listIds: ids };
+    }
+    const rules = [...w.filter.rules, ...v.hiddenRules.map((r) => ({ ...r }))];
+    if (rules.length > MAX_WIDGET_RULES) return { ok: false, error: "too_many_rules", id: w.id };
+    out.push({ ...w, source, filter: { ...w.filter, rules } });
+  }
+  return { ok: true, widgets: out };
 }

@@ -791,6 +791,7 @@ export default async function SpacePage(props: {
             <SpaceOverviewGrid
               initialLayouts={(prefs?.home?.overviewCardLayout ?? null) as Parameters<typeof SpaceOverviewGrid>[0]["initialLayouts"]}
               initialHidden={prefs?.home?.overviewCardsHidden ?? null}
+              overview={{ spaceId: space.id, spaceName: space.name, canManage: bookmarksCanEdit }}
               cards={{
                 recent: (
                   <OverviewCard title="Recent">

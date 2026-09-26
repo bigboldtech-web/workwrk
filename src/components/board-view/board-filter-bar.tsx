@@ -23,18 +23,22 @@ import type { PersonRef } from "./assignee-picker";
 import { useItemTypes } from "./use-item-types";
 import { Switch } from "@/components/ui/switch";
 import { MorePortal } from "@/components/layout/os/more-portal";
+// The matching itself lives in a pure module (Phase 5b), so a List's
+// Conditional colors rules and a server-side reader evaluate a rule exactly
+// the way this bar does. Re-exported, so every import of these names from
+// this file keeps working.
+import {
+  matchesRule,
+  rowAssigneeIds,
+  ruleActive,
+  type FilterOperator,
+  type FilterRule,
+} from "@/lib/work/filter-rules";
+
+export { matchesRule, rowAssigneeIds, ruleActive };
+export type { FilterOperator, FilterRule };
 
 // ── Model ──────────────────────────────────────────────────────────
-
-export type FilterOperator =
-  | "is"
-  | "isNot"
-  | "isSet"
-  | "isNotSet"
-  | "before"
-  | "after"
-  | "on"
-  | "contains";
 
 const ALL_OPERATORS: readonly FilterOperator[] = ["is", "isNot", "isSet", "isNotSet", "before", "after", "on", "contains"];
 
@@ -52,14 +56,6 @@ export const OPERATOR_LABEL: Record<FilterOperator, string> = {
 /** Built-in filterable fields. Any other `field` string is treated as a
  *  custom-field key and matched against Item.metadata[field]. */
 export type BuiltinFilterField = "status" | "assignee" | "priority" | "due" | "tags" | "title" | "type";
-
-export interface FilterRule {
-  /** Client-only row identity (regenerated on parse — never persisted). */
-  id: string;
-  field: string;
-  operator: FilterOperator;
-  value: string;
-}
 
 export interface BoardFilters {
   search: string;
@@ -187,13 +183,6 @@ export function parseSavedFilters(raw: unknown): SavedFilter[] {
   return out;
 }
 
-/** A rule participates in filtering once it's complete: set/not-set
- *  operators always are; the rest need a value. */
-export function ruleActive(rule: FilterRule): boolean {
-  if (rule.operator === "isSet" || rule.operator === "isNotSet") return true;
-  return rule.value.trim() !== "";
-}
-
 export function activeRuleCount(f: BoardFilters): number {
   return f.rules.filter(ruleActive).length;
 }
@@ -203,104 +192,44 @@ export function filtersActive(f: BoardFilters): boolean {
 }
 
 // ── Matching ───────────────────────────────────────────────────────
-
-/** Everyone on a task: the primary owner and every secondary assignee, with
- *  no duplicates. The assignee filter used to read ownerId alone, so "Me"
- *  hid every task somebody else was primary on even when the viewer was
- *  assigned to it. */
-export function rowAssigneeIds(row: BoardItemRow): string[] {
-  const ids = new Set<string>();
-  if (row.ownerId) ids.add(row.ownerId);
-  for (const id of row.assigneeIds ?? []) if (id) ids.add(id);
-  for (const p of row.assignees ?? []) if (p?.id) ids.add(p.id);
-  return Array.from(ids);
-}
-
-function scalarFor(row: BoardItemRow, field: string): string {
-  switch (field) {
-    case "status": return row.status ?? "";
-    case "assignee": return row.ownerId ?? "";
-    case "priority": return row.priority ?? "";
-    case "type": return row.itemTypeId ?? "";
-    case "title": return row.title;
-    default: {
-      const v = row.metadata?.[field];
-      return v == null ? "" : String(v);
-    }
-  }
-}
-
-function sameLocalDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function matchesRule(row: BoardItemRow, rule: FilterRule): boolean {
-  // Due date — date-only comparisons against the yyyy-mm-dd value.
-  if (rule.field === "due") {
-    const due = row.dueAt ? new Date(row.dueAt) : null;
-    if (rule.operator === "isSet") return !!due;
-    if (rule.operator === "isNotSet") return !due;
-    if (!due) return false;
-    const target = new Date(`${rule.value}T00:00:00`);
-    if (Number.isNaN(target.getTime())) return true; // unparsable value → don't filter
-    if (rule.operator === "on") return sameLocalDay(due, target);
-    if (rule.operator === "before") return due.getTime() < target.getTime();
-    if (rule.operator === "after") {
-      const endOfDay = new Date(target); endOfDay.setHours(23, 59, 59, 999);
-      return due.getTime() > endOfDay.getTime();
-    }
-    return true;
-  }
-
-  // Assignee — membership in the WHOLE assignee set, not just the primary.
-  if (rule.field === "assignee") {
-    const ids = rowAssigneeIds(row);
-    switch (rule.operator) {
-      case "is": return ids.includes(rule.value);
-      case "isNot": return !ids.includes(rule.value);
-      case "isSet": return ids.length > 0;
-      case "isNotSet": return ids.length === 0;
-      default: return true;
-    }
-  }
-
-  // Tags — membership in the row's tag list.
-  if (rule.field === "tags") {
-    const tags = row.tags ?? [];
-    switch (rule.operator) {
-      case "is": return tags.some((t) => t.id === rule.value);
-      case "isNot": return !tags.some((t) => t.id === rule.value);
-      case "isSet": return tags.length > 0;
-      case "isNotSet": return tags.length === 0;
-      default: return true;
-    }
-  }
-
-  const v = scalarFor(row, rule.field);
-  switch (rule.operator) {
-    case "is": return v.toLowerCase() === rule.value.toLowerCase();
-    case "isNot": return v.toLowerCase() !== rule.value.toLowerCase();
-    case "isSet": return v !== "";
-    case "isNotSet": return v === "";
-    case "contains": return v.toLowerCase().includes(rule.value.toLowerCase());
-    default: return true;
-  }
-}
+//
+// matchesRule, rowAssigneeIds and ruleActive live in
+// src/lib/work/filter-rules.ts and are re-exported at the top of this file.
 
 /**
  * Apply filters to the flat item list. Rules combine with the connector
  * (AND/OR); search + hideDone always AND on top. Ancestors of surviving
  * subtasks are kept so the table can render the parent chain.
+ *
+ * `opts.statusOf` (Phase 5b) is how a List reads the status of a row shown in
+ * it through a link: that row's stored status is a value of its HOME set, so
+ * a Status rule compares the status it has in THIS List (list-link-rows.ts
+ * boardStatusFor), and "Hide closed" reads the home status's own group. With
+ * no `opts`, every row is read exactly as before.
  */
-export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: StatusOption[]): BoardItemRow[] {
+export function applyFilters(
+  items: BoardItemRow[],
+  f: BoardFilters,
+  statuses: StatusOption[],
+  opts?: { statusOf?: (row: BoardItemRow) => string | null },
+): BoardItemRow[] {
   if (!filtersActive(f)) return items;
   const q = f.search.trim().toLowerCase();
   const rules = f.rules.filter(ruleActive);
+  const statusOf = opts?.statusOf;
+
+  const isDone = (it: BoardItemRow): boolean => {
+    const home = it.listLink?.homeStatus;
+    if (home) return home.group !== "ACTIVE";
+    return isDoneStatus(statuses, statusOf ? statusOf(it) : it.status);
+  };
+  const ruleMatches = (it: BoardItemRow, r: FilterRule): boolean =>
+    statusOf && r.field === "status" ? matchesRule({ ...it, status: statusOf(it) }, r) : matchesRule(it, r);
 
   const matches = (it: BoardItemRow): boolean => {
-    if (f.hideDone && isDoneStatus(statuses, it.status)) return false;
+    if (f.hideDone && isDone(it)) return false;
     if (rules.length) {
-      const ok = f.connector === "OR" ? rules.some((r) => matchesRule(it, r)) : rules.every((r) => matchesRule(it, r));
+      const ok = f.connector === "OR" ? rules.some((r) => ruleMatches(it, r)) : rules.every((r) => ruleMatches(it, r));
       if (!ok) return false;
     }
     if (q) {
