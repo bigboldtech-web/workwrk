@@ -96,6 +96,63 @@ describe("writing widgets", () => {
   });
 });
 
+// Who wrote a card's title (titleEdited) is what keeps a typed title from
+// being replaced by its settings, so it must come back from every step a
+// save takes: the write schema, resolvePassthrough, the stored JSON and the
+// read. A card stored before the flag must still load, without one.
+describe("titleEdited survives the round trip", () => {
+  const src = { kind: "lists" as const, listIds: ["A"] };
+  const typed = { id: "t", kind: "chart", title: "Tasks by Owner", titleEdited: true, source: src, groupBy: { field: "owner" }, layout };
+  const auto = { id: "a", kind: "stat", title: "Open tasks", titleEdited: false, source: src, scope: "open", layout };
+
+  it("is accepted by the write schema as a boolean and kept by it", () => {
+    const parsed = widgetInputSchema.safeParse(typed);
+    expect(parsed.success && parsed.data).toMatchObject({ titleEdited: true });
+    expect(widgetInputSchema.safeParse(auto).success).toBe(true);
+    expect(widgetInputSchema.safeParse({ ...typed, titleEdited: "yes" }).success).toBe(false);
+    for (const kind of ["stat", "chart", "list"]) {
+      const card = { id: "k", kind, title: "T", titleEdited: true, source: src, groupBy: "status", layout };
+      const r = widgetInputSchema.safeParse(card);
+      expect(r.success && "titleEdited" in r.data && r.data.titleEdited).toBe(true);
+    }
+  });
+
+  it("is kept from the submitted card to the stored JSON and back", () => {
+    const inputs = [typed, auto].map((w) => widgetInputSchema.parse(w));
+    const r = resolvePassthrough(inputs, []);
+    expect(r.ok && r.widgets.map((w) => ("titleEdited" in w ? w.titleEdited : "none"))).toEqual([true, false]);
+    const stored = serializeWidgets(r.ok ? r.widgets : []) as Array<Record<string, unknown>>;
+    expect(stored.map((w) => w.titleEdited)).toEqual([true, false]);
+    const back = parseWidgets(JSON.parse(JSON.stringify(stored)));
+    expect(back.map((w) => ("titleEdited" in w ? w.titleEdited : "none"))).toEqual([true, false]);
+    expect(serializeWidgets(back)).toEqual(stored);
+  });
+
+  it("loads a card stored before the flag with no flag, and writes it back without one", () => {
+    const old = { id: "o", kind: "chart", title: "Tasks by Owner", source: src, filter: { connector: "AND", rules: [], hideDone: false }, groupBy: { field: "owner" }, display: "bar", layout };
+    const [w] = parseWidgets([old]);
+    expect(w).toMatchObject({ id: "o", kind: "chart", title: "Tasks by Owner" });
+    expect("titleEdited" in w).toBe(false);
+    expect(serializeWidgets([w])).toEqual([old]);
+    // A flag that is not a boolean is not a flag.
+    const [odd] = parseWidgets([{ ...old, titleEdited: "true" }]);
+    expect("titleEdited" in odd).toBe(false);
+  });
+
+  it("keeps the stored flag when a client that does not know it saves the same title", () => {
+    const stored = parseWidgets([{ ...typed, filter: { connector: "AND", rules: [], hideDone: false }, display: "bar" }]);
+    const moved = { id: "t", kind: "chart", title: "Tasks by Owner", source: src, groupBy: { field: "owner" }, layout: { ...layout, x: 4 } } as WidgetInput;
+    const r = resolvePassthrough([moved], stored);
+    expect(r.ok && r.widgets[0]).toMatchObject({ titleEdited: true, layout: { x: 4 } });
+    // A new title sent without the flag: nobody can say who wrote it.
+    const renamed = resolvePassthrough([{ ...moved, title: "Owners" } as WidgetInput], stored);
+    expect(renamed.ok && "titleEdited" in renamed.widgets[0]).toBe(false);
+    // A flag that is sent always wins.
+    const cleared = resolvePassthrough([{ ...moved, titleEdited: false } as WidgetInput], stored);
+    expect(cleared.ok && cleared.widgets[0]).toMatchObject({ titleEdited: false });
+  });
+});
+
 describe("redactWidgetsForReader", () => {
   const cards = parseWidgets([
     { id: "notes", kind: "notes", title: "N", text: "t", layout },

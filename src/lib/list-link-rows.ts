@@ -106,14 +106,21 @@ export function linkedStatusNote(row: BoardItemRow, boardId: string, statuses: r
 }
 
 /**
- * The few words a Board card shows under its title for the same case ("In
- * review in Home"), so a card in To Do says why without a hover. Null when
- * linkedStatusNote is null.
+ * The few words a Board card shows under its title for the same case, so a
+ * card in To Do says why without a hover. Null when linkedStatusNote is null.
+ *
+ * The card's LinkedRowIndicator already names the home List right after the
+ * title whenever the viewer may know it, so then the line is the home status
+ * alone ("In review"); naming the List here too put its name on the card
+ * twice. When the indicator is the bare glyph, the line says where the
+ * status belongs ("In review in its home List"). The full sentence stays the
+ * line's tooltip (linkedStatusNote).
  */
 export function linkedStatusShort(row: BoardItemRow, boardId: string, statuses: readonly StatusOption[]): string | null {
   const p = boardStatusPlacement(row, boardId, statuses);
   if (p.exact || !p.home || !p.status) return null;
-  return `${p.home.label} in ${row.listLink?.homeList?.name ?? "its home List"}`;
+  const indicatorNamesHome = linkedRowKind(row, boardId) === "linked-root" && !!row.listLink?.homeList;
+  return indicatorNamesHome ? p.home.label : `${p.home.label} in its home List`;
 }
 
 /**

@@ -51,6 +51,28 @@ describe("FieldValue emptyLabel", () => {
     }
   });
 
+  // Progress was the one editor the label never reached: the panel's empty
+  // Progress row read the bar's em dash, and its slider said 0%, a value an
+  // unset default does not have.
+  it("an empty progress value reads the label it is given, editor and read-only alike", () => {
+    for (const mode of ["edit", "display"] as const) {
+      const out = html(field("PROGRESS_MANUAL"), "No default", mode);
+      expect(out).toContain("No default");
+      expect(out).not.toContain(DASH);
+      // The readout, not the bar's own width:0% style.
+      expect(out).not.toMatch(/>0%</);
+    }
+  });
+
+  it("a progress cell that passes no label keeps its em dash and its 0%", () => {
+    expect(html(field("PROGRESS_MANUAL"), undefined, "display")).toContain(DASH);
+    expect(html(field("PROGRESS_MANUAL"))).toMatch(/>0%</);
+    // A set value reads as its percent whatever the label.
+    const set = renderToStaticMarkup(createElement(FieldValue, { field: field("PROGRESS_MANUAL"), value: 40, mode: "edit", onChange: () => {}, boardId: "b1", emptyLabel: "No default" }));
+    expect(set).toContain("40%");
+    expect(set).not.toContain("No default");
+  });
+
   it("a table cell that passes no label keeps the em dash it always had", () => {
     for (const def of [field("TEXT"), field("NUMBER"), field("DROPDOWN"), field("PEOPLE")]) {
       expect(html(def)).toContain(DASH);

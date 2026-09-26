@@ -343,7 +343,7 @@ export function FieldValue(props: FieldValueProps) {
     case "PEOPLE":
       return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} emptyLabel={emptyLabel} />;
     case "PROGRESS_MANUAL":
-      return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "LOCATION":
       return <LocationValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "VOTING":
@@ -466,22 +466,33 @@ function PeopleValue({
 
 // ── Progress (manual 0–100) ───────────────────────────────────────
 
+// An unset value reads as `emptyLabel` when the host passes one (the List's
+// Default values panel says "No default", since an unset default is not 0%),
+// and otherwise as it always has: EMPTY on the bar, 0% beside the slider.
 function ProgressValue({
   value,
   readOnly,
   onChange,
+  emptyLabel,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  emptyLabel?: string;
 }) {
   const n = typeof value === "number" ? Math.max(0, Math.min(100, value)) : null;
+  const readout = (fallback: string) =>
+    n == null && emptyLabel !== undefined ? (
+      <span className="text-xs text-zinc-500 whitespace-nowrap">{emptyLabel}</span>
+    ) : (
+      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? fallback : `${n}%`}</span>
+    );
   const bar = (
     <span className="inline-flex items-center gap-2 min-w-[110px]">
       <span className="flex-1 h-1.5 rounded-full bg-zinc-100 overflow-hidden min-w-[64px]">
         <span className="block h-full rounded-full bg-[var(--os-brand)]" style={{ width: `${n ?? 0}%` }} />
       </span>
-      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? "—" : `${n}%`}</span>
+      {readout(EMPTY)}
     </span>
   );
   if (readOnly) return bar;
@@ -496,7 +507,7 @@ function ProgressValue({
         onChange={(e) => onChange?.(Number(e.target.value))}
         className="flex-1 min-w-0 accent-[var(--os-brand)]"
       />
-      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? "0%" : `${n}%`}</span>
+      {readout("0%")}
     </span>
   );
 }

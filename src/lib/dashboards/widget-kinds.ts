@@ -152,9 +152,13 @@ const LEGACY_TITLES: Partial<Record<WidgetInput["kind"], readonly string[]>> = {
 const SCOPE_TITLE = /^Sum(?: of (.+))? \((all|open|completed|overdue) tasks\)$/;
 
 /**
- * Whether a SAVED card's title is still one the settings gave it, so the
- * editor may keep it in step with them. True for its own default, and also
- * for any default title of its kind that no person had to type:
+ * Whether a card saved BEFORE titleEdited existed still has a title its
+ * settings gave it, read from the title's shape. It is the fallback for
+ * those cards alone: a card that carries the flag is decided by the flag
+ * (titleModeFor), because a person may well type a title shaped like a
+ * default ("Tasks by Owner"), and the shape cannot tell. True for its own
+ * default, and also for any default title of its kind that no person had to
+ * type:
  *   - a label the editor does not know yet (its Lists' fields are still
  *     loading) or no longer knows (the field is gone, the List was dropped),
  *     so "Sum of Points (open tasks)" is not frozen as typed by a slow fetch;
@@ -193,6 +197,158 @@ export function isUntouchedWidgetTitle(input: WidgetInput, fieldLabels: Readonly
     default:
       return false;
   }
+}
+
+// ── The editor's title ────────────────────────────────────────────────
+//
+// The widget editor keeps a card's title in one of four modes:
+//   auto     the settings' default, re-derived as they change
+//   typed    the person's own words, never overwritten
+//   cleared  the person emptied the field; it stays empty until a setting
+//            changes, and then goes back to auto
+//   saved    a card saved before titleEdited existed: judged once by its
+//            title's shape (isUntouchedWidgetTitle) against the fields of the
+//            Lists it was saved with, and then treated as auto or typed
+// Saving writes titleEdited: true for a typed title, false for one the
+// settings gave, and nothing for an older card not judged yet, so it stays
+// as it was.
+
+export type TitleMode = "auto" | "typed" | "cleared" | "saved";
+
+/** What the title does now: follow the settings or not, and the flag a save writes. */
+export interface TitleState {
+  follows: boolean;
+  edited: boolean | undefined;
+}
+
+function titleEditedOf(input: WidgetInput): boolean | undefined {
+  return "titleEdited" in input && typeof input.titleEdited === "boolean" ? input.titleEdited : undefined;
+}
+
+/** The mode the editor opens a card in. */
+export function titleModeFor(mode: "add" | "edit", initial: WidgetInput): TitleMode {
+  if (mode === "add") return "auto";
+  const flag = titleEditedOf(initial);
+  if (flag === true) return "typed";
+  if (flag === false) return "auto";
+  return "saved";
+}
+
+/** The mode after the person types in the Title field. */
+export function titleModeAfterTyping(value: string): TitleMode {
+  return value === "" ? "cleared" : "typed";
+}
+
+/**
+ * The mode after a settings change: an emptied field goes back to the
+ * settings. Every other mode stays; an older card's judgement does not
+ * depend on the settings (titleState), so no change can flip it.
+ */
+export function titleModeAfterSettingsChange(titleMode: TitleMode): TitleMode {
+  return titleMode === "cleared" ? "auto" : titleMode;
+}
+
+/**
+ * Whether isUntouchedWidgetTitle's answer for this title depends on the
+ * field labels: a "Sum of X" or a "Tasks by X" that could be naming a field.
+ * Every other shape reads the same whether or not the labels have arrived.
+ */
+function shapeNeedsLabels(input: WidgetInput): boolean {
+  if (!("title" in input)) return false;
+  if (input.kind === "stat") return SCOPE_TITLE.exec(input.title)?.[1] !== undefined;
+  if (input.kind === "chart") {
+    if (!input.title.startsWith("Tasks by ")) return false;
+    const word = input.title.slice("Tasks by ".length);
+    return word !== "field" && !Object.values(GROUP_WORDS).includes(word);
+  }
+  return false;
+}
+
+/**
+ * What the title does in `titleMode`. An older card ("saved") is judged
+ * against `savedLabels`, the fields of the Lists it was SAVED with, whatever
+ * the draft's source is now, so dropping the List that named its field
+ * cannot flip the answer. `savedLabelsReady` is true once those have
+ * arrived; a shape that could name a field is not judged before then (with
+ * no labels, "Tasks by Owner" reads as a default for any field, and judging
+ * it early is how a typed title got replaced). Until it is judged, the
+ * title stays as it is and a save writes no flag.
+ */
+export function titleState(
+  titleMode: TitleMode,
+  initial: WidgetInput,
+  savedLabels: ReadonlyMap<string, string>,
+  savedLabelsReady: boolean,
+): TitleState {
+  if (titleMode === "auto") return { follows: true, edited: false };
+  if (titleMode === "cleared") return { follows: false, edited: false };
+  if (titleMode === "typed") return { follows: false, edited: true };
+  if (!savedLabelsReady && shapeNeedsLabels(initial)) return { follows: false, edited: undefined };
+  const untouched = isUntouchedWidgetTitle(initial, savedLabels);
+  return { follows: untouched, edited: !untouched };
+}
+
+/**
+ * The field label a card's own title names for the field it sums or groups
+ * by ("Points" in "Sum of Points (open tasks)"), or null.
+ */
+function labelInTitle(input: WidgetInput): { key: string; label: string } | null {
+  if (input.kind === "stat" && input.metric?.op === "sum") {
+    const label = SCOPE_TITLE.exec(input.title)?.[1];
+    return label ? { key: input.metric.fieldKey, label } : null;
+  }
+  if (input.kind === "chart" && typeof input.groupBy === "object" && input.title.startsWith("Tasks by ")) {
+    const label = input.title.slice("Tasks by ".length);
+    return label && label !== "field" ? { key: input.groupBy.field, label } : null;
+  }
+  return null;
+}
+
+/**
+ * The labels an auto title is derived from. Until the chosen Lists' fields
+ * arrive, the saved card's field keeps the label its saved title names, so
+ * the Title field shows the saved "Sum of Points (open tasks)" instead of
+ * "Sum (open tasks)" while they load, and a scope changed meanwhile still
+ * reads "Sum of Points (completed tasks)". Once they have arrived the real
+ * labels decide, and a field that is gone reads as the generic word.
+ */
+export function titleLabels(
+  initial: WidgetInput,
+  fieldLabels: ReadonlyMap<string, string>,
+  labelsReady: boolean,
+): ReadonlyMap<string, string> {
+  if (labelsReady) return fieldLabels;
+  const named = labelInTitle(initial);
+  if (!named || fieldLabels.get(named.key)?.trim()) return fieldLabels;
+  return new Map([...fieldLabels, [named.key, named.label]]);
+}
+
+/** The field a card's default title names: the one it sums or groups by. */
+function titleFieldKey(input: WidgetInput): string | null {
+  if (input.kind === "stat" && input.metric?.op === "sum") return input.metric.fieldKey;
+  if (input.kind === "chart" && typeof input.groupBy === "object") return input.groupBy.field;
+  return null;
+}
+
+/**
+ * The card as the editor shows and saves it: the settings' title while it
+ * follows them, and titleEdited saying who wrote it. A default that would
+ * name a field whose label has not arrived yet keeps the title as it is
+ * until it has ("Calculation" on an older Sum card does not flash "Sum
+ * (open tasks)" first). A notes card is returned as it is: its title never
+ * follows anything.
+ */
+export function withEditorTitle(
+  draft: WidgetInput,
+  o: { state: TitleState; labels: ReadonlyMap<string, string>; labelsReady: boolean },
+): WidgetInput {
+  if (draft.kind !== "stat" && draft.kind !== "chart" && draft.kind !== "list") return draft;
+  const key = titleFieldKey(draft);
+  const waiting = !o.labelsReady && key !== null && !o.labels.get(key)?.trim();
+  const title = o.state.follows && !waiting ? defaultWidgetTitle(draft, o.labels) : draft.title;
+  const { titleEdited: _drop, ...rest } = draft;
+  void _drop;
+  return { ...rest, title, ...(o.state.edited === undefined ? {} : { titleEdited: o.state.edited }) } as WidgetInput;
 }
 
 /**

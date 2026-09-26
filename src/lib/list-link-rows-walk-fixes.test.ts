@@ -120,8 +120,19 @@ describe("a linked row filed under a status that is not its own", () => {
     );
   });
   it("has a few words for a Board card, seen without a hover", () => {
-    expect(linkedStatusShort(shared("REVIEW"), SHARED, SHARED_STATUSES)).toBe("In review in ML walk Open Home");
     expect(linkedStatusShort(shared("DONE"), SHARED, SHARED_STATUSES)).toBeNull();
+  });
+  it("names the home List once on a card: the indicator after the title does, so the line under it does not", () => {
+    // The card read "ML walk Open Home" in its indicator and "In review in
+    // ML walk Open Home" on the line under it.
+    const short = linkedStatusShort(shared("REVIEW"), SHARED, SHARED_STATUSES);
+    expect(short).toBe("In review");
+    expect(short).not.toContain("ML walk Open Home");
+    // The note behind it keeps the whole sentence.
+    expect(linkedStatusNote(shared("REVIEW"), SHARED, SHARED_STATUSES)).toContain("in ML walk Open Home");
+    // An indicator that is the bare glyph names nothing, so the line says
+    // where the status belongs.
+    expect(linkedStatusShort(shared("REVIEW", {}, { homeList: null }), SHARED, SHARED_STATUSES)).toBe("In review in its home List");
   });
   it("says nothing when the List holds the status itself, or for a home row", () => {
     expect(linkedStatusNote(shared("DONE"), SHARED, SHARED_STATUSES)).toBeNull();

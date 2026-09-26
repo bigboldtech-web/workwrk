@@ -14,6 +14,7 @@ import {
   readdWidgetLocal,
   rebaseDashboard,
   removeWidgetLocal,
+  renameWidgetLocal,
   stableStringify,
   stackOrder,
   toWidgetInputs,
@@ -278,6 +279,45 @@ describe("classifySaveResponse", () => {
     expect(classifySaveResponse(0, null)).toBe("retry");
     expect(classifySaveResponse(503, { error: "needs_database_update" })).toBe("retry");
     expect(classifySaveResponse(429, null)).toBe("retry");
+  });
+});
+
+describe("titleEdited on the canvas", () => {
+  const flagOf = (w: EditorWidget | WidgetInput | undefined) => (w && "titleEdited" in w ? w.titleEdited : "none");
+
+  it("travels in the save body, and a card without it is sent without it", () => {
+    const [typed, auto, old] = toWidgetInputs([stat("t", { titleEdited: true }), stat("a", { titleEdited: false }), stat("o")]);
+    expect([flagOf(typed), flagOf(auto), flagOf(old)]).toEqual([true, false, "none"]);
+    for (const i of [typed, auto, old]) expect(widgetInputSchema.safeParse(i).success).toBe(true);
+  });
+
+  it("is not part of a card's data: flagging a title never refetches its numbers", () => {
+    expect(dataKey(stat("a", { titleEdited: true }))).toBe(dataKey(stat("a")));
+    const [input] = toWidgetInputs([stat("a", { titleEdited: true })]);
+    expect(previewKey(input)).toBe(previewKey(toWidgetInputs([stat("a")])[0]));
+  });
+
+  it("flags a data card renamed from its menu as typed, and leaves notes and locked cards alone", () => {
+    const out = renameWidgetLocal([stat("a", { titleEdited: false }), notes("n"), hiddenCard("h")], "a", "Tasks by Owner");
+    expect(out[0]).toMatchObject({ title: "Tasks by Owner", titleEdited: true });
+    expect(renameWidgetLocal([notes("n")], "n", "Read me")[0]).toEqual({ ...notes("n"), title: "Read me" });
+    expect(renameWidgetLocal([hiddenCard("h")], "h", "X")[0]).toEqual(hiddenCard("h"));
+  });
+
+  it("moves with the title in a rebase: my typed title keeps my flag over their settings change", () => {
+    const base: DashboardSnapshot = { name: "Ops", widgets: [stat("a", { title: "Open tasks", titleEdited: false })] };
+    const local: DashboardSnapshot = { name: "Ops", widgets: [stat("a", { title: "Open tasks", titleEdited: true })] };
+    const live: DashboardSnapshot = { name: "Ops", widgets: [stat("a", { title: "Overdue tasks", titleEdited: false, scope: "overdue" })] };
+    const a = rebaseDashboard(base, local, live).widgets[0];
+    expect(a).toMatchObject({ title: "Open tasks", titleEdited: true, scope: "overdue" });
+    // Their typed title keeps their flag when I only moved the card.
+    const moved: DashboardSnapshot = { name: "Ops", widgets: [stat("a", { title: "Open tasks", titleEdited: false, layout: L(6, 0, 3, 3) })] };
+    const theirs: DashboardSnapshot = { name: "Ops", widgets: [stat("a", { title: "Q3 blockers", titleEdited: true })] };
+    expect(rebaseDashboard(base, moved, theirs).widgets[0]).toMatchObject({ title: "Q3 blockers", titleEdited: true, layout: L(6, 0, 3, 3) });
+    // A card with no flag on either side gains none.
+    const plain: DashboardSnapshot = { name: "Ops", widgets: [stat("b")] };
+    const out = rebaseDashboard(plain, { name: "Ops", widgets: [stat("b", { layout: L(3, 0, 3, 3) })] }, { name: "Ops", widgets: [stat("b", { scope: "overdue" })] }).widgets[0];
+    expect(flagOf(out)).toBe("none");
   });
 });
 

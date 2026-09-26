@@ -58,11 +58,12 @@ function without<T extends object>(o: T, keys: readonly string[]): Record<string
 
 /**
  * The part of a card that decides its DATA: everything but its id, title
- * and place. A save refetches a card's numbers only when this changed, and
- * the editor's preview result is reused only when it matches.
+ * (with the flag that says who wrote it) and place. A save refetches a
+ * card's numbers only when this changed, and the editor's preview result is
+ * reused only when it matches.
  */
 export function dataKey(w: EditorWidget | WidgetInput): string {
-  return stableStringify(without(w, ["id", "title", "layout", "partial"]));
+  return stableStringify(without(w, ["id", "title", "titleEdited", "layout", "partial"]));
 }
 
 /** The same key for a write input, which is what the editor previews. */
@@ -273,12 +274,13 @@ export function toWidgetInputs(widgets: readonly EditorWidget[]): WidgetInput[] 
     if (w.kind === "notes") return { id: w.id, kind: "notes", title: w.title, text: w.text, layout };
     const source = w.source.kind === "lists" ? { kind: "lists" as const, listIds: [...w.source.listIds] } : { ...w.source };
     const filter = { connector: w.filter.connector, rules: w.filter.rules.map((r) => ({ field: r.field, operator: r.operator, value: r.value })), hideDone: w.filter.hideDone };
-    if (w.kind === "stat") return { id: w.id, kind: "stat", title: w.title, source, filter, metric: { ...w.metric }, scope: w.scope, layout };
+    const flag = typeof w.titleEdited === "boolean" ? { titleEdited: w.titleEdited } : {};
+    if (w.kind === "stat") return { id: w.id, kind: "stat", title: w.title, ...flag, source, filter, metric: { ...w.metric }, scope: w.scope, layout };
     if (w.kind === "chart") {
       const groupBy = typeof w.groupBy === "object" ? { field: w.groupBy.field } : w.groupBy;
-      return { id: w.id, kind: "chart", title: w.title, source, filter, groupBy, display: w.display, layout };
+      return { id: w.id, kind: "chart", title: w.title, ...flag, source, filter, groupBy, display: w.display, layout };
     }
-    return { id: w.id, kind: "list", title: w.title, source, filter, sort: w.sort, limit: w.limit, layout };
+    return { id: w.id, kind: "list", title: w.title, ...flag, source, filter, sort: w.sort, limit: w.limit, layout };
   });
 }
 
@@ -313,6 +315,17 @@ export function removeWidgetLocal(
   return { widgets, removedIds };
 }
 
+/**
+ * A card renamed from its menu. That title is one the person typed, so a
+ * data card is flagged titleEdited and its settings never write over it.
+ */
+export function renameWidgetLocal(widgets: readonly EditorWidget[], id: string, title: string): EditorWidget[] {
+  return widgets.map((w) => {
+    if (w.id !== id || w.kind === "hidden" || w.kind === "passthrough") return w;
+    return w.kind === "notes" ? { ...w, title } : { ...w, title, titleEdited: true };
+  });
+}
+
 /** Undo of a removal: the same card back where it was, and no longer named as removed. */
 export function readdWidgetLocal(
   state: { widgets: readonly EditorWidget[]; removedIds: readonly string[] },
@@ -337,17 +350,30 @@ export function mergeMissingWidgets(local: readonly EditorWidget[], stored: read
 
 // ── Three-way rebase ─────────────────────────────────────────────────
 
+/** A card's titleEdited, or undefined for a notes card or one saved before the flag. */
+function titleFlag(w: EditorWidget): boolean | undefined {
+  return "titleEdited" in w && typeof w.titleEdited === "boolean" ? w.titleEdited : undefined;
+}
+
 function mergeCard(b: EditorWidget, l: EditorWidget, v: EditorWidget): EditorWidget {
   if (l.kind === "hidden" || l.kind === "passthrough" || v.kind === "hidden" || v.kind === "passthrough" || b.kind === "hidden" || b.kind === "passthrough") {
     return v;
   }
-  const titleMine = l.title !== b.title;
+  // The title and the flag that says who wrote it travel as one part: my
+  // typed title must not land flagged as theirs to re-derive, nor theirs
+  // flagged as mine.
+  const titleMine = l.title !== b.title || titleFlag(l) !== titleFlag(b);
   const layoutMine = !same(l.layout, b.layout);
   const bodyMine = dataKey(l) !== dataKey(b) || l.kind !== b.kind;
   const start: EditorWidget = bodyMine ? l : v;
+  const titleFrom = titleMine ? l : v;
+  const { titleEdited: _startFlag, ...rest } = start as EditorWidget & { titleEdited?: boolean };
+  void _startFlag;
+  const flag = start.kind === "notes" ? undefined : titleFlag(titleFrom);
   return {
-    ...start,
-    title: titleMine ? l.title : v.title,
+    ...rest,
+    title: titleFrom.title,
+    ...(flag === undefined ? {} : { titleEdited: flag }),
     layout: layoutMine ? { ...l.layout } : { ...v.layout },
   } as EditorWidget;
 }

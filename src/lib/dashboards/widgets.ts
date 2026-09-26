@@ -76,9 +76,21 @@ interface Base {
   layout: WidgetLayout;
 }
 
-export type StatWidget = Base & { kind: "stat"; source: WidgetSource; filter: WidgetFilter; metric: StatMetric; scope: StatScope };
-export type ChartWidget = Base & { kind: "chart"; source: WidgetSource; filter: WidgetFilter; groupBy: ChartGroupBy; display: ChartDisplay };
-export type ListWidget = Base & { kind: "list"; source: WidgetSource; filter: WidgetFilter; sort: ListSort; limit: number };
+/**
+ * Who wrote a data card's title: a person (true) or its settings (false).
+ * The editor keeps a title the settings gave in step with them and never
+ * replaces one a person typed, however much it looks like a default ("Tasks
+ * by Owner" on a chart grouped by an Owner field). Absent on a card saved
+ * before the flag existed; for those alone the editor reads the title's
+ * shape instead (widget-kinds.ts isUntouchedWidgetTitle).
+ */
+interface TitleFlag {
+  titleEdited?: boolean;
+}
+
+export type StatWidget = Base & TitleFlag & { kind: "stat"; source: WidgetSource; filter: WidgetFilter; metric: StatMetric; scope: StatScope };
+export type ChartWidget = Base & TitleFlag & { kind: "chart"; source: WidgetSource; filter: WidgetFilter; groupBy: ChartGroupBy; display: ChartDisplay };
+export type ListWidget = Base & TitleFlag & { kind: "list"; source: WidgetSource; filter: WidgetFilter; sort: ListSort; limit: number };
 export type NotesWidget = Base & { kind: "notes"; text: string };
 export type PassthroughWidget = { id: string; kind: "passthrough"; raw: unknown; layout?: WidgetLayout };
 export type DataWidget = StatWidget | ChartWidget | ListWidget;
@@ -164,6 +176,7 @@ function parseCurrent(o: Record<string, unknown>, id: string): Widget | null {
   const source = parseSource(o.source);
   if (!source) return null;
   const filter = parseFilter(o.filter);
+  const flag: TitleFlag = typeof o.titleEdited === "boolean" ? { titleEdited: o.titleEdited } : {};
   if (o.kind === "stat") {
     const m = asObject(o.metric);
     let metric: StatMetric = { op: "count" };
@@ -172,16 +185,16 @@ function parseCurrent(o: Record<string, unknown>, id: string): Widget | null {
       metric = { op: "sum", fieldKey: m.fieldKey };
     }
     const scope = typeof o.scope === "string" && SCOPES.has(o.scope) ? (o.scope as StatScope) : "total";
-    return { id, kind: "stat", title: parseTitle(o.title, "Calculation"), source, filter, metric, scope, layout };
+    return { id, kind: "stat", title: parseTitle(o.title, "Calculation"), ...flag, source, filter, metric, scope, layout };
   }
   if (o.kind === "chart") {
     const groupBy = parseGroupBy(o.groupBy);
     if (!groupBy) return null;
-    return { id, kind: "chart", title: parseTitle(o.title, "Chart"), source, filter, groupBy, display: o.display === "donut" ? "donut" : "bar", layout };
+    return { id, kind: "chart", title: parseTitle(o.title, "Chart"), ...flag, source, filter, groupBy, display: o.display === "donut" ? "donut" : "bar", layout };
   }
   if (o.kind === "list") {
     const sort = typeof o.sort === "string" && SORTS.has(o.sort) ? (o.sort as ListSort) : "updated";
-    return { id, kind: "list", title: parseTitle(o.title, "Tasks"), source, filter, sort, limit: clampInt(o.limit, 1, MAX_LIST_ROWS, 10), layout };
+    return { id, kind: "list", title: parseTitle(o.title, "Tasks"), ...flag, source, filter, sort, limit: clampInt(o.limit, 1, MAX_LIST_ROWS, 10), layout };
   }
   return null;
 }
@@ -239,12 +252,17 @@ export function parseWidgets(raw: unknown): Widget[] {
   return out;
 }
 
+/** The flag as stored: written only when it is known, so an older card stays as it was. */
+function titleFlagOf(w: TitleFlag): TitleFlag {
+  return typeof w.titleEdited === "boolean" ? { titleEdited: w.titleEdited } : {};
+}
+
 /** The JSON to persist. A passthrough is written back exactly as it was read. */
 export function serializeWidgets(widgets: readonly Widget[]): unknown[] {
   return widgets.map((w) => {
     if (w.kind === "passthrough") return w.raw;
     if (w.kind === "notes") return { id: w.id, kind: w.kind, title: w.title, text: w.text, layout: w.layout };
-    const common = { id: w.id, kind: w.kind, title: w.title, source: w.source, filter: w.filter, layout: w.layout };
+    const common = { id: w.id, kind: w.kind, title: w.title, ...titleFlagOf(w), source: w.source, filter: w.filter, layout: w.layout };
     if (w.kind === "stat") return { ...common, metric: w.metric, scope: w.scope };
     if (w.kind === "chart") return { ...common, groupBy: w.groupBy, display: w.display };
     return { ...common, sort: w.sort, limit: w.limit };
@@ -272,12 +290,14 @@ const sourceSchema = z.union([
   z.object({ kind: z.literal("lists"), listIds: z.array(idSchema).min(1).max(MAX_WIDGET_LISTS) }),
 ]);
 const titleSchema = z.string().trim().min(1).max(120);
+const titleEditedSchema = z.boolean().optional();
 
 export const widgetInputSchema = z.discriminatedUnion("kind", [
   z.object({
     id: idSchema,
     kind: z.literal("stat"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     metric: z.union([z.object({ op: z.literal("count") }), z.object({ op: z.literal("sum"), fieldKey: z.string().min(1).max(64) })]).optional(),
@@ -288,6 +308,7 @@ export const widgetInputSchema = z.discriminatedUnion("kind", [
     id: idSchema,
     kind: z.literal("chart"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     groupBy: z.union([z.enum(["status", "assignee", "priority"]), z.object({ field: z.string().min(1).max(64) })]),
@@ -298,6 +319,7 @@ export const widgetInputSchema = z.discriminatedUnion("kind", [
     id: idSchema,
     kind: z.literal("list"),
     title: titleSchema,
+    titleEdited: titleEditedSchema,
     source: sourceSchema,
     filter: filterSchema.optional(),
     sort: z.enum(["due", "updated", "created", "priority", "title"]).optional(),
@@ -325,6 +347,13 @@ function normalizeSource(s: z.infer<typeof sourceSchema>): WidgetSource {
  * STORED list: it must name a stored card, and it becomes that stored value
  * verbatim, so no client can write arbitrary JSON through one.
  *
+ * A data card sent without titleEdited keeps the stored card's flag while
+ * its title is unchanged. A client that does not know the flag (a tab opened
+ * before it existed, or a draft that tab left behind) would otherwise strip
+ * it just by moving the card, and a typed title would go back to being read
+ * by its shape. A changed title sent without the flag is left without one:
+ * nobody can say who wrote it.
+ *
  * It may name ANY stored card, not only a stored passthrough: that is how an
  * editor keeps a card they are not shown (a hidden card, whose Lists they
  * cannot read, travels to them as `{ id, kind: "hidden" }` and comes back as
@@ -341,8 +370,8 @@ export function resolvePassthrough(
   for (const w of submitted) {
     if (seen.has(w.id)) return { ok: false, error: "duplicate_widget", id: w.id };
     seen.add(w.id);
+    const s = storedById.get(w.id);
     if (w.kind === "passthrough") {
-      const s = storedById.get(w.id);
       if (!s) return { ok: false, error: "unknown_widget", id: w.id };
       out.push(s);
       continue;
@@ -351,7 +380,13 @@ export function resolvePassthrough(
       out.push({ id: w.id, kind: "notes", title: w.title, text: w.text, layout: { ...w.layout } });
       continue;
     }
-    const common = { id: w.id, title: w.title, source: normalizeSource(w.source), filter: normalizeFilter(w.filter), layout: { ...w.layout } };
+    const flag =
+      typeof w.titleEdited === "boolean"
+        ? { titleEdited: w.titleEdited }
+        : s && s.kind !== "notes" && s.kind !== "passthrough" && s.title === w.title
+          ? titleFlagOf(s)
+          : {};
+    const common = { id: w.id, title: w.title, ...flag, source: normalizeSource(w.source), filter: normalizeFilter(w.filter), layout: { ...w.layout } };
     if (w.kind === "stat") out.push({ ...common, kind: "stat", metric: w.metric ?? { op: "count" }, scope: w.scope ?? "total" });
     else if (w.kind === "chart") out.push({ ...common, kind: "chart", groupBy: w.groupBy, display: w.display ?? "bar" });
     else out.push({ ...common, kind: "list", sort: w.sort ?? "updated", limit: w.limit ?? 10 });

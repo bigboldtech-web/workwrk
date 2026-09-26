@@ -23,6 +23,7 @@ import {
   previewKey,
   readdWidgetLocal,
   removeWidgetLocal,
+  renameWidgetLocal,
 } from "@/lib/dashboards/dashboard-editor";
 import { resolvePassthrough, type EditorWidget, type WidgetInput, type WidgetLayout } from "@/lib/dashboards/widgets";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
@@ -265,8 +266,7 @@ export function useDashboard(id: string, opts: { enabled?: boolean } = {}) {
   );
 
   const renameWidget = useCallback(
-    (widgetId: string, title: string) =>
-      queue.mutate((s) => ({ ...s, widgets: s.widgets.map((x) => (x.id === widgetId && "title" in x ? ({ ...x, title } as EditorWidget) : x)) })),
+    (widgetId: string, title: string) => queue.mutate((s) => ({ ...s, widgets: renameWidgetLocal(s.widgets, widgetId, title) })),
     [queue],
   );
 

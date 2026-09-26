@@ -15,10 +15,14 @@
 // THE TITLE follows the settings until the person types one. A card starts
 // on defaultWidgetTitle ("Open tasks"), and while its title is untouched a
 // change of scope, metric, group by, sort or source re-derives it, so a card
-// can never be saved headed "Open tasks" while it counts completed ones. A
-// card opened for editing is untouched only when its saved title is still
-// its settings' default; a title anyone typed is never overwritten. Clearing
-// the field hands the title back to the settings at their next change.
+// can never be saved headed "Open tasks" while it counts completed ones.
+// Who wrote a title is saved with it (titleEdited), because a typed title
+// can look exactly like a default ("Tasks by Owner"): a typed one is never
+// overwritten, and only a card saved before the flag existed is judged by
+// its title's shape (widget-kinds.ts titleState). Clearing the field hands
+// the title back to the settings at their next change. Until the chosen
+// Lists' fields arrive, the Title field keeps the saved title rather than a
+// default missing its field's name (titleLabels).
 //
 // SAVING. The primary is disabled until the input is valid and while its
 // request is in flight. A failed save keeps the dialog open, with the input
@@ -52,7 +56,17 @@ import { OsShellContext, useLayer } from "@/components/layout/os/shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { previewKey } from "@/lib/dashboards/dashboard-editor";
-import { defaultWidgetTitle, isUntouchedWidgetTitle, kindMeta, type WidgetSurface } from "@/lib/dashboards/widget-kinds";
+import {
+  kindMeta,
+  titleLabels,
+  titleModeAfterSettingsChange,
+  titleModeAfterTyping,
+  titleModeFor,
+  titleState,
+  withEditorTitle,
+  type TitleMode,
+  type WidgetSurface,
+} from "@/lib/dashboards/widget-kinds";
 import { EMPTY_FILTER, widgetInputSchema, type WidgetFilter, type WidgetInput } from "@/lib/dashboards/widgets";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
 import type { StatusOption } from "@/lib/board-items-shared";
@@ -78,13 +92,29 @@ function isData(i: WidgetInput): i is DataInput {
   return i.kind === "stat" || i.kind === "chart" || i.kind === "list";
 }
 
-/** The fields and statuses of the chosen Lists, read once per List. */
-function useListFacts(listIds: readonly string[]) {
+/** Each field's label, the first List to define a key naming it. */
+function labelsOf(ids: readonly string[], fieldsBy: ReadonlyMap<string, FieldDef[]>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const id of ids) for (const f of fieldsBy.get(id) ?? []) if (!out.has(f.key)) out.set(f.key, f.label);
+  return out;
+}
+
+/**
+ * The fields and statuses of the chosen Lists, read once per List, and the
+ * field labels of the Lists the card was SAVED with (`savedIds`), which an
+ * older card's title is judged against (widget-kinds.ts titleState).
+ * `ready` and `savedReady` say every List's fields have arrived. A List
+ * whose fields could not be read is left unread rather than taken as having
+ * none, so a title that names one of its fields is not rewritten over a
+ * failed request.
+ */
+function useListFacts(listIds: readonly string[], savedIds: readonly string[]) {
   const [fieldsBy, setFieldsBy] = useState<Map<string, FieldDef[]>>(new Map());
   const [statusesBy, setStatusesBy] = useState<Map<string, StatusOption[]>>(new Map());
   const key = listIds.join(",");
+  const savedKey = savedIds.join(",");
   useEffect(() => {
-    const missing = listIds.filter((id) => !fieldsBy.has(id));
+    const missing = Array.from(new Set([...listIds, ...savedIds])).filter((id) => !fieldsBy.has(id));
     if (missing.length === 0) return;
     let live = true;
     void (async () => {
@@ -94,13 +124,13 @@ function useListFacts(listIds: readonly string[]) {
             fetch(`/api/boards/${encodeURIComponent(id)}/fields`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
             fetch(`/api/boards/${encodeURIComponent(id)}/settings`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
           ]);
-          return { id, fields: (f?.fields ?? []) as FieldDef[], statuses: (s?.statuses ?? []) as StatusOption[] };
+          return { id, fields: f ? ((f.fields ?? []) as FieldDef[]) : null, statuses: (s?.statuses ?? []) as StatusOption[] };
         }),
       );
       if (!live) return;
       setFieldsBy((prev) => {
         const next = new Map(prev);
-        for (const g of got) next.set(g.id, g.fields);
+        for (const g of got) if (g.fields) next.set(g.id, g.fields);
         return next;
       });
       setStatusesBy((prev) => {
@@ -112,9 +142,9 @@ function useListFacts(listIds: readonly string[]) {
     return () => {
       live = false;
     };
-    // `key` is the content of `listIds`.
+    // `key` and `savedKey` are the content of `listIds` and `savedIds`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, savedKey]);
   return useMemo(() => {
     const fields: FieldDef[] = [];
     const seenF = new Set<string>();
@@ -130,9 +160,15 @@ function useListFacts(listIds: readonly string[]) {
         statuses.push(s);
       }
     }
-    return { fields, statuses };
+    return {
+      fields,
+      statuses,
+      ready: listIds.every((id) => fieldsBy.has(id)),
+      savedLabels: labelsOf(savedIds, fieldsBy),
+      savedReady: savedIds.every((id) => fieldsBy.has(id)),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, fieldsBy, statusesBy]);
+  }, [key, savedKey, fieldsBy, statusesBy]);
 }
 
 export function WidgetEditor({
@@ -157,14 +193,10 @@ export function WidgetEditor({
   onSave: (input: WidgetInput, preview: PreviewSeed | null) => Promise<EditorSaveResult>;
 }) {
   const [draft, setDraft] = useState<WidgetInput>(initial);
-  // "typed": the person's own title, never overwritten. "cleared": they
-  // emptied the field, which stays empty until a setting changes. "auto":
-  // the title is the settings' default. "saved": an edited card, auto only
-  // while its saved title is one its settings gave it
-  // (isUntouchedWidgetTitle). A label not loaded yet counts as any label, so
-  // a change made before the Lists' fields arrive still re-derives the title
-  // instead of freezing "Sum of Points (open tasks)" on a completed count.
-  const [titleMode, setTitleMode] = useState<"auto" | "typed" | "cleared" | "saved">(mode === "add" ? "auto" : "saved");
+  // The four title modes are described in widget-kinds.ts (TitleMode). A
+  // card saved with titleEdited opens as typed or auto; only an older card
+  // opens as "saved", and is judged by its title's shape.
+  const [titleMode, setTitleMode] = useState<TitleMode>(() => titleModeFor(mode, initial));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ key: string; state: "loading" } | { key: string; state: "ready"; result: WidgetResult } | { key: string; state: "failed" } | null>(null);
@@ -175,22 +207,18 @@ export function WidgetEditor({
 
   // The Lists' fields come from the draft's source; the title can name one.
   const listIds = isData(draft) && draft.source.kind === "lists" ? draft.source.listIds : [];
-  const facts = useListFacts(listIds);
+  const savedIds = mode === "edit" && isData(initial) && initial.source.kind === "lists" ? initial.source.listIds : [];
+  const facts = useListFacts(listIds, savedIds);
   const fieldLabels = useMemo(() => new Map(facts.fields.map((f) => [f.key, f.label])), [facts.fields]);
-  const autoTitle =
-    isData(draft) &&
-    (titleMode === "auto" || (titleMode === "saved" && isUntouchedWidgetTitle(initial, fieldLabels)));
-  const input = useMemo<WidgetInput>(() => {
-    if (!autoTitle || !("title" in draft)) return draft;
-    const t = defaultWidgetTitle(draft, fieldLabels);
-    return t === draft.title ? draft : ({ ...draft, title: t } as WidgetInput);
-  }, [draft, autoTitle, fieldLabels]);
-  // Every settings change goes through here; the Title field does not. The
-  // first change settles a "saved" title for good, so dropping the List that
-  // named its field cannot flip it back to the stale saved words.
+  const { follows, edited } = titleState(titleMode, initial, facts.savedLabels, facts.savedReady);
+  const labels = useMemo(() => titleLabels(initial, fieldLabels, facts.ready), [initial, fieldLabels, facts.ready]);
+  const input = useMemo<WidgetInput>(
+    () => withEditorTitle(draft, { state: { follows, edited }, labels, labelsReady: facts.ready }),
+    [draft, follows, edited, labels, facts.ready],
+  );
+  // Every settings change goes through here; the Title field does not.
   const setInput = (next: WidgetInput) => {
-    if (titleMode === "cleared" || (titleMode === "saved" && autoTitle)) setTitleMode("auto");
-    else if (titleMode === "saved") setTitleMode("typed");
+    setTitleMode(titleModeAfterSettingsChange(titleMode));
     setDraft(next);
   };
 
@@ -344,7 +372,7 @@ export function WidgetEditor({
                 value={title}
                 maxLength={120}
                 onChange={(e) => {
-                  setTitleMode(e.target.value === "" ? "cleared" : "typed");
+                  setTitleMode(titleModeAfterTyping(e.target.value));
                   setDraft({ ...input, title: e.target.value } as WidgetInput);
                 }}
                 aria-label="Title"
