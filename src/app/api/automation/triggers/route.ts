@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { requireAutomation } from "@/lib/automation/gate";
 import { prisma } from "@/lib/prisma";
 import { legacyTriggersEnabled, triggersForOrg } from "@/lib/automation/registry-triggers";
+import { timeTriggersLive } from "@/lib/automation/cron-tick-server";
 
 // The Cashkr-era triggers come back with `hidden: true` unless the org's
 // product flag (settings.automation.legacyTriggers) is on; see
@@ -17,11 +18,15 @@ import { legacyTriggersEnabled, triggersForOrg } from "@/lib/automation/registry
 export async function GET() {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
-  const org = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
+  const [org, live] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } }),
+    // The time triggers are live only while the schedule cron is ticking.
+    timeTriggersLive(),
+  ]);
 
   return NextResponse.json(
     {
-      triggers: triggersForOrg(legacyTriggersEnabled(org?.settings)),
+      triggers: triggersForOrg(legacyTriggersEnabled(org?.settings), { timeTriggersLive: live }),
       // The time triggers read times in the server's calendar; the builder
       // names this zone beside the time so nobody guesses.
       serverZone: Intl.DateTimeFormat().resolvedOptions().timeZone,

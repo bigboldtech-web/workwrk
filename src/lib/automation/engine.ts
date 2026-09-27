@@ -3,14 +3,14 @@ import type { Prisma } from "@/generated/prisma";
 import { evaluateConditions } from "./conditions";
 import { isEverywhere, liveDefinition, readScope, readWhen, scopeMatches, whenMatches, type ScopePlace } from "./definition";
 import { readAutomationSettings } from "./settings";
-import { buildIdempotencyKey, extractEventTimestamp, extractRecordId } from "./idempotency";
+import { buildIdempotencyKey, extractEventTimestamp, extractRecordId, extractEventQualifier } from "./idempotency";
 import { getAction, type ActionContext } from "./registry-actions";
 import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
 import { triggerDisplayName } from "./registry-triggers";
 import { authorCanRead, eventAllowedForAuthor, loadAuthor, type AutomationAuthor } from "./author-reach";
 
 /**
- * Automation engine entry point — called by `dispatchEvent` in
+ * Automation engine entry point: called by `dispatchEvent` in
  * src/services/webhookDispatcher.ts, fire-and-forget.
  *
  * HARD GUARANTEE: this function NEVER throws. It sits on product
@@ -19,22 +19,22 @@ import { authorCanRead, eventAllowedForAuthor, loadAuthor, type AutomationAuthor
  * isolated, so one broken automation can't starve its siblings.
  *
  * Safeguards (per docs/plans/automation-hub.md):
- *   idempotency — run key = sha(org + event + recordId + eventTs),
+ *   idempotency: run key = sha(org + event + recordId + eventTs),
  *                 enforced by AutomationRun @@unique(workflowId,
  *                 idempotencyKey); the duplicate insert P2002s → skip.
- *   anti-loop   — chain depth carried as `__automationDepth` in the
+ *   anti-loop  : chain depth carried as `__automationDepth` in the
  *                 payload (max 3) + per-record cap of 20 runs/hour.
- *   conditions  — no match → run logged SKIPPED, nothing charged.
- *   usage       — monthly action limit blocks execution (run FAILED,
+ *   conditions : no match → run logged SKIPPED, nothing charged.
+ *   usage      : monthly action limit blocks execution (run FAILED,
  *                 admins notified once per month).
- *   paused      — settings.work.automationsPaused stops every automation
+ *   paused     : settings.work.automationsPaused stops every automation
  *                 in the workspace: nothing runs, nothing is charged.
- *   published   — a workflow runs its PUBLISHED version (the snapshot
+ *   published  : a workflow runs its PUBLISHED version (the snapshot
  *                 publishedVersionId names), never the draft the builder
  *                 is editing; a row with no version runs its definition.
- *   scope       — definition.scope limits a workflow to Lists, Folders or
+ *   scope      : definition.scope limits a workflow to Lists, Folders or
  *                 Spaces; a missing scope reads as Everywhere.
- *   retry       — failed retry-safe steps get `__retryState` seeded on
+ *   retry      : failed retry-safe steps get `__retryState` seeded on
  *                 the run's triggerPayload; /api/cron/automation-retry
  *                 re-runs them with immediate → 5m → 30m backoff.
  */
@@ -119,7 +119,7 @@ export async function runAutomationsForEvent(input: RunAutomationsInput): Promis
     const { organizationId, event } = input;
     if (!organizationId || !event) return;
 
-    // Matcher — hot index (organizationId, triggerEvent, status). The
+    // Matcher: hot index (organizationId, triggerEvent, status). The
     // column is the LIVE trigger (a draft trigger waits for Republish).
     const workflows = await prisma.automationWorkflow.findMany({
       where: { organizationId, triggerEvent: event, status: "ACTIVE" },
@@ -238,9 +238,10 @@ async function runMatched(args: {
     eventKey: event,
     recordId,
     eventTimestamp: extractEventTimestamp(payload),
+    qualifier: extractEventQualifier(payload),
   });
 
-  // Sequential per workflow — keeps per-record write ordering sane and
+  // Sequential per workflow: keeps per-record write ordering sane and
   // the DB load bounded. Each workflow's failure is isolated.
   let ran = 0;
   for (const wf of runnable) {
@@ -286,7 +287,7 @@ async function runWorkflow(args: {
   const startedAt = new Date();
 
   // Idempotency: the unique(workflowId, idempotencyKey) insert is the
-  // dedupe gate — a duplicate trigger P2002s here and we skip silently.
+  // dedupe gate: a duplicate trigger P2002s here and we skip silently.
   let runId: string;
   try {
     const run = await prisma.automationRun.create({
@@ -370,7 +371,7 @@ async function runWorkflow(args: {
   try {
     const def = parseDefinition(workflow.definition);
 
-    // Step 0 — the trigger itself, for the run-detail drawer.
+    // Step 0: the trigger itself, for the run-detail drawer.
     await logStep({
       stepType: "TRIGGER",
       stepKey: event,
@@ -380,7 +381,7 @@ async function runWorkflow(args: {
       startedAt,
     });
 
-    // Conditions — no match logs the run SKIPPED, nothing charged.
+    // Conditions: no match logs the run SKIPPED, nothing charged.
     const condStartedAt = new Date();
     const evaluation = evaluateConditions(def.conditions, payload);
     if (def.conditions) {
@@ -404,7 +405,7 @@ async function runWorkflow(args: {
       return true;
     }
 
-    // Usage gate — block the whole run when the monthly limit is spent.
+    // Usage gate: block the whole run when the monthly limit is spent.
     const usage = await getUsageState(organizationId);
     if (usage.blocked) {
       await finish("FAILED", `Monthly automation limit reached (${usage.used}/${usage.limit} actions used)`);
@@ -412,7 +413,7 @@ async function runWorkflow(args: {
       return true;
     }
 
-    // Executor — each action isolated; failures downgrade the run to
+    // Executor: each action isolated; failures downgrade the run to
     // PARTIAL/FAILED instead of aborting the remainder.
     const ctx: ActionContext = {
       organizationId,
@@ -491,7 +492,7 @@ async function runWorkflow(args: {
     }
 
     const status = failed === 0 ? "SUCCESS" : succeeded > 0 ? "PARTIAL" : "FAILED";
-    // Seed retry state only when every failed step is retry-safe — the
+    // Seed retry state only when every failed step is retry-safe: the
     // cron re-runs exactly those steps (immediate → 5m → 30m).
     const retryable = failed > 0 && failedUnretryable === 0;
     await finish(
@@ -500,7 +501,7 @@ async function runWorkflow(args: {
       retryable ? { attempt: 0, nextAttemptAt: new Date().toISOString() } : undefined,
     );
   } catch (err) {
-    // Engine-level crash inside this run — mark it FAILED, never rethrow
+    // Engine-level crash inside this run: mark it FAILED, never rethrow
     // to the caller loop (which also swallows).
     const message = err instanceof Error ? err.message.slice(0, 500) : "Automation engine error";
     await finish("FAILED", message).catch(() => {});

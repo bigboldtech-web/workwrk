@@ -123,6 +123,14 @@ export interface CreateAction {
    */
   requiredApps?: string[];
   /**
+   * The row is an Ask AI entry point (spec-ai-automation 1.2 "gate: app ai"):
+   * it renders only while the shell's askAiVisible fact holds, which is the
+   * `ai` rail app on, AI features on for the workspace
+   * (settings.data.aiEnabled) and not a Guest. A hidden `ai` app alone is
+   * not enough here, since the hub survives AI off on its Automation rows.
+   */
+  requiresAskAi?: boolean;
+  /**
    * Premium module app keys (lib/modules.ts) that must be ON for the org.
    * The Tables hub stays on the rail with the spreadsheets module off (Forms
    * is core, founder decision D15), so its "New table" and "Import a CSV..."
@@ -1681,7 +1689,7 @@ export const APPS: AppEntry[] = [
     ] },
   { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick", Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
-    createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
+    createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1", requiredApps: ["ai"], requiresAskAi: true }] },
   { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk", Sidebar: TalkSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },

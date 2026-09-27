@@ -15,12 +15,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { refuseWorkflowWrite, requireAutomation, workflowRights } from "@/lib/automation/gate";
-import { getTrigger } from "@/lib/automation/registry-triggers";
+import { refuseWorkflowWrite, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
 import { draftDiffersFromLive, draftTrigger, readScope } from "@/lib/automation/definition";
 import { listVersions } from "@/lib/automation/versions-server";
-import { scopeNamer } from "@/lib/automation/places-server";
+import { definitionWithScopeInOrg, scopeNamer } from "@/lib/automation/places-server";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -127,8 +126,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       : parsed.data.definition?.trigger !== undefined
         ? parsed.data.definition.trigger ?? null
         : undefined;
-  if (bodyTrigger && !getTrigger(bodyTrigger)) {
-    return NextResponse.json({ error: `Unknown trigger event: ${bodyTrigger}` }, { status: 400 });
+  if (bodyTrigger) {
+    // A trigger the draft already has is never refused (an older workflow stays editable).
+    const problem = await triggerProblem(ctx, bodyTrigger, draftTrigger(existing.definition, existing.triggerEvent));
+    if (problem) return NextResponse.json({ error: problem, section: "when" }, { status: 400 });
   }
 
   const data: Prisma.AutomationWorkflowUpdateInput = { updatedById: ctx.userId };
@@ -138,9 +139,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const published = Boolean(existing.publishedVersionId);
   if (parsed.data.definition !== undefined || bodyTrigger !== undefined) {
+    // The scope is pruned to this workspace: a junk or foreign id is never stored.
     const next =
       parsed.data.definition !== undefined
-        ? definitionForSave(parsed.data.definition)
+        ? await definitionWithScopeInOrg(ctx.orgId, definitionForSave(parsed.data.definition))
         : { ...((existing.definition as Record<string, unknown> | null) ?? {}) };
     const trigger = bodyTrigger !== undefined ? bodyTrigger : draftTrigger(existing.definition, existing.triggerEvent);
     next.trigger = trigger;

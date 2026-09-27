@@ -3,7 +3,7 @@
 /* /automation/logs: exactly what an automation did, and why it failed
  * (spec-ai-automation /automation/logs). Every Member reads it.
  *
- *   GET  /api/automation/runs   ?status= ?workflowId= ?severity= ?record=
+ *   GET  /api/automation/runs   ?status= ?workflowId= ?severity= ?record=  (each a comma list)
  *        ?days= | ?from= ?to=  ?sort=newest|oldest  ?take=  ?cursor=
  *        -> { runs, total, nextCursor, restarted }
  *   GET  /api/automation/runs/[id]         the drawer (steps, payloads, retry)
@@ -227,7 +227,11 @@ function RunDrawer({ runId, known, onClose, onRetried, onMissing }: { runId: str
             <section aria-labelledby="steps-title" className="flex flex-col">
               <h3 id="steps-title" className="m-0 mb-1 text-sm font-semibold text-ink">Steps</h3>
               {run.detailHidden ? (
-                <p className="m-0 mb-2 text-sm text-ink-2">This run is about a task in a List you can&apos;t open, so what went in and came back is not shown.</p>
+                <p className="m-0 mb-2 text-sm text-ink-2">
+                  {run.recordType === "task"
+                    ? "This run is about a task in a List you cannot open, so what went in and came back is not shown."
+                    : "What went in and came back is about a person, so it is shown only to whoever made this automation and to Owners and Admins."}
+                </p>
               ) : null}
               {run.steps.map((s) => {
                 const open = openStep === s.id;
@@ -281,7 +285,11 @@ function LogsInner() {
 
   const statuses = useMemo(() => parseRunStatuses(sp?.get("status")).statuses, [sp]);
   const view = viewForStatuses(statuses);
-  const workflowId = sp?.get("workflowId") ?? null;
+  // Several statuses at once (Health's "See all failures" sends failed and
+  // partly done) light no pill, so they count as a filter and show as ticks
+  // in the Status group below.
+  const statusIsFilter = statuses.length > 0 && view === "all";
+  const workflowIds = useMemo(() => (sp?.get("workflowId") ?? "").split(",").filter(Boolean), [sp]);
   const severities = useMemo(() => (sp?.get("severity") ?? "").split(",").filter(Boolean).map((s) => s.toUpperCase()), [sp]);
   const records = useMemo(() => (sp?.get("record") ?? "").split(",").filter(Boolean), [sp]);
   const days = sp?.get("days") ?? null;
@@ -329,12 +337,12 @@ function LogsInner() {
     router.replace(qs ? `/automation/logs?${qs}` : "/automation/logs", { scroll: false });
   }, [router, sp]);
 
-  const activeFilters = (workflowId ? 1 : 0) + (severities.length ? 1 : 0) + (records.length ? 1 : 0) + (days || from || to ? 1 : 0);
+  const activeFilters = (statusIsFilter ? 1 : 0) + (workflowIds.length ? 1 : 0) + (severities.length ? 1 : 0) + (records.length ? 1 : 0) + (days || from || to ? 1 : 0);
 
   const query = useMemo(() => {
     const q = new URLSearchParams({ sort, take: String(pageSize) });
     if (statuses.length) q.set("status", statuses.join(","));
-    if (workflowId) q.set("workflowId", workflowId);
+    if (workflowIds.length) q.set("workflowId", workflowIds.join(","));
     if (severities.length) q.set("severity", severities.join(","));
     if (records.length) q.set("record", records.join(","));
     if (from || to) {
@@ -343,7 +351,7 @@ function LogsInner() {
     } else if (days) q.set("days", days);
     if (cursor) q.set("cursor", cursor);
     return q.toString();
-  }, [sort, pageSize, statuses, workflowId, severities, records, from, to, days, cursor]);
+  }, [sort, pageSize, statuses, workflowIds, severities, records, from, to, days, cursor]);
 
   const load = useCallback(async () => {
     const r = await apiFetch<{ runs: RunRow[]; total: number; nextCursor: string | null; restarted?: boolean }>(`/api/automation/runs?${query}`, { cache: "no-store" });
@@ -430,6 +438,8 @@ function LogsInner() {
     else next.delete(value);
     setParams({ [key]: [...next].join(",") || null });
   };
+  // The Status group speaks in view words (failed, partial), the URL's own vocabulary.
+  const statusWords = statuses.map((s) => viewForStatuses([s]));
 
   const menu = [
     ...COLUMN_KEYS.map((k) => ({
@@ -494,13 +504,20 @@ function LogsInner() {
               onClose={() => setFilterOpen(false)}
               objects="runs"
               activeCount={activeFilters}
-              onClearAll={() => setParams({ workflowId: null, severity: null, record: null, days: null, from: null, to: null })}
+              onClearAll={() => setParams({ workflowId: null, severity: null, record: null, days: null, from: null, to: null, ...(statusIsFilter ? { status: null } : {}) })}
               search={{ value: filterSearch, onChange: setFilterSearch, placeholder: "Search fields" }}
             >
+              {fieldMatch("status") ? (
+                <FilterGroup label="Status">
+                  {LOG_VIEWS.filter((v) => v !== "all").map((v) => (
+                    <FilterRow key={v} label={LOG_VIEW_LABEL[v]} checked={statusWords.includes(v)} onCheckedChange={(on) => toggleList("status", statusWords, v, on)} />
+                  ))}
+                </FilterGroup>
+              ) : null}
               {fieldMatch("automation") ? (
                 <FilterGroup label="Automation">
                   {workflows.length === 0 ? <span className="px-2 text-sm text-ink-3">No automations yet</span> : workflows.map((w) => (
-                    <FilterRow key={w.id} label={w.name} checked={workflowId === w.id} onCheckedChange={(on) => setParams({ workflowId: on ? w.id : null })} />
+                    <FilterRow key={w.id} label={w.name} checked={workflowIds.includes(w.id)} onCheckedChange={(on) => toggleList("workflowId", workflowIds, w.id, on)} />
                   ))}
                 </FilterGroup>
               ) : null}

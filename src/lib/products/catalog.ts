@@ -172,22 +172,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   // OPERATIONS SUITE
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-assets",
-    name: "WorkwrK Assets",
-    tagline: "IT inventory, licenses, lifecycle",
-    description:
-      "Asset inventory (laptops/monitors/phones/access cards), assign-to-employee, lifecycle (in-stock → assigned → returned → retired), purchase info, warranty, photos.",
-    iconKey: "Package",
-    hue: "amber",
-    suite: "OPERATIONS",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 310,
-    pathPrefix: "/assets",
-    seededAgents: ["ava-asset-tracker"],
-  },
 
   // ─────────────────────────────────────────────
   // IT SUITE (NEW)
@@ -196,22 +180,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   // MARKETING SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-campaigns",
-    name: "WorkwrK Marketing",
-    tagline: "Campaigns · Content · Events",
-    description:
-      "Marketing operations: campaign planning with budget vs spend tracking + goal attainment, content calendar across blog/email/social/video, event briefs with capacity + ROI tracking. The CMO's command center.",
-    iconKey: "Megaphone",
-    hue: "amber",
-    suite: "MARKETING",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 500,
-    pathPrefix: "/marketing",
-    seededAgents: ["mira-campaign-manager", "cora-editor", "eva-event-planner"],
-  },
 
   // ─────────────────────────────────────────────
   // ENGINEERING SUITE (NEW)
@@ -257,9 +225,11 @@ export const DEFAULT_INSTALLED_SLUGS: string[] = PRODUCT_CATALOG.filter(
 export const DEPARTMENT_RECOMMENDED_PRODUCTS: Record<string, string[]> = {
   hr: ["workwrk-people", "workwrk-perform"],
   sales: ["workwrk-crm"],
-  operations: ["workwrk-procurement", "workwrk-assets"],
-  it: ["workwrk-itsm", "workwrk-assets"],
-  marketing: ["workwrk-campaigns"],
+  operations: ["workwrk-procurement"],
+  it: ["workwrk-itsm"],
+  // Marketing left the product scope (PPMS, 2026-06-03): a marketing team
+  // starts from the "Marketing" Space template instead of a module.
+  marketing: [],
   finance: ["workwrk-books", "workwrk-fpa"],
   engineering: ["workwrk-dev"],
   legal: ["workwrk-contracts", "workwrk-privacy"],

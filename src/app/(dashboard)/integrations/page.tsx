@@ -30,6 +30,7 @@ import { ViewTab } from "@/components/ui/view-tabs";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { RequestButton } from "@/components/ui/request-button";
+import { Picker } from "@/components/ui/picker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
@@ -69,6 +70,9 @@ export default function IntegrationsPage() {
   const q = sp?.get("q") ?? "";
   const category = sp?.get("category") ?? "";
   const tab: Tab = sp?.get("status") === "ready" ? "ready" : sp?.get("status") === "requested" ? "requested" : "all";
+  // Sort (spec 2.6): Most requested (the default, ready rows first), Name A to Z.
+  const sort: "requested" | "name" = sp?.get("sort") === "name" ? "name" : "requested";
+  const [sortOpen, setSortOpen] = useState(false);
 
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,10 +128,11 @@ export default function IntegrationsPage() {
 
   const sorted = useMemo(() => {
     if (!rows) return null;
+    if (sort === "name") return [...rows].sort((a, b) => a.name.localeCompare(b.name));
     // Ready first, then the most-requested, the only honest ordering signal.
     const rank = (r: Row) => (r.status === "ready" || r.status === "connected" ? 0 : r.status === "not_built" ? 1 : 2);
     return [...rows].sort((a, b) => rank(a) - rank(b) || b.requestCount - a.requestCount || a.name.localeCompare(b.name));
-  }, [rows]);
+  }, [rows, sort]);
 
   return (
     <>
@@ -142,9 +147,19 @@ export default function IntegrationsPage() {
         }
         toolbar={{
           filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: activeFilters },
+          sort: { onClick: () => setSortOpen((v) => !v), label: sort === "name" ? "Name A to Z" : "Sort", active: sort === "name" },
           primary: { label: "Request a connector", icon: Plus, onClick: () => setRequestOpen(true) },
         }}
       />
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort connectors" selected={sort}
+              sections={[{ options: [{ value: "requested", label: "Most requested" }, { value: "name", label: "Name A to Z" }] }]}
+              onSelect={(v) => { setSortOpen(false); setParams({ sort: v === "requested" ? null : v }); }} />
+          </div>
+        ) : null}
+      </div>
       <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
         <FilterPanel
           open={filterOpen}

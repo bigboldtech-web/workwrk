@@ -15,4 +15,12 @@ describe("the org currency", () => {
     expect(formatOrgMoney(1500, "INR", "en-IN")).toMatch(/₹/);
     expect(formatOrgMoney(10, "ZZZ", "en-US")).toMatch(/ZZZ/);
   });
+
+  it("formats a record exactly: grouping, cents only when there are any", () => {
+    expect(formatOrgMoney(2899, "USD", "en-US", { exact: true })).toBe("$2,899");
+    expect(formatOrgMoney(1234.5, "USD", "en-US", { exact: true })).toBe("$1,234.50");
+    expect(formatOrgMoney(12_400, "USD", "en-US", { exact: true })).toBe("$12,400");
+    expect(formatOrgMoney(950, "USD", "en-US", { exact: true })).toBe("$950");
+    expect(formatOrgMoney(0.99, "USD", "en-US", { exact: true })).toBe("$0.99");
+  });
 });

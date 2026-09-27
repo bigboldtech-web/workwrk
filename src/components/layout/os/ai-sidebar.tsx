@@ -143,8 +143,8 @@ export function AiSidebar() {
     };
   }, [load]);
 
-  const chatsCollapsed = isSectionCollapsed(prefs.sidebar, CHATS_KEY);
-  const automationCollapsed = isSectionCollapsed(prefs.sidebar, AUTOMATION_KEY);
+  const chatsClosed = isSectionCollapsed(prefs.sidebar, CHATS_KEY);
+  const automationClosed = isSectionCollapsed(prefs.sidebar, AUTOMATION_KEY);
   const appsOpened = isSectionCollapsed(prefs.sidebar, APPS_OPEN_KEY);
   const toggleSection = useCallback((key: string) => {
     void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, key) } });
@@ -166,10 +166,22 @@ export function AiSidebar() {
     [top, chats, automation, apps],
   );
   const activeHref = useActiveRowHref(candidates);
-  // Collapsed unless opened, and always open while one of its rows is the
-  // page you are on, so the lit row is never hidden inside a closed section.
+  // Every section is held open while one of its rows is the page you are on,
+  // so the lit row is never hidden inside a closed section (the row that
+  // carries the pill is a function of the URL, not of a stored collapse).
+  // APPS is collapsed unless opened; CHATS and AUTOMATION are open unless
+  // collapsed.
+  const chatsHoldActive = chats.some((c) => `/sidekick?session=${c.id}` === activeHref);
+  const chatsCollapsed = chatsClosed && !chatsHoldActive;
+  const automationHoldActive = automation.some((r) => r.href === activeHref);
+  const automationCollapsed = automationClosed && !automationHoldActive;
   const appsHoldActive = apps.some((r) => r.href === activeHref);
   const appsCollapsed = !appsOpened && !appsHoldActive;
+  // A section held open by the page you are on has nothing to toggle.
+  const toggleHeld = (key: string, held: boolean, closed: boolean) => {
+    if (held && closed) return;
+    toggleSection(key);
+  };
 
   const [menu, setMenu] = useState<{ chat: Chat; anchor: RefObject<HTMLElement | null> } | null>(null);
 
@@ -219,7 +231,7 @@ export function AiSidebar() {
 
       {askAiVisible ? (
         <>
-          <SidebarSectionLabel collapsed={chatsCollapsed} onToggle={() => toggleSection(CHATS_KEY)}>Chats</SidebarSectionLabel>
+          <SidebarSectionLabel collapsed={chatsCollapsed} onToggle={() => toggleHeld(CHATS_KEY, chatsHoldActive, chatsClosed)}>Chats</SidebarSectionLabel>
           {!chatsCollapsed ? (
             <ul className="flex flex-col gap-0.5">
               {error && !data ? (
@@ -270,21 +282,14 @@ export function AiSidebar() {
 
       {automation.length > 0 ? (
         <>
-          <SidebarSectionLabel collapsed={automationCollapsed} onToggle={() => toggleSection(AUTOMATION_KEY)}>Automation</SidebarSectionLabel>
+          <SidebarSectionLabel collapsed={automationCollapsed} onToggle={() => toggleHeld(AUTOMATION_KEY, automationHoldActive, automationClosed)}>Automation</SidebarSectionLabel>
           {!automationCollapsed ? <ul className="flex flex-col gap-0.5">{renderRows(automation)}</ul> : null}
         </>
       ) : null}
 
       {apps.length > 0 ? (
         <>
-          <SidebarSectionLabel
-            collapsed={appsCollapsed}
-            onToggle={() => {
-              // A section held open by the page you are on has nothing to toggle.
-              if (appsHoldActive && !appsOpened) return;
-              toggleSection(APPS_OPEN_KEY);
-            }}
-          >
+          <SidebarSectionLabel collapsed={appsCollapsed} onToggle={() => toggleHeld(APPS_OPEN_KEY, appsHoldActive, !appsOpened)}>
             Apps
           </SidebarSectionLabel>
           {!appsCollapsed ? <ul className="flex flex-col gap-0.5">{renderRows(apps)}</ul> : null}

@@ -22,12 +22,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { forbidden, requireAutomation, workflowRights } from "@/lib/automation/gate";
-import { getTrigger } from "@/lib/automation/registry-triggers";
+import { forbidden, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
 import { readScope } from "@/lib/automation/definition";
 import { readAutomationSettings } from "@/lib/automation/settings";
-import { containerContents, scopeNamer } from "@/lib/automation/places-server";
+import { containerContents, definitionWithScopeInOrg, scopeNamer } from "@/lib/automation/places-server";
 import {
   VIEW_STATUS,
   WORKFLOW_VIEWS,
@@ -213,12 +212,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const definition = definitionForSave(parsed.data.definition ?? {});
+  // The scope is pruned to this workspace: a junk or foreign id is never stored.
+  const definition = await definitionWithScopeInOrg(ctx.orgId, definitionForSave(parsed.data.definition ?? {}));
   const triggerEvent = parsed.data.triggerEvent ?? (typeof definition.trigger === "string" ? definition.trigger : null);
-  if (triggerEvent && !getTrigger(triggerEvent)) {
-    return NextResponse.json({ error: `Unknown trigger event: ${triggerEvent}` }, { status: 400 });
+  if (triggerEvent) {
+    const problem = await triggerProblem(ctx, triggerEvent);
+    if (problem) return NextResponse.json({ error: problem, section: "when" }, { status: 400 });
+    definition.trigger = triggerEvent;
   }
-  if (triggerEvent) definition.trigger = triggerEvent;
 
   const workflow = await prisma.automationWorkflow.create({
     data: {

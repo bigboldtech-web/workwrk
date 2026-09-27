@@ -98,17 +98,22 @@ export function draftFromGenerated(raw: unknown, prompt: string): AppDraft | nul
   };
 }
 
-/** The first problem with a draft, in words, or null when it can be created. */
-export function draftProblem(d: AppDraft): string | null {
-  if (!d.name.trim()) return "Give the app a name.";
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(d.slug)) return "The address can use lowercase letters, numbers and dashes.";
-  if (d.fields.length === 0) return "Add at least one field.";
-  if (d.fields.length > 20) return "An app can have up to 20 fields.";
+/** The first problem with a field list, in words, or null when it can be saved. */
+export function fieldsProblem(fields: readonly DraftField[]): string | null {
+  if (fields.length === 0) return "Add at least one field.";
+  if (fields.length > 20) return "An app can have up to 20 fields.";
   const keys = new Set<string>();
-  for (const f of d.fields) {
+  for (const f of fields) {
     if (!f.label.trim()) return "Every field needs a name.";
     if (keys.has(f.key)) return `Two fields are both called "${f.label}".`;
     keys.add(f.key);
   }
   return null;
+}
+
+/** The first problem with a draft, in words, or null when it can be created. */
+export function draftProblem(d: AppDraft): string | null {
+  if (!d.name.trim()) return "Give the app a name.";
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(d.slug)) return "The address can use lowercase letters, numbers and dashes.";
+  return fieldsProblem(d.fields);
 }

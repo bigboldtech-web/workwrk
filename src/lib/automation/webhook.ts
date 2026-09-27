@@ -20,6 +20,9 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { networkInterfaces } from "node:os";
 
+/** Every connection the product names; only WEBHOOK has a live route today. */
+export const CONNECTION_PROVIDERS = ["WHATSAPP", "GMAIL", "GOOGLE_CALENDAR", "SLACK", "WEBHOOK", "ZAPIER", "CRM"] as const;
+
 export interface WebhookMeta {
   url: string | null;
   secret: string | null;

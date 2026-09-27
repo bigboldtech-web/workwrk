@@ -219,10 +219,13 @@ describe("ROUTE_HUB completeness", () => {
 
   it("exempts only genuine redirects from the completeness gate", () => {
     // An entry here is an exemption from the test above, so it must be a route
-    // that really redirects before a hub is computed. All four do, as of
-    // Phase 2 Stage C: /today and /tasks joined /dashboard and
-    // /assigned-comments when /home and /my-work replaced them.
-    expect([...REDIRECT_ROUTES]).toEqual(["/today", "/dashboard", "/assigned-comments", "/tasks"]);
+    // that really redirects before a hub is computed. All five do: /today and
+    // /tasks joined /dashboard and /assigned-comments in Phase 2 Stage C when
+    // /home and /my-work replaced them, and /marketing in Phase 7 when the
+    // module's five pages became one resolver that redirects or 404s before
+    // it paints.
+    expect([...REDIRECT_ROUTES]).toEqual(["/today", "/dashboard", "/assigned-comments", "/tasks", "/marketing"]);
+    expect(ROUTE_HUB["/marketing"]).toBeUndefined();
     expect(ROUTE_HUB["/today"]).toBeUndefined();
     expect(ROUTE_HUB["/tasks"]).toBeUndefined();
     // Phase 2 W4: the seven legacy `/tasks/*` list pages are DELETED (their

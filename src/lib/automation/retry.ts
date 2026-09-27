@@ -4,7 +4,7 @@ import { getAction, type ActionContext } from "./registry-actions";
 import { recordUsage } from "./usage";
 
 /**
- * Retry queue — re-runs FAILED/PARTIAL runs whose failed steps are ALL
+ * Retry queue: re-runs FAILED/PARTIAL runs whose failed steps are ALL
  * retry-safe actions (notify/email/idempotent state-sets). Called by
  * POST /api/cron/automation-retry, mirroring `processWebhookRetries()`.
  *
@@ -18,7 +18,7 @@ import { recordUsage } from "./usage";
  *
  * Duplicate-side-effect guard: only `safeToRetry` actions are ever
  * re-executed (create_task and other non-idempotent actions never get
- * retry state seeded), and each retry re-runs exactly the FAILED steps —
+ * retry state seeded), and each retry re-runs exactly the FAILED steps;
  * succeeded steps are never repeated.
  */
 
@@ -48,7 +48,7 @@ export async function processAutomationRetries(): Promise<{
 }> {
   const now = Date.now();
 
-  // Candidate scan — retry state only exists on runs the engine judged
+  // Candidate scan: retry state only exists on runs the engine judged
   // retry-safe; the 48h window keeps the scan cheap and bounded.
   const candidates = await prisma.automationRun.findMany({
     where: {
@@ -78,7 +78,7 @@ export async function processAutomationRetries(): Promise<{
 
       const failedSteps = run.steps.filter((s) => s.stepType === "ACTION" && s.status === "FAILED");
       if (failedSteps.length === 0) continue;
-      // Double-check retry safety — the engine only seeds state for safe
+      // Double-check retry safety: the engine only seeds state for safe
       // failures, but the catalog may have changed since.
       const allSafe = failedSteps.every((s) => getAction(s.stepKey)?.safeToRetry === true);
       if (!allSafe) continue;
@@ -149,7 +149,7 @@ export async function processAutomationRetries(): Promise<{
       }
 
       if (stillFailing === 0) {
-        // Fully recovered — every ACTION step is now SUCCESS.
+        // Fully recovered: every ACTION step is now SUCCESS.
         recovered++;
         await prisma.automationRun.update({
           where: { id: run.id },
@@ -163,7 +163,7 @@ export async function processAutomationRetries(): Promise<{
         continue;
       }
 
-      // Still failing — advance or exhaust the backoff schedule.
+      // Still failing: advance or exhaust the backoff schedule.
       const attempt = state.attempt + 1;
       const exhausted = attempt >= MAX_RETRY_ATTEMPTS;
       const nextPayload = exhausted

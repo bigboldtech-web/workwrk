@@ -1,28 +1,38 @@
 "use client";
 
-// A Build app (spec-tools-misc 2.4). Loads the App and its rows from
-// /api/build/apps/[slug], renders them through BoardView (table, board,
-// calendar, gallery), and lets an Owner or Admin add and delete rows. An
-// archived app opens read only with Restore; a missing one is the in-shell
-// 404 with the way back, never a silent redirect.
+// A Build app (spec-tools-misc 2.4): use the app you built. Loads the App and
+// its rows from /api/build/apps/[slug], renders them through BoardView
+// (table, board, calendar, gallery, inline edit, bulk change and bulk
+// delete), and lets the viewer add rows. Header stack: BackButton to Build
+// apps, the neutral tile, the name, and a "…" with Rename, Copy link,
+// Archive or Restore, Delete. An archived app opens read only; a missing one
+// is the in-shell 404 with the way back, never a silent redirect.
+//
+// What changed: the dynamic Tailwind classes (bg-${hue}-100) that never
+// compiled, the "Built with Vibe" pill, the hand-rolled header and modal,
+// the hex literals and the unused CellValue are gone. Row identity is the
+// row's real id (the API stamps one on every row; a row from before has its
+// index), a bulk change is one request, and Delete moves the app to Trash.
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  Hammer,
-  Plus,
-  Trash2,
-  Wand2,
-  X,
-  Zap,
-} from "lucide-react";
+import { Archive, ArchiveRestore, Copy, Hammer, Link2, ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { duplicateBuildApp } from "@/lib/build/duplicate-app";
+import { EditFieldsDialog } from "../_components/edit-fields-dialog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
+import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
-import { useConfirm } from "@/components/ui/dialog-provider";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { BackButton } from "@/components/ui/back-button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { apiFetch } from "@/lib/api-fetch";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -35,6 +45,7 @@ interface AppField {
 
 interface AppRow {
   [key: string]: unknown;
+  __id?: string;
   __createdAt?: string;
   __createdById?: string;
 }
@@ -44,103 +55,114 @@ interface AppRecord {
   slug: string;
   name: string;
   description: string | null;
-  iconKey: string | null;
-  hue: string | null;
   status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
   schema: { fields?: AppField[] };
   ui: { rows?: AppRow[] };
 }
 
+/** A row's identity: its stamped id, else (a row from before ids) its index. */
+const rowId = (row: AppRow, idx: number) => (typeof row.__id === "string" ? row.__id : String(idx));
+
 export default function BuildAppPage() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const confirm = useConfirm();
+  const promptDialog = usePrompt();
+  const { toast } = useOsToast();
+  const { boot } = useBoot();
   const [app, setApp] = useState<AppRecord | null>(null);
-  const [loading, setLoading] = useState(true);
   const [showNewRow, setShowNewRow] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // "missing" is the in-shell 404 (spec-tools-misc 2.4: "That app does not
-  // exist, or it was deleted."), "failed" a load error with Retry. Before,
-  // a 404 silently pushed to /build and any other failure left a blank page.
-  const [loadState, setLoadState] = useState<"ok" | "missing" | "failed">("ok");
-  // Archive and Restore: Owner and Admin, or the app's creator (the API's
-  // canManage). A Member using an app someone else built fills its rows only.
+  const [editFields, setEditFields] = useState(false);
+  const [loadState, setLoadState] = useState<"loading" | "ok" | "missing" | "failed">("loading");
+  // Rename, Archive, Restore, Delete: Owner and Admin, or the app's creator
+  // (the API's canManage). A Member using an app someone else built fills
+  // its rows only.
   const [canManage, setCanManage] = useState(false);
 
   const load = useCallback(async () => {
     if (!params?.slug) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/build/apps/${params.slug}`);
-      if (!res.ok) {
-        setLoadState(res.status === 404 ? "missing" : "failed");
-        return;
-      }
-      const data = await res.json();
-      setLoadState("ok");
-      setApp(data.app);
-      setCanManage(data.canManage === true);
-    } catch {
-      setLoadState("failed");
-    } finally {
-      setLoading(false);
-    }
+    const r = await apiFetch<{ app: AppRecord; canManage?: boolean }>(`/api/build/apps/${params.slug}`, { cache: "no-store" });
+    if (!r.ok) { setLoadState(r.status === 404 ? "missing" : "failed"); return; }
+    setLoadState("ok");
+    setApp(r.data.app);
+    setCanManage(r.data.canManage === true);
   }, [params?.slug]);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => { clearTimeout(t); window.removeEventListener("focus", onFocus); };
+  }, [load]);
 
-  useEffect(() => { load(); }, [load]);
+  const fail = (msg: string, retry: () => void) => toast(msg, { tone: "danger", action: { label: "Try again", onClick: retry } });
 
-  async function appendRow(row: Record<string, unknown>) {
+  async function appendRow(row: Record<string, unknown>): Promise<boolean> {
+    if (!app) return false;
+    const r = await apiFetch(`/api/build/apps/${app.slug}/rows`, { method: "POST", json: { row } });
+    if (!r.ok) { fail(r.error || "Couldn't add the row", () => void appendRow(row)); return false; }
+    toast("Row added");
+    await load();
+    return true;
+  }
+
+  async function rename() {
     if (!app) return;
-    setError(null);
-    const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Add failed");
-      return;
-    }
-    setShowNewRow(false);
+    const name = await promptDialog({ title: "Rename app", defaultValue: app.name, submitLabel: "Rename", required: true });
+    if (!name || name.trim() === app.name) return;
+    const r = await apiFetch(`/api/build/apps/${app.slug}`, { method: "PATCH", json: { name: name.trim() } });
+    if (!r.ok) { fail(r.error || "Couldn't rename the app", () => void rename()); return; }
+    toast("Renamed");
     await load();
   }
 
-  async function deleteRow(index: number) {
+  async function setStatus(status: "ARCHIVED" | "PUBLISHED") {
     if (!app) return;
-    if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
-    const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ index }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Delete failed");
-      return;
+    if (status === "ARCHIVED") {
+      const ok = await confirm({ title: `Archive ${app.name}?`, description: "It leaves the list and its rows stop changing. Show archived on Build apps brings it back, and you can restore it.", confirmLabel: "Archive", destructive: true });
+      if (!ok) return;
     }
+    const r = await apiFetch(`/api/build/apps/${app.slug}`, { method: "PATCH", json: { status } });
+    if (!r.ok) { fail(r.error || (status === "ARCHIVED" ? "Couldn't archive the app" : "Couldn't restore the app"), () => void setStatus(status)); return; }
+    toast(status === "ARCHIVED" ? `${app.name} archived` : `${app.name} restored`);
     await load();
   }
 
   async function deleteApp() {
     if (!app) return;
-    if (!(await confirm({ title: "Archive app", description: `Archive "${app.name}"? Rows will be preserved but the app will be hidden.`, destructive: true, confirmLabel: "Archive" }))) return;
-    const res = await fetch(`/api/build/apps/${app.slug}`, { method: "DELETE" });
-    if (res.ok) router.push("/build");
+    const ok = await confirm({
+      title: `Delete ${app.name}?`,
+      description: `It moves to Trash with its rows. You can restore it from there for ${boot.org.trashDays} days.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    const r = await apiFetch(`/api/build/apps/${app.slug}`, { method: "DELETE" });
+    if (!r.ok) { fail(r.error || "Couldn't delete the app", () => void deleteApp()); return; }
+    toast(`${app.name} moved to Trash`);
+    router.push("/build");
   }
 
-  async function restoreApp() {
+  // Duplicate: a new app with the same fields and no rows (Owner and Admin).
+  const canDuplicate = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
+  async function duplicate() {
     if (!app) return;
-    const res = await fetch(`/api/build/apps/${app.slug}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "PUBLISHED" }) });
-    if (res.ok) await load();
-    else setError("Couldn't restore the app");
+    const r = await duplicateBuildApp(app.slug);
+    if (!r.ok) { fail(r.error, () => void duplicate()); return; }
+    toast(`${r.name} created`, { action: { label: "Open", onClick: () => router.push(`/build/${r.slug}`) } });
   }
 
-  if (loading && !app) {
+  async function copyLink() {
+    if (!app) return;
+    try { await navigator.clipboard.writeText(`${window.location.origin}/build/${app.slug}`); toast("Link copied"); }
+    catch { toast("Couldn't copy the link", { tone: "danger" }); }
+  }
+
+  if (loadState === "loading" && !app) {
     return (
-      <div className="p-6">
-        <SkeletonRows rows={6} />
-      </div>
+      <>
+        <OsPageHeader title="Build apps" back={{ fallbackHref: "/build", label: "Build apps" }} />
+        <div className="px-6 pt-2"><SkeletonRows rows={6} /></div>
+      </>
     );
   }
   if (loadState === "missing") {
@@ -154,245 +176,194 @@ export default function BuildAppPage() {
     return <OsEmptyView variant="error" title="Couldn't load this app" action={{ label: "Try again", onClick: () => void load() }} />;
   }
   const archived = app.status === "ARCHIVED";
-
   const fields = app.schema.fields ?? [];
   const rows = app.ui.rows ?? [];
 
-  return (
-    <div className="bldd p-6 max-w-[1600px] mx-auto">
-      <div className="mb-3"><BackButton fallbackHref="/build" label="Build apps" /></div>
+  const more = canManage ? [
+    { label: "Rename", icon: Pencil, onClick: () => void rename() },
+    { label: "Edit fields", icon: ListChecks, onClick: () => setEditFields(true) },
+    ...(canDuplicate ? [{ label: "Duplicate", icon: Copy, onClick: () => void duplicate() }] : []),
+    { label: "Copy link", icon: Link2, onClick: () => void copyLink() },
+    archived
+      ? { label: "Restore", icon: ArchiveRestore, onClick: () => void setStatus("PUBLISHED") }
+      : { label: "Archive", icon: Archive, onClick: () => void setStatus("ARCHIVED") },
+    { label: "Delete", icon: Trash2, destructive: true, onClick: () => void deleteApp() },
+  ] : [
+    { label: "Copy link", icon: Link2, onClick: () => void copyLink() },
+  ];
 
-      <div className="flex items-start justify-between mb-6">
-        <div className="flex items-start gap-4">
-          <EntityTile size="lg" icon={Hammer} {...NEUTRAL_TILE} />
-          <div>
-            <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
-            {app.description && <p className="text-xs text-zinc-500">{app.description}</p>}
-            <p className="text-xs text-zinc-500 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
-          </div>
-        </div>
-        {archived ? (
-          <div className="flex items-center gap-3 text-sm text-ink-2">
-            This app is archived, so its rows are read only.
-            {canManage ? <button type="button" onClick={() => void restoreApp()} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover">Restore</button> : null}
-          </div>
+  return (
+    <>
+      {/* The location row: AI > Build apps > {app name} (spec 2.4). */}
+      <Breadcrumb items={[{ label: "Build apps", href: "/build" }, { label: app.name }]} />
+      <OsPageHeader
+        title={app.name}
+        back={{ fallbackHref: "/build", label: "Build apps" }}
+        tile={{ icon: Hammer, ...NEUTRAL_TILE }}
+        more={more}
+        toolbar={{
+          left: app.description ? <span className="truncate text-sm text-ink-2">{app.description}</span> : undefined,
+          right: archived ? (
+            <span className="inline-flex items-center gap-3 text-sm text-ink-2">
+              Archived, so its rows are read only.
+              {canManage ? <button type="button" onClick={() => void setStatus("PUBLISHED")} className="font-medium text-brand-deep hover:underline">Restore</button> : null}
+            </span>
+          ) : undefined,
+          primary: archived ? undefined : { label: "New row", icon: Plus, onClick: () => setShowNewRow(true) },
+        }}
+      />
+
+      <div className="px-6 pb-8 pt-2">
+        {rows.length === 0 ? (
+          <OsEmptyView context="board" title="No rows yet" hint={archived ? "Restore the app to add rows." : undefined} />
         ) : (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowNewRow(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0073EA] hover:bg-[#0060B9] text-white text-xs font-medium"
-          >
-            <Plus size={14} /> New row
-          </button>
-          {canManage ? <button
-            type="button"
-            onClick={deleteApp}
-            className="p-2 rounded-lg text-zinc-500 hover:text-[#E2445C] hover:bg-red-50 dark:hover:bg-red-950/40"
-            aria-label="Archive app"
-            title="Archive app"
-          >
-            <Trash2 size={14} />
-          </button> : null}
-        </div>
+          <BoardView
+            boardKey={`build-app:${app.slug}`}
+            items={rows.map((row, idx) => ({ ...row, __rid: rowId(row, idx) }))}
+            fields={fields as BoardField[]}
+            getId={(r) => String((r as { __rid: string }).__rid)}
+            getTitle={(r) => {
+              const firstText = fields.find((f) => f.fieldType === "TEXT");
+              return String((r as Record<string, unknown>)[firstText?.key ?? fields[0]?.key ?? ""] ?? "Untitled");
+            }}
+            getValue={(r, key) => (r as Record<string, unknown>)[key]}
+            selectable
+            editableFields={archived ? [] : undefined}
+            onChangeField={async (id, fieldKey, value) => {
+              if (archived) { toast("Restore the app to change its rows."); return; }
+              const r = await apiFetch(`/api/build/apps/${app.slug}/rows`, { method: "PATCH", json: { id, row: { [fieldKey]: value } } });
+              if (!r.ok) { fail("Couldn't save that change.", () => void load()); return; }
+              await load();
+            }}
+            onBulkChange={async (ids, fieldKey, value) => {
+              if (archived) { toast("Restore the app to change its rows."); return; }
+              const r = await apiFetch<{ changed: number; failed: number }>(`/api/build/apps/${app.slug}/rows`, { method: "PATCH", json: { ids, row: { [fieldKey]: value } } });
+              if (!r.ok) fail("Couldn't save those rows.", () => void load());
+              else if (r.data.failed > 0) toast(`Changed ${r.data.changed} of ${ids.length} rows.`, { tone: "danger" });
+              await load();
+            }}
+            onBulkDelete={async (ids) => {
+              if (archived) { toast("Restore the app to change its rows."); return; }
+              const r = await apiFetch<{ deleted: number; failed: number }>(`/api/build/apps/${app.slug}/rows`, { method: "DELETE", json: { ids } });
+              if (!r.ok) fail("Couldn't delete those rows.", () => void load());
+              else if (r.data.failed > 0) toast(`Deleted ${r.data.deleted} of ${ids.length} rows.`, { tone: "danger" });
+              else toast(`${r.data.deleted} ${r.data.deleted === 1 ? "row" : "rows"} deleted`);
+              await load();
+            }}
+          />
         )}
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-xs text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Multi-view rendering, Table / Kanban / Calendar / Gallery */}
-      {rows.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white text-center py-16">
-          <Wand2 size={32} className="mx-auto mb-2 text-zinc-500" />
-          <p className="font-medium text-xs mb-1">No rows yet</p>
-          <p className="text-xs text-zinc-500 mb-4">{archived ? "This app is archived." : "Add the first row to populate your app."}</p>
-          {archived ? null : <button
-            type="button"
-            onClick={() => setShowNewRow(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0073EA] hover:bg-[#0060B9] text-white text-xs font-medium"
-          >
-            <Plus size={11} /> Add first row
-          </button>}
-        </div>
-      ) : (
-        <BoardView
-          boardKey={`build-app:${app.slug}`}
-          items={rows.map((row, idx) => ({ ...row, __idx: idx }))}
-          fields={fields as BoardField[]}
-          getId={(r) => String((r as { __idx: number }).__idx)}
-          getTitle={(r) => {
-            const firstText = fields.find((f) => f.fieldType === "TEXT");
-            return String((r as Record<string, unknown>)[firstText?.key ?? fields[0]?.key ?? ""] ?? "Untitled");
-          }}
-          getValue={(r, key) => (r as Record<string, unknown>)[key]}
-          selectable
-          onChangeField={async (id, fieldKey, value) => {
-            if (archived) { setError("Restore the app to change its rows."); return; }
-            const idx = Number(id);
-            const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index: idx, row: { [fieldKey]: value } }),
-            });
-            if (res.ok) await load();
-            else setError("Couldn't save that change. Try again.");
-          }}
-          onBulkChange={async (ids, fieldKey, value) => {
-            if (archived) { setError("Restore the app to change its rows."); return; }
-            // Patch each row by index, one at a time. Indexes are stable for
-            // a single load (we re-render after the batch). The route locks
-            // the app row per write, so nothing is lost either way; a write
-            // that fails is counted and said, never swallowed.
-            let failed = 0;
-            for (const id of ids) {
-              const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ index: Number(id), row: { [fieldKey]: value } }),
-              }).catch(() => null);
-              if (!res?.ok) failed++;
-            }
-            if (failed > 0) setError(`Couldn't save ${failed} of ${ids.length} rows. Try again.`);
-            await load();
-          }}
-          onBulkDelete={async (ids) => {
-            if (archived) { setError("Restore the app to change its rows."); return; }
-            // Delete in DESC order so prior deletes don't shift later
-            // indexes. The rows API deletes by index against the live
-            // app.ui.rows array.
-            const desc = [...ids].map(Number).sort((a, b) => b - a);
-            let failed = 0;
-            for (const idx of desc) {
-              const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ index: idx }),
-              }).catch(() => null);
-              if (!res?.ok) failed++;
-            }
-            if (failed > 0) setError(`Couldn't delete ${failed} of ${desc.length} rows. Try again.`);
-            await load();
-          }}
-        />
-      )}
-
-      {showNewRow && (
-        <NewRowModal
+      {showNewRow ? (
+        <NewRowDialog fields={fields} onClose={() => setShowNewRow(false)} onSave={async (row) => { if (await appendRow(row)) setShowNewRow(false); }} />
+      ) : null}
+      {editFields ? (
+        <EditFieldsDialog
+          slug={app.slug}
           fields={fields}
-          onClose={() => setShowNewRow(false)}
-          onSave={appendRow}
+          onClose={() => setEditFields(false)}
+          onSaved={() => { setEditFields(false); toast("Fields saved"); void load(); }}
         />
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }
 
+/* ─────────────────────────── New row ─────────────────────────── */
 
-function NewRowModal({
-  fields,
-  onClose,
-  onSave,
-}: {
+const INPUT = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base font-normal text-ink placeholder:text-ink-3";
+
+function NewRowDialog({ fields, onClose, onSave }: {
   fields: AppField[];
   onClose: () => void;
   onSave: (row: Record<string, unknown>) => Promise<void>;
 }) {
+  const confirm = useConfirm();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
+  const dirty = Object.values(values).some((v) => v !== null && v !== undefined && v !== "" && v !== false && !(Array.isArray(v) && v.length === 0));
 
-  function update(key: string, v: unknown) {
-    setValues((prev) => ({ ...prev, [key]: v }));
-  }
-  function toggleMulti(key: string, val: string) {
+  const update = (key: string, v: unknown) => setValues((prev) => ({ ...prev, [key]: v }));
+  const toggleMulti = (key: string, val: string) =>
     setValues((prev) => {
       const arr = Array.isArray(prev[key]) ? [...(prev[key] as string[])] : [];
       const idx = arr.indexOf(val);
       if (idx >= 0) arr.splice(idx, 1); else arr.push(val);
       return { ...prev, [key]: arr };
     });
+
+  async function close() {
+    if (dirty && !(await confirm({ title: "Discard this row?", description: "What you typed here is not saved.", confirmLabel: "Discard", destructive: true }))) return;
+    onClose();
   }
 
   async function submit() {
     setSaving(true);
-    try { await onSave(values); }
-    finally { setSaving(false); }
+    try { await onSave(values); } finally { setSaving(false); }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white border border-zinc-200 shadow-xl p-6 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">New row</h2>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-zinc-50 text-zinc-500"><X size={16} /></button>
+    <Dialog open onOpenChange={(v) => { if (!v) void close(); }}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>New row</DialogTitle>
+          <DialogDescription>One value per field. You can change any of them later, in the table.</DialogDescription>
+        </DialogHeader>
+        <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+          {fields.map((f) => (
+            <label key={f.key} className="flex flex-col gap-1 text-sm font-medium text-ink">
+              {f.label}
+              {f.fieldType === "TEXTAREA" ? (
+                <textarea value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value)} rows={3} className="rounded-md border border-line-strong bg-raised px-3 py-2 text-base font-normal text-ink" />
+              ) : f.fieldType === "NUMBER" ? (
+                <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className={`${INPUT} tabular-nums`} />
+              ) : f.fieldType === "DATE" ? (
+                <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className={INPUT} />
+              ) : f.fieldType === "CHECKBOX" ? (
+                <span className="flex h-9 items-center">
+                  <Switch checked={Boolean(values[f.key])} onChange={(v) => update(f.key, v)} aria-label={f.label} />
+                </span>
+              ) : f.fieldType === "SELECT" ? (
+                <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className={`${INPUT} appearance-none`}>
+                  <option value="">None</option>
+                  {(f.options?.choices ?? []).map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
+                </select>
+              ) : f.fieldType === "MULTI_SELECT" ? (
+                <span className="flex flex-wrap gap-1.5">
+                  {(f.options?.choices ?? []).map((c) => {
+                    const arr = Array.isArray(values[f.key]) ? (values[f.key] as string[]) : [];
+                    const sel = arr.includes(c.value);
+                    return (
+                      <button
+                        key={c.value}
+                        type="button"
+                        aria-pressed={sel}
+                        onClick={() => toggleMulti(f.key, c.value)}
+                        className={`inline-flex h-7 items-center rounded-md border px-2 text-sm font-normal ${sel ? "border-brand bg-brand-soft text-brand-deep" : "border-line bg-raised text-ink-2 hover:bg-hover"}`}
+                      >
+                        {c.label ?? c.value}
+                      </button>
+                    );
+                  })}
+                </span>
+              ) : (
+                <input
+                  type={f.fieldType === "EMAIL" ? "email" : f.fieldType === "URL" ? "url" : "text"}
+                  value={String(values[f.key] ?? "")}
+                  onChange={(e) => update(f.key, e.target.value || null)}
+                  className={INPUT}
+                />
+              )}
+            </label>
+          ))}
         </div>
-        {fields.map((f) => (
-          <div key={f.key}>
-            <label className="block text-xs font-medium text-zinc-500 mb-1">{f.label}</label>
-            {f.fieldType === "TEXTAREA" ? (
-              <textarea
-                value={String(values[f.key] ?? "")}
-                onChange={(e) => update(f.key, e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs resize-none"
-              />
-            ) : f.fieldType === "NUMBER" ? (
-              <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs" />
-            ) : f.fieldType === "DATE" ? (
-              <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs" />
-            ) : f.fieldType === "CHECKBOX" ? (
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={!!values[f.key]} onChange={(e) => update(f.key, e.target.checked)} />
-                {f.label}
-              </label>
-            ) : f.fieldType === "SELECT" ? (
-              <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs">
-                <option value="">None</option>
-                {(f.options?.choices ?? []).map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
-              </select>
-            ) : f.fieldType === "MULTI_SELECT" ? (
-              <div className="flex flex-wrap gap-1.5">
-                {(f.options?.choices ?? []).map((c) => {
-                  const arr = Array.isArray(values[f.key]) ? (values[f.key] as string[]) : [];
-                  const sel = arr.includes(c.value);
-                  return (
-                    <button
-                      key={c.value}
-                      type="button"
-                      onClick={() => toggleMulti(f.key, c.value)}
-                      className={"text-xs px-2 py-1 rounded-md border transition-colors " + (sel ? "bg-blue-100 dark:bg-blue-500/10 border-blue-300 text-blue-700" : "bg-white border-zinc-200 text-zinc-500 hover:border-muted-2")}
-                    >
-                      {c.label ?? c.value}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <input
-                type={f.fieldType === "EMAIL" ? "email" : f.fieldType === "URL" ? "url" : "text"}
-                value={String(values[f.key] ?? "")}
-                onChange={(e) => update(f.key, e.target.value || null)}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs"
-              />
-            )}
-          </div>
-        ))}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200">
-          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-zinc-500 hover:bg-zinc-50">Cancel</button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg text-xs font-medium bg-[#0073EA] hover:bg-[#0060B9] text-white disabled:opacity-50 inline-flex items-center gap-1.5"
-          >
-            {saving ? <Dots variant="pending" /> : <Zap size={12} />}
-            {saving ? "Saving…" : "Save row"}
+        <DialogFooter>
+          <button type="button" onClick={() => void close()} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
+          <button type="button" onClick={() => void submit()} disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-50">
+            {saving ? <Dots variant="pending" /> : null} Add row
           </button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

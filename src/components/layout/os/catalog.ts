@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════
- * Legacy colour maps, C and GRAD.
+ * Legacy colour map, C.
  *
  * This file used to be the demo MODULE CATALOG: a fixture of 60-odd sample
  * modules (CRM, Helpdesk, ITSM, Legal, Financials, Procurement, Marketing,
@@ -32,16 +32,3 @@ export const C = {
   gray:   "var(--os-c-gray)",
 };
 
-// Same deal: gradient keys are legacy names; values are design-system only.
-export const GRAD = {
-  orangePink:  "linear-gradient(135deg, var(--os-c-orange), var(--os-c-red))",
-  pinkPurple:  "linear-gradient(135deg, var(--os-brand), var(--os-brand-deep))",
-  bluePurple:  "linear-gradient(135deg, var(--os-c-blue), var(--os-brand-deep))",
-  greenTeal:   "linear-gradient(135deg, var(--os-c-green), var(--os-c-teal))",
-  indigoBlue:  "linear-gradient(135deg, var(--os-brand), var(--os-c-blue))",
-  redPink:     "linear-gradient(135deg, var(--os-c-red), #C62D42)",
-  brownOrange: "linear-gradient(135deg, var(--os-c-brown), var(--os-c-orange))",
-  purpleIndigo:"linear-gradient(135deg, var(--os-brand), var(--os-brand-deep))",
-  tealGreen:   "linear-gradient(135deg, var(--os-c-teal), var(--os-c-green))",
-  yellowOrange:"linear-gradient(135deg, var(--os-c-yellow), var(--os-c-orange))",
-};

@@ -48,7 +48,7 @@ export function HubSidebar({ overlay, onClose }: { overlay?: boolean; onClose?: 
 }
 
 function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () => void }) {
-  const { toggleSidebar, openCustomize, hubSidebarApp, sidebarWidth, setSidebarWidth, launcherApps, prefs } = useOsShell();
+  const { toggleSidebar, openCustomize, hubSidebarApp, sidebarWidth, setSidebarWidth, launcherApps, prefs, askAiVisible } = useOsShell();
   const activeModuleKeys = useMemo<string[]>(() => (Array.isArray(prefs.modules?.activeAppKeys) ? prefs.modules.activeAppKeys : []), [prefs.modules]);
   const { boot } = useBoot();
   const pathname = usePathname() || "";
@@ -100,6 +100,8 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
       if (!canAccessTier(a.requiredAccess, accessLevel)) return false;
       // The destination's own app gate, so a row never lands on AppOff.
       if (a.requiredApps && !a.requiredApps.every((k) => appKeys.has(k))) return false;
+      // An Ask AI door closes with the one fact every Ask AI entry reads.
+      if (a.requiresAskAi && !askAiVisible) return false;
       // A premium module the row's object belongs to must be on (Tables hub:
       // the hub survives module-off on Forms, its table rows do not).
       if (a.requiredModules && !a.requiredModules.every((k) => activeModuleKeys.includes(k))) return false;
@@ -107,7 +109,7 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
       if (permsLoading) return false;
       return canDo(a.requiredPermission.module, a.requiredPermission.action);
     });
-  }, [app, accessLevel, canDo, permsLoading, appKeys, activeModuleKeys]);
+  }, [app, accessLevel, canDo, permsLoading, appKeys, activeModuleKeys, askAiVisible]);
   const createMode: "custom" | "global" | "menu" | "single" | "none" =
     app.CreateMenu ? "custom"
     : app.createActions === "global" ? "global"

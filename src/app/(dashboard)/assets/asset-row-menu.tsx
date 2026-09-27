@@ -1,43 +1,40 @@
 "use client";
 
-// The "…" overflow menu for one asset row. Same primitives as the rest of
-// the app (MenuList / MenuItem via MorePortal, useConfirm for destructive):
+// The "…" menu for one asset row (spec-tools-misc 2.2), rendered only for a
+// viewer who can manage the row. Order: Open, Assign to, Unassign (when
+// assigned), Change status, Edit, Copy link, then Delete. The "Check-out log
+// · Soon" row is gone: it returns as a real row when the log exists.
 //
-//   Edit…            → shared form dialog (PATCH /api/assets/[id]) , page-owned
-//   Assign / Reassign → assign dialog (PATCH assignedToId)         , page-owned
-//   Unassign          → PATCH { assignedToId: null }  (when assigned)
-//   Change status ›   → PATCH { status }
-//   Check-out log     → Coming soon (no check-in/out backend yet)
-//   Delete asset      → DELETE /api/assets/[id]  (destructive, confirmed)
+//   Edit            the shared form dialog (PATCH /api/assets/[id]), page-owned
+//   Assign          the assign dialog (PATCH assignedToId), page-owned
+//   Unassign        PATCH { assignedToId: null }
+//   Change status   PATCH { status }
+//   Delete          DELETE /api/assets/[id], which moves it to Trash
 //
-// Mutations are enforced server-side (requirePermission); a 403 surfaces as
-// a clear toast rather than a dead button.
+// Rights come from the list response, so nothing renders that the API would
+// answer 403 to; a 403 that still arrives is a toast, never a dead button.
 
 import { useBoot } from "@/components/layout/os/boot-context";
 import { useEffect, useRef, useState } from "react";
 import {
-  MoreHorizontal, Pencil, UserRound, UserMinus, CircleDot, LogOut, Trash2,
+  MoreHorizontal, Pencil, UserRound, UserMinus, CircleDot, Trash2, ExternalLink, Link2,
 } from "lucide-react";
 import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { useToast } from "@/components/ui/toast";
+import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import {
-  STATUS_LABEL, STATUS_HUE, personName,
-  type ApiAsset, type AssetStatus,
-} from "./types";
-import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { apiFetch } from "@/lib/api-fetch";
+import { STATUS_LABEL, personName, statusColor, type ApiAsset, type AssetStatus, type AssetRights } from "./types";
 
-// Statuses a person can set directly. ASSIGNED is intentionally excluded
-// it's derived from assigning an owner, not picked from a list.
+// Statuses a person can set directly. ASSIGNED comes from assigning someone.
 const DIRECT_STATUSES: AssetStatus[] = ["AVAILABLE", "IN_REPAIR", "RETIRED", "LOST"];
 
-export function AssetRowMenu({
-  asset, onEdit, onAssign, onChanged,
-}: {
+export function AssetRowMenu({ asset, rights, onEdit, onAssign, onOpen, onChanged }: {
   asset: ApiAsset;
+  rights: AssetRights;
   onEdit: (a: ApiAsset) => void;
   onAssign: (a: ApiAsset) => void;
+  onOpen: (a: ApiAsset) => void;
   onChanged: () => void;
 }) {
   const { boot } = useBoot();
@@ -45,7 +42,7 @@ export function AssetRowMenu({
   const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const toast = useToast();
+  const { toast } = useOsToast();
   const confirm = useConfirm();
 
   useEffect(() => {
@@ -69,27 +66,14 @@ export function AssetRowMenu({
   const patch = async (body: Record<string, unknown>, okMsg: string) => {
     close();
     setBusy(true);
-    try {
-      const res = await fetch(`/api/assets/${asset.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast.error(
-          "Couldn't update asset",
-          res.status === 403 ? "You don't have permission for this." : (d?.error ?? "Try again."),
-        );
-        return;
-      }
-      toast.success(okMsg);
-      onChanged();
-    } catch {
-      toast.error("Network error", "Please try again.");
-    } finally {
-      setBusy(false);
+    const r = await apiFetch(`/api/assets/${asset.id}`, { method: "PATCH", json: body });
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.status === 403 ? "You can't change this asset." : (r.error || "Couldn't update the asset"), { tone: "danger", action: { label: "Try again", onClick: () => void patch(body, okMsg) } });
+      return;
     }
+    toast(okMsg);
+    onChanged();
   };
 
   const del = async () => {
@@ -102,74 +86,76 @@ export function AssetRowMenu({
     });
     if (!ok) return;
     setBusy(true);
-    try {
-      const res = await fetch(`/api/assets/${asset.id}`, { method: "DELETE" });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast.error(
-          "Couldn't delete asset",
-          res.status === 403 ? "You don't have permission for this." : (d?.error ?? `HTTP ${res.status}`),
-        );
-        return;
-      }
-      toast.success("Asset moved to Trash");
-      onChanged();
-    } catch {
-      toast.error("Network error", "Please try again.");
-    } finally {
-      setBusy(false);
+    const r = await apiFetch(`/api/assets/${asset.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.status === 403 ? "You can't delete this asset." : (r.error || "Couldn't delete the asset"), { tone: "danger", action: { label: "Try again", onClick: () => void del() } });
+      return;
     }
+    toast(`${asset.name} moved to Trash`);
+    onChanged();
+  };
+
+  const copyLink = async () => {
+    close();
+    try { await navigator.clipboard.writeText(`${window.location.origin}/assets?asset=${asset.id}`); toast("Link copied"); }
+    catch { toast("Couldn't copy the link", { tone: "danger" }); }
   };
 
   const isAssigned = Boolean(asset.assignedTo);
 
   return (
-    <span className="ast__more" data-open={open ? "true" : "false"}>
+    <>
       <button
         ref={btnRef}
         type="button"
-        className="ast__more-btn"
         title="More actions"
-        aria-label="More actions"
+        aria-label={`Actions for ${asset.name}`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={busy}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50"
       >
-        <MoreHorizontal />
+        <MoreHorizontal className="h-4 w-4" />
       </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={210} open={open} placement="below">
-        <MenuList className="min-w-[210px]" onClick={(e) => e.stopPropagation()}>
-          <MenuItem icon={Pencil} label="Edit…" onClick={() => { close(); onEdit(asset); }} />
-          <MenuItem
-            icon={UserRound}
-            label={isAssigned ? "Reassign…" : "Assign to…"}
-            description={isAssigned ? personName(asset.assignedTo) || undefined : undefined}
-            onClick={() => { close(); onAssign(asset); }}
-          />
-          {isAssigned && (
-            <MenuItem icon={UserMinus} label="Unassign" onClick={() => void patch({ assignedToId: null }, "Asset unassigned")} />
-          )}
-
-          <MenuSeparator />
-          <MenuSubmenu icon={CircleDot} label="Change status">
-            {DIRECT_STATUSES.map((s) => (
-              <MenuItem
-                key={s}
-                leading={<span className="ast__status-dot" style={{ background: STATUS_HUE[s] }} />}
-                label={STATUS_LABEL[s]}
-                selected={asset.status === s}
-                onClick={() => void patch({ status: s }, `Status → ${STATUS_LABEL[s]}`)}
-              />
-            ))}
-          </MenuSubmenu>
-
-          <UpcomingOnly><ComingSoonRow label="Check-out log" icon={LogOut} /></UpcomingOnly>
-
-          <MenuSeparator />
-          <MenuItem icon={Trash2} label="Delete asset" destructive onClick={() => void del()} />
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={220} open={open} placement="below" onClose={close}>
+        <MenuList className="min-w-[220px]" onClick={(e) => e.stopPropagation()} aria-label={`Actions for ${asset.name}`}>
+          <MenuItem icon={ExternalLink} label="Open" onClick={() => { close(); onOpen(asset); }} />
+          {rights.canAssign ? (
+            <MenuItem
+              icon={UserRound}
+              label={isAssigned ? "Reassign" : "Assign to"}
+              description={isAssigned ? personName(asset.assignedTo) || undefined : undefined}
+              onClick={() => { close(); onAssign(asset); }}
+            />
+          ) : null}
+          {rights.canAssign && isAssigned ? (
+            <MenuItem icon={UserMinus} label="Unassign" onClick={() => void patch({ assignedToId: null }, "Unassigned")} />
+          ) : null}
+          {rights.canEdit ? (
+            <MenuSubmenu icon={CircleDot} label="Change status">
+              {DIRECT_STATUSES.map((s) => (
+                <MenuItem
+                  key={s}
+                  leading={<span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor(s) }} aria-hidden />}
+                  label={STATUS_LABEL[s]}
+                  selected={asset.status === s}
+                  onClick={() => void patch({ status: s }, `Status changed to ${STATUS_LABEL[s]}`)}
+                />
+              ))}
+            </MenuSubmenu>
+          ) : null}
+          {rights.canEdit ? <MenuItem icon={Pencil} label="Edit" onClick={() => { close(); onEdit(asset); }} /> : null}
+          <MenuItem icon={Link2} label="Copy link" onClick={() => void copyLink()} />
+          {rights.canDelete ? (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={Trash2} label="Delete" destructive onClick={() => void del()} />
+            </>
+          ) : null}
         </MenuList>
       </MorePortal>
-    </span>
+    </>
   );
 }

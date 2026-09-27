@@ -67,7 +67,10 @@ function parseDate(raw: string | null | undefined, endOfDay: boolean): Date | nu
 }
 
 export interface RunQuery {
+  /** One automation (the first of `workflowIds`, kept for callers that read it). */
   workflowId: string | null;
+  /** ?workflowId= as a comma list: the Logs filter panel picks several. */
+  workflowIds: string[];
   statuses: string[];
   severities: string[];
   recordTypes: string[];
@@ -113,10 +116,13 @@ export function parseRunQuery(sp: URLSearchParams, now: Date = new Date()): RunQ
   const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 100) : 50;
   const cursor = sp.get("cursor")?.trim() || null;
 
+  const workflowIds = [...new Set((sp.get("workflowId") ?? "").split(",").map((x) => x.trim()).filter(Boolean))].slice(0, 50);
+
   return {
     ok: true,
     query: {
-      workflowId: sp.get("workflowId")?.trim() || null,
+      workflowId: workflowIds[0] ?? null,
+      workflowIds,
       statuses: st.statuses,
       severities,
       recordTypes,
@@ -133,7 +139,7 @@ export function parseRunQuery(sp: URLSearchParams, now: Date = new Date()): RunQ
 export function runWhere(orgId: string, q: RunQuery): Record<string, unknown> {
   return {
     organizationId: orgId,
-    ...(q.workflowId ? { workflowId: q.workflowId } : {}),
+    ...(q.workflowIds.length > 1 ? { workflowId: { in: q.workflowIds } } : q.workflowId ? { workflowId: q.workflowId } : {}),
     ...(q.statuses.length ? { status: { in: q.statuses } } : {}),
     ...(q.severities.length ? { severity: { in: q.severities } } : {}),
     ...(q.recordTypes.length ? { recordType: { in: q.recordTypes } } : {}),

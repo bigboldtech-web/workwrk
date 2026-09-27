@@ -35,6 +35,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useElementWidth } from "@/hooks/use-element-width";
 
 export interface TableColumn<T> {
   key: string;
@@ -52,8 +53,17 @@ export interface TableColumn<T> {
   render: (row: T, index: number) => ReactNode;
   /** Tailwind classes for the cell. */
   cellClassName?: string;
-  /** Hide under this width (a Tailwind breakpoint class pair). */
+  /** Extra classes for the header and body cells. Never a display class: a
+   *  column hides through `hideBelow`, so its grid track goes with it. */
   className?: string;
+  /**
+   * The column priority rule (spec-tools-misc section 1): drop this column
+   * when the CARD is narrower than this many pixels. The track and the
+   * minimum width go with it, so the remaining columns fill the card and the
+   * last one is never pushed under the sticky "..." cell. Hidden columns are
+   * in the drawer, never truncated to nothing.
+   */
+  hideBelow?: number;
 }
 
 export interface TableSort {
@@ -121,7 +131,7 @@ function alignClass(align?: "start" | "end" | "center", numeric?: boolean): stri
 }
 
 export function TableCard<T>({
-  columns,
+  columns: allColumns,
   rows,
   rowKey,
   rowHref,
@@ -144,6 +154,14 @@ export function TableCard<T>({
   ariaLabel,
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cardWidth = useElementWidth(cardRef);
+  // The columns this card is wide enough for. Unmeasured (the first frame,
+  // a test) shows every column.
+  const columns = useMemo(
+    () => (cardWidth === 0 ? allColumns : allColumns.filter((c) => !c.hideBelow || cardWidth >= c.hideBelow)),
+    [allColumns, cardWidth],
+  );
   const sel = selected ?? new Set<string>();
   const anySelected = sel.size > 0;
 
@@ -234,7 +252,7 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu]);
 
   return (
-    <div className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>
+    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>
       <div className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}

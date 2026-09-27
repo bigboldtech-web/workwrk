@@ -1,4 +1,4 @@
-// POST /api/items/bulk — one patch, many tasks.
+// POST /api/items/bulk: one patch, many tasks.
 //
 // Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/my-work, Data):
 // "`POST /api/items/bulk` (new: `{ ids[], patch }`) for the bulk bar".

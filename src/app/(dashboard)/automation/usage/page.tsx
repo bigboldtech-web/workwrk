@@ -16,11 +16,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
-import { ViewTab } from "@/components/ui/view-tabs";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { CARD, InlineRow } from "@/components/automation/automation-ui";
 import { apiFetch } from "@/lib/api-fetch";
+import { formatCount } from "@/lib/format/date";
 import { monthKey, shiftMonth } from "@/lib/automation/settings";
 
 interface Usage {
@@ -36,7 +36,7 @@ interface Usage {
   topPeople?: Array<{ userId: string | null; name: string; avatarUrl: string | null; count: number }>;
 }
 
-const fmt = (n: number) => new Intl.NumberFormat().format(n);
+const fmt = (n: number) => formatCount(n);
 
 function monthLabel(key: string): string {
   const [y, m] = key.split("-").map(Number);
@@ -135,10 +135,10 @@ function UsageInner() {
         title="Usage"
         views={
           <div className="flex items-center gap-1">
-            <button type="button" aria-label="Previous month" onClick={() => go(shiftMonth(month, -1))} className="inline-flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+            <button type="button" aria-label="Previous month" disabled={month <= "2000-01"} onClick={() => go(shiftMonth(month, -1))} className="inline-flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent">
               <ChevronLeft className="size-4" aria-hidden />
             </button>
-            <ViewTab label={monthLabel(month)} active />
+            <span aria-live="polite" className="os-chrome inline-flex h-7 items-center rounded-md bg-active px-2.5 text-base font-medium text-ink">{monthLabel(month)}</span>
             <button
               type="button"
               aria-label="Next month"

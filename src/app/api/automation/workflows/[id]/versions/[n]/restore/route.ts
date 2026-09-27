@@ -14,7 +14,7 @@
 // { ok: true, draftUpdated: true, keptVersion: number | null }.
 
 import { NextResponse, type NextRequest } from "next/server";
-import type { Prisma } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { draftTrigger, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
@@ -35,7 +35,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!wf) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   if (wf.status === "ARCHIVED") return NextResponse.json({ error: "Archived workflows cannot be edited" }, { status: 400 });
 
-  const result = await prisma.$transaction(async (tx) => {
+  // The workflow row is locked for the transaction (as publish does), so a
+  // restore and a publish at the same moment number their versions in turn.
+  let result: { notFound: true } | { notFound: false; keptVersion: number | null };
+  try {
+    result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${wf.id} FOR UPDATE`;
     const versions = await tx.automationWorkflowVersion.findMany({
       where: { workflowId: wf.id, organizationId: ctx.orgId },
       select: { versionNumber: true, definitionJson: true },
@@ -82,7 +87,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       },
     });
     return { notFound: false as const, keptVersion };
-  });
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return NextResponse.json({ error: "Somebody changed this automation's versions at the same moment. Reload and try again." }, { status: 409 });
+    }
+    throw err;
+  }
 
   if (result.notFound) return NextResponse.json({ error: "Version not found" }, { status: 404 });
   return NextResponse.json({ ok: true, draftUpdated: true, keptVersion: result.keptVersion });

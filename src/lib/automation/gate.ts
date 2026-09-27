@@ -68,6 +68,26 @@ export async function requireAutomation(): Promise<{ error: NextResponse } | Aut
   return { userId: viewer.userId, orgId: viewer.organizationId, canCreate: true, canManage, isAdmin, viewer };
 }
 
+/**
+ * Why a trigger may not be put on an automation, or null when it may. A
+ * hidden Cashkr-era trigger (the org's legacyTriggers flag is off) is not
+ * offered to anyone; with the flag on it still needs a manager or above,
+ * because the engine never runs a Member's automation on those events
+ * (author-reach.ts), so a Member publishing one would wait for a run that
+ * never comes. `current` is the trigger the draft already has: a save that
+ * keeps it is never refused, so an older workflow stays editable.
+ */
+export async function triggerProblem(ctx: AutomationContext, trigger: string, current?: string | null): Promise<string | null> {
+  const { getTrigger, isLegacyTrigger, legacyTriggersEnabled } = await import("./registry-triggers");
+  if (!getTrigger(trigger)) return `Unknown trigger event: ${trigger}`;
+  if (!isLegacyTrigger(trigger) || trigger === current) return null;
+  const { prisma } = await import("@/lib/prisma");
+  const org = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
+  if (!legacyTriggersEnabled(org?.settings)) return "That trigger is not available in this workspace. Choose another.";
+  if (!ctx.canManage) return "That trigger runs only for managers, Owners and Admins. Choose another.";
+  return null;
+}
+
 export function forbidden(message = "You need edit access to change automations."): NextResponse {
   return NextResponse.json({ error: message }, { status: 403 });
 }

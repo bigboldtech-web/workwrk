@@ -123,6 +123,12 @@ const SQL_MANIFEST = [
   // order is free: the catalogue reads zero counts and the request routes
   // answer a named 503 while the tables are absent.
   "2026-09-24-phase7-requests.sql",
+  // Phase 7, stage C review: "AutomationCronTick" (one row per cron endpoint,
+  // stamped on every tick, read by the trigger catalog so the two time
+  // triggers show "Not live yet" until the automation-schedule cron row
+  // really runs). One CREATE TABLE IF NOT EXISTS. Deploy order is free: the
+  // writer and the reader both catch the missing relation.
+  "2026-09-27-automation-cron-tick.sql",
 ];
 
 /**

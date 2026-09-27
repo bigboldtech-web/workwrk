@@ -14,6 +14,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ViewTab } from "@/components/ui/view-tabs";
@@ -23,7 +24,7 @@ import { CARD, InlineRow, BTN } from "@/components/automation/automation-ui";
 import { apiFetch } from "@/lib/api-fetch";
 import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
 import { ALERT_LABEL, ALERT_LEVELS } from "@/lib/automation/workflow-list";
-import { formatDate, formatRelative } from "@/lib/format/date";
+import { formatCount, formatDate, formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 
 interface Health {
@@ -178,13 +179,14 @@ function HealthInner() {
                       >
                         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: RUN_TONE_COLOR[l.tone] }} aria-hidden />
                         <span className="flex-1">{l.label}</span>
-                        <span className="tabular-nums text-ink-2">{new Intl.NumberFormat().format(health.totals.byStatus[l.key] ?? 0)}</span>
+                        <span className="tabular-nums text-ink-2">{formatCount(health.totals.byStatus[l.key] ?? 0, datePrefs)}</span>
+                        <ChevronRight className="size-4 shrink-0 text-ink-3" aria-hidden />
                       </Link>
                     ))}
                   </div>
                 </div>
                 <p className="m-0 mt-3 text-sm text-ink-3">
-                  {new Intl.NumberFormat().format(total)} run{total === 1 ? "" : "s"} in the last {days} days. Skipped and running ones do not count toward the rate.
+                  {formatCount(total, datePrefs)} run{total === 1 ? "" : "s"} in the last {days} days. Skipped and running ones do not count toward the rate.
                 </p>
               </section>
 
@@ -198,7 +200,8 @@ function HealthInner() {
                       className="mx-2 flex h-11 items-center gap-2 rounded-md px-3 text-row text-ink hover:bg-hover"
                     >
                       <span className="flex-1">{ALERT_LABEL[a]}</span>
-                      <span className="tabular-nums text-ink-2">{new Intl.NumberFormat().format(health.failuresBySeverity[a] ?? 0)}</span>
+                      <span className="tabular-nums text-ink-2">{formatCount(health.failuresBySeverity[a] ?? 0, datePrefs)}</span>
+                      <ChevronRight className="size-4 shrink-0 text-ink-3" aria-hidden />
                     </Link>
                   ))}
                 </div>
@@ -216,7 +219,9 @@ function HealthInner() {
                   columns={columns}
                   rows={failures}
                   rowKey={(r) => r.id}
-                  rowHref={(r) => `/automation/logs?runId=${r.id}`}
+                  // A click, not an href: the Automation cell is itself a
+                  // link, and an anchor may not hold another anchor.
+                  onRowClick={(r) => router.push(`/automation/logs?runId=${r.id}`)}
                   empty={<span className="text-ink-2">Nothing has failed. Good.</span>}
                   footer={failures && failures.length > 0 ? { total: failTotal, noun: "records", from: 1, to: failures.length } : undefined}
                 />

@@ -25,8 +25,9 @@ export type TrashType =
   | "file_folder"
   // A Meeting with its attendees and action items as one snapshot.
   | "meeting"
-  // Phase 7: a Tool with the people it was shared with, and an Asset.
-  | "tool" | "asset";
+  // Phase 7: a Tool with the people it was shared with, an Asset, and a
+  // Build app with its rows (App.ui.rows travels inside the row itself).
+  | "tool" | "asset" | "app";
 
 /** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
 export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
@@ -65,7 +66,7 @@ export const TRASH_LABEL: Record<TrashType, string> = {
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
   file_folder: "Folder", meeting: "Meeting",
-  tool: "Tool", asset: "Asset",
+  tool: "Tool", asset: "Asset", app: "App",
 };
 
 /**
@@ -105,6 +106,7 @@ const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
   meeting: "meeting",
   tool: "tool",
   asset: "asset",
+  app: "app",
 };
 
 export const TRASH_HREF: Record<TrashType, string> = Object.fromEntries(
@@ -387,6 +389,25 @@ const REGISTRY: Record<TrashType, Entry> = {
     },
   },
 
+  // A Build app. Its schema and its rows are JSON columns on the row, so the
+  // snapshot is the row and a restore brings every row of the app back.
+  app: {
+    capture: async (id) => {
+      const row = await prisma.app.findUnique({ where: { id } });
+      return row ? { label: row.name || "Untitled app", snapshot: { row: row as unknown as Row } } : null;
+    },
+    restore: async (s) => {
+      const row = { ...s.row };
+      // The slug is unique per org; an app created under the same address
+      // since the delete keeps it, and the restored one gets a suffix.
+      const orgId = String(row.organizationId ?? "");
+      const slug = String(row.slug ?? "app");
+      const taken = await prisma.app.findFirst({ where: { organizationId: orgId, slug }, select: { id: true } });
+      if (taken) row.slug = `${slug}-restored-${Date.now().toString(36)}`.slice(0, 60);
+      await prisma.app.create({ data: asData(row) });
+    },
+  },
+
   // A Task. Snapshot the item + its whole subtask subtree; the live delete
   // cascades the subtasks (Item.parentItem onDelete: Cascade), so restore
   // rebuilds the root then its descendants parents-first.
@@ -618,6 +639,7 @@ export async function moveToTrash(
     // A Tool cascades its ToolShare rows; they are in the snapshot above.
     case "tool": await prisma.tool.delete({ where: { id } }); break;
     case "asset": await prisma.asset.delete({ where: { id } }); break;
+    case "app": await prisma.app.delete({ where: { id } }); break;
     // "item", "board", "folder" and "space" are handled above, captured and
     // deleted in one transaction under row locks (Phase 5b, their links).
     // Drive folder: files and subfolders reference it with SetNull, so remove

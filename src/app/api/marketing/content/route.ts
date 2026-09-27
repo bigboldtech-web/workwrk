@@ -1,94 +1,25 @@
-// GET/POST /api/marketing/content — content calendar items
+// GET /api/marketing/content: the legacy ContentItem rows, read-only, for one
+// release (spec-tools-misc section 2.7 Data). Owner and Admin through the
+// Data gate. POST and PATCH are gone with the pages that called them.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveSuiteContext } from "@/lib/suites/auth";
-import { z } from "zod";
+import { AccessError, requireCan } from "@/lib/access/gate";
+import { jsonError } from "@/lib/api-helpers";
 
-export async function GET(req: Request) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-  const workspaceId = new URL(req.url).searchParams.get("workspace");
-  const items = await prisma.contentItem.findMany({
-    where: {
-      organizationId: ctx.orgId,
-      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
-    },
-    orderBy: [{ scheduledFor: "asc" }, { createdAt: "desc" }],
-    take: 300,
-  });
-  return NextResponse.json({ items });
-}
+export const dynamic = "force-dynamic";
 
-const createSchema = z.object({
-  title: z.string().min(1).max(200),
-  type: z.enum(["BLOG_POST", "EMAIL", "SOCIAL_POST", "VIDEO", "PODCAST", "WHITEPAPER", "EBOOK", "CASE_STUDY", "WEBINAR", "ONE_PAGER", "PRESS_RELEASE", "OTHER"]).optional(),
-  channel: z.string().max(80).optional(),
-  scheduledFor: z.string().optional(),
-  campaignId: z.string().optional(),
-  notes: z.string().max(8000).optional(),
-  workspaceId: z.string().optional(),
-});
-
-export async function POST(req: Request) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-  const body = await req.json().catch(() => null);
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
-
-  const item = await prisma.contentItem.create({
-    data: {
-      organizationId: ctx.orgId,
-      workspaceId: parsed.data.workspaceId ?? null,
-      title: parsed.data.title,
-      type: parsed.data.type ?? "BLOG_POST",
-      channel: parsed.data.channel,
-      scheduledFor: parsed.data.scheduledFor ? new Date(parsed.data.scheduledFor) : null,
-      campaignId: parsed.data.campaignId,
-      notes: parsed.data.notes,
-      ownerId: ctx.userId,
-      authorId: ctx.userId,
-    },
-  });
-  return NextResponse.json({ item });
-}
-
-const patchSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1).max(300).optional(),
-  type: z.enum(["BLOG_POST", "EMAIL", "SOCIAL_POST", "VIDEO", "PODCAST", "WHITEPAPER", "EBOOK", "CASE_STUDY", "WEBINAR", "ONE_PAGER", "PRESS_RELEASE", "OTHER"]).optional(),
-  status: z.enum(["IDEA", "BRIEFED", "IN_DRAFT", "IN_REVIEW", "APPROVED", "SCHEDULED", "PUBLISHED", "ARCHIVED"]).optional(),
-  channel: z.string().max(80).nullable().optional(),
-  scheduledFor: z.string().nullable().optional(),
-  notes: z.string().max(8000).nullable().optional(),
-});
-
-export async function PATCH(req: Request) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-  const body = await req.json().catch(() => null);
-  const parsed = patchSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
-
-  const existing = await prisma.contentItem.findFirst({
-    where: { id: parsed.data.id, organizationId: ctx.orgId },
-  });
-  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-
-  const now = new Date();
-  const item = await prisma.contentItem.update({
-    where: { id: existing.id },
-    data: {
-      ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
-      ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
-      ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
-      ...(parsed.data.channel !== undefined ? { channel: parsed.data.channel } : {}),
-      ...(parsed.data.scheduledFor !== undefined ? { scheduledFor: parsed.data.scheduledFor ? new Date(parsed.data.scheduledFor) : null } : {}),
-      ...(parsed.data.notes !== undefined ? { notes: parsed.data.notes } : {}),
-      // PUBLISHED status auto-stamps publishedAt on first transition.
-      ...(parsed.data.status === "PUBLISHED" && !existing.publishedAt ? { publishedAt: now } : {}),
-    },
-  });
-  return NextResponse.json({ item });
+export async function GET() {
+  try {
+    const { viewer } = await requireCan("manage", { type: "settings", page: "data" });
+    const items = await prisma.contentItem.findMany({
+      where: { organizationId: viewer.organizationId },
+      orderBy: [{ scheduledFor: "asc" }, { createdAt: "desc" }],
+      take: 300,
+    });
+    return NextResponse.json({ items });
+  } catch (e) {
+    if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);
+    throw e;
+  }
 }

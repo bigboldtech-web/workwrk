@@ -163,6 +163,10 @@ function WorkflowsInner() {
   const [nameDialog, setNameDialog] = useState<{ mode: "create" } | { mode: "rename"; row: Row } | null>(null);
   const [nameBusy, setNameBusy] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  // A Space, Folder or List link that no longer resolves (deleted, or never
+  // existed): the param is dropped and one line says so, so the page keeps
+  // its New automation button instead of dead-ending on "Try again".
+  const [placeGone, setPlaceGone] = useState(false);
 
   const setParams = useCallback((patch: Record<string, string | null>) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
@@ -190,6 +194,11 @@ function WorkflowsInner() {
   const load = useCallback(async () => {
     const r = await apiFetch<ListResponse>(`/api/automation/workflows?${query}`, { cache: "no-store" });
     if (!r.ok) {
+      if (r.status === 404 && (listId || folderId || spaceId)) {
+        setPlaceGone(true);
+        setParams({ listId: null, folderId: null, spaceId: null });
+        return;
+      }
       setError(true);
       setRows((prev) => prev ?? []);
       return;
@@ -198,7 +207,7 @@ function WorkflowsInner() {
     setData(r.data);
     setRows(r.data.workflows);
     setSelected((prev) => new Set([...prev].filter((id) => r.data.workflows.some((w) => w.id === id && w.can.edit))));
-  }, [query]);
+  }, [query, listId, folderId, spaceId, setParams]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 0);
@@ -407,10 +416,10 @@ function WorkflowsInner() {
         key: "success",
         k: "success",
         label: "Success",
-        width: "100px",
+        width: "112px",
         numeric: true,
         render: (w) => w.successRate === null
-          ? <span className="text-ink-3">No runs yet</span>
+          ? <span className="whitespace-nowrap text-ink-3">No runs yet</span>
           : <span title={`${w.successRuns} of ${w.terminalRuns} runs succeeded`}>{w.successRate}%</span>,
       },
       {
@@ -611,6 +620,9 @@ function WorkflowsInner() {
             </FilterPanel>
 
             <div className="flex min-w-0 flex-1 flex-col">
+              {placeGone ? (
+                <InlineRow action={{ label: "Dismiss", onClick: () => setPlaceGone(false) }}>That place no longer exists, so this is every automation</InlineRow>
+              ) : null}
               {error && (rows ?? []).length === 0 ? (
                 <InlineRow action={{ label: "Try again", onClick: () => void load() }}>Couldn&apos;t load automations</InlineRow>
               ) : (

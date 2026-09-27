@@ -102,10 +102,14 @@ export async function rotateWebhookSecret(orgId: string, userId: string): Promis
   return { secret };
 }
 
-/** Disconnect: the address is kept for an easy reconnect, the secret is dropped. */
+/**
+ * Disconnect: the address is kept for an easy reconnect, the secret is
+ * dropped. False when there is nothing connected (no row, or one already
+ * disconnected), so the route can answer 404 as it documents.
+ */
 export async function disconnectWebhook(orgId: string, userId: string): Promise<boolean> {
   const current = await loadWebhook(orgId);
-  if (!current) return false;
+  if (!current || current.status !== "CONNECTED") return false;
   await writeMeta(orgId, userId, { ...current.meta, secret: null, secretCreatedAt: null }, "DISCONNECTED");
   await audit(orgId, userId, "webhook_disconnected", "disconnected the automation webhook");
   return true;

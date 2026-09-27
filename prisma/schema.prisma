@@ -6763,3 +6763,12 @@ model AppSuggestion {
 
   @@index([organizationId, createdAt])
 }
+
+/// One row per cron endpoint, stamped on every tick. The automation trigger
+/// catalog reads the "automation-schedule" row to say whether the two time
+/// triggers (a task's date arrives, every time period) are actually firing,
+/// so a workspace never sees "Active" on an automation its host never runs.
+model AutomationCronTick {
+  name       String   @id
+  lastTickAt DateTime
+}

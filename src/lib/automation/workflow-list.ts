@@ -50,8 +50,23 @@ export const WORKFLOW_STATUS_VIEW: Record<string, { label: string; tone: "succes
   ARCHIVED: { label: "Archived", tone: "neutral" },
 };
 
+/**
+ * The API's status words, which spec-ai-automation writes in its deep links
+ * (?status=DRAFT), read as the same views as the pill words (?status=drafts),
+ * so a link built with either spelling lights the right pill.
+ */
+const STATUS_TO_VIEW: Record<string, WorkflowView> = {
+  ACTIVE: "active",
+  DRAFT: "drafts",
+  INACTIVE: "paused",
+  PAUSED: "paused",
+  ERROR: "errors",
+};
+
 export function parseView(raw: string | null | undefined): WorkflowView {
-  return (WORKFLOW_VIEWS as readonly string[]).includes(raw ?? "") ? (raw as WorkflowView) : "all";
+  const v = raw ?? "";
+  if ((WORKFLOW_VIEWS as readonly string[]).includes(v)) return v as WorkflowView;
+  return STATUS_TO_VIEW[v.toUpperCase()] ?? "all";
 }
 
 export function parseSort(raw: string | null | undefined): WorkflowSort {

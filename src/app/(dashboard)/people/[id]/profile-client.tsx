@@ -22,7 +22,7 @@
 import { NotFoundView } from "@/components/access/not-found-view";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { BackButton } from "@/components/ui/back-button";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Mail, Phone, Building2, Briefcase, Users,
   Target, CheckSquare, TrendingUp, Star, Smile, Zap, Heart,
-  Edit3, Save, Package, Laptop, Monitor, Smartphone,
+  Edit3, Save, Package,
   ArrowDownRight, ArrowUpRight, MoveRight, ChevronRight, Settings2,
   ClipboardCheck, Trophy, Gauge, Clock,
   MoreHorizontal, UserMinus, RotateCcw,
@@ -64,6 +64,14 @@ import { StatusChip } from "@/components/ui/chip";
 import { TeamStatTile, TeamAvatar, pctColor } from "@/components/team/ui";
 import { TAUPE } from "@/components/ui/accent";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { appAudienceAllows } from "@/lib/nav/app-audience";
+import { assetGlyph } from "@/app/(dashboard)/assets/asset-glyph";
 
 type Mode = "self" | "manage" | "peer";
 
@@ -524,66 +532,70 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
   );
 }
 
-/* ═══════════════════ Assets tab (kept from the old page) ═════════ */
+/* ═══════════════════ Assets tab ═══════════════════════════════════ */
+
+// A person's own kit (spec-tools-misc 2.2): the one door for a Member
+// without reports, and a manager's read of a report's kit. GET /api/assets
+// ?assignedToId= answers own rows for anyone and a report's rows for their
+// manager, never a stranger's. A viewer who can open /assets gets a link
+// to the row's drawer there.
 
 function AssetsTab({ userId }: { userId: string }) {
-  const [assets, setAssets] = useState<AssetRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [assets, setAssets] = useState<AssetRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const { boot } = useBoot();
+  const datePrefs = useDatePrefs();
+  const canOpenRegister = appAudienceAllows("assets", boot.viewer);
 
-  useEffect(() => {
-    fetch(`/api/assets?assignedToId=${userId}`)
-      .then((r) => r.ok ? r.json() : { data: [] })
-      .then((d) => setAssets(Array.isArray(d) ? d : d?.data || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const loadAssets = useCallback(async () => {
+    const r = await apiFetch<{ assets?: AssetRow[] } | AssetRow[]>(`/api/assets?assignedToId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+    if (!r.ok) { setFailed(true); return; }
+    setFailed(false);
+    setAssets(Array.isArray(r.data) ? r.data : r.data.assets ?? []);
   }, [userId]);
+  useEffect(() => {
+    const t = setTimeout(() => { void loadAssets(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadAssets]);
 
-  if (loading) return <div className="space-y-2">{[1, 2].map((i) => <div key={i} className="h-16 bg-zinc-50 rounded-lg animate-pulse" />)}</div>;
-
+  if (failed) return <OsEmptyView variant="error" title="Couldn't load the assets" action={{ label: "Try again", onClick: () => void loadAssets() }} compact />;
+  if (assets === null) return <SkeletonRows rows={3} />;
   if (assets.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <Package size={32} className="mx-auto text-zinc-400 mb-3" />
-        <p className="text-xs text-zinc-500">No assets assigned</p>
-        <p className="text-xs text-zinc-400 mt-1">Assets can be assigned from the Assets page</p>
-      </div>
-    );
+    return <OsEmptyView title="No kit assigned" hint="Laptops, phones and other equipment assigned to this person show here." compact />;
   }
 
-  const typeIcons: Record<string, React.ComponentType<{ size?: number; className?: string }>> = { LAPTOP: Laptop, DESKTOP: Monitor, MONITOR: Monitor, PHONE: Smartphone };
-
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-zinc-500 mb-3">{assets.length} asset{assets.length !== 1 ? "s" : ""} assigned</p>
-      {assets.map((asset) => {
-        const Icon = (asset.type && typeIcons[asset.type]) || Package;
-        return (
-          <Card key={asset.id}>
-            <CardContent className="p-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-zinc-50 flex items-center justify-center shrink-0">
-                  <Icon size={18} className="text-zinc-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-medium truncate">{asset.name}</p>
-                    <Badge variant="outline" className="text-xs px-1.5 py-0">{asset.condition}</Badge>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-zinc-500 mt-0.5">
-                    {asset.brand && <span>{asset.brand}</span>}
-                    {asset.model && <span>· {asset.model}</span>}
-                    {asset.serialNumber && <span>· S/N: {asset.serialNumber}</span>}
-                    {asset.imeiNumber && <span>· IMEI: {asset.imeiNumber}</span>}
-                  </div>
-                </div>
-                {asset.assignedAt && (
-                  <p className="text-xs text-zinc-500 shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })}
+    <div className="flex flex-col">
+      <p className="mb-2 text-sm text-ink-2">{assets.length} {assets.length === 1 ? "asset" : "assets"} assigned</p>
+      <ul className="os-chrome divide-y divide-line-soft rounded-lg border border-line bg-raised">
+        {assets.map((asset) => {
+          const Icon = assetGlyph(asset.type);
+          const inner = (
+            <>
+              <EntityTile size="sm" icon={Icon} {...NEUTRAL_TILE} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-row font-medium text-ink">{asset.name}</span>
+                  {asset.condition ? <span className="inline-flex h-5 items-center rounded-md bg-hover px-1.5 text-xs font-medium text-ink-2">{asset.condition.charAt(0) + asset.condition.slice(1).toLowerCase()}</span> : null}
+                </span>
+                <span className="block truncate text-sm text-ink-2">
+                  {[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : null, asset.imeiNumber ? `IMEI ${asset.imeiNumber}` : null].filter(Boolean).join(" · ") || "No model"}
+                </span>
+              </span>
+              {asset.assignedAt ? <span className="shrink-0 text-sm text-ink-2">Since {formatDate(asset.assignedAt, datePrefs, "date")}</span> : null}
+            </>
+          );
+          return (
+            <li key={asset.id}>
+              {canOpenRegister ? (
+                <Link href={`/assets?asset=${asset.id}`} className="flex min-h-11 items-center gap-3 px-3 py-1.5 hover:bg-hover">{inner}</Link>
+              ) : (
+                <div className="flex min-h-11 items-center gap-3 px-3 py-1.5">{inner}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -703,7 +715,14 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   const [user, setUser] = useState<any>(null);
   const [alignment, setAlignment] = useState<AlignmentPayload | null>(null);
   const [alignLoading, setAlignLoading] = useState(mode !== "peer");
-  const [tab, setTab] = useState("reviews");
+  // ?tab= names the opening tab, so a Member's own kit has an address
+  // (/people/me?tab=assets, spec-tools-misc 2.2); an unknown value opens
+  // the default. Later tab changes stay local, as before.
+  const sp = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const t = sp?.get("tab") ?? "";
+    return ["reviews", "history", "skills", "kudos", "checkins", "assets", "reports"].includes(t) ? t : "reviews";
+  });
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
 

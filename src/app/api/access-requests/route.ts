@@ -19,7 +19,7 @@ const bodySchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | null> = {
+const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | null> = {
   space: "space",
   board: "board",
   list: "board",
@@ -31,6 +31,9 @@ const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_fo
   sop_folder: "sop_folder",
   // A Member party on /agreements/[id] asks the contract's sender.
   contract: "contract",
+  // The Tool drawer's read-only banner (spec-tools-misc 2.1): a Can view
+  // holder asks whoever added the tool.
+  tool: "tool",
 };
 
 type RequestTarget = { ownerId: string | null; link: string | null };
@@ -64,6 +67,10 @@ async function targetFor(type: string, id: string, organizationId: string): Prom
     if (model === "sop_folder") {
       const f = await prisma.sOPFolder.findFirst({ where, select: { id: true } });
       return { ownerId: null, link: f ? "/sops/manage?tab=sop-folders" : null };
+    }
+    if (model === "tool") {
+      const t = await prisma.tool.findFirst({ where, select: { addedBy: true } });
+      return { ownerId: t?.addedBy ?? null, link: t ? `/tools?tool=${id}` : null };
     }
     if (model === "contract") {
       const a = await prisma.agreement.findFirst({ where, select: { createdById: true } });

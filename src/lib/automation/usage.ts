@@ -4,13 +4,13 @@ import { DEFAULT_MONTHLY_LIMIT, readAutomationSettings } from "./settings";
 export { DEFAULT_MONTHLY_LIMIT };
 
 /**
- * Usage metering — 1 AutomationUsage row per executed action, summed
+ * Usage metering: 1 AutomationUsage row per executed action, summed
  * per calendar month against the org's plan limit.
  *
  * Limit source: readAutomationSettings (settings.work.automationQuota, then
  * the older settings.automationLimit), default 1000 actions/month. When the limit is reached the engine blocks new
  * runs (run FAILED with an explanatory error) and org admins get one
- * Inbox notification per month — not one per blocked run.
+ * Inbox notification per month: not one per blocked run.
  */
 
 export function monthStart(now: Date = new Date()): Date {
@@ -78,7 +78,7 @@ export async function recordUsage(input: {
 }
 
 /**
- * Notify org admins that the monthly limit blocked a run — at most one
+ * Notify org admins that the monthly limit blocked a run: at most one
  * notification per admin per calendar month. Never throws.
  */
 export async function notifyLimitExceeded(organizationId: string, limit: number): Promise<void> {

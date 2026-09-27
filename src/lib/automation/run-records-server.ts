@@ -4,6 +4,15 @@
 // available" and the run drawer hides the payloads, so the Logs page cannot
 // be used to read a task in a List the viewer has no access to. An Owner or
 // Admin sees every record.
+//
+// The payloads of every OTHER kind of run are people's data (a KPI reading
+// carries a userId, an actual, a target and a score; a review its outcome),
+// and Logs is open to every Member. So a run that is not about a task shows
+// what went in and came back only to an Owner or Admin and to whoever made
+// the automation: a Member's automation on a person event only ever runs on
+// their own data (author-reach.ts), so the creator reads nothing that is not
+// theirs. Kudos (public by design) and a scheduled tick (no record at all)
+// carry nothing to hide.
 
 import { prisma } from "@/lib/prisma";
 import { accessibleIds } from "@/lib/access/index";
@@ -19,9 +28,16 @@ export interface RunRecord {
 
 export interface RecordResolver {
   record(recordType: string | null, recordId: string | null): RunRecord | null;
-  /** False when the run is about a task in a List the viewer cannot open. */
-  canSeeDetail(recordType: string | null, recordId: string | null): boolean;
+  /**
+   * False when the run is about a task in a List the viewer cannot open, or
+   * about anything that is not a task, kudos or a schedule tick unless the
+   * viewer made the automation (`createdById`) or is an Owner or Admin.
+   */
+  canSeeDetail(recordType: string | null, recordId: string | null, createdById: string | null | undefined): boolean;
 }
+
+/** Record kinds whose payload holds nothing about a person that the product hides. */
+const OPEN_RECORD_TYPES: ReadonlySet<string> = new Set(["kudos", "schedule"]);
 
 export async function resolveRunRecords(
   viewer: Viewer,
@@ -52,10 +68,14 @@ export async function resolveRunRecords(
       if (type === "kpi") return { type, id, name: "KPI reading", url: recordHref(type, id) };
       return null;
     },
-    canSeeDetail(type, id) {
-      if (isAdmin || type !== "task" || !id) return true;
-      // A task that no longer exists cannot be checked, so its payload stays hidden too.
-      return readable(id);
+    canSeeDetail(type, id, createdById) {
+      if (isAdmin) return true;
+      if (type === "task") {
+        // A task that no longer exists cannot be checked, so its payload stays hidden too.
+        return Boolean(id) && readable(id as string);
+      }
+      if (type && OPEN_RECORD_TYPES.has(type)) return true;
+      return Boolean(createdById) && createdById === viewer.userId;
     },
   };
 }

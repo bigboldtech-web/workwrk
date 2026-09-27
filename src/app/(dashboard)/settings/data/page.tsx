@@ -20,8 +20,9 @@
  */
 
 import { Dots } from "@/components/ui/dots";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Database,
   Users,
@@ -33,11 +34,16 @@ import {
   Trash2,
   Download,
   ChevronRight,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
+import { apiFetch } from "@/lib/api-fetch";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import type { LegacyMarketingCounts, LegacyMarketingReport } from "@/lib/marketing/legacy-import";
+import { LIST_NAME, MARKETING_KINDS, type MarketingKind } from "@/lib/marketing/legacy-map";
 
 type ExportRow = {
   key: string;
@@ -202,6 +208,8 @@ export default function DataCompliancePage() {
             ))}
           </Section>
 
+          <LegacyMarketingSection busy={busy} onExport={download} />
+
           <Section label="Governance">
             {GOVERNANCE.map(({ href, icon: Icon, title, desc }) => (
               <Link
@@ -223,6 +231,245 @@ export default function DataCompliancePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Marketing (legacy) ──────────────────────────────────────────────
+//
+// The retired Marketing module's rows (Campaign, ContentItem, EventBrief)
+// have no page any more: /marketing resolves here for an Owner or Admin
+// until the import has run (spec-tools-misc section 2.7). The section
+// renders only for an org that holds such rows or has already imported
+// them, exactly as the legacy Purchase-order and Invoice exports do. It
+// is the minimal entry; Phase 8's Settings > Data > Import tab re-homes it.
+//
+// Arriving with ?legacy=marketing (the /marketing resolver sends an Owner or
+// Admin here) scrolls to the row and pulses it once. For a workspace that
+// never held a row, that arrival still gets a sentence and the template link
+// instead of a page with nothing highlighted; and a failed read shows as a
+// failed read with a retry, since this row is what the redirect exists for.
+
+type LegacyState = {
+  counts: LegacyMarketingCounts;
+  hasRows: boolean;
+  migrated: { spaceSlug: string; lists: Partial<Record<MarketingKind, string>>; archived?: boolean } | null;
+};
+
+const MARKETING_TEMPLATE_HREF = "/templates?q=marketing";
+const TRASH_SPACES_HREF = "/trash?type=space";
+
+const LEGACY_CSV: ExportRow[] = MARKETING_KINDS.map((kind) => ({
+  key: `marketing-${kind}`,
+  href: `/api/marketing/legacy/export?entity=${kind}`,
+  fallbackName: `marketing-${kind}.csv`,
+  icon: Megaphone,
+  title: `Marketing (legacy) ${LIST_NAME[kind]} CSV`,
+  desc: kind === "campaigns"
+    ? "Every campaign with budget, spend, dates, goal and its own currency."
+    : kind === "content"
+      ? "Every content piece with type, channel, dates and links."
+      : "Every event with format, dates, capacity, registrations and spend.",
+}));
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function summarise(c: LegacyMarketingCounts): string {
+  return [plural(c.campaigns, "campaign", "campaigns"), plural(c.content, "content piece", "content pieces"), plural(c.events, "event", "events")].join(", ");
+}
+
+function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExport: (row: ExportRow) => void }) {
+  const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const params = useSearchParams();
+  const wanted = params.get("legacy") === "marketing";
+  const ref = useRef<HTMLDivElement>(null);
+  const [state, setState] = useState<LegacyState | null | "error">(null);
+  const [preview, setPreview] = useState<LegacyMarketingReport | null>(null);
+  const [running, setRunning] = useState<"preview" | "import" | null>(null);
+  const [pulse, setPulse] = useState(false);
+
+  const load = useCallback(async () => {
+    setState(null);
+    const r = await apiFetch<LegacyState>("/api/marketing/legacy");
+    setState(r.ok ? r.data : "error");
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!wanted || !state || !ref.current) return;
+    ref.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    setPulse(true);
+    const t = window.setTimeout(() => setPulse(false), 2400);
+    return () => window.clearTimeout(t);
+  }, [wanted, state]);
+
+  const run = useCallback(async (write: boolean) => {
+    if (running) return;
+    if (write) {
+      const ok = await confirm({
+        title: "Import the Marketing module?",
+        description: "A Marketing Space with Campaigns, Content and Events Lists is created and every row becomes a task there. The old rows stay where they are; nothing is deleted. Everyone in the workspace can view the Space; add people to it afterwards to let them edit, since the old pages let anyone edit.",
+        confirmLabel: "Import",
+      });
+      if (!ok) return;
+    }
+    setRunning(write ? "import" : "preview");
+    try {
+      const r = await apiFetch<{ report: LegacyMarketingReport }>("/api/marketing/legacy", { method: "POST", json: { write } });
+      if (!r.ok) {
+        // A blocked run (template not ready, another import running, the
+        // Space in Trash) comes back in plain words; the state may have moved
+        // under us, so read it again either way.
+        toast(r.error, { tone: "danger" });
+        if (write) await load();
+        return;
+      }
+      setPreview(r.data.report);
+      if (write) {
+        if (r.data.report.error) toast("The import stopped part-way. What moved is kept; run it again to finish.", { tone: "danger" });
+        else toast("Marketing imported. Everyone can view the Space; add people to it to let them edit.");
+        await load();
+      }
+    } finally {
+      setRunning(null);
+    }
+  }, [confirm, load, running, toast]);
+
+  // Still reading: nothing yet (the section appears when the answer does).
+  if (!state) return null;
+
+  // The read failed: say so, with the retry, rather than hiding the one row
+  // the /marketing redirect exists to reach.
+  if (state === "error") {
+    return (
+      <Section label="Legacy">
+        <div ref={ref} className="flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
+            <Megaphone className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
+            <div className="text-base text-ink-3">Couldn&rsquo;t check whether this workspace has anything from the retired Marketing module.</div>
+          </div>
+          <button type="button" onClick={() => void load()} className="inline-flex h-8 shrink-0 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+            Try again
+          </button>
+        </div>
+      </Section>
+    );
+  }
+
+  // Nothing to import and nothing imported: the section stays away, except
+  // for a person the /marketing redirect sent here, who is told why and
+  // pointed at the template the old module became.
+  if (!state.hasRows && !state.migrated) {
+    if (!wanted) return null;
+    return (
+      <Section label="Legacy">
+        <div ref={ref} className={`flex items-center gap-3 rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
+            <Megaphone className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
+            <div className="text-base text-ink-3">The Marketing module is retired and this workspace never held a campaign, content piece or event in it. Campaigns, content and events live in a Space now: start one from the Marketing template.</div>
+          </div>
+          <Link href={MARKETING_TEMPLATE_HREF} className="inline-flex h-8 shrink-0 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+            Open the template
+          </Link>
+        </div>
+      </Section>
+    );
+  }
+
+  const spaceHref = state.migrated ? `/spaces/${state.migrated.spaceSlug}` : null;
+  const archived = Boolean(state.migrated?.archived);
+  const written = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].written, 0) : 0;
+  const relinked = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].relinked, 0) : 0;
+
+  return (
+    <Section label="Legacy">
+      <div
+        ref={ref}
+        className={`rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}
+      >
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
+            <Megaphone className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
+            <div className="text-base text-ink-3">
+              {summarise(state.counts)} from the retired Marketing module.
+              {archived
+                ? <> Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
+                : spaceHref
+                  ? <> They live in the Marketing Space now; the old /marketing links open there. Everyone can view it; add people to the Space to let them edit.</>
+                  : <> Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>}
+            </div>
+            {preview && !preview.blocked ? (
+              <div className="mt-2 rounded-lg bg-subtle px-3 py-2 text-sm text-ink-2">
+                <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}</div>
+                {MARKETING_KINDS.map((k) => {
+                  const r = preview.kinds[k];
+                  const notes: string[] = [];
+                  if (r.alreadyMigrated) notes.push(`${r.alreadyMigrated} already moved`);
+                  if (r.relinked) notes.push(`${r.relinked} re-linked`);
+                  if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
+                  if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
+                  if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
+                  for (const u of r.unmappedStatuses) notes.push(`${u.count} with status ${u.value} land on the first status`);
+                  for (const f of r.unmappedFields) notes.push(`${f.field} folded into the description on ${f.count}`);
+                  return (
+                    <div key={k}>
+                      {LIST_NAME[k]}: {r.read} read, {r.written} {preview.write ? "written" : "to write"}{notes.length ? ` (${notes.join("; ")})` : ""}
+                    </div>
+                  );
+                })}
+                {preview.error ? <div className="mt-1 text-danger-text">Stopped part-way: {preview.error}. What moved is kept; run Import again to finish.</div> : null}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {archived ? (
+              <Link href={TRASH_SPACES_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                Open Trash
+              </Link>
+            ) : spaceHref ? (
+              <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                Open the Space
+              </Link>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void run(false)}
+                  disabled={running !== null}
+                  className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
+                >
+                  {running === "preview" ? <Dots variant="pending" /> : null}
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void run(true)}
+                  disabled={running !== null}
+                  className="inline-flex h-8 items-center gap-2 rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                >
+                  {running === "import" ? <Dots variant="pending" /> : null}
+                  Import
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      {LEGACY_CSV.map((row) => (
+        <ExportButton key={row.key} row={row} busy={busy} onRun={onExport} />
+      ))}
+    </Section>
   );
 }
 

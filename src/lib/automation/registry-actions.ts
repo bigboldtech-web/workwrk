@@ -12,7 +12,7 @@ import { authorCanWrite, loadAuthor, type AutomationAuthor } from "./author-reac
  * Action catalog + per-action execute() implementations.
  *
  * Every execute() runs inside the engine's step wrapper: throwing is
- * fine and expected on failure — the engine records the error on the
+ * fine and expected on failure: the engine records the error on the
  * AutomationRunStep and computes PARTIAL/FAILED. Actions must be
  * org-scoped (never touch a record outside ctx.organizationId) and
  * idempotent where `safeToRetry: true`.
@@ -124,7 +124,7 @@ async function resolveItem(ctx: ActionContext, params: Record<string, unknown>) 
   if (!itemId) throw new Error("No target task: the trigger payload has no record id");
   const item = await prisma.item.findFirst({
     where: { id: itemId, organizationId: ctx.organizationId },
-    select: { id: true, boardId: true, title: true, status: true, ownerId: true, priority: true, archivedAt: true },
+    select: { id: true, boardId: true, title: true, status: true, ownerId: true, priority: true, archivedAt: true, metadata: true },
   });
   if (!item) throw new Error("Task no longer exists (deleted or outside this workspace)");
   return item;
@@ -157,8 +157,30 @@ async function emitChained(ctx: ActionContext, event: string, payload: Record<st
       payload: { ...payload, __automationDepth: ctx.depth + 1 },
     });
   } catch {
-    // Chained fan-out is best-effort — the action itself already succeeded.
+    // Chained fan-out is best-effort: the action itself already succeeded.
   }
+}
+
+/** The task.field_changed payload the items routes emit, for a change an automation made. */
+function fieldChangedPayload(
+  item: { id: string; boardId: string; title: string; status: string | null; ownerId: string | null; priority: string | null },
+  field: string,
+  value: unknown,
+  previousValue: unknown,
+): Record<string, unknown> {
+  return {
+    id: item.id,
+    boardId: item.boardId,
+    title: item.title,
+    status: item.status,
+    ownerId: item.ownerId,
+    assigneeId: item.ownerId,
+    priority: field === "priority" ? value : item.priority,
+    field,
+    value,
+    previousValue,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export const AUTOMATION_ACTIONS: AutomationAction[] = [
@@ -219,7 +241,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const palette = getBoardStatuses(board);
       const match = palette.find((s) => s.value.toLowerCase() === status.toLowerCase());
       if (!match) {
-        // Renamed/deleted status — fail loudly instead of writing junk.
+        // Renamed/deleted status: fail loudly instead of writing junk.
         throw new Error(`Status "${status}" does not exist on this board`);
       }
       if (item.status === match.value) {
@@ -320,7 +342,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
 
       // "admins" fans out to every active workspace admin (idempotent
       // enough for retry: the whole step either wrote or threw before
-      // createMany — the only write — so a re-run can't double-insert
+      // createMany, the only write, so a re-run can't double-insert
       // after success because succeeded steps are never re-run).
       if (raw === "admins" || raw === "org_admins") {
         const admins = await prisma.user.findMany({
@@ -496,6 +518,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
         if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) throw new Error(`"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
         if (item.priority === next) return { itemId: item.id, field: key, changed: false };
         await updateBoardItem(item.id, { priority: next }, null);
+        await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, next, item.priority));
         return { itemId: item.id, field: key, value: next, changed: true };
       }
       const board = await prisma.board.findFirst({ where: { id: item.boardId, organizationId: ctx.organizationId }, select: { schema: true } });
@@ -504,9 +527,13 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const choices = def.options?.choices?.map((c) => ({ value: String(c.value), label: String(c.label) }));
       const coerced = coerceSetFieldValue({ key, type: def.type, choices }, raw);
       if (!coerced.ok) throw new Error(coerced.error);
+      const previous = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? (item.metadata as Record<string, unknown>)[key] : undefined) ?? null;
       await updateBoardItem(item.id, {}, null, {
         metadataFn: (stored) => ({ ...stored, [key]: coerced.value }),
       });
+      // A field an automation set is a field change like any other, so a
+      // second automation on that field runs (the depth cap stops loops).
+      await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, coerced.value, previous));
       return { itemId: item.id, field: key, value: coerced.value, changed: true };
     },
   },
@@ -560,7 +587,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
         throw new Error("WhatsApp is not connected for this workspace. Connect it under Automation → Connections.");
       }
       // Honest stub: the connection row exists but the send channel
-      // ships in a later wave — fail loudly rather than pretend.
+      // ships in a later wave: fail loudly rather than pretend.
       throw new Error("WhatsApp sending is not available yet.");
     },
   },

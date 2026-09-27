@@ -83,6 +83,12 @@ export const REDIRECT_ROUTES: readonly string[] = [
   "/dashboard",
   "/assigned-comments",
   "/tasks",
+  // Phase 7: the legacy Marketing resolver (`/marketing/[[...slug]]`) sends
+  // an Owner or Admin to the import row, a migrated org to its Space, List or
+  // task, and everyone else to the in-shell 404, all before any page code
+  // renders (spec-tools-misc section 1, "delete the /marketing prefix from
+  // the home row"; naming-canon retires "Marketing (as an app)").
+  "/marketing",
 ];
 
 /**
@@ -121,7 +127,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // under "ai" that row swapped the rail pill, replaced the sidebar and could
   // never go active, because the Work sidebar is not rendered on /favorites.
   "/favorites": "home",
-  "/marketing": "home",
   // The Work door for docs, tables, canvases, SOPs and forms opened from Work
   // when the viewer can see no Space for them: a personal or NOTEPAD doc, an
   // unscoped table, every SOP and form (src/lib/nav/object-href.ts). Its
@@ -214,7 +219,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/me/weekly-review": "Weekly review",
   "/me/mentions": "Mentions",
   "/activity": "Activity",
-  "/marketing": "Marketing",
   // Equal to the hub label, so the top bar drops it as a repeat of the hub
   // crumb; an object at the door declares its own crumb anyway.
   "/work": "Work",
@@ -263,9 +267,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   // ── Nested static directories (the hierarchy under a hub row) ──────
   //
   "/my-work/personal": "Personal list",
-  "/marketing/campaigns": "Campaigns",
-  "/marketing/events": "Events",
-  "/marketing/content": "Content library",
   // "/docs/trash" is gone: it 308s to /trash?tab=archived&type=doc, the one
   // Trash (spec-spaces-lists section 2). A ROUTE_TITLES row for a route with
   // no page fails the completeness test, which is the test doing its job.

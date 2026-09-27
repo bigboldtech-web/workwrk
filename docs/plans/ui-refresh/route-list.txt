@@ -58,11 +58,7 @@
 /(dashboard)/kra-kpi/review
 /(dashboard)/kudos
 /(dashboard)/library
-/(dashboard)/marketing
-/(dashboard)/marketing/[id]
-/(dashboard)/marketing/campaigns
-/(dashboard)/marketing/content
-/(dashboard)/marketing/events
+/(dashboard)/marketing/[[...slug]]
 /(dashboard)/me/mentions
 /(dashboard)/me/weekly-review
 /(dashboard)/meetings

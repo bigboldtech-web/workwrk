@@ -12,10 +12,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { forbidden, requireAutomation } from "@/lib/automation/gate";
-import { webhookUrlProblem } from "@/lib/automation/webhook";
+import { CONNECTION_PROVIDERS, webhookUrlProblem } from "@/lib/automation/webhook";
 import { disconnectWebhook, loadWebhook, saveWebhookUrl, webhookView } from "@/lib/automation/webhook-server";
 
-const PROVIDERS = ["WHATSAPP", "GMAIL", "GOOGLE_CALENDAR", "SLACK", "WEBHOOK", "ZAPIER", "CRM"] as const;
+const PROVIDERS = CONNECTION_PROVIDERS;
 type Provider = (typeof PROVIDERS)[number];
 
 // Every refusal is a sentence for the URL field, never a validator's wording.

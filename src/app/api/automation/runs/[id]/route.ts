@@ -5,7 +5,9 @@
 //   triggerName   the trigger as words
 //   record        the record it happened to (null when it cannot be shown)
 //   detailHidden  true when the run is about a task in a List the viewer
-//                 cannot open: the payloads are withheld, the steps keep
+//                 cannot open, or about a person (a KPI reading, a review)
+//                 and the viewer neither made the automation nor is an
+//                 Owner or Admin: the payloads are withheld, the steps keep
 //                 their names, statuses, durations and errors
 //   retry         { can, blockedBy }: Retry failed steps renders only when
 //                 the viewer can edit the automation, the run failed or
@@ -50,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
 
   const records = await resolveRunRecords(ctx.viewer, ctx.orgId, ctx.isAdmin, [run]);
-  const detailHidden = !records.canSeeDetail(run.recordType, run.recordId);
+  const detailHidden = !records.canSeeDetail(run.recordType, run.recordId, run.workflow.createdById);
 
   const failedActions = run.steps.filter((s) => s.stepType === "ACTION" && s.status === "FAILED");
   const blockedBy = [...new Set(failedActions.filter((s) => getAction(s.stepKey)?.safeToRetry !== true).map((s) => s.stepName || s.stepKey))];

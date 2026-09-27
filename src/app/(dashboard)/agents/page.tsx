@@ -228,10 +228,15 @@ function AgentsInner() {
     ) : a.lastRunAt ? <span className="text-sm text-ink-2">{formatRelative(a.lastRunAt, datePrefs)}</span> : <span className="text-sm text-ink-2">Never</span> },
     // The date AND the time, in the viewer's zone: beside a schedule read in
     // another zone the date alone looked like a contradiction (a Sunday next
-    // to "Weekdays").
-    { key: "next", label: "Next run", width: "160px", render: (a) => a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled
-      ? <span className="truncate text-sm text-ink-2" title={formatDate(a.nextRunAt, datePrefs, "datetime")}>{formatDate(a.nextRunAt, datePrefs, "smart")}, {formatDate(a.nextRunAt, datePrefs, "time")}</span>
-      : <span className="text-sm text-ink-3">Not scheduled</span> },
+    // to "Weekdays"). The smart style already answers with the bare time for
+    // a run due today, so that day reads "Today, 11:30 PM" rather than the
+    // time twice.
+    { key: "next", label: "Next run", width: "160px", render: (a) => {
+      if (!(a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled)) return <span className="text-sm text-ink-3">Not scheduled</span>;
+      const day = formatDate(a.nextRunAt, datePrefs, "smart");
+      const time = formatDate(a.nextRunAt, datePrefs, "time");
+      return <span className="truncate text-sm text-ink-2" title={formatDate(a.nextRunAt, datePrefs, "datetime")}>{day === time ? "Today" : day}, {time}</span>;
+    } },
   ], [datePrefs, serverZone, viewerZone]);
 
   const openAgent = openSlug ? agents?.find((a) => a.slug === openSlug) ?? null : null;

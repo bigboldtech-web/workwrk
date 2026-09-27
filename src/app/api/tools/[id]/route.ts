@@ -34,11 +34,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ? await prisma.user.findMany({ where: { id: { in: rows.map((r) => r.userId) }, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } })
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
+  // Who added it, so a Can view holder's banner can name the person to ask.
+  const owner = await prisma.user.findFirst({ where: { id: tool.addedBy, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } });
+  const addedByPerson = owner ? { id: owner.id, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || "Someone", avatar: owner.avatar } : null;
   const shares = rows.map((r) => {
     const u = byId.get(r.userId);
     return { ...r, name: u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone" : "Former member", avatar: u?.avatar ?? null };
   });
-  return jsonSuccess({ tool: { ...tool, hasLogin: hasLogin(tool.credentials), canManage: manage, shares } });
+  return jsonSuccess({ tool: { ...tool, hasLogin: hasLogin(tool.credentials), canManage: manage, shares, addedByPerson } });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -323,14 +323,25 @@ export function legacyTriggersEnabled(settings: unknown): boolean {
   return (automation as Record<string, unknown>).legacyTriggers === true;
 }
 
+/** The two triggers the automation-schedule cron fires (schedule-server.ts). */
+export const TIME_TRIGGER_KEYS: ReadonlySet<string> = new Set(["task.date_arrives", "schedule.every"]);
+
 /**
  * The catalog as the builder sees it: every trigger, with `hidden: true` on a
  * legacy one while the flag is off. Hidden triggers stay in the list so an
  * existing workflow, a template or a log row can still print the name; the
  * picker leaves them out unless one is the workflow's current trigger.
+ *
+ * `timeTriggersLive` (cron-tick-server.ts) is whether the schedule cron is
+ * really ticking on this host: while it is not, the two time triggers read
+ * `isEmitting: false`, so the builder, the Workflows list and Templates show
+ * "Not live yet" instead of Active on an automation that never runs.
  */
-export function triggersForOrg(showLegacy: boolean): Array<AutomationTrigger & { hidden?: boolean }> {
-  return AUTOMATION_TRIGGERS.map((t) => (!showLegacy && isLegacyTrigger(t.key) ? { ...t, hidden: true } : t));
+export function triggersForOrg(showLegacy: boolean, opts: { timeTriggersLive?: boolean } = {}): Array<AutomationTrigger & { hidden?: boolean }> {
+  return AUTOMATION_TRIGGERS.map((t) => {
+    const row = !showLegacy && isLegacyTrigger(t.key) ? { ...t, hidden: true } : t;
+    return opts.timeTriggersLive === false && TIME_TRIGGER_KEYS.has(t.key) ? { ...row, isEmitting: false } : row;
+  });
 }
 
 /**

@@ -6,7 +6,7 @@
 // can never go live: it needs a known trigger, at least one action, and
 // every action must exist in the registry and be available today.
 
-import type { Prisma } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
@@ -55,7 +55,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   }
   const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger };
 
-  const result = await prisma.$transaction(async (tx) => {
+  // Two publishes at once (a double click on Republish, two editors) must
+  // not both compute the same next versionNumber: the workflow row is locked
+  // for the transaction, so the second waits and numbers after the first.
+  // Should the unique index still trip, the answer is a sentence, not a 500.
+  let result: { workflow: unknown; version: unknown };
+  try {
+    result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${workflow.id} FOR UPDATE`;
     const latest = await tx.automationWorkflowVersion.aggregate({
       where: { workflowId: workflow.id },
       _max: { versionNumber: true },
@@ -91,7 +98,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     });
 
     return { workflow: updated, version };
-  });
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return NextResponse.json({ error: "Somebody published this automation at the same moment. Reload to see the live version." }, { status: 409 });
+    }
+    throw err;
+  }
 
   return NextResponse.json(result);
 }

@@ -63,6 +63,14 @@ describe("runWhere and runOrderBy", () => {
     });
   });
 
+  it("takes several automations in one ?workflowId= list", () => {
+    const r = parseRunQuery(q("workflowId=w1,w2,w1"), NOW);
+    if (!r.ok) throw new Error("parse");
+    expect(r.query.workflowIds).toEqual(["w1", "w2"]);
+    expect(r.query.workflowId).toBe("w1");
+    expect(runWhere("org1", r.query)).toEqual({ organizationId: "org1", workflowId: { in: ["w1", "w2"] } });
+  });
+
   it("orders by time then id so a keyset page never repeats a row", () => {
     const r = parseRunQuery(q("sort=oldest"), NOW);
     if (!r.ok) throw new Error("parse");

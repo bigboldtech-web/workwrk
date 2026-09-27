@@ -21,6 +21,12 @@ describe("parse helpers", () => {
   it("falls back to the defaults on junk", () => {
     expect(parseView("nope")).toBe("all");
     expect(parseView("paused")).toBe("paused");
+    // The API status words from a deep link read as the same views.
+    expect(parseView("DRAFT")).toBe("drafts");
+    expect(parseView("INACTIVE")).toBe("paused");
+    expect(parseView("ERROR")).toBe("errors");
+    expect(parseView("ACTIVE")).toBe("active");
+    expect(parseView("ARCHIVED")).toBe("all");
     expect(parseSort("")).toBe("updated");
     expect(parseTake("9999")).toBe(100);
     expect(parseTake("x")).toBe(40);

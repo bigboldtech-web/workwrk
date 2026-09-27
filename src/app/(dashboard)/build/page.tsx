@@ -9,18 +9,25 @@
 // "Start blank" skips straight to the fields. Nothing is written until
 // Create app. "Show archived" is real (?includeArchived=1 on the API, which
 // used to exclude archived apps server side so the checkbox could never show
-// anything), and an archived app can be restored. The KPI tiles (including
-// the Drafts tile that was always 0), the hashed hue palette, the Agents
-// header link and the page-local search go; search is ?q= on the API.
+// anything), and an archived app can be restored. Delete moves an app to
+// Trash with its rows (spec 2.12). The KPI tiles (including the Drafts tile
+// that was always 0), the hashed hue palette, the Agents header link and the
+// page-local search go; search is the filter panel's row search ("/"), a
+// real ?q= on the API.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Hammer, MoreHorizontal, Plus, Search, X, ArchiveRestore, Archive, ExternalLink, Wand2 } from "lucide-react";
+import { Hammer, MoreHorizontal, Plus, X, ArchiveRestore, Archive, ExternalLink, Wand2, Link2, Trash2, Copy, Pencil } from "lucide-react";
+import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
+import { duplicateBuildApp } from "@/lib/build/duplicate-app";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { useConfirm } from "@/components/ui/dialog-provider";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { useShortcut } from "@/lib/shortcuts";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { StatusChip } from "@/components/ui/chip";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
@@ -50,10 +57,12 @@ type ApiApp = {
 };
 type Tab = "all" | "published" | "drafts";
 
+// The same semantic tones the run chips and the Assets register use, not a
+// second source for one green.
 const STATUS: Record<AppStatus, { label: string; color: string }> = {
-  PUBLISHED: { label: "Published", color: "#1F8F4E" },
-  DRAFT: { label: "Draft", color: "#6B7280" },
-  ARCHIVED: { label: "Archived", color: "#6B7280" },
+  PUBLISHED: { label: "Published", color: RUN_TONE_COLOR.success },
+  DRAFT: { label: "Draft", color: RUN_TONE_COLOR.neutral },
+  ARCHIVED: { label: "Archived", color: RUN_TONE_COLOR.neutral },
 };
 
 const EXAMPLES = [
@@ -68,10 +77,14 @@ export default function BuildAppsPage() {
   const sp = useSearchParams();
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const datePrefs = useDatePrefs();
+  const { boot } = useBoot();
 
   const includeArchived = sp?.get("archived") === "1";
-  const [q, setQ] = useState(sp?.get("q") ?? "");
+  const q = sp?.get("q") ?? "";
+  const [draftQ, setDraftQ] = useState(q);
+  const [filterOpen, setFilterOpen] = useState(Boolean(q));
   const [tab, setTab] = useState<Tab>("all");
   const [apps, setApps] = useState<ApiApp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,12 +109,27 @@ export default function BuildAppsPage() {
     return () => clearTimeout(t);
   }, [load, q]);
 
-  const setArchived = (on: boolean) => {
+  const setParams = useCallback((patch: Record<string, string | null>) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
-    if (on) next.set("archived", "1"); else next.delete("archived");
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === "") next.delete(k); else next.set(k, v);
+    }
     const s = next.toString();
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
-  };
+  }, [sp, router, pathname]);
+  const setArchived = (on: boolean) => setParams({ archived: on ? "1" : null });
+  const setQ = (v: string) => { setDraftQ(v); };
+  useEffect(() => {
+    if (draftQ === q) return;
+    const t = setTimeout(() => setParams({ q: draftQ.trim() || null }), 250);
+    return () => clearTimeout(t);
+  }, [draftQ, q, setParams]);
+
+  useShortcut({ id: "build.search", keys: "/", label: "Search apps", scope: "page", group: "On this page", run: (e) => {
+    e.preventDefault();
+    setFilterOpen(true);
+    requestAnimationFrame(() => (document.querySelector(".os-filter-panel input[type=search]") as HTMLInputElement | null)?.focus());
+  } });
 
   const shown = useMemo(() => {
     if (!apps) return null;
@@ -113,10 +141,39 @@ export default function BuildAppsPage() {
   async function archive(a: ApiApp) {
     const ok = await confirm({ title: `Archive ${a.name}?`, description: "It leaves this list and its rows stop changing. Show archived brings it back, and you can restore it.", confirmLabel: "Archive", destructive: true });
     if (!ok) return;
-    const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "DELETE" });
+    const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "PATCH", json: { status: "ARCHIVED" } });
     if (!r.ok) { toast("Couldn't archive the app", { tone: "danger" }); return; }
     toast(`${a.name} archived`, { action: { label: "Undo", onClick: () => void restore(a) } });
     void load();
+  }
+  async function remove(a: ApiApp) {
+    const ok = await confirm({ title: `Delete ${a.name}?`, description: `It moves to Trash with its rows. You can restore it from there for ${boot.org.trashDays} days.`, confirmLabel: "Delete", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete the app", { tone: "danger" }); return; }
+    toast(`${a.name} moved to Trash`);
+    void load();
+  }
+  // Duplicate (spec 2.3): a new app with the same fields, no rows, named
+  // "Copy of {name}". Owner and Admin (the create right).
+  async function duplicate(a: ApiApp) {
+    const r = await duplicateBuildApp(a.slug);
+    if (!r.ok) { toast(r.error, { tone: "danger" }); return; }
+    toast(`${r.name} created`, { action: { label: "Open", onClick: () => router.push(`/build/${r.slug}`) } });
+    void load();
+  }
+  // Rename (spec 2.3 row menu): the same PATCH the detail page's "..." uses.
+  async function rename(a: ApiApp) {
+    const name = await promptDialog({ title: "Rename app", defaultValue: a.name, submitLabel: "Rename", required: true });
+    if (!name || name.trim() === a.name) return;
+    const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "PATCH", json: { name: name.trim().slice(0, 120) } });
+    if (!r.ok) { toast(r.error || "Couldn't rename the app", { tone: "danger", action: { label: "Try again", onClick: () => void rename(a) } }); return; }
+    toast("Renamed");
+    void load();
+  }
+  async function copyLink(a: ApiApp) {
+    try { await navigator.clipboard.writeText(`${window.location.origin}/build/${a.slug}`); toast("Link copied"); }
+    catch { toast("Couldn't copy the link", { tone: "danger" }); }
   }
   async function restore(a: ApiApp) {
     const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "PATCH", json: { status: "PUBLISHED" } });
@@ -132,7 +189,7 @@ export default function BuildAppsPage() {
         <span className="truncate">{a.name}</span>
       </span>
     ) },
-    { key: "description", label: "Description", width: "minmax(200px,1.4fr)", className: "max-lg:hidden", render: (a) => <span className="truncate text-sm text-ink-2">{a.description || "No description"}</span> },
+    { key: "description", label: "Description", width: "minmax(200px,1.4fr)", hideBelow: 700, render: (a) => <span className="truncate text-sm text-ink-2">{a.description || "No description"}</span> },
     { key: "status", label: "Status", width: "130px", render: (a) => <StatusChip disabled color={STATUS[a.status].color} label={STATUS[a.status].label} /> },
     { key: "rows", label: "Rows", width: "90px", numeric: true, render: (a) => a.rowCount },
     { key: "updated", label: "Updated", width: "130px", render: (a) => <span className="text-sm text-ink-2">{formatRelative(a.updatedAt, datePrefs)}</span> },
@@ -150,17 +207,26 @@ export default function BuildAppsPage() {
           </>
         }
         toolbar={{
-          left: (
-            <label className="flex h-9 w-64 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base text-ink">
-              <Search className="h-4 w-4 text-ink-2" aria-hidden />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search apps" aria-label="Search apps" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3" />
-            </label>
-          ),
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: (q ? 1 : 0) + (tab !== "all" ? 1 : 0) },
           primary: canCreate ? { label: "New app", icon: Plus, onClick: () => setNewOpen("describe"), split: { label: "Start blank", onClick: () => setNewOpen("blank") } } : undefined,
           menu: [{ label: "Show archived", checked: includeArchived, keepOpen: true, onClick: () => setArchived(!includeArchived) }],
         }}
       />
-      <div className="px-6 pb-8 pt-2">
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="apps"
+          activeCount={(q ? 1 : 0) + (tab !== "all" ? 1 : 0)}
+          onClearAll={() => { setQ(""); setTab("all"); setParams({ q: null }); }}
+          search={{ value: draftQ, onChange: setQ, placeholder: "Search apps" }}
+        >
+          <FilterGroup label="Status">
+            <FilterRow label="Published" checked={tab === "published"} onCheckedChange={(on) => setTab(on ? "published" : "all")} />
+            <FilterRow label="Draft" checked={tab === "drafts"} onCheckedChange={(on) => setTab(on ? "drafts" : "all")} />
+          </FilterGroup>
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
         {error ? (
           <OsEmptyView variant="error" title="Couldn't load Build apps" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
         ) : shown && shown.length === 0 && !q && tab === "all" ? (
@@ -174,7 +240,7 @@ export default function BuildAppsPage() {
             rowHref={(a) => `/build/${a.slug}`}
             empty={
               <span className="text-row text-ink-2">
-                No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setQ(""); setTab("all"); }}>Clear filters</button>
+                No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setQ(""); setTab("all"); setParams({ q: null }); }}>Clear filters</button>
               </span>
             }
             rowMenu={(a) => (
@@ -190,17 +256,24 @@ export default function BuildAppsPage() {
             )}
           />
         )}
+        </div>
       </div>
 
       {menu ? (
         <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
           <MenuList aria-label={`Actions for ${menu.app.name}`}>
             <MenuItem icon={ExternalLink} label="Open" onClick={() => { const a = menu.app; setMenu(null); router.push(`/build/${a.slug}`); }} />
+            {menu.app.canManage === false ? null : <MenuItem icon={Pencil} label="Rename" onClick={() => { const a = menu.app; setMenu(null); void rename(a); }} />}
+            {canCreate ? <MenuItem icon={Copy} label="Duplicate" onClick={() => { const a = menu.app; setMenu(null); void duplicate(a); }} /> : null}
+            <MenuItem icon={Link2} label="Copy link" onClick={() => { const a = menu.app; setMenu(null); void copyLink(a); }} />
             {menu.app.canManage === false ? null : <MenuSeparator />}
             {menu.app.canManage === false ? null : menu.app.status === "ARCHIVED" ? (
               <MenuItem icon={ArchiveRestore} label="Restore" onClick={() => { const a = menu.app; setMenu(null); void restore(a); }} />
             ) : (
-              <MenuItem icon={Archive} label="Archive" destructive onClick={() => { const a = menu.app; setMenu(null); void archive(a); }} />
+              <MenuItem icon={Archive} label="Archive" onClick={() => { const a = menu.app; setMenu(null); void archive(a); }} />
+            )}
+            {menu.app.canManage === false ? null : (
+              <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const a = menu.app; setMenu(null); void remove(a); }} />
             )}
           </MenuList>
         </MorePortal>

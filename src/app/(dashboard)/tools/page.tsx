@@ -13,26 +13,38 @@
 // moves the tool to Trash with its shares instead of erasing it. The KPI
 // tiles (one of them, "With creds", counted shares, not logins) and the
 // Settings header link go. Search is ?q= on the API instead of a filter over
-// one loaded page.
+// one loaded page. Every filter, the sort and the view live in the URL (one
+// setParams patch, so Clear all clears all); the Category rows come from
+// GET /api/tools/categories, not from the rows on screen; the tool admins
+// get a checkbox column with Share, Change category and Delete, a card
+// footer, and Export CSV in the "…" square; the drawer's autosaving fields
+// carry an AutosaveIndicator, and a Can view holder's banner names the
+// person to ask, with a Request link into the access request flow.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Search, ExternalLink, KeyRound, Eye, EyeOff, Copy, Plus, Link2, X, Trash2, UserPlus, ChevronDown,
+  ExternalLink, KeyRound, Eye, EyeOff, Copy, Plus, Link2, X, Trash2, UserPlus, ChevronDown, Download, Tag, MoreHorizontal, PanelRight,
 } from "lucide-react";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
-import { useConfirm } from "@/components/ui/dialog-provider";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 import { Drawer } from "@/components/ui/drawer";
 import { Picker } from "@/components/ui/picker";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { SkeletonLines } from "@/components/ui/skeleton";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import type { AutosaveStatus } from "@/hooks/use-autosave";
+import { useShortcut } from "@/lib/shortcuts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatRelative } from "@/lib/format/date";
@@ -56,7 +68,7 @@ type ToolRow = {
   shareCount: number;
 };
 type Credentials = { username?: string; password?: string; apiKey?: string; notes?: string };
-type ToolDetail = Omit<ToolRow, "sharedWith" | "shareCount" | "addedByPerson" | "sharedAt"> & {
+type ToolDetail = Omit<ToolRow, "sharedWith" | "shareCount" | "sharedAt"> & {
   credentials: Credentials | null;
   shares: Array<{ userId: string; sharedAt: string; name: string; avatar: string | null }>;
 };
@@ -78,23 +90,56 @@ export default function ToolsPage() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const { rowVersion } = useOsShell();
+  const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
+  const { boot } = useBoot();
   const datePrefs = useDatePrefs();
 
   const openId = sp?.get("tool") ?? null;
-  const [q, setQ] = useState(sp?.get("q") ?? "");
-  const [view, setView] = useState<"all" | "shared">("all");
+  const q = sp?.get("q") ?? "";
+  const category = sp?.get("category") ?? "";
+  const hasLogin = sp?.get("hasLogin") ?? "";
+  const sort = (sp?.get("sort") ?? "recent") as "recent" | "name" | "category";
+  const view: "all" | "shared" = sp?.get("view") === "shared" ? "shared" : "all";
+  const [draftQ, setDraftQ] = useState(q);
+  const [filterOpen, setFilterOpen] = useState(Boolean(q || category || hasLogin));
+  const [sortOpen, setSortOpen] = useState(false);
   const [rows, setRows] = useState<ToolRow[] | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkShareOpen, setBulkShareOpen] = useState(false);
+  const [bulkCategoryOpen, setBulkCategoryOpen] = useState(false);
   const [canAdd, setCanAdd] = useState(false);
   const [seesAll, setSeesAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // The row "..." (spec-tools-misc 2.1): Open, Open website, Share, Change
+  // category, Copy link, then Delete; only on a row the viewer manages.
+  const [menu, setMenu] = useState<{ tool: ToolRow; anchor: RefObject<HTMLElement | null> } | null>(null);
+  const shareOpen = sp?.get("share") === "1";
 
-  const setParam = useCallback((key: string, value: string | null) => {
+  // One patch per change. Three calls in a row would each rebuild the URL
+  // from the same stale search params and only the last would land.
+  const setParams = useCallback((patch: Record<string, string | null>) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
-    if (value) next.set(key, value); else next.delete(key);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v); else next.delete(k);
+    }
     const s = next.toString();
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   }, [sp, router, pathname]);
+  const setParam = useCallback((key: string, value: string | null) => setParams({ [key]: value }), [setParams]);
+  useEffect(() => {
+    if (draftQ === q) return;
+    const t = setTimeout(() => setParam("q", draftQ.trim() || null), 250);
+    return () => clearTimeout(t);
+  }, [draftQ, q, setParam]);
+  useShortcut({ id: "tools.search", keys: "/", label: "Search tools", scope: "page", group: "On this page", run: (e) => {
+    e.preventDefault();
+    setFilterOpen(true);
+    requestAnimationFrame(() => (document.querySelector(".os-filter-panel input[type=search]") as HTMLInputElement | null)?.focus());
+  } });
 
   const load = useCallback(async () => {
     const r = await apiFetch<{ tools: ToolRow[]; canAdd: boolean; seesAll: boolean }>(`/api/tools${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`, { cache: "no-store" });
@@ -103,14 +148,103 @@ export default function ToolsPage() {
     setRows(r.data.tools);
     setCanAdd(r.data.canAdd);
     setSeesAll(r.data.seesAll);
+    // The org's categories, not the categories of the rows on screen, so the
+    // group never vanishes when a search narrows the list to nothing.
+    const c = await apiFetch<{ categories: string[] }>("/api/tools/categories", { cache: "no-store" });
+    if (c.ok) setCategories(c.data.categories);
   }, [q]);
   const version = rowVersion("tools");
   useEffect(() => {
-    const t = setTimeout(() => { void load(); }, q ? 250 : 0);
-    return () => clearTimeout(t);
-  }, [load, q, version]);
+    const t = setTimeout(() => { void load(); }, 0);
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => { clearTimeout(t); window.removeEventListener("focus", onFocus); };
+  }, [load, version]);
 
-  const shown = useMemo(() => (rows && view === "shared" ? rows.filter((r) => r.sharedAt) : rows), [rows, view]);
+  const activeFilters = (q ? 1 : 0) + (category ? 1 : 0) + (hasLogin ? 1 : 0);
+  const clearFilters = () => { setDraftQ(""); setParams({ q: null, category: null, hasLogin: null }); };
+  const exportHref = () => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (category) params.set("category", category);
+    if (hasLogin) params.set("hasLogin", hasLogin);
+    return `/api/export/tools?${params}`;
+  };
+
+  // The bulk bar (tool admins): every id is a row the viewer may manage.
+  async function bulk(op: "category" | "delete" | "share", value?: string | null) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (op === "delete") {
+      const ok = await confirm({
+        title: `Delete ${ids.length} ${ids.length === 1 ? "tool" : "tools"}?`,
+        description: `They move to Trash with their saved logins and shares. Restore them from Trash within ${boot.org.trashDays} days to bring all of it back.`,
+        confirmLabel: "Delete",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    const r = await apiFetch<{ done: number; failed: number }>("/api/tools/bulk", { method: "POST", json: { op, ids, value } });
+    if (!r.ok) { toast(r.error || "Couldn't change those tools", { tone: "danger" }); return; }
+    if (r.data.failed > 0) toast(`Changed ${r.data.done} of ${ids.length}. ${r.data.failed} couldn't be changed.`, { tone: "danger" });
+    else toast(op === "delete" ? `${r.data.done} moved to Trash` : op === "share" ? "Shared" : "Category changed");
+    setSelected(new Set());
+    void load();
+  }
+  async function bulkCategory(value: string) {
+    setBulkCategoryOpen(false);
+    if (value === "__new__") {
+      const name = await prompt({ title: "New category", placeholder: "Design, Finance, Sales", submitLabel: "Change", required: true });
+      if (!name || !name.trim()) return;
+      void bulk("category", name.trim().slice(0, 60));
+      return;
+    }
+    void bulk("category", value === "__none__" ? null : value);
+  }
+  // One row's actions from its "..." menu: the same routes the drawer and
+  // the bulk bar use, so a right the API refuses is a toast, never a dead row.
+  async function rowCategory(t: ToolRow, value: string) {
+    let category: string | null = value === "__none__" ? null : value;
+    if (value === "__new__") {
+      const name = await prompt({ title: "New category", placeholder: "Design, Finance, Sales", submitLabel: "Change", required: true });
+      if (!name || !name.trim()) return;
+      category = name.trim().slice(0, 60);
+    }
+    const r = await apiFetch(`/api/tools/${t.id}`, { method: "PATCH", json: { category } });
+    if (!r.ok) { toast(r.status === 403 ? "You can't change this tool." : (r.error || "Couldn't change the category"), { tone: "danger", action: { label: "Try again", onClick: () => void rowCategory(t, value) } }); return; }
+    toast("Category changed");
+    void load();
+  }
+  async function rowDelete(t: ToolRow) {
+    const ok = await confirm({
+      title: `Delete ${t.name}?`,
+      description: `It moves to Trash with its saved login and its shares, and the people it was shared with lose it. Restore it from Trash within ${boot.org.trashDays} days to bring all of it back.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    const r = await apiFetch(`/api/tools/${t.id}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete the tool", { tone: "danger", action: { label: "Try again", onClick: () => void rowDelete(t) } }); return; }
+    toast(`${t.name} moved to Trash`);
+    if (openId === t.id) setParam("tool", null);
+    void load();
+  }
+  async function rowCopyLink(t: ToolRow) {
+    try { await navigator.clipboard.writeText(`${window.location.origin}/tools?tool=${t.id}`); toast("Link copied"); }
+    catch { toast("Couldn't copy the link", { tone: "danger" }); }
+  }
+  const websiteHref = (t: ToolRow) => (t.url ? (t.url.startsWith("http") ? t.url : `https://${t.url}`) : null);
+
+  const shown = useMemo(() => {
+    if (!rows) return null;
+    let list = view === "shared" ? rows.filter((r) => r.sharedAt) : rows;
+    if (category) list = list.filter((r) => r.category === category);
+    if (hasLogin) list = list.filter((r) => (hasLogin === "yes" ? r.hasLogin : !r.hasLogin));
+    if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === "category") list = [...list].sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name));
+    return list;
+  }, [rows, view, category, hasLogin, sort]);
+  const SORTS = [{ value: "recent", label: "Recently added" }, { value: "name", label: "Name A to Z" }, { value: "category", label: "Category" }];
 
   const columns = useMemo<TableColumn<ToolRow>[]>(() => [
     { key: "name", label: "Name", title: true, width: "minmax(220px,1.4fr)", render: (t) => (
@@ -125,10 +259,10 @@ export default function ToolsPage() {
     { key: "login", label: "Login", width: "120px", render: (t) => t.hasLogin
       ? <span className="inline-flex items-center gap-1.5 text-sm text-ink"><KeyRound className="h-3 w-3" aria-hidden />Saved</span>
       : <span className="text-sm text-ink-2">None</span> },
-    { key: "shared", label: "Shared with", width: "150px", className: "max-lg:hidden", render: (t) => t.sharedWith.length > 0
+    { key: "shared", label: "Shared with", width: "150px", hideBelow: 760, render: (t) => t.sharedWith.length > 0
       ? <AvatarStack size={20} max={3} people={t.sharedWith.map((p) => ({ id: p.id, avatar: p.avatar, ...splitName(p.name) }))} />
       : <span className="text-sm text-ink-2">{t.shareCount > 0 ? `${t.shareCount} ${t.shareCount === 1 ? "person" : "people"}` : "Not shared"}</span> },
-    { key: "added", label: "Added", width: "120px", className: "max-lg:hidden", render: (t) => (
+    { key: "added", label: "Added", width: "120px", hideBelow: 680, render: (t) => (
       <span className="text-sm text-ink-2" title={t.addedByPerson ? `Added by ${t.addedByPerson.name}` : undefined}>{formatRelative(t.createdAt, datePrefs)}</span>
     ) },
   ], [datePrefs]);
@@ -139,25 +273,53 @@ export default function ToolsPage() {
         title="Tools"
         views={seesAll ? (
           <>
-            <ViewTab label="All tools" active={view === "all"} onClick={() => setView("all")} />
-            <ViewTab label="Shared with me" active={view === "shared"} onClick={() => setView("shared")} />
+            <ViewTab label="All tools" active={view === "all"} onClick={() => setParam("view", null)} />
+            <ViewTab label="Shared with me" active={view === "shared"} onClick={() => setParam("view", "shared")} />
           </>
         ) : undefined}
         toolbar={{
-          left: (
-            <label className="flex h-9 w-64 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base text-ink">
-              <Search className="h-4 w-4 text-ink-2" aria-hidden />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tools" aria-label="Search tools" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3" />
-            </label>
-          ),
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: activeFilters },
+          sort: { onClick: () => setSortOpen((v) => !v), label: sort === "recent" ? "Sort" : SORTS.find((x) => x.value === sort)?.label, active: sort !== "recent" },
           primary: canAdd ? { label: "Add tool", icon: Plus, onClick: () => setAddOpen(true) } : undefined,
+          // Export CSV: the tool admins, never an Agent (the export rule).
+          menu: seesAll && !boot.viewer.isAgent ? [{ label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref(); } }] : undefined,
         }}
       />
-      <div className="px-6 pb-8 pt-2">
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort tools" selected={sort}
+              sections={[{ options: SORTS }]}
+              onSelect={(v) => { setSortOpen(false); setParam("sort", v === "recent" ? null : v); }} />
+          </div>
+        ) : null}
+      </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="tools"
+          activeCount={activeFilters}
+          onClearAll={clearFilters}
+          search={{ value: draftQ, onChange: setDraftQ, placeholder: "Search tools" }}
+        >
+          {categories.length > 0 ? (
+            <FilterGroup label="Category">
+              {categories.map((c) => (
+                <FilterRow key={c} label={c} checked={category === c} onCheckedChange={(on) => setParam("category", on ? c : null)} />
+              ))}
+            </FilterGroup>
+          ) : null}
+          <FilterGroup label="Has a login">
+            <FilterRow label="Yes" checked={hasLogin === "yes"} onCheckedChange={(on) => setParam("hasLogin", on ? "yes" : null)} />
+            <FilterRow label="No" checked={hasLogin === "no"} onCheckedChange={(on) => setParam("hasLogin", on ? "no" : null)} />
+          </FilterGroup>
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
         {error ? (
           <OsEmptyView variant="error" title="Couldn't load Tools" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
-        ) : shown && shown.length === 0 && !q ? (
-          <OsEmptyView title={canAdd ? "No tools yet" : "No tools shared with you yet."} />
+        ) : shown && shown.length === 0 && activeFilters === 0 ? (
+          <OsEmptyView title={view === "shared" || !canAdd ? "No tools shared with you yet." : "No tools yet"} />
         ) : (
           <TableCard
             ariaLabel="Tools"
@@ -166,10 +328,47 @@ export default function ToolsPage() {
             rowKey={(t) => t.id}
             onRowClick={(t) => setParam("tool", t.id)}
             highlightKey={openId}
-            empty={<span className="text-row text-ink-2">No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => setQ("")}>Clear search</button></span>}
-            rowMenu={(t) => t.url ? (
+            empty={<span className="text-row text-ink-2">No results · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>}
+            selectable={seesAll}
+            isRowSelectable={(t) => t.canManage}
+            selected={selected}
+            onSelectedChange={setSelected}
+            footer={shown ? { total: shown.length, noun: "records", from: shown.length ? 1 : 0, to: shown.length } : undefined}
+            bulkActions={seesAll ? (
+              <>
+                <BulkShare open={bulkShareOpen} onOpenChange={setBulkShareOpen} onPick={(id) => { setBulkShareOpen(false); void bulk("share", id); }} />
+                <div className="relative">
+                  <BulkButton icon={Tag} label="Change category" onClick={() => setBulkCategoryOpen((v) => !v)} />
+                  <Picker
+                    open={bulkCategoryOpen}
+                    onClose={() => setBulkCategoryOpen(false)}
+                    side="top"
+                    ariaLabel="Change category"
+                    sections={[{ options: [
+                      ...categories.map((c) => ({ value: c, label: c })),
+                      { value: "__none__", label: "No category" },
+                      { value: "__new__", label: "New category…" },
+                    ] }]}
+                    onSelect={(v) => void bulkCategory(v)}
+                    className="absolute bottom-10 start-0 z-50"
+                  />
+                </div>
+                <BulkButton icon={Trash2} label="Delete" destructive onClick={() => void bulk("delete")} />
+              </>
+            ) : undefined}
+            rowMenu={(t) => t.canManage ? (
+              <button
+                type="button"
+                aria-label={`Actions for ${t.name}`}
+                aria-haspopup="menu"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ tool: t, anchor: { current: e.currentTarget } }); }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            ) : t.url ? (
               <a
-                href={t.url.startsWith("http") ? t.url : `https://${t.url}`}
+                href={websiteHref(t) ?? undefined}
                 target="_blank"
                 rel="noreferrer"
                 onClick={(e) => e.stopPropagation()}
@@ -182,17 +381,82 @@ export default function ToolsPage() {
             ) : null}
           />
         )}
+        </div>
       </div>
 
-      <ToolDrawer id={openId} onClose={() => setParam("tool", null)} onChanged={() => void load()} />
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label={`Actions for ${menu.tool.name}`}>
+            <MenuItem icon={PanelRight} label="Open" onClick={() => { const t = menu.tool; setMenu(null); setParams({ tool: t.id, share: null }); }} />
+            {websiteHref(menu.tool) ? (
+              <MenuItem icon={ExternalLink} label="Open website" onClick={() => { const href = websiteHref(menu.tool); setMenu(null); if (href) window.open(href, "_blank", "noopener,noreferrer"); }} />
+            ) : null}
+            <MenuItem icon={UserPlus} label="Share" onClick={() => { const t = menu.tool; setMenu(null); setParams({ tool: t.id, share: "1" }); }} />
+            <MenuSubmenu icon={Tag} label="Change category">
+              {categories.map((c) => (
+                <MenuItem key={c} label={c} onClick={() => { const t = menu.tool; setMenu(null); void rowCategory(t, c); }} />
+              ))}
+              <MenuItem label="No category" onClick={() => { const t = menu.tool; setMenu(null); void rowCategory(t, "__none__"); }} />
+              <MenuItem label="New category…" onClick={() => { const t = menu.tool; setMenu(null); void rowCategory(t, "__new__"); }} />
+            </MenuSubmenu>
+            <MenuItem icon={Link2} label="Copy link" onClick={() => { const t = menu.tool; setMenu(null); void rowCopyLink(t); }} />
+            <MenuSeparator />
+            <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const t = menu.tool; setMenu(null); void rowDelete(t); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
+      <ToolDrawer id={openId} shareOpen={shareOpen} onClose={() => setParams({ tool: null, share: null })} onChanged={() => void load()} />
       {addOpen ? <AddToolDialog onClose={() => setAddOpen(false)} onAdded={(id) => { setAddOpen(false); void load(); setParam("tool", id); }} /> : null}
     </>
   );
 }
 
+function BulkButton({ icon: Icon, label, onClick, destructive }: { icon: typeof Plus; label: string; onClick: () => void; destructive?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium hover:bg-hover ${destructive ? "text-danger-text" : "text-ink"}`}>
+      <Icon className="h-4 w-4" aria-hidden />{label}
+    </button>
+  );
+}
+
+/** The bulk bar's Share: a people picker over GET /api/people/pick. */
+function BulkShare({ open, onOpenChange, onPick }: { open: boolean; onOpenChange: (v: boolean) => void; onPick: (userId: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(async () => {
+      setLoading(true);
+      const r = await apiFetch<{ people: Array<{ id: string; firstName: string | null; lastName: string | null; email: string | null }> }>(`/api/people/pick?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+      setLoading(false);
+      if (r.ok) setOptions(r.data.people.map((p) => ({ id: p.id, name: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "Someone", email: p.email })));
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, query]);
+  return (
+    <div className="relative">
+      <BulkButton icon={UserPlus} label="Share" onClick={() => onOpenChange(!open)} />
+      <Picker
+        open={open}
+        onClose={() => onOpenChange(false)}
+        side="top"
+        alwaysSearch
+        onSearchChange={setQuery}
+        loading={loading}
+        searchPlaceholder="Search people"
+        ariaLabel="Share with"
+        sections={[{ options: options.map((p) => ({ value: p.id, label: p.name, description: p.email ?? undefined, keywords: p.email ?? undefined })) }]}
+        onSelect={onPick}
+        className="absolute bottom-10 start-0 z-50"
+      />
+    </div>
+  );
+}
+
 /* ─────────────────────────── the drawer ─────────────────────────── */
 
-function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: () => void; onChanged: () => void }) {
+function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; shareOpen?: boolean; onClose: () => void; onChanged: () => void }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { boot } = useBoot();
@@ -201,6 +465,10 @@ function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
   const [error, setError] = useState(false);
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [loginDraft, setLoginDraft] = useState<Credentials | null>(null);
+  // The fields autosave on blur (design 5.17): every save is visible.
+  const [saveStatus, setSaveStatus] = useState<AutosaveStatus>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [requested, setRequested] = useState(false);
 
   const load = useCallback(async (toolId: string) => {
     const r = await apiFetch<{ tool: ToolDetail }>(`/api/tools/${toolId}`, { cache: "no-store" });
@@ -217,12 +485,29 @@ function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
 
   async function patch(body: Record<string, unknown>, done?: string) {
     if (!tool) return false;
+    setSaveStatus("saving");
     const r = await apiFetch(`/api/tools/${tool.id}`, { method: "PATCH", json: body });
-    if (!r.ok) { toast(r.error || "Couldn't save the change", { tone: "danger", action: { label: "Try again", onClick: () => void patch(body, done) } }); return false; }
+    if (!r.ok) {
+      setSaveStatus("error");
+      toast(r.error || "Couldn't save the change", { tone: "danger", action: { label: "Try again", onClick: () => void patch(body, done) } });
+      return false;
+    }
+    setSaveStatus("saved");
+    setLastSavedAt(new Date());
     if (done) toast(done);
     await load(tool.id);
     onChanged();
     return true;
+  }
+
+  // The Can view holder's Request (spec-tools-misc 2.1, access 5.6): one
+  // inbox row for whoever added the tool.
+  async function requestAccess() {
+    if (!tool) return;
+    const r = await apiFetch<{ notified: number; throttled?: boolean }>("/api/access-requests", { method: "POST", json: { objectType: "tool", objectId: tool.id, role: "EDIT" } });
+    if (!r.ok) { toast(r.error || "Couldn't send the request", { tone: "danger" }); return; }
+    setRequested(true);
+    toast(r.data.throttled ? "Already asked today. They have your request." : "Request sent");
   }
 
   async function remove() {
@@ -262,6 +547,7 @@ function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
               <Link2 className="h-4 w-4" />
             </button>
           ) : null}
+          {tool && manage ? <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} /> : null}
           {tool && !manage ? <span className="inline-flex h-6 items-center rounded-md bg-hover px-2 text-xs font-medium text-ink-2">Can view</span> : null}
           <button type="button" aria-label="Close" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             <X className="h-4 w-4" />
@@ -278,7 +564,12 @@ function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
       ) : (
         <div className="flex flex-col gap-6 p-4">
           {!manage ? (
-            <div className="rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">View only. Ask whoever added it for changes.</div>
+            <div className="flex items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
+              <span className="min-w-0 flex-1">View only. Ask {tool.addedByPerson?.name ?? "whoever added it"} for edit access.</span>
+              {requested ? <span className="shrink-0 text-ink-3">Requested</span> : (
+                <button type="button" onClick={() => void requestAccess()} className="shrink-0 font-medium text-brand-deep hover:underline">Request</button>
+              )}
+            </div>
           ) : null}
 
           <section className="flex flex-col">
@@ -341,7 +632,7 @@ function ToolDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
           </section>
 
           {manage ? (
-            <ShareSection tool={tool} onChanged={async () => { await load(tool.id); onChanged(); }} />
+            <ShareSection tool={tool} initialOpen={shareOpen} onChanged={async () => { await load(tool.id); onChanged(); }} />
           ) : null}
 
           {manage ? (
@@ -407,9 +698,10 @@ function FieldRow({ label, value, editable, onSave, placeholder, multiline, requ
   );
 }
 
-function ShareSection({ tool, onChanged }: { tool: ToolDetail; onChanged: () => Promise<void> }) {
+function ShareSection({ tool, initialOpen, onChanged }: { tool: ToolDetail; initialOpen?: boolean; onChanged: () => Promise<void> }) {
   const { toast } = useOsToast();
-  const [open, setOpen] = useState(false);
+  // Opened by the row menu's Share (?share=1) the people picker is already up.
+  const [open, setOpen] = useState(Boolean(initialOpen));
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
   const [loading, setLoading] = useState(false);

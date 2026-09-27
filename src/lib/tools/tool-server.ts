@@ -6,7 +6,7 @@ import { requireApp } from "@/lib/app-gate";
 import { legacySessionTiers } from "@/lib/access/legacy-session";
 import type { ToolViewer } from "./tool-access";
 
-export async function requireTools(): Promise<{ error: NextResponse } | ToolViewer & { orgId: string; name: string | null }> {
+export async function requireTools(): Promise<{ error: NextResponse } | ToolViewer & { orgId: string; name: string | null; isAgent: boolean; actingAs: boolean }> {
   // Every Member (APP_RULES.tools); Guests 404, a hidden app 403 app_off.
   const gate = await requireApp("tools");
   if ("error" in gate) return { error: gate.error };
@@ -17,5 +17,8 @@ export async function requireTools(): Promise<{ error: NextResponse } | ToolView
     toolAdmin: tiers.toolAdmin,
     isManager: tiers.manager,
     name: tiers.name,
+    // The export rule (access section 9): never an Agent, never acting as.
+    isAgent: gate.viewer.isAgent,
+    actingAs: Boolean(gate.viewer.actingAs),
   };
 }

@@ -9,7 +9,7 @@ import { accessibleIds } from "@/lib/access/index";
 import type { Viewer } from "@/lib/access/types";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
-import type { AutomationScope } from "./definition";
+import { isEverywhere, readScope, type AutomationScope } from "./definition";
 import { SETTABLE_FIELD_TYPES } from "./set-field";
 
 export interface PlaceSpace { id: string; name: string }
@@ -113,6 +113,40 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
     const shown = ids.map((id) => names.get(id)).filter((n): n is string => !!n);
     return { names: shown, hidden: ids.length - shown.length, everywhere: false };
   };
+}
+
+/**
+ * A saved scope with every id that is not a Space, Folder or List of THIS
+ * workspace dropped: a junk id, or one from another organization, would
+ * otherwise be stored and then read back as "1 more you cannot see", a
+ * place that does not exist. Ids the viewer cannot read are kept as they
+ * are (they are real, and counted, never named).
+ */
+export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise<AutomationScope> {
+  const [lists, folders, spaces] = await Promise.all([
+    scope.listIds.length ? prisma.board.findMany({ where: { id: { in: scope.listIds }, organizationId: orgId }, select: { id: true } }) : [],
+    scope.folderIds.length ? prisma.folder.findMany({ where: { id: { in: scope.folderIds }, organizationId: orgId }, select: { id: true } }) : [],
+    scope.spaceIds.length ? prisma.space.findMany({ where: { id: { in: scope.spaceIds }, organizationId: orgId }, select: { id: true } }) : [],
+  ]);
+  const keep = (rows: Array<{ id: string }>, ids: string[]) => {
+    const ok = new Set(rows.map((r) => r.id));
+    return ids.filter((id) => ok.has(id));
+  };
+  return { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
+}
+
+/**
+ * The definition as it will be stored, with its scope pruned to this
+ * workspace (scopeInOrg). Everywhere stays Everywhere; a scope that names
+ * only places outside the workspace becomes Everywhere too, which is what
+ * the engine would have run anyway (nothing ever matched the foreign id).
+ */
+export async function definitionWithScopeInOrg(orgId: string, definition: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!("scope" in definition)) return definition;
+  const pruned = await scopeInOrg(orgId, readScope(definition));
+  const rest = { ...definition };
+  delete rest.scope;
+  return isEverywhere(pruned) ? rest : { ...rest, scope: pruned };
 }
 
 /** The Lists and Folders inside a container, for the Workflows list's "..." menu filter. */

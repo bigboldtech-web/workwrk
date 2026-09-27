@@ -1103,7 +1103,7 @@ function InlineEditor({
           onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
           className={baseInputClass}
         >
-          <option value="">— None —</option>
+          <option value="">None</option>
           {choices.map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
         </select>
       );
@@ -1178,7 +1178,7 @@ function InlineEditor({
           onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
           className={baseInputClass}
         >
-          <option value="">— None —</option>
+          <option value="">None</option>
           {choices.map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
         </select>
       );
@@ -1480,7 +1480,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
                 <div className="text-xs text-zinc-500 mt-0.5">
                   {(() => {
                     const v = getValue(item, dateField.key);
-                    return typeof v === "string" ? new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "—";
+                    return typeof v === "string" ? new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "None";
                   })()}
                 </div>
               </div>
@@ -1562,10 +1562,10 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
 // ─────────────────────────────────────────────────────────
 
 function CellValue({ field, value, compact = false }: { field: BoardField; value: unknown; compact?: boolean }) {
-  if (value == null || value === "") return <span className="text-zinc-500">—</span>;
+  if (value == null || value === "") return <span className="text-ink-3">None</span>;
   switch (field.fieldType) {
     case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-zinc-500"}>{value ? "✓" : "—"}</span>;
+      return <span className={value ? "text-success-text" : "text-ink-3"}>{value ? "Yes" : "No"}</span>;
     case "DATE":
       return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
     case "MULTI_SELECT": {
@@ -1629,7 +1629,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "TIMELINE": {
       const tl = typeof value === "object" && value !== null ? value as { start?: string; end?: string } : null;
-      if (!tl?.start || !tl?.end) return <span className="text-zinc-500">—</span>;
+      if (!tl?.start || !tl?.end) return <span className="text-ink-3">None</span>;
       const start = new Date(tl.start);
       const end = new Date(tl.end);
       const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
@@ -1665,7 +1665,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "FILES": {
       const arr = Array.isArray(value) ? (value as unknown[]) : [];
-      if (arr.length === 0) return <span className="text-zinc-500">—</span>;
+      if (arr.length === 0) return <span className="text-ink-3">None</span>;
       return (
         <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
           📎 <span className="tabular-nums">{arr.length}</span>
@@ -1694,7 +1694,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "TAGS": {
       const arr = Array.isArray(value) ? (value as string[]) : [];
-      if (arr.length === 0) return <span className="text-zinc-500">—</span>;
+      if (arr.length === 0) return <span className="text-ink-3">None</span>;
       return (
         <div className="inline-flex flex-wrap gap-1">
           {arr.slice(0, compact ? 2 : 6).map((t) => (
@@ -1724,7 +1724,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const linked = typeof value === "object" && value !== null && "itemIds" in (value as Record<string, unknown>)
         ? ((value as Record<string, unknown>).itemIds as unknown[])
         : Array.isArray(value) ? value as unknown[] : [];
-      if (linked.length === 0) return <span className="text-zinc-500">—</span>;
+      if (linked.length === 0) return <span className="text-ink-3">None</span>;
       return (
         <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300">
           🔗 <span className="tabular-nums">{linked.length}</span> linked

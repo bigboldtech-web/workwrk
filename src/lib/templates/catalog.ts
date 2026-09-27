@@ -158,39 +158,6 @@ const itsmStarter: CatalogTemplate = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Marketing — Q4 campaign launch
-// ─────────────────────────────────────────────────────────
-
-const marketingQ4Launch: CatalogTemplate = {
-  slug: "marketing-q4-launch",
-  name: "Q4 campaign launch",
-  tagline: "2 campaigns · 3 content pieces · 1 event",
-  productSlug: "workwrk-campaigns",
-  apply: async (ctx) => {
-    const camp1 = await prisma.campaign.create({
-      data: { organizationId: ctx.orgId, name: "Q4 demand gen", description: "Drive demo requests for the new analytics suite.", channel: "Paid Search", budget: 50000, currency: "USD", goalMetric: "Leads", goalTarget: 200, ownerId: ctx.userId, startDate: new Date(), endDate: new Date(Date.now() + 90 * 86400000) },
-    });
-    await prisma.campaign.create({
-      data: { organizationId: ctx.orgId, name: "Customer expansion email series", description: "Re-engage power users with a 6-touch sequence.", channel: "Email", budget: 5000, currency: "USD", goalMetric: "Pipeline", goalTarget: 300000, ownerId: ctx.userId, startDate: new Date() },
-    });
-
-    await prisma.contentItem.createMany({
-      data: [
-        { organizationId: ctx.orgId, title: "How 3 Fortune-500s scaled HR with WorkwrK", type: "CASE_STUDY", channel: "Blog", status: "IN_DRAFT", ownerId: ctx.userId, authorId: ctx.userId, campaignId: camp1.id, scheduledFor: new Date(Date.now() + 7 * 86400000) },
-        { organizationId: ctx.orgId, title: "5 SOPs every new hire should read in week 1", type: "BLOG_POST", channel: "Blog", status: "BRIEFED", ownerId: ctx.userId, authorId: ctx.userId, scheduledFor: new Date(Date.now() + 14 * 86400000) },
-        { organizationId: ctx.orgId, title: "Webinar: Modular Work OS — the alternative to Workday", type: "WEBINAR", channel: "LinkedIn", status: "SCHEDULED", ownerId: ctx.userId, authorId: ctx.userId, campaignId: camp1.id, scheduledFor: new Date(Date.now() + 21 * 86400000) },
-      ],
-    });
-
-    await prisma.eventBrief.create({
-      data: { organizationId: ctx.orgId, name: "WorkwrK at SaaStr 2025", description: "Booth + 1 speaker session on AI agents in HR ops.", type: "Conference", format: "In-person", startDate: new Date(Date.now() + 75 * 86400000), endDate: new Date(Date.now() + 77 * 86400000), location: "San Francisco, CA", capacity: 5000, budget: 75000, status: "PROMOTING", ownerId: ctx.userId },
-    });
-
-    return { campaigns: 2, content: 3, events: 1 };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
 // Dev — Sprint planning starter
 // ─────────────────────────────────────────────────────────
 
@@ -348,7 +315,6 @@ export const TEMPLATE_CATALOG: CatalogTemplate[] = [
   personalTodoStarter,
   crmB2BPipeline,
   itsmStarter,
-  marketingQ4Launch,
   devSprintStarter,
   legalContractIntake,
   helpdeskSupportStarter,

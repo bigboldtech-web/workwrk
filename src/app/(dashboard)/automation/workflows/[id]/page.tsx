@@ -1048,7 +1048,7 @@ export default function AutomationBuilderPage() {
       more={[
         ...(canCreate && !archived ? [{ label: "Duplicate", icon: Copy, onClick: () => void duplicate() }] : []),
         { label: "View logs", icon: ScrollText, href: `/automation/logs?workflowId=${wf.id}` },
-        { label: "Version history", icon: History, onClick: () => void openHistory() },
+        ...(wf.versions.length > 0 ? [{ label: "Version history", icon: History, onClick: () => void openHistory() }] : []),
         ...(wf.can.archive && !archived ? [{ separator: true as const }, { label: "Archive", icon: Archive, destructive: true, onClick: () => void archive() }] : []),
         ...(wf.can.archive && archived ? [{ separator: true as const }, { label: "Bring back", icon: ArchiveRestore, onClick: () => void unarchive() }] : []),
       ]}
@@ -1131,8 +1131,15 @@ export default function AutomationBuilderPage() {
         <div className="flex h-9 items-center justify-between text-sm">
           <dt className="text-ink-2">Versions</dt>
           <dd className="m-0 flex items-center gap-2 text-ink">
-            {wf.versions.length} version{wf.versions.length === 1 ? "" : "s"}
-            <button type="button" onClick={() => void openHistory()} className={BTN.link}>View history</button>
+            {wf.versions.length === 0 ? (
+              // Publishing makes the first version; until then there is no history to open.
+              <span className="text-ink-2">None until you publish</span>
+            ) : (
+              <>
+                {wf.versions.length} version{wf.versions.length === 1 ? "" : "s"}
+                <button type="button" onClick={() => void openHistory()} className={BTN.link}>View history</button>
+              </>
+            )}
           </dd>
         </div>
       </dl>
