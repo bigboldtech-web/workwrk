@@ -33,7 +33,10 @@ import { needsCoreListViews } from "@/lib/work/list-view-seed";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
-import { canEditBoard, canContributeBoard, getBoardForReader, getBoardForReaderOrFolderGrantee, ensureCoreListViews } from "@/lib/board";
+import { ensureCoreListViews } from "@/lib/board";
+import { nodeCtxFromLevel, nodePathWorld } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import type { PlacementCrumb } from "@/lib/work/placement";
 import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
@@ -106,23 +109,31 @@ export default async function BoardPage(props: {
   // API and the strip's first tab cannot disagree.
   const { views, defaultView, pinned, pinnedById } = listViewsForViewer(allViews, u.id);
 
-  // READ GATE — the SAME predicate this page's own endpoints use.
-  //
-  // It was `canRead(viewer, { type: "board" })`, and that resolver does not
-  // consult BoardMember, while every `/api/boards/[id]/...` route this page
-  // calls loads the board through `getBoardForReader`, which does. So sharing
-  // a PRIVATE List straight to a person (the Share dialog's whole purpose on a
-  // List) produced a 404 page over APIs that would have answered 200. The page
-  // and the endpoints now agree, by construction: one function, both sides.
-  //
-  // With ONE addition, because swapping predicates lost a reader in the other
-  // direction: `canRead` reached FolderMember through its folder cascade and
-  // `getBoardForReader` does not, so a granular folder grantee kept the
-  // sidebar rows and the Folder page links into this List and got notFound()
-  // on every one of them. `getBoardForReaderOrFolderGrantee` is the strict
-  // predicate plus that one branch, so no destination a grant opened is closed.
-  const readable = await getBoardForReaderOrFolderGrantee(board.id, u.id, u.accessLevel ?? "EMPLOYEE");
-  if (!readable) notFound();
+  // READ GATE: the SAME resolver this page's own endpoints use
+  // (getBoardForReader and canContributeBoard delegate to it). One walk
+  // answers the role on this List (its own grant, its owner, its Folder chain,
+  // its Space, with the PRIVATE cut) and what the crumb may name above it.
+  const nodeCtx = nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel);
+  const { steps, self } = await nodePathWorld(nodeCtx, { kind: "list", id: board.id });
+  if (!roleAtLeast(self.role, "VIEW")) notFound();
+
+  // The crumb names the Space and the Folders above this List while the
+  // viewer can open each or passes through it on the way here (a path
+  // container opens its path view), and stops at the first they can do
+  // neither with: no gap, nothing hidden named.
+  const trail: PlacementCrumb[] = [];
+  for (const st of steps) {
+    if (!st.readable && !st.path) break;
+    trail.push(
+      st.kind === "space"
+        ? { label: st.name, href: `/spaces/${encodeURIComponent(st.slug ?? st.id)}`, tile: { icon: st.icon, color: st.color, name: st.name } }
+        : { label: st.name, href: `/folders/${encodeURIComponent(st.id)}` },
+    );
+  }
+  // The menu names the List's Folder only where the crumb does.
+  const folderHref = board.folder ? `/folders/${encodeURIComponent(board.folder.id)}` : null;
+  const namedFolder = folderHref && trail.some((c) => c.href === folderHref) ? board.folder : null;
+  const back = trail[trail.length - 1] ?? { label: "Work", href: "/home" };
 
   // Who pinned the default, for the Unpin row's "Pinned by" line. Scoped to
   // the organisation: a mark can only ever name a colleague.
@@ -160,14 +171,15 @@ export default async function BoardPage(props: {
   // (their own connect values, no reserved key, a linked row in this List's
   // namespace). A paint that differed from the poll would flicker rows in and
   // out twelve seconds after load.
+  //
+  // The gates are read off `self`, the walk above: the same resolver
+  // canContributeBoard and canEditBoard delegate to, answered once for this
+  // request rather than three more times.
   const accessLevel = u.accessLevel ?? "EMPLOYEE";
   const viewer = { userId: u.id, organizationId: u.organizationId, accessLevel };
-  const [items, canContribute, canManage, strictReadable] = await Promise.all([
-    listBoardItems(board.id, { view: { viewer, contextBoardId: board.id }, includeLinked: LIST_LINK_CANVAS_LIVE }),
-    canContributeBoard(board.id, u.id, accessLevel),
-    canEditBoard(board.id, u.id, accessLevel),
-    getBoardForReader(board.id, u.id, accessLevel),
-  ]);
+  const items = await listBoardItems(board.id, { view: { viewer, contextBoardId: board.id }, includeLinked: LIST_LINK_CANVAS_LIVE });
+  const canContribute = roleAtLeast(self.role, "EDIT");
+  const canManage = roleAtLeast(self.role, "FULL");
   const canDeleteTasks = canManage;
   // A connect column names only the Lists this viewer can read, a mirror only
   // its lookups into them: the same redaction every fields read applies.
@@ -182,11 +194,11 @@ export default async function BoardPage(props: {
   // Pin column and Row height write the view, so they render only where the
   // PATCH would be accepted: the route's own gate, computed here.
   const mayConfigureView = activeView ? canSaveView(activeView, u.id, canContribute) : false;
-  // Schedule report needs what the report route needs: the STRICT read
-  // (getBoardForReader; a granular folder grantee reads this page through the
-  // wider predicate and would be answered 404 there) and a member, never a
-  // Guest.
-  const scheduleReports = Boolean(strictReadable) && orgRoleOf({ accessLevel }) !== "GUEST";
+  // Schedule report needs what the report route needs: Can view from the one
+  // resolver (boardForViewer, the same walk as `self` above: a Folder grantee
+  // is a reader like any other now, and opens the schedule dialog too) and a
+  // member, never a Guest.
+  const scheduleReports = roleAtLeast(self.role, "VIEW") && orgRoleOf({ accessLevel }) !== "GUEST";
   // Per-List statuses (backbone #1) — the board's own set, or the
   // canonical default trio when Board.statuses is null.
   const statuses = getBoardStatuses(board);
@@ -201,25 +213,13 @@ export default async function BoardPage(props: {
           and this board. The Space link's destination is that Space crumb (and
           the Work sidebar's Space row); the Folder segment was a span, never a
           link, so no destination is lost. */}
-      <Breadcrumb
-        items={[
-          { label: board.space.name, href: `/spaces/${board.space.slug}`, tile: { icon: board.space.icon, color: board.space.color, name: board.space.name } },
-          // The Folder crumb was a span with no href while the Folder had its
-          // own route all along (audit High #7's other half).
-          ...(board.folder ? [{ label: board.folder.name, href: `/folders/${board.folder.id}` }] : []),
-          { label: board.name },
-        ]}
-      />
+      <Breadcrumb items={[...trail, { label: board.name }]} />
       {/* Title row (40) per design-system section 4: back · tile · name · lock
           · Share · "…". The generic "Automate" link and the bare
           AskSidekickButton are gone: Automations is a menu row scoped to THIS
           List, and AI is the one slot the shell owns. */}
       <div className="flex h-[40px] items-center gap-2 px-6">
-        <BackButton
-          fallbackHref={board.folder ? `/folders/${board.folder.id}` : `/spaces/${board.space.slug}`}
-          label={board.folder?.name ?? board.space.name}
-          className="me-0.5"
-        />
+        <BackButton fallbackHref={back.href ?? "/home"} label={back.label} className="me-0.5" />
         <EntityTile
           size="md"
           icon={board.icon}
@@ -273,7 +273,7 @@ export default async function BoardPage(props: {
             spaceSlug: board.space.slug,
             spaceName: board.space.name,
             folderId: board.folder?.id ?? null,
-            folderName: board.folder?.name ?? null,
+            folderName: namedFolder?.name ?? null,
             contents: `${items.length} task${items.length === 1 ? "" : "s"}`,
           }}
           role={canManage ? "full" : canContribute ? "edit" : "view"}

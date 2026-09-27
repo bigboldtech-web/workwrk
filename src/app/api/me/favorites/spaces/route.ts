@@ -9,7 +9,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -22,14 +23,13 @@ export async function GET() {
     ? (effective.home!.favoriteSpaceIds as string[])
     : [];
   if (ids.length === 0) return NextResponse.json({ spaces: [] });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
   const rows = await prisma.space.findMany({
     where: { organizationId: u.organizationId, id: { in: ids }, archivedAt: null },
     select: { id: true, slug: true, name: true, icon: true, color: true, visibility: true },
   });
-  const visible = (await Promise.all(
-    rows.map(async (s) => ((await getSpaceForReader(s.id, u.id!, accessLevel)) ? s : null)),
-  )).filter((s): s is NonNullable<typeof s> => s !== null);
+  // One world for every starred Space (the one resolver).
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "space", rows.map((s) => s.id));
+  const visible = rows.filter((s) => roleAtLeast(roles.get(s.id) ?? "none", "VIEW"));
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   return NextResponse.json({ spaces: visible });

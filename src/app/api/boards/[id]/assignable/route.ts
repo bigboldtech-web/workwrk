@@ -27,8 +27,10 @@
 
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sessionAccessLevel } from "@/lib/alignment-scope";
-import { canContributeBoard, getBoardForReader } from "@/lib/board";
+import { boardRoleOf } from "@/lib/board";
 import { listAssignableUsersForBoard } from "@/lib/assignable";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -41,15 +43,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   // A task list is not discoverable: "no access" and "no such board" are the
   // same answer, 404.
-  const board = await getBoardForReader(id, userId, sessionAccessLevel(session));
-  if (!board || board.organizationId !== orgId) return jsonError("Not found", 404);
+  const level = sessionAccessLevel(session);
+  const { board, role } = await boardRoleOf(id, userId, level);
+  if (!board || board.organizationId !== orgId || !roleAtLeast(role, "VIEW")) return jsonError("Not found", 404);
 
   const url = new URL(req.url);
   const search = url.searchParams.get("search") ?? undefined;
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
 
-  const includeEmail = await canContributeBoard(id, userId, sessionAccessLevel(session));
-  const data = await listAssignableUsersForBoard(id, orgId, { search, limit, includeEmail });
+  const includeEmail = roleAtLeast(role, "EDIT");
+  // The viewer's own context: the roster names only the people they may see.
+  const data = await listAssignableUsersForBoard(id, orgId, { search, limit, includeEmail }, nodeCtxFromLevel(userId, orgId, level));
   return jsonSuccess({ data, total: data.length }, 200, { "Cache-Control": "no-store" });
 }

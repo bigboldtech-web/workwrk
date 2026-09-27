@@ -14,12 +14,13 @@
 // (src/lib/reports/report-server.ts), so none of them can show more than the
 // others.
 //
-// Server-only: prisma and the access engine's read-side set arithmetic (the
-// same accessibleIds call /everything already scopes itself with).
+// Server-only: prisma and the one node-access resolver (the same one-world
+// List read /everything scopes itself with).
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access/ids";
 import type { Viewer } from "@/lib/access/types";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getBoardStatuses, isDoneStatus, makeStatusLookup, PRIORITY_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
@@ -99,13 +100,16 @@ export function sourceResolver(r: WidgetReader, reader: ListReader = listReader(
   const allReadable = (): Promise<string[]> => {
     if (!everything) {
       everything = (async () => {
-        const ids = await accessibleIds(r.viewer, "list", "VIEW");
-        if (ids.readable.size === 0) return [];
+        // Every live task List of the org, through ONE world: the ones this
+        // viewer can open, and no other.
         const rows = await prisma.board.findMany({
-          where: { id: { in: [...ids.readable] }, organizationId: r.ctx.organizationId, archivedAt: null, itemType: "studio-item" },
+          where: { organizationId: r.ctx.organizationId, archivedAt: null, itemType: "studio-item" },
           select: { id: true, itemType: true, settings: true, archivedAt: true },
         });
-        return rows.filter(isTaskList).map((b) => b.id);
+        const lists = rows.filter(isTaskList);
+        if (lists.length === 0) return [];
+        const roles = await nodeRoleMap(nodeCtxFromViewer(r.viewer), "list", lists.map((b) => b.id));
+        return lists.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW")).map((b) => b.id);
       })();
     }
     return everything;

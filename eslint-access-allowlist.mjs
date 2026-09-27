@@ -565,20 +565,13 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/route-guard.ts",
   "src/lib/sop-access.ts",
   "src/lib/space.ts",
-  // Bird's eye (2026-09-24) adds TWO, a pure module and its test.
-  // space-lists.ts answers which Lists of one Space a viewer can read and
-  // write, for dozens of Lists at once, by handing facts loaded in four
-  // queries (src/lib/space.ts, readableListsInSpace) to the frozen
-  // transcriptions: legacyAllows getBoardForReader, canContributeBoard and
-  // folderVisibleTo, the very functions getBoardForReader,
-  // getBoardForReaderOrFolderGrantee and canContributeBoard delegate to. It
-  // builds LegacyInputs, which names the signal, and its test proves parity
-  // with the per-List helpers. No route or component reads the signal: the
-  // two new routes (spaces/[id]/birdseye, spaces/[id]/default-view) go
-  // through itemCtx and the Space wrappers in src/lib/space.ts. Both leave
-  // with src/lib/space.ts at access step 6.
-  "src/lib/work/space-lists.ts",
-  "src/lib/work/space-lists.test.ts",
+  // Bird's eye (2026-09-24) had added src/lib/work/space-lists.ts and its
+  // test here: a pure second predicate over the frozen legacy transcriptions
+  // that readableListsInSpace decided through. The one access model merge
+  // (2026-09-27) retired both: readableListsInSpace answers from the one
+  // resolver's tree (node-access spaceTree), which knows the Private cut and
+  // a Folder grant's own role, so the module had no caller left and a second
+  // opinion on readability is exactly what this list exists to shrink.
   "src/lib/suites/auth.ts",
   "src/lib/trash.ts",
   "src/lib/types.ts",

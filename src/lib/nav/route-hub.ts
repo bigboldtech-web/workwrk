@@ -127,14 +127,18 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // never go active, because the Work sidebar is not rendered on /favorites.
   "/favorites": "home",
   "/marketing": "home",
-  // The Work door for docs, tables, canvases, SOPs and forms opened from Work
-  // when the viewer can see no Space for them: a personal or NOTEPAD doc, an
-  // unscoped table, every SOP and form (src/lib/nav/object-href.ts). Its
-  // children are dynamic (/work/docs/[id] and friends), so like /item and
-  // /folders it is a hub row with no page of its own. A Space item opened
-  // from Work lives under "/spaces" above, which already owns
-  // /spaces/[slug]/docs/[id], /spaces/[slug]/tables/[id] and
-  // /spaces/[slug]/canvas/[id] by longest prefix.
+  // The Work door for docs, tables, canvases, SOPs and forms: the id-only
+  // Work address of an object opened from any hub but the Docs and Tables
+  // storage browsers when no Space is known for it (a personal or NOTEPAD
+  // doc, an unscoped table, every SOP and form), the form Copy link gives
+  // from every hub, and where a person without the Docs or Tables hub is
+  // moved from a canonical URL (src/lib/nav/object-href.ts). It places each
+  // item for whoever opens it, under their own access. Its children are
+  // dynamic (/work/docs/[id] and friends), so like /item and /folders it is
+  // a hub row with no page of its own. A Space item lives under "/spaces"
+  // above, which already owns /spaces/[slug]/docs/[id],
+  // /spaces/[slug]/tables/[id] and /spaces/[slug]/canvas/[id] by longest
+  // prefix.
   "/work": "home",
 
   // ── Planner ───────────────────────────────────────────────────────

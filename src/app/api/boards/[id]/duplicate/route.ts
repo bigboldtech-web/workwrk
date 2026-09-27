@@ -8,6 +8,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { canEditBoard, duplicateBoard, getBoardForReader } from "@/lib/board";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { checkCreate } from "@/lib/access/node-placement";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -32,7 +34,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (!(await canEditBoard(id, c.userId, c.accessLevel))) {
-    return NextResponse.json({ error: "You don't have permission to duplicate this List." }, { status: 403 });
+    return NextResponse.json({ error: "You need Full access to this List to duplicate it." }, { status: 403 });
+  }
+  // The copy lands beside the original, so it takes the one create rule
+  // there (node-rules P1): Can edit or higher on the List's Folder, or on its
+  // Space at the root. A List grant alone never plants a new List in a
+  // container its holder only passes through or reads.
+  if (board.spaceId) {
+    const lands = await checkCreate(
+      nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+      board.folderId ? { kind: "folder", id: board.folderId } : { kind: "space", id: board.spaceId },
+      "list",
+    );
+    if (!lands.ok) return NextResponse.json({ error: lands.error }, { status: lands.status });
   }
 
   try {

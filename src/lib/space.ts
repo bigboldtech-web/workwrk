@@ -11,14 +11,19 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma, Space, SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
-import { legacyAllows, type SpaceRoleValue, type VisibilityValue } from "@/lib/access/parity";
-import { emptyLegacyInputs, loadSpaceInputs } from "@/lib/access/legacy-facts";
-import { spaceContainerRole, type ContainerRole } from "@/lib/work/container-menu";
+import { type ContainerRole } from "@/lib/work/container-menu";
 import { withArchivedBy } from "@/lib/archived-by";
-import { accessibleFolderIds } from "@/lib/folder";
-import { decideSpaceLists } from "@/lib/work/space-lists";
+import { decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility, type TreeRole } from "@/lib/access/node-rules";
+import { listVisibleSpaces, spaceTree } from "@/lib/access/node-access";
+import { renderedCounts, type FolderNode, type ListNode, type SpaceTreeResult } from "@/lib/access/node-tree";
 import { mergeSpaceSettings, spaceModulesPatch } from "@/lib/work/space-default-view";
 
+/**
+ * One row of the Space list. A PATH row (access "path": a Space the viewer
+ * only passes through on the way to a Folder, List, doc, table or canvas
+ * they were given) names the Space and nothing else: role, visibility,
+ * description, owner, parent and every count are null.
+ */
 export interface SpaceSummary {
   id: string;
   slug: string;
@@ -28,19 +33,20 @@ export interface SpaceSummary {
   color: string | null;
   parentSpaceId: string | null;
   ownerId: string | null;
-  visibility: Visibility;
+  visibility: Visibility | null;
   displayOrder: number;
   archivedAt: Date | null;
-  memberCount: number;
-  folderCount: number;
-  boardCount: number;
+  memberCount: number | null;
+  /** Null unless counts were asked for; then only what the viewer's tree renders. */
+  folderCount: number | null;
+  boardCount: number | null;
   /**
-   * The viewer's object role on this Space ("full" | "edit" | "view"), derived
-   * from the same membership `canEditSpace` / `canContributeSpace` read. Every
-   * surface that renders a container "…" needs it, and the sidebar cannot
-   * afford one async access call per row.
+   * The viewer's role on this Space ("full" | "edit" | "view"), from the one
+   * resolver (src/lib/access/node-access.ts). Null on a path row, which the
+   * tree renders as the reader's menu with no create trigger.
    */
-  role: ContainerRole;
+  role: ContainerRole | null;
+  access: "member" | "path";
 }
 
 function toSlug(name: string): string {
@@ -84,89 +90,23 @@ export function isOrgAdminAccessLevel(accessLevel: string | null | undefined): b
 }
 
 /**
- * Spaces visible to a user inside their org. Org admins see everything;
- * other users see ORG-visibility Spaces + WORKSPACE-visibility Spaces
- * they're members of + PRIVATE Spaces they're members of.
+ * The Spaces a user holds a role on, from the one resolver
+ * (node-access listVisibleSpaces). `paths` adds the Spaces they only pass
+ * through on the way to something they were given, as bare named rows;
+ * `counts` fills folderCount and boardCount with what their tree renders.
+ * Without either, only Spaces with a role come back: a caller that fans out
+ * to Space-scoped content must never pass `paths`.
  *
- * Archived Spaces are excluded by default; pass `includeArchived: true`
- * to see them (admin-only UI surface in Phase 2).
+ * Archived Spaces are excluded unless `includeArchived`.
  */
 export async function listSpacesForUser(
   userId: string,
   organizationId: string,
-  opts: { accessLevel?: string; includeArchived?: boolean; includeFolderContainers?: boolean } = {},
+  opts: { accessLevel?: string; includeArchived?: boolean; paths?: boolean; counts?: boolean } = {},
 ): Promise<SpaceSummary[]> {
-  const isAdmin = isOrgAdminAccessLevel(opts.accessLevel);
-  // `includeFolderContainers` widens the list to spaces the viewer can reach
-  // ONLY via a folder grant — a container for the folder they were shared. It
-  // returns space metadata only (name/icon/counts), NEVER space content, so it
-  // is safe here even though a folder-only grantee is not a full space reader.
-  // Callers that fan out to space-scoped CONTENT must not pass it.
-  const folderContainerClause = opts.includeFolderContainers
-    ? [{ folders: { some: { archivedAt: null, members: { some: { userId } } } } }]
-    : [];
-  const where = isAdmin
-    ? {
-        organizationId,
-        ...(opts.includeArchived ? {} : { archivedAt: null }),
-      }
-    : {
-        organizationId,
-        ...(opts.includeArchived ? {} : { archivedAt: null }),
-        OR: [
-          { visibility: "ORG" as Visibility },
-          { members: { some: { userId } } },
-          ...folderContainerClause,
-        ],
-      };
-
-  const rows = await prisma.space.findMany({
-    where,
-    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      description: true,
-      icon: true,
-      color: true,
-      parentSpaceId: true,
-      ownerId: true,
-      visibility: true,
-      displayOrder: true,
-      archivedAt: true,
-      // Counts must exclude archived (trashed) folders/boards — the actual
-      // lists do (board.ts / folder.ts filter archivedAt: null), so an
-      // unfiltered count reads higher than what the sidebar can show.
-      _count: {
-        select: {
-          members: true,
-          folders: { where: { archivedAt: null } },
-          boards: { where: { archivedAt: null } },
-        },
-      },
-      // The viewer's own membership row, for the per-Space role below.
-      members: { where: { userId }, select: { role: true }, take: 1 },
-    },
-  });
-
-  return rows.map((s) => ({
-    id: s.id,
-    slug: s.slug,
-    name: s.name,
-    description: s.description,
-    icon: s.icon,
-    color: s.color,
-    parentSpaceId: s.parentSpaceId,
-    ownerId: s.ownerId,
-    visibility: s.visibility,
-    displayOrder: s.displayOrder,
-    archivedAt: s.archivedAt,
-    memberCount: s._count.members,
-    folderCount: s._count.folders,
-    boardCount: s._count.boards,
-    role: spaceContainerRole({ isOrgAdmin: isAdmin, memberRole: s.members[0]?.role ?? null }),
-  }));
+  const ctx = nodeCtxFromLevel(userId, organizationId, opts.accessLevel);
+  const rows = await listVisibleSpaces(ctx, { paths: opts.paths, counts: opts.counts, includeArchived: opts.includeArchived });
+  return rows.map((r) => ({ ...r, visibility: r.visibility as Visibility | null }));
 }
 
 /**
@@ -212,51 +152,168 @@ export async function visibleSpaceIds(
 }
 
 /**
- * Read access check. Org admins always read. Otherwise:
- *   - ORG visibility → any org member reads.
- *   - WORKSPACE / PRIVATE → must have a SpaceMember row.
- * Returns the Space row if readable; null otherwise.
+ * The viewer's role on one Space, decided by node-rules R2 over the Space row
+ * and the viewer's own SpaceMember row, which is everything that rule reads,
+ * so the delegates below issue the one query they always issued. No org
+ * filter is applied here today and none is added: callers compare
+ * space.organizationId themselves.
+ */
+async function spaceRoleOf(spaceId: string, userId: string, accessLevel: string | null | undefined) {
+  const row = await prisma.space.findUnique({
+    where: { id: spaceId },
+    include: { members: { where: { userId }, select: { role: true } } },
+  });
+  if (!row) return { row: null, role: "none" as NodeRole };
+  const ctx = nodeCtxFromLevel(userId, row.organizationId, accessLevel);
+  const rows = emptyRows(row.organizationId);
+  rows.spaces.set(row.id, {
+    id: row.id, organizationId: row.organizationId, name: row.name, slug: row.slug, icon: row.icon, color: row.color,
+    visibility: row.visibility as NodeVisibility, ownerId: row.ownerId,
+  });
+  const grants = emptyGrants(ctx);
+  const own = row.members[0]?.role as MemberRole | undefined;
+  if (own) grants.space.set(row.id, own);
+  return { row, role: decide(rows, grants, { kind: "space", id: row.id }).role };
+}
+
+/**
+ * Read access check: the viewer holds Can view or higher on the Space (an org
+ * admin, any SpaceMember row, or an org-wide Space). Returns the Space row
+ * (with the viewer's own membership) when readable; null otherwise.
  */
 export async function getSpaceForReader(spaceId: string, userId: string, accessLevel?: string) {
-  // Delegate (migration step 1). The row is loaded by the engine's legacy
-  // facts loader with the same include this function used, and the decision is
-  // parity.ts's transcription of space.ts:199-203. No org filter is applied
-  // here today and none is added: the loader fills organizationId from the row
-  // so the comparison can never narrow. The row itself is still the return
-  // value, so every caller that reads space.settings or space.organizationId
-  // is untouched.
-  const { inputs, space } = await loadSpaceInputs(spaceId, { userId, accessLevel });
-  return legacyAllows(inputs, "getSpaceForReader") ? space : null;
+  const { row, role } = await spaceRoleOf(spaceId, userId, accessLevel);
+  return row && roleAtLeast(role, "VIEW") ? row : null;
 }
 
-/**
- * Edit access check. Org admins always edit. Otherwise a SpaceMember
- * row with role OWNER or ADMIN is required.
- */
+/** Full access on the Space: an org admin, or a SpaceMember OWNER or ADMIN row. */
 export async function canEditSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of space.ts:211-216.
-  // The admin branch is first there as it was here, so an org admin still
-  // issues no query at all.
-  const viewer = { userId, accessLevel };
-  const inputs = isOrgAdminAccessLevel(accessLevel)
-    ? emptyLegacyInputs(viewer)
-    : (await loadSpaceInputs(spaceId, viewer)).inputs;
-  return legacyAllows(inputs, "canEditSpace");
+  if (isOrgAdminAccessLevel(accessLevel)) return true;
+  const { role } = await spaceRoleOf(spaceId, userId, accessLevel);
+  return roleAtLeast(role, "FULL");
 }
 
 /**
- * CONTENT-write check — can this user create/edit content in the Space (tasks,
- * comments), as opposed to MANAGING it (members, settings, structure, which
- * stay on canEditSpace = OWNER/ADMIN). A plain MEMBER contributes; a GUEST is
- * read-only. This is what lets a Space "member" actually make changes.
+ * CONTENT-write check: Can edit or higher on the Space (a MEMBER contributes,
+ * a GUEST reads), as opposed to MANAGING it, which stays canEditSpace.
  */
 export async function canContributeSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of space.ts:226-231.
-  const viewer = { userId, accessLevel };
-  const inputs = isOrgAdminAccessLevel(accessLevel)
-    ? emptyLegacyInputs(viewer)
-    : (await loadSpaceInputs(spaceId, viewer)).inputs;
-  return legacyAllows(inputs, "canContributeSpace");
+  if (isOrgAdminAccessLevel(accessLevel)) return true;
+  const { role } = await spaceRoleOf(spaceId, userId, accessLevel);
+  return roleAtLeast(role, "EDIT");
+}
+
+/**
+ * The one check for nesting a Space under another, or taking it to the top
+ * level (POST /api/spaces/[id]/move and a parentSpaceId in PATCH
+ * /api/spaces/[id]): node-rules spaceNestVerdict, the placement rule's P2 for
+ * Space nesting. Full access on the Space itself, on the parent it leaves
+ * (so Full access on a sub-Space alone never pulls it out of a parent the
+ * person has no role on) and on the parent it goes under; a parent in
+ * another org, out of sight, archived, the Space itself or one of its own
+ * sub-Spaces is refused. Null when the move may go ahead.
+ */
+export async function spaceReparentRefusal(
+  spaceId: string,
+  parentSpaceId: string | null,
+  viewer: { userId: string; organizationId: string; accessLevel?: string },
+): Promise<{ status: 400 | 403 | 404; error: string } | null> {
+  const org = viewer.organizationId;
+  const self = await prisma.space.findFirst({ where: { id: spaceId, organizationId: org }, select: { parentSpaceId: true } });
+  if (!self) return { status: 404, error: "Not found" };
+  const currentId = self.parentSpaceId ?? null;
+  // The parent it leaves is asked nothing: a Space's place under a parent
+  // carries no access, and its OWNER or ADMIN moves it (node-rules
+  // spaceNestVerdict, P7).
+  const managesSpace = await canEditSpace(spaceId, viewer.userId, viewer.accessLevel);
+  let dest: Parameters<typeof spaceNestVerdict>[0]["dest"] = null;
+  if (parentSpaceId) {
+    const parent = parentSpaceId === spaceId
+      ? null
+      : await prisma.space.findFirst({ where: { id: parentSpaceId, organizationId: org }, select: { id: true, archivedAt: true } });
+    const [sees, manages] = parent
+      ? await Promise.all([
+          getSpaceForReader(parentSpaceId, viewer.userId, viewer.accessLevel).then((r) => !!r),
+          canEditSpace(parentSpaceId, viewer.userId, viewer.accessLevel),
+        ])
+      : [false, false];
+    // Walk UP from the proposed parent; reaching this Space means the parent
+    // is one of its own descendants.
+    let cycle = false;
+    let cursor: string | null = parent ? parentSpaceId : null;
+    const seen = new Set<string>();
+    while (cursor) {
+      if (cursor === spaceId) { cycle = true; break; }
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      const p: { parentSpaceId: string | null } | null = await prisma.space.findFirst({
+        where: { id: cursor, organizationId: org },
+        select: { parentSpaceId: true },
+      });
+      cursor = p?.parentSpaceId ?? null;
+    }
+    dest = { id: parentSpaceId, found: parentSpaceId === spaceId || !!parent, sees: parentSpaceId === spaceId || sees, archived: !!parent?.archivedAt, manages, cycle };
+  }
+  const verdict = spaceNestVerdict({ spaceId, managesSpace, current: currentId ? { id: currentId } : null, dest });
+  return verdict.ok ? null : { status: verdict.status, error: verdict.error };
+}
+
+export interface SpaceNestDestinations {
+  /** The top level (no parent): pickable when the move there would be accepted. */
+  top: { pickable: boolean; current: boolean };
+  /** The Spaces this one could go under, each pickable when the move would be accepted, and its current parent (Here now). */
+  spaces: Array<{ id: string; name: string; slug: string; icon: string | null; color: string | null; pickable: boolean; current: boolean }>;
+  /** Why nothing is pickable, when the Space cannot move anywhere for this viewer. */
+  refusal?: string;
+}
+
+/**
+ * P5 for Space nesting: exactly the parents spaces/[id]/move accepts for this
+ * viewer, from the same verdict (node-rules spaceNestVerdict) the route asks,
+ * so the Move dialog never offers a place the move refuses. Full access on the
+ * Space and on the parent it goes under (the parent it leaves is asked
+ * nothing); never the Space itself, one of its own sub-Spaces, or an archived
+ * Space. Null when the viewer cannot open the Space.
+ */
+export async function spaceNestDestinations(
+  spaceId: string,
+  viewer: { userId: string; organizationId: string; accessLevel?: string },
+): Promise<SpaceNestDestinations | null> {
+  const org = viewer.organizationId;
+  const self = await getSpaceForReader(spaceId, viewer.userId, viewer.accessLevel);
+  if (!self || self.organizationId !== org) return null;
+  const currentId = self.parentSpaceId ?? null;
+  const ctx = nodeCtxFromLevel(viewer.userId, org, viewer.accessLevel);
+  const [visible, all, managesSpace] = await Promise.all([
+    listVisibleSpaces(ctx),
+    prisma.space.findMany({ where: { organizationId: org }, select: { id: true, parentSpaceId: true } }),
+    canEditSpace(spaceId, viewer.userId, viewer.accessLevel),
+  ]);
+  // Its own sub-Spaces, at any depth: never a parent for it.
+  const below = new Set<string>([spaceId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of all) {
+      if (r.parentSpaceId && below.has(r.parentSpaceId) && !below.has(r.id)) {
+        below.add(r.id);
+        grew = true;
+      }
+    }
+  }
+  const current = currentId ? { id: currentId } : null;
+  const verdictFor = (dest: Parameters<typeof spaceNestVerdict>[0]["dest"]) => spaceNestVerdict({ spaceId, managesSpace, current, dest });
+  const top = verdictFor(null);
+  const candidates = visible.filter((s) => s.id !== spaceId && !s.archivedAt);
+  const manages = await Promise.all(candidates.map((s) => canEditSpace(s.id, viewer.userId, viewer.accessLevel)));
+  const spaces = candidates.map((s, i) => {
+    const v = verdictFor({ id: s.id, found: true, sees: true, archived: false, manages: manages[i], cycle: below.has(s.id) });
+    return { id: s.id, name: s.name, slug: s.slug, icon: s.icon, color: s.color, pickable: v.ok && !v.same, current: s.id === currentId };
+  });
+  const listed = spaces.filter((s) => s.pickable || s.current);
+  const topPick = top.ok && !top.same;
+  const nothing = !topPick && !listed.some((s) => s.pickable);
+  const refusal = !nothing ? undefined : !managesSpace ? "You need Full access to this Space to move it." : undefined;
+  return { top: { pickable: topPick, current: currentId === null }, spaces: listed, ...(refusal ? { refusal } : {}) };
 }
 
 // ── A viewer, whole ─────────────────────────────────────────────────
@@ -288,29 +345,34 @@ export interface SpaceListRow {
   settings?: Prisma.JsonValue;
   /** Present only when asked for (includeSchema). */
   schema?: Prisma.JsonValue;
-  /** The viewer's own BoardMember role on it. */
-  memberRole: SpaceRole | null;
-  /** canContributeBoard's answer: may this viewer create and change its tasks? */
+  /** The viewer's role on it, from the one resolver: the Work tree's row role. */
+  role: TreeRole;
+  /** Can edit or higher: may this viewer create and change its tasks? */
   canContribute: boolean;
 }
 
 /**
  * Every List of one Space the viewer can read, in the Work sidebar's order,
- * with whether they may write in each, and how many of its folders they see.
+ * with the viewer's role on each and whether they may write in it, plus how
+ * many of the Space's folders they see.
  *
- * Why one function. The Space page used to pick its Lists with an inline
- * rule that read only the ROOT folders' Lists and never read BoardMember or
- * FolderMember: a List in a sub-folder was missing from every cross-List tab,
- * a PRIVATE List shared to someone never appeared for them, and the header
- * counted every List, readable or not. This is now the one answer for Bird's
- * eye, every other Space tab, the header's count and GET /api/boards?spaceId=.
+ * ONE answer, the resolver's. The tree is exactly what GET
+ * /api/spaces/[id]/children renders for this viewer (node-access spaceTree,
+ * assembled by node-tree.ts): every List they can open at every depth, a
+ * PRIVATE List or a PRIVATE Folder that does not name them left out, a Folder
+ * grant reaching the Lists inside it without any Space row, and nothing else.
+ * Bird's eye, every other Space tab, the header's count and the sidebar are
+ * therefore one walk and cannot disagree, and an unreadable List is never
+ * named or counted anywhere. `opts.tree` hands in a tree the caller already
+ * built (the Space page), so the world is loaded once per request.
  *
- * Cost, whatever the List count: four reads in parallel (the Space with the
- * viewer's SpaceMember row, its live folders, its live Lists with the
- * viewer's BoardMember row, the viewer's folder grants, which an org admin
- * skips), then every decision in memory through the frozen transcriptions
- * (src/lib/work/space-lists.ts). Member rows arrive as relation includes on
- * org-scoped reads; the member tables are never queried on their own.
+ * Before this the answer came from a second predicate (the frozen legacy
+ * transcriptions, four reads and an in-memory decision) that knew nothing of
+ * the Private cut or of a Folder grant's own role. The walk gives the
+ * readable set and each List's role; the columns the tabs need (statuses,
+ * and schema when asked) come from one org-scoped read of exactly those
+ * Lists. No member table is read here: a grant is only ever read through
+ * the resolver.
  *
  * The caller gates the Space first. A Space outside the viewer's org, or one
  * that does not exist, answers no Lists.
@@ -318,79 +380,56 @@ export interface SpaceListRow {
 export async function readableListsInSpace(
   spaceId: string,
   viewer: SpaceViewer,
-  opts: { includeSchema?: boolean; includeSettings?: boolean; includeArchived?: boolean } = {},
+  opts: { includeSchema?: boolean; includeSettings?: boolean; tree?: SpaceTreeResult | null } = {},
 ): Promise<{ lists: SpaceListRow[]; folderCount: number }> {
-  const live = opts.includeArchived ? {} : { archivedAt: null };
   const includeSettings = opts.includeSettings === true;
   const includeSchema = opts.includeSchema === true;
-  const [space, folders, boards, granted] = await Promise.all([
-    prisma.space.findFirst({
-      where: { id: spaceId, organizationId: viewer.organizationId },
-      select: {
-        id: true,
-        organizationId: true,
-        visibility: true,
-        ownerId: true,
-        members: { where: { userId: viewer.userId }, select: { role: true } },
-      },
-    }),
-    prisma.folder.findMany({
-      where: { spaceId, organizationId: viewer.organizationId, ...live },
-      orderBy: [{ position: "asc" }, { id: "asc" }],
-      select: { id: true, parentFolderId: true, visibility: true, ownerId: true },
-    }),
-    prisma.board.findMany({
-      where: { spaceId, organizationId: viewer.organizationId, ...live },
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        icon: true,
-        color: true,
-        visibility: true,
-        ownerId: true,
-        folderId: true,
-        statuses: true,
-        settings: includeSettings,
-        schema: includeSchema,
-        members: { where: { userId: viewer.userId }, select: { role: true } },
-      },
-    }),
-    isOrgAdminAccessLevel(viewer.accessLevel) ? Promise.resolve(new Set<string>()) : accessibleFolderIds(viewer.userId),
-  ]);
-  if (!space) return { lists: [], folderCount: 0 };
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel);
+  const tree = opts.tree !== undefined ? opts.tree : await spaceTree(ctx, spaceId);
+  if (!tree) return { lists: [], folderCount: 0 };
 
-  const { lists, visibleFolderCount } = decideSpaceLists(viewer, {
-    space: {
-      id: space.id,
-      organizationId: space.organizationId,
-      visibility: space.visibility as VisibilityValue,
-      ownerId: space.ownerId,
-      memberRole: (space.members[0]?.role as SpaceRoleValue | undefined) ?? null,
-    },
-    folders,
-    boards: boards.map((b) => ({ ...b, memberRole: (b.members[0]?.role as SpaceRoleValue | undefined) ?? null })),
-    granted,
-  });
-  return {
-    lists: lists.map((b) => ({
-      id: b.id,
-      slug: b.slug,
-      name: b.name,
-      icon: b.icon,
-      color: b.color,
-      visibility: b.visibility,
-      ownerId: b.ownerId,
-      folderId: b.folderId,
-      statuses: b.statuses,
-      ...(includeSettings ? { settings: b.settings } : {}),
-      ...(includeSchema ? { schema: b.schema } : {}),
-      memberRole: b.memberRole,
-      canContribute: b.canContribute,
-    })),
-    folderCount: visibleFolderCount,
+  // The sidebar's order: root folders by position, inside each folder its
+  // child folders first and then its Lists, and the Space's root Lists after
+  // every folder, at any depth.
+  const ordered: Array<{ node: ListNode; folderId: string | null }> = [];
+  const walk = (folders: FolderNode[]) => {
+    for (const f of folders) {
+      walk(f.childFolders);
+      for (const l of f.boards) ordered.push({ node: l, folderId: f.id });
+    }
   };
+  walk(tree.folders);
+  for (const l of tree.boards) ordered.push({ node: l, folderId: null });
+  const folderCount = renderedCounts(tree).folders;
+  if (ordered.length === 0) return { lists: [], folderCount };
+
+  // The columns the walk does not carry, for exactly the readable Lists.
+  const rows = await prisma.board.findMany({
+    where: { id: { in: ordered.map((o) => o.node.id) }, organizationId: viewer.organizationId, archivedAt: null },
+    select: { id: true, statuses: true, schema: includeSchema },
+  });
+  const byId = new Map(rows.map((r) => [r.id, r] as const));
+  const lists: SpaceListRow[] = [];
+  for (const { node, folderId } of ordered) {
+    const row = byId.get(node.id);
+    if (!row) continue;
+    lists.push({
+      id: node.id,
+      slug: node.slug,
+      name: node.name,
+      icon: node.icon,
+      color: node.color,
+      visibility: node.visibility as Visibility,
+      ownerId: node.ownerId,
+      folderId,
+      statuses: row.statuses,
+      ...(includeSettings ? { settings: node.settings as Prisma.JsonValue } : {}),
+      ...(includeSchema ? { schema: row.schema } : {}),
+      role: node.role,
+      canContribute: node.role === "full" || node.role === "edit",
+    });
+  }
+  return { lists, folderCount };
 }
 
 // ── The one Space.settings writer ───────────────────────────────────
@@ -547,6 +586,7 @@ export async function createSpace(input: CreateSpaceInput): Promise<SpaceSummary
     // The creator is OWNER (or ADMIN when they named someone else), so either
     // way they hold Full access on the Space they just made.
     role: "full" as const,
+    access: "member" as const,
   };
 }
 
@@ -563,7 +603,10 @@ export interface UpdateSpaceInput {
   modules?: string[];
 }
 
-export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
+/** A client or a transaction: the visibility route writes the Space and its activity row in one. */
+type SpaceDb = typeof prisma | Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+export async function updateSpace(spaceId: string, patch: UpdateSpaceInput, db: SpaceDb = prisma) {
   const data: Record<string, unknown> = {};
   if (patch.name !== undefined) {
     const trimmed = patch.name.trim();
@@ -589,7 +632,7 @@ export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
     // No row: the same update as before answers the same not-found error.
   }
 
-  return prisma.space.update({ where: { id: spaceId }, data });
+  return db.space.update({ where: { id: spaceId }, data });
 }
 
 /** Soft-archive. archivedAt is set; Phase 2 ships the trash bin UI for restore. */

@@ -2,11 +2,40 @@
 // polymorphic entity. Mirrors monday's per-row Updates feed.
 //
 // DELETE is exposed via /api/item-updates/[id] as soft-archive only.
+//
+// A doc's block comments ride here as entityType DOC_BLOCK with an entityId
+// of "<docId>:<blockId>", and they follow the doc (the one node-access
+// resolver): reading them needs Can view on the doc, writing one needs Can
+// comment. Every other entity type answers as it always has.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { docRoleFor, nodeCtxFromSession } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { z } from "zod";
+
+/**
+ * For a DOC_BLOCK thread: may the viewer read ("read") or write ("write")
+ * it? Null when the entity is not a doc block. A doc outside the viewer's
+ * org, or one they cannot open, is the same 404 as a wrong id.
+ */
+async function docBlockGate(entityType: string, entityId: string, orgId: string, need: "read" | "write"): Promise<NextResponse | null> {
+  if (entityType !== "DOC_BLOCK") return null;
+  const docId = entityId.split(":")[0];
+  const notFound = NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!docId) return notFound;
+  const doc = await prisma.doc.findFirst({ where: { id: docId, organizationId: orgId }, select: { id: true } });
+  if (!doc) return notFound;
+  const ctx = await nodeCtxFromSession();
+  if (!ctx || ctx.organizationId !== orgId) return notFound;
+  const info = await docRoleFor(ctx, doc.id);
+  if (!roleAtLeast(info.unlockedRole, "VIEW")) return notFound;
+  // A Can view grant is read only; every older "view" listing reads as Can
+  // comment, so nobody who commented before loses it.
+  if (need === "write" && !info.canComment) return NextResponse.json({ error: "read-only" }, { status: 403 });
+  return null;
+}
 
 const createSchema = z.object({
   entityType: z.string().min(1).max(40),
@@ -24,6 +53,8 @@ export async function GET(req: Request) {
   if (!entityType || !entityId) {
     return NextResponse.json({ error: "entityType + entityId required" }, { status: 400 });
   }
+  const refused = await docBlockGate(entityType, entityId, ctx.orgId, "read");
+  if (refused) return refused;
 
   const updates = await prisma.itemUpdate.findMany({
     where: { organizationId: ctx.orgId, entityType, entityId, archivedAt: null },
@@ -63,6 +94,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  const refused = await docBlockGate(parsed.data.entityType, parsed.data.entityId, ctx.orgId, "write");
+  if (refused) return refused;
 
   const update = await prisma.itemUpdate.create({
     data: {

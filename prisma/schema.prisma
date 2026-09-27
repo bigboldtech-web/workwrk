@@ -6727,3 +6727,28 @@ model AutomationTemplate {
 
   @@index([isActive, category])
 }
+
+/// A person's grant on one table, canvas or form: the three node kinds that
+/// had no person-grant store. Spaces, Folders and Lists keep SpaceMember,
+/// FolderMember and BoardMember; docs keep Organization.settings.docSharing.
+/// Written only by src/lib/access/grants.ts and read only by
+/// src/lib/access/access-grant-store.ts through raw SQL, so a release that
+/// meets a database without this table answers as if nobody held a grant.
+/// objectType: "TABLE" | "WHITEBOARD" | "FORM". subjectType: "USER".
+/// role: ADMIN = Full access, MEMBER = Can edit, GUEST = Can view (OWNER unused).
+model AccessGrant {
+  id             String    @id
+  organizationId String
+  objectType     String
+  objectId       String
+  subjectType    String    @default("USER")
+  subjectId      String
+  role           SpaceRole
+  grantedById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@unique([objectType, objectId, subjectType, subjectId])
+  @@index([organizationId, subjectType, subjectId])
+  @@index([objectType, objectId])
+}

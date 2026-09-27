@@ -22,10 +22,15 @@
 // ids off one shape.
 //
 // GATES. A template is applied INTO a container, so the check is on the target,
-// never on the template: `canEditSpace` for a Space-anchored kind, and
-// `canEditBoard` for a View, which lands on a List. A kind that needs a
-// container and was not given one is a 400 that names the missing field, so the
-// modal can ask for it rather than failing silently.
+// never on the template, and it is the placement rule (node-rules P1 and P3,
+// node-placement resolveCreate): the container is the Folder when one is
+// given, else the Space at its root; the Folder settles the Space (a Space
+// that disagrees, a Folder in another org or in Trash is refused); and the
+// viewer needs Can edit or higher on that container, so a Folder grantee
+// applies a template into their Folder and a Space viewer applies none. A View
+// lands on a List and keeps `canEditBoard`. A kind that needs a container and
+// was not given one is a 400 that names the missing field, so the modal can
+// ask for it rather than failing silently.
 //
 // TWO GATES THAT WERE MISSING, AND BOTH WERE HOLES.
 //
@@ -46,8 +51,9 @@ import { prisma } from "@/lib/prisma";
 import { templatesAppGate } from "@/lib/templates/gate";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
-import { getSpaceForReader, canEditSpace } from "@/lib/space";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
 import {
   applyDocTemplate,
   applyFolderTemplate,
@@ -86,12 +92,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const folderId = str("folderId");
   const boardId = str("boardId");
 
-  /** Readable AND editable, or the caller hears about the target, not the template. */
-  async function gateSpace(targetSpaceId: string): Promise<Response | null> {
-    const space = await getSpaceForReader(targetSpaceId, userId, accessLevel);
-    if (!space || space.organizationId !== orgId) return jsonError("Not found", 404);
-    if (!(await canEditSpace(targetSpaceId, userId, accessLevel))) return jsonError("Forbidden", 403);
-    return null;
+  /**
+   * Where the template lands and whether the viewer may make `what` there
+   * (P3 then P1). The caller hears about the target, never the template.
+   */
+  const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
+  async function gatePlace(what: "list" | "folder" | "doc" | "canvas"): Promise<Response | { spaceId: string; folderId: string | null }> {
+    const placed = await resolveCreate(nodeCtx, { spaceId, folderId }, what);
+    if (!placed.ok) return jsonError(placed.error, placed.status);
+    return { spaceId: placed.spaceId as string, folderId: placed.folderId };
   }
 
   try {
@@ -101,16 +110,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (tpl.kind === "LIST") {
-      if (!spaceId) return jsonError("spaceId is required for a list template", 400);
-      const denied = await gateSpace(spaceId);
-      if (denied) return denied;
+      if (!spaceId && !folderId) return jsonError("spaceId is required for a list template", 400);
+      const place = await gatePlace("list");
+      if (place instanceof Response) return place;
       // "Include sample tasks" is off by default: a template's seed rows are an
       // example, and a person who wanted an empty list should get an empty list.
       const raw = payload as ListTemplatePayload;
       const includeSamples = body.includeSamples === true;
       const res = await applyListTemplate(
         includeSamples ? raw : { ...raw, items: [] },
-        { organizationId: orgId, userId, spaceId, folderId, name },
+        { organizationId: orgId, userId, spaceId: place.spaceId, folderId: place.folderId, name },
       );
       await bumpUsed(id);
       return jsonSuccess({ kind: "LIST", ...res, slug: res.slug }, 201);
@@ -135,14 +144,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (tpl.kind === "FOLDER") {
-      if (!spaceId) return jsonError("spaceId is required for a folder template", 400);
-      const denied = await gateSpace(spaceId);
-      if (denied) return denied;
+      if (!spaceId && !folderId) return jsonError("spaceId is required for a folder template", 400);
+      const place = await gatePlace("folder");
+      if (place instanceof Response) return place;
       const res = await applyFolderTemplate(payload as FolderTemplatePayload, {
         organizationId: orgId,
         userId,
-        spaceId,
-        parentFolderId: folderId,
+        spaceId: place.spaceId,
+        parentFolderId: place.folderId,
         name,
       });
       await bumpUsed(id);
@@ -150,13 +159,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (tpl.kind === "DOC") {
-      if (!spaceId) return jsonError("spaceId is required for a doc template", 400);
-      const denied = await gateSpace(spaceId);
-      if (denied) return denied;
+      if (!spaceId && !folderId) return jsonError("spaceId is required for a doc template", 400);
+      const place = await gatePlace("doc");
+      if (place instanceof Response) return place;
       const res = await applyDocTemplate(payload as DocTemplatePayload, {
         organizationId: orgId,
         userId,
-        spaceId,
+        spaceId: place.spaceId,
+        folderId: place.folderId,
         name,
       });
       await bumpUsed(id);
@@ -164,14 +174,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (tpl.kind === "WHITEBOARD") {
-      if (!spaceId) return jsonError("spaceId is required for a canvas template", 400);
-      const denied = await gateSpace(spaceId);
-      if (denied) return denied;
+      if (!spaceId && !folderId) return jsonError("spaceId is required for a canvas template", 400);
+      const place = await gatePlace("canvas");
+      if (place instanceof Response) return place;
       const res = await applyWhiteboardTemplate(payload as WhiteboardTemplatePayload, {
         organizationId: orgId,
         userId,
-        spaceId,
-        folderId,
+        spaceId: place.spaceId,
+        folderId: place.folderId,
         name,
       });
       await bumpUsed(id);

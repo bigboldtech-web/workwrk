@@ -27,7 +27,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createUpdate, listUpdates, listUpdatesAround, logActivity } from "@/lib/item-thread";
 import { filterNotifyUsers } from "@/lib/notify-prefs";
-import { notifyItemCommented } from "@/lib/notify-item";
+import { notifyItemCommented, taskReaders } from "@/lib/notify-item";
 import { publishItemChanged } from "@/lib/notify-realtime";
 import { autoWatch, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { gateItem, itemCtx } from "@/lib/item-gate";
@@ -138,8 +138,12 @@ async function notifyMentions(args: {
       }),
     ]);
     if (members.length === 0) return [];
+    // Only people who can open the task: the row names it, so a mention of
+    // someone the task is hidden from never tells them its title.
+    const readers = await taskReaders(args.organizationId, args.itemId, members.map((m) => m.id));
+    if (readers.size === 0) return members.map((m) => m.id);
     // Honors the "Mentions" toggle in /settings/notifications.
-    const wanted = await filterNotifyUsers(members.map((m) => m.id), "mentions");
+    const wanted = await filterNotifyUsers([...readers], "mentions");
     if (wanted.size === 0) return [];
     const authorName = `${author?.firstName ?? ""} ${author?.lastName ?? ""}`.trim() || "Someone";
     await prisma.notification.createMany({

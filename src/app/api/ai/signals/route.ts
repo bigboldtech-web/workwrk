@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { addressHref } from "@/lib/nav/object-href";
 import {
   getSessionOrFail,
   getOrgId,
@@ -159,7 +160,7 @@ export async function GET(_req: NextRequest) {
       severity: (s.pct ?? 0) < 40 ? "high" : "med",
       target: s.title,
       reason: `Compliance at ${Math.round(s.pct ?? 0)}%. Below 60% threshold.`,
-      href: `/sops/${s.id}`,
+      href: addressHref("sop", s.id, { scope: "work" }),
     });
   }
 

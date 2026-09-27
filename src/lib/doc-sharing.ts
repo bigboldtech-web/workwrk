@@ -17,6 +17,10 @@
 //     404-not-403 convention in src/lib/doc-access.ts)
 //   - unrestricted + unlisted: "edit" (org default preserved)
 //
+// Since the one access model (2026-09-24) the role itself comes from
+// src/lib/access/node-access.ts; resolveDocRole and getDocSharingMap stay
+// here as the documented baseline the legacy floor copies.
+//
 // ENFORCEMENT NOTE: every /api/docs/[id]/* subroute must call
 // requireDocRole() after its docAccessible() check — a restricted doc
 // must be invisible through every side door (versions, comments,
@@ -24,7 +28,7 @@
 // FUTURE doc subroute must do the same.
 
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { prisma } from "@/lib/prisma";
+import { docRoleFor, nodeCtxFromLevel, type NodeCtx } from "@/lib/access/node-access";
 
 export type DocRole = "edit" | "view";
 
@@ -75,22 +79,32 @@ export function isDocFull(viewer: { userId: string; accessLevel: string | null |
   return ADMIN_LEVELS.includes(viewer.accessLevel ?? "");
 }
 
-/** Bundled org-settings fetch + role resolution, so every doc subroute
- *  gates with one mechanical call after its docAccessible() check. */
+/**
+ * Every doc subroute's role gate, delegated to the one resolver
+ * (node-access docRoleFor): "edit" for Can edit and Full access, "view" for
+ * Can comment and Can view, null when the viewer cannot open the doc (the
+ * caller answers 404). The page lock is not applied here: the content writes
+ * check it themselves, as before.
+ */
 export async function requireDocRole(
   viewer: { orgId: string; userId: string; accessLevel: string | null | undefined },
   doc: { id: string; createdById: string | null },
 ): Promise<DocRole | null> {
-  const org = await prisma.organization.findUnique({
-    where: { id: viewer.orgId },
-    select: { settings: true },
-  });
-  const entry = getDocSharingMap(org?.settings)[doc.id];
-  return resolveDocRole(entry, {
-    userId: viewer.userId,
-    accessLevel: viewer.accessLevel,
-    createdById: doc.createdById,
-  });
+  const info = await docRoleFor(nodeCtxFromLevel(viewer.userId, viewer.orgId, viewer.accessLevel), doc.id);
+  return info.legacy;
+}
+
+/**
+ * Full access on a doc (lock, Trash, save as template, public link manage):
+ * its creator with reach, a Full holder of its Space or Folder (W5), or an
+ * org admin, from the one resolver. Replaces isDocFull at every caller.
+ */
+export async function isDocFullFor(
+  ctx: NodeCtx | { orgId: string; userId: string; accessLevel: string | null | undefined },
+  doc: { id: string },
+): Promise<boolean> {
+  const nodeCtx = "orgId" in ctx ? nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel) : ctx;
+  return (await docRoleFor(nodeCtx, doc.id)).canManage;
 }
 
 /** Timing-safe secret comparison (sha256 both sides first so lengths

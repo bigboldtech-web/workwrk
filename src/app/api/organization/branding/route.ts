@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { hasFeature } from "@/lib/enterprise-features";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 /**
  * /api/organization/branding
@@ -58,7 +59,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const data: { logo?: string | null; settings?: Record<string, unknown> } = {};
+  const data: { logo?: string | null } = {};
+  let branding: Record<string, unknown> | null = null;
 
   if ("logo" in body) {
     if (body.logo === null || typeof body.logo === "string") data.logo = body.logo;
@@ -70,7 +72,7 @@ export async function PATCH(req: NextRequest) {
       select: { settings: true },
     });
     const settings = (org?.settings ?? {}) as Record<string, unknown>;
-    const branding = (settings.branding ?? {}) as Record<string, unknown>;
+    branding = { ...((settings.branding ?? {}) as Record<string, unknown>) };
     if ("displayName" in body) {
       const v = typeof body.displayName === "string" ? body.displayName.trim().slice(0, 60) : null;
       branding.displayName = v || null;
@@ -80,12 +82,19 @@ export async function PATCH(req: NextRequest) {
       if (v && !/^#[0-9a-fA-F]{6}$/.test(v)) return jsonError("Use a 6-digit hex color, e.g. #d4ff2e");
       branding.primaryColor = v || null;
     }
-    data.settings = { ...settings, branding };
   }
 
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: data as Parameters<typeof prisma.organization.update>[0]["data"],
+  // The logo column and the `branding` key together; only that key of the
+  // shared settings column is written, so no other writer's key is lost.
+  const brandingPatch = branding;
+  await prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length > 0) {
+      await tx.organization.update({
+        where: { id: orgId },
+        data: data as Parameters<typeof prisma.organization.update>[0]["data"],
+      });
+    }
+    if (brandingPatch) await writeOrgSettingsKeys(orgId, { branding: brandingPatch }, tx);
   });
 
   return jsonSuccess({ ok: true });

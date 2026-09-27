@@ -1,46 +1,39 @@
 "use client";
 
-// ShareDialog — one door for "who can open this", whatever "this" is.
+// ShareDialog: one door for "who can open this", whatever "this" is.
 //
 // Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 0 (`ShareSpaceDialog`,
-// `ShareBoardDialog`, `ShareFolderDialog` become one `ShareDialog`) and section
-// 3 (the three container flavours), against access-model-spec section 6.1.
+// `ShareBoardDialog`, `ShareFolderDialog` become one `ShareDialog`) and the
+// access decisions A1 and A7: ONE Manage access dialog, the same for all seven
+// kinds (Space, Folder, List, doc with its sub-pages, table, canvas, form).
 //
-// WHAT THIS FIXES TODAY, before the three bodies are merged line by line. Three
-// dialogs meant three call shapes, and every host had to know which one it
-// wanted and what props that one took: `share-space-button.tsx`,
-// `board-share-button.tsx`, `share-board-button.tsx` and
-// `folder-more-menu.tsx` each hard-wired a different component with a different
-// prop name for the same id. That is why the sidebar List menu's "Sharing &
-// Permissions" row TOASTED instead of opening anything (audit Medium #14): the
-// host it was rendered from had no `onRequestShare` to pass, and there was no
-// neutral component it could mount itself. One entry point with one prop shape
-// means any host can open the right dialog for any container, and the row never
-// has to apologise.
+// Three dialogs meant three call shapes, and every host had to know which one
+// it wanted and what props that one took; that is why the sidebar List menu's
+// "Sharing & Permissions" row once toasted instead of opening anything. One
+// entry point with one prop shape means any host opens the right dialog for
+// any node, and the body is now the same body for every kind:
+// ManageAccessDialog, which reads GET /api/access/<kind>/<id> and writes
+// people through its grants route. The three container bodies, the table and
+// form share dialog and the doc popover stay exported for their own files'
+// pieces (the visibility controls, the Restricted switch, the public links),
+// which the one dialog composes; nothing mounts them any more.
 //
-// WHAT IS DELIBERATELY NOT DONE HERE. The three bodies keep their own
-// implementations for now: the Space body has the visibility tri-state plus
-// People / Departments / Offices tabs, the List body has the tri-state, and the
-// Folder body has the Restricted switch this stage added. Merging their
-// internals into one list with one grant vocabulary is the access unit's own
-// step 5 and lands with `AccessGrant`; collapsing the CALL SITES first is what
-// lets every menu row work in the meantime, and it means the merge has exactly
-// one consumer to satisfy.
+// `visibility` and `parentSpaceName` stay on the target so no host changes:
+// the dialog reads the truth from the server rather than from a prop that
+// could be stale.
 
-import { WhoHasAccess } from "./who-has-access";
-import { ShareSpaceDialog } from "@/components/layout/os/share-space-dialog";
-import { ShareBoardDialog } from "@/components/layout/os/share-board-dialog";
-import { ShareFolderDialog } from "@/components/layout/os/share-folder-dialog";
+import { ManageAccessDialog } from "./manage-access-dialog";
+import type { AccessPanel } from "@/lib/access/access-panel";
 
-export type ShareKind = "space" | "folder" | "list";
+export type ShareKind = "space" | "folder" | "list" | "doc" | "table" | "canvas" | "form";
 
 export interface ShareTarget {
   kind: ShareKind;
   id: string;
   name: string;
-  /** PRIVATE reads as "Restricted"; WORKSPACE as "Inherits". Spaces and Lists only today. */
+  /** PRIVATE reads as "Restricted"; WORKSPACE as "Inherits". The dialog reads the server's value. */
   visibility?: "PRIVATE" | "WORKSPACE" | "ORG";
-  /** Named in the "inherits from" line on a Folder and a List. */
+  /** Named in the "inherits from" line on a Folder and a List. The dialog reads the server's name. */
   parentSpaceName?: string | null;
 }
 
@@ -48,60 +41,29 @@ export interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   target: ShareTarget | null;
-  /** Fired after any grant or visibility write, so the host can refetch. */
-  onChanged?: () => void;
   /**
-   * The viewer cannot change access. Renders `WhoHasAccess` instead of the
-   * write body: "Who has access" used to be a label on the Share button and
-   * nothing more, so a reader was shown the Restricted switch, the Add-people
-   * picker and a role select that all answer 403 (access model, read-only
-   * rule: the control is absent, never disabled and never present-then-403).
+   * Fired after any grant or general-access write, with the host node's fresh
+   * panel (null when the viewer lost access to it), so the host can refetch or
+   * adopt a changed field. A host passing a no-argument callback still compiles.
+   */
+  onChanged?: (panel: AccessPanel | null) => void;
+  /**
+   * The viewer cannot change access to the node the host opened: the dialog
+   * reads "Who has access" and renders no control (the access model's
+   * read-only rule: absent, never disabled, never present-then-403). After a
+   * "Manage in <name>" door the dialog follows what the server says instead.
    */
   readOnly?: boolean;
 }
 
 export function ShareDialog({ open, onOpenChange, target, onChanged, readOnly = false }: ShareDialogProps) {
   if (!target) return null;
-
-  if (readOnly) {
-    return <WhoHasAccess open={open} onOpenChange={onOpenChange} target={target} />;
-  }
-
-  if (target.kind === "space") {
-    return (
-      <ShareSpaceDialog
-        open={open}
-        onOpenChange={onOpenChange}
-        spaceId={target.id}
-        spaceName={target.name}
-        initialVisibility={target.visibility ?? "WORKSPACE"}
-        onChanged={onChanged}
-      />
-    );
-  }
-
-  if (target.kind === "folder") {
-    return (
-      <ShareFolderDialog
-        open={open}
-        onOpenChange={onOpenChange}
-        folderId={target.id}
-        folderName={target.name}
-        initialVisibility={target.visibility ?? "WORKSPACE"}
-        parentSpaceName={target.parentSpaceName ?? null}
-        onChanged={onChanged}
-      />
-    );
-  }
-
   return (
-    <ShareBoardDialog
+    <ManageAccessDialog
       open={open}
       onOpenChange={onOpenChange}
-      boardId={target.id}
-      boardName={target.name}
-      initialVisibility={target.visibility ?? "WORKSPACE"}
-      parentSpaceName={target.parentSpaceName ?? ""}
+      target={{ kind: target.kind, id: target.id, name: target.name }}
+      readOnly={readOnly}
       onChanged={onChanged}
     />
   );

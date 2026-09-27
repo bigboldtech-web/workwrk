@@ -662,6 +662,9 @@ export function CreateTaskModal() {
           }).then((r) => r.json());
           const id = entry?.id ?? entry?.data?.id;
           if (id) setStagedFiles((p) => [...p, { id, name: up.name ?? file.name, mimeType: file.type, url: up.url }]);
+          // A refusal (the placement rule: a file tagged to the Space needs Can
+          // edit there) says why in one sentence.
+          else if (typeof entry?.error === "string") setNotice(entry.error);
         } catch {
           /* ignore single-file failure */
         } finally {
@@ -702,7 +705,7 @@ export function CreateTaskModal() {
       }).then((r) => r.json());
       const id = entry?.id ?? entry?.data?.id;
       if (id) setStagedFiles((p) => [...p, { id, name, mimeType: "text/uri-list", url }]);
-      else setNotice("Couldn't attach link");
+      else setNotice(typeof entry?.error === "string" ? entry.error : "Couldn't attach link");
     } catch {
       setNotice("Couldn't attach link");
     } finally {

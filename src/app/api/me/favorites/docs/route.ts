@@ -10,7 +10,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -28,12 +29,11 @@ export async function GET() {
     where: { organizationId: u.organizationId, id: { in: ids }, archivedAt: null },
     select: { id: true, title: true, excerpt: true, entityType: true, entityId: true },
   });
-  // Phase 37 — gate via docAccessible. Starred docs the viewer lost
-  // access to (parent Space/Board) silently drop out.
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (d) => ((await docAccessible(d, u.id!, accessLevel)) ? d : null)),
-  )).filter((d): d is NonNullable<typeof d> => d !== null);
+  // Starred docs the viewer lost access to (their Space, Folder, List or
+  // parent page, or a restriction) silently drop out: one world for every
+  // starred doc, from the one resolver.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "doc", rows.map((d) => d.id));
+  const visible = rows.filter((d) => roleAtLeast(roles.get(d.id) ?? "none", "VIEW"));
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));

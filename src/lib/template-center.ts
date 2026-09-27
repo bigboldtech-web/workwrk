@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { createBoard } from "@/lib/board";
 import { createSpace } from "@/lib/space";
 import { createFolder } from "@/lib/folder";
+import { lockParentFolder } from "@/lib/access/node-placement";
 import { createBoardItem } from "@/lib/board-items";
 import type { ViewType, Prisma } from "@/generated/prisma";
 import type { StatusOption } from "@/lib/board-items-shared";
@@ -260,15 +261,17 @@ export interface DocTemplatePayload {
 
 export async function applyDocTemplate(
   payload: DocTemplatePayload,
-  ctx: { organizationId: string; userId: string; spaceId: string | null; name: string },
+  ctx: { organizationId: string; userId: string; spaceId: string | null; folderId?: string | null; name: string },
 ): Promise<{ docId: string }> {
+  // Anchored where it was applied: the Folder when there is one, else the
+  // Space (the caller has checked the placement rule for that container).
   const doc = await prisma.doc.create({
     data: {
       organizationId: ctx.organizationId,
       title: ctx.name,
       content: (payload.content ?? {}) as Prisma.InputJsonValue,
-      entityType: ctx.spaceId ? "SPACE" : null,
-      entityId: ctx.spaceId,
+      entityType: ctx.folderId ? "FOLDER" : ctx.spaceId ? "SPACE" : null,
+      entityId: ctx.folderId ?? ctx.spaceId,
       position: Date.now(),
       createdById: ctx.userId,
       // Every Doc has at least one version, the same invariant POST /api/docs holds.
@@ -302,10 +305,17 @@ export async function applyWhiteboardTemplate(
   // has not had it applied yet must still get its Canvas, so the folder anchor
   // is the part that degrades, never the create.
   try {
-    const wb = await prisma.whiteboard.create({
-      data: { ...base, folderId: ctx.folderId ?? undefined },
-      select: { id: true },
-    });
+    // The placement rule (node-rules P3): with a Folder, the canvas takes the
+    // Folder's Space, read under a share lock, so a move of the Folder
+    // meanwhile cannot leave the canvas behind.
+    const folderId = ctx.folderId ?? null;
+    const wb = folderId
+      ? await prisma.$transaction(async (tx) => {
+          const parent = await lockParentFolder(tx, ctx.organizationId, folderId);
+          if (!parent) throw new Error("That folder no longer exists or is in Trash.");
+          return tx.whiteboard.create({ data: { ...base, spaceId: parent.spaceId, folderId }, select: { id: true } });
+        })
+      : await prisma.whiteboard.create({ data: base, select: { id: true } });
     return { whiteboardId: wb.id };
   } catch (err) {
     // Only the ONE failure this retry is for. A bare catch turned a transient
@@ -402,6 +412,24 @@ export async function snapshotBoard(boardId: string): Promise<{ name: string; pa
   return { name: board.name, payload };
 }
 
+/**
+ * Which Lists a Folder or Space snapshot may carry. A template is published
+ * to the whole org, so it carries only the Lists the saver could save as a
+ * template one by one: Full access on each (the LIST source's own gate). A
+ * Private List the saver cannot open, or only reads, is someone else's
+ * structure; it used to be captured with the Folder, its name and fields
+ * shown to everyone, and a copy made on apply. `canSaveList` answers for a
+ * batch of List ids; without it every List is kept (a system caller).
+ */
+export interface SnapshotOptions {
+  canSaveList?: (boardIds: string[]) => Promise<ReadonlySet<string>>;
+}
+
+async function keptLists(boardIds: string[], opts: SnapshotOptions): Promise<ReadonlySet<string>> {
+  if (!opts.canSaveList) return new Set(boardIds);
+  return boardIds.length ? opts.canSaveList(boardIds) : new Set<string>();
+}
+
 /** Snapshot a Space (its workflow settings + each child Board's structure)
  *  into a SPACE payload. Returns null if the space is missing. */
 /**
@@ -413,14 +441,19 @@ export async function snapshotBoard(boardId: string): Promise<{ name: string; pa
  * real in the spec (section 1, row 10) and applyFolderTemplate has always
  * known how to materialize one; only the snapshot half was missing.
  */
-export async function snapshotFolder(folderId: string): Promise<{ name: string; payload: FolderTemplatePayload } | null> {
+export async function snapshotFolder(
+  folderId: string,
+  opts: SnapshotOptions = {},
+): Promise<{ name: string; payload: FolderTemplatePayload } | null> {
   const folder = await prisma.folder.findUnique({
     where: { id: folderId },
     include: { boards: { where: { archivedAt: null }, select: { id: true } } },
   });
   if (!folder) return null;
   const lists: Array<{ name: string } & ListTemplatePayload> = [];
+  const keep = await keptLists(folder.boards.map((b) => b.id), opts);
   for (const b of folder.boards) {
+    if (!keep.has(b.id)) continue;
     const snap = await snapshotBoard(b.id);
     if (snap) lists.push({ name: snap.name, ...snap.payload });
   }
@@ -433,7 +466,10 @@ export async function snapshotFolder(folderId: string): Promise<{ name: string; 
   return { name: folder.name, payload };
 }
 
-export async function snapshotSpace(spaceId: string): Promise<{ name: string; payload: SpaceTemplatePayload } | null> {
+export async function snapshotSpace(
+  spaceId: string,
+  opts: SnapshotOptions = {},
+): Promise<{ name: string; payload: SpaceTemplatePayload } | null> {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
     include: { boards: { where: { archivedAt: null }, select: { id: true } } },
@@ -441,7 +477,9 @@ export async function snapshotSpace(spaceId: string): Promise<{ name: string; pa
   if (!space) return null;
   const settings = (space.settings ?? {}) as { workflow?: Record<string, unknown> };
   const lists: Array<{ name: string } & ListTemplatePayload> = [];
+  const keep = await keptLists(space.boards.map((b) => b.id), opts);
   for (const b of space.boards) {
+    if (!keep.has(b.id)) continue;
     const snap = await snapshotBoard(b.id);
     if (snap) lists.push({ name: snap.name, ...snap.payload });
   }

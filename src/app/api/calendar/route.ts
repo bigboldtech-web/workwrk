@@ -44,6 +44,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { weekStartUTC } from "@/lib/timesheet";
+import { addressHref } from "@/lib/nav/object-href";
 
 const MANAGER_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR",
@@ -227,7 +228,8 @@ export async function GET(req: Request) {
       kind: "SOP_ASSIGNMENT",
       ownerId: a.userId,
       ownerName: nameById.get(a.userId) ?? null,
-      url: `/sops/${a.sop?.id ?? ""}`,
+      // The Work door for the SOP; the SOP list when the row lost its SOP.
+      url: a.sop?.id ? addressHref("sop", a.sop.id, { scope: "work" }) : "/sops",
     }));
 
   const events = [...taskEvents, ...reviewEvents, ...sopEvents].sort(

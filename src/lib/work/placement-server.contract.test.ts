@@ -2,7 +2,9 @@
 // needs a database the unit suite does not have. It pins the three promises
 // the loader makes, so a later edit cannot quietly break one:
 //   1. every lookup is scoped to the viewer's org (nothing foreign is named);
-//   2. every object is gated by the SAME function its own API gates it with;
+//   2. every object is gated by the SAME function its own API gates it with,
+//      all of them the one node-access resolver, and a form is never placed
+//      without reading its row;
 //   3. the gate never redirects, never 404s an object state and never uses
 //      requireSessionUser's bare redirect("/login"), which drops the return
 //      address.
@@ -50,29 +52,41 @@ describe("the Work placement loader", () => {
   });
 
   it("gates each kind with the function its own API uses", () => {
-    expect(LOADER).toMatch(/docAccessible\(/);
-    expect(LOADER).toMatch(/resolveDocRole\(/);
-    expect(LOADER).toMatch(/getDocSharingMap\(/);
-    expect(LOADER).toMatch(/readableTable\(/);
-    expect(LOADER).toMatch(/whiteboardSpaceVisible\(/);
+    expect(LOADER).toMatch(/await docAccess\(ctx, doc\.id\)/);
+    expect(LOADER).toMatch(/await readableTable\(/);
+    expect(LOADER).toMatch(/await whiteboardReadable\(ctx, wb\)/);
     expect(LOADER).toMatch(/loadSuiteViewer\(/);
     // The canvas read is the API's: org-scoped and not archived.
     expect(LOADER).toMatch(/prisma\.whiteboard\.findFirst\(\{\s*where:\s*\{\s*id,\s*organizationId:\s*viewer\.orgId,\s*archivedAt:\s*null\s*\}/);
-    // The tree rules, for what the reveal and the pill may name.
-    expect(LOADER).toMatch(/folderAccessForSpace\(/);
-    expect(LOADER).toMatch(/folderVisibleTo\(/);
+    // The tree rules, for what the reveal and the pill may name: the one
+    // resolver's walk, and the tree's own depth rule.
+    expect(LOADER).toMatch(/nodePathWorld\(/);
     expect(LOADER).toMatch(/treeFolderIds\(/);
+    // No second, older gate beside the resolver.
+    expect(LOADER).not.toMatch(/docAccessible\(|resolveDocRole\(|getDocSharingMap\(|whiteboardSpaceVisible\(|folderAccessForSpace\(|folderVisibleTo\(/);
   });
 
-  it("leaves the access engine inert", () => {
-    expect(LOADER).not.toMatch(/from "@\/lib\/access(\/[^"]*)?"/);
+  it("places a form through the resolver, and never as a static door without reading the row", () => {
+    const fn = LOADER.slice(LOADER.indexOf("async function placeForm("));
+    expect(fn).toMatch(/prisma\.formDefinition\.findFirst\(\{\s*where:\s*\{\s*id,\s*organizationId:\s*viewer\.orgId\s*\}/);
+    expect(fn).toMatch(/nodeRole\(ctxOf\(viewer\), \{ kind: "form", id: form\.id \}\)/);
+    expect(fn.indexOf("findFirst")).toBeLessThan(fn.indexOf("staticDoorPlacement("));
+    // The switch sends forms there, and only SOPs take the static door.
+    expect(LOADER).toMatch(/case "form":\s*return placeForm\(id, session\);/);
+    expect(LOADER).toMatch(/case "sop":\s*return \{ state: "ok", placement: staticDoorPlacement\(kind, id\) \};/);
+  });
+
+  it("leaves the access engine inert: node-access is the live resolver beside it", () => {
+    const ENGINE = /from "@\/lib\/access(\/(resolve|facts|ids|id-sets|parity|index|gate|guards|enforcement|settings|labels|legacy-facts|viewer))?"/;
+    expect(LOADER).not.toMatch(ENGINE);
+    expect(GATE).not.toMatch(ENGINE);
     expect(GATE).not.toMatch(/from "@\/lib\/access(\/[^"]*)?"/);
   });
 
-  it("shares one whiteboard gate with GET, PATCH and DELETE /api/whiteboards/[id]", () => {
+  it("shares one canvas gate with GET, PATCH and DELETE /api/whiteboards/[id]", () => {
     const api = read("src/app/api/whiteboards/[id]/route.ts");
-    expect(api).toMatch(/import \{ whiteboardSpaceVisible \} from "@\/lib\/whiteboard-gate"/);
-    expect(api.match(/await whiteboardSpaceVisible\(/g)?.length).toBe(3);
+    expect(api).toMatch(/import \{ whiteboardReadable \} from "@\/lib\/whiteboard-gate"/);
+    expect(api.match(/await whiteboardReadable\(/g)?.length).toBe(3);
     expect(api).not.toMatch(/function checkSpaceVisible/);
   });
 });

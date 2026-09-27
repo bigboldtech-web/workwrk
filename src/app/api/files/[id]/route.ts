@@ -10,6 +10,8 @@ import {
 } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { canReadFile } from "@/lib/file-access";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { PlacementConflict, checkFileEdit, lockFolderPlacement, resolveFileMove } from "@/lib/access/node-placement";
 
 /**
  * One file row.
@@ -76,6 +78,17 @@ export async function PATCH(
   // shouldn't see.
   if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
 
+  // A change to the file itself (its name, description or drive folder) is
+  // a write in the container it sits in: Can edit there (node-rules
+  // fileEditDecision), never a Can view grant. Starring stays a reader's
+  // mark, as it always was.
+  const accessLevelFor = (session.user as { accessLevel?: string }).accessLevel;
+  const editsFile = typeof body.name === "string" || body.folderId !== undefined || typeof body.description === "string" || body.description === null;
+  if (editsFile) {
+    const edit = await checkFileEdit(nodeCtxFromLevel(getUserId(session), orgId, accessLevelFor), existing);
+    if (!edit.ok) return jsonError(edit.error, edit.status);
+  }
+
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
   if (body.folderId !== undefined) {
@@ -87,38 +100,49 @@ export async function PATCH(
     }
   }
   if (typeof body.starred === "boolean") data.starred = body.starred;
-
-  // Space anchors — move the file anywhere: into a Space folder (spaceId is
-  // derived from the folder), to a Space root (folder cleared), or out of
-  // Spaces entirely (both cleared).
-  if (body.spaceFolderId !== undefined) {
-    if (body.spaceFolderId === null || body.spaceFolderId === "") {
-      data.spaceFolderId = null;
-    } else {
-      const sf = await prisma.folder.findFirst({
-        where: { id: body.spaceFolderId, space: { organizationId: orgId } },
-        select: { id: true, spaceId: true },
-      });
-      if (!sf) return jsonError("space folder not found", 404);
-      data.spaceFolderId = sf.id;
-      data.spaceId = sf.spaceId;
-    }
-  }
-  if (body.spaceId !== undefined && data.spaceId === undefined) {
-    if (body.spaceId === null || body.spaceId === "") {
-      data.spaceId = null;
-      if (data.spaceFolderId === undefined) data.spaceFolderId = null;
-    } else {
-      const space = await prisma.space.findFirst({ where: { id: body.spaceId, organizationId: orgId }, select: { id: true } });
-      if (!space) return jsonError("space not found", 404);
-      data.spaceId = space.id;
-      if (data.spaceFolderId === undefined) data.spaceFolderId = null;
-    }
-  }
   if (typeof body.description === "string" || body.description === null) data.description = body.description?.slice?.(0, 500) ?? null;
 
-  const updated = await prisma.fileEntry.update({ where: { id }, data });
-  return jsonSuccess(await withFreshFileUrl(updated));
+  // THE PLACEMENT RULE for the file's place in the Space tree (node-rules P2
+  // and P3, node-placement resolveFileMove). What the request names: a Space
+  // folder (the Space comes from it; a spaceId that disagrees is a 400), a
+  // Space's root (spaceFolderId cleared: the Space named, else the one the
+  // file is in), or out of every Space (spaceId null). The folder is checked
+  // for Trash and for an archived Space, and the move needs its uploader or
+  // Full access where it is now, Full access on the place it leaves (and its
+  // Space when it leaves every Space), and Can edit where it goes. A drive
+  // folder (folderId) is not a Space container and keeps its own rule.
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  let placed: { spaceId: string | null; spaceFolderId: string | null } | null = null;
+  if (body.spaceFolderId !== undefined || body.spaceId !== undefined) {
+    const folderNamed = str(body.spaceFolderId);
+    const req = folderNamed
+      ? { spaceFolderId: folderNamed, ...(body.spaceId !== undefined ? { spaceId: str(body.spaceId) } : {}) }
+      : { spaceFolderId: null, spaceId: body.spaceId !== undefined ? str(body.spaceId) : existing.spaceId };
+    const move = await resolveFileMove(nodeCtxFromLevel(getUserId(session), orgId, accessLevelFor), existing, req);
+    if (!move.ok) {
+      return jsonError(move.status === 404 ? (req.spaceFolderId ? "space folder not found" : "space not found") : move.error, move.status);
+    }
+    if (!move.same) placed = { spaceId: move.spaceId, spaceFolderId: move.spaceFolderId };
+  }
+
+  if (!placed) {
+    const updated = await prisma.fileEntry.update({ where: { id }, data });
+    return jsonSuccess(await withFreshFileUrl(updated));
+  }
+  // The write half of P3: the folder's Space read again under the share lock
+  // a move of that folder waits for, in the same transaction as the update,
+  // so the file never keeps a Space its folder has just left.
+  const where = placed;
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockFolderPlacement(tx, orgId, { spaceId: where.spaceId, folderId: where.spaceFolderId });
+      return tx.fileEntry.update({ where: { id }, data: { ...data, spaceId: where.spaceId, spaceFolderId: where.spaceFolderId } });
+    });
+    return jsonSuccess(await withFreshFileUrl(updated));
+  } catch (err) {
+    if (err instanceof PlacementConflict) return jsonError(err.message, err.status);
+    throw err;
+  }
 }
 
 export async function DELETE(
@@ -136,6 +160,11 @@ export async function DELETE(
   if (!existing) return jsonError("not found", 404);
 
   if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
+  // Trash takes the file away from everyone who reads it there: Can edit on
+  // where it sits (node-rules fileEditDecision), never Can view. A Can view
+  // grantee used to Trash another person's file out of a Folder they only read.
+  const edit = await checkFileEdit(nodeCtxFromLevel(getUserId(session), orgId, (session.user as { accessLevel?: string }).accessLevel), existing);
+  if (!edit.ok) return jsonError(edit.error, edit.status);
 
   await moveToTrash("file", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

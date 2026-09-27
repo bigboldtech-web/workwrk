@@ -30,10 +30,14 @@
 // Every host in this repo now passes the role it has already worked out.
 //
 // WHAT MOVED RATHER THAN DISAPPEARED, because the founder checks:
-//   * Space "Make Private" / "Make workspace-visible"  -> the Share dialog's
-//     visibility tri-state, which this menu can now open from EVERY host.
+//   * Space "Make Private" / "Make workspace-visible"  -> the Manage access
+//     dialog's visibility tri-state, which this menu opens from EVERY host.
 //   * Folder "Make private"                            -> the Restricted switch
 //     in the same dialog (it had no un-do at all before).
+//   * "Share" (and "Sharing & Permissions" before it)  -> "Manage access" at
+//     Full access, "Who has access" below it: the one dialog every node uses.
+//   * A path container (a Space or Folder seen only on the way to something
+//     shared inside it, decision A3)                   -> Copy link only.
 //   * List "List info" (a toast)                       -> About.
 //   * Space "Modules"                                  -> the "Features" row,
 //     which keeps the modal reachable until the Space page grows its Settings
@@ -48,7 +52,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Star, Pin, Plus, Edit2, Link as LinkIcon, Palette, Share2,
+  MoreHorizontal, Star, Pin, Plus, Edit2, Link as LinkIcon, Palette, UserPlus,
   Settings, CircleDot, Tag, Shapes, Info, Files, Save, Zap, BellOff, Bell,
   EyeOff, ArrowRightLeft, ArrowUp, ArrowDown, Copy, Archive, Trash2,
   ListChecks, FolderPlus, FileText, Brush, IterationCw, Blocks, Table2,
@@ -72,11 +76,11 @@ import { RowColorRulesPanel } from "@/components/board-view/list-settings/row-co
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
-import { treeChanged, accessChanged } from "@/lib/work/container-events";
+import { treeChanged } from "@/lib/work/container-events";
 import { objectHrefNow } from "./use-object-href";
 import { hydrateSidebarState, setSpaceHidden } from "@/lib/work/sidebar-expand";
 import {
-  containerMenuRows, containerPath, containerNoun,
+  containerMenuRows, containerPath, containerNoun, newItemsFor,
   type ContainerAction, type ContainerKind, type ContainerRole,
 } from "@/lib/work/container-menu";
 
@@ -105,10 +109,17 @@ export interface ContainerObject {
 
 export interface ContainerMenuProps {
   container: ContainerObject;
-  role?: ContainerRole;
+  /** The viewer's role here. Absent or null (a row the server did not decide) renders the reader's menu. */
+  role?: ContainerRole | null;
   canDelete?: boolean;
   isAgent?: boolean;
+  /** Kept so no host breaks; ignored (the access row reads Manage access at Full access only). */
   editorsCanShare?: boolean;
+  /**
+   * The viewer sees this Space or Folder only as the way to something shared
+   * with them inside it (decision A3): the menu is exactly Copy link.
+   */
+  pathOnly?: boolean;
   onUpdated?: () => void;
   /** Keyboard alternatives to a drag (critic #10). Absent at the ends. */
   onMoveUp?: () => void;
@@ -152,7 +163,7 @@ const ROW_ICON: Record<ContainerAction, LucideIcon> = {
   rename: Edit2,
   "copy-link": LinkIcon,
   color: Palette,
-  share: Share2,
+  "manage-access": UserPlus,
   features: Blocks,
   statuses: CircleDot,
   fields: Tag,
@@ -372,13 +383,13 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
           />
         ) : null}
 
+        {/* The same decision the row's own label is made from
+            (containerMenuRows: "Manage access" at Full access only). The
+            dialog itself tells the tree and the sidebar about a change. */}
         <ShareDialog
           open={shareOpen}
           onOpenChange={setShareOpen}
-          // The same decision the row's own label is made from
-          // (containerMenuRows: Full access, or Can edit under toggle 4).
-          readOnly={!((props.role ?? "view") === "full"
-            || (props.editorsCanShare === true && (props.role ?? "view") === "edit"))}
+          readOnly={(props.role ?? "view") !== "full" || props.pathOnly === true}
           target={{
             kind: container.kind,
             id: container.id,
@@ -386,7 +397,7 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
             visibility: container.visibility,
             parentSpaceName: container.spaceName ?? null,
           }}
-          onChanged={() => { onUpdated?.(); accessChanged({ kind: container.kind, id: container.id }); }}
+          onChanged={() => onUpdated?.()}
         />
 
         <ContainerAboutModal
@@ -420,10 +431,10 @@ type Mode = "menu" | "rename" | "icon";
 
 function ContainerMenuBody({
   container,
-  role = "view",
+  role: roleProp,
   canDelete = true,
   isAgent = false,
-  editorsCanShare = false,
+  pathOnly = false,
   onUpdated,
   onMoveUp,
   onMoveDown,
@@ -447,6 +458,9 @@ function ContainerMenuBody({
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { openTemplateCenter, openCreateList, openCreateSprint } = useOsShell();
+  // A null role is the Work tree's "not decided here" (an older server, a
+  // path container): the reader's menu, never more.
+  const role: ContainerRole = roleProp ?? "view";
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(container.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -941,7 +955,7 @@ function ContainerMenuBody({
     isTopPinned: topPinned,
     canDelete,
     isAgent,
-    editorsCanShare,
+    pathOnly,
   });
 
   return (
@@ -957,25 +971,27 @@ function ContainerMenuBody({
           case "pin-top":
             return <MenuItem key={row.action} icon={Icon} label={row.label} iconFilled={topPinned} onClick={toggleTopPin} />;
 
-          case "new":
+          case "new": {
+            // Exactly what the one create rule lets this viewer make here
+            // (newItemsFor, node-rules P1): the server accepts every row shown.
+            const can = new Set(newItemsFor(container.kind, role, pathOnly));
             return (
               <MenuSubmenu key={row.action} icon={Icon} label="New">
-                <MenuItem icon={ListChecks} label="List" onClick={() => {
+                {can.has("list") ? <MenuItem icon={ListChecks} label="List" onClick={() => {
                   onClose();
                   openCreateList({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
+                }} /> : null}
+                {can.has("sprint") ? <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
                   onClose();
                   openCreateSprint({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} />
-                <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} />
-                <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} />
-                {container.kind === "space" ? (
-                  <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} />
-                ) : null}
+                }} /> : null}
+                {can.has("folder") ? <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} /> : null}
+                {can.has("doc") ? <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} /> : null}
+                {can.has("canvas") ? <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} /> : null}
+                {can.has("table") ? <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} /> : null}
               </MenuSubmenu>
             );
+          }
 
           case "rename":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => setMode("rename")} />;
@@ -986,7 +1002,7 @@ function ContainerMenuBody({
           case "color":
             return <MenuItem key={row.action} icon={Icon} label={row.label} submenu onClick={() => setMode("icon")} />;
 
-          case "share":
+          case "manage-access":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestShare(); }} />;
 
           case "features":

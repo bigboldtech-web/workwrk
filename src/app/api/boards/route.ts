@@ -8,10 +8,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canContributeBoard, createBoard, getBoardForReader, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
-import { canEditSpace, getSpaceForReader, listSpacesForUser, readableListsInSpace } from "@/lib/space";
-import { canRead, type ViewerContext } from "@/lib/access";
+import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
+import { getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { prisma } from "@/lib/prisma";
+import { nodeCtxFromLevel, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 const VIEW_TYPES = [
   "TABLE", "KANBAN", "GANTT", "CALENDAR", "TIMELINE", "CHART", "DOC", "FORM",
@@ -60,8 +62,13 @@ export async function GET(req: Request) {
   // List's task into it is refused by PATCH /api/items/[id] with 403. The route
   // stays the superset and answers enough for a caller to filter, rather than
   // narrowing for one caller and breaking the other.
+  const nodeCtx = nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel);
+
   if (url.searchParams.get("editable") === "1") {
-    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    // Path Spaces are candidates too: a Folder grantee writes to the Lists in
+    // their Folder without holding a role on its Space, and the picker groups
+    // rows under the Space's name. The write check below decides every row.
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel, paths: true });
     const spaceIds = spaces.map((s) => s.id);
     const candidates = await prisma.board.findMany({
       where: {
@@ -78,13 +85,10 @@ export async function GET(req: Request) {
       select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true, folderId: true, productSlug: true },
       orderBy: { name: "asc" },
     });
-    // One write check per candidate. The list is per-viewer and small (a
-    // person is on tens of Lists, not thousands), and offering a row that
-    // 403s would be worse than the checks.
-    const allowed = await Promise.all(
-      candidates.map(async (b) => ((await canContributeBoard(b.id, c.userId, c.accessLevel)) ? b : null)),
-    );
-    const boards = allowed.filter((b): b is NonNullable<typeof b> => b !== null);
+    // ONE world for every candidate (never a gate call per row): only the
+    // Lists the viewer can edit, so a picker row never 403s on click.
+    const roles = await nodeRoleMap(nodeCtx, "list", candidates.map((b) => b.id));
+    const boards = candidates.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "EDIT"));
     // Only the Spaces that still have a List under them after the write check.
     // `spaces` is everything the viewer can READ, so a Space they can open but
     // write to nowhere inside came back with no boards beneath it, and the
@@ -108,9 +112,12 @@ export async function GET(req: Request) {
   // caller has no single Space context. Backwards-compatible: only
   // triggers on ?all=1.
   if (url.searchParams.get("all") === "1") {
-    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    // Path Spaces too: a person granted one Folder or List of a Space picks
+    // those Lists here like any other, and the role filter below keeps
+    // everything else in that Space out.
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel, paths: true });
     const spaceIds = spaces.map((s) => s.id);
-    const boards = spaceIds.length
+    const rows = spaceIds.length
       ? await prisma.board.findMany({
           where: {
             organizationId: c.organizationId,
@@ -121,28 +128,24 @@ export async function GET(req: Request) {
           orderBy: { name: "asc" },
         })
       : [];
+    // Every row through one world: a PRIVATE List in a readable Space is not
+    // listed to someone it does not name.
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
 
   if (folderId) {
-    // Gate on folder READ (the resolver also enforces org scope + PRIVATE +
-    // folder grants). Previously this branch was unauthenticated and cross-org.
-    const viewer: ViewerContext = { userId: c.userId, organizationId: c.organizationId, accessLevel: c.accessLevel };
-    if (!(await canRead(viewer, { type: "folder", id: folderId }))) {
+    // Can view on the Folder (org scope, the Private cut and Folder grants,
+    // from the one resolver), then only the Lists in it the viewer can open:
+    // the same answer the Work tree gives.
+    const folder = await nodeRole(nodeCtx, { kind: "folder", id: folderId });
+    if (!roleAtLeast(folder.role, "VIEW")) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    // Reading the FOLDER is not reading every List in it: a PRIVATE List
-    // inside is still its owner's. The Lists answered are the readable ones,
-    // by the same predicate the Space page and Bird's eye use.
-    const folder = await prisma.folder.findFirst({
-      where: { id: folderId, organizationId: c.organizationId },
-      select: { spaceId: true },
-    });
-    const readable = folder
-      ? new Set((await readableListsInSpace(folder.spaceId, c, { includeArchived })).lists.map((l) => l.id))
-      : new Set<string>();
-    const boards = (await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId }))
-      .filter((b) => readable.has(b.id));
+    const rows = await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId });
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
   if (spaceId) {
@@ -150,11 +153,9 @@ export async function GET(req: Request) {
     if (!space || space.organizationId !== c.organizationId) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    // Only the Lists this viewer can read, and never the names of the others
-    // (review #11): the listing used to answer every List of the Space,
-    // PRIVATE ones included.
-    const readable = new Set((await readableListsInSpace(spaceId, c, { includeArchived })).lists.map((l) => l.id));
-    const boards = (await listBoardsInSpace(spaceId, { includeArchived })).filter((b) => readable.has(b.id));
+    const rows = await listBoardsInSpace(spaceId, { includeArchived });
+    const roles = await nodeRoleMap(nodeCtx, "list", rows.map((b) => b.id));
+    const boards = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
     return NextResponse.json({ boards });
   }
   return NextResponse.json({ error: "spaceId or folderId required" }, { status: 400 });
@@ -169,24 +170,28 @@ export async function GET(req: Request) {
 // Why not ?all=1: it answers "every List in a Space I can read", which leaves
 // out a List shared with me directly and an ORG-visible List in someone else's
 // Space, and it names a PRIVATE List inside a readable Space that I cannot
-// open. Here the candidates come from four doors (a Space read in full, an
-// ORG-visible List, a direct List grant, my own Personal List) and each is then
-// checked with getBoardForReader, the predicate the List page itself uses, so
-// no row names a List the viewer cannot open. writable=1 checks
-// canContributeBoard as well, never instead: it does not walk a PRIVATE
-// folder, so it alone would offer a List the viewer cannot open.
+// open. Here the candidates come through five doors (a Space read in full, a
+// Space the viewer only passes through on the way to a Folder or List they
+// were given, an ORG-visible List, a direct List grant, my own Personal List)
+// and every candidate is then decided by the one resolver over ONE world
+// (nodeRoleMap, never a gate call per row), so no row names a List the viewer
+// cannot open. writable=1 asks Can edit of the same answer, never a second
+// predicate.
 //
-// Spaces come from listSpacesForUser WITHOUT includeFolderContainers: a Space
-// reached only through a folder grant is a container, not something the
-// viewer reads in full, so it is never offered as a card's "A Space" source.
+// The path door is what lets a Folder grantee pick the Lists of their Folder:
+// their Space is not read in full, the Lists are not ORG-visible and they hold
+// no List row, so without it their pickers came back empty.
 //
-// Search-driven: at most `limit` search rows are checked (8 at a time) and
+// Spaces come from the full-read rows only: a Space reached through a Folder
+// or List grant is a container the viewer passes through, not something they
+// read in full, so it is never offered as a card's "A Space" source.
+//
+// Search-driven: at most READABLE_TAKE search rows are considered and
 // `truncated` says more existed, so a person with thousands of Lists types to
-// narrow instead of the server checking every one. `ids` names Lists a host
-// already holds, checked first and returned first in the given order, so a
-// chip is always nameable whatever page of results is loaded.
+// narrow instead of the server deciding every one. `ids` names Lists a host
+// already holds, decided and returned first in the given order, so a chip is
+// always nameable whatever page of results is loaded.
 const READABLE_TAKE = 300;
-const READABLE_CHECK_BATCH = 8;
 
 async function readableLists(
   url: URL,
@@ -207,8 +212,9 @@ async function readableLists(
   const rawLimit = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(100, Math.floor(rawLimit)) : 50;
 
-  const readSpaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
-  const readSpaceIds = readSpaces.map((s) => s.id);
+  const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel, paths: true });
+  const candidateSpaceIds = spaces.map((s) => s.id);
+  const readSpaces = spaces.filter((s) => s.access !== "path");
 
   const baseWhere = {
     organizationId: c.organizationId,
@@ -216,7 +222,7 @@ async function readableLists(
     itemType: "studio-item",
     ...(spaceParam ? { spaceId: spaceParam } : {}),
     OR: [
-      ...(readSpaceIds.length ? [{ spaceId: { in: readSpaceIds } }] : []),
+      ...(candidateSpaceIds.length ? [{ spaceId: { in: candidateSpaceIds } }] : []),
       { visibility: "ORG" as const },
       { members: { some: { userId: c.userId } } },
       { spaceId: null, ownerId: c.userId },
@@ -254,14 +260,6 @@ async function readableLists(
     if (targets && b.productSlug === "personal-list") return false;
     return true;
   };
-  // Writable is read AND contribute, both checked: canContributeBoard does
-  // not walk a PRIVATE folder the List sits in (getBoardForReader does), so on
-  // its own it would name a List the viewer cannot open.
-  const allowed = async (b: Row): Promise<boolean> => {
-    const row = await getBoardForReader(b.id, c.userId, c.accessLevel);
-    if (!row || row.organizationId !== c.organizationId) return false;
-    return writable ? canContributeBoard(b.id, c.userId, c.accessLevel) : true;
-  };
   // `settings` is read for the system check only and never leaves the server.
   const toRow = (b: Row) => ({
     id: b.id,
@@ -276,31 +274,31 @@ async function readableLists(
 
   const idById = new Map(idRows.map((b) => [b.id, b] as const));
   const idCandidates = ids.map((id) => idById.get(id)).filter((b): b is Row => !!b && eligible(b));
-  const idResults: Row[] = [];
-  for (let i = 0; i < idCandidates.length; i += READABLE_CHECK_BATCH) {
-    const batch = idCandidates.slice(i, i + READABLE_CHECK_BATCH);
-    const ok = await Promise.all(batch.map(allowed));
-    batch.forEach((b, j) => {
-      if (ok[j]) idResults.push(b);
-    });
-  }
-
-  const taken = new Set(idResults.map((b) => b.id));
+  const taken = new Set(idCandidates.map((b) => b.id));
   const searchCandidates = searchRows.filter((b) => !taken.has(b.id) && eligible(b));
+
+  // ONE world for every candidate: the resolver's role on each List (its own
+  // grant, its owner, its Folder chain, its Space, the PRIVATE cut), and the
+  // rung the caller asked for read off it.
+  const roles = await nodeRoleMap(
+    nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+    "list",
+    [...idCandidates, ...searchCandidates].map((b) => b.id),
+  );
+  const allowed = (b: Row): boolean => roleAtLeast(roles.get(b.id) ?? "none", writable ? "EDIT" : "VIEW");
+
+  const idResults = idCandidates.filter(allowed);
   const found: Row[] = [];
-  let checked = 0;
   let overflow = false;
-  while (checked < searchCandidates.length && found.length < limit) {
-    const batch = searchCandidates.slice(checked, checked + READABLE_CHECK_BATCH);
-    checked += batch.length;
-    const ok = await Promise.all(batch.map(allowed));
-    batch.forEach((b, j) => {
-      if (!ok[j]) return;
-      if (found.length < limit) found.push(b);
-      else overflow = true;
-    });
+  for (const b of searchCandidates) {
+    if (!allowed(b)) continue;
+    if (found.length < limit) found.push(b);
+    else {
+      overflow = true;
+      break;
+    }
   }
-  const truncated = overflow || checked < searchCandidates.length || searchRows.length >= READABLE_TAKE;
+  const truncated = overflow || searchRows.length >= READABLE_TAKE;
 
   return NextResponse.json(
     {
@@ -346,19 +344,25 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  const space = await getSpaceForReader(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!space || space.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const canEdit = await canEditSpace(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Where it lands (the placement rule, node-rules P3: its Folder settles the
+  // Space, and a Folder in another Space, another org or Trash is refused)
+  // and whether the viewer may make a List there (P1: Can edit or higher on
+  // the Folder, or on the Space at its root; in a Folder under the legacy
+  // Private rule, today's canEditSpace on its Space, P7). A Folder grant
+  // never needs, and never gives, anything on the Space.
+  const placed = await resolveCreate(
+    nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+    { spaceId: parsed.data.spaceId, folderId: parsed.data.folderId ?? null },
+    "list",
+  );
+  if (!placed.ok) return NextResponse.json({ error: placed.error }, { status: placed.status });
 
   try {
     const board = await createBoard({
       organizationId: c.organizationId,
       userId: c.userId,
-      spaceId: parsed.data.spaceId,
-      folderId: parsed.data.folderId ?? null,
+      spaceId: placed.spaceId as string,
+      folderId: placed.folderId,
       name: parsed.data.name ?? "",
       description: parsed.data.description,
       icon: parsed.data.icon,

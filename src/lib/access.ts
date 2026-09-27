@@ -26,15 +26,10 @@ import {
   legacyIsDirectorLevel,
   legacyIsManagerLevel,
 } from "@/lib/access/legacy-levels";
-import { legacyResolveDetailed } from "@/lib/access/parity";
-import {
-  loadBoardInputs,
-  loadDocInputs,
-  loadFolderInputs,
-  loadItemInputs,
-  loadSpaceInputs,
-  type LegacyViewer,
-} from "@/lib/access/legacy-facts";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { toLegacyPermission, type NodeDecision, type NodeRef, type NodeVia } from "@/lib/access/node-rules";
+import { loadRows, seedsOf } from "@/lib/access/node-world";
+import { nodeName } from "@/lib/access/node-tree";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -93,18 +88,6 @@ export function isManagerOrAbove(viewer: ViewerContext): boolean {
   return legacyIsManagerLevel(String(viewer.accessLevel));
 }
 
-/** The ViewerContext as the legacy facts loader wants it. Unlike the container
- *  gates in space.ts / board.ts / folder.ts, this file's resolvers DO scope by
- *  organization (access.ts:134, :167, :206, :239, :272), so the org id is
- *  passed through and the comparison still happens. */
-function viewerToLegacy(viewer: ViewerContext): LegacyViewer {
-  return {
-    userId: viewer.userId,
-    organizationId: viewer.organizationId,
-    accessLevel: String(viewer.accessLevel),
-  };
-}
-
 // ── Module-level gate ─────────────────────────────────────────────
 
 function resolveModule(viewer: ViewerContext, name: ModuleName): AccessDecision {
@@ -139,54 +122,98 @@ function resolveModule(viewer: ViewerContext, name: ModuleName): AccessDecision 
 
 // ── Resource resolvers ────────────────────────────────────────────
 
-// The five object resolvers below are DELEGATES (migration step 1). Each one
-// loads the rows it always loaded, through src/lib/access/legacy-facts.ts, and
-// decides through src/lib/access/parity.ts, which holds this file's branches
-// transcribed line for line — reasons included, because GET /api/me/access
-// serves `reason` verbatim and the pivot may not change an API response.
-//
-// They still answer what they answer today, which for six of these rows is not
-// what the engine's decide() answers: a direct BoardMember grant is still
-// invisible here, a Space ADMIN still pierces a PRIVATE board, and an org
-// admin still reads a NOTEPAD doc. Those are the audit 1.6 disagreements and
-// they are listed in parity.ts EXPECTED_MISMATCHES, to be closed by the flip
-// after the parity job's week, never silently by this PR.
+// The five object resolvers below answer through the one node-access
+// resolver (src/lib/access/node-access.ts), so GET /api/boards?folderId,
+// /api/me/access, the folder members route, work/locate and the Folder page
+// follow the same answer as the Work tree and every write gate. Full access
+// (or the Space Owner rung) is "admin", Can edit is "edit", Can comment and
+// Can view are "read". The reason is the via, in words.
 //
 // resolveUser, resolveWeeklyReview, resolveKra and resolveModule are NOT
-// delegated: they resolve people data and nav tiers, which the transcription
-// does not cover.
+// node reads: they resolve people data and nav tiers and stay as they were.
+
+const ROLE_WORD: Record<string, string> = { OWNER: "owner", FULL: "admin", EDIT: "member", COMMENT: "commenter", VIEW: "guest" };
+
+function reasonFor(d: NodeDecision, ref: NodeRef, name: (r: NodeRef) => string): string {
+  const via: NodeVia = d.via;
+  const word = ROLE_WORD[d.role] ?? "member";
+  switch (via.type) {
+    case "org_admin":
+      return "org admin override";
+    case "own":
+      if (via.source === "SpaceMember") return `space ${word}`;
+      if (via.source === "FolderMember") return `folder member (${word})`;
+      if (via.source === "BoardMember") return `list member (${word})`;
+      return "shared with you";
+    case "owner":
+      return ref.kind === "doc" ? "you created this doc" : `${ref.kind === "list" ? "list" : ref.kind} owner`;
+    case "lift":
+      return "space manager named on this folder";
+    case "pierce":
+      return "space owner";
+    case "inherited":
+      return `inherited from ${name(via.node)}`;
+    case "everyone":
+      return via.node ? `${via.node.kind === "list" ? "list" : "space"} is org-visible` : "open to everyone in the org";
+    case "floor":
+      return "shared before the new rule";
+    default:
+      return `no access to this ${ref.kind === "list" ? "board" : ref.kind}`;
+  }
+}
+
+async function resolveNode(viewer: ViewerContext, ref: NodeRef): Promise<AccessDecision> {
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, String(viewer.accessLevel));
+  const decisions = await nodeRoles(ctx, [ref]);
+  const d = decisions.get(`${ref.kind}:${ref.id}`);
+  if (!d || d.role === "none") {
+    const exists = await nodeExists(viewer.organizationId, ref);
+    if (!exists) return { permission: "none", reason: `${ref.kind === "list" ? "board" : ref.kind} not found in your org` };
+    return { permission: "none", reason: d ? reasonFor(d, ref, () => "") : "no access" };
+  }
+  const rows = await loadRows(viewer.organizationId, seedsOf([ref]), { rowsOnly: true });
+  return { permission: toLegacyPermission(d.role), reason: reasonFor(d, ref, (r) => nodeName(rows, r)) };
+}
+
+async function nodeExists(organizationId: string, ref: NodeRef): Promise<boolean> {
+  const where = { id: ref.id, organizationId };
+  switch (ref.kind) {
+    case "space":
+      return !!(await prisma.space.findFirst({ where, select: { id: true } }));
+    case "folder":
+      return !!(await prisma.folder.findFirst({ where, select: { id: true } }));
+    case "list":
+      return !!(await prisma.board.findFirst({ where, select: { id: true } }));
+    case "doc":
+      return !!(await prisma.doc.findFirst({ where, select: { id: true } }));
+    default:
+      return false;
+  }
+}
 
 async function resolveSpace(viewer: ViewerContext, spaceId: string): Promise<AccessDecision> {
-  const { inputs } = await loadSpaceInputs(spaceId, viewerToLegacy(viewer));
-  return legacyResolveDetailed(inputs, "space");
+  return resolveNode(viewer, { kind: "space", id: spaceId });
 }
 
 async function resolveFolder(viewer: ViewerContext, folderId: string): Promise<AccessDecision> {
-  const { inputs } = await loadFolderInputs(folderId, viewerToLegacy(viewer));
-  return legacyResolveDetailed(inputs, "folder");
+  return resolveNode(viewer, { kind: "folder", id: folderId });
 }
 
 async function resolveBoard(viewer: ViewerContext, boardId: string): Promise<AccessDecision> {
-  const { inputs } = await loadBoardInputs(boardId, viewerToLegacy(viewer), {
-    folderDepth: "full",
-  });
-  return legacyResolveDetailed(inputs, "board");
+  return resolveNode(viewer, { kind: "list", id: boardId });
 }
 
 async function resolveDoc(viewer: ViewerContext, docId: string): Promise<AccessDecision> {
-  // `consumer: "resolveDoc"` opts into the anchor-chain skip, which is sound
-  // only because this file's branches at :242 and :253 return before reading
-  // the anchor for an org admin and for the doc's creator. docAccessible has
-  // neither branch, which is why the loader's default is the safe one.
-  const { inputs } = await loadDocInputs(docId, viewerToLegacy(viewer), {
-    consumer: "resolveDoc",
-  });
-  return legacyResolveDetailed(inputs, "doc");
+  return resolveNode(viewer, { kind: "doc", id: docId });
 }
 
+/** A task follows its List; the task's owner edits where the List reads (today). */
 async function resolveItem(viewer: ViewerContext, itemId: string): Promise<AccessDecision> {
-  const { inputs } = await loadItemInputs(itemId, viewerToLegacy(viewer));
-  return legacyResolveDetailed(inputs, "item");
+  const item = await prisma.item.findFirst({ where: { id: itemId, organizationId: viewer.organizationId }, select: { boardId: true, ownerId: true } });
+  if (!item) return { permission: "none", reason: "item not found in your org" };
+  const board = await resolveNode(viewer, { kind: "list", id: item.boardId });
+  if (board.permission === "read" && item.ownerId === viewer.userId) return { permission: "edit", reason: "you own this item" };
+  return board;
 }
 
 async function resolveUser(viewer: ViewerContext, targetUserId: string): Promise<AccessDecision> {

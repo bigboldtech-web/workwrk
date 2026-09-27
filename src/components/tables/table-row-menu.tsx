@@ -12,14 +12,18 @@
 //   Open · Open in new tab (not on the sheet itself) · separator ·
 //   Rename (inline) and Duplicate (not a Guest, unless it is theirs) ·
 //   Move to Space... (creator or admin) ·
-//   Add to / Remove from favorites · separator · Share... · Copy link ·
+//   Add to / Remove from favorites · separator · Manage access (Who has
+//   access below Full access; never an Agent) · Copy link ·
 //   Copy embed code (public link on) · separator · Export as CSV (never an
 //   Agent) · separator ·
 //   Move to Trash (creator or admin; confirm naming the table)
 //
 // It is a MenuList body. Hosts use `useTableRowMenu()` + `TableRowMenuHost`,
 // which mount it in a MorePortal at the right-click point or under the "...",
-// and own the Share dialog so every door opens the same one.
+// and own the Manage access dialog so every door opens the same one: the one
+// dialog every node uses, with the public link, its embed code and the
+// internal link inside it. After a change the host hears the public link's
+// new state, so the Copy embed code row follows it.
 //
 // WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
 // object-href.ts). Open, Open in new tab and the "Copy made" toast build the
@@ -29,8 +33,10 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { Code2, Copy, Download, ExternalLink, FolderInput, Link2, Pencil, Share2, Star, Table2, Trash2 } from "lucide-react";
+import { Code2, Copy, Download, ExternalLink, FolderInput, Link2, Pencil, Star, Table2, Trash2, UserPlus, Users } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ShareDialog } from "@/components/access/share-dialog";
+import type { ContainerRole } from "@/lib/work/container-menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { Picker } from "@/components/ui/picker";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -40,7 +46,7 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { notifyTablesChanged } from "@/components/layout/os/sidebar-refresh";
 import { apiFetch } from "@/lib/api-fetch";
 import { downloadUrl } from "@/lib/download";
-import { ObjectShareDialog, embedSnippet } from "./object-share-dialog";
+import { embedSnippet } from "./object-share-dialog";
 import { currentOpenObject } from "@/components/layout/os/work-placement";
 import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -53,8 +59,10 @@ export interface TableMenuTarget {
   spaceSlug?: string | null;
   isFavorite?: boolean;
   isPublic?: boolean;
-  /** Creator or Owner/Admin. Absent = resolved from GET /api/tables/[id] on open. */
+  /** Full access on the table (GET /api/tables/[id].canManage). Absent = resolved on open. */
   canManage?: boolean;
+  /** The viewer's role when the host knows it (the Work tree); Full access stands in for an absent canManage. */
+  role?: ContainerRole | null;
   publicLinksAllowed?: boolean;
   ownerName?: string | null;
 }
@@ -78,7 +86,8 @@ export function TableRowMenu({
   initialMode?: "menu" | "move";
   onClose: () => void;
   onChanged?: (kind: TableMenuChange, next?: Partial<TableMenuTarget>) => void;
-  onShare?: (resolved: TableMenuTarget) => void;
+  /** Opens the Manage access dialog, read only below Full access (absent = no access row). */
+  onShare?: (resolved: TableMenuTarget, readOnly: boolean) => void;
   /** The sheet focuses its own title instead of the inline rename row. */
   onRenameInline?: () => void;
 }) {
@@ -91,22 +100,28 @@ export function TableRowMenu({
   const [fav, setFav] = useState(!!table.isFavorite);
   const [busy, setBusy] = useState<string | null>(null);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
-  // Opened straight at the picker: load the Spaces once, in a tick.
+  const [rootMove, setRootMove] = useState(false);
+  // Opened straight at the picker: load the places once, in a tick, from
+  // the same endpoint openMove asks (the placement rule, P5), never the whole
+  // Space list: that offered every Space the person could read.
   useEffect(() => {
     if (initialMode !== "move") return;
     let alive = true;
     const t = setTimeout(() => {
-      void apiFetch<{ spaces?: SpaceRow[] }>("/api/spaces", { cache: "no-store" }).then((r) => {
-        if (alive) setSpaces(r.ok ? (r.data.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
+      void apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=table&id=${encodeURIComponent(table.id)}`, { cache: "no-store" }).then((r) => {
+        if (!alive) return;
+        setRootMove(r.ok && r.data.root?.pickable === true);
+        setSpaces(r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
       });
     }, 0);
     return () => { alive = false; clearTimeout(t); };
-  }, [initialMode]);
+  }, [initialMode, table.id]);
 
   // A host that knows the manage right passes it; otherwise it is resolved on
   // open, and until it lands only the rows every reader holds are rendered.
   const [resolved, setResolved] = useState<Partial<TableMenuTarget> | null>(null);
-  const known = table.canManage !== undefined && table.isFavorite !== undefined;
+  const hostCanManage = table.canManage ?? (table.role ? table.role === "full" : undefined);
+  const known = hostCanManage !== undefined && table.isFavorite !== undefined;
   useEffect(() => {
     if (known) return;
     let alive = true;
@@ -126,8 +141,11 @@ export function TableRowMenu({
     })();
     return () => { alive = false; };
   }, [known, table.id, table.isFavorite, table.isPublic, table.spaceId]);
-  const canManage = table.canManage ?? resolved?.canManage ?? false;
+  const canManage = hostCanManage ?? resolved?.canManage ?? false;
   const pending = !known && resolved === null;
+  // The access row waits for the manage right, never for the favourites, so
+  // its label is decided once and does not flip.
+  const manageKnown = hostCanManage !== undefined || resolved !== null;
   const isAgent = boot.viewer.isAgent;
   // Rename and Duplicate are edits: a Guest (a read-only holder while the
   // access engine is inert) gets them only on a table they made, which is
@@ -184,8 +202,12 @@ export function TableRowMenu({
   async function openMove() {
     setMode("move");
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[] }>("/api/spaces", { cache: "no-store" });
-      setSpaces(r.ok ? (r.data.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
+      // Exactly the places the move rule accepts for this person (the
+      // placement rule, P5): Space roots, and No Space only when it would be
+      // taken.
+      const r = await apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=table&id=${encodeURIComponent(table.id)}`, { cache: "no-store" });
+      setRootMove(r.ok && r.data.root?.pickable === true);
+      setSpaces(r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })) : []);
     }
   }
 
@@ -194,8 +216,9 @@ export function TableRowMenu({
     setBusy("move");
     const r = await apiFetch(`/api/tables/${table.id}`, { method: "PATCH", json: { spaceId } });
     setBusy(null);
-    onClose();
+    // A refusal keeps the picker open on the choice, with the server's sentence.
     if (!r.ok) { toast(r.error || "Couldn't move the table", { tone: "danger" }); return; }
+    onClose();
     const target = spaceId ? spaces?.find((s) => s.id === spaceId)?.name ?? "the Space" : "No Space";
     toast(`Moved to ${target}`);
     dispatchTablesChanged();
@@ -261,7 +284,7 @@ export function TableRowMenu({
           emptyLabel="No Spaces"
           loading={spaces === null}
           sections={[
-            { options: [{ value: "none", label: "No Space", description: "Everyone in the workspace can open it" }] },
+            ...(rootMove ? [{ options: [{ value: "none", label: "No Space", description: "Everyone in the workspace can open it" }] }] : []),
             { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
           ]}
         />
@@ -287,7 +310,13 @@ export function TableRowMenu({
       {canManage ? <MenuItem icon={FolderInput} label="Move to Space…" busy={busy === "move"} onClick={() => void openMove()} /> : null}
       <MenuItem icon={Star} iconFilled={fav} label={fav ? "Remove from favorites" : "Add to favorites"} onClick={() => void toggleFav()} />
       <MenuSeparator />
-      {onShare ? <MenuItem icon={Share2} label="Share…" onClick={() => { onClose(); onShare(full); }} /> : null}
+      {onShare && manageKnown ? (
+        <MenuItem
+          icon={canManage ? UserPlus : Users}
+          label={canManage ? "Manage access" : "Who has access"}
+          onClick={() => { onClose(); onShare(full, !canManage); }}
+        />
+      ) : null}
       <MenuItem icon={Link2} label="Copy link" onClick={copyLink} />
       {full.isPublic && full.publicLinksAllowed !== false ? <MenuItem icon={Code2} label="Copy embed code" onClick={copyEmbed} /> : null}
       {!isAgent ? (
@@ -345,7 +374,10 @@ export function TableRowMenuHost({ menu, context, onChanged, onRenameInline }: {
   onRenameInline?: () => void;
 }) {
   const dummy = useRef<HTMLElement | null>(null);
-  const [share, setShare] = useState<TableMenuTarget | null>(null);
+  // The table the dialog is about outlives the menu, and stays set while the
+  // dialog closes so it animates out whole.
+  const [share, setShare] = useState<{ table: TableMenuTarget; readOnly: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const s = menu.state;
   return (
     <>
@@ -357,27 +389,24 @@ export function TableRowMenuHost({ menu, context, onChanged, onRenameInline }: {
             context={context}
             onClose={menu.close}
             onChanged={(kind, next) => onChanged?.(kind, s.table, next)}
-            onShare={(t) => setShare(t)}
+            onShare={(t, readOnly) => { setShare({ table: t, readOnly }); setShareOpen(true); }}
             onRenameInline={onRenameInline}
           />
         </MorePortal>
       ) : null}
       {share ? (
-        <ObjectShareDialog
-          open
-          mode={share.canManage ? "share" : "who"}
-          onClose={() => setShare(null)}
-          object={{
-            kind: "table",
-            id: share.id,
-            name: share.name,
-            isPublic: !!share.isPublic,
-            canManage: !!share.canManage,
-            publicLinksAllowed: share.publicLinksAllowed !== false,
-            anchorName: share.spaceName ?? null,
-            ownerName: share.ownerName ?? null,
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          target={{ kind: "table", id: share.table.id, name: share.table.name || "Untitled table" }}
+          readOnly={share.readOnly}
+          onChanged={(panel) => {
+            // The public link lives in the dialog now: hand its state to the
+            // host so the list's globe and the Copy embed code row follow it.
+            // No publicLink on the panel means the link is off.
+            if (panel) onChanged?.("public", share.table, { isPublic: !!panel.general.publicLink?.on });
+            dispatchTablesChanged();
           }}
-          onPublicChange={(isPublic) => { onChanged?.("public", share, { isPublic }); dispatchTablesChanged(); }}
         />
       ) : null}
     </>
