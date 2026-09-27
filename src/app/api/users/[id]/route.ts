@@ -19,7 +19,7 @@
 // ever fed are no longer read here.
 
 import { NextResponse, type NextRequest } from "next/server";
-import type { Prisma } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { getLatestScore, getScoreHistory } from "@/services/performanceScoreService";
@@ -36,23 +36,50 @@ import {
   PERSON_FIELD_LABEL,
   canWritePersonField,
   checkPersonPatch,
+  dobOverwriteAllowed,
+  seesFullBirthday,
+  visibleStatus,
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
+import { subjectRowView } from "@/lib/people/review-visibility";
+import { profileFieldRows, readProfileFieldDefs, validateProfileValues } from "@/lib/people/profile-fields";
+import { effectivePersonSchedule, nominalWeekHours, readPersonScheduleOverride, validatePersonScheduleOverride } from "@/lib/work-schedule";
+import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+
+/** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
+const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ error, ...extra }, { status });
 
-function accessFor(ctx: PeopleCtx, relation: PersonRelation, subject: { id: string; deletedAt: Date | null; accessLevel: string }) {
+function accessFor(
+  ctx: PeopleCtx,
+  relation: PersonRelation,
+  subject: { id: string; deletedAt: Date | null; accessLevel: string },
+  subjectHasDob = false,
+) {
   const opts = { managerTierSelf: relation === "self" && ctx.managerTier };
-  const editable = Object.keys(PERSON_FIELD_GROUP).filter((f) => f !== "accessLevel" && f !== "avatar" && canWritePersonField(f, relation, opts));
+  const editable = Object.keys(PERSON_FIELD_GROUP).filter(
+    (f) =>
+      f !== "accessLevel" &&
+      f !== "avatar" &&
+      canWritePersonField(f, relation, opts) &&
+      (f !== "dateOfBirth" || dobOverwriteAllowed(relation, subjectHasDob)),
+  );
   const subjectIsAdmin = subject.accessLevel === "COMPANY_ADMIN" || subject.accessLevel === "SUPER_ADMIN";
+  // Acting on a person (remove, photo, alignment, ratings, tags, dotted
+  // lines) is yesterday's write door: self, Admin, the People team, the
+  // org-wide levels, or a manager-tier viewer over their SOLID tree. A
+  // dotted-line manager, or a report's manager below manager tier
+  // (chain-view), reads the record and acts on nothing.
+  const writes = relation !== "none" && relation !== "chain-view";
   const canRemove =
     relation !== "self" &&
-    (ctx.isAdmin || (ctx.managerTier && relation !== "none" && !subjectIsAdmin));
+    (ctx.isAdmin || (ctx.managerTier && writes && !subjectIsAdmin));
   const peopleData = relation !== "none";
   return {
     relation,
@@ -60,26 +87,27 @@ function accessFor(ctx: PeopleCtx, relation: PersonRelation, subject: { id: stri
     editable,
     remove: canRemove && !subject.deletedAt,
     restore: canRemove && !!subject.deletedAt,
-    avatar: !subject.deletedAt && (relation === "self" || ctx.isAdmin || (peopleData && ctx.managerTier)),
-    manageAlignment: relation !== "self" && peopleData,
-    rateSkills: relation !== "self" && peopleData,
+    avatar: !subject.deletedAt && (relation === "self" || ctx.isAdmin || (writes && ctx.managerTier)),
+    manageAlignment: relation !== "self" && writes,
+    rateSkills: relation !== "self" && writes,
     addSkills: relation === "self" || ctx.isAdmin || ctx.peopleTeam,
     removeSkills: relation === "self" || ctx.isAdmin,
-    tags: relation !== "self" && peopleData,
-    dottedLines: relation !== "self" && peopleData,
+    tags: relation !== "self" && writes,
+    dottedLines: relation !== "self" && writes,
     manageMembers: ctx.isAdmin,
     // Day and month of the birthday for the chain; the full date for self,
     // the People team and Admins.
-    fullBirthday: relation === "self" || relation === "admin" || relation === "people-team",
+    fullBirthday: seesFullBirthday(relation),
   };
 }
 
-async function tolerantPeopleFields(id: string): Promise<{ weeklyCapacityHours: number | null; customFields: unknown }> {
+async function tolerantPeopleFields(id: string): Promise<{ weeklyCapacityHours: number | null; customFields: unknown; workSchedule: unknown }> {
   try {
-    const r = await prisma.user.findUnique({ where: { id }, select: { weeklyCapacityHours: true, customFields: true } });
-    return { weeklyCapacityHours: r?.weeklyCapacityHours ?? null, customFields: r?.customFields ?? null };
+    const r = await prisma.user.findUnique({ where: { id }, select: { weeklyCapacityHours: true, customFields: true, workSchedule: true } });
+    return { weeklyCapacityHours: r?.weeklyCapacityHours ?? null, customFields: r?.customFields ?? null, workSchedule: r?.workSchedule ?? null };
   } catch {
-    return { weeklyCapacityHours: null, customFields: null };
+    // The Phase 6 columns are absent for one release: every reader falls back.
+    return { weeklyCapacityHours: null, customFields: null, workSchedule: null };
   }
 }
 
@@ -125,7 +153,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!card) return err(404, "User not found");
 
   const presence = (await presenceFor([id])).get(id) ?? null;
-  const access = accessFor(ctx, relation, card);
+  const dobRow = relation === "none" ? null : await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
+  const access = accessFor(ctx, relation, card, !!dobRow?.dateOfBirth);
   const isGuest = ctx.orgRole === "GUEST";
   const base = {
     id: card.id,
@@ -133,7 +162,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     lastName: card.lastName,
     email: card.email,
     avatar: card.avatar,
-    status: card.status,
+    // Raw employment status (PIP, notice period, probation, leave) is people
+    // data; everyone else learns only whether the account is deactivated.
+    status: visibleStatus(card.status, access.peopleData),
+    isDeactivated: card.status === "INACTIVE",
     joinDate: card.joinDate,
     deletedAt: card.deletedAt,
     isAgent: card.accessLevel === "AGENT",
@@ -210,11 +242,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           orderBy: { createdAt: "desc" },
           take: 20,
           select: {
-            id: true, cycleId: true, status: true, outcome: true, overallScore: true, calibratedScore: true,
+            id: true, cycleId: true, status: true, outcome: true, overallScore: true, calibratedScore: true, reviewerId: true,
             cycle: { select: { id: true, name: true, startDate: true, endDate: true, status: true } },
           },
         },
-        _count: { select: { kpiRecords: true } },
+        _count: { select: { kpiRecords: true, reviewsAsSubject: true } },
       },
     }),
     tolerantPeopleFields(id),
@@ -222,6 +254,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     getScoreHistory(id, 6),
     prisma.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
   ]);
+  const orgSchedule = await readOrgWorkSchedule(ctx.organizationId);
   const bands = getScoringBands((org?.settings ?? {}) as Parameters<typeof getScoringBands>[0]);
 
   const reviewerIds = [...new Set((full?.kpiRecords ?? []).map((r) => r.reviewedById).filter((x): x is string => !!x))];
@@ -241,16 +274,33 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       phone: full?.phone ?? null,
       dateOfBirth,
       weeklyCapacityHours: extra.weeklyCapacityHours,
-      customFields: extra.customFields,
+      // The schedule this person works (their own days and hours, or the
+      // org's) and the week it adds up to, so the record says
+      // "Org default (40h)" instead of a bare "Org default".
+      workSchedule: readPersonScheduleOverride(extra.workSchedule),
+      orgSchedule: { workdays: orgSchedule.workdays, hoursPerDay: orgSchedule.hoursPerDay },
+      defaultWeeklyHours: nominalWeekHours(effectivePersonSchedule(orgSchedule, extra.workSchedule)),
+      // Only the fields the org defines, in its order; a value whose field
+      // was removed stays stored but is not shown.
+      profileFields: profileFieldRows(readProfileFieldDefs(org?.settings), extra.customFields),
       certifications: full?.certifications ?? [],
       kpiHistory: (full?.kpiRecords ?? []).map((r) => ({
         ...r,
         reviewedBy: r.reviewedById ? reviewerName.get(r.reviewedById) ?? null : null,
       })),
       kpiHistoryTotal: full?._count.kpiRecords ?? 0,
+      reviewsTotal: full?._count.reviewsAsSubject ?? 0,
       // A review row is the subject's result; the written peer answers never
-      // ride this payload (spec-teams-performance, the aggregate rule).
-      reviews: full?.reviewsAsSubject ?? [],
+      // ride this payload (spec-teams-performance, the aggregate rule). The
+      // subject's own rows go through the same lens as the cycle GET
+      // (subjectRowView): no calibration ever, and the outcome and score
+      // only once the review is COMPLETED, so a manager's draft rating or a
+      // calibration in progress never reaches them early.
+      reviews: (full?.reviewsAsSubject ?? []).map((r) => {
+        const { reviewerId: _reviewerId, ...rest } = relation === "self" ? subjectRowView(r, ctx.userId) : r;
+        void _reviewerId;
+        return rest;
+      }),
       score: latestScore ? { score: latestScore.score, breakdown: latestScore.breakdown, band: scoreBand(latestScore.score, bands) } : null,
       scoreHistory: scoreHistory.map((h) => ({ period: h.period, score: h.score })),
     },
@@ -306,6 +356,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.phone = v || null;
   }
   if (body.avatar !== undefined) data.avatar = body.avatar;
+  if (body.dateOfBirth !== undefined && relation !== "self" && !seesFullBirthday(relation)) {
+    // This viewer is shown the day and month only, so they cannot see what
+    // they would overwrite: they may fill a missing date, never replace or
+    // clear one.
+    const cur = await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
+    if (!dobOverwriteAllowed(relation, !!cur?.dateOfBirth)) {
+      return err(403, "A date of birth is already on file. The person, the People team or an Admin can change it.", {
+        code: "field_forbidden",
+        fields: ["dateOfBirth"],
+      });
+    }
+  }
   if (body.dateOfBirth !== undefined) {
     if (body.dateOfBirth === null || body.dateOfBirth === "") data.dateOfBirth = null;
     else {
@@ -329,16 +391,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.weeklyCapacityHours = v;
   }
   if (body.workSchedule !== undefined) {
-    if (body.workSchedule !== null && (typeof body.workSchedule !== "object" || Array.isArray(body.workSchedule))) {
-      return err(400, "A work schedule is an object, or null for the org schedule", { field: "workSchedule" });
-    }
-    data.workSchedule = body.workSchedule;
+    const v = validatePersonScheduleOverride(body.workSchedule);
+    if (!v.ok) return err(400, v.error, { field: "workSchedule" });
+    data.workSchedule = v.value === null ? Prisma.DbNull : v.value;
   }
+  // Profile fields are merged key by key in one statement after the update
+  // (two editors saving different fields never overwrite each other).
+  let profilePatch: { set: Record<string, string>; remove: string[] } | null = null;
   if (body.customFields !== undefined) {
-    if (body.customFields !== null && (typeof body.customFields !== "object" || Array.isArray(body.customFields))) {
-      return err(400, "Profile fields are an object", { field: "customFields" });
-    }
-    data.customFields = body.customFields;
+    const org = await prisma.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const v = validateProfileValues(body.customFields, readProfileFieldDefs(org?.settings));
+    if (!v.ok) return err(400, v.error, { field: "customFields" });
+    profilePatch = { set: v.set, remove: v.remove };
   }
 
   // Placement must point at the org's own rows.
@@ -372,7 +436,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (body.accessLevel !== undefined) {
-    if (typeof body.accessLevel !== "string") return err(400, "Unknown access level", { field: "accessLevel" });
+    if (typeof body.accessLevel !== "string" || !(ACCESS_LEVELS as readonly string[]).includes(body.accessLevel)) {
+      return err(400, "Unknown access level", { field: "accessLevel" });
+    }
     if (target.accessLevel === "COMPANY_ADMIN" && body.accessLevel !== "COMPANY_ADMIN") {
       const adminCount = await prisma.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
       if (adminCount <= 1) return err(400, "Cannot demote the last Company Admin. Promote another user first.");
@@ -381,13 +447,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.accessLevel = body.accessLevel;
   }
 
-  if (Object.keys(data).length === 0) return err(400, "Nothing to change");
+  if (Object.keys(data).length === 0 && !profilePatch) return err(400, "Nothing to change");
 
   const user = await prisma.user.update({
     where: { id },
     data: data as Prisma.UserUncheckedUpdateInput,
     select: { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true },
   });
+  if (profilePatch) {
+    const json = JSON.stringify(profilePatch.set);
+    await prisma.$executeRaw`
+      UPDATE "User"
+      SET "customFields" = ((CASE WHEN jsonb_typeof("customFields") = 'object' THEN "customFields" ELSE '{}'::jsonb END) - ${profilePatch.remove}::text[]) || ${json}::jsonb
+      WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
+  }
 
   if (data.managerId !== undefined && data.managerId !== target.managerId) {
     void logActivity({

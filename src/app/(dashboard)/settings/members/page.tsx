@@ -74,6 +74,16 @@ export default function MembersPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("invite") === "1") setInviteOpen(true);
   }, []);
+  // `?open=<userId>` (the person record's "Manage in Members") lands on
+  // that one person: the list is narrowed to them once it loads, so the
+  // admin changes their org role or access without hunting for the row.
+  const [openId] = useState<string | null>(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("open")));
+  const [openApplied, setOpenApplied] = useState(false);
+  if (!openApplied && openId && members) {
+    const m = members.find((x) => x.id === openId);
+    setOpenApplied(true);
+    if (m?.email) setQ(m.email);
+  }
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 

@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { apiFetch } from "@/lib/api-fetch";
+import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import type { OrgNode, OrgPerson } from "@/lib/people/reporting-lines";
 import { PeoplePickerField, PersonAvatar, type PickPerson } from "./person-bits";
 
@@ -53,16 +53,24 @@ function Row({
   const manager = p.managerId ? byId.get(p.managerId) : null;
   const toPick = (x: ChartPerson): PickPerson => ({ id: x.id, firstName: x.firstName, lastName: x.lastName, avatar: x.avatar, email: null });
   const meta = [display.showTitle ? p.jobTitle : null, display.showDepartment ? p.department : null].filter(Boolean).join(" · ");
+  // Through the record write queue: a dropped connection keeps the change
+  // and retries it (at once on reconnect), and the row says so meanwhile.
   async function setManager(id: string | null) {
     onError(p.id, null);
-    const r = await apiFetch(`/api/users/${p.id}`, { method: "PATCH", json: { managerId: id } });
+    const r = await recordWriteQueue().write("PATCH", `/api/users/${p.id}`, { managerId: id }, {
+      onRetrying: () => onError(p.id, "Not saved, retrying"),
+    });
     if (!r.ok) { onError(p.id, r.error || "Not saved"); return; }
+    onError(p.id, null);
     onSaved();
   }
   async function setDotted(ids: string[]) {
     onError(p.id, null);
-    const r = await apiFetch(`/api/users/${p.id}/dotted-lines`, { method: "PUT", json: { managerIds: ids } });
+    const r = await recordWriteQueue().write("PUT", `/api/users/${p.id}/dotted-lines`, { managerIds: ids }, {
+      onRetrying: () => onError(p.id, "Not saved, retrying"),
+    });
     if (!r.ok) { onError(p.id, r.error || "Not saved"); return; }
+    onError(p.id, null);
     onSaved();
   }
   return (
@@ -233,7 +241,7 @@ export function OrgTree({
       </div>
       {unlinked.length > 0 ? (
         <div className="border-t border-line">
-          <div className="flex h-11 items-center gap-2 bg-surface-2 px-3">
+          <div className="flex h-11 items-center gap-2 bg-subtle px-3">
             <span className="text-row font-medium text-ink">Not linked to a manager</span>
             <span className="text-xs font-medium text-ink-2">{unlinked.length}</span>
           </div>

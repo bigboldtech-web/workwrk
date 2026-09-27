@@ -21,6 +21,7 @@
 // failed read, the error text with no Retry, and the Org settings link to
 // the Settings root (it is Settings > Structure now, for Owner and Admin).
 
+import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -139,8 +140,10 @@ export default function OrgChartClient() {
   }, [q, dept, office, title, onlyMine, myChain]);
   const roots = useMemo(() => {
     if (onlyUnlinked) {
-      // Nobody reports to them and they report to nobody, plus the loops.
-      return forest.roots.filter((r) => r.children.length === 0 && !r.person.managerId && matches(r.person));
+      // The same set the "Not linked to a manager" section and the footer
+      // count: people no root reaches (a reporting loop, a chain broken by a
+      // removed manager). The tree itself shows no roots under this filter.
+      return [];
     }
     return filters ? filterForest(forest.roots, matches) : forest.roots;
   }, [forest, filters, matches, onlyUnlinked]);
@@ -218,15 +221,15 @@ export default function OrgChartClient() {
             <OsEmptyView title="No reporting lines yet" hint={canEdit ? undefined : "Ask an Admin to set reporting lines."} action={canEdit ? { label: "Edit reporting lines", onClick: () => setEditing(true) } : undefined} />
           ) : roots.length === 0 && unlinked.length === 0 ? (
             <p className="rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">
-              Nobody matches · <button type="button" className="text-brand-deep hover:underline" onClick={clear}>Clear filters</button>
+              {onlyUnlinked && filters === 1 ? "Everyone is linked: each person reaches the top of the chart" : "Nobody matches"} · <button type="button" className="text-brand-deep hover:underline" onClick={clear}>Clear filters</button>
             </p>
           ) : (
             <>
               {nobodyLinked && !editing ? <p className="text-sm text-ink-2">Nobody has a manager yet.{canEdit ? " Use Edit reporting lines to set them." : " Ask an Admin to set reporting lines."}</p> : null}
-              {data.truncated ? <p role="status" className="text-sm text-warning-text">Showing the first {data.data.length} of {data.total} people. Filter to find someone further down.</p> : null}
+              {data.truncated ? <p role="status" className="text-sm text-warning-text">Showing the first {data.data.length} of {data.total} people. <Link href="/people" className="text-brand-deep hover:underline">Search the Directory</Link> to find anyone else.</p> : null}
               <OrgTree
                 roots={roots}
-                unlinked={onlyUnlinked ? unlinked : unlinked}
+                unlinked={unlinked}
                 byId={byId}
                 editable={editing}
                 display={{ showTitle, showDepartment }}

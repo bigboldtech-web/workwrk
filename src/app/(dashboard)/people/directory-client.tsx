@@ -25,12 +25,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Building2, Download, ExternalLink, LayoutGrid, Link2, List, MessageCircle, MoreHorizontal, RotateCcw, Tag, Upload, UserPlus, Users,
+  Building2, Download, ExternalLink, LayoutGrid, Link2, List, MessageCircle, MoreHorizontal, Pencil, RotateCcw, Tag, Upload, UserMinus, UserPlus, Users,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { MenuItem, MenuList } from "@/components/ui/menu";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
@@ -76,7 +76,9 @@ interface Row {
 interface ListResponse {
   data: Row[];
   pagination: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean };
-  viewer: { privileged: boolean; canInvite: boolean; canImport: boolean; canExport: boolean };
+  /** Server totals per group over the whole filtered set (key "none" = no value). */
+  groups?: Array<{ key: string; count: number }>;
+  viewer: { privileged: boolean; canInvite: boolean; canImport: boolean; canExport: boolean; canRemove?: boolean };
 }
 type Opt = { id: string; label: string };
 
@@ -92,11 +94,11 @@ const GROUPS: Array<{ value: DirectoryGroup; label: string }> = [
   { value: "office", label: "Office" },
   { value: "title", label: "Job title" },
 ];
-type ColKey = "email" | "office" | "joined" | "phone";
+type ColKey = "email" | "office" | "joined" | "phone" | "tags";
 const DISPLAY_KEY = "workwrk:directory:columns:v1";
 
 function readColumns(): Record<ColKey, boolean> {
-  const base = { email: true, office: true, joined: true, phone: false };
+  const base: Record<ColKey, boolean> = { email: true, office: true, joined: true, phone: false, tags: false };
   try {
     const raw = window.localStorage.getItem(DISPLAY_KEY);
     return raw ? { ...base, ...(JSON.parse(raw) as Partial<Record<ColKey, boolean>>) } : base;
@@ -124,7 +126,7 @@ export default function PeopleDirectoryClient() {
   const [filterOpen, setFilterOpen] = useState(filters > 0);
   const [sortOpen, setSortOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [columns, setColumns] = useState<Record<ColKey, boolean>>({ email: true, office: true, joined: true, phone: false });
+  const [columns, setColumns] = useState<Record<ColKey, boolean>>({ email: true, office: true, joined: true, phone: false, tags: false });
   const [importOpen, setImportOpen] = useState(sp?.get("import") === "1");
   const [menu, setMenu] = useState<{ row: Row; anchor: RefObject<HTMLElement | null> } | null>(null);
   const [depts, setDepts] = useState<Opt[]>([]);
@@ -290,6 +292,9 @@ export default function PeopleDirectoryClient() {
     if (columns.email) cols.push({ key: "email", label: "Email", width: "minmax(180px,1.2fr)", hideBelow: 1000, render: (r) => <span className="truncate">{r.email}</span> });
     if (columns.phone) cols.push({ key: "phone", label: "Phone", width: "140px", hideBelow: 1000, render: (r) => <span className="truncate tabular-nums">{r.phone ?? ""}</span> });
     if (columns.office) cols.push({ key: "office", label: "Office", width: "120px", hideBelow: 1200, render: (r) => <span className="truncate">{r.office?.city || r.office?.name || ""}</span> });
+    if (columns.tags) cols.push({ key: "tags", label: "Tags", width: "minmax(140px,0.8fr)", hideBelow: 1100, render: (r) => (
+      <span className="flex min-w-0 items-center gap-1 overflow-hidden">{r.tags.map((t) => <Chip key={t.id}>{t.name}</Chip>)}</span>
+    ) });
     if (columns.joined) cols.push({ key: "joined", label: removedView ? "Removed" : "Joined", width: "136px", hideBelow: 700, render: (r) => (
       <span className="tabular-nums text-ink-2">{formatDate(removedView && r.deletedAt ? r.deletedAt : r.joinDate, datePrefs, "date")}</span>
     ) });
@@ -311,20 +316,26 @@ export default function PeopleDirectoryClient() {
       }
     : undefined;
 
-  // Grouped rendering: the server sorts by the group first, so a page splits
-  // into runs of the same key.
-  const groups = useMemo(() => {
-    if (!rows || q.group === "none") return null;
-    const keyOf = (r: Row) => q.group === "department" ? r.department?.name ?? "No department" : q.group === "office" ? r.office?.name ?? "No office" : r.role?.title ?? "No job title";
-    const out: Array<{ key: string; rows: Row[] }> = [];
-    for (const r of rows) {
-      const k = keyOf(r);
-      const last = out[out.length - 1];
-      if (last && last.key === k) last.rows.push(r); else out.push({ key: k, rows: [r] });
-    }
-    return out;
-  }, [rows, q.group]);
+  // Grouped rendering, ONE card: the server sorts by the group first, so a
+  // page is runs of the same key, each opened by a 44px header row whose
+  // count is the server's total for the group (not the page's run).
+  const groupTotals = useMemo(() => new Map((data?.groups ?? []).map((g) => [g.key, g.count])), [data?.groups]);
+  const groupOf = useMemo(() => {
+    if (q.group === "none") return undefined;
+    return (r: Row) => {
+      const pick = q.group === "department"
+        ? { id: r.department?.id ?? null, label: r.department?.name ?? "No department" }
+        : q.group === "office"
+          ? { id: r.office?.id ?? null, label: r.office?.name ?? "No office" }
+          : { id: r.role?.id ?? null, label: r.role?.title ?? "No job title" };
+      const key = pick.id ?? "none";
+      return { key, label: pick.label, count: groupTotals.get(key) ?? null };
+    };
+  }, [q.group, groupTotals]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  }, []);
 
   const rowMenu = (r: Row) => (
     <button
@@ -376,6 +387,9 @@ export default function PeopleDirectoryClient() {
       onSelectedChange={setSelected}
       bulkActions={bulkActions}
       footer={withFooter ? footer : undefined}
+      groupOf={groupOf}
+      collapsedGroups={collapsed}
+      onToggleGroup={toggleGroup}
       empty={
         filters > 0
           ? <span className="text-row text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>
@@ -409,6 +423,7 @@ export default function PeopleDirectoryClient() {
             { label: "Office", checked: columns.office, keepOpen: true, onClick: () => setColumn("office", !columns.office) },
             { label: "Joined", checked: columns.joined, keepOpen: true, onClick: () => setColumn("joined", !columns.joined) },
             ...(privileged ? [{ label: "Phone", checked: columns.phone, keepOpen: true, onClick: () => setColumn("phone", !columns.phone) }] : []),
+            { label: "Tags", checked: columns.tags, keepOpen: true, onClick: () => setColumn("tags", !columns.tags) },
             { separator: true as const },
             ...GROUPS.map((g) => ({ label: `Group by ${g.label.toLowerCase()}`, checked: q.group === g.value, onClick: () => setParams({ group: g.value === "none" ? null : g.value }) })),
             ...(data?.viewer.canImport || data?.viewer.canExport ? [{ separator: true as const }] : []),
@@ -483,8 +498,8 @@ export default function PeopleDirectoryClient() {
             <div className="flex flex-col gap-3">
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
                 {rows.map((r) => (
-                  <li key={r.id}>
-                    <Link href={`/people/${r.id}`} className="flex items-center gap-3 rounded-lg border border-line bg-raised p-3 hover:bg-hover">
+                  <li key={r.id} className="h-full">
+                    <Link href={`/people/${r.id}`} className="flex h-full items-center gap-3 rounded-lg border border-line bg-raised p-3 hover:bg-hover">
                       <PersonAvatar person={r} size={40} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-row font-medium text-ink">{personName(r)}</span>
@@ -506,19 +521,6 @@ export default function PeopleDirectoryClient() {
                 </div>
               ) : null}
             </div>
-          ) : groups && groups.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              {groups.map((g, i) => (
-                <section key={`${g.key}-${i}`} className="flex flex-col gap-1">
-                  <button type="button" onClick={() => setCollapsed((c) => { const n = new Set(c); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}
-                    aria-expanded={!collapsed.has(g.key)} className="flex h-11 items-center gap-2 rounded-md bg-surface-2 px-3 text-start">
-                    <span className="text-row font-medium text-ink">{g.key}</span>
-                    <span className="text-xs font-medium text-ink-2">{g.rows.length}</span>
-                  </button>
-                  {collapsed.has(g.key) ? null : table(g.rows, i === groups.length - 1)}
-                </section>
-              ))}
-            </div>
           ) : (
             table(rows, true)
           )}
@@ -533,11 +535,20 @@ export default function PeopleDirectoryClient() {
               const id = menu.row.id; setMenu(null);
               void navigator.clipboard.writeText(`${window.location.origin}/people/${id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
             }} />
+            {privileged && menu.row.canEdit && !menu.row.deletedAt ? (
+              <MenuItem icon={Pencil} label="Edit details" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}?edit=details`); }} />
+            ) : null}
             {talkOn && menu.row.id !== boot.viewer.id ? (
               <MenuItem icon={MessageCircle} label="Message" onClick={() => {
                 const id = menu.row.id; setMenu(null);
                 void apiFetch<{ id?: string }>("/api/conversations", { method: "POST", json: { type: "DM", memberIds: [id] } }).then((r) => { if (r.ok && r.data.id) router.push(`/tlk/${r.data.id}`); else toast("Couldn't open the conversation", { tone: "danger" }); });
               }} />
+            ) : null}
+            {data?.viewer.canRemove && menu.row.id !== boot.viewer.id && !menu.row.deletedAt ? (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={UserMinus} destructive label="Remove" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}?edit=remove`); }} />
+              </>
             ) : null}
           </MenuList>
         </MorePortal>

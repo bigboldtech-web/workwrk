@@ -672,6 +672,12 @@ model Invitation {
   roleId         String?
   managerId      String?
   officeId       String?
+  // Phase 6 (prisma/sql/2026-09-26-phase6-people.sql): the names and phone
+  // a People CSV import carried, so the invitee's form starts filled and no
+  // imported phone number is lost. Nullable; a manual invite leaves them null.
+  firstName      String?
+  lastName       String?
+  phone          String?
   // Role-definition gate (the vision's KRA/KPI/SOP entry rule):
   // an admin can't issue an invite without first picking at least one
   // KRA and one SOP for the role. These arrays carry the selection so

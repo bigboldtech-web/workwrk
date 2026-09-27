@@ -18,7 +18,9 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown, ChevronRight, Download, List, ListTree, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, List, ListTree, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { OsPageHeader, OsToolbar } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -33,6 +35,7 @@ import { Avatar } from "@/components/ui/avatar-stack";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
+import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import { USER_HUES, departmentHue } from "@/lib/people/department-hue";
 import { toCsv } from "@/lib/people/people-csv";
 import { PeoplePickerField, personName, type PickPerson } from "./person-bits";
@@ -106,8 +109,17 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   const [layout, setLayout] = useState<"table" | "tree">("table");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [showDesc, setShowDesc] = useState(false);
+  const [showTitles, setShowTitles] = useState(true);
+  const [headFilter, setHeadFilter] = useState<PickPerson | null>(null);
+  const [parentFilter, setParentFilter] = useState<string | null>(null);
+  const [parentPickOpen, setParentPickOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkParentOpen, setBulkParentOpen] = useState(false);
+  const [menu, setMenu] = useState<{ d: Dept; anchor: { current: HTMLElement | null } } | null>(null);
+  const confirm = useConfirm();
   const openId = sp?.get("open") ?? null;
   const creating = sp?.get("new") === "1";
+  const newParent = sp?.get("parent") ?? null;
 
   const setParams = useCallback((patch: Record<string, string | null>) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
@@ -142,9 +154,14 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   const filtered = useMemo(() => {
     if (!list) return null;
     const needle = q.trim().toLowerCase();
-    return list.filter((d) => (!needle || d.name.toLowerCase().includes(needle) || (d.head && personName(d.head).toLowerCase().includes(needle))) && (!noHead || !d.headId));
-  }, [list, q, noHead]);
-  const filters = (q.trim() ? 1 : 0) + (noHead ? 1 : 0);
+    return list.filter((d) =>
+      (!needle || d.name.toLowerCase().includes(needle) || (d.head && personName(d.head).toLowerCase().includes(needle))) &&
+      (!noHead || !d.headId) &&
+      (!headFilter || d.headId === headFilter.id) &&
+      (!parentFilter || d.parentId === parentFilter));
+  }, [list, q, noHead, headFilter, parentFilter]);
+  const filters = (q.trim() ? 1 : 0) + (noHead ? 1 : 0) + (headFilter ? 1 : 0) + (parentFilter ? 1 : 0);
+  const clearFilters = () => { setQ(""); setNoHead(false); setHeadFilter(null); setParentFilter(null); };
 
   const rows = useMemo(() => {
     if (!filtered) return null;
@@ -187,10 +204,47 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     { key: "people", label: "People", width: "96px", numeric: true, render: ({ d }) => (
       <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/people?dept=${d.id}`); }} className="tabular-nums hover:underline">{d._count.members}</button>
     ) },
-    { key: "titles", label: "Job titles", width: "96px", numeric: true, hideBelow: 560, render: ({ d }) => (
+    ...(showTitles ? [{ key: "titles", label: "Job titles", width: "96px", numeric: true, hideBelow: 560, render: ({ d }: { d: Dept }) => (
       <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/people/roles?dept=${d.id}`); }} className="tabular-nums hover:underline">{d._count.roles}</button>
-    ) },
-  ], [layout, collapsed, byId, router, showDesc]);
+    ) }] : []),
+  ], [layout, collapsed, byId, router, showDesc, showTitles]);
+
+  // A department is deletable only when nobody (current or removed) is in it
+  // and it has no sub-departments: the same rule the drawer and the route use.
+  const isDeletable = (d: Dept) => d._count.members === 0 && d.removedMembers === 0 && d.subDepartments.length === 0;
+  const selectedDepts = (list ?? []).filter((d) => selected.has(d.id));
+  const selectedDeletable = selectedDepts.filter(isDeletable);
+  async function bulkSetParent(parentId: string | null) {
+    const rows = selectedDepts.filter((d) => d.id !== parentId);
+    const failed: string[] = [];
+    for (const d of rows) {
+      const r = await apiFetch(`/api/departments/${d.id}`, { method: "PATCH", json: { parentId } });
+      if (!r.ok) failed.push(d.id);
+    }
+    const done = rows.length - failed.length;
+    toast(failed.length ? `Moved ${done}; ${failed.length} couldn't be moved (a loop, or no access)` : `Moved ${done} ${done === 1 ? "department" : "departments"}`, failed.length ? { tone: "danger" } : undefined);
+    setSelected(new Set(failed));
+    void load();
+  }
+  async function deleteDepts(rows: Dept[]) {
+    if (rows.length === 0) return;
+    const ok = await confirm({
+      title: rows.length === 1 ? `Delete ${rows[0].name}?` : `Delete ${rows.length} departments?`,
+      description: "Only empty departments with no sub-departments are deleted. This can't be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    const failed: string[] = [];
+    for (const d of rows) {
+      const r = await apiFetch(`/api/departments/${d.id}`, { method: "DELETE" });
+      if (!r.ok) failed.push(d.id);
+    }
+    const done = rows.length - failed.length;
+    toast(failed.length ? `Deleted ${done}; ${failed.length} couldn't be deleted` : `Deleted ${done} ${done === 1 ? "department" : "departments"}`, failed.length ? { tone: "danger" } : undefined);
+    setSelected(new Set(failed));
+    void load();
+  }
 
   function exportCsv() {
     const csv = toCsv(["Department", "Head", "Parent", "People", "Job titles", "Description"],
@@ -210,6 +264,7 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     primary: canWrite && !creating ? { label: "New department", icon: Plus, onClick: () => setParams({ new: "1", open: null }) } : undefined,
     menu: [
       { label: "Description", checked: showDesc, keepOpen: true, onClick: () => setShowDesc((x) => !x) },
+      { label: "Job titles", checked: showTitles, keepOpen: true, onClick: () => setShowTitles((x) => !x) },
       ...(isAdmin && !boot.viewer.isAgent ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
     ],
   };
@@ -229,9 +284,24 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
       </div>
       <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="departments" activeCount={filters}
-          onClearAll={() => { setQ(""); setNoHead(false); }} search={{ value: q, onChange: setQ, placeholder: "Search departments" }}>
+          onClearAll={clearFilters} search={{ value: q, onChange: setQ, placeholder: "Search departments" }}>
           <FilterGroup label="Head">
+            <PeoplePickerField ariaLabel="Head" value={headFilter ? [headFilter.id] : []} people={headFilter ? [headFilter] : []} placeholder="Anyone"
+              onChange={(_ids, picked) => setHeadFilter(picked[0] ?? null)} />
             <FilterRow label="Has no head" checked={noHead} onCheckedChange={setNoHead} />
+          </FilterGroup>
+          <FilterGroup label="Parent">
+            <div className="relative">
+              <button type="button" aria-haspopup="listbox" aria-expanded={parentPickOpen} onClick={() => setParentPickOpen((v) => !v)}
+                className="inline-flex h-8 w-full items-center gap-1.5 rounded-md border border-line bg-raised px-2 text-sm text-ink hover:border-line-strong">
+                <span className={`min-w-0 flex-1 truncate text-start ${parentFilter ? "" : "text-ink-3"}`}>{parentFilter ? byId.get(parentFilter)?.name ?? "Any" : "Any"}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-2" aria-hidden />
+              </button>
+              <Picker open={parentPickOpen} onClose={() => setParentPickOpen(false)} ariaLabel="Parent department" searchPlaceholder="Search departments" selected={parentFilter ?? "__any__"}
+                sections={[{ options: [{ value: "__any__", label: "Any" }, ...(list ?? []).filter((d) => d.subDepartments.length > 0).map((d) => ({ value: d.id, label: d.name }))] }]}
+                onSelect={(v) => { setParentPickOpen(false); setParentFilter(v === "__any__" ? null : v); }}
+                className="absolute start-0 top-9 z-50" />
+            </div>
           </FilterGroup>
         </FilterPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -253,28 +323,67 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
               rowKey={(r) => r.d.id}
               onRowClick={(r) => setParams({ open: r.d.id, new: null })}
               highlightKey={openId}
+              selectable={canWrite}
+              selected={selected}
+              onSelectedChange={setSelected}
+              bulkActions={canWrite ? (
+                <>
+                  <div className="relative">
+                    <button type="button" onClick={() => setBulkParentOpen((v) => !v)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink hover:bg-hover"><ListTree className="h-4 w-4" aria-hidden />Set parent</button>
+                    <Picker open={bulkParentOpen} onClose={() => setBulkParentOpen(false)} side="top" ariaLabel="Set parent" searchPlaceholder="Search departments"
+                      sections={[{ options: [{ value: "__none__", label: "No parent" }, ...(list ?? []).filter((d) => !selected.has(d.id)).map((d) => ({ value: d.id, label: d.name }))] }]}
+                      onSelect={(val) => { setBulkParentOpen(false); void bulkSetParent(val === "__none__" ? null : val); }}
+                      className="absolute bottom-10 start-0 z-50" />
+                  </div>
+                  {selectedDeletable.length ? (
+                    <button type="button" onClick={() => void deleteDepts(selectedDeletable)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-danger-text hover:bg-hover"><Trash2 className="h-4 w-4" aria-hidden />Delete empty ({selectedDeletable.length})</button>
+                  ) : null}
+                </>
+              ) : undefined}
+              rowMenu={canWrite ? (r) => (
+                <button type="button" aria-label={`Actions for ${r.d.name}`} aria-haspopup="menu"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ d: r.d, anchor: { current: e.currentTarget } }); }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              ) : undefined}
               footer={list ? { total: list.length, noun: "departments", from: rows?.length ? 1 : 0, to: rows?.length ?? 0 } : undefined}
-              empty={<span className="text-row text-ink-2">No departments match · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setQ(""); setNoHead(false); }}>Clear filters</button></span>}
+              empty={<span className="text-row text-ink-2">No departments match · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>}
             />
           )}
         </div>
       </div>
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label={`Actions for ${menu.d.name}`}>
+            <MenuItem icon={Pencil} label="Edit" onClick={() => { const id = menu.d.id; setMenu(null); setParams({ open: id, new: null }); }} />
+            <MenuItem icon={Plus} label="Add sub-department" onClick={() => { const id = menu.d.id; setMenu(null); setParams({ new: "1", open: null, parent: id }); }} />
+            {isDeletable(menu.d) ? (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const d = menu.d; setMenu(null); void deleteDepts([d]); }} />
+              </>
+            ) : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
       {(openId && byId.get(openId)) || creating ? (
         <DepartmentDrawer
-          key={creating ? "new" : openId}
+          key={creating ? `new:${newParent ?? ""}` : openId}
+          defaultParentId={creating ? newParent : null}
           dept={creating ? null : byId.get(openId!) ?? null}
           all={list ?? []}
           canWrite={canWrite}
-          onClose={() => setParams({ open: null, new: null })}
+          onClose={() => setParams({ open: null, new: null, parent: null })}
           onChanged={() => void load()}
-          onCreated={(id) => { void load(); setParams({ new: null, open: id }); toast("Department created"); }}
+          onCreated={(id) => { void load(); setParams({ new: null, open: id, parent: null }); toast("Department created"); }}
         />
       ) : null}
     </>
   );
 }
 
-type FieldState = "idle" | "saving" | "saved" | { error: string };
+type FieldState = "idle" | "saving" | "saved" | "retrying" | { error: string };
 
 function DrawerRow({ label, field, state, children }: { label: string; field: string; state: Record<string, FieldState>; children: React.ReactNode }) {
   const st = state[field];
@@ -284,14 +393,17 @@ function DrawerRow({ label, field, state, children }: { label: string; field: st
       <div className="min-w-0">
         {children}
         {typeof st === "object" ? <p role="alert" className="mt-1 text-xs text-danger-text">{st.error}</p> : null}
+        {st === "retrying" ? <p role="status" className="mt-1 text-xs text-danger-text">Not saved, retrying. It saves when you reconnect.</p> : null}
       </div>
       <span className="pt-2">{st === "saved" ? <Check className="h-4 w-4 text-success-text" aria-label="Saved" /> : null}</span>
     </div>
   );
 }
 
-function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated }: {
+function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, defaultParentId = null }: {
   dept: Dept | null; all: Dept[]; canWrite: boolean; onClose: () => void; onChanged: () => void; onCreated: (id: string) => void;
+  /** "Add sub-department" from a row: the new department starts under it. */
+  defaultParentId?: string | null;
 }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
@@ -299,7 +411,7 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated }
   const [name, setName] = useState(dept?.name ?? "");
   const [description, setDescription] = useState(dept?.description ?? "");
   const [head, setHead] = useState<PickPerson | null>(dept?.head ?? null);
-  const [parentId, setParentId] = useState<string | null>(dept?.parentId ?? null);
+  const [parentId, setParentId] = useState<string | null>(dept?.parentId ?? (defaultParentId && all.some((d) => d.id === defaultParentId) ? defaultParentId : null));
   const [hue, setHue] = useState<number | null>(dept ? departmentHue(dept.color).index : null);
   const [parentOpen, setParentOpen] = useState(false);
   const [state, setState] = useState<Record<string, FieldState>>({});
@@ -332,7 +444,11 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated }
   async function save(field: string, body: Record<string, unknown>): Promise<boolean> {
     if (!dept) return true;
     setState((s) => ({ ...s, [field]: "saving" }));
-    const r = await apiFetch(`/api/departments/${dept.id}`, { method: "PATCH", json: body });
+    // The record write queue keeps a change a dropped connection lost and
+    // retries it, even after the drawer closes.
+    const r = await recordWriteQueue().write("PATCH", `/api/departments/${dept.id}`, body, {
+      onRetrying: () => setState((s) => ({ ...s, [field]: "retrying" })),
+    });
     if (!r.ok) { setState((s) => ({ ...s, [field]: { error: r.error || "Not saved" } })); return false; }
     setState((s) => ({ ...s, [field]: "saved" }));
     onChanged();
@@ -415,13 +531,13 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated }
               </div>
             </DrawerRow>
             <DrawerRow state={state} label="Colour" field="color">
-              <div role="radiogroup" aria-label="Colour" className="flex flex-wrap items-center gap-1.5 pt-1">
+              <div role="radiogroup" aria-label="Colour" className="flex flex-wrap items-center gap-1 pt-1">
                 <button type="button" role="radio" aria-checked={hue === null} onClick={() => { setHue(null); if (!create) void save("color", { color: null }); }}
-                  className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium ${hue === null ? "border-brand text-brand-deep" : "border-line text-ink-2"}`}>None</button>
+                  className={`inline-flex h-6 items-center rounded-md border px-2 text-xs font-medium ${hue === null ? "border-brand text-brand-deep" : "border-line text-ink-2"}`}>None</button>
                 {USER_HUES.map((h) => (
                   <button key={h.index} type="button" role="radio" aria-checked={hue === h.index} aria-label={h.name} title={h.name}
                     onClick={() => { setHue(h.index); if (!create) void save("color", { color: String(h.index) }); }}
-                    className={`h-7 w-7 rounded-md border-2 ${hue === h.index ? "border-ink" : "border-transparent"}`}>
+                    className={`h-6 w-6 rounded-md border-2 ${hue === h.index ? "border-ink" : "border-transparent"}`}>
                     <span className="block h-full w-full rounded" style={{ background: h.hex }} />
                   </button>
                 ))}

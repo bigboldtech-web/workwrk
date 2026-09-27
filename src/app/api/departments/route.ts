@@ -8,6 +8,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { viewerFromSession } from "@/lib/access/viewer";
 import { getSessionOrFail, getOrgId, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { mayWriteDepartments } from "@/lib/people/department-access.server";
 import { departmentHue } from "@/lib/people/department-hue";
@@ -17,7 +18,9 @@ const err = (status: number, error: string, extra: Record<string, unknown> = {})
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if ((session.user as { accessLevel?: string }).accessLevel === "GUEST") return err(404, "Not found");
+  // A Guest is an org role (orgRoleOf), not an AccessLevel value, so the
+  // guard asks the viewer rather than comparing the level to "GUEST".
+  if ((await viewerFromSession())?.orgRole === "GUEST") return err(404, "Not found");
   const orgId = getOrgId(session);
 
   const departments = await prisma.department.findMany({

@@ -35,6 +35,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (body.managerRating !== undefined) {
     if (relation === "self") return err(403, "Your manager or the People team gives the manager rating.", { code: "field_forbidden", fields: ["managerRating"] });
+    // A dotted-line manager (or a report's manager below manager tier) reads
+    // the record but rates nothing, the same door as every other write here.
+    if (relation === "chain-view") return err(403, "Their manager or the People team gives the manager rating.", { code: "field_forbidden", fields: ["managerRating"] });
     if (body.managerRating !== null && !isRating(body.managerRating)) return err(400, "A rating is 1 to 5", { field: "managerRating" });
     data.managerRating = body.managerRating as number | null;
   }

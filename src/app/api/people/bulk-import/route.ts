@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
   const [org, members, pending, departments, roles, offices] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true } }),
     prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
-    prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false }, select: { email: true } }),
+    // Only LIVE invitations block a row: a person whose invite expired can be
+    // imported again (the expired row stays, untouched).
+    prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } }, select: { email: true } }),
     prisma.department.findMany({ where: { organizationId: orgId }, select: { id: true, name: true } }),
     prisma.role.findMany({ where: { organizationId: orgId }, select: { id: true, title: true } }),
     prisma.office.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, city: true } }),
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 
   const outcomes: Outcome[] = [];
-  const ready: Array<{ email: string; departmentId: string | null; roleId: string | null; officeId: string | null; managerId: string | null }> = [];
+  const ready: Array<{ email: string; firstName: string; lastName: string; phone: string | null; departmentId: string | null; roleId: string | null; officeId: string | null; managerId: string | null }> = [];
   const seen = new Set<string>();
   rows.forEach((r, i) => {
     const rowNum = i + 1;
@@ -96,7 +98,8 @@ export async function POST(req: NextRequest) {
       managerId = m.id;
     }
     outcomes.push({ row: rowNum, email, status: "ready" });
-    ready.push({ email, departmentId, roleId, officeId, managerId });
+    const phone = s(r.phone).slice(0, 40) || null;
+    ready.push({ email, firstName: s(r.firstName).slice(0, 80), lastName: s(r.lastName).slice(0, 80), phone, departmentId, roleId, officeId, managerId });
   });
 
   const summary = {
@@ -115,6 +118,11 @@ export async function POST(req: NextRequest) {
       prisma.invitation.create({
         data: {
           email: r.email,
+          // Kept on the invitation so the invitee's form starts filled and the
+          // imported phone lands on their record when they join.
+          firstName: r.firstName || null,
+          lastName: r.lastName || null,
+          phone: r.phone,
           accessLevel: "EMPLOYEE",
           token: crypto.randomBytes(32).toString("hex"),
           expiresAt,

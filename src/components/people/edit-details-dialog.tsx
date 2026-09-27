@@ -8,12 +8,14 @@
 // refused field shows the server's reason under it; the footer has only
 // Close. Org role, Agent and access are the Members drawer's.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Picker } from "@/components/ui/picker";
 import { apiFetch } from "@/lib/api-fetch";
+import { recordWriteQueue } from "@/lib/people/record-write-queue";
+import { describeSchedule } from "@/lib/work-schedule";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
 
@@ -30,11 +32,15 @@ export interface EditablePerson {
   manager: PickPerson | null;
   dottedManagers: PickPerson[];
   weeklyCapacityHours?: number | null;
+  workSchedule?: { workdays: number[]; hoursPerDay: number } | null;
+  orgSchedule?: { workdays: number[]; hoursPerDay: number } | null;
+  defaultWeeklyHours?: number | null;
+  profileFields?: Array<{ key: string; label: string; value: string | null }>;
   access: { editable: string[]; dottedLines: boolean; manageMembers: boolean };
 }
 
 type Opt = { id: string; label: string };
-type FieldState = "idle" | "saving" | "saved" | { error: string };
+type FieldState = "idle" | "saving" | "saved" | "retrying" | { error: string };
 
 function OptionField({ value, options, onPick, ariaLabel, noneLabel, footer }: { value: string | null; options: Opt[]; onPick: (id: string | null) => void; ariaLabel: string; noneLabel: string; footer?: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -61,6 +67,76 @@ function OptionField({ value, options, onPick, ariaLabel, noneLabel, footer }: {
   );
 }
 
+const WEEKDAYS: Array<{ d: number; short: string; long: string }> = [
+  { d: 1, short: "M", long: "Monday" }, { d: 2, short: "T", long: "Tuesday" }, { d: 3, short: "W", long: "Wednesday" },
+  { d: 4, short: "T", long: "Thursday" }, { d: 5, short: "F", long: "Friday" }, { d: 6, short: "S", long: "Saturday" }, { d: 0, short: "S", long: "Sunday" },
+];
+
+/**
+ * A person's own working days and hours over the org schedule (decided
+ * addition a). "Org schedule" stores null; "Their own" starts from the org's
+ * days and hours so nothing jumps.
+ */
+function ScheduleField({ value, org, onChange }: {
+  value: { workdays: number[]; hoursPerDay: number } | null;
+  org: { workdays: number[]; hoursPerDay: number } | null;
+  onChange: (next: { workdays: number[]; hoursPerDay: number } | null) => void;
+}) {
+  const base = org ?? { workdays: [1, 2, 3, 4, 5], hoursPerDay: 8 };
+  const [hours, setHours] = useState(String(value?.hoursPerDay ?? base.hoursPerDay));
+  const own = value !== null;
+  const segment = "inline-flex h-7 items-center rounded-md px-2.5 text-sm font-medium";
+  return (
+    <div className="flex flex-col gap-2">
+      <div role="radiogroup" aria-label="Work schedule" className="inline-flex w-fit gap-0.5 rounded-md border border-line p-0.5">
+        <button type="button" role="radio" aria-checked={!own} className={`${segment} ${!own ? "bg-selected text-ink" : "text-ink-2 hover:bg-hover"}`} onClick={() => { if (own) onChange(null); }}>
+          Org schedule
+        </button>
+        <button type="button" role="radio" aria-checked={own} className={`${segment} ${own ? "bg-selected text-ink" : "text-ink-2 hover:bg-hover"}`} onClick={() => { if (!own) onChange({ workdays: [...base.workdays], hoursPerDay: base.hoursPerDay }); }}>
+          Their own
+        </button>
+      </div>
+      {own && value ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1" role="group" aria-label="Working days">
+            {WEEKDAYS.map((w) => {
+              const on = value.workdays.includes(w.d);
+              return (
+                <button
+                  key={w.d}
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={w.long}
+                  title={w.long}
+                  onClick={() => onChange({ ...value, workdays: on ? value.workdays.filter((x) => x !== w.d) : [...value.workdays, w.d].sort((a, b) => a - b) })}
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-sm font-medium ${on ? "border-brand bg-brand text-white" : "border-line text-ink-2 hover:bg-hover"}`}
+                >
+                  {w.short}
+                </button>
+              );
+            })}
+          </div>
+          <input
+            type="number" inputMode="decimal" min={0.5} max={24} step={0.5}
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            onBlur={() => {
+              const h = Number(hours);
+              if (!Number.isFinite(h) || h <= 0 || h > 24) { setHours(String(value.hoursPerDay)); return; }
+              if (h !== value.hoursPerDay) onChange({ ...value, hoursPerDay: h });
+            }}
+            aria-label="Hours a day"
+            className="h-7 w-16 rounded-md border border-line bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
+          />
+          <span className="text-sm text-ink-2">hours a day</span>
+        </div>
+      ) : (
+        <span className="text-sm text-ink-2">{describeSchedule(base)}</span>
+      )}
+    </div>
+  );
+}
+
 function Row({ label, state, children }: { label: string; state: FieldState; children: ReactNode }) {
   return (
     <div className="grid grid-cols-[140px_1fr_20px] items-start gap-3 py-1.5">
@@ -68,6 +144,7 @@ function Row({ label, state, children }: { label: string; state: FieldState; chi
       <div className="min-w-0">
         {children}
         {typeof state === "object" ? <p role="alert" className="mt-1 text-xs text-danger-text">{state.error}</p> : null}
+        {state === "retrying" ? <p role="status" className="mt-1 text-xs text-danger-text">Not saved, retrying. It saves when you reconnect, even if you close this.</p> : null}
       </div>
       <span className="pt-2" aria-live="polite">
         {state === "saved" ? <Check className="h-4 w-4 text-success-text" aria-label="Saved" /> : state === "saving" ? <span className="sr-only">Saving</span> : null}
@@ -94,6 +171,10 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
   const [lastName, setLastName] = useState(person.lastName);
   const [phone, setPhone] = useState(person.phone ?? "");
   const [changed, setChanged] = useState(false);
+  const [schedule, setSchedule] = useState<{ workdays: number[]; hoursPerDay: number } | null>(person.workSchedule ?? null);
+  const [profile, setProfile] = useState<Record<string, string>>(() =>
+    Object.fromEntries((person.profileFields ?? []).map((f) => [f.key, f.value ?? ""])),
+  );
   const [status, setStatus] = useState(person.status);
 
   useEffect(() => {
@@ -115,19 +196,31 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Every field write goes through the record write queue: a dropped
+  // connection keeps the change and retries (on a backoff, and at once on
+  // reconnect), even after this dialog closes, which is what the shell's
+  // offline banner promises. A refusal is said under the field and dropped.
+  const closedRef = useRef(false);
   async function save(field: string, body: Record<string, unknown>, url = `/api/users/${person.id}`, method: "PATCH" | "PUT" = "PATCH"): Promise<boolean> {
     setState((s) => ({ ...s, [field]: "saving" }));
-    const r = await apiFetch(url, { method, json: body });
+    const r = await recordWriteQueue().write(method, url, body, {
+      onRetrying: () => { if (!closedRef.current) setState((s) => ({ ...s, [field]: "retrying" })); },
+    });
     if (!r.ok) {
-      setState((s) => ({ ...s, [field]: { error: r.error || "Not saved" } }));
+      if (!closedRef.current) setState((s) => ({ ...s, [field]: { error: r.error || "Not saved" } }));
       return false;
+    }
+    if (closedRef.current) {
+      // Landed after the dialog closed: refresh the record behind it.
+      onSaved();
+      return true;
     }
     setState((s) => ({ ...s, [field]: "saved" }));
     setChanged(true);
     return true;
   }
 
-  const close = () => { if (changed) onSaved(); onClose(); };
+  const close = () => { closedRef.current = true; if (changed) onSaved(); onClose(); };
   const personal = can("firstName") || can("lastName") || can("phone");
 
   return (
@@ -219,14 +312,47 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                     const v = capacity.trim() === "" ? null : Number(capacity);
                     if (v !== (person.weeklyCapacityHours ?? null)) void save("weeklyCapacityHours", { weeklyCapacityHours: v });
                   }}
-                  placeholder="Org default"
+                  placeholder={person.defaultWeeklyHours != null ? `${person.defaultWeeklyHours}` : "Org default"}
                   aria-label="Weekly capacity hours"
                   className="h-8 w-28 rounded-md border border-line bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none"
                 />
-                <span className="text-sm text-ink-2">hours a week. Blank uses the org default.</span>
+                <span className="text-sm text-ink-2">
+                  hours a week. Blank uses {person.workSchedule ? "their schedule" : "the org default"}
+                  {person.defaultWeeklyHours != null ? ` (${person.defaultWeeklyHours}h)` : ""}.
+                </span>
               </div>
             </Row>
           ) : null}
+          {can("workSchedule") ? (
+            <Row label="Work schedule" state={state.workSchedule ?? "idle"}>
+              <ScheduleField
+                value={schedule}
+                org={person.orgSchedule ?? null}
+                onChange={(next) => {
+                  const prev = schedule;
+                  setSchedule(next);
+                  void save("workSchedule", { workSchedule: next }).then((ok) => { if (!ok) setSchedule(prev); });
+                }}
+              />
+            </Row>
+          ) : null}
+          {can("customFields")
+            ? (person.profileFields ?? []).map((f) => (
+                <Row key={f.key} label={f.label} state={state[`cf:${f.key}`] ?? "idle"}>
+                  <input
+                    value={profile[f.key] ?? ""}
+                    onChange={(e) => setProfile((p) => ({ ...p, [f.key]: e.target.value }))}
+                    onBlur={() => {
+                      const v = (profile[f.key] ?? "").trim();
+                      if (v !== (f.value ?? "")) void save(`cf:${f.key}`, { customFields: { [f.key]: v || null } });
+                    }}
+                    maxLength={500}
+                    aria-label={f.label}
+                    className="h-8 w-full rounded-md border border-line bg-raised px-2 text-sm text-ink focus:border-brand focus:outline-none"
+                  />
+                </Row>
+              ))
+            : null}
           {can("dateOfBirth") ? (
             <Row label="Date of birth" state={state.dateOfBirth ?? "idle"}>
               <input type="date" value={dob} onChange={(e) => { setDob(e.target.value); void save("dateOfBirth", { dateOfBirth: e.target.value || null }); }} aria-label="Date of birth" className="h-8 rounded-md border border-line bg-raised px-2 text-sm text-ink focus:border-brand focus:outline-none" />
@@ -241,6 +367,15 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                 <button type="button" className="text-brand-deep hover:underline" onClick={() => void save("status", { status: "ACTIVE" }).then((ok) => { if (ok) setStatus("ACTIVE"); })}>Set to Active</button>
               </div>
             </Row>
+          ) : null}
+          {person.access.manageMembers ? (
+            <p className="mt-3 text-sm text-ink-2">
+              {(person.profileFields ?? []).length === 0 ? "No profile fields yet. " : ""}
+              <button type="button" className="text-brand-deep hover:underline" onClick={() => { onClose(); openSettings("/settings/structure?tab=fields"); }}>
+                {(person.profileFields ?? []).length === 0 ? "Add profile fields" : "Manage profile fields"}
+              </button>
+              {" "}in Settings, like Employee ID or Pronouns.
+            </p>
           ) : null}
           {person.access.manageMembers ? (
             <p className="mt-3 text-sm text-ink-2">

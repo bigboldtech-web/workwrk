@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeSchedule,
+  effectivePersonSchedule,
+  nominalWeekHours,
+  validatePersonScheduleOverride,
   capacityForDay,
   dayKeyLocal,
   expectedWeekHours,
@@ -181,5 +185,35 @@ describe("a partial body merged over the saved calendar", () => {
   it("still writes a real change to every field when every field is sent", () => {
     const next = merge({ workdays: [0, 6], hoursPerDay: 4, timezone: "UTC", holidays: [] });
     expect(next).toEqual({ workdays: [0, 6], hoursPerDay: 4, timezone: "UTC", holidays: [] });
+  });
+});
+
+
+describe("a person's own schedule", () => {
+  it("validates strictly and normalises", () => {
+    expect(validatePersonScheduleOverride({ workdays: [3, 1, 1], hoursPerDay: 6 })).toEqual({ ok: true, value: { workdays: [1, 3], hoursPerDay: 6 } });
+    expect(validatePersonScheduleOverride(null)).toEqual({ ok: true, value: null });
+    expect(validatePersonScheduleOverride({ days: "lol" }).ok).toBe(false);
+    expect(validatePersonScheduleOverride({ workdays: [7], hoursPerDay: 8 }).ok).toBe(false);
+    expect(validatePersonScheduleOverride({ workdays: [1], hoursPerDay: 0 }).ok).toBe(false);
+    expect(validatePersonScheduleOverride({ workdays: [1], hoursPerDay: 8, extra: 1 }).ok).toBe(false);
+    expect(validatePersonScheduleOverride([1, 2]).ok).toBe(false);
+  });
+
+  it("overrides days and hours but keeps the org's holidays and zone", () => {
+    const org = { workdays: [1, 2, 3, 4, 5] as const, hoursPerDay: 8, timezone: "Asia/Kolkata", holidays: [{ date: "2026-10-02", name: "Gandhi Jayanti" }] };
+    const s = effectivePersonSchedule({ ...org, workdays: [...org.workdays] }, { workdays: [1, 3, 5], hoursPerDay: 6 });
+    expect(s.workdays).toEqual([1, 3, 5]);
+    expect(s.hoursPerDay).toBe(6);
+    expect(s.holidays).toHaveLength(1);
+    expect(s.timezone).toBe("Asia/Kolkata");
+    expect(effectivePersonSchedule({ ...org, workdays: [...org.workdays] }, { junk: true }).workdays).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("describes and totals a week", () => {
+    expect(describeSchedule({ workdays: [1, 2, 3, 4, 5], hoursPerDay: 8 })).toBe("Mon to Fri, 8h a day");
+    expect(describeSchedule({ workdays: [1, 3, 5], hoursPerDay: 6 })).toBe("Mon, Wed, Fri, 6h a day");
+    expect(describeSchedule({ workdays: [], hoursPerDay: 8 })).toBe("No fixed days");
+    expect(nominalWeekHours({ workdays: [1, 2, 3, 4, 5], hoursPerDay: 7.5 })).toBe(37.5);
   });
 });

@@ -38,6 +38,11 @@ function list(v: string | null): string[] {
   return v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
 }
 
+/** The AccessLevel enum values a job title's seniority can hold. */
+const SENIORITY_VALUES: ReadonlySet<string> = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR",
+]);
+
 /**
  * Parse the query. Values a viewer may not use (the Removed and No manager
  * views, the Deactivated filter) are dropped here when `privileged` is
@@ -61,7 +66,9 @@ export function parseDirectoryQuery(sp: ParamsLike, opts: { privileged: boolean 
     officeId: sp.get("office") ?? sp.get("officeId"),
     managerId: sp.get("reportsTo") ?? sp.get("managerId"),
     tagIds: list(sp.get("tags") ?? sp.get("tagIds")),
-    seniority: list(sp.get("seniority")),
+    // Only real seniority values reach the database; anything else is
+    // dropped (the filter reads as off), never a 500.
+    seniority: list(sp.get("seniority")).filter((v) => SENIORITY_VALUES.has(v)),
     deactivated: opts.privileged && sp.get("deactivated") === "1",
     sort: SORTS.has(rawSort) ? (rawSort as DirectorySort) : "name",
     group: GROUPS.has(rawGroup) ? (rawGroup as DirectoryGroup) : "none",

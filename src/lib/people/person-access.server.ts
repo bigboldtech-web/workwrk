@@ -10,7 +10,9 @@ import "server-only";
 // manager saw a "manage" page over a minimal payload and a 403 on save).
 //
 // Relationship order, strongest first: self, admin, people-team, org-wide
-// (the legacy C-level, VP and Director reach), chain, none.
+// (the legacy C-level, VP and Director reach), chain (manager tier over the
+// solid tree: writes as yesterday), chain-view (dotted or below manager
+// tier: reads only), none.
 
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
@@ -31,8 +33,14 @@ export interface PeopleCtx {
   orgWide: boolean;
   /** Legacy manager tier (kept for the rules that could act yesterday). */
   managerTier: boolean;
-  /** Everyone below the viewer, solid or dotted, self excluded. */
+  /** Everyone below the viewer, solid or dotted, self excluded (the read reach). */
   chain: Set<string>;
+  /**
+   * The write reach: a manager-tier viewer's SOLID report tree, any depth,
+   * self excluded. Exactly yesterday's canTouchUserAlignment door, so write
+   * rights over a person never grow with a dotted line or a report.
+   */
+  writeChain: Set<string>;
 }
 
 /** Build the context once per request. Null when signed out. */
@@ -43,15 +51,21 @@ export async function peopleCtx(): Promise<PeopleCtx | null> {
   const accessLevel = row?.accessLevel ?? "EMPLOYEE";
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
   const chain = new Set<string>(viewer.reportTree ?? []);
+  const managerTier = legacyIsManagerLevel(accessLevel);
+  const writeChain = new Set<string>();
   // The legacy walker reaches further down solid lines; union, never narrow.
-  if (legacyIsManagerLevel(accessLevel) || chain.size > 0) {
+  if (managerTier || chain.size > 0) {
     try {
-      for (const id of await getTeamUserIds(viewer.organizationId, viewer.userId)) chain.add(id);
+      for (const id of await getTeamUserIds(viewer.organizationId, viewer.userId)) {
+        chain.add(id);
+        if (managerTier) writeChain.add(id);
+      }
     } catch {
-      // The engine's tree alone still answers.
+      // The engine's tree alone still answers reads; writes fail closed.
     }
   }
   chain.delete(viewer.userId);
+  writeChain.delete(viewer.userId);
   const peopleTeam = viewer.peopleTeam === true;
   return {
     userId: viewer.userId,
@@ -62,8 +76,9 @@ export async function peopleCtx(): Promise<PeopleCtx | null> {
     isAdmin,
     peopleTeam,
     orgWide: isAdmin || peopleTeam || ORG_WIDE_ALIGNMENT_LEVELS.has(accessLevel),
-    managerTier: legacyIsManagerLevel(accessLevel),
+    managerTier,
     chain,
+    writeChain,
   };
 }
 
@@ -73,7 +88,8 @@ export function relationTo(ctx: PeopleCtx, subjectId: string): PersonRelation {
   if (ctx.isAdmin) return "admin";
   if (ctx.peopleTeam) return "people-team";
   if (ctx.orgWide) return "org-wide";
-  if (ctx.chain.has(subjectId)) return "chain";
+  if (ctx.writeChain.has(subjectId)) return "chain";
+  if (ctx.chain.has(subjectId)) return "chain-view";
   return "none";
 }
 

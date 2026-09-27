@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { viewerFromSession } from "@/lib/access/viewer";
 import { mayWriteJobTitles } from "@/lib/people/job-title-access.server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { isAssignableSeniority } from "@/lib/people/seniority";
@@ -9,7 +10,9 @@ export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const orgId = getOrgId(session);
-  if ((session.user as { accessLevel?: string }).accessLevel === "GUEST") return jsonError("Not found", 404);
+  // A Guest is an org role (orgRoleOf), not an AccessLevel value, so the
+  // guard asks the viewer rather than comparing the level to "GUEST".
+  if ((await viewerFromSession())?.orgRole === "GUEST") return jsonError("Not found", 404);
 
   // Additive alignment counts for the job-title-first workspace: every
   // role row carries how many KRAs it contains and how many KPI gauges
@@ -78,7 +81,13 @@ export async function POST(req: NextRequest) {
   if (title.length > 120) return jsonError("A job title is up to 120 characters");
   // `seniority` is the field; `level` is accepted as its alias for one release.
   const seniority = body?.seniority ?? body?.level ?? "EMPLOYEE";
-  if (!isAssignableSeniority(seniority)) return jsonError("Pick one of the six seniority labels");
+  // Duplicating a title keeps its seniority even when that is a legacy value
+  // (HR, Company admin) the picker no longer offers.
+  const source =
+    typeof body?.duplicateOf === "string" && body.duplicateOf
+      ? await prisma.role.findFirst({ where: { id: body.duplicateOf, organizationId: getOrgId(session) }, select: { level: true } })
+      : null;
+  if (!isAssignableSeniority(seniority, source?.level ?? null)) return jsonError("Pick one of the six seniority labels");
   const departmentId = typeof body?.departmentId === "string" && body.departmentId ? body.departmentId : null;
   if (departmentId && !(await prisma.department.count({ where: { id: departmentId, organizationId: getOrgId(session) } }))) {
     return jsonError("That department isn't in this workspace");

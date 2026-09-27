@@ -19,6 +19,9 @@
 --                                     WorkSchedule (decided addition a)
 --   "User"."customFields"             values of the org's custom profile
 --                                     fields (decided addition c)
+--   "Invitation"."firstName",
+--   "lastName", "phone"               what a People CSV import carried, kept
+--                                     on the invitation for the invitee
 --   "Threshold"."escalatedToId"       who an escalation goes to (T9; nothing
 --                                     enforces thresholds yet, report only)
 --   "KPIRecord"."reviewedById"        the manager who recorded or approved a
@@ -97,3 +100,11 @@ BEGIN
       FOREIGN KEY ("sessionId") REFERENCES "CandorSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;
   END IF;
 END $$;
+
+-- 9. Invitation names and phone (Stage B review): a People CSV import now
+--    sends invitations rather than creating accounts, and the Invitation had
+--    nowhere to keep the first name, last name and phone the file carried,
+--    so they were silently dropped. Nullable; a manual invite leaves them null.
+ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "firstName" TEXT;
+ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "lastName" TEXT;
+ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "phone" TEXT;

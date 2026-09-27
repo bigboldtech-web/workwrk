@@ -12,7 +12,8 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { NEUTRAL_TILE } from "@/components/ui/entity-tile";
-import { Chip, StatusChip } from "@/components/ui/chip";
+import { Chip } from "@/components/ui/chip";
+import { ToneChip } from "@/components/people/person-bits";
 import Link from "next/link";
 import {
   GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
@@ -93,7 +94,7 @@ export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, tab 
     const res = await fetch("/api/roles", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: `${bundle.role.title} (copy)`, description: bundle.role.description, seniority: bundle.role.level, departmentId: bundle.role.department?.id ?? null }),
+      body: JSON.stringify({ title: `${bundle.role.title} (copy)`, description: bundle.role.description, seniority: bundle.role.level, duplicateOf: roleId, departmentId: bundle.role.department?.id ?? null }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { toast(d?.error ?? "Couldn't duplicate the job title"); return; }
@@ -221,7 +222,7 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
               {canEdit ? (
                 missing > 0 ? (
                   <>
-                    <StatusChip color="#B45309" label={`Missing ${missing} of ${totalTemplates} KRAs`} />
+                    <ToneChip tone="warning" label={`Missing ${missing} of ${totalTemplates} KRAs`} />
                     <button type="button" disabled={seedingId === p.id} onClick={() => void seedHolder(p)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
                       {seedingId === p.id ? "Seeding" : "Seed"}
                     </button>
@@ -240,10 +241,10 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
 // ─────────────────────────── shared bits ───────────────────────────
 function Card({ title, icon: Icon, action, children }: { title: string; icon?: React.ComponentType<{ className?: string }>; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-4">
+    <section className="rounded-xl border border-line bg-raised p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-zinc-900 flex items-center gap-1.5">
-          {Icon ? <Icon className="w-4 h-4 text-zinc-400" /> : null}
+        <h2 className="text-xs font-semibold text-ink flex items-center gap-1.5">
+          {Icon ? <Icon className="w-4 h-4 text-ink-2" /> : null}
           {title}
         </h2>
         {action}
@@ -388,10 +389,10 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
               onChange={(e) => { setTitle(e.target.value); titleRef.current = e.target.value; queueSave(); }}
               onBlur={() => void flush()}
               placeholder="Job title"
-              className="w-full text-base rounded-md border border-zinc-200 px-2.5 py-1.5 focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full text-base rounded-md border border-line px-2.5 py-1.5 focus:outline-none focus:border-[var(--os-brand)]"
             />
           ) : (
-            <span className="text-base text-zinc-700">{bundle.role.title}</span>
+            <span className="text-base text-ink">{bundle.role.title}</span>
           )}
         </Field>
         <Field label="Description">
@@ -402,27 +403,27 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
               onBlur={() => void flush()}
               rows={2}
               placeholder="What this job title is for and what it must ensure"
-              className="w-full text-base rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full text-base rounded-md border border-line px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
           ) : (
-            <span className="text-base text-zinc-700">{mission || <span className="text-zinc-400">Not set</span>}</span>
+            <span className="text-base text-ink">{mission || <span className="text-ink-2">Not set</span>}</span>
           )}
         </Field>
         <Field label="Department">
           {canEdit ? (
             <FunctionPicker roleId={bundle.role.id} current={bundle.role.department} />
           ) : (
-            <span className="text-base text-zinc-700">{bundle.role.department?.name ?? <span className="text-zinc-400">No department</span>}</span>
+            <span className="text-base text-ink">{bundle.role.department?.name ?? <span className="text-ink-2">No department</span>}</span>
           )}
         </Field>
         <Field label="Seniority">
           {canEdit ? (
             <LevelSelect roleId={bundle.role.id} current={bundle.role.level} />
           ) : (
-            <span className="text-base text-zinc-700">{seniorityLabel(bundle.role.level)}</span>
+            <span className="text-base text-ink">{seniorityLabel(bundle.role.level)}</span>
           )}
         </Field>
-        <Field label="People"><Link href={`/people/roles/${bundle.role.id}?tab=people`} className="text-base text-zinc-700 hover:underline">{bundle.people.length} {bundle.people.length === 1 ? "person holds" : "people hold"} this title</Link></Field>
+        <Field label="People"><Link href={`/people/roles/${bundle.role.id}?tab=people`} className="text-base text-ink hover:underline">{bundle.people.length} {bundle.people.length === 1 ? "person holds" : "people hold"} this title</Link></Field>
       </div>
     </Card>
   );
@@ -431,7 +432,7 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-3">
-      <span className="text-xs text-zinc-500 w-[88px] shrink-0">{label}</span>
+      <span className="text-xs text-ink-2 w-[88px] shrink-0">{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );
@@ -480,10 +481,10 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
         disabled={busy}
         onClick={toggle}
         title="Pick the department this job title belongs to"
-        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-zinc-50 disabled:opacity-50"
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-hover disabled:opacity-50"
       >
-        <span className={dept ? "text-zinc-700" : "text-zinc-400"}>{dept?.name ?? "No department"}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+        <span className={dept ? "text-ink" : "text-ink-2"}>{dept?.name ?? "No department"}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-ink-2" />
       </button>
       {open ? (
         <>
@@ -493,9 +494,9 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
               {depts === null ? (
                 <div className="px-3 py-2"><SkeletonLines lines={2} /></div>
               ) : loadFailed ? (
-                <div className="px-3 py-2 text-sm text-zinc-500">Couldn&rsquo;t load departments. Reopen to retry.</div>
+                <div className="px-3 py-2 text-sm text-ink-2">Couldn&rsquo;t load departments. Reopen to retry.</div>
               ) : depts.length === 0 ? (
-                <div className="px-3 py-2 text-sm leading-relaxed text-zinc-500">
+                <div className="px-3 py-2 text-sm leading-relaxed text-ink-2">
                   No departments yet. Create one in{" "}
                   <Link href="/people/departments" className="text-[var(--os-brand)] hover:underline" onClick={() => setOpen(false)}>
                     Teams, Departments
@@ -504,7 +505,7 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
                 </div>
               ) : (
                 <>
-                  <MenuItem label={<span className="text-zinc-500">No department</span>} selected={!dept} onClick={() => void pick(null)} />
+                  <MenuItem label={<span className="text-ink-2">No department</span>} selected={!dept} onClick={() => void pick(null)} />
                   <MenuSeparator />
                   {depts.map((d) => (
                     <MenuItem key={d.id} label={d.name} selected={dept?.id === d.id} onClick={() => void pick(d)} />
@@ -559,10 +560,10 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
         disabled={busy}
         onClick={() => setOpen((v) => !v)}
         aria-label="Seniority"
-        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-zinc-50 disabled:opacity-50"
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-hover disabled:opacity-50"
       >
-        <span className="text-zinc-700">{seniorityLabel(level)}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+        <span className="text-ink">{seniorityLabel(level)}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-ink-2" />
       </button>
       {open ? (
         <>
@@ -581,7 +582,7 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
           </MorePortal>
         </>
       ) : null}
-      <p className="text-xs text-zinc-400 mt-1">
+      <p className="text-xs text-ink-2 mt-1">
         Display only. Seniority never changes what someone can do.
       </p>
     </div>
@@ -640,12 +641,12 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
 
   return (
     <Card title="Ownership boundary" icon={GitBranch}>
-      <p className="text-xs text-zinc-400 mb-3 -mt-1">One concept, one owner, one place. A request is raised to the owner, never edited directly.</p>
+      <p className="text-xs text-ink-2 mb-3 -mt-1">One concept, one owner, one place. A request is raised to the owner, never edited directly.</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Owns */}
-        <BoundaryColumn tone="#16a34a" icon={ShieldCheck} label="Owns">
+        <BoundaryColumn icon={ShieldCheck} label="Owns">
           {bundle.ownedAreas.length === 0 ? <Empty>Nothing owned yet</Empty> : bundle.ownedAreas.map((a) => (
-            <li key={a.id} className="group/oa flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-emerald-50/60 text-base text-zinc-800">
+            <li key={a.id} className="group/oa flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-hover text-base text-ink">
               {renamingId === a.id ? (
                 <input
                   autoFocus
@@ -656,7 +657,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
                     if (e.key === "Escape") setRenamingId(null);
                   }}
                   onBlur={() => void saveRename(a.id)}
-                  className="flex-1 min-w-0 text-base bg-white rounded border border-emerald-200 px-1.5 py-0.5 outline-none focus:border-[var(--os-brand)]"
+                  className="flex-1 min-w-0 text-base bg-raised rounded border border-line px-1.5 py-0.5 outline-none focus:border-brand"
                 />
               ) : (
                 <span className="flex-1 truncate" title={a.name}>{a.name}</span>
@@ -669,7 +670,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
                     onClick={() => { setRenamingId(a.id); setRenameVal(a.name); }}
                     title="Rename area"
                     aria-label={`Rename ${a.name}`}
-                    className="text-zinc-300 hover:text-zinc-700"
+                    className="text-ink-3 hover:text-ink"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
@@ -679,7 +680,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
                     onClick={() => setDeleteArea({ id: a.id, name: a.name })}
                     title="Delete area"
                     aria-label={`Delete ${a.name}`}
-                    className="text-zinc-300 hover:text-red-500"
+                    className="text-ink-3 hover:text-danger-text"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -690,21 +691,21 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
           {canEdit ? (
             <li className="flex items-center gap-1.5 px-1 pt-1">
               <input value={newArea} onChange={(e) => setNewArea(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addOwnedArea(); } }}
-                placeholder="Add an owned area…" className="flex-1 text-sm bg-transparent outline-none placeholder:text-zinc-400" />
+                placeholder="Add an owned area…" className="flex-1 text-sm bg-transparent outline-none placeholder:text-ink-2" />
               {newArea.trim() ? <button type="button" disabled={busy} onClick={addOwnedArea} className="text-[var(--os-brand)]"><Check className="w-3.5 h-3.5" /></button> : null}
             </li>
           ) : null}
         </BoundaryColumn>
 
         {/* Can request */}
-        <BoundaryColumn tone="#0073EA" icon={HandHelping} label="Can request" onAdd={canEdit ? () => setAddOpen("CAN_REQUEST") : undefined}>
+        <BoundaryColumn icon={HandHelping} label="Can request" onAdd={canEdit ? () => setAddOpen("CAN_REQUEST") : undefined}>
           {canRequest.length === 0 ? <Empty>None yet. Link areas other roles own, so this role can raise requests to them.</Empty> : canRequest.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} onRequest={() => raiseRequest(b)} />
           ))}
         </BoundaryColumn>
 
         {/* Cannot touch */}
-        <BoundaryColumn tone="#dc2626" icon={Ban} label="Cannot touch" onAdd={canEdit ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
+        <BoundaryColumn icon={Ban} label="Cannot touch" onAdd={canEdit ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
           {cannotTouch.length === 0 ? <Empty>None yet. Mark areas explicitly off-limits for this role.</Empty> : cannotTouch.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} />
           ))}
@@ -722,8 +723,8 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
             <DialogHeader>
               <DialogTitle>Request: {requestFor.area.name}</DialogTitle>
             </DialogHeader>
-            <p className="text-xs text-zinc-500 mb-3">
-              Goes to everyone currently holding <span className="font-medium text-zinc-700">{requestFor.area.ownerRole?.title ?? "the owner role"}</span>. They decide and act; this job title never edits the area directly.
+            <p className="text-xs text-ink-2 mb-3">
+              Goes to everyone currently holding <span className="font-medium text-ink">{requestFor.area.ownerRole?.title ?? "the owner role"}</span>. They decide and act; this job title never edits the area directly.
             </p>
             <textarea
               value={requestNote}
@@ -731,10 +732,10 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
               rows={3}
               autoFocus
               placeholder="What do you need changed or decided?"
-              className="w-full text-sm rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full text-sm rounded-md border border-line px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
             <div className="mt-3 flex justify-end gap-2">
-              <button type="button" onClick={() => setRequestFor(null)} className="h-8 px-3 rounded-md text-sm text-zinc-600 hover:bg-zinc-100">Cancel</button>
+              <button type="button" onClick={() => setRequestFor(null)} className="h-8 px-3 rounded-md text-sm text-ink-2 hover:bg-hover">Cancel</button>
               <button type="button" disabled={sendingRequest || !requestNote.trim()} onClick={() => void sendRequest()} className="h-8 px-3.5 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50 inline-flex items-center gap-1.5">
                 {sendingRequest ? "Sending" : "Send request"}
               </button>
@@ -761,12 +762,14 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
   );
 }
 
-function BoundaryColumn({ tone, icon: Icon, label, onAdd, children }: { tone: string; icon: React.ComponentType<{ className?: string }>; label: string; onAdd?: () => void; children: React.ReactNode }) {
+// Neutral columns (design-system 4: one blue, no tinted panels): the icon
+// and the word carry the meaning, never a green, blue or red header.
+function BoundaryColumn({ icon: Icon, label, onAdd, children }: { icon: React.ComponentType<{ className?: string }>; label: string; onAdd?: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-zinc-200 overflow-hidden">
-      <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-zinc-100" style={{ background: `${tone}0d` }}>
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: tone }}><Icon className="w-3.5 h-3.5" />{label}</span>
-        {onAdd ? <button type="button" onClick={onAdd} className="text-zinc-400 hover:text-zinc-700"><Plus className="w-3.5 h-3.5" /></button> : null}
+    <div className="rounded-lg border border-line overflow-hidden">
+      <div className="flex h-9 items-center justify-between px-2.5 border-b border-line-soft bg-subtle">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink"><Icon className="w-3.5 h-3.5 text-ink-2" />{label}</span>
+        {onAdd ? <button type="button" onClick={onAdd} aria-label={`Add to ${label}`} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><Plus className="w-3.5 h-3.5" /></button> : null}
       </div>
       <ul className="p-1.5 space-y-0.5 min-h-[40px]">{children}</ul>
     </div>
@@ -775,13 +778,13 @@ function BoundaryColumn({ tone, icon: Icon, label, onAdd, children }: { tone: st
 
 function BoundaryRow({ b, canEdit, busy, onRemove, onRequest }: { b: Boundary; canEdit: boolean; busy: boolean; onRemove: () => void; onRequest?: () => void }) {
   return (
-    <li className="group/br flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-base text-zinc-800">
+    <li className="group/br flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-hover text-base text-ink">
       <span className="flex-1 min-w-0">
         <span className="block truncate" title={b.area.name}>{b.area.name}</span>
-        {b.area.ownerRole ? <span className="block text-xs text-zinc-400 truncate">owner · {b.area.ownerRole.title}</span> : <span className="block text-xs text-amber-500">no owner set</span>}
+        {b.area.ownerRole ? <span className="block text-xs text-ink-2 truncate">owner · {b.area.ownerRole.title}</span> : <span className="block text-xs text-warning-text">No owner set</span>}
       </span>
       {onRequest ? <button type="button" onClick={onRequest} title="Raise a request to the owner" className="opacity-0 group-hover/br:opacity-100 text-xs text-[var(--os-brand)] hover:underline">Request</button> : null}
-      {canEdit ? <button type="button" disabled={busy} onClick={onRemove} className="text-zinc-300 hover:text-red-500" title="Remove from this list" aria-label="Remove"><X className="w-3.5 h-3.5" /></button> : null}
+      {canEdit ? <button type="button" disabled={busy} onClick={onRemove} className="text-ink-3 hover:text-danger-text" title="Remove from this list" aria-label="Remove"><X className="w-3.5 h-3.5" /></button> : null}
     </li>
   );
 }
@@ -816,7 +819,7 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
         <DialogHeader>
           <DialogTitle>{relation === "CAN_REQUEST" ? "Can request" : "Cannot touch"}: pick an area</DialogTitle>
         </DialogHeader>
-        <p className="text-xs text-zinc-500 mb-2">
+        <p className="text-xs text-ink-2 mb-2">
           {relation === "CAN_REQUEST"
             ? "This role will be able to raise requests to the area's owner, never edit it directly."
             : "This role is explicitly barred from the area, even requests are off the table."}
@@ -825,25 +828,25 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search areas or owners…"
-          className="mb-2 w-full h-8 px-2.5 rounded-md border border-zinc-200 text-sm focus:outline-none focus:border-[var(--os-brand)]"
+          className="mb-2 w-full h-8 px-2.5 rounded-md border border-line text-sm focus:outline-none focus:border-[var(--os-brand)]"
         />
         {areas.length === 0 ? (
-          <p className="px-1 py-4 text-xs text-zinc-400">
-            No areas owned by other roles yet. Areas are defined on the owning role&apos;s page: open that job title and add them under <span className="font-medium text-zinc-600">Owns</span>.
+          <p className="px-1 py-4 text-xs text-ink-2">
+            No areas owned by other roles yet. Areas are defined on the owning role&apos;s page: open that job title and add them under <span className="font-medium text-ink-2">Owns</span>.
           </p>
         ) : filtered.length === 0 ? (
-          <p className="px-1 py-4 text-xs text-zinc-400">Nothing matches.</p>
+          <p className="px-1 py-4 text-xs text-ink-2">Nothing matches.</p>
         ) : null}
         <ul className="max-h-[240px] overflow-y-auto -mx-1">
           {filtered.map((a) => (
             <li key={a.id}>
-              <button type="button" disabled={busy} onClick={() => onPick(a.id)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-base hover:bg-zinc-50">
-                <span className="flex-1 min-w-0"><span className="block truncate">{a.name}</span>{a.ownerRole ? <span className="block text-xs text-zinc-400">owner · {a.ownerRole.title}</span> : null}</span>
+              <button type="button" disabled={busy} onClick={() => onPick(a.id)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-base hover:bg-hover">
+                <span className="flex-1 min-w-0"><span className="block truncate">{a.name}</span>{a.ownerRole ? <span className="block text-xs text-ink-2">owner · {a.ownerRole.title}</span> : null}</span>
               </button>
             </li>
           ))}
         </ul>
-        <div className="mt-2 border-t border-zinc-100 pt-2">
+        <div className="mt-2 border-t border-line-soft pt-2">
           {creating ? (
             <div className="space-y-1.5">
               <input
@@ -851,25 +854,25 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
                 onChange={(e) => setNewName(e.target.value)}
                 autoFocus
                 placeholder="New area name (e.g. Quote pricing rules)"
-                className="w-full h-8 px-2.5 rounded-md border border-zinc-200 text-sm focus:outline-none focus:border-[var(--os-brand)]"
+                className="w-full h-8 px-2.5 rounded-md border border-line text-sm focus:outline-none focus:border-[var(--os-brand)]"
               />
               <select
                 value={newOwner}
                 onChange={(e) => setNewOwner(e.target.value)}
-                className="w-full h-8 px-2 rounded-md border border-zinc-200 text-sm text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+                className="w-full h-8 px-2 rounded-md border border-line text-sm text-ink focus:outline-none focus:border-[var(--os-brand)]"
               >
                 <option value="">Owner role…</option>
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
               </select>
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setCreating(false)} className="h-7 px-2.5 rounded-md text-xs text-zinc-600 hover:bg-zinc-100">Cancel</button>
+                <button type="button" onClick={() => setCreating(false)} className="h-7 px-2.5 rounded-md text-xs text-ink-2 hover:bg-hover">Cancel</button>
                 <button type="button" disabled={savingNew || !newName.trim() || !newOwner} onClick={() => void createArea()} className="h-7 px-3 rounded-md text-xs font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50">
                   {savingNew ? "Creating…" : "Create and add"}
                 </button>
               </div>
             </div>
           ) : (
-            <button type="button" onClick={() => setCreating(true)} className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left text-sm text-[var(--os-brand)] hover:bg-zinc-50">
+            <button type="button" onClick={() => setCreating(true)} className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left text-sm text-[var(--os-brand)] hover:bg-hover">
               <Plus className="w-3.5 h-3.5" /> New area…
             </button>
           )}
@@ -880,7 +883,7 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <li className="px-2 py-1.5 text-xs text-zinc-400">{children}</li>;
+  return <li className="px-2 py-1.5 text-xs text-ink-2">{children}</li>;
 }
 
 // ─────────────────────────── KRAs & KPIs (the role's alignment template) ───────────────────────────
@@ -902,7 +905,7 @@ function RowMenu({ items }: { items: { icon: LucideIcon; label: string; destruct
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="More actions"
-        className="w-6 h-6 grid place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 shrink-0"
+        className="w-6 h-6 grid place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink shrink-0"
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>
@@ -1034,39 +1037,40 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
       ) : undefined}
     >
       <div className="flex items-center justify-between gap-3 mb-3 -mt-1">
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-ink-2">
           Every person with this job title inherits these. Quarterly targets live
           on each person&rsquo;s goals.
         </p>
         {bundle.kras.length > 0 ? (
-          <span
-            className={`text-xs tabular-nums shrink-0 ${totalWeight > 100 ? "text-[#E2445C]" : "text-zinc-400"}`}
-            title="Sum of this job title's KRA weights. Aim for 100%."
-          >
-            weight {totalWeight}% of 100
-          </span>
+          totalWeight !== 100 ? (
+            <span className="shrink-0" title="Sum of this job title's KRA weights. Aim for 100%.">
+              <ToneChip tone="warning" label={`Weights total ${totalWeight}%`} />
+            </span>
+          ) : (
+            <span className="shrink-0 text-xs tabular-nums text-ink-2" title="Sum of this job title's KRA weights.">Weights total 100%</span>
+          )
         ) : null}
       </div>
 
       {bundle.kras.length === 0 ? (
-        <p className="text-base text-zinc-400 py-2">
+        <p className="text-base text-ink-2 py-2">
           No KRAs yet. Add the first area of responsibility this job title owns.
         </p>
       ) : (
         <div className="space-y-3">
           {bundle.kras.map((k) => (
-            <section key={k.id} className="rounded-lg border border-zinc-200">
+            <section key={k.id} className="rounded-lg border border-line">
               {/* KRA heading, a container: no number, no progress bar. */}
               <header className="flex items-start gap-2.5 px-3 pt-2.5 pb-2">
-                <Target className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
+                <Target className="w-4 h-4 text-ink-2 shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-base font-semibold text-zinc-900 truncate" title={k.name}>{k.name}</h3>
+                  <h3 className="text-base font-semibold text-ink truncate" title={k.name}>{k.name}</h3>
                   {k.description ? (
-                    <p className="text-sm text-zinc-500 leading-snug mt-0.5">{k.description}</p>
+                    <p className="text-sm text-ink-2 leading-snug mt-0.5">{k.description}</p>
                   ) : null}
                 </div>
                 <span
-                  className={`text-sm font-mono tabular-nums shrink-0 mt-0.5 ${k.weight ? "text-zinc-700" : "text-zinc-400"}`}
+                  className={`text-sm font-mono tabular-nums shrink-0 mt-0.5 ${k.weight ? "text-ink" : "text-ink-2"}`}
                   title="Job title weight: every holder inherits this share as their starting weightage"
                 >
                   {k.weight || 0}%
@@ -1085,22 +1089,22 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
 
               {/* KPI gauge rows */}
               {k.kpis.length > 0 ? (
-                <ul className="border-t border-zinc-100">
+                <ul className="border-t border-line-soft">
                   {k.kpis.map((p) => {
                     const dir = resolvedDirection(p);
                     const DirIcon = DIRECTION_META[dir].icon;
                     const line = healthyLine(p);
                     const shared = p.ownership === "SHARED";
                     return (
-                      <li key={p.id} className="flex items-start gap-2.5 px-3 py-2 border-b border-zinc-100 last:border-b-0">
+                      <li key={p.id} className="flex items-start gap-2.5 px-3 py-2 border-b border-line-soft last:border-b-0">
                         {p.isNorthStar ? (
-                          <Star className="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0" style={{ fill: "currentColor" }} aria-label="North-star gauge" />
+                          <Star className="w-3.5 h-3.5 mt-0.5 text-ink shrink-0" style={{ fill: "currentColor" }} aria-label="North-star gauge" />
                         ) : (
-                          <Gauge className="w-3.5 h-3.5 mt-0.5 text-zinc-300 shrink-0" />
+                          <Gauge className="w-3.5 h-3.5 mt-0.5 text-ink-3 shrink-0" />
                         )}
                         <span className="min-w-0 flex-1">
-                          <span className="block text-base text-zinc-800 truncate" title={p.name}>{p.name}</span>
-                          <span className="block text-xs text-zinc-400 truncate">
+                          <span className="block text-base text-ink truncate" title={p.name}>{p.name}</span>
+                          <span className="block text-xs text-ink-2 truncate">
                             {[
                               p.unit,
                               shared ? "influenced · reviewed, not graded" : null,
@@ -1108,21 +1112,17 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                             ].filter(Boolean).join(" · ") || " "}
                           </span>
                           {p.description ? (
-                            <p className="text-xs text-zinc-500 leading-snug mt-1 whitespace-pre-wrap break-words">{p.description}</p>
+                            <p className="text-xs text-ink-2 leading-snug mt-1 whitespace-pre-wrap break-words">{p.description}</p>
                           ) : null}
                         </span>
-                        <DirIcon className="w-3.5 h-3.5 mt-0.5 text-zinc-400 shrink-0" aria-label={DIRECTION_META[dir].hint} />
+                        <DirIcon className="w-3.5 h-3.5 mt-0.5 text-ink-2 shrink-0" aria-label={DIRECTION_META[dir].hint} />
                         {line ? (
-                          <span className="text-sm font-mono text-zinc-700 shrink-0" title={`Healthy line: ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
+                          <span className="text-sm font-mono text-ink shrink-0" title={`Healthy line: ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
                         ) : (
-                          <span className="text-xs italic text-zinc-400 shrink-0">no baseline yet</span>
+                          <span className="text-xs italic text-ink-2 shrink-0">no baseline yet</span>
                         )}
-                        <span
-                          className="text-micro font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0"
-                          style={shared ? { background: "#a78b6c22", color: "#8e7165" } : { background: "#0073EA1a", color: "#0073EA" }}
-                          title={shared ? "Influenced by this job title: reviewed, not graded" : "Controlled by this job title: graded"}
-                        >
-                          {shared ? "Shared" : "Owned"}
+                        <span className="shrink-0" title={shared ? "Influenced by this job title: reviewed, not graded" : "Controlled by this job title: graded"}>
+                          <Chip>{shared ? "Shared" : "Owned"}</Chip>
                         </span>
                         {canEdit ? (
                           <RowMenu
@@ -1137,7 +1137,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                   })}
                 </ul>
               ) : (
-                <p className="border-t border-zinc-100 px-3 py-2 text-xs text-zinc-400">
+                <p className="border-t border-line-soft px-3 py-2 text-xs text-ink-2">
                   No gauges yet. How will this area be measured?
                 </p>
               )}
@@ -1146,7 +1146,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                 <button
                   type="button"
                   onClick={() => setKpiDialog({ kraId: k.id, kraName: k.name })}
-                  className="w-full flex items-center gap-1.5 px-3 py-1.5 border-t border-zinc-100 text-sm text-zinc-500 hover:text-[var(--os-brand)] hover:bg-zinc-50 rounded-b-lg"
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 border-t border-line-soft text-sm text-ink-2 hover:text-[var(--os-brand)] hover:bg-hover rounded-b-lg"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add KPI
                 </button>
@@ -1203,13 +1203,28 @@ function SopCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) 
   const [picked, setPicked] = useState<SopOption | null>(null);
   const [move, setMove] = useState<{ sop: SopOption; kraId: string; current: string } | null>(null);
 
+  // The picker searches on the server as the person types (no row cap: an
+  // org with thousands of SOPs finds any of them by name).
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<number | null>(null);
+  const fetchSops = async (term: string) => {
+    const seq = ++searchSeq.current;
+    const qs = new URLSearchParams({ status: "PUBLISHED", limit: "50" });
+    if (term.trim()) qs.set("q", term.trim());
+    const res = await fetch(`/api/sops?${qs.toString()}`, { cache: "no-store" }).catch(() => null);
+    const d = res ? await res.json().catch(() => null) : null;
+    if (seq !== searchSeq.current) return;
+    const rows = (Array.isArray(d) ? d : d?.data ?? d?.sops ?? []) as Array<{ id: string; title: string; kraId?: string | null }>;
+    setOptions(rows.map((r) => ({ id: r.id, title: r.title, kraId: r.kraId ?? null })));
+  };
+  const onSearch = (term: string) => {
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => { void fetchSops(term); }, 200);
+  };
   const open = async () => {
     setStep("sop");
     if (options) return;
-    const res = await fetch("/api/sops?limit=500&status=PUBLISHED", { cache: "no-store" });
-    const d = await res.json().catch(() => null);
-    const rows = (Array.isArray(d) ? d : d?.data ?? d?.sops ?? []) as Array<{ id: string; title: string; kraId?: string | null }>;
-    setOptions(rows.map((r) => ({ id: r.id, title: r.title, kraId: r.kraId ?? null })));
+    await fetchSops("");
   };
   const link = async (sop: SopOption, kraId: string, force = false) => {
     setStep(null);
@@ -1243,7 +1258,8 @@ function SopCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) 
             ariaLabel="Link SOP"
             searchPlaceholder="Search published SOPs"
             loading={options === null}
-            emptyLabel="No published SOPs yet"
+            onSearchChange={onSearch}
+            emptyLabel="No published SOPs match"
             sections={[{ options: (options ?? []).filter((o) => !linked.has(o.id)).map((o) => ({ value: o.id, label: o.title })) }]}
             onSelect={choose}
             className="absolute end-0 top-9 z-50"
@@ -1262,15 +1278,15 @@ function SopCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) 
       ) : undefined}
     >
       {sops.length === 0 ? (
-        <p className="text-base text-zinc-400 py-2">{bundle.kras.length === 0 ? "Add a KRA first: SOPs link to a KRA of this job title." : "No SOPs linked to this job title's KRAs."}</p>
+        <p className="text-base text-ink-2 py-2">{bundle.kras.length === 0 ? "Add a KRA first: SOPs link to a KRA of this job title." : "No SOPs linked to this job title's KRAs."}</p>
       ) : (
         <ul className="space-y-0.5">
           {sops.map((s) => (
             <li key={s.id}>
-              <Link href={`/sops/${s.id}`} className="flex min-h-11 items-center gap-2 px-2 rounded-md hover:bg-zinc-50 text-base">
+              <Link href={`/sops/${s.id}`} className="flex min-h-11 items-center gap-2 px-2 rounded-md hover:bg-hover text-base">
                 <FileText className="w-3.5 h-3.5 text-ink-2 shrink-0" />
-                <span className="flex-1 min-w-0 truncate text-zinc-800">{s.title}</span>
-                <span className="text-xs text-zinc-400 shrink-0">via {s.kraName}</span>
+                <span className="flex-1 min-w-0 truncate text-ink">{s.title}</span>
+                <span className="text-xs text-ink-2 shrink-0">via {s.kraName}</span>
                 <Chip>{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Chip>
               </Link>
             </li>
@@ -1303,33 +1319,33 @@ function ThresholdsCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
     }
   };
   return (
-    <Card title="Escalation thresholds" icon={Gauge} action={canEdit && !adding ? <button type="button" aria-label="Add threshold" onClick={() => setAdding(true)} className="text-zinc-400 hover:text-zinc-700"><Plus className="w-4 h-4" /></button> : undefined}>
+    <Card title="Escalation thresholds" icon={Gauge} action={canEdit && !adding ? <button type="button" aria-label="Add threshold" onClick={() => setAdding(true)} className="text-ink-2 hover:text-ink"><Plus className="w-4 h-4" /></button> : undefined}>
       <p className="-mt-1 mb-2 text-sm text-ink-2">Not enforced yet. Nothing escalates from these until the escalation job reads them.</p>
       {bundle.thresholds.length === 0 && !adding ? (
-        <p className="text-base text-zinc-400 py-2">No thresholds.</p>
+        <p className="text-base text-ink-2 py-2">No thresholds.</p>
       ) : (
         <ul className="space-y-1">
           {bundle.thresholds.map((t) => (
-            <li key={t.id} className="group/th flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-base">
+            <li key={t.id} className="group/th flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-hover text-base">
               <span className="flex-1 min-w-0">
-                <span className="block truncate text-zinc-800">{t.label}</span>
-                <span className="block text-xs text-zinc-400 truncate">{t.trigger}</span>
+                <span className="block truncate text-ink">{t.label}</span>
+                <span className="block text-xs text-ink-2 truncate">{t.trigger}</span>
               </span>
-              <span className="font-mono text-zinc-700 shrink-0">{t.value}{t.unit ? ` ${t.unit}` : ""}</span>
-              {canEdit ? <button type="button" disabled={busy} onClick={() => call(`/api/thresholds/${t.id}`, "DELETE")} className="opacity-0 group-hover/th:opacity-100 text-zinc-400 hover:text-red-500 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button> : null}
+              <span className="font-mono text-ink shrink-0">{t.value}{t.unit ? ` ${t.unit}` : ""}</span>
+              {canEdit ? <button type="button" disabled={busy} onClick={() => call(`/api/thresholds/${t.id}`, "DELETE")} className="opacity-0 group-hover/th:opacity-100 text-ink-2 hover:text-danger-text shrink-0"><Trash2 className="w-3.5 h-3.5" /></button> : null}
             </li>
           ))}
         </ul>
       )}
       {adding ? (
-        <div className="mt-2 rounded-lg border border-zinc-200 p-2.5 space-y-1.5">
-          <input autoFocus value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Label (e.g. Unclaimed → nudge)" className="w-full text-base rounded border border-zinc-200 px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
-          <input value={draft.trigger} onChange={(e) => setDraft({ ...draft, trigger: e.target.value })} placeholder="Trigger (e.g. order unclaimed)" className="w-full text-base rounded border border-zinc-200 px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
+        <div className="mt-2 rounded-lg border border-line p-2.5 space-y-1.5">
+          <input autoFocus value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Label (e.g. Unclaimed → nudge)" className="w-full text-base rounded border border-line px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
+          <input value={draft.trigger} onChange={(e) => setDraft({ ...draft, trigger: e.target.value })} placeholder="Trigger (e.g. order unclaimed)" className="w-full text-base rounded border border-line px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
           <div className="flex items-center gap-1.5">
-            <input value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} inputMode="decimal" placeholder="45" className="w-20 text-base font-mono rounded border border-zinc-200 px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
-            <input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="min" className="w-16 text-base rounded border border-zinc-200 px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
+            <input value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} inputMode="decimal" placeholder="45" className="w-20 text-base font-mono rounded border border-line px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
+            <input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="min" className="w-16 text-base rounded border border-line px-2 py-1 outline-none focus:border-[var(--os-brand)]" />
             <div className="flex-1" />
-            <button type="button" onClick={() => setAdding(false)} className="h-7 px-2.5 rounded-md text-sm text-zinc-600 hover:bg-zinc-100">Cancel</button>
+            <button type="button" onClick={() => setAdding(false)} className="h-7 px-2.5 rounded-md text-sm text-ink-2 hover:bg-hover">Cancel</button>
             <button type="button" disabled={busy} onClick={submit} className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50">Add</button>
           </div>
         </div>
@@ -1374,27 +1390,27 @@ function InstancesPanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
 
   return (
     <Card title="Instances" icon={UsersIcon} action={canEdit && !creating ? <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"><Plus className="w-3.5 h-3.5" />New instance</button> : undefined}>
-      <p className="text-xs text-zinc-400 mb-3 -mt-1">Role × Scope, held by a person. Clone the definition per scope (Pool 1, Pool 2…) and compare.</p>
+      <p className="text-xs text-ink-2 mb-3 -mt-1">Role × Scope, held by a person. Clone the definition per scope (Pool 1, Pool 2…) and compare.</p>
 
       {bundle.instances.length === 0 && !creating ? (
-        <p className="text-base text-zinc-400 py-2">No instances yet.</p>
+        <p className="text-base text-ink-2 py-2">No instances yet.</p>
       ) : (
         <ul className="space-y-1.5">
           {bundle.instances.map((i) => (
-            <li key={i.id} className="group/inst flex items-center gap-3 px-3 py-2 rounded-lg border border-zinc-200 hover:bg-zinc-50">
+            <li key={i.id} className="group/inst flex items-center gap-3 px-3 py-2 rounded-lg border border-line hover:bg-hover">
               {i.user ? (
-                <span className="w-7 h-7 rounded-full bg-zinc-200 text-zinc-600 text-xs font-medium inline-flex items-center justify-center shrink-0">{initials(i.user)}</span>
-              ) : <span className="w-7 h-7 rounded-full bg-zinc-100 text-zinc-400 inline-flex items-center justify-center shrink-0"><UsersIcon className="w-3.5 h-3.5" /></span>}
+                <span className="w-7 h-7 rounded-full bg-line text-ink-2 text-xs font-medium inline-flex items-center justify-center shrink-0">{initials(i.user)}</span>
+              ) : <span className="w-7 h-7 rounded-full bg-subtle text-ink-2 inline-flex items-center justify-center shrink-0"><UsersIcon className="w-3.5 h-3.5" /></span>}
               <span className="flex-1 min-w-0">
-                <span className="block text-base text-zinc-800 truncate">{i.name || `${bundle.role.title}${i.scope ? ` · ${i.scope.name}` : ""}`}</span>
-                <span className="block text-xs text-zinc-400 truncate">{i.scope ? `${i.scope.dimension}: ${i.scope.name}` : "no scope"} · {personName(i.user)}</span>
+                <span className="block text-base text-ink truncate">{i.name || `${bundle.role.title}${i.scope ? ` · ${i.scope.name}` : ""}`}</span>
+                <span className="block text-xs text-ink-2 truncate">{i.scope ? `${i.scope.dimension}: ${i.scope.name}` : "no scope"} · {personName(i.user)}</span>
               </span>
               {canEdit ? (
                 <>
                   <button type="button" disabled={seedingId === i.id} onClick={() => applyDefinition(i)} className="inline-flex items-center gap-1 text-xs text-[var(--os-brand)] hover:underline shrink-0">
                     <Sparkles className="w-3 h-3" />Apply definition
                   </button>
-                  <button type="button" disabled={busy} onClick={() => call(`/api/role-instances/${i.id}`, "DELETE")} className="opacity-0 group-hover/inst:opacity-100 text-zinc-400 hover:text-red-500 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button type="button" disabled={busy} onClick={() => call(`/api/role-instances/${i.id}`, "DELETE")} className="opacity-0 group-hover/inst:opacity-100 text-ink-2 hover:text-danger-text shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                 </>
               ) : null}
             </li>
@@ -1403,10 +1419,10 @@ function InstancesPanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
       )}
 
       {creating ? (
-        <div className="mt-3 rounded-lg border border-zinc-200 p-3 space-y-2">
+        <div className="mt-3 rounded-lg border border-line p-3 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500 w-[64px]">Scope</span>
-            <select value={scopeId} onChange={(e) => setScopeId(e.target.value)} className="flex-1 text-base rounded-md border border-zinc-200 px-2 py-1.5 outline-none focus:border-[var(--os-brand)]">
+            <span className="text-xs text-ink-2 w-[64px]">Scope</span>
+            <select value={scopeId} onChange={(e) => setScopeId(e.target.value)} className="flex-1 text-base rounded-md border border-line px-2 py-1.5 outline-none focus:border-[var(--os-brand)]">
               <option value="">No scope</option>
               {bundle.scopes.map((s) => <option key={s.id} value={s.id}>{s.dimension}: {s.name}</option>)}
               <option value="__new__">+ New scope…</option>
@@ -1414,19 +1430,19 @@ function InstancesPanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
           </div>
           {scopeId === "__new__" ? (
             <div className="flex items-center gap-2 pl-[72px]">
-              <input value={newScope.name} onChange={(e) => setNewScope({ ...newScope, name: e.target.value })} placeholder="Scope name (e.g. Pool 1)" className="flex-1 text-base rounded-md border border-zinc-200 px-2 py-1.5 outline-none focus:border-[var(--os-brand)]" />
-              <input value={newScope.dimension} onChange={(e) => setNewScope({ ...newScope, dimension: e.target.value })} placeholder="dimension" className="w-28 text-base rounded-md border border-zinc-200 px-2 py-1.5 outline-none focus:border-[var(--os-brand)]" />
+              <input value={newScope.name} onChange={(e) => setNewScope({ ...newScope, name: e.target.value })} placeholder="Scope name (e.g. Pool 1)" className="flex-1 text-base rounded-md border border-line px-2 py-1.5 outline-none focus:border-[var(--os-brand)]" />
+              <input value={newScope.dimension} onChange={(e) => setNewScope({ ...newScope, dimension: e.target.value })} placeholder="dimension" className="w-28 text-base rounded-md border border-line px-2 py-1.5 outline-none focus:border-[var(--os-brand)]" />
             </div>
           ) : null}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500 w-[64px]">Person</span>
-            <select value={userId} onChange={(e) => setUserId(e.target.value)} className="flex-1 text-base rounded-md border border-zinc-200 px-2 py-1.5 outline-none focus:border-[var(--os-brand)]">
+            <span className="text-xs text-ink-2 w-[64px]">Person</span>
+            <select value={userId} onChange={(e) => setUserId(e.target.value)} className="flex-1 text-base rounded-md border border-line px-2 py-1.5 outline-none focus:border-[var(--os-brand)]">
               <option value="">Unassigned</option>
               {bundle.orgUsers.map((p) => <option key={p.id} value={p.id}>{personName(p)}</option>)}
             </select>
           </div>
           <div className="flex justify-end gap-1.5">
-            <button type="button" onClick={() => setCreating(false)} className="h-7 px-2.5 rounded-md text-sm text-zinc-600 hover:bg-zinc-100">Cancel</button>
+            <button type="button" onClick={() => setCreating(false)} className="h-7 px-2.5 rounded-md text-sm text-ink-2 hover:bg-hover">Cancel</button>
             <button type="button" disabled={busy} onClick={createInstance} className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50">Create instance</button>
           </div>
         </div>

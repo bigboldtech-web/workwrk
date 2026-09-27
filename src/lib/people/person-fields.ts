@@ -10,8 +10,14 @@
 //   people-team  the People team (seeded as the HR level)
 //   org-wide     the legacy org-wide levels (C-level, VP, Director), who
 //                edited every record yesterday and keep doing so
-//   chain        the subject sits in the viewer's reporting chain (solid or
-//                dotted, any depth)
+//   chain        a manager-tier viewer whose SOLID report tree holds the
+//                subject (any depth): yesterday's write door
+//                (canTouchUserAlignment), unchanged
+//   chain-view   the subject sits in the viewer's chain some other way (a
+//                dotted line, or a solid report of a viewer below manager
+//                tier): reads people data, writes nothing here. Yesterday
+//                this viewer had no write at all, so a matrix manager can
+//                never deactivate, move or re-line a person.
 //   none         anyone else in the org
 //
 // ALIGNMENT, NOT A RESTRICTION: the table keeps every write a person could
@@ -23,7 +29,7 @@
 //
 // Pure: no imports. Client safe.
 
-export type PersonRelation = "self" | "admin" | "people-team" | "org-wide" | "chain" | "none";
+export type PersonRelation = "self" | "admin" | "people-team" | "org-wide" | "chain" | "chain-view" | "none";
 
 export type PersonFieldGroup = "personal" | "dob" | "placement" | "reports-to" | "status" | "access";
 
@@ -61,13 +67,15 @@ export function canWritePersonGroup(
       // Names and phone: the person and the people who run the org's records.
       return relation === "self" || relation === "admin" || relation === "people-team" || relation === "org-wide";
     case "dob":
-      // The old manager dialog edited the date of birth, so the chain keeps it.
-      return relation !== "none";
+      // The old manager dialog edited the date of birth, so the chain keeps
+      // it. The route adds one more rule (see dobOverwriteAllowed): a viewer
+      // shown only the day and month may set a missing date, never replace one.
+      return relation !== "none" && relation !== "chain-view";
     case "placement":
     case "reports-to":
     case "status":
       if (relation === "self") return opts.managerTierSelf === true;
-      return relation !== "none";
+      return relation !== "none" && relation !== "chain-view";
     case "access":
       // Membership fields are the Members drawer's (Owner and Admin only).
       return relation === "admin";
@@ -103,6 +111,30 @@ export function checkPersonPatch(
 /** Does this relationship read people data (phone, birthday, capacity, KRAs, reviews)? */
 export function readsPeopleData(relation: PersonRelation): boolean {
   return relation !== "none";
+}
+
+/** Does this relationship see the full date of birth (the year too)? */
+export function seesFullBirthday(relation: PersonRelation): boolean {
+  return relation === "self" || relation === "admin" || relation === "people-team";
+}
+
+/**
+ * A viewer who sees only the day and month cannot see what they would
+ * overwrite, so they may fill a missing date of birth but never replace one.
+ */
+export function dobOverwriteAllowed(relation: PersonRelation, subjectHasDob: boolean): boolean {
+  if (!canWritePersonGroup("dob", relation)) return false;
+  return seesFullBirthday(relation) || !subjectHasDob;
+}
+
+/**
+ * Employment status as a viewer may see it. The raw value (PIP, notice
+ * period, probation, leave) is people data; everyone else learns only
+ * whether the account is deactivated.
+ */
+export function visibleStatus(status: string, peopleData: boolean): string {
+  if (peopleData) return status;
+  return status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
 }
 
 /** Plain words for a field, for the per-field 403 message. */

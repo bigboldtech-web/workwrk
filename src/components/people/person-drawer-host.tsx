@@ -22,6 +22,7 @@ import { Drawer, DRAWER_DEFAULT_W, clampDrawerWidth } from "@/components/ui/draw
 import { goBackOr } from "@/components/ui/back-button";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { useBoot } from "@/components/layout/os/boot-context";
+import { apiFetch } from "@/lib/api-fetch";
 import { PersonRecord } from "./person-record";
 
 const STATIC_SEGMENTS = new Set(["me", "departments", "roles", "skills"]);
@@ -34,7 +35,13 @@ export function PersonDrawerHost({ personId }: { personId: string }) {
   const reserved = STATIC_SEGMENTS.has(personId) || boot.viewer.orgRole === "GUEST";
   const hardLoad = isInitialEntryPath(`/people/${personId}`);
   const [expanded, setExpanded] = useState(false);
-  const [width, setWidth] = useState(() => clampDrawerWidth(DRAWER_DEFAULT_W));
+  // Remembered, the same one drawer width the task drawer keeps
+  // (home.work.drawerWidth, 480 to 720), so the record opens where it was left.
+  const [width, setWidth] = useState(() => clampDrawerWidth(boot.prefs?.home?.work?.drawerWidth ?? DRAWER_DEFAULT_W));
+  const saveWidth = useCallback((px: number) => {
+    setWidth(px);
+    void apiFetch("/api/preferences", { method: "PATCH", json: { home: { work: { drawerWidth: px } } } });
+  }, []);
   const [meta, setMeta] = useState<{ name: string; self: boolean } | null>(null);
   const { toast } = useOsToast();
   const onMeta = useCallback((m: { name: string; self: boolean }) => setMeta(m), []);
@@ -74,7 +81,7 @@ export function PersonDrawerHost({ personId }: { personId: string }) {
       layerId="person-drawer"
       expanded={expanded}
       width={width}
-      onWidthChange={setWidth}
+      onWidthChange={saveWidth}
       header={
         <>
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">

@@ -7,6 +7,7 @@ import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
 import { apiFetch } from "@/lib/api-fetch";
+import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import { readLastAppPath, recordLastAppPath, serverLastAppPath, subscribeLastAppPath } from "@/lib/settings-nav";
 import { deepMergePatch, type PreferencesPatch } from "@/lib/preferences-schema";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
@@ -130,6 +131,8 @@ export type PresenceStatus = {
 };
 
 export const DEFAULT_PRESENCE: PresenceStatus = { emoji: null, label: "Online", expiresAt: null };
+/** Do not disturb: a status everyone sees on the dot (presence.ts draws it busy). */
+export const DND_PRESENCE: PresenceStatus = { emoji: "⛔", label: "Do not disturb", expiresAt: null };
 
 export type OpenItem = {
   moduleId: string;
@@ -680,6 +683,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const setPresenceStatus = useCallback((s: PresenceStatus) => {
     setPresenceStatusState(s);
     try { window.localStorage.setItem(PRESENCE_KEY, JSON.stringify(s)); } catch {}
+    // Shared with everyone else too (User.presenceStatus), so the dots on
+    // the Directory, the Org chart and the record show it. The write queue
+    // retries a dropped connection; "Online" clears the dot.
+    const shared = s.label === DEFAULT_PRESENCE.label ? null : s.label;
+    void recordWriteQueue().write("PUT", "/api/me/presence", { status: shared, until: shared ? s.expiresAt : null });
   }, []);
   const openStatusModal = useCallback(() => setStatusModalOpen(true), []);
   const closeStatusModal = useCallback(() => setStatusModalOpen(false), []);

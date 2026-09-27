@@ -9,9 +9,10 @@
  *     Import button. It is the in-place CSV import dialog now, opened right
  *     here (and from /tables, the sheet's File menu and the Tables hub "+"
  *     for any Member).
- *   - "People CSV" linked to the Directory, which has no import control: a
- *     dead end, removed. The real People importer is the settings unit's
- *     Settings > Data > Import tab (Phase 8), wired to /api/people/bulk-import.
+ *   - "People CSV" is back now that the Directory has an importer (Phase 6
+ *     Stage B): the card sends you to the Directory with Import people open
+ *     (/people?import=1). The settings unit's Settings > Data > Import tab
+ *     (Phase 8) will host the same importer here.
  *   - The five competitor tiles are one line, and only under "Show upcoming
  *     features".
  *   - The "Database" wording is gone (naming canon: Table).
@@ -23,7 +24,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Table2, Upload } from "lucide-react";
+import { Table2, Upload, Users } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
@@ -70,6 +71,25 @@ export default function ImportsPage() {
                 Import a CSV
               </button>
             ) : null}
+          </div>
+        </section>
+        <section className="mt-4 max-w-2xl rounded-lg border border-line bg-raised" aria-labelledby="imp-people">
+          <div className="flex items-start gap-3 px-5 py-4">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-ink-2" aria-hidden>
+              <Users className="h-[18px] w-[18px]" strokeWidth={1.5} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 id="imp-people" className="m-0 text-base font-semibold text-ink">People from a CSV</h2>
+              <p className="m-0 mt-0.5 text-base text-ink-2">
+                Open the Directory, then choose Import people. Each row is checked first, and everyone ready gets an invitation.
+              </p>
+            </div>
+            <Link
+              href="/people?import=1"
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-line px-3 text-base font-medium text-ink hover:bg-hover"
+            >
+              Import people
+            </Link>
           </div>
         </section>
         {showUpcoming ? (

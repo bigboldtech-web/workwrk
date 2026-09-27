@@ -84,8 +84,18 @@ export function RemovePersonDialog({
     setBusy(true);
     setError(null);
     const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0;
+    let rehomedNote = "";
     if (needsHandover) {
-      const h = await apiFetch(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
+      const h = await apiFetch<{ reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; data?: { reportsRehomed?: Array<{ name: string | null; managerName: string | null }> } }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
+      if (h.ok) {
+        // Reports that could not go to the new owner (the new owner
+        // themselves, or a move that would make a loop) went up a level or
+        // to no manager: say exactly where, never silently.
+        const rehomed = h.data?.reportsRehomed ?? h.data?.data?.reportsRehomed ?? [];
+        if (rehomed.length) {
+          rehomedNote = " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + ".";
+        }
+      }
       if (!h.ok) {
         setBusy(false);
         setError(`Nothing was removed. The handover failed: ${h.error || "try again"}.`);
@@ -100,7 +110,7 @@ export function RemovePersonDialog({
         : d.error || "Couldn't remove them");
       return;
     }
-    toast(`${fullName} was removed. Restore them from the Directory's Removed view.`);
+    toast(`${fullName} was removed. Restore them from the Directory's Removed view.${rehomedNote}`);
     onRemoved();
   }
 
@@ -112,7 +122,7 @@ export function RemovePersonDialog({
           <DialogDescription>They lose access at once. Their history (tasks, docs, reviews and KPI numbers) stays, and an Admin can restore them.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink">
+          <div className="rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm text-ink">
             {summary === null && !summaryFailed ? (
               <SkeletonLines lines={2} />
             ) : summaryFailed ? (

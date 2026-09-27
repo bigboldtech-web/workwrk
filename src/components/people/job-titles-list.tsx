@@ -151,6 +151,42 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   }, [shown, group]);
 
   const deletable = (r: JobTitle) => r._count.users === 0 && r.removedHolders === 0 && r._count.kraTemplates === 0;
+  const groupByKey = useMemo(() => new Map((groups ?? []).map((g) => [g.key, g])), [groups]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeptOpen, setBulkDeptOpen] = useState(false);
+  const selectedRows = useMemo(() => (list ?? []).filter((r) => selected.has(r.id)), [list, selected]);
+  const selectedUnfilled = selectedRows.filter(deletable);
+
+  // Bulk: one PATCH or DELETE per title, counted; a failure names how many
+  // did not go through and leaves them selected.
+  async function bulkMove(departmentId: string | null) {
+    const rows = selectedRows;
+    const failed: string[] = [];
+    for (const r of rows) {
+      const res = await apiFetch(`/api/roles/${r.id}`, { method: "PATCH", json: { departmentId } });
+      if (!res.ok) failed.push(r.id);
+    }
+    const done = rows.length - failed.length;
+    const where = departmentId ? depts.find((d) => d.id === departmentId)?.name ?? "the department" : "no department";
+    toast(failed.length ? `Moved ${done}; ${failed.length} couldn't be moved` : `Moved ${done} ${done === 1 ? "job title" : "job titles"} to ${where}`, failed.length ? { tone: "danger" } : undefined);
+    setSelected(new Set(failed));
+    void load();
+  }
+  async function bulkDelete() {
+    const rows = selectedUnfilled;
+    const ok = await confirm({ title: `Delete ${rows.length} unfilled ${rows.length === 1 ? "job title" : "job titles"}?`, description: "Only titles nobody holds and with no KRAs are deleted. This can't be undone.", confirmLabel: "Delete", destructive: true });
+    if (!ok) return;
+    const failed: string[] = [];
+    for (const r of rows) {
+      const res = await apiFetch(`/api/roles/${r.id}`, { method: "DELETE" });
+      if (!res.ok) failed.push(r.id);
+    }
+    const done = rows.length - failed.length;
+    toast(failed.length ? `Deleted ${done}; ${failed.length} couldn't be deleted` : `Deleted ${done} ${done === 1 ? "job title" : "job titles"}`, failed.length ? { tone: "danger" } : undefined);
+    setSelected(new Set(failed));
+    void load();
+  }
 
   async function rename(r: JobTitle) {
     const next = await prompt({ title: "Rename job title", defaultValue: r.title, submitLabel: "Rename", required: true });
@@ -261,31 +297,47 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
             <TableCard ariaLabel="Job titles" columns={columns} rows={[]} rowKey={(r) => r.id}
               empty={<span className="text-row text-ink-2">No job titles match · <button type="button" className="text-brand-deep hover:underline" onClick={clear}>Clear filters</button></span>} />
           ) : (
-            groups.map((g, i) => (
-              <section key={g.key} className="flex flex-col gap-1">
-                {g.label ? (
-                  <div className="flex h-11 items-center gap-2 rounded-md bg-surface-2 px-3">
-                    <span className="text-row font-medium text-ink">{g.label}</span>
-                    <span className="text-xs font-medium text-ink-2">{g.rows.length}</span>
+            // ONE card: each group opens with a 44px header row inside it (the
+            // whole list is loaded, so each count is the group's real size).
+            <TableCard
+              ariaLabel="Job titles"
+              columns={columns}
+              rows={groups.flatMap((g) => g.rows)}
+              rowKey={(r) => r.id}
+              rowHref={(r) => `/people/roles/${r.id}`}
+              groupOf={group === "none" ? undefined : (r) => {
+                const key = group === "department" ? r.departmentId ?? "__none" : r.seniority;
+                const g = groupByKey.get(key);
+                return { key, label: g?.label ?? "", count: g?.rows.length ?? null };
+              }}
+              collapsedGroups={collapsed}
+              onToggleGroup={(key) => setCollapsed((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
+              selectable={canWrite}
+              selected={selected}
+              onSelectedChange={setSelected}
+              bulkActions={canWrite ? (
+                <>
+                  <div className="relative">
+                    <button type="button" onClick={() => setBulkDeptOpen((v) => !v)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink hover:bg-hover"><Building2 className="h-4 w-4" aria-hidden />Set department</button>
+                    <Picker open={bulkDeptOpen} onClose={() => setBulkDeptOpen(false)} side="top" ariaLabel="Set department" searchPlaceholder="Search departments"
+                      sections={[{ options: [{ value: "__none__", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
+                      onSelect={(v) => { setBulkDeptOpen(false); void bulkMove(v === "__none__" ? null : v); }}
+                      className="absolute bottom-10 start-0 z-50" />
                   </div>
-                ) : null}
-                <TableCard
-                  ariaLabel={g.label ? `Job titles in ${g.label}` : "Job titles"}
-                  columns={columns}
-                  rows={g.rows}
-                  rowKey={(r) => r.id}
-                  rowHref={(r) => `/people/roles/${r.id}`}
-                  rowMenu={canWrite ? (r) => (
-                    <button type="button" aria-label={`Actions for ${r.title}`} aria-haspopup="menu"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ row: r, anchor: { current: e.currentTarget } }); }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                  ) : undefined}
-                  footer={i === groups.length - 1 && list ? { total: shown?.length ?? 0, noun: "job titles", from: shown?.length ? 1 : 0, to: shown?.length ?? 0 } : undefined}
-                />
-              </section>
-            ))
+                  {selectedUnfilled.length ? (
+                    <button type="button" onClick={() => void bulkDelete()} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-danger-text hover:bg-hover"><Trash2 className="h-4 w-4" aria-hidden />Delete unfilled ({selectedUnfilled.length})</button>
+                  ) : null}
+                </>
+              ) : undefined}
+              rowMenu={canWrite ? (r) => (
+                <button type="button" aria-label={`Actions for ${r.title}`} aria-haspopup="menu"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ row: r, anchor: { current: e.currentTarget } }); }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              ) : undefined}
+              footer={list ? { total: shown?.length ?? 0, noun: "job titles", from: shown?.length ? 1 : 0, to: shown?.length ?? 0 } : undefined}
+            />
           )}
         </div>
       </div>

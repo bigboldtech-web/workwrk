@@ -37,6 +37,9 @@ export async function GET(req: NextRequest) {
     email: invitation.email,
     organizationName: invitation.organization.name,
     accessLevel: invitation.accessLevel,
+    // What a People CSV import carried, so the form starts filled.
+    firstName: invitation.firstName ?? null,
+    lastName: invitation.lastName ?? null,
   });
 }
 
@@ -100,6 +103,8 @@ export async function POST(req: Request) {
           roleId: invitation.roleId,
           managerId: invitation.managerId,
           officeId: invitation.officeId,
+          // The phone a People CSV import carried lands on the record.
+          phone: invitation.phone ?? null,
         },
       });
 

@@ -32,7 +32,7 @@
 // and always at Compact density on touch devices (os.css `.os-tc__more`).
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useElementWidth } from "@/hooks/use-element-width";
@@ -120,6 +120,14 @@ export interface TableCardProps<T> {
   onRowDeleteKey?: (row: T) => void;
   className?: string;
   ariaLabel?: string;
+  /**
+   * Grouped rendering inside ONE card: a 44px group header row starts each
+   * run of rows with the same key (the caller sorts by the group first).
+   * `count` is the server's total for the group, never the page's run.
+   */
+  groupOf?: (row: T) => { key: string; label: ReactNode; count?: number | null };
+  collapsedGroups?: ReadonlySet<string>;
+  onToggleGroup?: (key: string) => void;
 }
 
 const CELL = "flex min-w-0 items-center px-3";
@@ -152,16 +160,34 @@ export function TableCard<T>({
   onRowDeleteKey,
   className,
   ariaLabel,
+  groupOf,
+  collapsedGroups,
+  onToggleGroup,
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const cardWidth = useElementWidth(cardRef);
   // The columns this card is wide enough for. Unmeasured (the first frame,
   // a test) shows every column.
-  const columns = useMemo(
-    () => (cardWidth === 0 ? allColumns : allColumns.filter((c) => !c.hideBelow || cardWidth >= c.hideBelow)),
-    [allColumns, cardWidth],
-  );
+  // Beyond each column's own hideBelow, the droppable columns (the ones
+  // that declared a hideBelow) also give way, widest threshold first, while
+  // the row's minimum is wider than the card: otherwise the pinned "..."
+  // cell sits over the last visible column and cuts it mid-word (a date
+  // reading "17 S" with the Filter panel open).
+  const columns = useMemo(() => {
+    if (cardWidth === 0) return allColumns;
+    let cols = allColumns.filter((c) => !c.hideBelow || cardWidth >= c.hideBelow);
+    const fixed = (selectable ? 44 : 0) + (rowMenu ? 44 : 0);
+    const minOf = (c: TableColumn<T>) => { const m = /(\d+)px/.exec(c.width ?? ""); return m ? Number(m[1]) : 120; };
+    const total = () => cols.reduce((w, c) => w + minOf(c), fixed);
+    while (total() > cardWidth) {
+      const droppable = cols.filter((c) => c.hideBelow);
+      if (droppable.length === 0) break;
+      const drop = droppable.reduce((a, b) => ((b.hideBelow ?? 0) > (a.hideBelow ?? 0) ? b : a));
+      cols = cols.filter((c) => c !== drop);
+    }
+    return cols;
+  }, [allColumns, cardWidth, selectable, rowMenu]);
   const sel = selected ?? new Set<string>();
   const anySelected = sel.size > 0;
 
@@ -314,6 +340,27 @@ export function TableCard<T>({
           ) : (
             rows.map((row, i) => {
               const key = rowKey(row);
+              const group = groupOf ? groupOf(row) : null;
+              const startsGroup = !!group && (i === 0 || groupOf!(rows[i - 1]).key !== group.key);
+              const groupCollapsed = !!group && !!collapsedGroups?.has(group.key);
+              const header = startsGroup && group ? (
+                <div key={`group:${group.key}:${i}`} role="row" className="os-tc__group border-b border-line-soft bg-subtle">
+                  <button
+                    type="button"
+                    role="rowheader"
+                    aria-expanded={!groupCollapsed}
+                    onClick={onToggleGroup ? () => onToggleGroup(group.key) : undefined}
+                    className="flex h-11 w-full items-center gap-2 px-4 text-start"
+                  >
+                    {onToggleGroup ? (
+                      groupCollapsed ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-2 rtl:rotate-180" strokeWidth={1.5} aria-hidden /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+                    ) : null}
+                    <span className="truncate text-row font-medium text-ink">{group.label}</span>
+                    {group.count != null ? <span className="text-xs font-medium tabular-nums text-ink-2">{group.count}</span> : null}
+                  </button>
+                </div>
+              ) : null;
+              if (groupCollapsed) return header;
               const href = rowHref?.(row) ?? null;
               const isSel = sel.has(key);
               const isHi = highlightKey === key;
@@ -375,7 +422,7 @@ export function TableCard<T>({
                 </>
               );
               if (href) {
-                return (
+                const link = (
                   <Link
                     key={key}
                     href={href}
@@ -389,8 +436,9 @@ export function TableCard<T>({
                     {content}
                   </Link>
                 );
+                return header ? <Fragment key={key}>{header}{link}</Fragment> : link;
               }
-              return (
+              const plain = (
                 <div
                   key={key}
                   role="row"
@@ -405,6 +453,7 @@ export function TableCard<T>({
                   {content}
                 </div>
               );
+              return header ? <Fragment key={key}>{header}{plain}</Fragment> : plain;
             })
           )}
         </div>

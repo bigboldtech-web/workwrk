@@ -15,7 +15,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import {
-  Building2, Briefcase, ShieldCheck, ChevronRight, Users, Layers, Lock,
+  Building2, Briefcase, ShieldCheck, ChevronRight, ListPlus, Users, Layers, Lock,
   type LucideIcon,
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
@@ -28,6 +28,7 @@ import { Suspense } from "react";
 import { BackButton } from "@/components/ui/back-button";
 import { DepartmentsManager } from "@/components/people/departments-manager";
 import { JobTitlesList } from "@/components/people/job-titles-list";
+import { ProfileFieldsManager } from "@/components/people/profile-fields-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -78,15 +79,15 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
   // The Structure tabs (spec-teams-people section 3): the same
   // DepartmentsManager and JobTitlesList the Teams pages render, inside the
   // settings door. The org chart is a link card, never embedded (one chart).
-  if (tab === "departments" || tab === "titles") {
+  if (tab === "departments" || tab === "titles" || tab === "fields") {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-2 px-6 pt-4">
           <BackButton fallbackHref="/settings/structure" label="Org structure" />
-          <h1 className="text-title font-semibold text-ink">{tab === "departments" ? "Departments" : "Job titles"}</h1>
+          <h1 className="text-title font-semibold text-ink">{tab === "departments" ? "Departments" : tab === "titles" ? "Job titles" : "Profile fields"}</h1>
         </div>
         <Suspense>
-          {tab === "departments" ? <DepartmentsManager door="settings" /> : <JobTitlesList door="settings" />}
+          {tab === "departments" ? <DepartmentsManager door="settings" /> : tab === "titles" ? <JobTitlesList door="settings" /> : <ProfileFieldsManager />}
         </Suspense>
       </div>
     );
@@ -146,6 +147,14 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
             title="Job titles"
             meta={`${roleCount} job title${roleCount === 1 ? "" : "s"}`}
             desc="Job definitions with KRA and KPI templates that seed onto every holder. Seniority on a title is display only."
+          />
+          <BlockTile
+            href="/settings/structure?tab=fields"
+            Icon={ListPlus}
+            grad="linear-gradient(135deg, var(--os-brand-deep), var(--os-c-teal))"
+            title="Profile fields"
+            meta="Custom fields on every record"
+            desc="Extra fields on each person's record, like Employee ID or Pronouns."
           />
           <BlockTile
             href="/organization"

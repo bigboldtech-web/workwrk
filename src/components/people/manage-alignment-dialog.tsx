@@ -6,15 +6,16 @@
 // the existing /api/kra-assignments + /api/sop-assignments + seed endpoints
 // so there's a single screen instead of editing each piece piecemeal.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Chip } from "@/components/ui/chip";
+import { Picker } from "@/components/ui/picker";
+import { ToneChip } from "./person-bits";
 import { useToast } from "@/components/ui/toast";
-import { Target, ScrollText, Plus, X, Sparkles } from "lucide-react";
+import { ChevronDown, Target, ScrollText, Plus, X, Sparkles } from "lucide-react";
 import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface KraAssignment { id: string; kraId: string; weightage: number; kra?: { id: string; name: string; category?: string | null; role?: { id: string; title: string } | null } }
@@ -37,6 +38,35 @@ function asArray<T>(data: unknown, keys: string[]): T[] {
   if (Array.isArray(inner)) return inner as T[];
   if (inner && Array.isArray((inner as Record<string, unknown>).items)) return (inner as Record<string, unknown>).items as T[];
   return [];
+}
+
+/**
+ * A server-searched catalogue for a picker: loads the first 50 when the
+ * picker opens and re-queries as the person types (debounced 200ms), so
+ * nothing past a fixed row count is ever out of reach.
+ */
+function useServerSearch<T>(urlFor: (q: string) => string, keys: string[], active: boolean) {
+  const [rows, setRows] = useState<T[] | null>(null);
+  const seq = useRef(0);
+  const timer = useRef<number | null>(null);
+  const run = useCallback(async (q: string) => {
+    const mine = ++seq.current;
+    const data = await fetch(urlFor(q), { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+    if (mine !== seq.current) return;
+    setRows(asArray<T>(data, keys));
+    // urlFor and keys are stable per call site.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!active) return;
+    const t = window.setTimeout(() => { void run(""); }, 0);
+    return () => window.clearTimeout(t);
+  }, [active, run]);
+  const search = useCallback((q: string) => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { void run(q.trim()); }, 200);
+  }, [run]);
+  return { rows, search };
 }
 
 /** Editable per-KRA weight. This used to be static text, so an assignment
@@ -69,9 +99,9 @@ function WeightCell({ value, disabled, onSave }: {
           if (e.key === "Escape") { setDraft(String(value)); }
         }}
         aria-label="Weightage %"
-        className="w-12 h-6 px-1 rounded border border-zinc-200 text-xs text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="h-7 w-12 rounded-md border border-line bg-raised px-1 text-end text-sm tabular-nums text-ink focus:border-brand focus:outline-none disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
-      <span className="text-xs text-zinc-400">%</span>
+      <span className="text-sm text-ink-2">%</span>
     </span>
   );
 }
@@ -88,28 +118,30 @@ export function ManageAlignmentDialog({
   const { success, error } = useToast();
   const [kraAssignments, setKraAssignments] = useState<KraAssignment[]>([]);
   const [sopAssignments, setSopAssignments] = useState<SopAssignment[]>([]);
-  const [allKras, setAllKras] = useState<KraOption[]>([]);
-  const [allSops, setAllSops] = useState<SopOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
   const [newKraId, setNewKraId] = useState("");
+  const [newKraLabel, setNewKraLabel] = useState("");
   const [newKraWeight, setNewKraWeight] = useState(10);
   const [newSopId, setNewSopId] = useState("");
+  const [newSopLabel, setNewSopLabel] = useState("");
+  const [kraPickOpen, setKraPickOpen] = useState(false);
+  const [sopPickOpen, setSopPickOpen] = useState(false);
+  const kraSearch = useServerSearch<KraOption>((q) => `/api/kras?limit=50${q ? `&search=${encodeURIComponent(q)}` : ""}`, ["items", "data"], kraPickOpen);
+  const sopSearch = useServerSearch<SopOption>((q) => `/api/sops?limit=50&status=PUBLISHED${q ? `&q=${encodeURIComponent(q)}` : ""}`, ["items", "data"], sopPickOpen);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [kraRes, sopRes, krasRes, sopsRes] = await Promise.all([
+      // The KRA and SOP catalogues are searched on the server as the
+      // manager types (no row cap: KRA number 501 is as findable as the first).
+      const [kraRes, sopRes] = await Promise.all([
         fetch(`/api/kra-assignments?userId=${userId}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/sop-assignments?userId=${userId}`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/kras?limit=500`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/sops?limit=200&status=PUBLISHED`).then((r) => r.json()).catch(() => null),
       ]);
       setKraAssignments(asArray<KraAssignment>(kraRes, ["assignments", "data"]));
       setSopAssignments(asArray<SopAssignment>(sopRes, ["assignments", "data"]));
-      setAllKras(asArray<KraOption>(krasRes, ["items", "data"]));
-      setAllSops(asArray<SopOption>(sopsRes, ["items", "data"]));
     } finally {
       setLoading(false);
     }
@@ -123,8 +155,8 @@ export function ManageAlignmentDialog({
   const assignedSopIds = useMemo(() => new Set(sopAssignments.map((a) => a.sopId)), [sopAssignments]);
   const totalWeight = useMemo(() => kraAssignments.reduce((s, a) => s + (a.weightage || 0), 0), [kraAssignments]);
 
-  const availableKras = allKras.filter((k) => !assignedKraIds.has(k.id));
-  const availableSops = allSops.filter((s) => !assignedSopIds.has(s.id));
+  const availableKras = (kraSearch.rows ?? []).filter((k) => !assignedKraIds.has(k.id));
+  const availableSops = (sopSearch.rows ?? []).filter((s) => !assignedSopIds.has(s.id));
 
   const addKra = async () => {
     if (!newKraId) return;
@@ -135,7 +167,7 @@ export function ManageAlignmentDialog({
         body: JSON.stringify({ userId, kraId: newKraId, weightage: newKraWeight }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); error("Couldn't add KRA", d.error); return; }
-      setNewKraId(""); setNewKraWeight(10);
+      setNewKraId(""); setNewKraLabel(""); setNewKraWeight(10);
       await load(); fireChanged(); success("KRA added");
     } finally { setBusy(null); }
   };
@@ -182,7 +214,7 @@ export function ManageAlignmentDialog({
         body: JSON.stringify({ sopId: newSopId, userIds: [userId] }),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); error("Couldn't assign SOP", d.error); return; }
-      setNewSopId("");
+      setNewSopId(""); setNewSopLabel("");
       await load(); fireChanged(); success("SOP assigned");
     } finally { setBusy(null); }
   };
@@ -210,12 +242,12 @@ export function ManageAlignmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[720px] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-[720px] max-h-[85vh] min-h-[min(560px,85vh)] content-start overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between gap-3">
+          <DialogTitle className="flex items-center justify-between gap-3 pe-8">
             <span>Manage alignment · {userName}</span>
             <Button size="sm" variant="outline" onClick={() => void seedFromRole()} disabled={busy !== null}>
-              <Sparkles className="w-3.5 h-3.5 mr-1" />
+              <Sparkles className="me-1 h-3.5 w-3.5" />
               Seed from job title
             </Button>
           </DialogTitle>
@@ -224,83 +256,111 @@ export function ManageAlignmentDialog({
         {loading ? (
           <SkeletonRows rows={4} />
         ) : (
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             {/* KRAs */}
             <section>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5">
-                  <Target className="w-3.5 h-3.5" /> KRAs · {kraAssignments.length}
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="flex items-center gap-1.5 text-sm font-medium text-ink-2">
+                  <Target className="h-3.5 w-3.5" aria-hidden /> KRAs <span className="tabular-nums">{kraAssignments.length}</span>
                 </h3>
-                <span className={`text-xs ${totalWeight > 100 ? "text-red-500" : "text-zinc-400"}`}>
-                  weight {totalWeight}%
-                </span>
+                {totalWeight > 100 ? (
+                  <ToneChip tone="warning" label={`Weights total ${totalWeight}%`} />
+                ) : (
+                  <span className="text-sm tabular-nums text-ink-2">Weights total {totalWeight}%</span>
+                )}
               </div>
-              <ul className="space-y-1.5">
+              <ul className="flex flex-col gap-1.5">
                 {kraAssignments.map((a) => (
-                  <li key={a.id} className="flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5">
-                    <span className="flex-1 min-w-0 text-xs truncate">{a.kra?.name ?? "KRA"}</span>
+                  <li key={a.id} className="flex min-h-11 items-center gap-2 rounded-md border border-line px-2.5">
+                    <span className="min-w-0 flex-1 truncate text-row text-ink">{a.kra?.name ?? "KRA"}</span>
                     {/* Which job title this KRA belongs to: an orphan KRA is
                         flagged so the manager spots it before assigning. */}
                     {a.kra?.role ? (
-                      <span className="text-xs text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 truncate max-w-[120px]" title={a.kra.role.title}>{a.kra.role.title}</span>
+                      <span className="max-w-[140px] shrink-0 truncate" title={a.kra.role.title}><Chip>{a.kra.role.title}</Chip></span>
                     ) : (
-                      <span className="text-xs text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">No job title</span>
+                      <ToneChip tone="warning" label="No job title" title="This KRA belongs to no job title yet" />
                     )}
-                    {a.kra?.category ? <Badge variant="outline" className="text-micro">{a.kra.category}</Badge> : null}
+                    {a.kra?.category ? <Chip>{a.kra.category}</Chip> : null}
                     <WeightCell key={`w-${a.id}-${a.weightage}`} value={a.weightage} disabled={busy !== null} onSave={(w) => saveWeight(a.id, w)} />
                     <button type="button" onClick={() => void removeKra(a.id)} disabled={busy !== null}
-                      className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove KRA">
-                      <X className="w-3.5 h-3.5" />
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text disabled:opacity-50" aria-label="Remove KRA">
+                      <X className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 ))}
-                {kraAssignments.length === 0 ? <li className="text-sm text-zinc-400 px-1">No KRAs assigned.</li> : null}
+                {kraAssignments.length === 0 ? <li className="px-1 text-sm text-ink-2">No KRAs assigned.</li> : null}
               </ul>
               <div className="mt-2 flex items-center gap-2">
-                <select value={newKraId} onChange={(e) => setNewKraId(e.target.value)}
-                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-base bg-white">
-                  <option value="">Add a KRA…</option>
-                  {availableKras.map((k) => (
-                    <option key={k.id} value={k.id}>
-                      {k.name}{k.role?.title ? ` · ${k.role.title}` : " · no job title"}
-                    </option>
-                  ))}
-                </select>
-                <Input type="number" min={1} max={100} value={newKraWeight}
+                <div className="relative min-w-0 flex-1">
+                  <button type="button" aria-haspopup="listbox" aria-expanded={kraPickOpen} onClick={() => setKraPickOpen((v) => !v)}
+                    className="inline-flex h-8 w-full items-center gap-1.5 rounded-md border border-line bg-raised px-2 text-sm text-ink hover:border-line-strong">
+                    <span className={`min-w-0 flex-1 truncate text-start ${newKraId ? "" : "text-ink-3"}`}>{newKraId ? newKraLabel : "Add a KRA"}</span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-2" aria-hidden />
+                  </button>
+                  <Picker
+                    open={kraPickOpen}
+                    onClose={() => setKraPickOpen(false)}
+                    ariaLabel="Add a KRA"
+                    searchPlaceholder="Search KRAs"
+                    alwaysSearch
+                    loading={kraSearch.rows === null}
+                    onSearchChange={kraSearch.search}
+                    emptyLabel="No KRAs match"
+                    sections={[{ options: availableKras.map((k) => ({ value: k.id, label: k.name, hint: k.role?.title ?? "No job title" })) }]}
+                    onSelect={(v) => { const k = availableKras.find((x) => x.id === v); setNewKraId(v); setNewKraLabel(k?.name ?? ""); setKraPickOpen(false); }}
+                    className="absolute start-0 top-9 z-50"
+                  />
+                </div>
+                <input type="number" min={1} max={100} value={newKraWeight}
                   onChange={(e) => setNewKraWeight(Number(e.target.value))}
-                  className="w-16 h-8 text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
-                <Button size="sm" onClick={() => void addKra()} disabled={!newKraId || busy !== null}>
-                  <Plus className="w-3.5 h-3.5" />
+                  className="h-8 w-16 rounded-md border border-line bg-raised px-2 text-end text-sm tabular-nums text-ink focus:border-brand focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
+                <Button size="sm" variant="outline" onClick={() => void addKra()} disabled={!newKraId || busy !== null} aria-label="Add KRA">
+                  <Plus className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </section>
 
             {/* SOPs */}
             <section>
-              <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5 mb-2">
-                <ScrollText className="w-3.5 h-3.5" /> SOPs · {sopAssignments.length}
+              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink-2">
+                <ScrollText className="h-3.5 w-3.5" aria-hidden /> SOPs <span className="tabular-nums">{sopAssignments.length}</span>
               </h3>
-              <ul className="space-y-1.5">
+              <ul className="flex flex-col gap-1.5">
                 {sopAssignments.map((a) => (
-                  <li key={a.id} className="flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5">
-                    <span className="flex-1 min-w-0 text-xs truncate">{a.sop?.title ?? "SOP"}</span>
-                    {a.mandatory ? <Badge variant="outline" className="text-micro">Mandatory</Badge> : null}
+                  <li key={a.id} className="flex min-h-11 items-center gap-2 rounded-md border border-line px-2.5">
+                    <span className="min-w-0 flex-1 truncate text-row text-ink">{a.sop?.title ?? "SOP"}</span>
+                    {a.mandatory ? <Chip>Mandatory</Chip> : null}
                     <button type="button" onClick={() => void removeSop(a.id)} disabled={busy !== null}
-                      className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove SOP">
-                      <X className="w-3.5 h-3.5" />
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text disabled:opacity-50" aria-label="Remove SOP">
+                      <X className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 ))}
-                {sopAssignments.length === 0 ? <li className="text-sm text-zinc-400 px-1">No SOPs assigned.</li> : null}
+                {sopAssignments.length === 0 ? <li className="px-1 text-sm text-ink-2">No SOPs assigned.</li> : null}
               </ul>
               <div className="mt-2 flex items-center gap-2">
-                <select value={newSopId} onChange={(e) => setNewSopId(e.target.value)}
-                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-base bg-white">
-                  <option value="">Assign a SOP…</option>
-                  {availableSops.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-                </select>
-                <Button size="sm" onClick={() => void addSop()} disabled={!newSopId || busy !== null}>
-                  <Plus className="w-3.5 h-3.5" />
+                <div className="relative min-w-0 flex-1">
+                  <button type="button" aria-haspopup="listbox" aria-expanded={sopPickOpen} onClick={() => setSopPickOpen((v) => !v)}
+                    className="inline-flex h-8 w-full items-center gap-1.5 rounded-md border border-line bg-raised px-2 text-sm text-ink hover:border-line-strong">
+                    <span className={`min-w-0 flex-1 truncate text-start ${newSopId ? "" : "text-ink-3"}`}>{newSopId ? newSopLabel : "Assign a SOP"}</span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-2" aria-hidden />
+                  </button>
+                  <Picker
+                    open={sopPickOpen}
+                    onClose={() => setSopPickOpen(false)}
+                    ariaLabel="Assign a SOP"
+                    searchPlaceholder="Search published SOPs"
+                    alwaysSearch
+                    loading={sopSearch.rows === null}
+                    onSearchChange={sopSearch.search}
+                    emptyLabel="No published SOPs match"
+                    sections={[{ options: availableSops.map((x) => ({ value: x.id, label: x.title })) }]}
+                    onSelect={(v) => { const x = availableSops.find((y) => y.id === v); setNewSopId(v); setNewSopLabel(x?.title ?? ""); setSopPickOpen(false); }}
+                    className="absolute start-0 top-9 z-50"
+                  />
+                </div>
+                <Button size="sm" variant="outline" onClick={() => void addSop()} disabled={!newSopId || busy !== null} aria-label="Assign SOP">
+                  <Plus className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </section>

@@ -25,7 +25,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { hasPermission } from "@/lib/api-helpers";
 import { directoryWhere, parseDirectoryQuery, type DirectoryQuery } from "./directory-query";
-import { isPeopleAdmin, peopleCtx, readsPeopleDataOf, type PeopleCtx } from "./person-access.server";
+import { isPeopleAdmin, peopleCtx, readsPeopleDataOf, relationTo, type PeopleCtx } from "./person-access.server";
+import { canWritePersonGroup, visibleStatus } from "./person-fields";
 
 export const CHART_CAP = 5000;
 
@@ -129,6 +130,15 @@ export async function directoryList(req: NextRequest): Promise<Response> {
     prisma.user.count({ where }),
   ]);
 
+  // Group totals over the WHOLE filtered set (never the page's run), so a
+  // group that crosses a page boundary still shows its real count.
+  let groups: Array<{ key: string; count: number }> | undefined;
+  if (q.group !== "none") {
+    const by = q.group === "department" ? "departmentId" : q.group === "office" ? "officeId" : "roleId";
+    const counted = await prisma.user.groupBy({ by: [by], where, _count: { _all: true } });
+    groups = counted.map((g) => ({ key: (g as Record<string, unknown>)[by] as string | null ?? "none", count: g._count._all }));
+  }
+
   const presence = await presenceFor(users.map((u) => u.id));
   // Invite follows the invitations route's own gate (people.create), so the
   // button never renders for someone POST /api/invitations would refuse.
@@ -144,7 +154,10 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       lastName: u.lastName,
       email: u.email,
       avatar: u.avatar,
-      status: u.status,
+      // Raw employment status (PIP, notice period, probation, leave) is
+      // people data; everyone else learns only whether it is deactivated.
+      status: visibleStatus(u.status, peopleData),
+      isDeactivated: u.status === "INACTIVE",
       managerId: u.managerId,
       joinDate: u.joinDate,
       deletedAt: privileged ? u.deletedAt : null,
@@ -160,7 +173,9 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       // People data (access 3.5): only for self, the chain, the People team
       // and Admins. Absent, not blank, for anyone else.
       ...(peopleData ? { phone: u.phone } : {}),
-      canEdit: peopleData && u.id !== ctx.userId,
+      // A row is selectable (and editable) only where the viewer holds the
+      // placement write: a dotted-line manager reads, never edits.
+      canEdit: u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id)),
     };
   });
 
@@ -169,7 +184,8 @@ export async function directoryList(req: NextRequest): Promise<Response> {
     {
       data: rows,
       pagination: { page: q.page, limit: q.size, total, totalPages, hasMore: q.page < totalPages },
-      viewer: { privileged, canInvite, canImport: ctx.isAdmin, canExport: ctx.isAdmin && !ctx.isAgent },
+      ...(groups ? { groups } : {}),
+      viewer: { privileged, canInvite, canImport: ctx.isAdmin, canExport: ctx.isAdmin && !ctx.isAgent, canRemove: ctx.isAdmin && !ctx.isAgent },
     },
     { headers: { "Cache-Control": "no-store" } },
   );
@@ -210,7 +226,8 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
         avatar: u.avatar,
         managerId: u.managerId,
         isAgent: u.accessLevel === "AGENT",
-        status: u.status,
+        status: visibleStatus(u.status, readsPeopleDataOf(ctx, u.id)),
+        isDeactivated: u.status === "INACTIVE",
         roleId: u.roleId,
         departmentId: u.departmentId,
         officeId: u.officeId,

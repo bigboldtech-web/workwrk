@@ -1,7 +1,7 @@
 "use client";
 
 // AvatarMenu (spec-shell 2.12): you. A 280px MenuList on the bar's avatar:
-// a header with the real presence dot, then Set status…, Mute notifications
+// a header with the real presence dot, then Set status…, Do not disturb, Mute notifications
 // (a submenu of durations, or "Muted until … · Unmute"), My profile, My
 // settings, Workspace settings (Owner and Admin), the Theme segmented control
 // (and Chrome once CHROME_CONTROL_EXPOSED), Personal tools (each row runs the
@@ -19,7 +19,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
-  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, Pin, PinOff, Settings, SmilePlus, Wrench,
+  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, MinusCircle, Pin, PinOff, Settings, SmilePlus, Wrench,
 } from "lucide-react";
 import { MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 import { ChromePopover } from "./chrome-popover";
 import { HelpMenuRows } from "./help-menu";
 import { openShortcutsOverlay } from "./shell-shortcuts";
-import { useOsShell } from "./shell-context";
+import { DEFAULT_PRESENCE, DND_PRESENCE, useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
 import { usePersonalTools } from "./use-personal-tools";
@@ -84,8 +84,9 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
   const { openSettings } = useSettingsNav();
   const { toast } = useOsToast();
   const {
-    presenceStatus, openStatusModal, mutedNotifications, mutedUntil, setMutedUntil, prefs, patchPrefs,
+    presenceStatus, setPresenceStatus, openStatusModal, mutedNotifications, mutedUntil, setMutedUntil, prefs, patchPrefs,
   } = useOsShell();
+  const dnd = presenceStatus.label === DND_PRESENCE.label;
   const tools = usePersonalTools();
 
   const v = boot.viewer;
@@ -144,6 +145,13 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
       </div>
       <div className="py-1">
         <MenuItem icon={SmilePlus} label="Set status…" onClick={() => { close(); openStatusModal(); }} />
+        {/* Do not disturb (decided addition c): a status everyone sees on
+            your dot, until you turn it off. Muting is the row below. */}
+        {dnd ? (
+          <MenuItem icon={MinusCircle} label="Turn off Do not disturb" onClick={() => { close(); setPresenceStatus(DEFAULT_PRESENCE); }} />
+        ) : (
+          <MenuItem icon={MinusCircle} label="Do not disturb" onClick={() => { close(); setPresenceStatus(DND_PRESENCE); }} />
+        )}
         {mutedNotifications && mutedUntil ? (
           <MenuItem icon={BellOff} label={`Muted until ${fmtUntil(mutedUntil)} · Unmute`} onClick={() => { void mute(null); }} />
         ) : (

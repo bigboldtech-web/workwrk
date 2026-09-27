@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ArrowDownRight, ArrowUpRight, CalendarCheck, ExternalLink, Gift, Link2, MessageCircle,
+  ArrowDownRight, ArrowUpRight, CalendarCheck, ExternalLink, Eye, Gift, Link2, MessageCircle,
   MoreHorizontal, MoveRight, Network, Pencil, Plus, RotateCcw, Star, Trophy, UserMinus, Users,
 } from "lucide-react";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/layout/os/top-bar/breadcrumb";
@@ -55,11 +55,14 @@ import { assetGlyph } from "@/app/(dashboard)/assets/asset-glyph";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ratingLabel } from "@/lib/people/skills-aggregate";
 import { seniorityLabel } from "@/lib/people/seniority";
+import { describeSchedule } from "@/lib/work-schedule";
+import { fitTabs } from "@/lib/people/fit-tabs";
 import { cn } from "@/lib/utils";
 import { PersonAvatar, ToneChip, personName, type PickPerson } from "./person-bits";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { EditDetailsDialog } from "./edit-details-dialog";
 import { RemovePersonDialog } from "./remove-person-dialog";
+import { RecordAccessDialog } from "./record-access-dialog";
 import { AddSkillDialog, RateSkillDialog, SKILLS_CHANGED, emitSkillsChanged } from "./skill-dialogs";
 
 /* ─────────────────────────── payload ─────────────────────────── */
@@ -111,9 +114,14 @@ interface Person {
   phone?: string | null;
   dateOfBirth?: string | null;
   weeklyCapacityHours?: number | null;
+  workSchedule?: { workdays: number[]; hoursPerDay: number } | null;
+  orgSchedule?: { workdays: number[]; hoursPerDay: number } | null;
+  defaultWeeklyHours?: number | null;
+  profileFields?: Array<{ key: string; label: string; value: string | null }>;
   kpiHistory?: KpiHistoryRow[];
   kpiHistoryTotal?: number;
   reviews?: ReviewRow[];
+  reviewsTotal?: number;
   score?: { score: number; breakdown: Record<string, unknown> | null; band: { label: string; tone: "success" | "warning" | "danger" | "neutral" } | null } | null;
   scoreHistory?: Array<{ period: string; score: number }>;
 }
@@ -189,7 +197,7 @@ function Rows({ children }: { children: ReactNode }) {
 
 function RecordRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid min-h-9 grid-cols-[140px_1fr] items-center gap-3 py-1">
+    <div className="grid min-h-[36px] grid-cols-[140px_1fr] items-center gap-3 py-1">
       <dt className="text-sm font-medium text-ink-2">{label}</dt>
       <dd className="min-w-0 text-row text-ink">{children}</dd>
     </div>
@@ -254,6 +262,7 @@ export function PersonRecord({
   const [alignState, setAlignState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [editOpen, setEditOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -317,12 +326,47 @@ export function PersonRecord({
     if (tab === "overview") qs.delete("tab"); else qs.set("tab", tab);
     router.replace(`/people/${id}${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
   }, [state, rawTab, tab, sp, router, id]);
+  // ?edit=details and ?edit=remove (the Directory row menu's Edit details
+  // and Remove) open the dialog once the record says the viewer holds it,
+  // then leave the URL; a viewer who does not hold it just gets the record.
+  const editParam = sp?.get("edit") ?? null;
+  const [editHandled, setEditHandled] = useState<string | null>(null);
+  const editKey = editParam ? `${id}:${editParam}` : null;
+  if (state === "ready" && person && editKey && editHandled !== editKey) {
+    // Render-phase derived state (the Picker pattern), never an effect.
+    setEditHandled(editKey);
+    if (editParam === "details" && !person.deletedAt && (person.access.editable.length > 0 || person.access.dottedLines)) setEditOpen(true);
+    if (editParam === "remove" && person.access.remove) setRemoveOpen(true);
+  }
+  useEffect(() => {
+    if (!editKey || editHandled !== editKey) return;
+    const qs = new URLSearchParams(sp?.toString() ?? "");
+    qs.delete("edit");
+    router.replace(`/people/${id}${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
+  }, [editKey, editHandled, sp, router, id]);
   const setTab = (next: TabKey) => {
     const qs = new URLSearchParams(sp?.toString() ?? "");
     if (next === "overview") qs.delete("tab"); else qs.set("tab", next);
     router.replace(`/people/${id}${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
   };
-  const tabRef = useRef<HTMLDivElement>(null);
+  // The tab strip keeps to one line: tabs that do not fit (the 520 drawer
+  // holds about six) go into a "More" menu, and the active tab is always in
+  // view. Measured with a callback ref, since the strip mounts after load.
+  const [tabsW, setTabsW] = useState(0);
+  const tabsObs = useRef<ResizeObserver | null>(null);
+  const tabRef = useCallback((el: HTMLDivElement | null) => {
+    tabsObs.current?.disconnect();
+    tabsObs.current = null;
+    if (!el) return;
+    const read = () => setTabsW(Math.round(el.getBoundingClientRect().width));
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    tabsObs.current = ro;
+  }, []);
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false);
+  const moreTabsRef = useRef<HTMLButtonElement>(null);
 
   const name = person ? personName(person) : "";
   useEffect(() => { if (person) onMeta?.({ name: personName(person), self: person.access.relation === "self" }); }, [person, onMeta]);
@@ -401,6 +445,7 @@ export function PersonRecord({
         <MorePortal anchorRef={menuRef} width={240} open placement="below" onClose={() => setMenuOpen(false)}>
           <MenuList aria-label="Person actions">
             <MenuItem icon={Link2} label="Copy link" onClick={() => { setMenuOpen(false); void copyLink(); }} />
+            <MenuItem icon={Eye} label="Who can see this record" onClick={() => { setMenuOpen(false); setAccessOpen(true); }} />
             {person.access.manageMembers ? (
               <MenuItem icon={ExternalLink} label="Manage in Members" onClick={() => { setMenuOpen(false); openSettings(`/settings/members?open=${person.id}`); }} />
             ) : null}
@@ -421,13 +466,13 @@ export function PersonRecord({
         <div className="flex flex-col gap-3 rounded-lg border border-line p-4"><SkeletonRows rows={6} rowHeight="36px" /></div>
       ) : (
         <>
-          <RecordCard person={person} datePrefs={datePrefs} />
+          <RecordCard person={person} datePrefs={datePrefs} onEditPlacement={!person.deletedAt ? () => setEditOpen(true) : undefined} />
           {tabs.length > 1 ? (
             <div
               ref={tabRef}
               role="tablist"
               aria-label="Record sections"
-              className="flex h-9 items-center gap-1 overflow-x-auto"
+              className="flex h-9 items-center gap-1 overflow-hidden"
               onKeyDown={(e) => {
                 if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
                 const i = tabs.indexOf(tab);
@@ -435,15 +480,45 @@ export function PersonRecord({
                 setTab(next);
               }}
             >
-              {tabs.map((t) => (
-                <ViewTab
-                  key={t}
-                  label={TAB_LABEL[t]}
-                  active={tab === t}
-                  onClick={() => setTab(t)}
-                  trailing={t === "kudos" && person.kudosCount > 0 ? <span className="text-xs font-medium text-ink-2">{person.kudosCount}</span> : undefined}
-                />
-              ))}
+              {(() => {
+                const { shown, overflow } = fitTabs(tabs, tab, tabsW, (t) => TAB_LABEL[t].length + (t === "kudos" && person.kudosCount > 0 ? String(person.kudosCount).length + 1 : 0));
+                return (
+                  <>
+                    {shown.map((t) => (
+                      <ViewTab
+                        key={t}
+                        label={TAB_LABEL[t]}
+                        active={tab === t}
+                        onClick={() => setTab(t)}
+                        trailing={t === "kudos" && person.kudosCount > 0 ? <span className="text-xs font-medium text-ink-2">{person.kudosCount}</span> : undefined}
+                      />
+                    ))}
+                    {overflow.length ? (
+                      <>
+                        <button
+                          ref={moreTabsRef}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={moreTabsOpen}
+                          onClick={() => setMoreTabsOpen((v) => !v)}
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-base text-ink-2 hover:bg-hover hover:text-ink"
+                        >
+                          More <span className="text-xs font-medium tabular-nums">{overflow.length}</span>
+                        </button>
+                        {moreTabsOpen ? (
+                          <MorePortal anchorRef={moreTabsRef} width={200} open placement="below" onClose={() => setMoreTabsOpen(false)}>
+                            <MenuList aria-label="More sections">
+                              {overflow.map((t) => (
+                                <MenuItem key={t} label={t === "kudos" && person.kudosCount > 0 ? `${TAB_LABEL[t]} ${person.kudosCount}` : TAB_LABEL[t]} onClick={() => { setMoreTabsOpen(false); setTab(t); }} />
+                              ))}
+                            </MenuList>
+                          </MorePortal>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
+                );
+              })()}
             </div>
           ) : null}
           <div role="tabpanel" aria-label={TAB_LABEL[tab]}>
@@ -490,6 +565,7 @@ export function PersonRecord({
           onSaved={() => { bumpRowVersion("people"); void load(); void loadAlignment(); }}
         />
       ) : null}
+      {accessOpen && person ? <RecordAccessDialog userId={person.id} onClose={() => setAccessOpen(false)} /> : null}
       {removeOpen && person ? (
         <RemovePersonDialog
           userId={person.id}
@@ -524,9 +600,15 @@ function EditShortcut({ enabled, onOpen }: { enabled: boolean; onOpen: () => voi
 
 /* ─────────────────────────── record card ─────────────────────────── */
 
-function RecordCard({ person, datePrefs }: { person: Person; datePrefs: ReturnType<typeof useDatePrefs> }) {
+/** Fields beyond the personal ones (names, phone, date of birth). */
+const PLACEMENT_FIELDS = ["roleId", "departmentId", "officeId", "managerId", "weeklyCapacityHours", "workSchedule", "customFields"];
+
+function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; datePrefs: ReturnType<typeof useDatePrefs>; onEditPlacement?: () => void }) {
   const { toast } = useOsToast();
   const self = person.access.relation === "self";
+  // An Owner, Admin or manager-tier person holds their own placement writes
+  // (yesterday's rule), so the "ask your manager" caption would be wrong.
+  const selfPlacement = self && person.access.editable.some((f) => PLACEMENT_FIELDS.includes(f));
   const birthday = person.dateOfBirth
     ? person.dateOfBirth.startsWith("--")
       ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`2000-${person.dateOfBirth.slice(2)}T12:00:00Z`))
@@ -557,13 +639,46 @@ function RecordCard({ person, datePrefs }: { person: Person; datePrefs: ReturnTy
         {person.access.peopleData && birthday ? <RecordRow label="Date of birth">{birthday}</RecordRow> : null}
         <RecordRow label="Joined">{formatDate(person.joinDate, datePrefs, "date")}</RecordRow>
         {person.access.peopleData ? (
-          <RecordRow label="Weekly capacity">{person.weeklyCapacityHours != null ? `${person.weeklyCapacityHours}h` : <span className="text-ink-2">Org default</span>}</RecordRow>
+          <RecordRow label="Weekly capacity">
+            {person.weeklyCapacityHours != null ? (
+              `${person.weeklyCapacityHours}h`
+            ) : (
+              <span className="text-ink-2">
+                {person.workSchedule ? "From their schedule" : "Org default"}
+                {person.defaultWeeklyHours != null ? ` (${person.defaultWeeklyHours}h)` : ""}
+              </span>
+            )}
+          </RecordRow>
         ) : null}
+        {person.access.peopleData && (person.workSchedule || person.orgSchedule) ? (
+          <RecordRow label="Work schedule">
+            {person.workSchedule ? (
+              describeSchedule(person.workSchedule)
+            ) : (
+              <span className="text-ink-2">Org schedule{person.orgSchedule ? ` (${describeSchedule(person.orgSchedule)})` : ""}</span>
+            )}
+          </RecordRow>
+        ) : null}
+        {person.access.peopleData
+          ? (person.profileFields ?? [])
+              .filter((f) => f.value || person.access.editable.includes("customFields"))
+              .map((f) => (
+                <RecordRow key={f.key} label={f.label}>
+                  {f.value ? <span className="whitespace-pre-wrap break-words">{f.value}</span> : <span className="text-ink-3">Not set</span>}
+                </RecordRow>
+              ))
+          : null}
         {person.access.peopleData ? (
           <RecordRow label="Tags"><TagPicker entityType="USER" entityId={person.id} canEdit={person.access.tags} /></RecordRow>
         ) : null}
       </dl>
-      {self ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
+      {self && !selfPlacement ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
+      {self && selfPlacement && onEditPlacement ? (
+        <p className="pb-1 pt-2 text-sm text-ink-2">
+          You can change your own placement.{" "}
+          <button type="button" className="text-brand-deep hover:underline" onClick={onEditPlacement}>Edit details</button>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -767,8 +882,12 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
       title={alignment ? `Goals · ${alignment.quarter}` : "Goals"}
       action={
         <span className="flex items-center gap-1">
-          <GhostButton href={self ? "/okrs?mine=1" : `/okrs?owner=${person.id}`}>All goals</GhostButton>
-          {!person.deletedAt ? <GhostButton icon={Plus} href={self ? "/okrs?new=1" : `/okrs?new=1&owner=${person.id}`}>Set a goal</GhostButton> : null}
+          {/* /okrs has no per-person owner filter yet, so a link claiming to
+              be about this person would show the viewer's own goals, and a
+              "Set a goal" would create the goal as the viewer's. On someone
+              else's record the door is the Team goals view instead. */}
+          {self ? <GhostButton href="/okrs">All goals</GhostButton> : person.access.relation !== "chain-view" ? <GhostButton href="/okrs?view=team">Team goals</GhostButton> : null}
+          {self && !person.deletedAt ? <GhostButton icon={Plus} href="/okrs?new=1">Set a goal</GhostButton> : null}
         </span>
       }
     >
@@ -827,6 +946,11 @@ function ReviewsTab({ person }: { person: Person }) {
         ))}
         {!self && reviews.length === 0 ? <li className="px-3 py-3 text-row text-ink-2">No reviews yet</li> : null}
       </Rows>
+      {(person.reviewsTotal ?? 0) > reviews.length ? (
+        <p className="text-sm text-ink-2">
+          Showing the latest {reviews.length} of {person.reviewsTotal}. <Link href="/reviews" className="text-brand-deep hover:underline">See every cycle in Review cycles</Link>
+        </p>
+      ) : null}
       {self && reviews.length === 0 ? <p className="text-sm text-ink-2">No review cycles yet.</p> : null}
     </Section>
   );
@@ -911,13 +1035,30 @@ function SkillsTab({ person, onChanged }: { person: Person; onChanged: () => voi
 
 function KudosTab({ person, datePrefs }: { person: Person; datePrefs: ReturnType<typeof useDatePrefs> }) {
   const self = person.access.relation === "self";
+  // The record carries the newest 20; the rest page in from /api/kudos, 20
+  // at a time, until the list reaches the total the tab counts.
+  const [older, setOlder] = useState<KudosRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const all = [...person.kudosReceived, ...older.filter((o) => !person.kudosReceived.some((k) => k.id === o.id))];
+  async function showMore() {
+    setLoadingMore(true);
+    setMoreError(null);
+    const next = page + 1;
+    const r = await apiFetch<{ data: KudosRow[] }>(`/api/kudos?userId=${person.id}&page=${next}&limit=20`, { cache: "no-store" });
+    setLoadingMore(false);
+    if (!r.ok) { setMoreError(r.error || "Couldn't load more kudos"); return; }
+    setOlder((cur) => [...cur, ...(r.data.data ?? [])]);
+    setPage(next);
+  }
   return (
     <Section title="Kudos" action={!self && !person.deletedAt ? <GhostButton icon={Gift} href={`/kudos?new=1&to=${person.id}`}>Give kudos</GhostButton> : undefined}>
-      {person.kudosReceived.length === 0 ? (
+      {all.length === 0 ? (
         <p className="text-row text-ink-2">No kudos yet.</p>
       ) : (
         <Rows>
-          {person.kudosReceived.map((k) => (
+          {all.map((k) => (
             <li key={k.id} className="flex gap-3 px-3 py-3">
               <Avatar person={k.giver} size={28} />
               <div className="min-w-0 flex-1">
@@ -933,6 +1074,14 @@ function KudosTab({ person, datePrefs }: { person: Person; datePrefs: ReturnType
           ))}
         </Rows>
       )}
+      {all.length < person.kudosCount ? (
+        <div className="flex items-center gap-3">
+          <button type="button" disabled={loadingMore} onClick={() => void showMore()} className="inline-flex h-8 items-center rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
+            {loadingMore ? "Loading more kudos" : `Show more (${person.kudosCount - all.length})`}
+          </button>
+          {moreError ? <span role="alert" className="text-sm text-danger-text">{moreError}</span> : null}
+        </div>
+      ) : null}
     </Section>
   );
 }

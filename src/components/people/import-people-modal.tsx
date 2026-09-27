@@ -82,7 +82,7 @@ export function PeopleImport({ flow }: { flow: ReturnType<typeof usePeopleImport
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) void flow.stage(f); }}
-          className={`flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center ${drag ? "border-brand bg-brand-soft" : "border-line-strong bg-surface-2"}`}
+          className={`flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center ${drag ? "border-brand bg-brand-soft" : "border-line-strong bg-subtle"}`}
         >
           <Upload className="h-5 w-5 text-ink-2" aria-hidden />
           <p className="text-row text-ink">Drop a CSV here, or</p>
