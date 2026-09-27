@@ -1,0 +1,11 @@
+-- Phase 7 walk, group 6: IntegrationRequest."name", the connector name a
+-- person typed into "Request a connector". The key is its slug
+-- (custom:hub-spot) and was the only thing stored, so /integrations could not
+-- list the request back and Settings read "hub-spot" instead of "HubSpot".
+--
+-- Runs after prisma/sql/2026-09-24-phase7-requests.sql has created the table
+-- (scripts/deploy-migrations.mjs applies the manifest before migrate deploy).
+-- Idempotent: ADD COLUMN IF NOT EXISTS, nullable, no backfill. The routes
+-- read and write it through raw SQL that tolerates its absence, so deploy
+-- order is free.
+ALTER TABLE "IntegrationRequest" ADD COLUMN IF NOT EXISTS "name" TEXT;

@@ -2,7 +2,11 @@
 // "Marketing (legacy)" (spec-tools-misc section 2.7; the page is Phase 8's,
 // the minimal entry is on /settings/data today).
 //
-//   GET   the counts, whether the import has run, and the migrated Space
+//   GET   the counts, whether the import has run, the migrated Space, and
+//         what a write would still do (rows never moved, or whose task was
+//         deleted for good, and moved tasks whose dates still need
+//         anchoring), so the page keeps offering Import while there is
+//         something left for it to do
 //   POST  { write: false } a dry-run report; { write: true } the import
 //
 // Owner and Admin only, through the one Data gate (requireCan "manage"
@@ -17,7 +21,8 @@
 import { NextRequest } from "next/server";
 import { AccessError, requireCan } from "@/lib/access/gate";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { countLegacyMarketing, findMigratedMarketing, hasLegacyMarketing, importLegacyMarketing } from "@/lib/marketing/legacy-import";
+import { countLegacyMarketing, findMigratedMarketing, hasLegacyMarketing, importLegacyMarketing, pendingLegacyMarketing, resolveImportZone } from "@/lib/marketing/legacy-import";
+import { MARKETING_KINDS } from "@/lib/marketing/legacy-map";
 import { logActivity } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
@@ -27,14 +32,23 @@ const DATA_PAGE = { type: "settings", page: "data" } as const;
 export async function GET() {
   try {
     const { viewer } = await requireCan("manage", DATA_PAGE);
-    const [counts, migrated] = await Promise.all([
+    const [counts, migrated, zone] = await Promise.all([
       countLegacyMarketing(viewer.organizationId),
       findMigratedMarketing(viewer.organizationId),
+      resolveImportZone(viewer.organizationId, viewer.userId),
     ]);
+    // What is left to do is read only once the Space exists: before that,
+    // everything is pending and the page already shows Import.
+    const pending = migrated ? await pendingLegacyMarketing(viewer.organizationId, zone) : null;
+    const moved = { ...counts };
+    if (pending) for (const k of MARKETING_KINDS) moved[k] = counts[k] - pending.toWrite[k];
     return jsonSuccess({
       counts,
       hasRows: hasLegacyMarketing(counts),
       migrated: migrated ? { spaceSlug: migrated.spaceSlug, lists: migrated.lists, archived: migrated.archived } : null,
+      /** Rows that have a task today, per kind (equals `counts` once everything is over). */
+      moved,
+      pending,
     });
   } catch (e) {
     if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);

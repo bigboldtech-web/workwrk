@@ -7,12 +7,17 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canManageTool } from "@/lib/tools/tool-access";
+import { canManageTool, canSeeTool } from "@/lib/tools/tool-access";
 import { requireTools } from "@/lib/tools/tool-server";
 
+// Same rule as ../route.ts: a tool the viewer cannot see is "Not found" on
+// every method, so the 403 below never confirms an unshared id exists. See
+// is decided before manage; the copy is for a Can view holder only.
 async function manageable(id: string, v: Exclude<Awaited<ReturnType<typeof requireTools>>, { error: unknown }>) {
   const tool = await prisma.tool.findFirst({ where: { id, organizationId: v.orgId }, select: { id: true, name: true, addedBy: true } });
   if (!tool) return { error: jsonError("Not found", 404) };
+  const share = await prisma.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: v.userId } }, select: { id: true } });
+  if (!canSeeTool(v, tool, Boolean(share))) return { error: jsonError("Not found", 404) };
   if (!canManageTool(v, tool)) return { error: jsonError("You can't share this tool. Ask whoever added it.", 403) };
   return { tool };
 }

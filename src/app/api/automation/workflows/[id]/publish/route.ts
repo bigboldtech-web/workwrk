@@ -3,8 +3,9 @@
 // Snapshots the current definition into an AutomationWorkflowVersion
 // (next versionNumber), marks it the published version, and flips the
 // workflow ACTIVE. Validates the definition first so a broken workflow
-// can never go live: it needs a known trigger, at least one action, and
-// every action must exist in the registry and be available today.
+// can never go live: it needs a known trigger, at least one action,
+// every action must exist in the registry and be available today, and
+// every condition whose operator takes a value must carry one.
 
 import { Prisma } from "@/generated/prisma";
 import { NextResponse, type NextRequest } from "next/server";
@@ -14,6 +15,7 @@ import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
+import { firstConditionMissingValue } from "@/lib/automation/builder-state";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -52,6 +54,17 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (!impl.available) {
       return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index, issues: { section: "then", index } }, { status: 400 });
     }
+  }
+  // A condition such as "priority equals" with no value would go live and
+  // compare against "" on every event, never matching, so the automation
+  // silently never runs. The builder refuses it too; this is for the API
+  // path and for a draft saved before the builder learned to check.
+  const emptyCondition = firstConditionMissingValue(def.conditions);
+  if (emptyCondition !== null) {
+    return NextResponse.json(
+      { error: "One condition has no value. Pick one or remove it.", section: "only_if", index: emptyCondition, issues: { section: "only_if", index: emptyCondition } },
+      { status: 400 },
+    );
   }
   const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger };
 

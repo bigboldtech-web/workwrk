@@ -120,7 +120,37 @@ type Row = {
   /** Runs instead of navigating; the palette closes first. */
   action?: () => void;
   shortcut?: string;
+  /**
+   * Extra names a typed query may match, never shown. The canon labels of
+   * spec-ai-automation 1.3 ("Ask AI", "Workflows") name pages whose rows
+   * carry the hub or app label ("AI", "Automation"), and a person types
+   * what the page is called, not what the rail calls it.
+   */
+  aliases?: string[];
 };
+
+/**
+ * Search aliases by app key, for the rows appRow builds. Hidden names only:
+ * the row still reads as the catalog labels it.
+ */
+const APP_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  ai: ["Ask AI"],
+  automation: ["Workflows"],
+};
+
+/**
+ * Does a jump row answer a typed query? Substring on the label and on every
+ * alias, case-insensitive; `lq` is the already lowercased query. Exported for
+ * the test, pure on purpose.
+ */
+export function rowMatchesQuery(
+  row: Pick<Row, "label" | "aliases">,
+  lq: string,
+): boolean {
+  if (!lq) return false;
+  if (row.label.toLowerCase().includes(lq)) return true;
+  return (row.aliases ?? []).some((a) => a.toLowerCase().includes(lq));
+}
 
 type Section = {
   key: string;
@@ -400,6 +430,7 @@ function PaletteBody() {
         secondary: a.hubKey ? HUB_LABELS[hub] : undefined,
         glyph: <Glyph icon={Icon} />,
         href: hubHref(a.key),
+        aliases: APP_SEARCH_ALIASES[a.key]?.slice(),
       };
     },
     [hubHref],
@@ -640,9 +671,12 @@ function PaletteBody() {
       };
       groups[kind].push(row);
     }
-    const apps = [...jumpRows.slice(0, 3), ...launcherApps.map(appRow)].filter(
-      (r) => r.label.toLowerCase().includes(lq),
-    );
+    // Every jump row, not the first three plus the apps: jumpRows is already
+    // the personal rows followed by every launcher app, so this is the same
+    // list with no duplicates, and the rows that exist only here (Everything,
+    // Favorites, Activity, Agents, Integrations) are found by typing their
+    // name instead of answering "No results" to the label the list shows.
+    const apps = jumpRows.filter((r) => rowMatchesQuery(r, lq));
     const settings = settingsRows(q);
     const actions: Row[] = [];
     if (aiVisible && isMember)
@@ -740,8 +774,6 @@ function PaletteBody() {
     jumpRows,
     createRows,
     settingsRows,
-    launcherApps,
-    appRow,
     aiVisible,
     isMember,
     openSidekick,
@@ -803,6 +835,10 @@ function PaletteBody() {
   }, [activeIdx]);
 
   const hint = q.length >= 2;
+  // A found app, setting or jump row is a result. Without this the line said
+  // "No results" over the very row the person typed the name of (Agents,
+  // Inbox), because it looked at the search hits alone.
+  const found = sections.some((s) => s.key !== "actions" && s.rows.length > 0);
   let runningIdx = -1;
 
   return (
@@ -901,7 +937,7 @@ function PaletteBody() {
             </button>
           </div>
         ) : null}
-        {hint && !failed && !searching && live.length === 0 ? (
+        {hint && !failed && !searching && live.length === 0 && !found ? (
           <div className="flex h-9 items-center px-4 text-sm text-ink-2">
             No results for &ldquo;{q}&rdquo;
           </div>

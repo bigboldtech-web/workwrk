@@ -54,6 +54,27 @@ describe("filterWorkflows", () => {
     expect(filterWorkflows(rows, { view: "drafts", showArchived: false }).map((r) => r.id)).toEqual(["b"]);
   });
 
+  it("the Errors view is the workflows whose latest finished run failed, not a stored status", () => {
+    // Nothing writes the ERROR workflow status, so the view is run-derived.
+    const failing = [
+      row({ id: "f", status: "ACTIVE", lastRunFailed: true, successRate: 25 }),
+      row({ id: "g", status: "INACTIVE", lastRunFailed: true }),
+      row({ id: "h", status: "ARCHIVED", lastRunFailed: true }),
+      row({ id: "ok", status: "ACTIVE", lastRunFailed: false, successRate: 100 }),
+      row({ id: "never", status: "ACTIVE" }),
+      row({ id: "stored", status: "ERROR" }),
+    ];
+    // Active and paused failures show; archived, recovered, never-run and
+    // a bare ERROR status without a failed run do not.
+    expect(filterWorkflows(failing, { view: "errors", showArchived: false }).map((r) => r.id)).toEqual(["f", "g"]);
+    // Show archived reads the same as in the All view.
+    expect(filterWorkflows(failing, { view: "errors", showArchived: true }).map((r) => r.id)).toEqual(["f", "g", "h"]);
+    // The other filters still apply on top.
+    expect(filterWorkflows(failing, { view: "errors", showArchived: false, q: "g" }).map((r) => r.id)).toEqual(["g"]);
+    // The spec's ?status=ERROR deep link still lights the Errors pill.
+    expect(parseView("ERROR")).toBe("errors");
+  });
+
   it("filters by creator, alert level and where it runs", () => {
     expect(filterWorkflows(rows, { view: "all", showArchived: false, createdBy: ["u2"] }).map((r) => r.id)).toEqual(["b"]);
     expect(filterWorkflows(rows, { view: "all", showArchived: false, severities: ["CRITICAL"] }).map((r) => r.id)).toEqual(["c"]);

@@ -13,6 +13,7 @@
 // the Ideas migration used for its List (`Board.settings.legacyIdeasList`).
 
 import type { CsvCell } from "@/lib/csv";
+import { localDayIso } from "@/lib/item-date";
 
 export type MarketingKind = "campaigns" | "content" | "events";
 export const MARKETING_KINDS: readonly MarketingKind[] = ["campaigns", "content", "events"];
@@ -105,6 +106,78 @@ export function mapMarketingStatus(kind: MarketingKind, legacy: string | null | 
 /** The same slug the seed's `choices()` helper writes, so a legacy label lands on a real choice. */
 export function choiceValue(label: string): string {
   return label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+// ── Dates ───────────────────────────────────────────────────────────
+//
+// The legacy pages only ever showed these columns as calendar days
+// (toLocaleDateString) and the legacy API stored a picked day as UTC
+// midnight, so a campaign that ends "2026-12-31" is 2026-12-31T00:00:00.000Z
+// in its row. A task treats startAt and dueAt as instants and shows them in
+// the viewer's zone: copied verbatim, that instant reads Dec 30, 7:00 PM in
+// New York and Dec 31, 05:30 in Kolkata, a day early for everyone west of
+// UTC and a time of day everywhere but UTC, on a campaign that never had
+// one. The product's own rule (item-date.ts) is that a date-only value is
+// midnight of that day in the zone it was picked in, so the import anchors
+// every UTC-midnight value to midnight of the same calendar day in the
+// import zone (the migrating Owner's saved zone, else the workspace's, else
+// the machine's). A value that carries a time of day is a real instant and
+// is kept as it is. No zone (the CSV, the tests) keeps the verbatim value.
+
+/** The legacy shape of a picked day: the UTC clock reads exactly 00:00:00.000. */
+export function isUtcMidnight(d: Date): boolean {
+  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+}
+
+/** A legacy date as the task should hold it: a picked day becomes midnight of that day in `zone`; anything else, or no zone, is verbatim. */
+export function anchorLegacyDay(d: Date | null | undefined, zone: string | null | undefined): Date | null {
+  if (!d) return null;
+  if (!zone || Number.isNaN(d.getTime()) || !isUtcMidnight(d)) return d;
+  try {
+    const iso = localDayIso(d.toISOString().slice(0, 10), { timezone: zone });
+    return iso ? new Date(iso) : d;
+  } catch {
+    // An unknown zone name: Intl throws, and the verbatim value is better
+    // than no task at all. The importer validates the zone before it gets here.
+    return d;
+  }
+}
+
+export interface LegacyDates {
+  startAt: Date | null;
+  dueAt: Date | null;
+}
+
+/** Which legacy columns feed the built-in Start and Due dates, per kind, in one place: the mappers, the import's date correction and its pending count all read this. */
+export type LegacyDateColumns = Partial<Pick<LegacyCampaignRow, "startDate" | "endDate">> & Partial<Pick<LegacyContentRow, "scheduledFor">>;
+
+export function legacyDates(kind: MarketingKind, row: LegacyDateColumns, zone?: string | null): LegacyDates {
+  if (kind === "content") return { startAt: null, dueAt: anchorLegacyDay(row.scheduledFor, zone) };
+  const start = anchorLegacyDay(row.startDate, zone);
+  // An event without an end is a one-day event: it is due the day it happens.
+  return { startAt: start, dueAt: kind === "events" ? anchorLegacyDay(row.endDate, zone) ?? start : anchorLegacyDay(row.endDate, zone) };
+}
+
+/**
+ * What a re-run changes on a task an earlier run wrote with verbatim dates:
+ * each date the task still holds exactly as the legacy row stored it (nobody
+ * has touched it since) moves to its anchored value; a date someone has set
+ * by hand, or one the zone leaves where it is, is left alone. Null when
+ * nothing needs to move.
+ */
+export function legacyDateCorrection(kind: MarketingKind, row: LegacyDateColumns, zone: string | null | undefined, task: LegacyDates): Partial<LegacyDates> | null {
+  const verbatim = legacyDates(kind, row, null);
+  const anchored = legacyDates(kind, row, zone);
+  const patch: Partial<LegacyDates> = {};
+  for (const key of ["startAt", "dueAt"] as const) {
+    const was = verbatim[key];
+    const now = anchored[key];
+    const held = task[key];
+    if (!was || !now || !held) continue;
+    if (held.getTime() !== was.getTime() || now.getTime() === was.getTime()) continue;
+    patch[key] = now;
+  }
+  return Object.keys(patch).length ? patch : null;
 }
 
 // ── Rows to tasks ───────────────────────────────────────────────────
@@ -202,6 +275,11 @@ function provenance(kind: MarketingKind, row: { id: string; workspaceId: string 
   return out;
 }
 
+/** The zone the task's dates were anchored in, kept in the provenance so a later correction knows what it is looking at. */
+function dateZone(zone: string | null | undefined, dates: LegacyDates): Record<string, unknown> {
+  return zone && (dates.startAt || dates.dueAt) ? { dateZone: zone } : {};
+}
+
 function describe(parts: Array<[label: string, value: string | null | undefined]>, body: string | null | undefined): { description: string; folded: string[] } {
   const folded: string[] = [];
   const lines: string[] = [];
@@ -225,8 +303,14 @@ export function moneyText(amount: number, currency: string): string {
   }
 }
 
-export function campaignToTask(row: LegacyCampaignRow, opts: { listCurrency: string }): MappedTask {
+/** `importZone`: the IANA zone a picked day is anchored in (see "Dates" above); absent, the dates are copied verbatim. */
+export interface DateOpts {
+  importZone?: string | null;
+}
+
+export function campaignToTask(row: LegacyCampaignRow, opts: { listCurrency: string } & DateOpts): MappedTask {
   const status = mapMarketingStatus("campaigns", row.status);
+  const dates = legacyDates("campaigns", row, opts.importZone);
   const currency = (row.currency || opts.listCurrency).toUpperCase();
   const currencyMismatch = currency !== opts.listCurrency.toUpperCase();
   const budget = moneyToNumber(row.budget);
@@ -259,14 +343,14 @@ export function campaignToTask(row: LegacyCampaignRow, opts: { listCurrency: str
     ...(currencyMismatch && spent !== null ? { spent } : {}),
     ...(row.channel ? { channel: row.channel } : {}),
     ...(row.goalMetric ? { goalMetric: row.goalMetric } : {}),
+    ...dateZone(opts.importZone, dates),
   });
   return {
     title: row.name.trim() || "Untitled campaign",
     status: status.value,
     statusExact: status.exact,
     statusUnmapped: status.unmapped,
-    startAt: row.startDate,
-    dueAt: row.endDate,
+    ...dates,
     ownerId: row.ownerId,
     metadata,
     folded,
@@ -290,8 +374,9 @@ const CONTENT_TYPE_LABEL: Record<string, string> = {
   OTHER: "Other",
 };
 
-export function contentToTask(row: LegacyContentRow, opts: { campaignTitleById?: ReadonlyMap<string, string> } = {}): MappedTask {
+export function contentToTask(row: LegacyContentRow, opts: { campaignTitleById?: ReadonlyMap<string, string> } & DateOpts = {}): MappedTask {
   const status = mapMarketingStatus("content", row.status);
+  const dates = legacyDates("content", row, opts.importZone);
   const campaignTitle = row.campaignId ? opts.campaignTitleById?.get(row.campaignId) ?? null : null;
   const { description, folded } = describe(
     [
@@ -315,14 +400,14 @@ export function contentToTask(row: LegacyContentRow, opts: { campaignTitleById?:
     ...(row.campaignId ? { campaignId: row.campaignId } : {}),
     ...(row.authorId ? { authorId: row.authorId } : {}),
     ...(row.publishedAt ? { publishedAt: row.publishedAt.toISOString() } : {}),
+    ...dateZone(opts.importZone, dates),
   });
   return {
     title: row.title.trim() || "Untitled content",
     status: status.value,
     statusExact: status.exact,
     statusUnmapped: status.unmapped,
-    startAt: null,
-    dueAt: row.scheduledFor,
+    ...dates,
     ownerId: row.ownerId ?? row.authorId,
     metadata,
     folded,
@@ -330,8 +415,9 @@ export function contentToTask(row: LegacyContentRow, opts: { campaignTitleById?:
   };
 }
 
-export function eventToTask(row: LegacyEventRow, opts: { listCurrency: string; campaignTitleById?: ReadonlyMap<string, string> }): MappedTask {
+export function eventToTask(row: LegacyEventRow, opts: { listCurrency: string; campaignTitleById?: ReadonlyMap<string, string> } & DateOpts): MappedTask {
   const status = mapMarketingStatus("events", row.status);
+  const dates = legacyDates("events", row, opts.importZone);
   const budget = moneyToNumber(row.budget);
   const spent = moneyToNumber(row.spent);
   const campaignTitle = row.campaignId ? opts.campaignTitleById?.get(row.campaignId) ?? null : null;
@@ -357,14 +443,14 @@ export function eventToTask(row: LegacyEventRow, opts: { listCurrency: string; c
     ...(row.type ? { type: row.type } : {}),
     ...(row.format ? { format: row.format } : {}),
     ...(row.campaignId ? { campaignId: row.campaignId } : {}),
+    ...dateZone(opts.importZone, dates),
   });
   return {
     title: row.name.trim() || "Untitled event",
     status: status.value,
     statusExact: status.exact,
     statusUnmapped: status.unmapped,
-    startAt: row.startDate,
-    dueAt: row.endDate ?? row.startDate,
+    ...dates,
     ownerId: row.ownerId,
     metadata,
     folded,

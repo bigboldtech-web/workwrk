@@ -11,6 +11,13 @@ import { readScope, type AutomationScope } from "./definition";
 export const WORKFLOW_VIEWS = ["all", "active", "drafts", "paused", "errors"] as const;
 export type WorkflowView = (typeof WORKFLOW_VIEWS)[number];
 
+/**
+ * The stored status each view reads as. Errors is the exception: nothing
+ * ever writes the ERROR workflow status (the engine records failures on the
+ * run, and only touches lastRunAt on the workflow), so the Errors view is
+ * derived from runs instead (see filterWorkflows). Its entry here only keeps
+ * the spec's ?status=ERROR deep link lighting the Errors pill.
+ */
 export const VIEW_STATUS: Record<WorkflowView, string | null> = {
   all: null,
   active: "ACTIVE",
@@ -18,6 +25,9 @@ export const VIEW_STATUS: Record<WorkflowView, string | null> = {
   paused: "INACTIVE",
   errors: "ERROR",
 };
+
+/** The run statuses that count as a finished run (the success-rate base). */
+export const TERMINAL_RUN_STATUSES = ["SUCCESS", "FAILED", "PARTIAL"] as const;
 
 export const VIEW_LABEL: Record<WorkflowView, string> = {
   all: "All",
@@ -83,6 +93,12 @@ export interface ListRow {
   updatedAt: string | Date;
   lastRunAt: string | Date | null;
   successRate: number | null;
+  /**
+   * Did this workflow's most recent finished run (SUCCESS, FAILED or
+   * PARTIAL; a SKIPPED or in-flight run proves nothing either way) end
+   * FAILED? What the Errors view shows. Missing reads as false.
+   */
+  lastRunFailed?: boolean;
   definition: unknown;
 }
 
@@ -113,7 +129,12 @@ export function scopeTouches(scope: AutomationScope, c: NonNullable<ListFilters[
 }
 
 export function filterWorkflows<T extends ListRow>(rows: T[], f: ListFilters): T[] {
-  const status = VIEW_STATUS[f.view];
+  // Errors is "what is failing right now", not a stored status: the rows
+  // whose latest finished run failed, in any status (a paused one still
+  // needs fixing before it comes back), archived hidden as in the All view.
+  // A workflow that has since run clean drops out, so the tab can be
+  // cleared by fixing the automation rather than staying red for ever.
+  const status = f.view === "errors" ? null : VIEW_STATUS[f.view];
   const q = f.q?.trim().toLowerCase() ?? "";
   return rows.filter((w) => {
     if (status) {
@@ -121,6 +142,7 @@ export function filterWorkflows<T extends ListRow>(rows: T[], f: ListFilters): T
     } else if (!f.showArchived && w.status === "ARCHIVED") {
       return false;
     }
+    if (f.view === "errors" && !w.lastRunFailed) return false;
     if (q && !w.name.toLowerCase().includes(q)) return false;
     if (f.createdBy?.length && !(w.createdById && f.createdBy.includes(w.createdById))) return false;
     if (f.triggers?.length && !(w.triggerEvent && f.triggers.includes(w.triggerEvent))) return false;

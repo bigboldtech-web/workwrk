@@ -18,6 +18,10 @@ import { isGoogleEnabled } from "@/services/googleCalendar";
  * { connectors: [{ key, name, category, blurb, status, setupHref, canSetUp,
  *   requestCount, requestedByMe }], canConnect }
  *
+ * A connector somebody asked for by name (Request a connector) is a row too,
+ * category Other, so the requester can see and withdraw it (see
+ * customConnectorRows below).
+ *
  * Every Member reads (app key integrations). The old body of this GET
  * returned every Integration row with its `config`, which holds API keys, to
  * any signed-in person, and had no caller in the app; that is gone.
@@ -55,31 +59,80 @@ export async function GET(req: NextRequest) {
   }
 
   const requested = new Set([...counts.keys()]);
-  const list = filterConnectors(
-    {
-      q: sp.get("q"),
-      category: sp.get("category"),
-      status: sp.get("status"),
-      showUpcoming: sp.get("upcoming") === "1",
-      availability: { "google-calendar": isGoogleEnabled() },
-    },
-    requested,
-  );
+  const query = {
+    q: sp.get("q"),
+    category: sp.get("category"),
+    status: sp.get("status"),
+    showUpcoming: sp.get("upcoming") === "1",
+    availability: { "google-calendar": isGoogleEnabled() },
+  };
+  const list = filterConnectors(query, requested);
+
+  // "Request a connector" free text lives under a custom:* key that the
+  // registry never lists, so the person who sent it could not see it on the
+  // page, nor withdraw it. Each such key the org holds becomes one row here:
+  // not built, category Other, requestable and withdrawable through the
+  // same footer control as a catalogue card. It answers the page's filters
+  // the way a catalogue row does (a category filter hides it, since it has
+  // none; Ready hides it; Requested and All show it).
+  const customKeys = [...counts.keys()].filter((k) => k.startsWith("custom:"));
+  const customRows = customKeys.length && query.status !== "ready" && !query.category
+    ? await customConnectorRows(viewer.organizationId, customKeys, query.q)
+    : [];
 
   return jsonSuccess({
-    connectors: list.map((c) => ({
-      key: c.key,
-      name: c.name,
-      category: c.category,
-      blurb: c.blurb,
-      status: c.kind,
-      setupHref: c.setup?.href ?? null,
-      canSetUp: c.kind === "ready" ? (c.setup?.by === "member" ? true : admin) : false,
-      requestCount: counts.get(c.key) ?? 0,
-      requestedByMe: mine.has(c.key),
-    })),
+    connectors: [
+      ...list.map((c) => ({
+        key: c.key,
+        name: c.name,
+        category: c.category as string,
+        blurb: c.blurb,
+        status: c.kind,
+        setupHref: c.setup?.href ?? null,
+        canSetUp: c.kind === "ready" ? (c.setup?.by === "member" ? true : admin) : false,
+        requestCount: counts.get(c.key) ?? 0,
+        requestedByMe: mine.has(c.key),
+      })),
+      ...customRows.map((r) => ({
+        key: r.key,
+        name: r.name,
+        category: "Other",
+        blurb: "Not in the catalogue yet. Asked for by people here.",
+        status: "not_built" as const,
+        setupHref: null,
+        canSetUp: false,
+        requestCount: counts.get(r.key) ?? 0,
+        requestedByMe: mine.has(r.key),
+      })),
+    ],
     canConnect: admin,
   });
+}
+
+/**
+ * The custom:* keys as rows, named as the first person typed them. The name
+ * column is read through raw SQL (the schema comment on
+ * IntegrationRequest.name says why); a database without it, or the dev
+ * server's split client, answers no names and the slug is humanized
+ * ("custom:hub-spot" reads "Hub Spot"). The same two helpers live in
+ * requests/route.ts: a route file cannot export them and no shared module
+ * owns them yet.
+ */
+async function customConnectorRows(organizationId: string, keys: string[], q: string | null): Promise<{ key: string; name: string }[]> {
+  const names = new Map<string, string>();
+  try {
+    const rows = await prisma.$queryRaw<{ key: string; name: string | null }[]>`SELECT "key", "name" FROM "IntegrationRequest" WHERE "organizationId" = ${organizationId} AND "key" LIKE ${"custom:%"} AND "name" IS NOT NULL ORDER BY "createdAt" ASC`;
+    for (const r of rows) if (r.name && !names.has(r.key)) names.set(r.key, r.name);
+  } catch {
+    // column absent
+  }
+  const humanize = (key: string) =>
+    key.replace(/^custom:/, "").split("-").filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  const needle = (q ?? "").trim().toLowerCase();
+  return keys
+    .map((key) => ({ key, name: names.get(key) ?? humanize(key) }))
+    .filter((r) => !needle || `${r.name} other`.toLowerCase().includes(needle))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function POST(req: NextRequest) {

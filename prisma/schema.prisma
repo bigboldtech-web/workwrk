@@ -6743,6 +6743,13 @@ model IntegrationRequest {
   userId         String
   note           String?      @db.Text
   notify         Boolean      @default(true)
+  /// "Request a connector" free text: the name the person typed, kept as
+  /// typed. `key` holds only its slug (custom:hub-spot), which is what the
+  /// count groups on; without this the catalogue and Settings could only
+  /// show the slug back. Null on a catalogue request, whose name is the
+  /// registry's. Written and read through raw SQL until the client is
+  /// regenerated, so a database without the column still answers.
+  name           String?
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, key, userId])

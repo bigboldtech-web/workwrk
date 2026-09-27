@@ -633,9 +633,13 @@ export default function AutomationBuilderPage() {
     if (!r.ok) {
       const body = (r.issues && typeof r.issues === "object" ? r.issues : null) as { section?: string; index?: number } | null;
       const section = body?.section;
-      if (section === "when") setProblems({ when: r.error, actions: {} });
-      else if (section === "then" && typeof body?.index === "number" && draft.actions[body.index]) setProblems({ actions: { [draft.actions[body.index].id]: r.error } });
-      else setProblems({ then: r.error || "Couldn't publish", actions: {} });
+      // The server indexes the saved rules, which skip rows the draft still
+      // holds but toSaveBody drops (no field or operator), so count as it does.
+      const savedConds = draft.conditions.filter((c) => c.opaque !== undefined || (c.field && c.operator));
+      if (section === "when") setProblems({ when: r.error, conditions: {}, actions: {} });
+      else if (section === "only_if" && typeof body?.index === "number" && savedConds[body.index]) setProblems({ conditions: { [savedConds[body.index].id]: r.error }, actions: {} });
+      else if (section === "then" && typeof body?.index === "number" && draft.actions[body.index]) setProblems({ conditions: {}, actions: { [draft.actions[body.index].id]: r.error } });
+      else setProblems({ then: r.error || "Couldn't publish", conditions: {}, actions: {} });
       toast("Not published", { tone: "danger" });
       return;
     }
@@ -909,6 +913,8 @@ export default function AutomationBuilderPage() {
     const f = conditionFields.find((x) => x.key === row.field);
     const kind = valueKindFor(f?.type, row.operator);
     const set = (value: string) => setCond(row.id, { value });
+    // Red until a value is picked, the same marking a required action param gets.
+    const invalid = Boolean(problems?.conditions[row.id]) && !row.value.trim();
     if (kind === "none") return null;
     if (readOnly) {
       const shown =
@@ -921,26 +927,26 @@ export default function AutomationBuilderPage() {
     }
     if (kind === "user") {
       return <Token label={userLabel(row.value, people)} placeholder="Pick a person" ariaLabel="Condition person" readOnly={false} alwaysSearch onSearchChange={setPeopleQuery}
-        sections={peopleSections(people, peopleQuery, false, false, false)} selected={row.value} onSelect={set} />;
+        sections={peopleSections(people, peopleQuery, false, false, false)} selected={row.value} onSelect={set} invalid={invalid} />;
     }
     if (kind === "status") {
-      return <StatusToken value={row.value} options={statusOptions} ariaLabel="Condition status" onChange={set} />;
+      return <StatusToken value={row.value} options={statusOptions} ariaLabel="Condition status" onChange={set} invalid={invalid} />;
     }
     if (kind === "priority") {
       return <Token label={PRIORITY_OPTIONS.find((o) => o.value === row.value)?.label ?? null} placeholder="Pick a priority" ariaLabel="Condition priority" readOnly={false}
-        sections={[{ options: PRIORITY_OPTIONS.map((p) => ({ value: p.value, label: p.label })) }]} selected={row.value} onSelect={set} />;
+        sections={[{ options: PRIORITY_OPTIONS.map((p) => ({ value: p.value, label: p.label })) }]} selected={row.value} onSelect={set} invalid={invalid} />;
     }
     if (kind === "list") {
       return <Token label={row.value ? listLabel(row.value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel="Condition List" readOnly={false}
-        sections={[{ options: listOptions }]} selected={row.value} onSelect={set} />;
+        sections={[{ options: listOptions }]} selected={row.value} onSelect={set} invalid={invalid} />;
     }
     if (kind === "boolean") {
       return <Token label={row.value === "true" ? "Yes" : row.value === "false" ? "No" : null} placeholder="Yes or no" ariaLabel="Condition yes or no" readOnly={false}
-        sections={[{ options: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] }]} selected={row.value} onSelect={set} />;
+        sections={[{ options: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] }]} selected={row.value} onSelect={set} invalid={invalid} />;
     }
-    if (kind === "date") return <input type="date" aria-label="Condition date" value={row.value} onChange={(e) => set(e.target.value)} className={cn(FIELD, "w-40")} />;
-    if (kind === "number") return <input type="number" aria-label="Condition number" value={row.value} onChange={(e) => set(e.target.value)} className={cn(FIELD, "w-28")} />;
-    return <input aria-label="Condition value" value={row.value} onChange={(e) => set(e.target.value)} placeholder="Value" className={cn(FIELD, "min-w-[140px] flex-1")} />;
+    if (kind === "date") return <input type="date" aria-label="Condition date" value={row.value} onChange={(e) => set(e.target.value)} className={cn(FIELD, "w-40", invalid && "border-danger-solid")} />;
+    if (kind === "number") return <input type="number" aria-label="Condition number" value={row.value} onChange={(e) => set(e.target.value)} className={cn(FIELD, "w-28", invalid && "border-danger-solid")} />;
+    return <input aria-label="Condition value" value={row.value} onChange={(e) => set(e.target.value)} placeholder="Value" className={cn(FIELD, "min-w-[140px] flex-1", invalid && "border-danger-solid")} />;
   };
 
   /* Then */
@@ -1242,16 +1248,20 @@ export default function AutomationBuilderPage() {
                   const f = conditionFields.find((x) => x.key === row.field);
                   const ops = operatorsFor(f?.type);
                   const fieldOptions: PickerOption[] = conditionFields.filter((x) => !x.legacy || x.key === row.field).map((x) => ({ value: x.key, label: x.label }));
+                  const condErr = problems?.conditions[row.id];
                   return (
-                    <div key={row.id} className="flex flex-wrap items-center gap-2">
-                      <Token label={f?.label ?? (row.field || null)} placeholder="Pick a field" ariaLabel="Condition field" readOnly={readOnly} width={240}
-                        sections={[{ options: fieldOptions }]} selected={row.field}
-                        onSelect={(v) => { const nf = conditionFields.find((x) => x.key === v); const nops = operatorsFor(nf?.type); setCond(row.id, { field: v, operator: nops.includes(row.operator) ? row.operator : nops[0], value: "" }); }} />
-                      <Token label={OPERATOR_LABEL.get(row.operator) ?? row.operator} placeholder="Pick how" ariaLabel="Condition operator" readOnly={readOnly} width={240}
-                        sections={[{ options: ops.map((o) => ({ value: o, label: OPERATOR_LABEL.get(o) ?? o })) }]} selected={row.operator}
-                        onSelect={(v) => setCond(row.id, { operator: v, value: valueKindFor(f?.type, v) === valueKindFor(f?.type, row.operator) ? row.value : "" })} />
-                      {valueControl(row)}
-                      {!readOnly ? <button type="button" aria-label="Remove condition" onClick={() => removeCond(row.id)} className={BTN.icon}><Trash2 className="size-4" /></button> : null}
+                    <div key={row.id} className="flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Token label={f?.label ?? (row.field || null)} placeholder="Pick a field" ariaLabel="Condition field" readOnly={readOnly} width={240}
+                          sections={[{ options: fieldOptions }]} selected={row.field}
+                          onSelect={(v) => { const nf = conditionFields.find((x) => x.key === v); const nops = operatorsFor(nf?.type); setCond(row.id, { field: v, operator: nops.includes(row.operator) ? row.operator : nops[0], value: "" }); }} />
+                        <Token label={OPERATOR_LABEL.get(row.operator) ?? row.operator} placeholder="Pick how" ariaLabel="Condition operator" readOnly={readOnly} width={240}
+                          sections={[{ options: ops.map((o) => ({ value: o, label: OPERATOR_LABEL.get(o) ?? o })) }]} selected={row.operator}
+                          onSelect={(v) => setCond(row.id, { operator: v, value: valueKindFor(f?.type, v) === valueKindFor(f?.type, row.operator) ? row.value : "" })} />
+                        {valueControl(row)}
+                        {!readOnly ? <button type="button" aria-label="Remove condition" onClick={() => removeCond(row.id)} className={BTN.icon}><Trash2 className="size-4" /></button> : null}
+                      </div>
+                      {condErr ? <p className="m-0 text-sm text-danger-text" role="alert">{condErr}</p> : null}
                     </div>
                   );
                 })}

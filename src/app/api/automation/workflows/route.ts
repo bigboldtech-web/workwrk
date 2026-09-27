@@ -3,7 +3,10 @@
 // GET  the workspace's automations for the Workflows list (spec-ai-automation
 //      /automation/workflows). Query, every parameter optional:
 //        ?status=  a view word (all, active, drafts, paused, errors) or a
-//                  stored status (ACTIVE, DRAFT, INACTIVE, ERROR, ARCHIVED)
+//                  stored status (ACTIVE, DRAFT, INACTIVE, ERROR, ARCHIVED).
+//                  errors (and ERROR) is derived from runs: the workflows
+//                  whose most recent finished run failed, since nothing
+//                  writes the ERROR workflow status
 //        ?includeArchived=1   Show archived (the All view)
 //        ?q=  ?createdBy=  ?trigger=  ?severity=  ?where=   (comma lists)
 //        ?listId= | ?folderId= | ?spaceId=   the container a "..." menu
@@ -28,6 +31,7 @@ import { readScope } from "@/lib/automation/definition";
 import { readAutomationSettings } from "@/lib/automation/settings";
 import { containerContents, definitionWithScopeInOrg, scopeNamer } from "@/lib/automation/places-server";
 import {
+  TERMINAL_RUN_STATUSES,
   VIEW_STATUS,
   WORKFLOW_VIEWS,
   filterWorkflows,
@@ -140,6 +144,31 @@ export async function GET(req: NextRequest) {
   }
   const creatorById = new Map(creators.map((u) => [u.id, { name: `${u.firstName} ${u.lastName}`.trim(), avatar: u.avatar ?? null }]));
 
+  // The Errors view: is the most recent finished run a failure? Only the
+  // workflows that have ever failed can qualify, so the lookup is bounded by
+  // them: the newest finished run's time per workflow, then that run's
+  // status (Prisma's `distinct` would read every run into memory instead).
+  const everFailed = ids.filter((id) => (statsByWorkflow.get(id)?.FAILED ?? 0) > 0);
+  const terminalStatuses = [...TERMINAL_RUN_STATUSES];
+  const newestFinished = everFailed.length
+    ? await prisma.automationRun.groupBy({
+        by: ["workflowId"],
+        where: { organizationId: ctx.orgId, workflowId: { in: everFailed }, status: { in: terminalStatuses } },
+        _max: { createdAt: true },
+      })
+    : [];
+  const newestPairs = newestFinished.flatMap((g) =>
+    g._max.createdAt ? [{ workflowId: g.workflowId, createdAt: g._max.createdAt, status: { in: terminalStatuses } }] : [],
+  );
+  const newestRuns = newestPairs.length
+    ? await prisma.automationRun.findMany({
+        where: { organizationId: ctx.orgId, OR: newestPairs },
+        select: { workflowId: true, status: true },
+      })
+    : [];
+  // Two finished runs in the same millisecond: a failure among them counts.
+  const lastRunFailedIds = new Set(newestRuns.filter((r) => r.status === "FAILED").map((r) => r.workflowId));
+
   const enriched = rows.map((w) => {
     const counts = statsByWorkflow.get(w.id) ?? {};
     const success = counts.SUCCESS ?? 0;
@@ -151,6 +180,7 @@ export async function GET(req: NextRequest) {
       successRuns: success,
       terminalRuns: terminal,
       successRate: terminal > 0 ? Math.round((success / terminal) * 100) : null,
+      lastRunFailed: lastRunFailedIds.has(w.id),
     };
   });
 

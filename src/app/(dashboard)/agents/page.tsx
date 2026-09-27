@@ -42,6 +42,7 @@ import { SchedulePicker } from "@/components/ai/schedule-picker";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { RunStatusChip, RunStatusDot } from "@/components/automation/run-status-chip";
 import { apiFetch } from "@/lib/api-fetch";
+import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { agentState, runsOnWords, scheduleZone, wordsInZone } from "@/lib/agents/schedule-words";
 import { scheduleForSave } from "@/lib/agents/cron";
 import { toolOutcome } from "@/lib/agents/tool-verbs";
@@ -167,7 +168,10 @@ function AgentsInner() {
     return () => { clearTimeout(t); window.removeEventListener("focus", onFocus); };
   }, [load]);
 
-  const changed = useCallback(() => { void load(); setRunsVersion((v) => v + 1); }, [load]);
+  // After Pause, Turn on, Add or Remove: reload the page and tell the AI hub
+  // sidebar too, so its Agents badge (agents that are On) does not sit on the
+  // old number until the window is refocused. Same pattern as the workflows page.
+  const changed = useCallback(() => { void load(); setRunsVersion((v) => v + 1); notifyAiChatsChanged(); }, [load]);
 
   async function setStatus(a: Agent, status: "ENABLED" | "DISABLED") {
     setBusy(a.slug);
@@ -373,7 +377,7 @@ function AgentsInner() {
         onOpenChange={setAddOpen}
         available={available}
         removed={removed}
-        onAdded={() => { void load(); setRunsVersion((v) => v + 1); }}
+        onAdded={changed}
       />
     </>
   );

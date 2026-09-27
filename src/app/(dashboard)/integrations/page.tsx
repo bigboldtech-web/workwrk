@@ -39,7 +39,10 @@ import { CONNECTOR_CATEGORIES, type ConnectorCategory } from "@/lib/integrations
 type Row = {
   key: string;
   name: string;
-  category: ConnectorCategory;
+  // A registry category, or "Other" on a connector somebody asked for by
+  // name (Request a connector): those rows come from the org's requests,
+  // not the registry, and take the Plug icon below.
+  category: ConnectorCategory | "Other";
   blurb: string;
   status: "ready" | "connected" | "not_built" | "upcoming";
   setupHref: string | null;
@@ -48,7 +51,7 @@ type Row = {
   requestedByMe: boolean;
 };
 
-const CATEGORY_ICON: Record<ConnectorCategory, LucideIcon> = {
+const CATEGORY_ICON: Partial<Record<Row["category"], LucideIcon>> = {
   Calendar: CalendarDays,
   Messaging: MessageCircle,
   Email: Mail,

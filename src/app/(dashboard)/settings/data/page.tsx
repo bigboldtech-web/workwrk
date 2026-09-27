@@ -42,7 +42,7 @@ import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import type { LegacyMarketingCounts, LegacyMarketingReport } from "@/lib/marketing/legacy-import";
+import type { LegacyMarketingCounts, LegacyMarketingReport, LegacyPending } from "@/lib/marketing/legacy-import";
 import { LIST_NAME, MARKETING_KINDS, type MarketingKind } from "@/lib/marketing/legacy-map";
 
 type ExportRow = {
@@ -248,11 +248,23 @@ export default function DataCompliancePage() {
 // never held a row, that arrival still gets a sentence and the template link
 // instead of a page with nothing highlighted; and a failed read shows as a
 // failed read with a retry, since this row is what the redirect exists for.
+//
+// ONCE THE SPACE EXISTS the row keeps offering Preview and Import for as
+// long as a write has something to do: a row never moved (or whose task was
+// deleted for good from Trash, which the /marketing/{id} toast sends people
+// here to fix), a moved task whose dates still wait to be anchored, and the
+// run's own "stopped part-way, run it again" case. The copy counts what was
+// moved, never the raw legacy count, so it never claims a row lives in the
+// Space when it does not.
 
 type LegacyState = {
   counts: LegacyMarketingCounts;
   hasRows: boolean;
   migrated: { spaceSlug: string; lists: Partial<Record<MarketingKind, string>>; archived?: boolean } | null;
+  /** Rows that have a task today, per kind. */
+  moved: LegacyMarketingCounts;
+  /** What a write would still do; null until the Space exists (before that, everything is pending). */
+  pending: LegacyPending | null;
 };
 
 const MARKETING_TEMPLATE_HREF = "/templates?q=marketing";
@@ -277,6 +289,24 @@ function plural(n: number, one: string, many: string): string {
 
 function summarise(c: LegacyMarketingCounts): string {
   return [plural(c.campaigns, "campaign", "campaigns"), plural(c.content, "content piece", "content pieces"), plural(c.events, "event", "events")].join(", ");
+}
+
+/** "5 of 6 campaigns, 3 content pieces, 2 events": the moved count against the legacy count where they differ. */
+function summariseMoved(moved: LegacyMarketingCounts, all: LegacyMarketingCounts): string {
+  const part = (kind: MarketingKind, one: string, many: string) =>
+    moved[kind] === all[kind] ? plural(all[kind], one, many) : `${moved[kind]} of ${plural(all[kind], one, many)}`;
+  return [part("campaigns", "campaign", "campaigns"), part("content", "content piece", "content pieces"), part("events", "event", "events")].join(", ");
+}
+
+/** The rows a write would still bring over, in words: "1 campaign and 2 events". */
+function summarisePending(p: LegacyMarketingCounts): string {
+  const parts = [
+    p.campaigns ? plural(p.campaigns, "campaign", "campaigns") : null,
+    p.content ? plural(p.content, "content piece", "content pieces") : null,
+    p.events ? plural(p.events, "event", "events") : null,
+  ].filter((x): x is string => Boolean(x));
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExport: (row: ExportRow) => void }) {
@@ -388,6 +418,13 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
   const archived = Boolean(state.migrated?.archived);
   const written = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].written, 0) : 0;
   const relinked = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].relinked, 0) : 0;
+  const redated = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].redated, 0) : 0;
+  const waiting = state.pending ? state.pending.toWrite.campaigns + state.pending.toWrite.content + state.pending.toWrite.events : 0;
+  const toRedate = state.pending?.toRedate ?? 0;
+  // Import stays on offer while a write has work left, and after a run that
+  // stopped part-way (its toast says to run it again, so the button must be
+  // there to press). A Space in Trash blocks the write, so not then.
+  const importable = !archived && (!spaceHref || waiting > 0 || toRedate > 0 || Boolean(preview?.error));
 
   return (
     <Section label="Legacy">
@@ -402,16 +439,22 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
           <div className="min-w-0 flex-1">
             <div className="text-base font-medium text-ink">Marketing (legacy)</div>
             <div className="text-base text-ink-3">
-              {summarise(state.counts)} from the retired Marketing module.
-              {archived
-                ? <> Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
-                : spaceHref
-                  ? <> They live in the Marketing Space now; the old /marketing links open there. Everyone can view it; add people to the Space to let them edit.</>
-                  : <> Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>}
+              {archived ? (
+                <>{summarise(state.counts)} from the retired Marketing module. Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
+              ) : spaceHref ? (
+                <>
+                  {summariseMoved(state.moved, state.counts)} from the retired Marketing module {waiting > 0 ? "moved to" : "live in"} the Marketing Space; the old /marketing links open there.
+                  {waiting > 0 ? <> {summarisePending(state.pending!.toWrite)} still {waiting === 1 ? "waits" : "wait"}: Import brings {waiting === 1 ? "it" : "them"} over, and nothing is deleted.</> : null}
+                  {toRedate > 0 ? <> {plural(toRedate, "moved task carries its date", "moved tasks carry their dates")} as the old module stored {toRedate === 1 ? "it" : "them"}, without a time zone; Import sets {toRedate === 1 ? "it" : "them"} to midnight in {state.pending!.zone}.</> : null}
+                  {" "}Everyone can view the Space; add people to it to let them edit.
+                </>
+              ) : (
+                <>{summarise(state.counts)} from the retired Marketing module. Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>
+              )}
             </div>
             {preview && !preview.blocked ? (
               <div className="mt-2 rounded-lg bg-subtle px-3 py-2 text-sm text-ink-2">
-                <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}</div>
+                <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}{redated ? `, ${plural(redated, "moved task", "moved tasks")} ${preview.write ? "re-dated" : "to re-date"} to midnight in ${preview.dateZone ?? "the import zone"}` : ""}</div>
                 {MARKETING_KINDS.map((k) => {
                   const r = preview.kinds[k];
                   const notes: string[] = [];
@@ -420,6 +463,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
                   if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
                   if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
                   if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
+                  if (r.redated) notes.push(`${r.redated} already moved, ${preview.write ? "dates anchored" : "dates to anchor"}`);
                   for (const u of r.unmappedStatuses) notes.push(`${u.count} with status ${u.value} land on the first status`);
                   for (const f of r.unmappedFields) notes.push(`${f.field} folded into the description on ${f.count}`);
                   return (
@@ -437,11 +481,13 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
               <Link href={TRASH_SPACES_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
                 Open Trash
               </Link>
-            ) : spaceHref ? (
+            ) : null}
+            {spaceHref && !archived ? (
               <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
                 Open the Space
               </Link>
-            ) : (
+            ) : null}
+            {importable ? (
               <>
                 <button
                   type="button"
@@ -462,7 +508,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
                   Import
                 </button>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

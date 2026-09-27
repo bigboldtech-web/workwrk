@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchorLegacyDay,
   campaignToTask,
   campaignsToCsvRows,
   choiceValue,
   contentToTask,
   eventToTask,
   eventsToCsvRows,
+  isUtcMidnight,
+  legacyDateCorrection,
+  legacyDates,
   legacyMarketingTarget,
   mapMarketingStatus,
   marketingTemplateProblem,
@@ -178,6 +182,74 @@ describe("campaignToTask", () => {
     const t = campaignToTask({ ...campaign, description: null, channel: null, budget: null, spent: null, goalMetric: null, goalTarget: null, goalActual: null, utmCampaign: null, name: "" }, { listCurrency: "USD" });
     expect(t.title).toBe("Untitled campaign");
     expect(Object.keys(t.metadata)).toEqual([ITEM_PROVENANCE_KEY]);
+  });
+});
+
+// The legacy API stored a picked day as UTC midnight and the legacy pages
+// showed it as a calendar day; a task shows an instant in the viewer's zone,
+// so a verbatim copy reads a day early west of UTC. The anchoring below is
+// what keeps "Dec 31" as Dec 31 for a marketer in New York.
+describe("legacy dates", () => {
+  const feb1 = new Date("2026-02-01T00:00:00.000Z");
+  const jun10 = new Date("2026-06-10T00:00:00.000Z");
+  const withTime = new Date("2026-02-01T10:30:00.000Z");
+
+  it("tells a picked day from a real instant", () => {
+    expect(isUtcMidnight(feb1)).toBe(true);
+    expect(isUtcMidnight(withTime)).toBe(false);
+  });
+
+  it("anchors a picked day to midnight of the same calendar day in the import zone, across DST", () => {
+    expect(anchorLegacyDay(feb1, "America/New_York")?.toISOString()).toBe("2026-02-01T05:00:00.000Z");
+    expect(anchorLegacyDay(jun10, "America/New_York")?.toISOString()).toBe("2026-06-10T04:00:00.000Z");
+    expect(anchorLegacyDay(feb1, "Asia/Kolkata")?.toISOString()).toBe("2026-01-31T18:30:00.000Z");
+    expect(anchorLegacyDay(feb1, "UTC")?.toISOString()).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("keeps a real instant, a missing value and a verbatim copy when no zone is given", () => {
+    expect(anchorLegacyDay(withTime, "America/New_York")).toBe(withTime);
+    expect(anchorLegacyDay(null, "America/New_York")).toBeNull();
+    expect(anchorLegacyDay(feb1, null)).toBe(feb1);
+    expect(anchorLegacyDay(feb1, undefined)).toBe(feb1);
+  });
+
+  it("reads each kind's date columns in one place, an event without an end due the day it starts", () => {
+    expect(legacyDates("campaigns", campaign, "America/New_York")).toEqual({ startAt: new Date("2026-02-01T05:00:00.000Z"), dueAt: new Date("2026-04-30T04:00:00.000Z") });
+    expect(legacyDates("content", content, "America/New_York")).toEqual({ startAt: null, dueAt: new Date("2026-03-01T05:00:00.000Z") });
+    expect(legacyDates("events", event, "America/New_York")).toEqual({ startAt: new Date("2026-06-10T04:00:00.000Z"), dueAt: new Date("2026-06-10T04:00:00.000Z") });
+    expect(legacyDates("events", event, null)).toEqual({ startAt: event.startDate, dueAt: event.startDate });
+  });
+
+  it("makes every mapper anchor its dates in the import zone and name the zone in the provenance", () => {
+    const c = campaignToTask(campaign, { listCurrency: "USD", importZone: "America/New_York" });
+    expect(c.startAt?.toISOString()).toBe("2026-02-01T05:00:00.000Z");
+    expect(c.dueAt?.toISOString()).toBe("2026-04-30T04:00:00.000Z");
+    expect(c.metadata[ITEM_PROVENANCE_KEY]).toMatchObject({ dateZone: "America/New_York" });
+    const ct = contentToTask(content, { importZone: "Asia/Kolkata" });
+    expect(ct.dueAt?.toISOString()).toBe("2026-02-28T18:30:00.000Z");
+    const e = eventToTask(event, { listCurrency: "USD", importZone: "America/New_York" });
+    expect(e.startAt?.toISOString()).toBe("2026-06-10T04:00:00.000Z");
+    expect(e.dueAt?.toISOString()).toBe("2026-06-10T04:00:00.000Z");
+    // No dates, no zone in the provenance.
+    const bare = campaignToTask({ ...campaign, startDate: null, endDate: null }, { listCurrency: "USD", importZone: "America/New_York" });
+    expect(bare.metadata[ITEM_PROVENANCE_KEY]).not.toHaveProperty("dateZone");
+  });
+
+  it("corrects only a date the task still holds exactly as the row stored it", () => {
+    // Written verbatim by an earlier run: both dates move.
+    expect(legacyDateCorrection("campaigns", campaign, "America/New_York", { startAt: campaign.startDate, dueAt: campaign.endDate })).toEqual({
+      startAt: new Date("2026-02-01T05:00:00.000Z"),
+      dueAt: new Date("2026-04-30T04:00:00.000Z"),
+    });
+    // The due date was set by hand since: only the untouched start moves.
+    expect(legacyDateCorrection("campaigns", campaign, "America/New_York", { startAt: campaign.startDate, dueAt: new Date("2026-05-02T04:00:00.000Z") })).toEqual({
+      startAt: new Date("2026-02-01T05:00:00.000Z"),
+    });
+    // Already anchored, or a zone where midnight is midnight: nothing to do.
+    expect(legacyDateCorrection("campaigns", campaign, "America/New_York", { startAt: new Date("2026-02-01T05:00:00.000Z"), dueAt: new Date("2026-04-30T04:00:00.000Z") })).toBeNull();
+    expect(legacyDateCorrection("campaigns", campaign, "UTC", { startAt: campaign.startDate, dueAt: campaign.endDate })).toBeNull();
+    // A task whose date was cleared is left cleared.
+    expect(legacyDateCorrection("content", content, "America/New_York", { startAt: null, dueAt: null })).toBeNull();
   });
 });
 

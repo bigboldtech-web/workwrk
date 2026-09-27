@@ -4,6 +4,14 @@
 // DELETE /api/tools/[id]: move it to Trash (manage). It used to be a hard
 //        delete with no org check; now it is restorable for the retention
 //        window, with its shares.
+//
+// Every method answers the same 404 for a tool the viewer cannot see. PATCH
+// and DELETE used to decide manage before see, so a Member whose share had
+// just been taken back (still holding the /tools?tool=<id> link from the
+// share notification) got "You can't change this tool. Ask whoever added it."
+// for the real id and "Not found" for a made-up one: an existence oracle,
+// and copy that told them someone had added it. The 403 is now only for a
+// person who can see the tool but not manage it (a Can view holder).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +21,8 @@ import { moveToTrash } from "@/lib/trash";
 import { canManageTool, canSeeTool, hasLogin } from "@/lib/tools/tool-access";
 import { requireTools } from "@/lib/tools/tool-server";
 
+type Viewer = Exclude<Awaited<ReturnType<typeof requireTools>>, { error: unknown }>;
+
 async function load(id: string, orgId: string) {
   return prisma.tool.findFirst({
     where: { id, organizationId: orgId },
@@ -20,14 +30,23 @@ async function load(id: string, orgId: string) {
   });
 }
 
+// The tool as the viewer may know it: null when it is another org's, gone,
+// or simply not shared with them (canSeeTool needs the viewer's ToolShare).
+// share/route.ts applies the same rule; a Member must not be able to tell
+// the three apart on any method.
+async function loadVisible(id: string, v: Viewer) {
+  const tool = await load(id, v.orgId);
+  if (!tool) return null;
+  const share = await prisma.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: v.userId } }, select: { id: true } });
+  return canSeeTool(v, tool, Boolean(share)) ? tool : null;
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await load(id, v.orgId);
+  const tool = await loadVisible(id, v);
   if (!tool) return jsonError("Not found", 404);
-  const share = await prisma.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: v.userId } }, select: { id: true } });
-  if (!canSeeTool(v, tool, Boolean(share))) return jsonError("Not found", 404);
   const manage = canManageTool(v, tool);
   const rows = manage ? await prisma.toolShare.findMany({ where: { toolId: id }, select: { userId: true, sharedAt: true }, orderBy: { sharedAt: "asc" } }) : [];
   const users = rows.length
@@ -48,7 +67,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await load(id, v.orgId);
+  const tool = await loadVisible(id, v);
   if (!tool) return jsonError("Not found", 404);
   if (!canManageTool(v, tool)) return jsonError("You can't change this tool. Ask whoever added it.", 403);
 
@@ -85,7 +104,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await load(id, v.orgId);
+  const tool = await loadVisible(id, v);
   if (!tool) return jsonError("Not found", 404);
   if (!canManageTool(v, tool)) return jsonError("You can't delete this tool. Ask whoever added it.", 403);
   const moved = await moveToTrash("tool", id, { organizationId: v.orgId, userId: v.userId, userName: v.name });

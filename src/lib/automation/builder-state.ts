@@ -209,7 +209,31 @@ export function operatorsFor(fieldType: string | undefined): string[] {
 export interface PublishProblems {
   when?: string;
   then?: string;
+  /** Keyed by CondRow id: a condition whose operator needs a value and has none. */
+  conditions: Record<string, string>;
   actions: Record<string, string>;
+}
+
+export const EMPTY_CONDITION_MESSAGE = "Pick a value, or remove this condition.";
+
+/**
+ * The index of the first flat rule in a saved `definition.conditions` whose
+ * operator needs a value and carries none (undefined, null or blank), or
+ * null when every rule is complete. Nested groups are API-authored and the
+ * builder shows them verbatim, so they are not judged here. The publish
+ * route uses this so the API path refuses what the builder refuses.
+ */
+export function firstConditionMissingValue(conditions: unknown): number | null {
+  const group = asRecord(conditions);
+  if (!Array.isArray(group.rules)) return null;
+  for (const [index, node] of group.rules.entries()) {
+    const rule = asRecord(node);
+    if (Array.isArray(rule.rules)) continue;
+    if (typeof rule.operator !== "string" || !NEEDS_VALUE.has(rule.operator)) continue;
+    const v = rule.value;
+    if (v === undefined || v === null || (typeof v === "string" && !v.trim())) return index;
+  }
+  return null;
 }
 
 /** What stops a publish, said under the section it belongs to (never a toast alone). */
@@ -217,7 +241,7 @@ export function publishProblems(
   d: Draft,
   catalog: { triggers: Array<{ key: string }>; actions: Array<{ key: string; name: string; available: boolean; params: Array<{ key: string; label: string; required: boolean }> }> },
 ): PublishProblems {
-  const out: PublishProblems = { actions: {} };
+  const out: PublishProblems = { conditions: {}, actions: {} };
   if (!d.trigger) out.when = "Choose what starts this automation.";
   else if (catalog.triggers.length && !catalog.triggers.some((t) => t.key === d.trigger)) out.when = "That trigger no longer exists. Choose another.";
   const real = d.actions.filter((a) => a.key);
@@ -239,6 +263,15 @@ export function publishProblems(
     const missing = impl.params.filter((p) => p.required && !(a.params[p.key] ?? "").trim());
     if (missing.length) out.actions[a.id] = `Fill in ${missing.map((p) => p.label.toLowerCase()).join(" and ")}.`;
   }
+  // A condition with an operator that needs a value and no value would go
+  // live comparing against "" and never match, so the automation silently
+  // never runs. Opaque rows are API-authored groups the builder cannot edit,
+  // and a row with no field or operator never reaches the definition
+  // (toSaveBody drops it), so neither is a blocker here.
+  for (const c of d.conditions) {
+    if (c.opaque !== undefined || !c.field || !c.operator) continue;
+    if (NEEDS_VALUE.has(c.operator) && !(c.value ?? "").trim()) out.conditions[c.id] = EMPTY_CONDITION_MESSAGE;
+  }
   if (d.trigger === "task.field_changed" && typeof d.when.field !== "string") {
     // Not a blocker: no field means "any field". Nothing to report.
   }
@@ -246,7 +279,7 @@ export function publishProblems(
 }
 
 export function hasProblems(p: PublishProblems): boolean {
-  return Boolean(p.when || p.then || Object.keys(p.actions).length);
+  return Boolean(p.when || p.then || Object.keys(p.conditions).length || Object.keys(p.actions).length);
 }
 
 /** Move one item in a list (drag to reorder). */

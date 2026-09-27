@@ -55,7 +55,18 @@ export async function GET() {
       }),
       prisma.appSuggestion.count({ where: { organizationId: gate.viewer.organizationId } }),
     ]);
-    return NextResponse.json({ suggestions: rows, total });
+    // Who suggested it, by name, so Settings can show text, who and when.
+    // userId carries no relation (offboarding must not erase the
+    // suggestion), so a person who has left reads as "Someone who left".
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const users = userIds.length
+      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } })
+      : [];
+    const userName = new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    return NextResponse.json({
+      suggestions: rows.map((r) => ({ ...r, by: userName.get(r.userId) ?? "Someone who left" })),
+      total,
+    });
   } catch (e) {
     if (tableMissing(e)) return NextResponse.json({ suggestions: [], total: 0 });
     throw e;

@@ -16,6 +16,11 @@
 //   - the source tables are never deleted or emptied; every row keeps its id,
 //     gains `migratedItemId`, and the task keeps the row's id under
 //     `metadata.legacyMarketing`, so the link holds in both directions;
+//   - a picked day is anchored, not copied: the legacy API stored a date as
+//     UTC midnight, a task shows an instant in the viewer's zone, so every
+//     UTC-midnight value becomes midnight of that day in the import zone
+//     (resolveImportZone) and a task an earlier run wrote verbatim is put
+//     right on the next write, as long as nobody has edited that date since;
 //   - it goes through the product's own creators (createSpace,
 //     applyListTemplate, createBoardItem), so the Space has its owner row,
 //     the Lists have their views and statuses, and every task has its
@@ -46,6 +51,7 @@ import { createSpace } from "@/lib/space";
 import { applyListTemplate, type ListTemplatePayload, type SpaceTemplatePayload } from "@/lib/template-center";
 import { createBoardItem } from "@/lib/board-items";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
+import { getEffectivePreferences } from "@/lib/preferences";
 import type { Prisma } from "@/generated/prisma";
 import {
   campaignToTask,
@@ -53,6 +59,7 @@ import {
   eventToTask,
   ITEM_PROVENANCE_KEY,
   LEGACY_SOURCE,
+  legacyDateCorrection,
   LIST_MARKER_KEY,
   LIST_NAME,
   MARKETING_KINDS,
@@ -61,6 +68,7 @@ import {
   SPACE_MARKER_KEY,
   TEMPLATE_NOT_READY,
   marketingTemplateProblem,
+  type LegacyDates,
   type MappedTask,
   type MarketingKind,
   type MigratedMarketing,
@@ -84,6 +92,89 @@ export async function countLegacyMarketing(organizationId: string): Promise<Lega
 
 export function hasLegacyMarketing(c: LegacyMarketingCounts): boolean {
   return c.campaigns + c.content + c.events > 0;
+}
+
+/** A zone name Intl knows, or null: a stored preference can hold anything. */
+function validZone(zone: unknown): string | null {
+  if (typeof zone !== "string" || !zone.trim()) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone.trim() });
+    return zone.trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The zone a picked day is anchored in (legacy-map.ts "Dates"): the actor's
+ * saved locale zone (what their own task dates are written in), else the
+ * workspace's work-schedule zone, else its headquarters office, else the
+ * machine this runs on. It never comes back empty, so the anchoring always
+ * happens and the report can name the zone it used.
+ */
+export async function resolveImportZone(organizationId: string, actorId: string): Promise<string> {
+  const prefs = await getEffectivePreferences(actorId, organizationId).catch(() => null);
+  const own = validZone(prefs?.home?.locale?.timezone);
+  if (own) return own;
+  const schedule = await prisma.workSchedule.findUnique({ where: { organizationId }, select: { timezone: true } }).catch(() => null);
+  const org = validZone(schedule?.timezone);
+  if (org) return org;
+  const office = await prisma.office
+    .findFirst({ where: { organizationId, timezone: { not: null } }, select: { timezone: true }, orderBy: [{ isHeadquarters: "desc" }, { createdAt: "asc" }] })
+    .catch(() => null);
+  const hq = validZone(office?.timezone);
+  if (hq) return hq;
+  return validZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? "UTC";
+}
+
+export interface LegacyPending {
+  /** Rows with no task yet: never moved, or the task was deleted for good from Trash. Per kind. */
+  toWrite: LegacyMarketingCounts;
+  /** Moved tasks still holding a date exactly as the legacy row stored it, which the next write anchors in `zone`. */
+  toRedate: number;
+  zone: string;
+}
+
+/**
+ * What a write would still do, for the Settings > Data row: it decides
+ * whether Preview and Import render once the Space exists. Same reading of
+ * "done" as the import (the mark names a task that exists, in any state).
+ */
+export async function pendingLegacyMarketing(organizationId: string, zone: string): Promise<LegacyPending> {
+  const rows = await loadLegacyRows(organizationId);
+  const items = await loadClaimedItems(organizationId, rows);
+  const toWrite: LegacyMarketingCounts = { campaigns: 0, content: 0, events: 0 };
+  let toRedate = 0;
+  for (const kind of MARKETING_KINDS) {
+    for (const row of rows[kind]) {
+      const held = items.get(migratedId(row.customFields) ?? "");
+      if (!held) toWrite[kind] += 1;
+      else if (legacyDateCorrection(kind, row, zone, held)) toRedate += 1;
+    }
+  }
+  return { toWrite, toRedate, zone };
+}
+
+/** Every legacy row, oldest first so positions follow creation order. */
+async function loadLegacyRows(organizationId: string) {
+  const [campaigns, content, events] = await Promise.all([
+    prisma.campaign.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
+    prisma.contentItem.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
+    prisma.eventBrief.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
+  ]);
+  return { campaigns, content, events };
+}
+
+/**
+ * The tasks the rows' marks name, confirmed against the Item table, with the
+ * dates they hold today. A task in Trash still counts: the person chose to
+ * trash it, and a re-run must not bring it back as a second copy.
+ */
+async function loadClaimedItems(organizationId: string, rows: Record<MarketingKind, Array<{ customFields: unknown }>>): Promise<Map<string, LegacyDates>> {
+  const claimed = MARKETING_KINDS.flatMap((k) => rows[k].map((r) => migratedId(r.customFields))).filter((id): id is string => Boolean(id));
+  if (!claimed.length) return new Map();
+  const found = await prisma.item.findMany({ where: { organizationId, id: { in: claimed } }, select: { id: true, startAt: true, dueAt: true } });
+  return new Map(found.map((i) => [i.id, { startAt: i.startAt, dueAt: i.dueAt }]));
 }
 
 /**
@@ -190,6 +281,8 @@ export interface KindReport {
   ownerDropped: number;
   /** Campaigns carrying a currency other than the List's. */
   currencyMismatch: number;
+  /** Tasks an earlier run wrote with verbatim dates, whose untouched dates this run anchors (dry run: would anchor). */
+  redated: number;
   listSlug: string | null;
   listCreated: boolean;
 }
@@ -199,6 +292,8 @@ export interface LegacyMarketingReport {
   organizationName: string;
   write: boolean;
   currency: string;
+  /** The IANA zone picked days were anchored in (resolveImportZone). Absent only on a report the script builds for an org it could not run. */
+  dateZone?: string;
   templateFound: boolean;
   spaceSlug: string | null;
   spaceCreated: boolean;
@@ -218,7 +313,7 @@ export interface LegacyMarketingReport {
 }
 
 export function emptyKind(): KindReport {
-  return { read: 0, alreadyMigrated: 0, written: 0, relinked: 0, statusMoved: 0, unmappedStatuses: [], unmappedFields: [], ownerDropped: 0, currencyMismatch: 0, listSlug: null, listCreated: false };
+  return { read: 0, alreadyMigrated: 0, written: 0, relinked: 0, statusMoved: 0, unmappedStatuses: [], unmappedFields: [], ownerDropped: 0, currencyMismatch: 0, redated: 0, listSlug: null, listCreated: false };
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -257,11 +352,13 @@ export async function importLegacyMarketing(input: {
   const { organizationId, actorId, write } = input;
   const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true, settings: true } });
   const currency = orgCurrencyFromSettings(org?.settings);
+  const zone = await resolveImportZone(organizationId, actorId);
   const report: LegacyMarketingReport = {
     organizationId,
     organizationName: org?.name ?? organizationId,
     write,
     currency,
+    dateZone: zone,
     templateFound: false,
     spaceSlug: null,
     spaceCreated: false,
@@ -274,7 +371,7 @@ export async function importLegacyMarketing(input: {
     return report;
   }
   if (!write) {
-    await runImport(report, { organizationId, actorId, currency, write: false });
+    await runImport(report, { organizationId, actorId, currency, zone, write: false });
     return report;
   }
   try {
@@ -289,7 +386,7 @@ export async function importLegacyMarketing(input: {
           report.blockedCode = "running";
           return;
         }
-        await runImport(report, { organizationId, actorId, currency, write: true });
+        await runImport(report, { organizationId, actorId, currency, zone, write: true });
       },
       // The lock lives as long as the transaction: long enough for a big org.
       { maxWait: 15_000, timeout: 30 * 60_000 },
@@ -303,9 +400,9 @@ export async function importLegacyMarketing(input: {
 
 async function runImport(
   report: LegacyMarketingReport,
-  ctx: { organizationId: string; actorId: string; currency: string; write: boolean },
+  ctx: { organizationId: string; actorId: string; currency: string; zone: string; write: boolean },
 ): Promise<void> {
-  const { organizationId, actorId, currency, write } = ctx;
+  const { organizationId, actorId, currency, zone, write } = ctx;
 
   const template = await loadMarketingTemplate();
   report.templateFound = "payload" in template;
@@ -325,12 +422,7 @@ async function runImport(
     return;
   }
 
-  // Every legacy row, oldest first so positions follow creation order.
-  const [campaigns, content, events] = await Promise.all([
-    prisma.campaign.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
-    prisma.contentItem.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
-    prisma.eventBrief.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
-  ]);
+  const { campaigns, content, events } = await loadLegacyRows(organizationId);
   report.kinds.campaigns.read = campaigns.length;
   report.kinds.content.read = content.length;
   report.kinds.events.read = events.length;
@@ -346,17 +438,11 @@ async function runImport(
   }
   if (campaigns.length + content.length + events.length === 0) return;
 
-  // Rows an earlier run already moved, confirmed against the Item table. A
-  // task in Trash still counts: the person chose to trash it, and a re-run
-  // must not bring it back as a second copy.
-  const claimed = [...campaigns, ...content, ...events].map((r) => migratedId(r.customFields)).filter((id): id is string => Boolean(id));
-  const existingItems = claimed.length
-    ? new Set((await prisma.item.findMany({ where: { organizationId, id: { in: claimed } }, select: { id: true } })).map((i) => i.id))
-    : new Set<string>();
-  const isDone = (customFields: unknown) => {
-    const id = migratedId(customFields);
-    return Boolean(id && existingItems.has(id));
-  };
+  // Rows an earlier run already moved, confirmed against the Item table
+  // (loadClaimedItems says why a task in Trash counts), with the dates each
+  // task holds today, for the correction below.
+  const existingItems = await loadClaimedItems(organizationId, { campaigns, content, events });
+  const heldTask = (customFields: unknown) => existingItems.get(migratedId(customFields) ?? "") ?? null;
 
   // Tasks the marker Lists already hold, by the row their provenance names:
   // the crash window (task created, row not yet marked) resolves to a
@@ -381,19 +467,30 @@ async function runImport(
 
   const plans: Record<MarketingKind, Plan<{ id: string; customFields: unknown }>[]> = { campaigns: [], content: [], events: [] };
   const relinks: Record<MarketingKind, Array<{ row: { id: string; customFields: unknown }; itemId: string }>> = { campaigns: [], content: [], events: [] };
+  // Tasks an earlier run wrote before dates were anchored (legacy-map.ts
+  // "Dates"): the ones whose dates still read exactly as the legacy row
+  // stored them are put on the same calendar day in the import zone. A date
+  // someone has since set by hand is theirs and is left alone.
+  const redates: Record<MarketingKind, Array<{ itemId: string; patch: Partial<LegacyDates> }>> = { campaigns: [], content: [], events: [] };
   const unmappedStatus: Record<MarketingKind, Map<string, number>> = { campaigns: new Map(), content: new Map(), events: new Map() };
   const unmappedField: Record<MarketingKind, Map<string, number>> = { campaigns: new Map(), content: new Map(), events: new Map() };
 
-  const consider = <Row extends { id: string; customFields: unknown; status: string }>(kind: MarketingKind, row: Row, task: MappedTask) => {
+  const consider = <Row extends { id: string; customFields: unknown; status: string; startDate?: Date | null; endDate?: Date | null; scheduledFor?: Date | null }>(kind: MarketingKind, row: Row, task: MappedTask) => {
     const k = report.kinds[kind];
-    if (isDone(row.customFields)) {
+    const held = heldTask(row.customFields);
+    if (held) {
       k.alreadyMigrated += 1;
+      const patch = legacyDateCorrection(kind, row, zone, held);
+      if (patch) {
+        k.redated += 1;
+        redates[kind].push({ itemId: migratedId(row.customFields)!, patch });
+      }
       return;
     }
-    const held = taskByRow.get(`${kind}:${row.id}`);
-    if (held) {
+    const onList = taskByRow.get(`${kind}:${row.id}`);
+    if (onList) {
       k.relinked += 1;
-      relinks[kind].push({ row, itemId: held });
+      relinks[kind].push({ row, itemId: onList });
       return;
     }
     if (task.statusUnmapped) tally(unmappedStatus[kind], row.status);
@@ -406,16 +503,16 @@ async function runImport(
     }
     plans[kind].push({ row, task });
   };
-  for (const c of campaigns) consider("campaigns", c, campaignToTask(c, { listCurrency: currency }));
-  for (const c of content) consider("content", c, contentToTask(c, { campaignTitleById }));
-  for (const e of events) consider("events", e, eventToTask(e, { listCurrency: currency, campaignTitleById }));
+  for (const c of campaigns) consider("campaigns", c, campaignToTask(c, { listCurrency: currency, importZone: zone }));
+  for (const c of content) consider("content", c, contentToTask(c, { campaignTitleById, importZone: zone }));
+  for (const e of events) consider("events", e, eventToTask(e, { listCurrency: currency, campaignTitleById, importZone: zone }));
   for (const kind of MARKETING_KINDS) {
     report.kinds[kind].unmappedStatuses = sorted(unmappedStatus[kind], "value");
     report.kinds[kind].unmappedFields = sorted(unmappedField[kind], "field");
     report.kinds[kind].written = plans[kind].length;
   }
 
-  const pending = MARKETING_KINDS.reduce((n, k) => n + plans[k].length + relinks[k].length, 0);
+  const pending = MARKETING_KINDS.reduce((n, k) => n + plans[k].length + relinks[k].length + redates[k].length, 0);
 
   // A Marketing Space in Trash is still the Marketing Space: nothing is
   // built beside it, whatever is pending. Restoring it is the way back.
@@ -430,7 +527,10 @@ async function runImport(
 
   if (!write) return;
   if (pending === 0 && found && MARKETING_KINDS.every((k) => found.lists[k])) return;
-  for (const kind of MARKETING_KINDS) report.kinds[kind].written = 0;
+  for (const kind of MARKETING_KINDS) {
+    report.kinds[kind].written = 0;
+    report.kinds[kind].redated = 0;
+  }
 
   try {
     // 1. The Space, once.
@@ -490,6 +590,12 @@ async function runImport(
     };
     for (const kind of MARKETING_KINDS) {
       const markRow = markers[kind];
+      // The date correction first: it touches only tasks that already exist,
+      // one column write each, and the count on the report moves per task.
+      for (const { itemId, patch } of redates[kind]) {
+        await prisma.item.update({ where: { id: itemId }, data: patch });
+        report.kinds[kind].redated += 1;
+      }
       for (const { row, itemId } of relinks[kind]) await markRow(row.id, row.customFields, itemId);
       for (const { row, task } of plans[kind]) {
         const item = await createBoardItem(
