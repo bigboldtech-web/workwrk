@@ -11,8 +11,9 @@
 // RULES (scripts/MIGRATIONS.md):
 //   - dry run by default: `write: false` reads everything and writes nothing;
 //   - idempotent: the Space is found by its marker, the Lists by theirs, and a
-//     row whose `customFields.migratedItemId` names a task that still exists
-//     is skipped, so a second run moves only what the first did not;
+//     row that any task carries the marker of, live or in Trash, is skipped
+//     (legacy-map.ts "Moved or not"), so a second run moves only what the
+//     first did not and a task someone trashed never comes back as a copy;
 //   - the source tables are never deleted or emptied; every row keeps its id,
 //     gains `migratedItemId`, and the task keeps the row's id under
 //     `metadata.legacyMarketing`, so the link holds in both directions;
@@ -60,16 +61,24 @@ import {
   ITEM_PROVENANCE_KEY,
   LEGACY_SOURCE,
   legacyDateCorrection,
+  legacyRowState,
+  legacyTaskIndex,
   LIST_MARKER_KEY,
   LIST_NAME,
   MARKETING_KINDS,
   MARKETING_TEMPLATE_KEY,
   MIGRATED_ITEM_KEY,
+  migratedItemId,
   SPACE_MARKER_KEY,
   TEMPLATE_NOT_READY,
   marketingTemplateProblem,
+  taskProvenance,
+  tasksInTrashSnapshot,
+  type HeldDates,
   type LegacyDates,
+  type LegacyTaskIndex,
   type MappedTask,
+  type MarkedTask,
   type MarketingKind,
   type MigratedMarketing,
 } from "./legacy-map";
@@ -128,8 +137,14 @@ export async function resolveImportZone(organizationId: string, actorId: string)
 }
 
 export interface LegacyPending {
-  /** Rows with no task yet: never moved, or the task was deleted for good from Trash. Per kind. */
+  /**
+   * Rows a write still has to do something for, per kind: no task at all
+   * (never moved, or the task was deleted for good from Trash), or a live
+   * task whose row lost its mark in the crash window (the write re-links it).
+   */
   toWrite: LegacyMarketingCounts;
+  /** Rows whose task is in Trash, per kind: moved, never imported again, back when the task is restored. */
+  trashed: LegacyMarketingCounts;
   /** Moved tasks still holding a date exactly as the legacy row stored it, which the next write anchors in `zone`. */
   toRedate: number;
   zone: string;
@@ -137,22 +152,27 @@ export interface LegacyPending {
 
 /**
  * What a write would still do, for the Settings > Data row: it decides
- * whether Preview and Import render once the Space exists. Same reading of
- * "done" as the import (the mark names a task that exists, in any state).
+ * whether Preview and Import render once the Space exists. The same rule as
+ * the import (legacy-map.ts legacyRowState), read from the same index, so
+ * the page never offers to import a row the import would skip. `found` is
+ * the caller's findMigratedMarketing answer, looked up here when not given.
  */
-export async function pendingLegacyMarketing(organizationId: string, zone: string): Promise<LegacyPending> {
+export async function pendingLegacyMarketing(organizationId: string, zone: string, found?: FoundMarketing | null): Promise<LegacyPending> {
   const rows = await loadLegacyRows(organizationId);
-  const items = await loadClaimedItems(organizationId, rows);
+  const marketing = found === undefined ? await findMigratedMarketing(organizationId) : found;
+  const { held, index } = await loadMovedState(organizationId, rows, marketing);
   const toWrite: LegacyMarketingCounts = { campaigns: 0, content: 0, events: 0 };
+  const trashed: LegacyMarketingCounts = { campaigns: 0, content: 0, events: 0 };
   let toRedate = 0;
   for (const kind of MARKETING_KINDS) {
     for (const row of rows[kind]) {
-      const held = items.get(migratedId(row.customFields) ?? "");
-      if (!held) toWrite[kind] += 1;
-      else if (legacyDateCorrection(kind, row, zone, held)) toRedate += 1;
+      const at = legacyRowState(kind, row, index);
+      if (at.state === "trashed") trashed[kind] += 1;
+      else if (at.state === "none" || !at.marked) toWrite[kind] += 1;
+      else if (legacyDateCorrection(kind, row, zone, held.get(at.itemId)!)) toRedate += 1;
     }
   }
-  return { toWrite, toRedate, zone };
+  return { toWrite, trashed, toRedate, zone };
 }
 
 /** Every legacy row, oldest first so positions follow creation order. */
@@ -165,16 +185,78 @@ async function loadLegacyRows(organizationId: string) {
   return { campaigns, content, events };
 }
 
+/** An Item row as the rule reads it: its provenance, and whether it is archived (in Trash > Archived). */
+function markedFromItem(i: { id: string; metadata: unknown; archivedAt: Date | null }): MarkedTask {
+  const { kind, rowId } = taskProvenance(i.metadata);
+  return { id: i.id, kind, rowId, archived: i.archivedAt !== null };
+}
+
 /**
- * The tasks the rows' marks name, confirmed against the Item table, with the
- * dates they hold today. A task in Trash still counts: the person chose to
- * trash it, and a re-run must not bring it back as a second copy.
+ * The tasks the rows' marks name, confirmed against the Item table (an
+ * archived task is still on it), with the dates they hold today and the zone
+ * their provenance says those dates were anchored in.
  */
-async function loadClaimedItems(organizationId: string, rows: Record<MarketingKind, Array<{ customFields: unknown }>>): Promise<Map<string, LegacyDates>> {
-  const claimed = MARKETING_KINDS.flatMap((k) => rows[k].map((r) => migratedId(r.customFields))).filter((id): id is string => Boolean(id));
-  if (!claimed.length) return new Map();
-  const found = await prisma.item.findMany({ where: { organizationId, id: { in: claimed } }, select: { id: true, startAt: true, dueAt: true } });
-  return new Map(found.map((i) => [i.id, { startAt: i.startAt, dueAt: i.dueAt }]));
+async function loadClaimedItems(organizationId: string, claimed: readonly string[]): Promise<{ held: Map<string, HeldDates>; tasks: MarkedTask[] }> {
+  if (!claimed.length) return { held: new Map(), tasks: [] };
+  const found = await prisma.item.findMany({
+    where: { organizationId, id: { in: [...claimed] } },
+    select: { id: true, startAt: true, dueAt: true, metadata: true, archivedAt: true },
+  });
+  return {
+    held: new Map(found.map((i) => [i.id, { startAt: i.startAt, dueAt: i.dueAt, dateZone: taskProvenance(i.metadata).dateZone }])),
+    tasks: found.map(markedFromItem),
+  };
+}
+
+/** The tasks the marker Lists hold, with the row their provenance names: what the crash-window re-link reads. */
+async function loadMarkerListTasks(organizationId: string, found: FoundMarketing | null): Promise<MarkedTask[]> {
+  const listIds = found ? MARKETING_KINDS.map((k) => found.listIds[k]).filter((id): id is string => Boolean(id)) : [];
+  if (!listIds.length) return [];
+  const held = await prisma.item.findMany({ where: { organizationId, boardId: { in: listIds } }, select: { id: true, metadata: true, archivedAt: true } });
+  return held.map(markedFromItem);
+}
+
+/**
+ * The org's tasks in Trash that carry a Marketing marker: an id a row names
+ * in `claimed`, or a provenance naming a row. A trashed task is no longer on
+ * the Item table; it is inside a TrashItem snapshot, on its own or in the
+ * snapshot of the List, Folder or Space it was trashed with.
+ *
+ * The SQL only narrows which snapshots come back: a task trashed on its own
+ * under an id a row names, or any hierarchy snapshot whose text holds the
+ * provenance key, so an org's other trashed Lists are never shipped here.
+ * tasksInTrashSnapshot reads the tasks out of what comes back, and that is
+ * the answer. The ids go as ONE array parameter (`= ANY`), never a
+ * Prisma.join list, for the reason doc-lock.ts readDocLocks gives.
+ */
+export async function loadTrashedMarketingTasks(organizationId: string, claimed: readonly string[]): Promise<MarkedTask[]> {
+  const snapshots = await prisma.$queryRaw<Array<{ entityType: string; snapshot: unknown }>>`
+    SELECT "entityType", snapshot FROM "TrashItem"
+    WHERE "organizationId" = ${organizationId}
+      AND "entityType" IN ('item', 'board', 'folder', 'space')
+      AND ("entityId" = ANY(${[...claimed]}::text[]) OR snapshot::text LIKE ${`%"${ITEM_PROVENANCE_KEY}"%`})`;
+  const wanted = new Set(claimed);
+  return snapshots.flatMap((s) => tasksInTrashSnapshot(s.entityType, s.snapshot)).filter((t) => (t.kind && t.rowId) || wanted.has(t.id));
+}
+
+/**
+ * Everything the moved-or-not rule reads for one org's rows, in one place so
+ * the import and the page's pending counts agree: the tasks the marks name
+ * (with their dates, for the correction), the tasks on the marker Lists, and
+ * the tasks in Trash snapshots.
+ */
+async function loadMovedState(
+  organizationId: string,
+  rows: Record<MarketingKind, Array<{ customFields: unknown }>>,
+  found: FoundMarketing | null,
+): Promise<{ held: Map<string, HeldDates>; index: LegacyTaskIndex }> {
+  const claimed = MARKETING_KINDS.flatMap((k) => rows[k].map((r) => migratedItemId(r.customFields))).filter((id): id is string => Boolean(id));
+  const [claimedItems, onLists, trashed] = await Promise.all([
+    loadClaimedItems(organizationId, claimed),
+    loadMarkerListTasks(organizationId, found),
+    loadTrashedMarketingTasks(organizationId, claimed),
+  ]);
+  return { held: claimedItems.held, index: legacyTaskIndex({ live: [...claimedItems.tasks, ...onLists], trashed }) };
 }
 
 /**
@@ -229,12 +311,16 @@ export async function migratedCampaignItem(organizationId: string, campaignId: s
     select: { customFields: true },
   });
   if (!row) return { exists: false, itemId: null, trashed: false };
-  const id = (row.customFields as Record<string, unknown> | null)?.[MIGRATED_ITEM_KEY];
-  if (typeof id !== "string" || !id) return { exists: true, itemId: null, trashed: false };
-  const item = await prisma.item.findFirst({ where: { id, organizationId }, select: { id: true, archivedAt: true } });
-  if (!item) return { exists: true, itemId: null, trashed: false };
-  if (item.archivedAt) return { exists: true, itemId: null, trashed: true };
-  return { exists: true, itemId: item.id, trashed: false };
+  const id = migratedItemId(row.customFields);
+  const item = id ? await prisma.item.findFirst({ where: { id, organizationId }, select: { id: true, archivedAt: true } }) : null;
+  if (item?.archivedAt) return { exists: true, itemId: null, trashed: true };
+  if (item) return { exists: true, itemId: item.id, trashed: false };
+  // No live task: one in Trash still means moved (legacy-map.ts "Moved or
+  // not"), and the notice must say Trash, not "not moved yet", or it sends an
+  // Owner to Settings > Data to import a campaign that already has a task.
+  const inTrash = await loadTrashedMarketingTasks(organizationId, id ? [id] : []);
+  const trashed = inTrash.some((t) => t.id === id || (t.kind === "campaigns" && t.rowId === campaignId));
+  return { exists: true, itemId: null, trashed };
 }
 
 /**
@@ -272,6 +358,12 @@ export interface KindReport {
    * second task is made.
    */
   relinked: number;
+  /**
+   * Rows whose task is in Trash: moved, then put there. No task is written
+   * for them (a row with no mark gets its mark back), and restoring the task
+   * is what brings it back.
+   */
+  trashed: number;
   /** Rows whose status moved to a neighbour (APPROVED to PLANNING, and so on). */
   statusMoved: number;
   unmappedStatuses: Array<{ value: string; count: number }>;
@@ -308,12 +400,12 @@ export interface LegacyMarketingReport {
   archived?: boolean;
   /** Set when the write stopped part-way; the next run resumes. */
   error?: string;
-  /** After a write: every source row points at a task that exists. */
+  /** After a write: every source row points at a task that exists, live or in Trash. */
   verified?: boolean;
 }
 
 export function emptyKind(): KindReport {
-  return { read: 0, alreadyMigrated: 0, written: 0, relinked: 0, statusMoved: 0, unmappedStatuses: [], unmappedFields: [], ownerDropped: 0, currencyMismatch: 0, redated: 0, listSlug: null, listCreated: false };
+  return { read: 0, alreadyMigrated: 0, written: 0, relinked: 0, trashed: 0, statusMoved: 0, unmappedStatuses: [], unmappedFields: [], ownerDropped: 0, currencyMismatch: 0, redated: 0, listSlug: null, listCreated: false };
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -322,11 +414,6 @@ function tally(map: Map<string, number>, key: string): void {
 
 function sorted<K extends string>(map: Map<string, number>, name: K): Array<Record<K, string> & { count: number }> {
   return Array.from(map, ([k, count]) => ({ [name]: k, count }) as Record<K, string> & { count: number }).sort((a, b) => b.count - a.count);
-}
-
-function migratedId(customFields: unknown): string | null {
-  const id = (customFields as Record<string, unknown> | null)?.[MIGRATED_ITEM_KEY];
-  return typeof id === "string" && id ? id : null;
 }
 
 interface Plan<Row> {
@@ -438,29 +525,12 @@ async function runImport(
   }
   if (campaigns.length + content.length + events.length === 0) return;
 
-  // Rows an earlier run already moved, confirmed against the Item table
-  // (loadClaimedItems says why a task in Trash counts), with the dates each
-  // task holds today, for the correction below.
-  const existingItems = await loadClaimedItems(organizationId, { campaigns, content, events });
-  const heldTask = (customFields: unknown) => existingItems.get(migratedId(customFields) ?? "") ?? null;
-
-  // Tasks the marker Lists already hold, by the row their provenance names:
-  // the crash window (task created, row not yet marked) resolves to a
-  // re-link instead of a duplicate.
-  const taskByRow = new Map<string, string>();
-  const markerListIds = found ? MARKETING_KINDS.map((k) => found.listIds[k]).filter((id): id is string => Boolean(id)) : [];
-  if (markerListIds.length) {
-    const held = await prisma.item.findMany({
-      where: { organizationId, boardId: { in: markerListIds } },
-      select: { id: true, metadata: true },
-    });
-    for (const item of held) {
-      const prov = (item.metadata as Record<string, unknown> | null)?.[ITEM_PROVENANCE_KEY] as Record<string, unknown> | undefined;
-      const kind = prov?.kind;
-      const rowId = prov?.id;
-      if (typeof kind === "string" && typeof rowId === "string" && !taskByRow.has(`${kind}:${rowId}`)) taskByRow.set(`${kind}:${rowId}`, item.id);
-    }
-  }
+  // Which rows an earlier run already moved (legacy-map.ts "Moved or not"):
+  // the live tasks the marks name, with the dates each holds today for the
+  // correction below; the tasks on the marker Lists, so the crash window
+  // (task created, row not yet marked) resolves to a re-link instead of a
+  // duplicate; and the tasks in Trash, which are moved too.
+  const { held: existingItems, index } = await loadMovedState(organizationId, { campaigns, content, events }, found);
 
   const members = new Set((await prisma.user.findMany({ where: { organizationId, deletedAt: null }, select: { id: true } })).map((u) => u.id));
   const campaignTitleById = new Map(campaigns.map((c) => [c.id, c.name]));
@@ -477,20 +547,27 @@ async function runImport(
 
   const consider = <Row extends { id: string; customFields: unknown; status: string; startDate?: Date | null; endDate?: Date | null; scheduledFor?: Date | null }>(kind: MarketingKind, row: Row, task: MappedTask) => {
     const k = report.kinds[kind];
-    const held = heldTask(row.customFields);
-    if (held) {
+    const at = legacyRowState(kind, row, index);
+    if (at.state === "live" && at.marked) {
       k.alreadyMigrated += 1;
-      const patch = legacyDateCorrection(kind, row, zone, held);
+      const patch = legacyDateCorrection(kind, row, zone, existingItems.get(at.itemId)!);
       if (patch) {
         k.redated += 1;
-        redates[kind].push({ itemId: migratedId(row.customFields)!, patch });
+        redates[kind].push({ itemId: at.itemId, patch });
       }
       return;
     }
-    const onList = taskByRow.get(`${kind}:${row.id}`);
-    if (onList) {
+    if (at.state === "live") {
       k.relinked += 1;
-      relinks[kind].push({ row, itemId: onList });
+      relinks[kind].push({ row, itemId: at.itemId });
+      return;
+    }
+    if (at.state === "trashed") {
+      // Moved, then put in Trash: never a second task. A row that lost its
+      // mark gets it back, naming the id the task is restored under, so the
+      // read-back holds and /marketing/{id} can say where the task went.
+      k.trashed += 1;
+      if (!at.marked) relinks[kind].push({ row, itemId: at.itemId });
       return;
     }
     if (task.statusUnmapped) tally(unmappedStatus[kind], row.status);
@@ -591,9 +668,19 @@ async function runImport(
     for (const kind of MARKETING_KINDS) {
       const markRow = markers[kind];
       // The date correction first: it touches only tasks that already exist,
-      // one column write each, and the count on the report moves per task.
+      // and the count on the report moves per task. The dates and the zone
+      // marker land together, so the task reads as anchored from then on
+      // (legacyDateCorrection skips it) and a later run in another zone
+      // never moves it again. The marker is set in place (jsonb_set) rather
+      // than read and written back whole, so an edit a person makes to the
+      // task's fields meanwhile is not overwritten by this run's older copy.
       for (const { itemId, patch } of redates[kind]) {
-        await prisma.item.update({ where: { id: itemId }, data: patch });
+        await prisma.$transaction([
+          prisma.item.update({ where: { id: itemId }, data: patch }),
+          prisma.$executeRaw`
+            UPDATE "Item" SET metadata = jsonb_set(metadata, ${[ITEM_PROVENANCE_KEY, "dateZone"]}::text[], to_jsonb(${zone}::text))
+            WHERE id = ${itemId} AND jsonb_typeof(metadata->(${ITEM_PROVENANCE_KEY}::text)) = 'object'`,
+        ]);
         report.kinds[kind].redated += 1;
       }
       for (const { row, itemId } of relinks[kind]) await markRow(row.id, row.customFields, itemId);
@@ -618,18 +705,23 @@ async function runImport(
     }
 
     // 4. Read back: every source row now names a task that exists in the
-    //    organization. Existence, not the List: a person may since have moved
-    //    a migrated task to another List, and that is theirs to do.
+    //    organization, live or in Trash. Existence, not the List: a person
+    //    may since have moved a migrated task to another List, and that is
+    //    theirs to do; and a task they trashed is still the row's task.
     const [c2, ci2, e2] = await Promise.all([
       prisma.campaign.findMany({ where: { organizationId }, select: { customFields: true } }),
       prisma.contentItem.findMany({ where: { organizationId }, select: { customFields: true } }),
       prisma.eventBrief.findMany({ where: { organizationId }, select: { customFields: true } }),
     ]);
     const check = async (kind: MarketingKind, rows: Array<{ customFields: unknown }>) => {
-      const ids = rows.map((r) => migratedId(r.customFields));
-      if (ids.some((id) => !id)) throw new Error(`${kind}: ${ids.filter((id) => !id).length} row(s) have no ${MIGRATED_ITEM_KEY} after the write`);
-      const live = await prisma.item.count({ where: { organizationId, id: { in: ids as string[] } } });
-      if (live !== ids.length) throw new Error(`${kind}: ${ids.length} row(s) marked, ${live} task(s) found in the workspace`);
+      const marks = rows.map((r) => migratedItemId(r.customFields));
+      if (marks.some((id) => !id)) throw new Error(`${kind}: ${marks.filter((id) => !id).length} row(s) have no ${MIGRATED_ITEM_KEY} after the write`);
+      const ids = marks as string[];
+      const live = new Set((await prisma.item.findMany({ where: { organizationId, id: { in: ids } }, select: { id: true } })).map((i) => i.id));
+      const away = ids.filter((id) => !live.has(id));
+      const inTrash = away.length ? new Set((await loadTrashedMarketingTasks(organizationId, away)).map((t) => t.id)) : new Set<string>();
+      const held = ids.filter((id) => live.has(id) || inTrash.has(id)).length;
+      if (held !== ids.length) throw new Error(`${kind}: ${ids.length} row(s) marked, ${held} task(s) found in the workspace or its Trash`);
     };
     await check("campaigns", c2);
     await check("content", ci2);

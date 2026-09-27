@@ -158,14 +158,27 @@ export function legacyDates(kind: MarketingKind, row: LegacyDateColumns, zone?: 
   return { startAt: start, dueAt: kind === "events" ? anchorLegacyDay(row.endDate, zone) ?? start : anchorLegacyDay(row.endDate, zone) };
 }
 
+/** A task's dates as the correction reads them, with the zone its provenance says they were anchored in (null when no run anchored them). */
+export interface HeldDates extends LegacyDates {
+  dateZone?: string | null;
+}
+
 /**
  * What a re-run changes on a task an earlier run wrote with verbatim dates:
  * each date the task still holds exactly as the legacy row stored it (nobody
  * has touched it since) moves to its anchored value; a date someone has set
  * by hand, or one the zone leaves where it is, is left alone. Null when
  * nothing needs to move.
+ *
+ * A task whose provenance already names a `dateZone` is never corrected. That
+ * zone is written by every run that anchors (at create, and by the re-date
+ * itself), and a date anchored in UTC reads exactly as the row stored it, so
+ * the dates alone cannot tell "never anchored" from "anchored where midnight
+ * is midnight": without the marker, a later run in another zone would move
+ * a task a second time.
  */
-export function legacyDateCorrection(kind: MarketingKind, row: LegacyDateColumns, zone: string | null | undefined, task: LegacyDates): Partial<LegacyDates> | null {
+export function legacyDateCorrection(kind: MarketingKind, row: LegacyDateColumns, zone: string | null | undefined, task: HeldDates): Partial<LegacyDates> | null {
+  if (task.dateZone) return null;
   const verbatim = legacyDates(kind, row, null);
   const anchored = legacyDates(kind, row, zone);
   const patch: Partial<LegacyDates> = {};
@@ -178,6 +191,131 @@ export function legacyDateCorrection(kind: MarketingKind, row: LegacyDateColumns
     patch[key] = now;
   }
   return Object.keys(patch).length ? patch : null;
+}
+
+// ── Moved or not ────────────────────────────────────────────────────
+//
+// A legacy row is moved when any task carries its migration marker: the
+// row's `customFields.migratedItemId` names the task, or the task's
+// `metadata.legacyMarketing` names the row. A task in Trash carries both as
+// surely as a live one, in either of the two ways this product puts a task
+// there: archived in place (`archivedAt`, Trash > Archived) or deleted into
+// a TrashItem snapshot (Trash > Deleted), which removes the Item row but
+// keeps it whole, and a restore brings it back under the same id. So it
+// counts as moved. Read only against the live Item table, a person who
+// trashed a migrated campaign on purpose would see Import bring it back as a
+// second task, and restoring the first would then make two. Only a row that
+// no task names, live or in Trash, is ever imported; a task deleted for good
+// from Trash leaves its row importable again, which is the one way back.
+
+/** A task a marker can be read off: its id, the legacy row its provenance names (both null when it names none), and whether it is archived. */
+export interface MarkedTask {
+  id: string;
+  kind: string | null;
+  rowId: string | null;
+  archived?: boolean;
+}
+
+/** Where a row's task is: on its List, or in Trash (archived, or deleted into a snapshot). */
+export type TaskPlace = "live" | "trashed";
+
+/** What the rule reads: every task a mark can name, by id, and the same tasks by the row their provenance names. */
+export interface LegacyTaskIndex {
+  byId: ReadonlyMap<string, TaskPlace>;
+  byRow: ReadonlyMap<string, { itemId: string; place: TaskPlace }>;
+}
+
+/**
+ * `live`: the row's task is on its List; `marked` is false when the row
+ * still needs its mark written back (the crash window's re-link).
+ * `trashed`: moved, then put in Trash; never imported again, and restoring
+ * the task is the way back; `marked` as for live. `none`: no task anywhere,
+ * the only state a write creates a task for.
+ */
+export type LegacyRowState =
+  | { state: TaskPlace; itemId: string; marked: boolean }
+  | { state: "none" };
+
+/** The key a task's provenance files it under: one legacy row of one kind. */
+export function legacyRowKey(kind: string, rowId: string): string {
+  return `${kind}:${rowId}`;
+}
+
+/** The task id a legacy row's `customFields` names, or null. */
+export function migratedItemId(customFields: unknown): string | null {
+  const id = (customFields as Record<string, unknown> | null)?.[MIGRATED_ITEM_KEY];
+  return typeof id === "string" && id ? id : null;
+}
+
+/** What `Item.metadata.legacyMarketing` says: the row the task came from, and the zone its dates were anchored in. */
+export function taskProvenance(metadata: unknown): { kind: string | null; rowId: string | null; dateZone: string | null } {
+  const prov = metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>)[ITEM_PROVENANCE_KEY] : null;
+  if (!prov || typeof prov !== "object" || Array.isArray(prov)) return { kind: null, rowId: null, dateZone: null };
+  const p = prov as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return { kind: text(p.kind), rowId: text(p.id), dateZone: text(p.dateZone) };
+}
+
+/**
+ * The tasks one Trash snapshot holds, in the shapes src/lib/trash.ts writes:
+ * a task is `row` with its whole subtree under `children.subtasks`; a List,
+ * a Folder and a Space carry every task of their Lists under
+ * `children.items`. No other kind holds a task.
+ */
+export function tasksInTrashSnapshot(entityType: string, snapshot: unknown): MarkedTask[] {
+  const s = snapshot && typeof snapshot === "object" ? (snapshot as { row?: unknown; children?: Record<string, unknown> }) : null;
+  if (!s) return [];
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const rows =
+    entityType === "item" ? [s.row, ...list(s.children?.subtasks)]
+      : entityType === "board" || entityType === "folder" || entityType === "space" ? list(s.children?.items)
+        : [];
+  const out: MarkedTask[] = [];
+  for (const r of rows) {
+    const id = r && typeof r === "object" ? (r as Record<string, unknown>).id : null;
+    if (typeof id !== "string" || !id) continue;
+    const { kind, rowId } = taskProvenance((r as Record<string, unknown>).metadata);
+    out.push({ id, kind, rowId });
+  }
+  return out;
+}
+
+/**
+ * The index the rule reads. `live` is every task on the Item table the
+ * import looked at (the ones the marks name and the ones on the marker
+ * Lists); an archived one among them is in Trash. `trashed` is every task
+ * read out of a Trash snapshot. Under one row a task on its List wins over
+ * one in Trash, and otherwise the first one filed wins.
+ */
+export function legacyTaskIndex(input: { live: readonly MarkedTask[]; trashed: readonly MarkedTask[] }): LegacyTaskIndex {
+  const byId = new Map<string, TaskPlace>();
+  const byRow = new Map<string, { itemId: string; place: TaskPlace }>();
+  const file = (t: MarkedTask, place: TaskPlace) => {
+    if (!byId.has(t.id)) byId.set(t.id, place);
+    if (!t.kind || !t.rowId) return;
+    const key = legacyRowKey(t.kind, t.rowId);
+    const had = byRow.get(key);
+    if (!had || (had.place === "trashed" && place === "live")) byRow.set(key, { itemId: t.id, place });
+  };
+  for (const t of input.live) file(t, t.archived ? "trashed" : "live");
+  for (const t of input.trashed) file(t, "trashed");
+  return { byId, byRow };
+}
+
+/**
+ * Whether a legacy row was moved, and where its task is. The row's own mark
+ * is read first, since it is what the link both ways was written from; a row
+ * with no usable mark is matched by provenance. A row whose task is in Trash
+ * is moved, full stop: the importer writes no task for it, only its mark
+ * when that is missing.
+ */
+export function legacyRowState(kind: MarketingKind, row: { id: string; customFields: unknown }, index: LegacyTaskIndex): LegacyRowState {
+  const marked = migratedItemId(row.customFields);
+  const place = marked ? index.byId.get(marked) : undefined;
+  if (marked && place) return { state: place, itemId: marked, marked: true };
+  const hit = index.byRow.get(legacyRowKey(kind, row.id));
+  if (hit) return { state: hit.place, itemId: hit.itemId, marked: false };
+  return { state: "none" };
 }
 
 // ── Rows to tasks ───────────────────────────────────────────────────

@@ -11,6 +11,9 @@ import {
   legacyDateCorrection,
   legacyDates,
   legacyMarketingTarget,
+  legacyRowState,
+  legacyTaskIndex,
+  tasksInTrashSnapshot,
   mapMarketingStatus,
   marketingTemplateProblem,
   moneyToNumber,
@@ -250,6 +253,84 @@ describe("legacy dates", () => {
     expect(legacyDateCorrection("campaigns", campaign, "UTC", { startAt: campaign.startDate, dueAt: campaign.endDate })).toBeNull();
     // A task whose date was cleared is left cleared.
     expect(legacyDateCorrection("content", content, "America/New_York", { startAt: null, dueAt: null })).toBeNull();
+  });
+
+  it("never corrects a task whose provenance already names the zone it was anchored in", () => {
+    // Anchored in UTC, midnight reads exactly as the row stored it: without
+    // the marker a later run in New York would take it for a verbatim copy
+    // and move it a second time.
+    expect(legacyDateCorrection("campaigns", campaign, "America/New_York", { startAt: campaign.startDate, dueAt: campaign.endDate, dateZone: "UTC" })).toBeNull();
+    // No marker (a task an early run wrote verbatim): corrected as before.
+    expect(legacyDateCorrection("campaigns", campaign, "America/New_York", { startAt: campaign.startDate, dueAt: campaign.endDate, dateZone: null })).not.toBeNull();
+  });
+});
+
+// The moved-or-not rule. A task in Trash is still the row's task: read only
+// against the live Item table, a campaign someone trashed on purpose came
+// back as a second task on the next Import, and restoring the first made two.
+describe("legacyRowState", () => {
+  const prov = (kind: string, id: string) => ({ [ITEM_PROVENANCE_KEY]: { kind, id } });
+  const mark = (itemId: string) => ({ migratedItemId: itemId });
+
+  // One of each: a live task, an archived one (Trash > Archived), one
+  // deleted to Trash on its own, one deleted with its List, one deleted as a
+  // subtask of another task, and one live task on a marker List whose row
+  // never got its mark (the crash window).
+  const trashed = [
+    ...tasksInTrashSnapshot("item", { row: { id: "it_deleted", metadata: prov("campaigns", "cmp_deleted") }, children: { subtasks: [], listLinks: [] } }),
+    ...tasksInTrashSnapshot("board", { row: { id: "list_old" }, children: { items: [{ id: "it_in_list", metadata: prov("content", "cnt_in_list") }], views: [], members: [] } }),
+    ...tasksInTrashSnapshot("item", { row: { id: "it_parent", metadata: {} }, children: { subtasks: [{ id: "it_sub", metadata: prov("events", "evt_unmarked") }] } }),
+    // A note holds no task, whatever its snapshot looks like.
+    ...tasksInTrashSnapshot("note", { row: { id: "it_ghost", metadata: prov("campaigns", "cmp_new") } }),
+  ];
+  const index = legacyTaskIndex({
+    live: [
+      { id: "it_live", kind: "campaigns", rowId: "cmp_live" },
+      { id: "it_archived", kind: "campaigns", rowId: "cmp_archived", archived: true },
+      { id: "it_crash", kind: "content", rowId: "cnt_crash" },
+    ],
+    trashed,
+  });
+
+  it("reads the tasks out of every snapshot kind that holds one, and none out of the rest", () => {
+    expect(trashed.map((t) => t.id)).toEqual(["it_deleted", "it_in_list", "it_parent", "it_sub"]);
+    expect(trashed.find((t) => t.id === "it_sub")).toEqual({ id: "it_sub", kind: "events", rowId: "evt_unmarked" });
+    expect(tasksInTrashSnapshot("space", null)).toEqual([]);
+    expect(tasksInTrashSnapshot("space", { row: {}, children: { items: "not a list" } })).toEqual([]);
+  });
+
+  it("a row whose task is live is moved", () => {
+    expect(legacyRowState("campaigns", { id: "cmp_live", customFields: mark("it_live") }, index)).toEqual({ state: "live", itemId: "it_live", marked: true });
+  });
+
+  it("a row whose task was deleted to Trash is moved, not waiting", () => {
+    expect(legacyRowState("campaigns", { id: "cmp_deleted", customFields: mark("it_deleted") }, index)).toEqual({ state: "trashed", itemId: "it_deleted", marked: true });
+  });
+
+  it("a row whose task is archived, or went to Trash with its List, is moved", () => {
+    expect(legacyRowState("campaigns", { id: "cmp_archived", customFields: mark("it_archived") }, index)).toEqual({ state: "trashed", itemId: "it_archived", marked: true });
+    expect(legacyRowState("content", { id: "cnt_in_list", customFields: mark("it_in_list") }, index)).toEqual({ state: "trashed", itemId: "it_in_list", marked: true });
+  });
+
+  it("a row with no mark is matched by provenance, live or in Trash, so it is re-linked and never imported", () => {
+    expect(legacyRowState("content", { id: "cnt_crash", customFields: {} }, index)).toEqual({ state: "live", itemId: "it_crash", marked: false });
+    expect(legacyRowState("events", { id: "evt_unmarked", customFields: null }, index)).toEqual({ state: "trashed", itemId: "it_sub", marked: false });
+  });
+
+  it("only a row no task names, live or in Trash, is never moved", () => {
+    expect(legacyRowState("campaigns", { id: "cmp_new", customFields: {} }, index)).toEqual({ state: "none" });
+    // A mark naming a task deleted for good from Trash: importable again.
+    expect(legacyRowState("campaigns", { id: "cmp_purged", customFields: mark("it_purged") }, index)).toEqual({ state: "none" });
+    // Provenance is per kind: a content task never claims a campaign.
+    expect(legacyRowState("campaigns", { id: "cnt_in_list", customFields: {} }, index)).toEqual({ state: "none" });
+  });
+
+  it("under one row a task on its List wins over one in Trash", () => {
+    const both = legacyTaskIndex({
+      live: [{ id: "it_back", kind: "campaigns", rowId: "cmp_twice" }],
+      trashed: [{ id: "it_old", kind: "campaigns", rowId: "cmp_twice" }],
+    });
+    expect(legacyRowState("campaigns", { id: "cmp_twice", customFields: {} }, both)).toEqual({ state: "live", itemId: "it_back", marked: false });
   });
 });
 

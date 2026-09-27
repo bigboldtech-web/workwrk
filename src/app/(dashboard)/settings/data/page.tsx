@@ -256,12 +256,17 @@ export default function DataCompliancePage() {
 // run's own "stopped part-way, run it again" case. The copy counts what was
 // moved, never the raw legacy count, so it never claims a row lives in the
 // Space when it does not.
+//
+// A ROW WHOSE TASK IS IN TRASH IS MOVED, NOT WAITING. The row says so in one
+// sentence and points at Trash, and nothing here offers to import it: Import
+// would make a second task beside the one in Trash, and restoring that one
+// would then make two (legacy-map.ts "Moved or not").
 
 type LegacyState = {
   counts: LegacyMarketingCounts;
   hasRows: boolean;
   migrated: { spaceSlug: string; lists: Partial<Record<MarketingKind, string>>; archived?: boolean } | null;
-  /** Rows that have a task today, per kind. */
+  /** Rows whose task is live today, per kind; the rest wait (`pending.toWrite`) or are in Trash (`pending.trashed`). */
   moved: LegacyMarketingCounts;
   /** What a write would still do; null until the Space exists (before that, everything is pending). */
   pending: LegacyPending | null;
@@ -269,6 +274,9 @@ type LegacyState = {
 
 const MARKETING_TEMPLATE_HREF = "/templates?q=marketing";
 const TRASH_SPACES_HREF = "/trash?type=space";
+// Not narrowed to tasks: a task deleted with its List or Space sits in Trash
+// as that List or Space, and an archived one is on the Archived tab.
+const TRASH_HREF = "/trash";
 
 const LEGACY_CSV: ExportRow[] = MARKETING_KINDS.map((kind) => ({
   key: `marketing-${kind}`,
@@ -421,6 +429,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
   const redated = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].redated, 0) : 0;
   const waiting = state.pending ? state.pending.toWrite.campaigns + state.pending.toWrite.content + state.pending.toWrite.events : 0;
   const toRedate = state.pending?.toRedate ?? 0;
+  const inTrash = state.pending ? state.pending.trashed.campaigns + state.pending.trashed.content + state.pending.trashed.events : 0;
   // Import stays on offer while a write has work left, and after a run that
   // stopped part-way (its toast says to run it again, so the button must be
   // there to press). A Space in Trash blocks the write, so not then.
@@ -445,6 +454,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
                 <>
                   {summariseMoved(state.moved, state.counts)} from the retired Marketing module {waiting > 0 ? "moved to" : "live in"} the Marketing Space; the old /marketing links open there.
                   {waiting > 0 ? <> {summarisePending(state.pending!.toWrite)} still {waiting === 1 ? "waits" : "wait"}: Import brings {waiting === 1 ? "it" : "them"} over, and nothing is deleted.</> : null}
+                  {inTrash > 0 ? <> {summarisePending(state.pending!.trashed)} moved, then put in Trash. Restore {inTrash === 1 ? "it" : "them"} from Trash.</> : null}
                   {toRedate > 0 ? <> {plural(toRedate, "moved task carries its date", "moved tasks carry their dates")} as the old module stored {toRedate === 1 ? "it" : "them"}, without a time zone; Import sets {toRedate === 1 ? "it" : "them"} to midnight in {state.pending!.zone}.</> : null}
                   {" "}Everyone can view the Space; add people to it to let them edit.
                 </>
@@ -460,6 +470,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
                   const notes: string[] = [];
                   if (r.alreadyMigrated) notes.push(`${r.alreadyMigrated} already moved`);
                   if (r.relinked) notes.push(`${r.relinked} re-linked`);
+                  if (r.trashed) notes.push(`${r.trashed} in Trash, not imported again`);
                   if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
                   if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
                   if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
@@ -485,6 +496,11 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
             {spaceHref && !archived ? (
               <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
                 Open the Space
+              </Link>
+            ) : null}
+            {!archived && inTrash > 0 ? (
+              <Link href={TRASH_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                Open Trash
               </Link>
             ) : null}
             {importable ? (

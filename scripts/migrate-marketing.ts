@@ -61,7 +61,7 @@ interface Report {
   write: boolean;
   orgFilter: string | null;
   orgs: LegacyMarketingReport[];
-  totals: { read: number; alreadyMigrated: number; written: number; blocked: number; errors: number };
+  totals: { read: number; alreadyMigrated: number; trashed: number; written: number; blocked: number; errors: number };
 }
 
 function argValue(flag: string): string | null {
@@ -80,7 +80,7 @@ async function main() {
     write,
     orgFilter,
     orgs: [],
-    totals: { read: 0, alreadyMigrated: 0, written: 0, blocked: 0, errors: 0 },
+    totals: { read: 0, alreadyMigrated: 0, trashed: 0, written: 0, blocked: 0, errors: 0 },
   };
 
   const orgs = await prisma.organization.findMany({
@@ -130,6 +130,7 @@ async function main() {
     for (const k of MARKETING_KINDS) {
       report.totals.read += r.kinds[k].read;
       report.totals.alreadyMigrated += r.kinds[k].alreadyMigrated;
+      report.totals.trashed += r.kinds[k].trashed;
       report.totals.written += r.kinds[k].written;
     }
     if (r.blocked) report.totals.blocked += 1;
@@ -167,6 +168,8 @@ function render(report: Report): string {
       const r = o.kinds[k];
       out.push(`  ${k.padEnd(10)} read ${r.read}, already moved ${r.alreadyMigrated}, ${report.write ? "written" : "to write"} ${r.written}` +
         (r.relinked ? `, re-linked ${r.relinked}` : "") +
+        // Moved, then trashed by a person: never written again (legacy-map.ts "Moved or not").
+        (r.trashed ? `, in Trash ${r.trashed} (moved, not written again)` : "") +
         `, status moved ${r.statusMoved}, owner dropped ${r.ownerDropped}` +
         (k === "campaigns" ? `, currency differs ${r.currencyMismatch}` : "") +
         `   list ${r.listSlug ?? "(new)"}`);
@@ -174,11 +177,11 @@ function render(report: Report): string {
       for (const f of r.unmappedFields) out.push(`             folded into description: ${f.field} (${f.count} row(s))`);
     }
     if (o.error) out.push(`  ERROR: ${o.error}  (rows already marked are done; run again to resume)`);
-    if (o.verified) out.push("  verified: every row points at a task that exists");
+    if (o.verified) out.push("  verified: every row points at a task that exists, live or in Trash");
     if (report.write && o.verified) out.push("  the Space is visible to everyone; Members edit once an Owner adds them to it");
     out.push("");
   }
-  out.push(`totals: read ${report.totals.read}, already moved ${report.totals.alreadyMigrated}, ${report.write ? "written" : "to write"} ${report.totals.written}, blocked orgs ${report.totals.blocked}, errors ${report.totals.errors}`);
+  out.push(`totals: read ${report.totals.read}, already moved ${report.totals.alreadyMigrated}, in Trash ${report.totals.trashed}, ${report.write ? "written" : "to write"} ${report.totals.written}, blocked orgs ${report.totals.blocked}, errors ${report.totals.errors}`);
   return out.join("\n");
 }
 
