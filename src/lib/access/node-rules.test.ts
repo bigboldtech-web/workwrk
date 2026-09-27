@@ -817,8 +817,10 @@ describe("canvases", () => {
 
 describe("forms", () => {
   const f = () => new World().space("S").list("L", "S", null).form("FM", { targetBoardId: "L" }).form("FREE");
-  it("a member edits, a Guest does not, a Guest creator manages, a Guest with a FORM grant views", () => {
-    expect(f().role("form", "FM")).toBe("EDIT");
+  it("a Member opens a form read-only when its List is out of reach (round five: the form follows its destination), a Guest does not, a Guest creator manages, a Guest with a FORM grant views", () => {
+    expect(f().role("form", "FM")).toBe("VIEW");
+    expect(f().onList("L", "MEMBER").role("form", "FM")).toBe("EDIT");
+    expect(f().role("form", "FREE")).toBe("EDIT");
     expect(f().as({ orgGuest: true }).role("form", "FM")).toBe("none");
     expect(f().as({ orgGuest: true }).form("FM", { createdById: ME }).role("form", "FM")).toBe("FULL");
     expect(f().as({ orgGuest: true }).onObject("form", "FM", "GUEST").role("form", "FM")).toBe("VIEW");
@@ -935,13 +937,13 @@ describe("moves (moveDecision)", () => {
     const w = canvasWorld().onFolder("F", "ADMIN");
     w.g.since?.set("folder:F", CUTOFF + 1);
     expect(moveDecision(w.rows, w.g, { kind: "canvas", id: "C" }, null)).toBe(false);
-    // The Space manager who owns it takes it out; one who does not cannot,
-    // because their Full access would not go with it (the one-way door).
+    // The Space manager takes it out whether they own it or not (P7, round
+    // six); at the org root its owner or an org admin brings it back.
     const owner = new World("legacy").space("S", "PRIVATE").folder("F", "S").canvas("C", "S", "F", ME).onSpace("S", "ADMIN");
     owner.rows.legacyBefore = CUTOFF;
     expect(moveDecision(owner.rows, owner.g, { kind: "canvas", id: "C" }, null)).toBe(true);
     const manager = canvasWorld().onSpace("S", "ADMIN");
-    expect(moveDecision(manager.rows, manager.g, { kind: "canvas", id: "C" }, null)).toBe(false);
+    expect(moveDecision(manager.rows, manager.g, { kind: "canvas", id: "C" }, null)).toBe(true);
   });
   it("a Space contributor from before the cutoff no longer does: a move needs Full access on the canvas and where it is (P2, delta M6)", () => {
     const w = canvasWorld().onSpace("S", "MEMBER");

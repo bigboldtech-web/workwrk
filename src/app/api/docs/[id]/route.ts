@@ -12,7 +12,7 @@ import { z } from "zod";
 import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { anchorAgreesWithParent, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
+import { anchorAgreesWithParent, isDocAnchorKind, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
 import { checkMove, docAnchorPlaceOf, docHomeOf, docPlaceLive, moveDestinations, writeDocTreeMove } from "@/lib/access/node-placement";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
@@ -64,8 +64,6 @@ async function readableParent(
   return { id: p.id, title: p.title };
 }
 
-/** Anchor types a doc may be moved onto (M2: never an unknown type). */
-const MOVABLE_ANCHORS = new Set(["SPACE", "FOLDER", "BOARD", "BOARD_ITEM"]);
 
 function sameHome(a: DocHome, b: DocHome): boolean {
   if (a.kind !== "anchor" || b.kind !== "anchor") return a.kind === b.kind;
@@ -337,7 +335,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const nextId = parsed.data.entityId !== undefined ? parsed.data.entityId : existing.entityId;
     const anchorChanges = parsed.data.entityType !== undefined || parsed.data.entityId !== undefined;
     const parentChanges = parsed.data.parentId !== undefined && parsed.data.parentId !== existing.parentId;
-    if (anchorChanges && nextType && !MOVABLE_ANCHORS.has(nextType)) {
+    // M2: only onto an anchor the model knows (node-rules DOC_ANCHOR_KINDS, the set POST /api/docs makes docs on).
+    if (anchorChanges && nextType && !isDocAnchorKind(nextType)) {
       return NextResponse.json({ error: "invalid_anchor", message: "A doc can move to a Space, a Folder, a List or a task." }, { status: 400 });
     }
     if (parentChanges && parsed.data.parentId && (await nestsUnderItself(ctx.orgId, id, parsed.data.parentId))) {

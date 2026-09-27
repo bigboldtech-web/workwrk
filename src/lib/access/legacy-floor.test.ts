@@ -147,6 +147,16 @@ describe("the floor is today's answer over the grid", () => {
             if (legacyAllows(i, "docAccessible")) {
               const role = legacyResolveDocRole(entry as never, { userId: ME, accessLevel: i.accessLevel, createdById: creator ? ME : OTHER });
               if (role) expected = legacyIsDocFull({ userId: ME, accessLevel: i.accessLevel }, { createdById: creator ? ME : OTHER }) ? "FULL" : role === "edit" ? "EDIT" : "COMMENT";
+              // Round six, break 3: a reach the org-wide rule alone gives (gone
+              // once the org-wide Space or List is read closed) floors at Can
+              // view, the role the rule gives everyone; today's rows keep Can edit.
+              const closed = (v: "WORKSPACE" | "PRIVATE" | "ORG") => (v === "ORG" ? "WORKSPACE" : v);
+              const rowsOnly: LegacyInputs = {
+                ...i,
+                ...(i.space ? { space: { ...i.space, visibility: closed(i.space.visibility) } } : {}),
+                ...(i.board ? { board: { ...i.board, visibility: closed(i.board.visibility) } } : {}),
+              };
+              if (expected === "EDIT" && !legacyAllows(rowsOnly, "docAccessible")) expected = "VIEW";
             }
             const got = floorFor(rows, g, { kind: "doc", id: "D" });
             if (got !== expected) failures.push(`${got} != ${expected} ${anchor} ${JSON.stringify(entry)} ${creator} ${JSON.stringify(w)}`);

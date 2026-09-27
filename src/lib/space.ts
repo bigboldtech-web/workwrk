@@ -13,7 +13,7 @@ import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { type ContainerRole } from "@/lib/work/container-menu";
 import { withArchivedBy } from "@/lib/archived-by";
-import { SPACE_NEST_REFUSAL, decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility } from "@/lib/access/node-rules";
+import { decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility } from "@/lib/access/node-rules";
 import { listVisibleSpaces } from "@/lib/access/node-access";
 
 /**
@@ -220,10 +220,10 @@ export async function spaceReparentRefusal(
   const self = await prisma.space.findFirst({ where: { id: spaceId, organizationId: org }, select: { parentSpaceId: true } });
   if (!self) return { status: 404, error: "Not found" };
   const currentId = self.parentSpaceId ?? null;
-  const [managesSpace, managesCurrent] = await Promise.all([
-    canEditSpace(spaceId, viewer.userId, viewer.accessLevel),
-    currentId && currentId !== parentSpaceId ? canEditSpace(currentId, viewer.userId, viewer.accessLevel) : Promise.resolve(true),
-  ]);
+  // The parent it leaves is asked nothing: a Space's place under a parent
+  // carries no access, and its OWNER or ADMIN moves it (node-rules
+  // spaceNestVerdict, P7).
+  const managesSpace = await canEditSpace(spaceId, viewer.userId, viewer.accessLevel);
   let dest: Parameters<typeof spaceNestVerdict>[0]["dest"] = null;
   if (parentSpaceId) {
     const parent = parentSpaceId === spaceId
@@ -252,7 +252,7 @@ export async function spaceReparentRefusal(
     }
     dest = { id: parentSpaceId, found: parentSpaceId === spaceId || !!parent, sees: parentSpaceId === spaceId || sees, archived: !!parent?.archivedAt, manages, cycle };
   }
-  const verdict = spaceNestVerdict({ spaceId, managesSpace, current: currentId ? { id: currentId, manages: managesCurrent } : null, dest });
+  const verdict = spaceNestVerdict({ spaceId, managesSpace, current: currentId ? { id: currentId } : null, dest });
   return verdict.ok ? null : { status: verdict.status, error: verdict.error };
 }
 
@@ -269,9 +269,9 @@ export interface SpaceNestDestinations {
  * P5 for Space nesting: exactly the parents spaces/[id]/move accepts for this
  * viewer, from the same verdict (node-rules spaceNestVerdict) the route asks,
  * so the Move dialog never offers a place the move refuses. Full access on the
- * Space, on the parent it leaves and on the parent it goes under; never the
- * Space itself, one of its own sub-Spaces, or an archived Space. Null when the
- * viewer cannot open the Space.
+ * Space and on the parent it goes under (the parent it leaves is asked
+ * nothing); never the Space itself, one of its own sub-Spaces, or an archived
+ * Space. Null when the viewer cannot open the Space.
  */
 export async function spaceNestDestinations(
   spaceId: string,
@@ -282,11 +282,10 @@ export async function spaceNestDestinations(
   if (!self || self.organizationId !== org) return null;
   const currentId = self.parentSpaceId ?? null;
   const ctx = nodeCtxFromLevel(viewer.userId, org, viewer.accessLevel);
-  const [visible, all, managesSpace, managesCurrent] = await Promise.all([
+  const [visible, all, managesSpace] = await Promise.all([
     listVisibleSpaces(ctx),
     prisma.space.findMany({ where: { organizationId: org }, select: { id: true, parentSpaceId: true } }),
     canEditSpace(spaceId, viewer.userId, viewer.accessLevel),
-    currentId ? canEditSpace(currentId, viewer.userId, viewer.accessLevel) : Promise.resolve(true),
   ]);
   // Its own sub-Spaces, at any depth: never a parent for it.
   const below = new Set<string>([spaceId]);
@@ -299,7 +298,7 @@ export async function spaceNestDestinations(
       }
     }
   }
-  const current = currentId ? { id: currentId, manages: managesCurrent } : null;
+  const current = currentId ? { id: currentId } : null;
   const verdictFor = (dest: Parameters<typeof spaceNestVerdict>[0]["dest"]) => spaceNestVerdict({ spaceId, managesSpace, current, dest });
   const top = verdictFor(null);
   const candidates = visible.filter((s) => s.id !== spaceId && !s.archivedAt);
@@ -311,13 +310,7 @@ export async function spaceNestDestinations(
   const listed = spaces.filter((s) => s.pickable || s.current);
   const topPick = top.ok && !top.same;
   const nothing = !topPick && !listed.some((s) => s.pickable);
-  const refusal = !nothing
-    ? undefined
-    : !managesSpace
-      ? "You need Full access to this Space to move it."
-      : current && !current.manages
-        ? SPACE_NEST_REFUSAL
-        : undefined;
+  const refusal = !nothing ? undefined : !managesSpace ? "You need Full access to this Space to move it." : undefined;
   return { top: { pickable: topPick, current: currentId === null }, spaces: listed, ...(refusal ? { refusal } : {}) };
 }
 

@@ -131,8 +131,8 @@ describe("R7b: the role a table's Space gives (delta C3)", () => {
     expect(world().on("space", "S", "GUEST", OLD).role(tb("T"))).toBe("EDIT");
   });
 
-  it("the org-wide reach keeps today's Can edit, a member edits, a manager and the creator manage", () => {
-    expect(world("ORG").role(tb("T"))).toBe("EDIT");
+  it("the org-wide reach gives Can view (round six, break 3), a member edits, a manager and the creator manage", () => {
+    expect(world("ORG").role(tb("T"))).toBe("VIEW");
     expect(world().on("space", "S", "MEMBER", NEW).role(tb("T"))).toBe("EDIT");
     expect(world().on("space", "S", "ADMIN", NEW).role(tb("T"))).toBe("FULL");
     const creator = new W().space("S").table("T", "S", ME).on("space", "S", "GUEST", NEW);
@@ -220,22 +220,30 @@ describe("subtreeAnchorPlan: a sub-page with its own anchor follows its moved pa
   });
 });
 
-// ── break 3: nesting a Space asks Full on both parents ────────────────
+// ── break 3: nesting a Space asks Full on the Space and where it goes ──
+//
+// Round two asked Full access on the parent it leaves as well. Round three's
+// break 3 proved that took away what a Space OWNER did before node-access
+// (their sub-Space to the top level, or under another Space they manage),
+// against P7, and a Space's place under a parent carries no access: so the
+// parent it leaves is asked nothing.
 
-describe("spaceNestVerdict: a Space's place under its parent is the parent's structure", () => {
+describe("spaceNestVerdict: a Space moves by its own managers, into a Space they manage", () => {
   const dest = (over: Partial<{ id: string; found: boolean; sees: boolean; archived: boolean; manages: boolean; cycle: boolean }> = {}) =>
     ({ id: "Q", found: true, sees: true, archived: false, manages: true, cycle: false, ...over });
 
-  it("Full on a sub-Space alone never pulls it out of a parent the mover has no role on, to another Space or to the top level", () => {
-    const current = { id: "P", manages: false };
-    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current, dest: dest() })).toEqual({ ok: false, status: 403, error: SPACE_NEST_REFUSAL });
-    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current, dest: null })).toEqual({ ok: false, status: 403, error: SPACE_NEST_REFUSAL });
+  it("Full on a sub-Space takes it to the top level, or under another Space the mover manages, with no role on the parent it leaves (P7)", () => {
+    const current = { id: "P" };
+    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current, dest: dest() })).toEqual({ ok: true, same: false });
+    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current, dest: null })).toEqual({ ok: true, same: false });
   });
 
-  it("Full on the Space, on the parent it leaves and on the one it goes under: allowed", () => {
-    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: { id: "P", manages: true }, dest: dest() })).toEqual({ ok: true, same: false });
+  it("from the top level the same: under a Space they manage", () => {
     expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: null, dest: dest() })).toEqual({ ok: true, same: false });
-    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: { id: "P", manages: true }, dest: null })).toEqual({ ok: true, same: false });
+  });
+
+  it("but never back under a parent they do not manage: the destination needs Full access", () => {
+    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: { id: "P" }, dest: dest({ manages: false }) })).toEqual({ ok: false, status: 403, error: SPACE_NEST_REFUSAL });
   });
 
   it("an archived parent is refused, as every other placement refuses one", () => {
@@ -252,7 +260,7 @@ describe("spaceNestVerdict: a Space's place under its parent is the parent's str
 
   it("no Full on the Space itself moves nothing; the parent it already has is no move", () => {
     expect(spaceNestVerdict({ spaceId: "X", managesSpace: false, current: null, dest: dest() })).toMatchObject({ ok: false, status: 403 });
-    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: { id: "Q", manages: false }, dest: dest() })).toEqual({ ok: true, same: true });
+    expect(spaceNestVerdict({ spaceId: "X", managesSpace: true, current: { id: "Q" }, dest: dest({ manages: false }) })).toEqual({ ok: true, same: true });
   });
 
   it("the refusal is one plain sentence with no double hyphen or em dash", () => {

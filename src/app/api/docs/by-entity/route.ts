@@ -12,7 +12,7 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { canCreateDocAt, docAccess } from "@/lib/doc-access";
 import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { createRefusal } from "@/lib/access/node-rules";
+import { DOC_ANCHOR_REFUSAL, createRefusal, isDocAnchorKind } from "@/lib/access/node-rules";
 import { docAnchorPlaceOf, docPlaceLive } from "@/lib/access/node-placement";
 
 const bodySchema = z.object({
@@ -28,6 +28,12 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  // M2: the one doc of an entity exists for the anchors the model knows
+  // (DOC_ANCHOR_KINDS) and a person's own note; any other string is refused
+  // before anything is read (round six, item 4).
+  if (parsed.data.entityType !== "NOTEPAD" && !isDocAnchorKind(parsed.data.entityType)) {
+    return NextResponse.json({ error: DOC_ANCHOR_REFUSAL, code: "invalid_anchor", message: DOC_ANCHOR_REFUSAL }, { status: 400 });
+  }
 
   // Gate the parent entity. Without this, find-or-create would let a probe
   // with a guessed parent ID either surface an existing doc on a private

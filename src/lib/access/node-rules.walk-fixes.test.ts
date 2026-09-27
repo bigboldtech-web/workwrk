@@ -216,9 +216,9 @@ describe("the role an anchored doc's reach gives (R6b)", () => {
     expect(w.role("doc", "DF")).toBe("EDIT");
   });
 
-  it("the org-wide reach of an org-wide Space still edits its docs (today's rule, no row)", () => {
-    expect(world("legacy", "ORG").role("doc", "DS")).toBe("EDIT");
+  it("the org-wide reach of an org-wide Space gives Can view on its docs, as on the Space itself (round six, break 3: no row lifts it)", () => {
+    expect(world("legacy", "ORG").role("doc", "DS")).toBe("VIEW");
     const w = world("legacy", "ORG").on("folder", "F", "GUEST", NEW);
-    expect(w.role("doc", "DF")).toBe("EDIT");
+    expect(w.role("doc", "DF")).toBe("VIEW");
   });
 });

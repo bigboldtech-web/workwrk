@@ -25,14 +25,16 @@
 //       Can view for everyone on an org-wide List. A List grant or ownership
 //       opens the List under any Folder: grants never cut.
 //   R6  Doc: a note (NOTEPAD) is its owner's alone. Anchored docs follow the
-//       anchor: a reach from the org-wide rule or from a row written before
-//       the cutoff edits an unrestricted doc (today's rule), a row written
-//       after it gives its own role (R6b, anchoredDocRole); a
-//       sub-page follows its parent page exactly (A6); a root doc is the
-//       whole org's. A listing pierces reach; restricted keeps only the
-//       listed people; a listing made before this release is a cap.
+//       anchor: a row written before the cutoff edits an unrestricted doc
+//       (today's rule), a row written after it gives its own role, and the
+//       org-wide rule gives what it gives the Space, Can view (R6b,
+//       anchoredDocRole); a sub-page follows its parent page exactly (A6);
+//       a root doc is the whole org's. A listing pierces reach; restricted
+//       keeps only the listed people; a listing made before this release is
+//       a cap.
 //   R7  Table, R8 Canvas, R9 Form: their container (or the org), their
-//       creator or owner, and an AccessGrant row that pierces.
+//       creator or owner, and an AccessGrant row that pierces. A table takes
+//       its Space's role on R6b's terms (R7b, spaceTableRole).
 //   R10 a Space or Folder with no role is a PATH container when something
 //       below it has a strict role: named on the way, never opened.
 //   R11 under the "legacy" Private rule the effective role is the higher of
@@ -561,6 +563,18 @@ export function notepadOwnerOf(rows: NodeRows, doc: DocFact): string | undefined
   return undefined;
 }
 
+/**
+ * Where a form sends responses: its List first (the primary destination, as
+ * the Goes to card and formResponsesAllowed read it), else its table, else
+ * null for nowhere yet. The place a form lives in for R9 and the placement
+ * rule (P2 for a form's destination).
+ */
+export function formDestinationRef(f: FormFact): NodeRef | null {
+  if (f.targetBoardId) return { kind: "list", id: f.targetBoardId };
+  if (f.targetTableId) return { kind: "table", id: f.targetTableId };
+  return null;
+}
+
 export type DocShape = "anchored" | "subpage" | "root";
 
 export function docShape(doc: DocFact): DocShape {
@@ -791,6 +805,12 @@ export class NodeEvaluator {
         if (!this.grants.viewer.orgAdmin) best = this.doc(ref.id, "effective");
       }
     }
+    // The floor is today's answer from today's ROWS (A8). A reach the
+    // org-wide rule alone gives (R2 on an org-wide Space, R4 on an org-wide
+    // List, read through to what is inside) is no row, so no floor lifts it:
+    // today's "every reader edits an unrestricted doc" once made every doc of
+    // an org-wide Space Can edit for the whole org (round six, break 3).
+    if (best.via.type === "everyone" && best.via.node !== null) return best;
     const floor = floorFor(this.rows, this.grants, ref);
     if (rankOf(floor) > rankOf(best.role)) return { role: floor, via: { type: "floor", node: ref } };
     return best;
@@ -966,21 +986,28 @@ export class NodeEvaluator {
    * R6b, the role an anchored doc's reach gives. Today everyone who reaches
    * an unrestricted doc edits it (and Can edit shares a doc, MANAGE_BAR), so
    * a Can view role on its Space, Folder or List gave Can edit and sharing on
-   * every doc inside. A8 keeps that for the rows that gave it: rows written
-   * before the cutoff and the org-wide "everyone" reach. A grant this release
-   * writes follows A5 instead: the ancestor's role is the doc's role, so the
-   * dialog's "Can view: Read only." holds for the docs inside too. The answer
-   * is the higher of the two, so a person holding both an older row and a new
-   * one keeps the older reach.
+   * every doc inside. A8 keeps that for the ROWS that gave it: rows written
+   * before the cutoff. A grant this release writes follows A5 instead: the
+   * ancestor's role is the doc's role, so the dialog's "Can view: Read only."
+   * holds for the docs inside too. The answer is the higher of the two, so a
+   * person holding both an older row and a new one keeps the older reach.
+   *
+   * The org-wide "everyone" reach is no row anyone wrote: it is R2's Can view
+   * on an org-wide Space (or R4's on an org-wide List), and it gives exactly
+   * that on the docs inside. Round six, break 3: it once lifted to Can edit,
+   * so every Member of the org, with no membership at all, added sub-pages
+   * under and rewrote, renamed and shared every doc of every org-wide Space
+   * while the dialog read "Everyone: Can view" (P1: Can view never creates).
    */
   private anchoredDocRole(d: DocFact, reach: Res): Res {
     const lift = (r: Res): Res => ({ role: roleAtLeast(r.role, "FULL") ? "FULL" : "EDIT", via: r.via });
-    if (reach.via.type === "everyone") return lift(reach);
+    if (reach.via.type === "everyone") return { role: inheritRole(reach.role), via: reach.via };
     const old = this.legacyEv();
     if (!old) return lift(reach);
     const capped: Res = { role: inheritRole(reach.role), via: reach.via };
     const oldReach = old.anchorReach(d);
-    if (oldReach.role === "none") return capped;
+    // An older reach that is the org-wide rule alone is no row: nothing to keep.
+    if (oldReach.role === "none" || oldReach.via.type === "everyone") return capped;
     const legacy = lift(oldReach);
     return rankOf(legacy.role) > rankOf(capped.role) ? legacy : capped;
   }
@@ -989,20 +1016,24 @@ export class NodeEvaluator {
    * R7b, the role a table's Space gives, on the same terms as R6b. Today
    * everyone who reaches a Space edits every table in it (rows, columns, CSV
    * import, a form pointed at it), so a Can view role on the Space climbed to
-   * Can edit on its tables. A8 keeps that for the rows that gave it: rows
-   * written before the cutoff and the org-wide "everyone" reach. A grant this
-   * release writes follows A5 instead: the Space role is the table's role, so
-   * "Can view: Read only." holds for the tables inside too and roles never
-   * climb (delta C3). The higher of the two, so an older row keeps its reach.
+   * Can edit on its tables. A8 keeps that for the ROWS that gave it: rows
+   * written before the cutoff. A grant this release writes follows A5
+   * instead: the Space role is the table's role, so "Can view: Read only."
+   * holds for the tables inside too and roles never climb (delta C3). The
+   * higher of the two, so an older row keeps its reach. The org-wide
+   * "everyone" reach is no row and gives the Space's Can view, as in R6b
+   * (round six, break 3: every Member once added rows, columns and CSV
+   * imports to, and pointed their own forms at, every table of every
+   * org-wide Space).
    */
   private spaceTableRole(spaceId: string, reach: Res): Res {
     const lift = (r: Res): Res => ({ role: roleAtLeast(r.role, "FULL") ? "FULL" : "EDIT", via: r.via });
-    if (reach.via.type === "everyone") return lift(reach);
+    if (reach.via.type === "everyone") return { role: inheritRole(reach.role), via: reach.via };
     const old = this.legacyEv();
     if (!old) return lift(reach);
     const capped: Res = { role: inheritRole(reach.role), via: reach.via };
     const oldReach = old.strict({ kind: "space", id: spaceId });
-    if (oldReach.role === "none") return capped;
+    if (oldReach.role === "none" || oldReach.via.type === "everyone") return capped;
     const legacy = lift(oldReach);
     return rankOf(legacy.role) > rankOf(capped.role) ? legacy : capped;
   }
@@ -1083,7 +1114,26 @@ export class NodeEvaluator {
     if (!f || !this.sameOrg(f.organizationId)) return NONE;
     const ref: NodeRef = { kind: "form", id };
     const cands: Candidate[] = [];
-    if (!this.grants.viewer.orgGuest) cands.push({ role: "EDIT", via: { type: "everyone", node: null }, prio: P_EVERYONE });
+    const member = !this.grants.viewer.orgGuest;
+    const dest = formDestinationRef(f);
+    if (dest) {
+      // A form that sends responses somewhere is part of that List's (or
+      // table's) structure, so it inherits the role held there: Can edit on
+      // the List edits the questions, Full access there manages the form.
+      // Every Member still opens the form itself (the Forms hub lists every
+      // form of the org and the builder renders read-only; the responses
+      // stay behind formResponsesAllowed). Round four, breaks 2 and 4: every
+      // Member once held Can edit on every form, so a person with nothing on
+      // a private Space rewrote its form's questions and where they went.
+      const parentRes = this.strict(dest);
+      if (parentRes.role !== "none") cands.push(up(parentRes));
+      if (member) cands.push({ role: "VIEW", via: { type: "everyone", node: null }, prio: P_EVERYONE });
+    } else if (member) {
+      // Nowhere yet: the org root's rule, as for a table or a canvas there.
+      cands.push({ role: "EDIT", via: { type: "everyone", node: null }, prio: P_EVERYONE });
+    }
+    // The creator keeps Full access for the life of the form, wherever it
+    // sends responses (spec-tables-forms T2).
     if (f.createdById && f.createdById === this.u) cands.push({ role: "FULL", via: { type: "owner", node: ref }, prio: P_OWNER });
     const g = this.grants.object.get(objectGrantKey("form", id));
     if (g) cands.push({ role: memberToRole(g), via: { type: "own", node: ref, source: "AccessGrant" }, prio: P_OWN });
@@ -1234,14 +1284,20 @@ export class NodeEvaluator {
 //       another moves what is inside the first into the second. The org root
 //       is the one destination no one holds a role on, and landing there
 //       opens the node to the whole org, so a move out of every Space also
-//       needs Full access on the Space it leaves, and Full access on the node
-//       that goes with it (its owner, an org admin, a Full share on a doc):
-//       a Space manager's push of someone else's node out of every Space was
-//       a one-way door, open to the org and theirs no longer to bring back
+//       needs Full access on the Space it leaves: a Space OWNER or ADMIN
+//       takes any node out of their Space, as they did before node-access
+//       (P7, round six), and at the org root its owner or an org admin
+//       brings it back. Anyone else who takes a node out of every Space (a
+//       Folder or List grantee moving a doc under a page of the org's) needs
+//       Full access that goes with the node (its owner, an org admin, a Full
+//       share on a doc), or the push would be a one-way door
 //       (fullWhereItLands). A Folder moves with everything beneath it, so
 //       it needs Full access on all of it, as its delete does, unless the
 //       mover manages its Space (folderMoveAllowed). A canvas's or a table's
-//       own grant never moves it (M3). (moveVerdict)
+//       own grant never moves it (M3). (moveVerdict) A form lives where it
+//       sends responses, so changing that is the same move: Full access on
+//       the form and on the List or table it leaves, Can edit on the one it
+//       goes to (formDestinationVerdict).
 //   P3  The Space of anything is derived from its destination parent, never
 //       taken from the request: a Space that disagrees with the parent Folder
 //       is refused, a parent in another org or in Trash is refused
@@ -1280,7 +1336,7 @@ const HOLDS: Readonly<Record<PlaceKind, ReadonlySet<NodeKind | "root">>> = {
   doc: new Set(["space", "folder", "list", "doc", "root"]),
   canvas: new Set(["space", "folder", "root"]),
   table: new Set(["space", "root"]),
-  form: new Set(["root"]),
+  form: new Set(["list", "table", "root"]),
   file: new Set(["space", "folder", "root"]),
 };
 
@@ -1390,8 +1446,10 @@ export function currentPlace(rows: NodeRows, ref: NodeRef): Place | undefined {
       if (!t) return undefined;
       return t.spaceId ? { kind: "space", id: t.spaceId } : null;
     }
-    case "form":
-      return rows.forms.has(ref.id) ? null : undefined;
+    case "form": {
+      const f = rows.forms.get(ref.id);
+      return f ? formDestinationRef(f) : undefined;
+    }
     case "doc": {
       const d = rows.docs.get(ref.id);
       if (!d) return undefined;
@@ -1404,6 +1462,25 @@ export function currentPlace(rows: NodeRows, ref: NodeRef): Place | undefined {
     }
   }
 }
+
+/**
+ * M2: the anchors a doc is made on or moved to, exactly as the model spells
+ * them: a Space, a Folder, a List or a task. A note (NOTEPAD) is made once
+ * under its owner's name and never re-anchored. Any other string falls
+ * through R6's open fallback (today's rule for the older anchor types, kept
+ * for the rows that have them), so a Member once anchored a doc to a Folder,
+ * a table or a canvas they could not even see (round six, item 4): no route
+ * makes a doc on an anchor outside this set.
+ */
+export const DOC_ANCHOR_KINDS: ReadonlySet<string> = new Set(["SPACE", "FOLDER", "BOARD", "BOARD_ITEM"]);
+
+/** Is this an anchor a route may make a doc on or move one to (exact case: "folder" is no Folder)? */
+export function isDocAnchorKind(entityType: string | null | undefined): boolean {
+  return typeof entityType === "string" && DOC_ANCHOR_KINDS.has(entityType);
+}
+
+/** P6: the one sentence a doc made on an anchor outside DOC_ANCHOR_KINDS answers with. */
+export const DOC_ANCHOR_REFUSAL = "A doc can be added to a Space, a Folder, a List or a task.";
 
 /**
  * The place a doc anchor names: a Space, a Folder, a List, or the List of a
@@ -1501,6 +1578,13 @@ function rowsWithNodeAt(rows: NodeRows, ref: NodeRef, dest: Place): NodeRows | n
       docs.set(ref.id, { ...d, ...at });
       return { ...rows, docs };
     }
+    case "form": {
+      const f = rows.forms.get(ref.id);
+      if (!f) return null;
+      const forms = new Map(rows.forms);
+      forms.set(ref.id, { ...f, targetBoardId: dest?.kind === "list" ? dest.id : null, targetTableId: dest?.kind === "table" ? dest.id : null });
+      return { ...rows, forms };
+    }
     default:
       return null;
   }
@@ -1572,12 +1656,22 @@ export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, 
     if (!managesPlace(ev, c)) return { ok: false, failure: "source" };
   }
   if (!createAllowed(ev, dest, what)) return { ok: false, failure: "destination" };
-  // P2 out of every Space: the node's Full access must go with it. A Space
-  // manager's Full access on someone else's canvas, doc or table ends at the
-  // Space's edge, so their push would be a one-way door: the node open to
-  // the whole org and nobody but its owner able to bring it back.
-  if (leavesEverySpace(rows, ref, dest) && !fullWhereItLands(rows, grants, ref, dest)) return { ok: false, failure: "landing" };
+  // P2 out of every Space: the node's Full access must go with it, unless the
+  // mover manages the Space it leaves. A Space OWNER or ADMIN took any node
+  // out of their Space before node-access (P7, round six, breaks 5 and 6);
+  // their push opens it to the org, where its owner or an org admin brings
+  // it back. Anyone else (a Folder or List grantee moving a doc under a page
+  // of the org's) needs Full access that goes with the node.
+  if (leavesEverySpace(rows, ref, dest) && !managesSpaceOf(ev, ref) && !fullWhereItLands(rows, grants, ref, dest)) {
+    return { ok: false, failure: "landing" };
+  }
   return { ok: true, same: false };
+}
+
+/** P7: does the viewer manage the Space a node sits in (a Space OWNER or ADMIN, an org admin)? False for a node in no Space. */
+function managesSpaceOf(ev: NodeEvaluator, ref: NodeRef): boolean {
+  const spaceId = spaceOfNode(ev.rows, ref);
+  return !!spaceId && managesPlace(ev, { kind: "space", id: spaceId });
 }
 
 /**
@@ -1587,6 +1681,88 @@ export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, 
  */
 export function moveDecision(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, destRef: NodeRef | null): boolean {
   return moveVerdict(rows, grants, ref, destRef).ok;
+}
+
+/** A form's two destination slots: the List and the table it sends responses to. */
+export type FormSlot = "list" | "table";
+
+/** A change to a form's destinations: a slot left out is unchanged, null empties it. */
+export interface FormDestinationChange { list?: string | null; table?: string | null }
+
+export type FormDestinationVerdict =
+  | { ok: true; same: boolean }
+  | { ok: false; failure: MoveFailure; slot: FormSlot | null };
+
+/**
+ * P2 for a form's destination. A form writes every response INTO the List or
+ * the table it sends them to, so that destination is the container the form
+ * lives in, and changing it is a move: Full access on the form, Full access
+ * where it sends responses now (the List or table it leaves, when it still
+ * exists), and Can edit or higher where it will send them (P1: the role that
+ * makes a task or a row there). Emptying both slots takes the form out of
+ * every Space, so as for every node (moveVerdict) the Full access must go
+ * with it: the creator's, an org admin's or a Full share on the form itself
+ * (fullWhereItLands). A change that repeats what is stored is no move.
+ *
+ * Round four, breaks 2 and 4: the route once asked Can edit on the new List
+ * alone, so a person holding Can edit on one List of their own, with nothing
+ * on the List a private Space's form fed, pointed that form's future
+ * responses into their List.
+ */
+export function formDestinationVerdict(rows: NodeRows, grants: ViewerGrants, formId: string, change: FormDestinationChange): FormDestinationVerdict {
+  if (grants.viewer.denied) return { ok: false, failure: "node", slot: null };
+  const f = rows.forms.get(formId);
+  if (!f || f.organizationId !== rows.organizationId) return { ok: false, failure: "node", slot: null };
+  const stored = (slot: FormSlot) => (slot === "list" ? f.targetBoardId : f.targetTableId);
+  const slots = (["list", "table"] as const).filter((slot) => change[slot] !== undefined && change[slot] !== stored(slot));
+  if (slots.length === 0) return { ok: true, same: true };
+  const ev = new NodeEvaluator(rows, grants);
+  if (!roleAtLeast(ev.effective({ kind: "form", id: formId }).role, "FULL")) return { ok: false, failure: "node", slot: null };
+  for (const slot of slots) {
+    const cur = stored(slot);
+    if (!cur) continue;
+    // A destination that is gone is no container: the form reads as sending
+    // nowhere, and its creator points it somewhere again.
+    const held = slot === "list" ? rows.lists.has(cur) : rows.tables.has(cur);
+    if (held && !managesPlace(ev, { kind: slot, id: cur })) return { ok: false, failure: "source", slot };
+  }
+  for (const slot of slots) {
+    const next = change[slot];
+    if (next && !createAllowed(ev, { kind: slot, id: next }, "form")) return { ok: false, failure: "destination", slot };
+  }
+  const after = { list: change.list !== undefined ? change.list : f.targetBoardId, table: change.table !== undefined ? change.table : f.targetTableId };
+  if (!after.list && !after.table) {
+    const cur = formDestinationRef(f);
+    const space = cur ? spaceOfPlace(rows, cur) : null;
+    // As for every node (moveVerdict): a manager of the Space it leaves takes it out (P7).
+    if (space && !managesPlace(ev, { kind: "space", id: space }) && !fullWhereItLands(rows, grants, { kind: "form", id: formId }, null)) {
+      return { ok: false, failure: "landing", slot: null };
+    }
+  }
+  return { ok: true, same: false };
+}
+
+/**
+ * The half of formDestinationVerdict that does not depend on where the form
+ * would go: Full access on the form and where it sends responses now. GET
+ * /api/forms/[id] answers it as canChangeDestination, so the builder's Goes
+ * to card offers Change only to someone the change could work for (P5).
+ */
+export function formDestinationChangeable(rows: NodeRows, grants: ViewerGrants, formId: string): boolean {
+  const f = rows.forms.get(formId);
+  if (!f || grants.viewer.denied) return false;
+  const probe: FormDestinationChange = { list: f.targetBoardId ? null : "\u0000probe", table: f.targetTableId ? null : undefined };
+  const v = formDestinationVerdict(rows, grants, formId, probe);
+  return v.ok || v.failure === "destination" || v.failure === "landing";
+}
+
+/** P6: the one sentence a refused destination change answers with. */
+export function formDestinationRefusal(failure: MoveFailure, slot: FormSlot | null): string {
+  const noun = slot === "table" ? "table" : "List";
+  if (failure === "node") return "You need Full access to this form to change where its responses go.";
+  if (failure === "destination") return `You need Can edit on that ${noun} to send responses to it.`;
+  if (failure === "landing") return "You need Full access to this form itself, not only through where it sends responses, to stop it sending them anywhere.";
+  return "You need Full access where this form sends responses now and Can edit where it will send them.";
 }
 
 /**
@@ -1619,10 +1795,10 @@ export function fileMoveVerdict(
     }
   }
   if (!createAllowed(ev, dest, "file")) return { ok: false, failure: "destination" };
-  // Out of every Space a file moves by its uploader or an admin alone, so a
-  // Space manager who pushed someone else's file out could never bring it
-  // back: only the people who keep Full access on it there take it out.
-  if (from && dest === null && !own) return { ok: false, failure: "landing" };
+  // Out of every Space (dest null) a file goes with its uploader, an admin,
+  // or a manager of the Space it leaves, which the source checks above have
+  // already asked (P7, as for every node, round six): at the org root its
+  // uploader or an admin moves it on.
   return { ok: true, same: false };
 }
 
@@ -1818,25 +1994,28 @@ export function subtreeAnchorPlan(
 
 export type SpaceNestVerdict = { ok: true; same: boolean } | { ok: false; status: 400 | 403 | 404; error: string };
 
-/** P6 for Space nesting: the one sentence both halves of a refused move answer with. */
-export const SPACE_NEST_REFUSAL = "You need Full access on the Space this one sits in now and on the Space it is going into.";
+/** P6 for Space nesting: the one sentence a refused destination answers with. */
+export const SPACE_NEST_REFUSAL = "You need Full access on the Space this one is going into.";
 
 /**
  * P2 for nesting a Space under another, or taking it to the top level (dest
- * null). A sub-Space's place under its parent is the parent's structure, so a
- * move needs Full access on the Space itself, Full access on the parent it
- * leaves, and Full access on the parent it goes under (Space nesting has
- * always asked Full access at both ends: a sub-Space is no content a Can edit
- * holder adds). The parent it already has is no move. A parent that is the
- * Space itself, one of its own sub-Spaces, in another org, out of the
- * viewer's sight or archived is refused, archived as every other placement
- * refuses it (P3).
+ * null). A Space is a top-level access node: its place under a parent Space
+ * carries no access (the resolver ignores parentSpaceId), so the parent it
+ * leaves is asked nothing. The move needs Full access on the Space itself
+ * (its OWNER or ADMIN, or an org admin) and Full access on the parent it goes
+ * under, exactly what spaces/[id]/move asked before node-access (P7: a Space
+ * OWNER moved their sub-Space to the top level or under another Space they
+ * manage, and round two's stricter rule took that away; round three, break
+ * 3). The parent it already has is no move. A parent that is the Space
+ * itself, one of its own sub-Spaces, in another org, out of the viewer's
+ * sight or archived is refused, archived as every other placement refuses it
+ * (P3).
  */
 export function spaceNestVerdict(input: {
   spaceId: string;
   managesSpace: boolean;
   /** The parent it has now, or null at the top level. */
-  current: { id: string; manages: boolean } | null;
+  current: { id: string } | null;
   /** The parent it goes under, or null for the top level. */
   dest: { id: string; found: boolean; sees: boolean; archived: boolean; manages: boolean; cycle: boolean } | null;
 }): SpaceNestVerdict {
@@ -1849,7 +2028,6 @@ export function spaceNestVerdict(input: {
     if (dest.archived) return { ok: false, status: 400, error: "That Space is archived." };
     if (dest.cycle) return { ok: false, status: 400, error: "Can't move a Space into one of its own sub-Spaces." };
   }
-  if (current && !current.manages) return { ok: false, status: 403, error: SPACE_NEST_REFUSAL };
   if (dest && !dest.manages) return { ok: false, status: 403, error: SPACE_NEST_REFUSAL };
   return { ok: true, same: false };
 }
@@ -2120,14 +2298,14 @@ export const NODE_ACCESS_DELTAS: readonly NodeAccessDelta[] = [
     id: "C2",
     mode: "always",
     kind: "information",
-    text: "A Can view role on a Space, Folder or List written at or after the workspace's cutoff gives Can view on the docs inside and their sub-pages, so it never edits or shares them (A5). Rows from before the cutoff and the org-wide reach keep today's Can edit (A8).",
+    text: "A Can view role on a Space, Folder or List written at or after the workspace's cutoff gives Can view on the docs inside and their sub-pages, so it never edits or shares them (A5), and so does the org-wide reach: an org-wide Space or List gives everyone Can view, on the docs inside too. Rows from before the cutoff keep today's Can edit (A8).",
     legacySource: "doc-access.ts resolveDocRole gave every reader of an unrestricted doc Can edit, and Can edit changes its sharing.",
   },
   {
     id: "C3",
     mode: "always",
     kind: "information",
-    text: "A Can view role on a Space written at or after the workspace's cutoff gives Can view on the tables in it, so it never adds rows or columns, imports into them or points a form at them (A5). Rows from before the cutoff and the org-wide reach keep today's Can edit (A8).",
+    text: "A Can view role on a Space written at or after the workspace's cutoff gives Can view on the tables in it, so it never adds rows or columns, imports into them or points a form at them (A5), and so does the org-wide reach: an org-wide Space gives everyone Can view, on its tables too. Rows from before the cutoff keep today's Can edit (A8).",
     legacySource: "api/tables/[id] and its rows and import routes let every reader of the table's Space write to it.",
   },
   {

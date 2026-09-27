@@ -14,7 +14,7 @@ import { z } from "zod";
 import { canCreateDocAt } from "@/lib/doc-access";
 import { getDocSharingMap } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
-import { anchorAgreesWithParent, applyDocLock, createRefusal, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
+import { DOC_ANCHOR_REFUSAL, anchorAgreesWithParent, applyDocLock, createRefusal, isDocAnchorKind, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { docAnchorPlaceOf, docHomeOf, docPlaceLive } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilters, matchesView, parseDocsListQuery, slicePage, sortDocs, type DocsCandidate } from "@/lib/docs-list";
@@ -325,6 +325,13 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  // M2: a doc is made on an anchor the model knows (DOC_ANCHOR_KINDS, exact
+  // case) or as a note. Any other string is refused before anything is read:
+  // it once fell through R6's open fallback, so a Member anchored a doc to a
+  // Folder, a table or a canvas they could not see (round six, item 4).
+  if (parsed.data.entityType && parsed.data.entityType !== "NOTEPAD" && !isDocAnchorKind(parsed.data.entityType)) {
+    return NextResponse.json({ error: DOC_ANCHOR_REFUSAL, code: "invalid_anchor", message: DOC_ANCHOR_REFUSAL }, { status: 400 });
+  }
 
   const content = (parsed.data.content as object) ?? {};
 

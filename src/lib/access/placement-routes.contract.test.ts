@@ -21,7 +21,8 @@ describe("Folders", () => {
   });
   it("PATCH moves a new parent or a spaceId through the helper, which checks the Space against the parent", () => {
     const route = read("src/app/api/folders/[id]/route.ts");
-    expect(route).toMatch(/const placing = parentFolderId !== undefined \|\| spaceId !== undefined;/);
+    // Round five: a bare position is a P4 reorder through the same helper.
+    expect(route).toMatch(/const placing = parentFolderId !== undefined \|\| spaceId !== undefined \|\| position !== undefined;/);
     expect(route).toMatch(/moved = await moveFolder\(gate\.ctx, id, \{\s*spaceId,\s*parentFolderId: parentFolderId !== undefined \? parentFolderId : gate\.folder\.parentFolderId,/);
     expect(route).not.toMatch(/comes from where it sits/);
   });
@@ -119,9 +120,9 @@ describe("Tables, canvases, files", () => {
 });
 
 describe("Forms, templates, Spaces", () => {
-  it("a form's destination needs Can edit on create, change and copy", () => {
+  it("a form's destination needs Can edit on create and copy, and a change is a move with both ends asked (round five)", () => {
     expect(read("src/app/api/forms/route.ts")).toMatch(/await checkFormDestination\(nodeCtxFromViewer\(viewer\), \{ boardId: targetBoardId, tableId: targetTableId \}\)/);
-    expect(read("src/app/api/forms/[id]/route.ts")).toMatch(/await checkFormDestination\(nodeCtxFromViewer\(editor\), \{ boardId: newBoard, tableId: newTable \}\)/);
+    expect(read("src/app/api/forms/[id]/route.ts")).toMatch(/await checkFormDestinationChange\(nodeCtxFromViewer\(editor\), existing\.id, \{/);
     expect(read("src/app/api/forms/[id]/duplicate/route.ts")).toMatch(/targetBoardId: keepBoard \? source\.targetBoardId : null/);
   });
   it("a template lands where the rule allows", () => {

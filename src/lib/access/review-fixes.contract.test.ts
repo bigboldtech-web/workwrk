@@ -55,9 +55,12 @@ describe("the Ask AI tools (finding 3)", () => {
 describe("doc duplicate (finding 5)", () => {
   it("asks canCreateDocAt for the place the copy lands, as POST /api/docs does", () => {
     const route = read("src/app/api/docs/[id]/duplicate/route.ts");
-    const gate = route.indexOf("canCreateDocAt(nodeCtxFromLevel(");
+    const gate = route.indexOf("canCreateDocAt(nodeCtx,");
     expect(gate).toBeGreaterThan(0);
-    expect(gate).toBeLessThan(route.indexOf("prisma.doc.create("));
+    // The copy is written inside a transaction (tx.doc.create), after the gate.
+    const write = route.indexOf(".doc.create(");
+    expect(write).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(write);
   });
 });
 

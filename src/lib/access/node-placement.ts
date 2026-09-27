@@ -44,6 +44,9 @@ import {
   fileEditDecision,
   fileMoveVerdict,
   filePlace,
+  formDestinationChangeable,
+  formDestinationRefusal,
+  formDestinationVerdict,
   moveRefusal,
   moveVerdict,
   placeHolds,
@@ -52,6 +55,7 @@ import {
   roleAtLeast,
   subtreeAnchorPlan,
   type DocHome,
+  type FormDestinationChange,
   type NodeCtx,
   type NodeRef,
   type NodeRows,
@@ -801,6 +805,50 @@ export async function checkFormDestination(
     if (!roleAtLeast(role, "EDIT")) return fail(403, `You need Can edit on that ${noun} to send responses to it.`);
   }
   return { ok: true };
+}
+
+/**
+ * A change of a form's destination: the placement rule P2 for a form
+ * (node-rules formDestinationVerdict). `boardId` and `tableId` left out are
+ * unchanged, null empties the slot. The new List or table must be live in
+ * this org and open to the viewer (a guessed id confirms nothing, so one they
+ * cannot open reads as gone, as checkFormDestination reads it); then Full
+ * access on the form and where it sends responses now, and Can edit where it
+ * will send them. Refused with the one sentence (P6), nothing written.
+ */
+export async function checkFormDestinationChange(
+  ctx: NodeCtx,
+  formId: string,
+  change: { boardId?: string | null; tableId?: string | null },
+): Promise<{ ok: true; same: boolean } | PlaceRefusal> {
+  if (ctx.denied) return fail(404, "Not found");
+  const org = ctx.organizationId;
+  const form = await prisma.formDefinition.findFirst({ where: { id: formId, organizationId: org }, select: { id: true, targetBoardId: true, targetTableId: true } });
+  if (!form) return fail(404, "Not found");
+  const [board, table] = await Promise.all([
+    change.boardId ? prisma.board.findFirst({ where: { id: change.boardId, organizationId: org, archivedAt: null }, select: { id: true } }) : Promise.resolve(null),
+    change.tableId ? prisma.dataTable.findFirst({ where: { id: change.tableId, organizationId: org }, select: { id: true } }) : Promise.resolve(null),
+  ]);
+  if (change.boardId && !board) return fail(400, "That List no longer exists");
+  if (change.tableId && !table) return fail(400, "That table no longer exists");
+  const refs: NodeRef[] = [{ kind: "form", id: form.id }];
+  for (const id of [form.targetBoardId, board?.id]) if (id) refs.push({ kind: "list", id });
+  for (const id of [form.targetTableId, table?.id]) if (id) refs.push({ kind: "table", id });
+  const { rows, grants } = await loadWorld(ctx, refs, { chain: true });
+  const ev = new NodeEvaluator(rows, grants);
+  if (board && !roleAtLeast(ev.effective({ kind: "list", id: board.id }).role, "VIEW")) return fail(400, "That List no longer exists");
+  if (table && !roleAtLeast(ev.effective({ kind: "table", id: table.id }).role, "VIEW")) return fail(400, "That table no longer exists");
+  const asked: FormDestinationChange = { list: change.boardId, table: change.tableId };
+  const verdict = formDestinationVerdict(rows, grants, form.id, asked);
+  if (verdict.ok) return verdict;
+  return fail(403, formDestinationRefusal(verdict.failure, verdict.slot));
+}
+
+/** May this viewer change where the form sends responses at all (node-rules formDestinationChangeable)? GET /api/forms/[id] canChangeDestination. */
+export async function formDestinationChangeableFor(ctx: NodeCtx, formId: string): Promise<boolean> {
+  if (ctx.denied) return false;
+  const { rows, grants } = await loadWorld(ctx, [{ kind: "form", id: formId }], { chain: true });
+  return formDestinationChangeable(rows, grants, formId);
 }
 
 // ── a file's place in the Space tree ─────────────────────────────────

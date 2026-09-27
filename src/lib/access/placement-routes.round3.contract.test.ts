@@ -146,7 +146,8 @@ describe("break 8: the Space Move dialog lists the parents spaces/[id]/move acce
 describe("break 9: every move out of every Space asks the landing rule", () => {
   it("moveVerdict refuses the push when Full access would not go with the node", () => {
     const fn = between(read("src/lib/access/node-rules.ts"), "export function moveVerdict(", "export function moveDecision(");
-    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !fullWhereItLands\(rows, grants, ref, dest\)\) return \{ ok: false, failure: "landing" \};/);
+    // Round six: a manager of the Space it leaves is exempt (P7), everyone else needs Full access that goes with the node.
+    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !managesSpaceOf\(ev, ref\) && !fullWhereItLands\(rows, grants, ref, dest\)\) \{\n\s+return \{ ok: false, failure: "landing" \};/);
   });
   it("and the canvas, table and doc moves all go through checkMove", () => {
     const lib = read("src/lib/access/node-placement.ts");

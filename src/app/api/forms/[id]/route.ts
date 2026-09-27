@@ -9,10 +9,22 @@
 // names it. A patch is partial and merged over what is stored. The people on
 // "Tell these people about each new response" must be in the form's org.
 //
-// Who may edit (interim, access engine inert): every Member of the org, as
-// before; a Guest only a form they made. GET answers `canEdit` so the builder
-// renders read-only for everyone else, and `canManage` (creator or admin) for
-// the public link, delete and deleting responses.
+// Who may edit: the one resolver's R9. A form inherits the role held where it
+// sends responses (Can edit on that List edits the questions, Full access
+// there manages the form), its creator holds Full access for life, a form
+// grant gives its role, and every Member opens it read-only; a form sending
+// nowhere yet is every Member's to edit, as anything at the org root. GET
+// answers `canEdit` so the builder renders read-only for everyone else,
+// `canManage` (Full access) for the public link, delete and deleting
+// responses, and `canChangeDestination` for the Goes to card.
+//
+// A change of destination is a MOVE under the placement rule (node-rules P2,
+// formDestinationVerdict): Full access on the form, Full access where it
+// sends responses now, Can edit where it will send them; emptying it takes
+// the form out of every Space, so the Full access must be the form's own.
+// Round four, breaks 2 and 4: every Member once held Can edit on every form,
+// and only the new List was asked, so a person with nothing on a private
+// Space redirected its form's responses and rewrote its questions.
 // DELETE /api/forms/[id]   move to the one Trash WITH its responses; only its creator or an admin
 //
 // Phase 5 gates (spec-tables-forms section 3 ask 1, section 4 step 1, with the
@@ -31,7 +43,7 @@ import {
 import { viewerFromSession } from "@/lib/access/viewer";
 import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { formResponsesAllowed, nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
-import { checkFormDestination } from "@/lib/access/node-placement";
+import { checkFormDestinationChange, formDestinationChangeableFor } from "@/lib/access/node-placement";
 import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
@@ -107,7 +119,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const role = await formRoleOf(viewer, form.id);
   if (!roleAtLeast(role, "VIEW")) return jsonError("not found", 404);
   const canEdit = roleAtLeast(role, "EDIT");
-  const canRead = viewer ? await formResponsesAllowed(nodeCtxFromViewer(viewer), form.id) : false;
+  const [canRead, canChangeDestination] = viewer
+    ? await Promise.all([formResponsesAllowed(nodeCtxFromViewer(viewer), form.id), formDestinationChangeableFor(nodeCtxFromViewer(viewer), form.id)])
+    : [false, false];
   const { _count, ...rest } = form;
   const settings = readFormSettings((form as { settings?: unknown }).settings);
   const responder = viewer ? { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent } : null;
@@ -135,6 +149,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     canRespond,
     // Full access on the form: its public link, delete, deleting responses.
     canManage: roleAtLeast(role, "FULL"),
+    // The placement rule's source half for a destination change (node-rules
+    // formDestinationChangeable): Full access on the form and where it sends
+    // responses now. The Goes to card offers Change only then (P5).
+    canChangeDestination,
     // Reading responses needs the form AND where its answers land (R9); a
     // form grant never bypasses the destination.
     canReadResponses: canRead,
@@ -195,18 +213,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
-  // A destination must be a List or a table in this org that the editor can
-  // write to (Can edit: every response is written into it, the placement
-  // rule, node-rules P1); a stale id from an old tab is refused rather than
-  // stored as a dead link. The builder saves the whole form every time, so a
-  // destination it repeats unchanged is not a change and is never refused.
+  // A change of destination is a move (node-placement
+  // checkFormDestinationChange, the placement rule P2): Full access on the
+  // form and where it sends responses now, Can edit on the List or table in
+  // this org it will send them to; a stale id from an old tab is refused
+  // rather than stored as a dead link. The builder saves the whole form every
+  // time, so a destination it repeats unchanged is not a change and is never
+  // refused. Refused, nothing is written and the sentence names what is
+  // needed (P6).
   const nextBoard = "targetBoardId" in body ? (typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null) : undefined;
   const nextTable = "targetTableId" in body ? (typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null) : undefined;
-  const newBoard = nextBoard && nextBoard !== existing.targetBoardId ? nextBoard : null;
-  const newTable = nextTable && nextTable !== existing.targetTableId ? nextTable : null;
-  if ((newBoard || newTable) && editor) {
-    const dest = await checkFormDestination(nodeCtxFromViewer(editor), { boardId: newBoard, tableId: newTable });
-    if (!dest.ok) return jsonError(dest.error, dest.status);
+  const boardChanges = nextBoard !== undefined && nextBoard !== existing.targetBoardId;
+  const tableChanges = nextTable !== undefined && nextTable !== existing.targetTableId;
+  if ((boardChanges || tableChanges) && editor) {
+    const change = await checkFormDestinationChange(nodeCtxFromViewer(editor), existing.id, {
+      boardId: boardChanges ? nextBoard : undefined,
+      tableId: tableChanges ? nextTable : undefined,
+    });
+    if (!change.ok) return jsonError(change.error, change.status);
   }
   if (nextBoard !== undefined) data.targetBoardId = nextBoard;
   if (nextTable !== undefined) data.targetTableId = nextTable;

@@ -124,10 +124,14 @@ export default async function FolderPage(props: {
     );
   }
   const canEdit = roleAtLeast(decision.role, "EDIT");
-  // Full access on the Folder manages it and creates Lists, sub-folders and
-  // canvases in it (POST /api/boards and /api/folders ask the same question).
+  // Full access on the Folder manages it (rename, move, delete, access).
   const canManage = roleAtLeast(decision.role, "FULL");
-  const canCreateInFolder = canManage;
+  // The placement rule (node-rules P1): Can edit or higher creates Lists,
+  // sub-folders, docs and canvases in it, exactly what POST /api/boards and
+  // POST /api/folders accept. The Contents card once offered New list and
+  // New folder at Full only, while the header's New submenu offered them at
+  // Can edit and the server took them (round three, break 8).
+  const canCreateInFolder = canEdit;
   const folderRole = toContainerRole(decision.role) ?? "view";
 
   // Everything nested under this folder, so the Tasks tab covers the shelf and

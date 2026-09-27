@@ -320,7 +320,24 @@ function docFloor(rows: NodeRows, grants: ViewerGrants, docId: string): FloorRol
   });
   if (!role) return "none";
   if (legacyIsDocFull({ userId: grants.viewer.userId, accessLevel: level }, doc)) return "FULL";
+  // Today's "every reader edits an unrestricted doc" is kept for the ROWS
+  // that reach the doc (A8). The org-wide rule is no row: a reach it alone
+  // gives (the doc out of reach once the org-wide Space or List is read
+  // closed) floors at the Can view the rule gives everyone (R2, R4). Round
+  // six, break 3: a Can view row this release wrote, which the floor drops,
+  // read back as Can edit on every doc of an org-wide Space.
+  if (role === "edit" && !legacyAllows(withOrgWideClosed(inputs), "docAccessible")) return "VIEW";
   return role === "edit" ? "EDIT" : "COMMENT";
+}
+
+/** The same inputs with every org-wide visibility closed: what today's rows alone reach. */
+function withOrgWideClosed(inputs: LegacyInputs): LegacyInputs {
+  const closed = (v: LegacySpace["visibility"]): LegacySpace["visibility"] => (v === "ORG" ? "WORKSPACE" : v);
+  return {
+    ...inputs,
+    ...(inputs.space ? { space: { ...inputs.space, visibility: closed(inputs.space.visibility) } } : {}),
+    ...(inputs.board ? { board: { ...inputs.board, visibility: closed(inputs.board.visibility) } } : {}),
+  };
 }
 
 function canvasFloor(rows: NodeRows, grants: ViewerGrants, canvasId: string): FloorRole {

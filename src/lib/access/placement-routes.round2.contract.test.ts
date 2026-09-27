@@ -107,13 +107,20 @@ describe("break 9: a file's own edits and its Trash need Can edit where it sits"
   });
 });
 
-describe("break 3: Space nesting asks the parent it leaves", () => {
-  it("spaceReparentRefusal reads the current parent and hands both ends to spaceNestVerdict", () => {
+describe("break 3: Space nesting asks the Space and where it goes, never the parent it leaves (round three, break 3)", () => {
+  it("spaceReparentRefusal hands spaceNestVerdict the current parent's id alone, and the destination's archived state", () => {
     const lib = read("src/lib/space.ts");
     const fn = lib.slice(lib.indexOf("export async function spaceReparentRefusal("), lib.indexOf("export interface CreateSpaceInput"));
     expect(fn).not.toMatch(/if \(!parentSpaceId\) return null;/);
-    expect(fn).toMatch(/canEditSpace\(currentId, viewer\.userId, viewer\.accessLevel\)/);
+    expect(fn).not.toMatch(/canEditSpace\(currentId/);
+    expect(fn).toMatch(/current: currentId \? \{ id: currentId \} : null/);
     expect(fn).toMatch(/archived: !!parent\?\.archivedAt/);
+  });
+  it("and the Space Move dialog asks no role on the parent it leaves either", () => {
+    const lib = read("src/lib/space.ts");
+    const fn = lib.slice(lib.indexOf("export async function spaceNestDestinations("), lib.indexOf("export interface CreateSpaceInput"));
+    expect(fn).not.toMatch(/canEditSpace\(currentId/);
+    expect(fn).toMatch(/const current = currentId \? \{ id: currentId \} : null;/);
   });
 });
 

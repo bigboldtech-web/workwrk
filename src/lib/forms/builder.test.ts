@@ -118,21 +118,24 @@ describe("map-to-existing-field", () => {
 });
 
 describe("audienceLine", () => {
-  // The rule the API enforces today (api/forms/[id] canEditForm): every Member
-  // edits and reads responses, a Guest only their own form, whatever the
-  // destination. The copy must not promise a narrower audience than that.
-  it("tells the owner the whole workspace can edit and read, with or without a destination", () => {
-    const none = audienceLine(null);
-    expect(none).toBe("Every member of this workspace can edit this form and read its responses. A guest can only if they made the form.");
-    expect(audienceLine({ kind: "list", name: "Sales · Q4 leads" })).toBe(none);
-    expect(audienceLine({ kind: "table", name: "Pipeline" })).toBe(none);
+  // The rule the API enforces (node-rules R9, round five): a form follows the
+  // List or table it sends responses to; one sending nowhere yet is every
+  // Member's. The copy must promise neither more nor less than that.
+  it("without a destination, tells the owner the whole workspace can edit and read", () => {
+    expect(audienceLine(null)).toBe("Every member of this workspace can edit this form and read its responses. A guest can only if they made the form.");
+    expect(audienceLine(undefined)).toBe(audienceLine(null));
   });
-  it("never claims only the owner and admins can edit, or that editors come from the destination", () => {
-    for (const d of [null, { kind: "list" as const, name: "Sales" }, { kind: "table" as const, name: "" }]) {
-      const line = audienceLine(d);
-      expect(line).not.toMatch(/only you/i);
-      expect(line).not.toMatch(/editors of/i);
-      expect(line).not.toMatch(/\u2014|-{2}/);
+  it("with a destination, names the destination's readers, editors and Full access holders, and the read-only rest", () => {
+    const list = audienceLine({ kind: "list", name: "Sales · Q4 leads" });
+    expect(list).toBe("Whoever can open the List this form sends responses to can read them, whoever can edit that List can edit this form, and Full access on it changes where the responses go. Everyone else in the workspace can open the form read-only.");
+    expect(audienceLine({ kind: "table", name: "Pipeline" })).toMatch(/^Whoever can open the table this form sends responses to/);
+    // Never the destination's name: a viewer who cannot open it sees "A private List".
+    expect(list).not.toMatch(/Q4 leads/);
+  });
+  it("never claims only the owner and admins can edit, and carries no em dash or double hyphen", () => {
+    for (const s of [audienceLine(null), audienceLine({ kind: "list", name: "L" }), audienceLine({ kind: "table", name: "T" })]) {
+      expect(s).not.toMatch(/only the owner/i);
+      expect(s).not.toMatch(/—|--/);
     }
   });
 });

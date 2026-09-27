@@ -118,6 +118,8 @@ type ApiForm = {
   canEdit?: boolean;
   canRespond?: boolean;
   canManage?: boolean;
+  /** Full access on the form and where it sends responses now: the Goes to card offers Change only then (node-rules P2, P5). */
+  canChangeDestination?: boolean;
   canReadResponses?: boolean;
   isAgent?: boolean;
   publicLinksAllowed?: boolean;
@@ -1100,7 +1102,7 @@ export function FormBuilder({ formId }: { formId: string }) {
             )}
 
             {/* 4. Goes to, 5. mapping */}
-            <GoesToCard listDest={listDest} tableDest={tableDest} readOnly={locked} tablesOn={tablesOn} onChange={(n) => void changeDestination(n)} />
+            <GoesToCard listDest={listDest} tableDest={tableDest} readOnly={locked || !form.canChangeDestination} tablesOn={tablesOn} onChange={(n) => void changeDestination(n)} />
             {readOnly ? null : <MappingCard
               fields={draft.fields}
               listDest={listDest}

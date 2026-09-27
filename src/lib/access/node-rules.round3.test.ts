@@ -119,11 +119,15 @@ describe("break 9: a push out of every Space needs Full access that goes with th
       .canvas("CA", "A", "FA", owner).doc("DR", { entityType: "SPACE", entityId: "A", createdById: owner }).table("TA", "A", owner)
       .on("space", "A", "ADMIN");
 
-  it("a Space ADMIN never pushes someone else's canvas, doc or table to the org root (the one-way door)", () => {
+  it("a Space ADMIN pushes someone else's canvas, doc or table to the org root (P7, round six: as before node-access); a Folder ADMIN never does", () => {
     const w = world();
-    expect(w.move(cv("CA"), null)).toEqual({ ok: false, failure: "landing" });
-    expect(w.move(dc("DR"), null)).toEqual({ ok: false, failure: "landing" });
-    expect(w.move(tb("TA"), null)).toEqual({ ok: false, failure: "landing" });
+    expect(w.move(cv("CA"), null)).toEqual({ ok: true, same: false });
+    expect(w.move(dc("DR"), null)).toEqual({ ok: true, same: false });
+    expect(w.move(tb("TA"), null)).toEqual({ ok: true, same: false });
+    // The one-way door stays shut for a narrow grant: Full access on the
+    // Folder alone is not Full access on the Space it leaves (P2, "source").
+    const narrow = new W().space("A", "PRIVATE").folder("FA", "A").canvas("CA", "A", "FA").on("folder", "FA", "ADMIN");
+    expect(narrow.move(cv("CA"), null)).toEqual({ ok: false, failure: "source" });
     expect(moveRefusal("canvas", "landing")).toBe("You need Full access to this canvas itself, not only through its Space, to take it out of every Space.");
   });
 
@@ -159,10 +163,11 @@ describe("break 9: a push out of every Space needs Full access that goes with th
     expect(w.move(dc("DR"), null)).toEqual({ ok: true, same: false });
   });
 
-  it("a canvas's or a table's own grant never takes it out (M3), even with Full access on the Space", () => {
-    const w = world().onObject("canvas", "CA", "ADMIN").onObject("table", "TA", "ADMIN");
-    expect(w.move(cv("CA"), null)).toEqual({ ok: false, failure: "landing" });
-    expect(w.move(tb("TA"), null)).toEqual({ ok: false, failure: "landing" });
+  it("a canvas's or a table's own grant never takes it out (M3): with Can edit on the Space it is the node that refuses", () => {
+    const w = new W().space("A", "PRIVATE").folder("FA", "A").canvas("CA", "A", "FA").table("TA", "A")
+      .on("space", "A", "MEMBER").onObject("canvas", "CA", "ADMIN").onObject("table", "TA", "ADMIN");
+    expect(w.move(cv("CA"), null)).toEqual({ ok: false, failure: "node" });
+    expect(w.move(tb("TA"), null)).toEqual({ ok: false, failure: "node" });
   });
 
   it("fullWhereItLands reads the role at the org root; leavesEverySpace names the moves it guards", () => {

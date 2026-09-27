@@ -9,8 +9,13 @@
 // has), and one that disagrees is a 400 with nothing written. For a Folder at
 // a Space's root, the Space named is the root it goes to. Writing it straight
 // through is how a sub-folder once jumped to another Space's root under a
-// parent that stayed behind. A delete takes the whole subtree, so it needs
-// Full access on everything in it (node-placement checkFolderDelete).
+// parent that stayed behind. A bare `position` goes through the same helper:
+// it is a reorder under the parent the Folder has (P4), which needs Full
+// access on the Folder AND on that parent, exactly what the sidebar drag
+// (POST /api/folders/reorder) asks. Written straight through, it let a Folder
+// grantee reshuffle the root folders of a Space they cannot open (round four,
+// break 1). A delete takes the whole subtree, so it needs Full access on
+// everything in it (node-placement checkFolderDelete).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -88,10 +93,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (rest.name !== undefined && !rest.name.trim()) {
     return NextResponse.json({ error: "Folder name cannot be empty" }, { status: 400 });
   }
-  // A new parent or a Space is a move (P2, P3, P4): the one move helper,
-  // before anything else is written, so a refused move writes nothing at all.
-  // With a Space and no parent named, the parent is the one the Folder has.
-  const placing = parentFolderId !== undefined || spaceId !== undefined;
+  // A new parent, a Space or a position is a move or a reorder (P2, P3, P4):
+  // the one move helper, before anything else is written, so a refused one
+  // writes nothing at all. With a Space and no parent named, or a position
+  // alone, the parent is the one the Folder has.
+  const placing = parentFolderId !== undefined || spaceId !== undefined || position !== undefined;
   let moved: Awaited<ReturnType<typeof moveFolder>> | null = null;
   if (placing) {
     moved = await moveFolder(gate.ctx, id, {
@@ -103,7 +109,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   try {
     const before = gate.folder.visibility;
-    const patch = { ...rest, ...(!placing && position !== undefined ? { position } : {}) };
+    const patch = { ...rest };
     const updated = Object.keys(patch).length === 0 && moved?.ok
       ? await prisma.folder.findUnique({ where: { id } })
       : await prisma.$transaction(async (tx) => {
