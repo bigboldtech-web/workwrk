@@ -1,594 +1,288 @@
 "use client";
 
-/* Pulse survey builder — create + edit.
- *
- * Manager/admin gated at the call site AND server-side (POST /api/pulse-surveys
- * and PATCH /api/pulse-surveys/[id] both require isManager). Offers ONLY fields
- * the PulseSurvey model already has: title, questions, audienceType, anonymous,
- * frequency, closesAt. Narrower `USERS` targeting needs a paginated,
- * searchable person picker we haven't built, so it's honest Coming-soon rather
- * than a control the audience-count math would silently drop.
- *
- * Creating publishes immediately (the POST route sets status ACTIVE and
- * notifies the audience) — the copy says so; managers close later from the
- * card / detail page.
- */
+// The survey builder (spec-teams-performance /surveys, the 960 editor modal):
+// a title; the questions as a ReorderableList (drag, keyboard, and Move up /
+// Move down in each row's "...": never drag alone), each with its type and,
+// for the two pick types, at least two options; who it goes to (Everyone,
+// offices, departments, tags, or Specific people, built over the people
+// picker); Anonymous; Repeats; Closes on. The footer is Cancel, Save as
+// draft and the blue Publish ("Publishing sends this to N people right
+// away"), which is what ends the old publish-only builder: Draft is a real
+// status again. Editing is for a Draft only; an Open survey's questions are
+// fixed (every stored answer is keyed to them).
+//
+// The runner gate is server side (POST /api/pulse-surveys and PATCH
+// /api/pulse-surveys/[id]); the page only opens this for a runner.
 
-import { Dots } from "@/components/ui/dots";
-import { useCallback, useEffect, useState } from "react";
-import {
-  Plus,
-  Trash2,
-  GripVertical,
-  AlertTriangle,
-  Star,
-  Gauge,
-  ToggleRight,
-  CircleDot,
-  ListChecks,
-  Type as TypeIcon,
-  Lock,
-} from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
+import { useEffect, useMemo, useState } from "react";
+import { MoreHorizontal, Plus, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { DateField } from "@/components/ui/date-field";
 import { Switch } from "@/components/ui/switch";
-import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { Picker } from "@/components/ui/picker";
+import { PickerButton } from "@/components/dashboards/widget-registry";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { ReorderableList } from "@/components/performance/reorderable-list";
+import { apiFetch } from "@/lib/api-fetch";
+import { SURVEY_QUESTION_TYPES, type SurveyQuestionType } from "@/lib/performance/survey";
 
-export type QType = "rating" | "nps" | "yes_no" | "single_choice" | "multi_choice" | "text";
-
-export interface BuilderQuestion {
-  id: string;
-  text: string;
-  type: QType;
-  options?: string[];
-}
-
+export type QType = SurveyQuestionType;
+export interface BuilderQuestion { id: string; text: string; type: QType; options?: string[]; required?: boolean }
 export interface EditableSurvey {
   id: string;
   title: string;
   questions: BuilderQuestion[];
   audienceType: string;
-  officeIds: string[];
-  departmentIds: string[];
-  tagIds: string[];
+  officeIds?: string[];
+  departmentIds?: string[];
+  userIds?: string[];
+  tagIds?: string[];
   anonymous: boolean;
-  frequency: string | null;
-  closesAt: string | null;
+  frequency?: string | null;
+  closesAt?: string | null;
 }
 
-type AudienceType = "ALL" | "OFFICES" | "DEPARTMENTS" | "USERS" | "TAGS";
-type Lookup = { id: string; name: string };
-
-const Q_TYPES: { value: QType; label: string; Icon: typeof Star; hasOptions: boolean }[] = [
-  { value: "rating", label: "Rating 1–5", Icon: Star, hasOptions: false },
-  { value: "nps", label: "NPS 0–10", Icon: Gauge, hasOptions: false },
-  { value: "yes_no", label: "Yes / No", Icon: ToggleRight, hasOptions: false },
-  { value: "single_choice", label: "Single choice", Icon: CircleDot, hasOptions: true },
-  { value: "multi_choice", label: "Multiple choice", Icon: ListChecks, hasOptions: true },
-  { value: "text", label: "Free text", Icon: TypeIcon, hasOptions: false },
+type Audience = "ALL" | "OFFICES" | "DEPARTMENTS" | "TAGS" | "USERS";
+const AUDIENCES: Array<{ value: Audience; label: string }> = [
+  { value: "ALL", label: "Everyone" },
+  { value: "OFFICES", label: "By office" },
+  { value: "DEPARTMENTS", label: "By department" },
+  { value: "TAGS", label: "By tag" },
+  { value: "USERS", label: "Specific people" },
 ];
-
-const FREQ_OPTS: { value: string; label: string }[] = [
-  { value: "", label: "One-off (no repeat)" },
+const REPEATS = [
+  { value: "", label: "Does not repeat" },
   { value: "WEEKLY", label: "Weekly" },
-  { value: "BIWEEKLY", label: "Biweekly" },
+  { value: "BIWEEKLY", label: "Every two weeks" },
   { value: "MONTHLY", label: "Monthly" },
   { value: "QUARTERLY", label: "Quarterly" },
 ];
 
-function newQid(): string {
-  return `q_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-}
-
-function blankQuestion(): BuilderQuestion {
-  return { id: newQid(), text: "", type: "rating" };
-}
-
-/** yyyy-mm-dd for a Date offset by `days` from today (local). */
-function dateInputValue(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Prefill an edited survey's close date only when it's still in the future —
- *  the PATCH route rejects past dates, so a stale one would block saving. */
-function futureDateOnly(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime()) || d.getTime() <= Date.now()) return "";
-  return d.toISOString().slice(0, 10);
-}
+type Lookup = { id: string; name: string };
+const blank = (n: number): BuilderQuestion => ({ id: `q${Date.now().toString(36)}${n}`, text: "", type: "rating" });
 
 export function SurveyBuilder({
   open,
-  mode,
+  onOpenChange,
+  mode = "create",
   survey,
-  onClose,
   onSaved,
-  questionsLocked = false,
 }: {
   open: boolean;
-  mode: "create" | "edit";
+  onOpenChange: (v: boolean) => void;
+  mode?: "create" | "edit";
   survey?: EditableSurvey | null;
-  onClose: () => void;
-  onSaved: (msg: string) => void;
-  /** People have answered: the questions freeze (their answers point at them). */
-  questionsLocked?: boolean;
+  onSaved: (saved: { id: string; status: string }) => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [questions, setQuestions] = useState<BuilderQuestion[]>([blankQuestion()]);
-  const [audienceType, setAudienceType] = useState<AudienceType>("ALL");
-  const [officeIds, setOfficeIds] = useState<string[]>([]);
-  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
-  const [tagIds, setTagIds] = useState<string[]>([]);
-  const [anonymous, setAnonymous] = useState(true);
-  const [frequency, setFrequency] = useState("");
-  const [closesAt, setClosesAt] = useState("");
-
-  const [offices, setOffices] = useState<Lookup[]>([]);
-  const [departments, setDepartments] = useState<Lookup[]>([]);
-  const [tags, setTags] = useState<Lookup[]>([]);
-
-  const [submitting, setSubmitting] = useState(false);
+  const confirm = useConfirm();
+  const [title, setTitle] = useState(survey?.title ?? "");
+  const [questions, setQuestions] = useState<BuilderQuestion[]>(survey?.questions?.length ? survey.questions : [blank(1)]);
+  const [audience, setAudience] = useState<Audience>((survey?.audienceType as Audience) ?? "ALL");
+  const [officeIds, setOfficeIds] = useState<string[]>(survey?.officeIds ?? []);
+  const [departmentIds, setDepartmentIds] = useState<string[]>(survey?.departmentIds ?? []);
+  const [tagIds, setTagIds] = useState<string[]>(survey?.tagIds ?? []);
+  const [people, setPeople] = useState<PickPerson[]>([]);
+  const [userIds, setUserIds] = useState<string[]>(survey?.userIds ?? []);
+  const [anonymous, setAnonymous] = useState(survey?.anonymous ?? true);
+  const [frequency, setFrequency] = useState(survey?.frequency ?? "");
+  const [closesAt, setClosesAt] = useState<string>(survey?.closesAt ? survey.closesAt.slice(0, 10) : "");
+  const [lookups, setLookups] = useState<{ offices: Lookup[]; departments: Lookup[]; tags: Lookup[] }>({ offices: [], departments: [], tags: [] });
+  const [busy, setBusy] = useState<null | "DRAFT" | "ACTIVE">(null);
   const [error, setError] = useState<string | null>(null);
+  // The row "..." is a Picker rendered in place, never a portal: a portalled
+  // menu sits outside the dialog's focus trap and a click on it closes the
+  // dialog.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
-  // Hydrate the form when the dialog opens (create → blank, edit → survey).
   useEffect(() => {
     if (!open) return;
-    if (mode === "edit" && survey) {
-      setTitle(survey.title);
-      setQuestions(
-        survey.questions.length > 0
-          ? survey.questions.map((q) => ({ ...q, id: q.id || newQid() }))
-          : [blankQuestion()],
-      );
-      setAudienceType((["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"].includes(survey.audienceType) ? survey.audienceType : "ALL") as AudienceType);
-      setOfficeIds(survey.officeIds ?? []);
-      setDepartmentIds(survey.departmentIds ?? []);
-      setTagIds(survey.tagIds ?? []);
-      setAnonymous(survey.anonymous);
-      setFrequency(survey.frequency ?? "");
-      setClosesAt(futureDateOnly(survey.closesAt));
-    } else {
-      setTitle("");
-      setQuestions([blankQuestion()]);
-      setAudienceType("ALL");
-      setOfficeIds([]);
-      setDepartmentIds([]);
-      setTagIds([]);
-      setAnonymous(true);
-      setFrequency("");
-      setClosesAt("");
+    const need = (audience === "OFFICES" && !lookups.offices.length) || (audience === "DEPARTMENTS" && !lookups.departments.length) || (audience === "TAGS" && !lookups.tags.length);
+    if (!need) return;
+    void Promise.all([
+      apiFetch<Lookup[]>("/api/offices", { cache: "no-store" }),
+      apiFetch<Lookup[]>("/api/departments", { cache: "no-store" }),
+      apiFetch<Lookup[] | { data: Lookup[] }>("/api/tags", { cache: "no-store" }),
+    ]).then(([o, d, t]) => {
+      const arr = (x: unknown): Lookup[] => (Array.isArray(x) ? x : x && typeof x === "object" && Array.isArray((x as { data?: unknown }).data) ? (x as { data: Lookup[] }).data : []).map((v: Lookup) => ({ id: String(v.id), name: String(v.name ?? "") }));
+      setLookups({ offices: o.ok ? arr(o.data) : [], departments: d.ok ? arr(d.data) : [], tags: t.ok ? arr(t.data) : [] });
+    });
+  }, [open, audience, lookups]);
+
+  const touch = <T,>(fn: (v: T) => void) => (v: T) => { setDirty(true); fn(v); };
+  const setQ = (id: string, patch: Partial<BuilderQuestion>) => { setDirty(true); setQuestions((qs) => qs.map((q) => (q.id === id ? { ...q, ...patch } : q))); };
+
+  const requestClose = async () => {
+    if (busy) return;
+    if (dirty && !(await confirm({ title: "Discard this survey?", description: "Your changes have not been saved.", confirmLabel: "Discard", destructive: true }))) return;
+    onOpenChange(false);
+  };
+
+  const validate = (): string | null => {
+    if (!title.trim()) return "Give the survey a title.";
+    const real = questions.filter((q) => q.text.trim());
+    if (!real.length) return "Add at least one question.";
+    for (const q of real) {
+      if ((q.type === "single_choice" || q.type === "multi_choice") && (q.options ?? []).filter((o) => o.trim()).length < 2) return `"${q.text.trim()}" needs at least two options.`;
     }
+    if (audience === "OFFICES" && !officeIds.length) return "Pick at least one office.";
+    if (audience === "DEPARTMENTS" && !departmentIds.length) return "Pick at least one department.";
+    if (audience === "TAGS" && !tagIds.length) return "Pick at least one tag.";
+    if (audience === "USERS" && !userIds.length) return "Pick at least one person.";
+    if (frequency && !closesAt) return "A repeating survey needs a close date.";
+    return null;
+  };
+
+  const save = async (status: "DRAFT" | "ACTIVE") => {
+    const bad = validate();
+    if (bad) { setError(bad); return; }
+    setBusy(status);
     setError(null);
-  }, [open, mode, survey]);
-
-  // Lazy-load office / department lookups once when needed.
-  const loadLookups = useCallback(async () => {
-    try {
-      if (offices.length === 0) {
-        const r = await fetch("/api/offices");
-        if (r.ok) {
-          const data: unknown = await r.json();
-          if (Array.isArray(data)) setOffices(data.map((o) => ({ id: String((o as Lookup).id), name: String((o as Lookup).name ?? "Office") })));
-        }
-      }
-      if (departments.length === 0) {
-        const r = await fetch("/api/departments");
-        if (r.ok) {
-          const data: unknown = await r.json();
-          if (Array.isArray(data)) setDepartments(data.map((d) => ({ id: String((d as Lookup).id), name: String((d as Lookup).name ?? "Department") })));
-        }
-      }
-      if (tags.length === 0) {
-        const r = await fetch("/api/tags");
-        if (r.ok) {
-          const data: unknown = await r.json();
-          if (Array.isArray(data)) setTags(data.map((t) => ({ id: String((t as Lookup).id), name: String((t as Lookup).name ?? "Tag") })));
-        }
-      }
-    } catch { /* lookups are best-effort; ALL still works */ }
-  }, [offices.length, departments.length, tags.length]);
-
-  useEffect(() => {
-    if (open && (audienceType === "OFFICES" || audienceType === "DEPARTMENTS" || audienceType === "TAGS")) void loadLookups();
-  }, [open, audienceType, loadLookups]);
-
-  function handleOpenChange(next: boolean) {
-    if (next || submitting) return;
-    onClose();
-  }
-
-  function updateQuestion(id: string, patch: Partial<BuilderQuestion>) {
-    setQuestions((qs) => qs.map((q) => (q.id === id ? { ...q, ...patch } : q)));
-  }
-  function setQuestionType(id: string, type: QType) {
-    setQuestions((qs) =>
-      qs.map((q) => {
-        if (q.id !== id) return q;
-        const hasOptions = type === "single_choice" || type === "multi_choice";
-        return {
-          ...q,
-          type,
-          options: hasOptions ? (q.options && q.options.length > 0 ? q.options : ["", ""]) : undefined,
-        };
-      }),
-    );
-  }
-  function addQuestion() {
-    setQuestions((qs) => [...qs, blankQuestion()]);
-  }
-  function removeQuestion(id: string) {
-    setQuestions((qs) => (qs.length <= 1 ? qs : qs.filter((q) => q.id !== id)));
-  }
-  function setOption(qid: string, idx: number, value: string) {
-    setQuestions((qs) =>
-      qs.map((q) => {
-        if (q.id !== qid || !q.options) return q;
-        const options = [...q.options];
-        options[idx] = value;
-        return { ...q, options };
-      }),
-    );
-  }
-  function addOption(qid: string) {
-    setQuestions((qs) => qs.map((q) => (q.id === qid ? { ...q, options: [...(q.options ?? []), ""] } : q)));
-  }
-  function removeOption(qid: string, idx: number) {
-    setQuestions((qs) =>
-      qs.map((q) => {
-        if (q.id !== qid || !q.options) return q;
-        if (q.options.length <= 2) return q;
-        return { ...q, options: q.options.filter((_, i) => i !== idx) };
-      }),
-    );
-  }
-
-  function toggleId(list: string[], id: string): string[] {
-    return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  }
-
-  async function submit() {
-    setError(null);
-    if (!title.trim()) { setError("Give the survey a title."); return; }
-
-    const cleaned: BuilderQuestion[] = [];
-    for (const q of questions) {
-      if (!q.text.trim()) { setError("Every question needs text (or remove the empty one)."); return; }
-      if (q.type === "single_choice" || q.type === "multi_choice") {
-        const opts = (q.options ?? []).map((o) => o.trim()).filter(Boolean);
-        if (opts.length < 2) { setError(`"${q.text.trim()}" needs at least two options.`); return; }
-        cleaned.push({ id: q.id, text: q.text.trim(), type: q.type, options: opts });
-      } else {
-        cleaned.push({ id: q.id, text: q.text.trim(), type: q.type });
-      }
-    }
-    if (cleaned.length === 0) { setError("Add at least one question."); return; }
-
-    if (audienceType === "OFFICES" && officeIds.length === 0) { setError("Pick at least one office."); return; }
-    if (audienceType === "DEPARTMENTS" && departmentIds.length === 0) { setError("Pick at least one department."); return; }
-    if (audienceType === "TAGS" && tagIds.length === 0) { setError("Pick at least one tag."); return; }
-
-    if (closesAt) {
-      const ms = new Date(`${closesAt}T23:59:59`).getTime();
-      if (Number.isNaN(ms) || ms <= Date.now()) { setError("Close date must be in the future."); return; }
-    }
-    if (frequency && !closesAt) { setError("A repeating survey needs a close date so we know when to rotate it."); return; }
-
-    const payload: Record<string, unknown> = {
+    const payload = {
       title: title.trim(),
-      ...(questionsLocked ? {} : { questions: cleaned }),
-      audienceType,
-      officeIds: audienceType === "OFFICES" ? officeIds : [],
-      departmentIds: audienceType === "DEPARTMENTS" ? departmentIds : [],
-      tagIds: audienceType === "TAGS" ? tagIds : [],
+      questions: questions.filter((q) => q.text.trim()).map((q) => ({ ...q, text: q.text.trim(), options: q.options?.map((o) => o.trim()).filter(Boolean) })),
+      audienceType: audience,
+      officeIds, departmentIds, tagIds, userIds,
       anonymous,
       frequency: frequency || null,
       closesAt: closesAt ? new Date(`${closesAt}T23:59:59`).toISOString() : null,
+      status,
     };
+    const r = mode === "edit" && survey
+      ? await apiFetch<{ id: string; status: string }>(`/api/pulse-surveys/${survey.id}`, { method: "PATCH", json: payload })
+      : await apiFetch<{ id: string; status: string }>("/api/pulse-surveys", { method: "POST", json: payload });
+    setBusy(null);
+    if (!r.ok) { setError(r.error || "Couldn't save the survey."); return; }
+    setDirty(false);
+    onSaved({ id: r.data.id, status: r.data.status });
+    onOpenChange(false);
+  };
 
-    setSubmitting(true);
-    try {
-      const url = mode === "edit" && survey ? `/api/pulse-surveys/${survey.id}` : "/api/pulse-surveys";
-      const res = await fetch(url, {
-        method: mode === "edit" ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        if (res.status === 403) { setError("Only the person who made this survey, the People team or an Admin can change it."); return; }
-        let msg = "Couldn't save the survey.";
-        try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* keep default */ }
-        setError(msg);
-        return;
-      }
-      onSaved(mode === "edit" ? "Survey updated" : "Survey published");
-      onClose();
-    } catch {
-      setError("Not saved. Check your connection and try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const anonLabel = anonymous ? "Anonymous" : "Attributed";
+  const idsPicker = (label: string, list: Lookup[], value: string[], set: (v: string[]) => void) => (
+    <PickerButton ariaLabel={label} multi keepOpen
+      label={value.length ? list.filter((x) => value.includes(x.id)).map((x) => x.name).join(", ") || `${value.length} picked` : <span className="text-ink-3">Pick {label.toLowerCase()}</span>}
+      selected={value} sections={[{ options: list.map((x) => ({ value: x.id, label: x.name })) }]}
+      onSelect={(id) => { setDirty(true); set(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]); }} emptyLabel="None yet" className="mt-2" />
+  );
+  const reachLine = audience === "USERS" ? `${userIds.length} ${userIds.length === 1 ? "person" : "people"}` : audience === "ALL" ? "everyone" : "everyone in the groups you picked";
+  const questionOptions = useMemo(() => SURVEY_QUESTION_TYPES.map((t) => ({ value: t.value, label: t.label })), []);
+  const input = "h-9 w-full rounded-md border border-line bg-raised px-3 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]";
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="workwrk-os os-portal-panel max-w-[620px]">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) void requestClose(); }}>
+      <DialogContent className="max-h-[90vh] max-w-[960px]">
         <DialogHeader>
-          <DialogTitle>{mode === "edit" ? "Edit survey" : "New pulse survey"}</DialogTitle>
-          <DialogDescription>
-            {mode === "edit"
-              ? "Update the questions, audience, or settings."
-              : "Publishing sends this to the audience right away and starts collecting responses."}
-          </DialogDescription>
+          <DialogTitle>{mode === "edit" ? "Edit survey" : "New survey"}</DialogTitle>
+          <DialogDescription>Save it as a draft, or publish it to send it now.</DialogDescription>
         </DialogHeader>
-
-        <div className="flex flex-col gap-4 py-1">
-          {/* Title */}
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-[var(--os-ink-2)]">Title</span>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. How was your sprint?"
-              maxLength={160}
-              className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-base text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
-            />
+        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto pe-1" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void save("ACTIVE"); } }}>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Title</span>
+            <input autoFocus value={title} maxLength={200} onChange={(e) => touch(setTitle)(e.target.value)} className={input} />
           </label>
 
-          {/* Questions */}
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-[var(--os-ink-2)]">Questions</span>
-            {questionsLocked ? (
-              <span className="text-sm text-[var(--os-ink-3)]">People have already answered, so the questions stay as they are. You can still change the title, audience and close date.</span>
-            ) : null}
-            <fieldset disabled={questionsLocked} className="contents">
-            <div className="flex flex-col gap-2.5">
-              {questions.map((q, qi) => {
-                const meta = Q_TYPES.find((t) => t.value === q.type);
-                const hasOptions = q.type === "single_choice" || q.type === "multi_choice";
+            <span className="text-sm font-medium text-ink">Questions</span>
+            <ReorderableList
+              items={questions}
+              itemKey={(q) => q.id}
+              itemLabel={(q) => q.text}
+              onReorder={(next) => { setDirty(true); setQuestions(next); }}
+              renderRow={(q, api) => {
+                const pick = q.type === "single_choice" || q.type === "multi_choice";
+                const opts = q.options ?? [];
                 return (
-                  <div key={q.id} className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] p-2.5 flex flex-col gap-2">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-2 text-[var(--os-ink-4)]"><GripVertical className="w-3.5 h-3.5" /></span>
-                      <div className="flex-1 flex flex-col gap-2">
-                        <input
-                          value={q.text}
-                          onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
-                          placeholder={`Question ${qi + 1}`}
-                          maxLength={240}
-                          className="h-9 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-base text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
-                        />
-                        <div className="flex flex-wrap gap-1.5">
-                          {Q_TYPES.map(({ value, label, Icon }) => {
-                            const active = q.type === value;
-                            return (
-                              <button
-                                key={value}
-                                type="button"
-                                onClick={() => setQuestionType(q.id, value)}
-                                className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs border transition-colors ${
-                                  active
-                                    ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
-                                    : "border-[var(--os-line)] text-[var(--os-ink-3)] hover:bg-[var(--os-surface)]"
-                                }`}
-                              >
-                                <Icon className="w-3 h-3" /> {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {hasOptions ? (
-                          <div className="flex flex-col gap-1.5 pl-1">
-                            {(q.options ?? []).map((opt, oi) => (
-                              <div key={oi} className="flex items-center gap-1.5">
-                                <span className="text-[var(--os-ink-4)]">
-                                  {meta?.value === "multi_choice" ? <ListChecks className="w-3 h-3" /> : <CircleDot className="w-3 h-3" />}
-                                </span>
-                                <input
-                                  value={opt}
-                                  onChange={(e) => setOption(q.id, oi, e.target.value)}
-                                  placeholder={`Option ${oi + 1}`}
-                                  maxLength={120}
-                                  className="flex-1 h-8 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-base text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => removeOption(q.id, oi)}
-                                  disabled={(q.options ?? []).length <= 2}
-                                  aria-label="Remove option"
-                                  className="h-7 w-7 inline-flex items-center justify-center rounded-md text-[var(--os-ink-4)] hover:text-[var(--os-c-red)] hover:bg-[var(--os-surface)] disabled:opacity-30 disabled:hover:text-[var(--os-ink-4)]"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => addOption(q.id)}
-                              className="self-start inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs text-[var(--os-brand-deep)] hover:bg-[var(--os-surface)]"
-                            >
-                              <Plus className="w-3 h-3" /> Add option
-                            </button>
-                          </div>
+                  <div className="flex flex-col gap-2 rounded-md border border-line p-2">
+                    <div className="flex items-center gap-2">
+                      {api.grip}
+                      <input value={q.text} maxLength={1000} placeholder={`Question ${api.index + 1}`} aria-label={`Question ${api.index + 1}`} onChange={(e) => setQ(q.id, { text: e.target.value })} className={input} />
+                      <PickerButton ariaLabel={`Type of question ${api.index + 1}`} label={SURVEY_QUESTION_TYPES.find((t) => t.value === q.type)?.label ?? "Free text"} selected={q.type}
+                        sections={[{ options: questionOptions }]}
+                        onSelect={(v) => setQ(q.id, { type: v as QType, options: v === "single_choice" || v === "multi_choice" ? (q.options?.length ? q.options : ["", ""]) : undefined })} className="shrink-0" />
+                      <span className="relative shrink-0">
+                        <button type="button" aria-label={`More for question ${api.index + 1}`} aria-haspopup="menu" aria-expanded={menuFor === q.id} onClick={() => setMenuFor((m) => (m === q.id ? null : q.id))} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><MoreHorizontal className="h-4 w-4" /></button>
+                        {menuFor === q.id ? (
+                          <Picker open onClose={() => setMenuFor(null)} ariaLabel="Question actions" width={180} align="end" className="absolute end-0 top-9 z-50"
+                            sections={[{ options: [
+                              ...(api.moveUp ? [{ value: "up", label: "Move up" }] : []),
+                              ...(api.moveDown ? [{ value: "down", label: "Move down" }] : []),
+                              ...(questions.length > 1 ? [{ value: "remove", label: "Remove" }] : []),
+                            ] }]}
+                            onSelect={(v) => {
+                              setMenuFor(null);
+                              if (v === "up") api.moveUp?.();
+                              else if (v === "down") api.moveDown?.();
+                              else if (v === "remove") { setDirty(true); setQuestions((qs) => (qs.length > 1 ? qs.filter((x) => x.id !== q.id) : qs)); }
+                            }} />
                         ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeQuestion(q.id)}
-                        disabled={questions.length <= 1}
-                        aria-label="Remove question"
-                        className="mt-1 h-7 w-7 inline-flex items-center justify-center rounded-md text-[var(--os-ink-4)] hover:text-[var(--os-c-red)] hover:bg-[var(--os-surface)] disabled:opacity-30 disabled:hover:text-[var(--os-ink-4)]"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </span>
+                      <button type="button" aria-label={`Remove question ${api.index + 1}`} disabled={questions.length === 1} onClick={() => { setDirty(true); setQuestions((qs) => qs.filter((x) => x.id !== q.id)); }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"><X className="h-4 w-4" /></button>
                     </div>
+                    {pick ? (
+                      <div className="flex flex-col gap-1 ps-8">
+                        {opts.map((o, oi) => (
+                          <div key={oi} className="flex items-center gap-2">
+                            <input value={o} maxLength={300} placeholder={`Option ${oi + 1}`} aria-label={`Option ${oi + 1} of question ${api.index + 1}`}
+                              onChange={(e) => setQ(q.id, { options: opts.map((x, xi) => (xi === oi ? e.target.value : x)) })} className="h-8 w-full rounded-md border border-line bg-raised px-2 text-sm text-ink outline-none focus-visible:border-[var(--os-focus)]" />
+                            <button type="button" aria-label={`Remove option ${oi + 1}`} onClick={() => setQ(q.id, { options: opts.filter((_, xi) => xi !== oi) })} className="inline-flex h-7 w-7 items-center justify-center rounded text-ink-2 hover:bg-hover"><X className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                        {opts.filter((o) => o.trim()).length < 2 ? <span className="text-xs text-danger-text">Add at least two options.</span> : null}
+                        <button type="button" onClick={() => setQ(q.id, { options: [...opts, ""] })} className="self-start text-sm font-medium text-ink-2 hover:text-ink">Add option</button>
+                      </div>
+                    ) : null}
+                    <label className="flex items-center gap-2 ps-8 text-sm text-ink-2">
+                      <input type="checkbox" checked={!!q.required} onChange={(e) => setQ(q.id, { required: e.target.checked || undefined })} className="h-4 w-4" />Required
+                    </label>
                   </div>
                 );
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={addQuestion}
-              className="self-start inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-dashed border-[var(--os-line)] text-base text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add question
-            </button>
-            </fieldset>
+              }}
+            />
+            <button type="button" onClick={() => { setDirty(true); setQuestions((qs) => [...qs, blank(qs.length + 1)]); }} className="inline-flex h-9 items-center gap-2 self-start rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><Plus className="h-4 w-4" />Add question</button>
           </div>
 
-          {/* Audience */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-[var(--os-ink-2)]">Audience</span>
-            <div className="flex flex-wrap gap-1.5">
-              {([
-                { value: "ALL", label: "Everyone" },
-                { value: "OFFICES", label: "By office" },
-                { value: "DEPARTMENTS", label: "By department" },
-                { value: "TAGS", label: "By tag" },
-              ] as { value: AudienceType; label: string }[]).map(({ value, label }) => {
-                const active = audienceType === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setAudienceType(value)}
-                    className={`inline-flex items-center h-8 px-3 rounded-lg text-base border transition-colors ${
-                      active
-                        ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
-                        : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-              <UpcomingOnly><ComingSoonRow label="Specific people" className="h-8" /></UpcomingOnly>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-ink">Who it goes to</span>
+              <PickerButton ariaLabel="Audience" label={AUDIENCES.find((a) => a.value === audience)?.label ?? "Everyone"} selected={audience} sections={[{ options: AUDIENCES }]} onSelect={(v) => { setDirty(true); setAudience(v as Audience); }} />
+              {audience === "OFFICES" ? idsPicker("Offices", lookups.offices, officeIds, setOfficeIds) : null}
+              {audience === "DEPARTMENTS" ? idsPicker("Departments", lookups.departments, departmentIds, setDepartmentIds) : null}
+              {audience === "TAGS" ? idsPicker("Tags", lookups.tags, tagIds, setTagIds) : null}
+              {audience === "USERS" ? (
+                <div className="mt-2">
+                  <PeoplePickerField ariaLabel="People" multiple value={userIds} people={people} placeholder="Pick people"
+                    onChange={(ids, picked) => { setDirty(true); setUserIds(ids); setPeople(picked); }} />
+                </div>
+              ) : null}
             </div>
-
-            {audienceType === "OFFICES" ? (
-              <PickerGrid items={offices} selected={officeIds} onToggle={(id) => setOfficeIds((l) => toggleId(l, id))} empty="No offices found" />
-            ) : null}
-            {audienceType === "DEPARTMENTS" ? (
-              <PickerGrid items={departments} selected={departmentIds} onToggle={(id) => setDepartmentIds((l) => toggleId(l, id))} empty="No departments found" />
-            ) : null}
-            {audienceType === "TAGS" ? (
-              <PickerGrid items={tags} selected={tagIds} onToggle={(id) => setTagIds((l) => toggleId(l, id))} empty="No tags yet — create some in Settings → Tags" />
-            ) : null}
-          </div>
-
-          {/* Anonymous + frequency + close date */}
-          <div className="flex flex-col gap-2.5 rounded-lg border border-[var(--os-line)] p-3">
-            <label className="flex items-center justify-between gap-3">
-              <span className="flex flex-col">
-                <span className="text-base text-[var(--os-ink)] inline-flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-[var(--os-ink-3)]" /> {anonLabel} responses
-                </span>
-                <span className="text-xs text-[var(--os-ink-3)]">
-                  {anonymous
-                    ? "Managers see aggregates only — no names, ever."
-                    : "Managers can see who said what. Use only when people expect it."}
-                </span>
-              </span>
-              <Switch checked={anonymous} onChange={setAnonymous} aria-label="Anonymous responses" />
-            </label>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-[var(--os-ink-2)]">Repeat</span>
-                <select
-                  value={frequency}
-                  onChange={(e) => setFrequency(e.target.value)}
-                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-2.5 text-base text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
-                >
-                  {FREQ_OPTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                </select>
+            <div className="flex flex-col gap-3">
+              <label className="flex items-start gap-3 text-sm text-ink">
+                <Switch checked={anonymous} onChange={(v) => { setDirty(true); setAnonymous(v); }} aria-label="Anonymous" />
+                <span className="flex flex-col"><span className="font-medium">Anonymous</span><span className="text-xs text-ink-2">Names are never shown, not even to you. This is fixed once the survey opens.</span></span>
               </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-[var(--os-ink-2)]">
-                  Close date {frequency ? <span className="text-[var(--os-c-red)]">*</span> : <span className="text-[var(--os-ink-4)]">(optional)</span>}
-                </span>
-                <input
-                  type="date"
-                  value={closesAt}
-                  min={dateInputValue(1)}
-                  onChange={(e) => setClosesAt(e.target.value)}
-                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-base text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
-                />
-              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium text-ink">Repeats</span>
+                  <PickerButton ariaLabel="Repeats" label={REPEATS.find((r) => r.value === frequency)?.label ?? "Does not repeat"} selected={frequency || ""} sections={[{ options: REPEATS.map((r) => ({ value: r.value || "none", label: r.label })) }]} onSelect={(v) => { setDirty(true); setFrequency(v === "none" ? "" : v); }} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium text-ink">Closes on</span>
+                  <DateField value={closesAt || null} onChange={(v) => { setDirty(true); setClosesAt(v ?? ""); }} ariaLabel="Closes on" align="end" />
+                </div>
+              </div>
             </div>
           </div>
-
-          {error ? (
-            <div className="flex items-start gap-2 rounded-lg border border-[color:var(--os-c-red)]/40 bg-[color:var(--os-c-red)]/10 px-3 py-2 text-base text-[var(--os-c-red)]">
-              <AlertTriangle className="w-4 h-4 mt-[1px] shrink-0" />
-              <span>{error}</span>
-            </div>
-          ) : null}
+          {error ? <p role="alert" className="m-0 text-sm text-danger-text">{error}</p> : null}
         </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            onClick={() => handleOpenChange(false)}
-            disabled={submitting}
-            className="h-9 px-3.5 rounded-lg border border-[var(--os-line)] text-base text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)] disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-base font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
-          >
-            {submitting ? <Dots variant="pending" /> : null}
-            {mode === "edit" ? "Save changes" : "Publish survey"}
-          </button>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <span className="me-auto text-xs text-ink-2">Publishing sends this to {reachLine} right away.</span>
+          <Button variant="ghost" onClick={() => void requestClose()} disabled={!!busy}>Cancel</Button>
+          <Button variant="outline" onClick={() => void save("DRAFT")} disabled={!!busy}>{busy === "DRAFT" ? "Saving" : "Save as draft"}</Button>
+          <Button onClick={() => void save("ACTIVE")} disabled={!!busy}>{busy === "ACTIVE" ? "Publishing" : "Publish"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function PickerGrid({
-  items,
-  selected,
-  onToggle,
-  empty,
-}: {
-  items: Lookup[];
-  selected: string[];
-  onToggle: (id: string) => void;
-  empty: string;
-}) {
-  if (items.length === 0) {
-    return <div className="text-sm text-[var(--os-ink-4)] px-1 pt-1">{empty}…</div>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5 pt-1">
-      {items.map((it) => {
-        const active = selected.includes(it.id);
-        return (
-          <button
-            key={it.id}
-            type="button"
-            onClick={() => onToggle(it.id)}
-            className={`inline-flex items-center h-7 px-2.5 rounded-md text-sm border transition-colors ${
-              active
-                ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
-                : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
-            }`}
-          >
-            {it.name}
-          </button>
-        );
-      })}
-    </div>
   );
 }

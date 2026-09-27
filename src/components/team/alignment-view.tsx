@@ -299,8 +299,14 @@ export function AlignmentView({ people, hasSubTeams, drill }: {
   // Decisions made elsewhere (the weekly queue, another tab) show on return.
   useEffect(() => {
     const onFocus = () => { if (Date.now() - refreshed.current > 5000) { refreshed.current = Date.now(); router.refresh(); } };
+    // A decision on the weekly queue (or in another tab) arrives as
+    // `review.decided`, so this board and /team/reviews stay in step.
+    const onRealtime = (e: Event) => {
+      if ((e as CustomEvent<{ type?: string }>).detail?.type === "review.decided") { refreshed.current = Date.now(); router.refresh(); }
+    };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    window.addEventListener("workwrk:realtime", onRealtime);
+    return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("workwrk:realtime", onRealtime); };
   }, [router]);
 
   const shown = useMemo(() => sortAlignment(people.filter((p) => matchesAlignmentFilter({

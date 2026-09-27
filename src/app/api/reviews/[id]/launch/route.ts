@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
+import { formatDate } from "@/lib/format/date";
 
 export async function POST(
   req: NextRequest,
@@ -80,20 +81,36 @@ export async function POST(
     prisma.reviewCycle.update({ where: { id }, data: { status: "ACTIVE" } }),
   ]);
 
-  // Create notifications for all employees
-  const notifications = employees.map((emp) => ({
-    title: "Review Cycle Started",
-    message: `${cycle.name} has been launched. Please complete your self-assessment.`,
-    type: "review_open",
-    link: `/reviews/${id}`,
-    userId: emp.id,
-  }));
+  // The two Inbox doors (spec-teams-performance section 1): every subject
+  // gets "Your review for {cycle} is open", and every reviewer gets one row
+  // for all the manager reviews they owe, never one row per person.
+  const dueLabel = formatDate(cycle.endDate, { timezone: "UTC" }, "date");
+  const owed = new Map<string, number>();
+  for (const r of reviewData) {
+    if (r.reviewerId !== r.subjectId) owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
+  }
+  const notifications = [
+    ...employees.map((emp) => ({
+      title: `Your review for ${cycle.name} is open`,
+      message: `Due ${dueLabel}`,
+      type: "review_open",
+      link: `/reviews/${id}`,
+      userId: emp.id,
+    })),
+    ...[...owed.entries()].map(([reviewerId, n]) => ({
+      title: `You owe ${n} manager ${n === 1 ? "review" : "reviews"} for ${cycle.name}`,
+      message: `Due ${dueLabel}`,
+      type: "manager_reviews_due",
+      link: `/reviews/${id}?tab=team`,
+      userId: reviewerId,
+    })),
+  ];
 
   await prisma.notification.createMany({ data: notifications });
 
   // Send review pending emails to all employees
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const dueDate = new Date(cycle.endDate).toLocaleDateString();
+  const dueDate = dueLabel;
   const employeesWithEmail = await prisma.user.findMany({
     where: { id: { in: employees.map((e) => e.id) } },
     select: { id: true, email: true },

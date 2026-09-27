@@ -1,210 +1,157 @@
-import type { Prisma } from "@/generated/prisma";
+// /api/talent-assessment: the talent grid (spec-teams-performance /talent).
+//
+// GET  ?period=  the placements in the viewer's scope for a period (every
+//      period when omitted), with the person, their department, job title
+//      and manager, and who placed them. Never the viewer's own placement.
+//      A GET never writes (PO-22): the old ?auto=true seeded rows from a read.
+// POST { userId, period, performance, potential, action?, notes? }: place or
+//      move one person (a MANUAL placement). { autoPlace: true, period } is
+//      kept for one release and runs Fill from scores (POST /fill).
+//
+// Scope (lib/performance/talent.server.ts): the People team and Admin see
+// the org, anyone with reports their chain, nobody else anything.
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { chainOf, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { fillFromScores, talentCtx } from "@/lib/performance/talent.server";
+import { TALENT_ACTIONS, actionLabel, boxLabel, levelLabel } from "@/lib/performance/talent";
+import { toCsv } from "@/lib/csv";
 
-/**
- * Who may read and place on the 9-box, and over whom (Phase 6): the page's
- * own rule (the `talent` APP_RULES row), so page and data always agree. The
- * People team, Owner and Admin see the org; anyone with reports sees their
- * reporting chain (solid plus dotted, the engine's tree); nobody else sees
- * anything, whatever their legacy access level (a legacy org-wide level with
- * no reports is not given the org's placements: an Admin adds them to the
- * People team if they should be). NEVER THEMSELF (DECIDED: a person does
- * not see their own placement), whoever they are.
- */
-async function talentScope(session: Parameters<typeof getOrgId>[0]): Promise<{ allowed: boolean; ids: string[] | null }> {
-  const callerId = getUserId(session);
-  if (await isPeopleTeamOrAdmin(session)) return { allowed: true, ids: null };
-  const chain = (await chainOf(callerId)).filter((id) => id !== callerId);
-  return { allowed: chain.length > 0, ids: chain };
-}
+const ACTIONS = new Set(TALENT_ACTIONS.map((a) => a.value));
 
 export async function GET(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error } = await getSessionOrFail();
   if (error) return error;
-  const scope = await talentScope(session);
-  if (!scope.allowed) return jsonError("Forbidden", 403);
+  const ctx = await talentCtx();
+  if (!ctx || !ctx.allowed) return jsonError("Forbidden", 403);
 
-  const orgId = getOrgId(session);
-  const callerId = getUserId(session);
-  const url = new URL(req.url);
-  const period = url.searchParams.get("period") || "";
-  // A GET never writes (PO-22): the old ?auto=true seeded placements from
-  // a read. Auto-place is POST { autoPlace: true, period } now.
-
-  // Scope (talentScope above): the org or the caller's tree, never the
-  // caller's own placement.
-  const where: any = { organizationId: orgId };
-  if (period) where.period = period;
-  where.userId = scope.ids === null ? { not: callerId } : { in: scope.ids };
-
+  const period = new URL(req.url).searchParams.get("period") || "";
   const assessments = await prisma.talentAssessment.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
+    where: {
+      organizationId: ctx.organizationId,
+      ...(period ? { period } : {}),
+      userId: ctx.ids === null ? { not: ctx.userId } : { in: ctx.ids.filter((id) => id !== ctx.userId) },
+    },
+    orderBy: { updatedAt: "desc" },
   });
 
+  const userIds = [...new Set([...assessments.map((a) => a.userId), ...assessments.map((a) => a.assessedBy)])];
+  const users = userIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: userIds }, organizationId: ctx.organizationId },
+        select: {
+          id: true, firstName: true, lastName: true, avatar: true, managerId: true, deletedAt: true,
+          department: { select: { id: true, name: true } },
+          role: { select: { id: true, title: true } },
+        },
+      })
+    : [];
+  const byId = new Map(users.map((u) => [u.id, u] as const));
 
-  // Get user details
-  const userIds = [...new Set(assessments.map((a) => a.userId))];
-  const users = userIds.length > 0 ? await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } }, role: { select: { title: true } } },
-  }) : [];
-  const userMap = new Map(users.map((u) => [u.id, u]));
+  const rows = assessments
+    // A person who has left is not on the grid.
+    .filter((a) => byId.get(a.userId) && !byId.get(a.userId)!.deletedAt)
+    .map((a) => {
+      const by = byId.get(a.assessedBy);
+      return {
+        ...a,
+        user: byId.get(a.userId) ?? null,
+        placedBy: by ? { id: by.id, name: `${by.firstName} ${by.lastName}`.trim() } : null,
+      };
+    });
 
-  return jsonSuccess(assessments.map((a) => ({
-    ...a,
-    user: userMap.get(a.userId) || null,
-  })));
-}
-
-
-/**
- * Auto-place: one placement per person in scope who has no placement for
- * the period and has a performance score, mapping the score to a box
- * (performance from the score, potential medium until someone decides).
- * Never overwrites a placement a person made, never the caller. Returns the
- * number placed.
- */
-async function autoPlaceFromScores(
-  session: Parameters<typeof getOrgId>[0],
-  scope: { ids: string[] | null },
-  period: string,
-): Promise<number> {
-  const orgId = getOrgId(session);
-  const callerId = getUserId(session);
-  const isOrgWide = scope.ids === null;
-  const where: Prisma.TalentAssessmentWhereInput = {
-    organizationId: orgId,
-    period,
-    userId: scope.ids === null ? { not: callerId } : { in: scope.ids },
-  };
-  const assessments = await prisma.talentAssessment.findMany({ where, select: { userId: true } });
-  {
-    const assessedUserIds = new Set(assessments.map((a) => a.userId));
-    const userScopeIds = isOrgWide ? null : scope.ids;
-    const allUsers = await prisma.user.findMany({
-      where: {
-        organizationId: orgId,
-        deletedAt: null,
-        accessLevel: { not: "SUPER_ADMIN" },
-        // Never the caller: nobody places themself, automatically or not.
-        ...(userScopeIds ? { id: { in: userScopeIds } } : { id: { not: callerId } }),
+  // Export CSV (and Export selected with ?ids=): never for an Agent.
+  const sp = new URL(req.url).searchParams;
+  if (sp.get("format") === "csv") {
+    if (ctx.isAgent) return jsonError("Forbidden", 403);
+    const only = new Set((sp.get("ids") ?? "").split(",").filter(Boolean));
+    const csv = toCsv(
+      rows.filter((r) => !only.size || only.has(r.id)).map((r) => ({
+        Person: r.user ? `${r.user.firstName} ${r.user.lastName}`.trim() : "",
+        Department: r.user?.department?.name ?? "",
+        "Job title": r.user?.role?.title ?? "",
+        Box: boxLabel(r.boxPosition),
+        Performance: levelLabel(r.performance),
+        Potential: levelLabel(r.potential),
+        Action: actionLabel(r.action),
+        Period: r.period,
+        "Placed by": r.placedBy?.name ?? "",
+        "Placed on": r.updatedAt.toISOString().slice(0, 10),
+      })),
+      ["Person", "Department", "Job title", "Box", "Performance", "Potential", "Action", "Period", "Placed by", "Placed on"],
+    );
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="talent-${(period || "all").replace(/[^\w-]+/g, "-")}.csv"`,
+        "Cache-Control": "no-store",
       },
-      select: { id: true },
     });
-
-    // Get KPI scores for the period or latest
-    const kpiPeriod = period.replace(/Q(\d) (\d{4})/, (_, q, y) => {
-      const month = (parseInt(q) - 1) * 3 + 1;
-      return `${y}-${String(month).padStart(2, "0")}`;
-    });
-
-    const performanceScores = await prisma.performanceScore.findMany({
-      where: { organizationId: orgId },
-      orderBy: { period: "desc" },
-      distinct: ["userId"],
-    });
-    const scoreMap = new Map(performanceScores.map((s) => [s.userId, s.score]));
-
-    const newAssessments: any[] = [];
-    for (const user of allUsers) {
-      if (assessedUserIds.has(user.id)) continue;
-      const score = scoreMap.get(user.id);
-      if (score == null) continue;
-
-      // Map score to performance: 0-50 = Low(1), 50-80 = Medium(2), 80+ = High(3)
-      const performance = score >= 80 ? 3 : score >= 50 ? 2 : 1;
-      // Default potential to medium (can be manually adjusted)
-      const potential = 2;
-      const boxPosition = `${performance}-${potential}`;
-
-      newAssessments.push({
-        userId: user.id,
-        period,
-        performance,
-        potential,
-        boxPosition,
-        action: null,
-        notes: "Auto-placed from performance score",
-        // Phase 6: where the placement came from, so the grid can say so.
-        source: "SCORES",
-        assessedBy: getUserId(session),
-        organizationId: orgId,
-      });
-    }
-
-    if (newAssessments.length > 0) {
-      // assessedUserIds already filtered; skipDuplicates guards against
-      // concurrent auto-place runs hitting the unique constraint.
-      const r = await prisma.talentAssessment.createMany({ data: newAssessments, skipDuplicates: true });
-      return r.count;
-    }
-    return newAssessments.length;
   }
+  return jsonSuccess(rows);
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error } = await getSessionOrFail();
   if (error) return error;
-  const scope = await talentScope(session);
-  if (!scope.allowed) return jsonError("Forbidden", 403);
+  const ctx = await talentCtx();
+  if (!ctx || !ctx.allowed) return jsonError("Forbidden", 403);
 
-  const orgId = getOrgId(session);
-  const assessedBy = getUserId(session);
-  const body = await req.json();
-  const { userId, period, performance, potential, action, notes } = body;
+  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  const period = typeof body.period === "string" ? body.period.trim().slice(0, 100) : "";
 
-  // Auto-place (a write, so a POST): { autoPlace: true, period }.
-  if (body?.autoPlace === true) {
-    if (typeof period !== "string" || !period.trim()) return jsonError("period required");
-    const placed = await autoPlaceFromScores(session, scope, period.trim());
-    if (placed > 0) {
+  if (body.autoPlace === true) {
+    if (!period) return jsonError("period required");
+    const res = await fillFromScores(ctx, period);
+    if (res.placed > 0) {
       logActivity({
         type: "talent_assessment_auto_placed",
-        actorId: assessedBy,
-        organizationId: orgId,
-        description: `Auto-placed ${placed} people from performance scores for ${period.trim()}`,
+        actorId: ctx.userId,
+        organizationId: ctx.organizationId,
+        description: `Placed ${res.placed} people from performance scores for ${period}`,
         targetType: "talent_assessment",
-        metadata: { period: period.trim(), placed },
+        metadata: { period, ...res },
       });
     }
-    return jsonSuccess({ placed, period: period.trim() });
+    return jsonSuccess({ ...res, period });
   }
 
-  if (!userId || !period || !performance || !potential) {
+  const userId = typeof body.userId === "string" ? body.userId : "";
+  const performance = Number(body.performance);
+  const potential = Number(body.potential);
+  if (!userId || !period || !body.performance || !body.potential) {
     return jsonError("userId, period, performance, and potential required");
   }
-  // Performance and potential are the grid's 1 to 3 axes, nothing else.
   if (![1, 2, 3].includes(performance) || ![1, 2, 3].includes(potential)) {
     return jsonError("performance and potential must each be 1, 2 or 3");
   }
+  const action = typeof body.action === "string" && body.action ? body.action : null;
+  if (action && !ACTIONS.has(action)) return jsonError("Unknown action", 400);
+  const notes = typeof body.notes === "string" ? body.notes.slice(0, 5000) : null;
   // Only people the caller may place: in their scope, in this org, and never
-  // themself (the route used to place anyone, the caller included).
-  if (userId === assessedBy) return jsonError("You can't place yourself on the grid", 403);
-  if (scope.ids !== null && !scope.ids.includes(userId)) return jsonError("Not found", 404);
-  const target = await prisma.user.findFirst({ where: { id: userId, organizationId: orgId, deletedAt: null }, select: { id: true } });
+  // themself.
+  if (userId === ctx.userId) return jsonError("You can't place yourself on the grid", 403);
+  if (ctx.ids !== null && !ctx.ids.includes(userId)) return jsonError("Not found", 404);
+  const target = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { id: true } });
   if (!target) return jsonError("Not found", 404);
 
   const boxPosition = `${performance}-${potential}`;
-
   const assessment = await prisma.talentAssessment.upsert({
-    where: { userId_period_organizationId: { userId, period, organizationId: orgId } },
-    create: { userId, period, performance, potential, boxPosition, action, notes, assessedBy, organizationId: orgId },
-    update: { performance, potential, boxPosition, action, notes, assessedBy },
+    where: { userId_period_organizationId: { userId, period, organizationId: ctx.organizationId } },
+    create: { userId, period, performance, potential, boxPosition, action, notes, assessedBy: ctx.userId, organizationId: ctx.organizationId, source: "MANUAL" },
+    update: { performance, potential, boxPosition, action, notes, assessedBy: ctx.userId, source: "MANUAL" },
   });
 
   logActivity({
     type: "talent_assessment_upserted",
-    actorId: assessedBy,
-    organizationId: orgId,
+    actorId: ctx.userId,
+    organizationId: ctx.organizationId,
     description: `Placed person in ${boxPosition} for ${period}${action ? ` (action: ${action})` : ""}`,
     targetId: assessment.id,
     targetType: "talent_assessment",
-    metadata: { userId, period, performance, potential, boxPosition, action: action || null },
+    metadata: { userId, period, performance, potential, boxPosition, action },
   });
 
   return jsonSuccess(assessment);

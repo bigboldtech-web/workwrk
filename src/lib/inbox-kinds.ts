@@ -130,6 +130,9 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   kpi_approved: k("kpi_approved", "KPI numbers approved", "Gauge", "other", "people"),
   kpi_recorded_for_you: k("kpi_recorded_for_you", "KPI numbers recorded for you", "Gauge", "other", "people"),
   weekly_review_decided: k("weekly_review_decided", "Weekly review answered", "CalendarCheck", "primary", "people"),
+  // A nudge from /team/reviews: submit your weekly review, or decide the
+  // ones waiting for you (spec-teams-performance /team/reviews bulk bar).
+  weekly_review_reminder: k("weekly_review_reminder", "Weekly review reminder", "CalendarCheck", "primary", "people"),
   policy: k("policy", "Policy to acknowledge", "ScrollText", "primary", "announcements"),
   policy_published: k("policy_published", "Policy to acknowledge", "ScrollText", "primary", "announcements"),
   meeting_invite: k("meeting_invite", "Meeting invite", "Video", "primary", "people"),

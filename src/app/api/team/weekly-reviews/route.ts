@@ -1,30 +1,26 @@
-// GET /api/team/weekly-reviews
+// GET /api/team/weekly-reviews (kept for API callers; the /team/reviews page
+// reads GET /api/weekly-reviews, which adds the chain scope, names and
+// paging). The direct queue: every WeeklyReview awaiting or decided by the
+// caller as the person's manager. ?status=SUBMITTED|ACKNOWLEDGED|DRAFT.
 //
-// Manager queue: every WeeklyReview where the caller is the recorded
-// manager. Optionally filter via ?status=SUBMITTED|ACKNOWLEDGED|DRAFT.
-// Manager+ access level required (mirrors /team/alignment).
+// Gate: the `weekly-reviews` APP_RULES row's facts (anyone with reports,
+// the People team and Admin), the same as the page, instead of a copied
+// access-level list.
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { listReviewsForManager } from "@/lib/weekly-review";
-
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
-  "MANAGER", "TEAM_LEAD", "HR",
-]);
+import { mayOpenQueue, weeklyQueueCtx } from "@/lib/people/weekly-queue.server";
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
-  if (!u.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!MANAGER_LEVELS.has(u.accessLevel ?? "EMPLOYEE")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const ctx = await weeklyQueueCtx();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!mayOpenQueue(ctx)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const url = new URL(req.url);
   const raw = url.searchParams.get("status");
   const status = raw === "DRAFT" || raw === "SUBMITTED" || raw === "ACKNOWLEDGED" ? raw : undefined;
-  const reviews = await listReviewsForManager(u.id, { status, take: 100 });
-  return NextResponse.json({ reviews });
+  const reviews = await listReviewsForManager(ctx.userId, { status, take: 100 });
+  // A draft is its author's unfinished writing: listed, never read.
+  return NextResponse.json({
+    reviews: reviews.map((r) => (r.status === "DRAFT" ? { ...r, highlights: null, blockers: null, plan: null, kpiSnapshots: [], kraProgress: [] } : r)),
+  });
 }

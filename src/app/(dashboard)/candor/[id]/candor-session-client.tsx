@@ -1,631 +1,417 @@
 "use client";
 
-/* Candor session detail — the closed loop for anonymous feedback.
- *
- *  One route, three faces depending on who you are and the session state:
- *    · Owner + DRAFT            → PROMPT EDITOR (title/description/scope/prompts) + Launch
- *    · Owner + ACTIVE/CLOSED    → RESULTS (aggregated, ZERO respondent identity) + Close
- *    · Respondent + ACTIVE      → RESPOND FORM (anonymous — stores only answers)
- *
- *  Data:
- *    GET  /api/candor                 (list — org-scoped + dept/active gated; source of truth for access)
- *    GET  /api/candor/[id]/results    (managers only, org-scoped, no identity)
- *    POST /api/candor/[id]/respond    (anonymous — no userId/IP/device is ever stored)
- *    PATCH/POST /api/candor           (owner edits + launch/close)
- *    GET  /api/departments            (scope picker)
- *
- *  Anonymity is the top guarantee: the respond flow never sends identity and
- *  the CandorResponse row has no user column, so a reply can't be traced back.
- */
+// A candor session (spec-teams-performance /candor/[id]): answer it, write
+// it, or read what came back. Three faces from what the server says the
+// viewer may do (GET /api/candor/[id] faces), each on the detail chrome with
+// a real back to Candor:
+//
+//   Editor    the owner (or the People team, Admin) while it is a Draft:
+//             About (title, description, who can answer), Questions (a
+//             ReorderableList: drag, keyboard, and Move up / Move down in
+//             each row's "..."), Danger zone. Autosaves per field.
+//   Respond   in scope, Open, not answered: the questions, then the blue
+//             "Submit anonymously" in the title row. You answer once; your
+//             typing is kept on this device until it is sent.
+//   Results   the owner, the People team, Admin: answer counts, rating
+//             bars, shuffled unattributed quotes. Under four answers the
+//             whole body is one quiet block (DECIDED: the anonymity floor).
+// Someone who may both answer and read results (People team in scope) gets a
+// Respond · Results pill row and lands on Respond until they have answered.
 
-import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import {
-  MessageCircleHeart,
-  ArrowLeft,
-  Lock,
-  ShieldCheck,
-  Send,
-  Plus,
-  Trash2,
-  ChevronUp,
-  ChevronDown,
-  Activity,
-  CheckCircle2,
-  Building,
-  Globe,
-  Type,
-  Star,
-  Repeat,
-  Edit3,
-  BarChart3,
-  Rocket,
-} from "lucide-react";
-import { OsPageHeader, OsPageHeaderSkeleton } from "@/components/layout/os/page-header";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Ban, Link2, MoreHorizontal, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
-
-import { useOsToast } from "@/components/layout/os/toast";
+import { OsPageHeader, OsPageHeaderSkeleton } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { BackButton } from "@/components/ui/back-button";
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { ErrorState } from "@/components/ui/error-state";
-import { NotFoundView } from "@/components/access/not-found-view";
+import { useOsToast } from "@/components/layout/os/toast";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { PickerButton } from "@/components/dashboards/widget-registry";
+import { ToneChip } from "@/components/people/person-bits";
+import { AnonymityNote } from "@/components/culture/anonymity-note";
+import { ReorderableList } from "@/components/performance/reorderable-list";
+import { QuestionRenderer, hasAnswer } from "@/components/performance/question-renderer";
+import { useAutosave } from "@/hooks/use-autosave";
+import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { CANDOR_PROMPT_TYPES, candorStatusOf, type CandorPrompt, type CandorPromptType } from "@/lib/performance/candor";
+import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
 
-type CandorStatus = "DRAFT" | "ACTIVE" | "CLOSED";
-type PromptType = "text" | "rating" | "start_stop_continue";
-type Prompt = { id: string; text: string; type: PromptType };
-
-type ApiCandor = {
+type Faces = { isOwner: boolean; canManage: boolean; canSeeResults: boolean; inScope: boolean; canRespond: boolean; hasResponded: boolean; canDelete: boolean; canExport: boolean };
+type Session = {
   id: string;
   title: string;
-  description?: string | null;
-  prompts: unknown;
-  status: CandorStatus;
-  departmentId?: string | null;
-  launchedAt?: string | null;
-  closedAt?: string | null;
-  createdAt: string;
-  createdBy: string;
-  responseCount?: number;
-  isOwner?: boolean;
-  /** The server's record (CandorRespondent) that this viewer has answered. */
-  hasResponded?: boolean;
+  description: string | null;
+  status: "DRAFT" | "ACTIVE" | "CLOSED";
+  departmentId: string | null;
+  department: { id: string; name: string } | null;
+  prompts: CandorPrompt[];
+  launchedAt: string | null;
+  closedAt: string | null;
+  responseCount?: number | null;
+  faces: Faces;
 };
-
-type Dept = { id: string; name: string };
-
-type RatingResult = { prompt: Prompt; type: "rating"; average: string | null; distribution: { value: number; count: number }[]; count: number };
-type TextResult = { prompt: Prompt; type: "text"; responses: unknown[]; count: number };
-type ResultItem = RatingResult | TextResult;
-type ResultsPayload = {
-  session: { id: string; title: string; description?: string | null; status: CandorStatus; launchedAt?: string | null; closedAt?: string | null };
+type Results = {
   totalResponses: number;
-  /** Under the anonymity floor: only the count comes back. */
-  belowFloor?: boolean;
-  floor?: number;
-  results: ResultItem[];
+  belowFloor: boolean;
+  floor: number;
+  results: Array<
+    | { prompt: CandorPrompt; type: "rating"; average: string | null; distribution: Array<{ value: number; count: number }>; count: number }
+    | { prompt: CandorPrompt; type: "text"; responses: unknown[]; count: number }
+  >;
 };
 
-const PROMPT_TYPES: { value: PromptType; label: string; Icon: typeof Type }[] = [
-  { value: "text", label: "Open text", Icon: Type },
-  { value: "rating", label: "Rating 1-5", Icon: Star },
-  { value: "start_stop_continue", label: "Start / Stop / Continue", Icon: Repeat },
-];
+const draftKey = (id: string) => `workwrk:candor-answers:${id}`;
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-}
-
-function normalizePrompts(raw: unknown): Prompt[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((p) => {
-    if (typeof p === "string") return { id: uid(), text: p, type: "text" as PromptType };
-    const o = (p ?? {}) as Record<string, unknown>;
-    const t = (o.type as PromptType) || "text";
-    return {
-      id: typeof o.id === "string" && o.id ? o.id : uid(),
-      text: typeof o.text === "string" ? o.text : "",
-      type: (["text", "rating", "start_stop_continue"] as const).includes(t) ? t : "text",
-    };
-  });
-}
-
-function fmtDate(iso?: string | null): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-const STATUS_META: Record<CandorStatus, { label: string; hue: string; Icon: typeof Edit3 }> = {
-  DRAFT: { label: "Draft", hue: "var(--os-c-darkgray)", Icon: Edit3 },
-  ACTIVE: { label: "Active", hue: "var(--os-c-orange)", Icon: Activity },
-  CLOSED: { label: "Closed", hue: "var(--os-c-green)", Icon: CheckCircle2 },
-};
-
-export default function CandorDetailPage() {
-  const params = useParams<{ id: string }>();
-  const id = params?.id;
-  const [session, setSession] = useState<ApiCandor | null | undefined>(undefined);
-  const [loadError, setLoadError] = useState<string | null>(null);
+export default function CandorSessionClient({ id }: { id: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
   const { toast } = useOsToast();
-  const { bumpRowVersion } = useOsShell();
+  const { blockingLayerOpen } = useOsShell();
+  const confirm = useConfirm();
+  const datePrefs = useDatePrefs();
 
+  const [s, setS] = useState<Session | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      const res = await fetch("/api/candor");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiCandor[] = data.data ?? (Array.isArray(data) ? data : []);
-      setSession(list.find((s) => s.id === id) ?? null);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+    const r = await apiFetch<Session>(`/api/candor/${id}`, { cache: "no-store" });
+    if (!r.ok) { setError(r.status === 404 ? "This session is not available to you." : r.error || "Couldn't load the session"); return; }
+    setError(null);
+    setS(r.data);
   }, [id]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
 
-  const afterMutate = useCallback(() => {
-    bumpRowVersion("candor");
-    void load();
-  }, [bumpRowVersion, load]);
+  const faces = s?.faces;
+  const editing = !!s && !!faces?.canManage && s.status === "DRAFT";
+  const both = !!faces?.canSeeResults && (!!faces?.canRespond || !!faces?.hasResponded) && s?.status !== "DRAFT";
+  const tabParam = sp?.get("tab");
+  const face: "editor" | "respond" | "results" | "thanks" | null = !s || !faces ? null
+    : editing ? "editor"
+      : both ? (tabParam === "results" || (faces.hasResponded && tabParam !== "respond") ? "results" : faces.canRespond ? "respond" : "thanks")
+        : faces.canRespond ? "respond"
+          : faces.canSeeResults ? "results"
+            : "thanks";
 
-  const header = (
-    <>
-      <Breadcrumb items={[{ label: "Candor", href: "/candor" }, ...(session ? [{ label: session.title }] : [])]} />
-      {session === undefined && !loadError ? (
-        <OsPageHeaderSkeleton />
-      ) : (
-        <OsPageHeader
-          title={session ? session.title : "Candor session"}
-          back={{ fallbackHref: "/candor", label: "Candor" }}
-        />
-      )}
-    </>
-  );
+  const setTab = (t: "respond" | "results") => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    next.set("tab", t);
+    router.replace(`${pathname}?${next}`, { scroll: false });
+  };
 
-  // A session the API will not return (closed, another team's, or none) is
-  // the in-shell 404, identical for a miss and a denial (spec-shell 2.4).
-  if (session === null && !loadError) return <NotFoundView />;
-
-  let body: React.ReactNode;
-  if (loadError) {
-    body = <ErrorState what="this session" hint={loadError} onRetry={() => { void load(); }} />;
-  } else if (!session) {
-    body = <SkeletonRows />;
-  } else if (session.isOwner) {
-    body = session.status === "DRAFT"
-      ? <EditorView session={session} onMutate={afterMutate} toast={toast} />
-      : <ResultsView session={session} onMutate={afterMutate} toast={toast} />;
-  } else if (session.status === "ACTIVE") {
-    body = <RespondView session={session} onMutate={afterMutate} toast={toast} />;
-  } else {
-    body = <NotAvailable title="This session isn't open" subtitle="It's no longer collecting responses." />;
+  // ── Respond ───────────────────────────────────────────────────────
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const [answersFor, setAnswersFor] = useState<string | null>(null);
+  if (s && answersFor !== s.id) {
+    setAnswersFor(s.id);
+    try { const raw = typeof window !== "undefined" ? window.localStorage.getItem(draftKey(s.id)) : null; if (raw) setAnswers(JSON.parse(raw) as Record<string, unknown>); } catch { /* private mode */ }
   }
-
-  return (
-    <>
-      {header}
-      <div className="cnd-d">{body}</div>
-    </>
-  );
-}
-
-function NotAvailable({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="cnd-d__blank">
-      <div className="cnd-d__blank-art"><MessageCircleHeart /></div>
-      <h2>{title}</h2>
-      <p>{subtitle}</p>
-      <BackButton fallbackHref="/candor" label="Candor" />
-    </div>
-  );
-}
-
-/* ─────────────────────────── RESPOND (anonymous) ─────────────────────────── */
-
-type SscValue = { start: string; stop: string; cont: string };
-
-function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutate: () => void; toast: (m: string) => void }) {
-  const prompts = useMemo(() => normalizePrompts(session.prompts), [session.prompts]);
-  const storageKey = `candor:responded:${session.id}`;
-  const [text, setText] = useState<Record<string, string>>({});
-  const [rating, setRating] = useState<Record<string, number>>({});
-  const [ssc, setSsc] = useState<Record<string, SscValue>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-  // "Already responded" comes from the server (GET /api/candor reads
-  // CandorRespondent, which records WHO answered and never what), so a
-  // second device or cleared storage never reopens a form that cannot be
-  // sent. The browser flag stays as a fallback for a database that has not
-  // had the Phase 6 SQL yet. Lazy + SSR-safe: this subtree only mounts on
-  // the client, so there is no hydration mismatch.
-  const [already, setAlready] = useState<boolean>(() => {
-    if (session.hasResponded) return true;
-    if (typeof window === "undefined") return false;
-    try { return !!localStorage.getItem(storageKey); } catch { return false; }
+  const setAnswer = (pid: string, v: unknown) => setAnswers((a) => {
+    const next = { ...a, [pid]: v };
+    try { window.localStorage.setItem(draftKey(id), JSON.stringify(next)); } catch { /* private mode: kept in memory */ }
+    return next;
   });
-
-  function buildAnswers(): { promptId: string; value: string | number }[] {
-    const out: { promptId: string; value: string | number }[] = [];
-    for (const p of prompts) {
-      if (p.type === "rating") {
-        const r = rating[p.id];
-        if (r) out.push({ promptId: p.id, value: r });
-      } else if (p.type === "start_stop_continue") {
-        const v = ssc[p.id];
-        if (v) {
-          const parts: string[] = [];
-          if (v.start.trim()) parts.push(`Start: ${v.start.trim()}`);
-          if (v.stop.trim()) parts.push(`Stop: ${v.stop.trim()}`);
-          if (v.cont.trim()) parts.push(`Continue: ${v.cont.trim()}`);
-          if (parts.length) out.push({ promptId: p.id, value: parts.join("\n") });
-        }
-      } else {
-        const t = (text[p.id] || "").trim();
-        if (t) out.push({ promptId: p.id, value: t });
-      }
-    }
-    return out;
-  }
-
-  async function submit() {
-    const answers = buildAnswers();
-    if (answers.length === 0) { toast("Add at least one answer"); return; }
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr] = useState<string | null>(null);
+  const [thanks, setThanks] = useState(false);
+  const answeredCount = (s?.prompts ?? []).filter((p) => hasAnswer(p.type, answers[p.id])).length;
+  const submit = useCallback(async () => {
+    if (!s) return;
+    if (!answeredCount) { setSubmitErr("Answer at least one question."); return; }
+    const ok = await confirm({ title: "Submit anonymously?", description: "You can answer once. After you submit, your answers cannot be changed.", confirmLabel: "Submit", destructive: false });
+    if (!ok) return;
     setSubmitting(true);
-    try {
-      const res = await fetch(`/api/candor/${session.id}/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers }),
-      });
-      if (res.status === 409) {
-        // Answered already (another device, or a double click): nothing to
-        // retry, so say so instead of a failure that can never clear.
-        try { localStorage.setItem(storageKey, "1"); } catch { /* ignore */ }
-        setAlready(true);
-        onMutate();
-        return;
-      }
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast(res.status === 403 ? (d?.error ?? "This session isn't open to you") : "Couldn't submit. Your answers are still here, try again.");
-        setSubmitting(false);
-        return;
-      }
-      try { localStorage.setItem(storageKey, "1"); } catch { /* ignore */ }
-      setDone(true);
-      onMutate();
-    } catch {
-      toast("Couldn't submit. Your answers are still here, try again.");
-      setSubmitting(false);
-    }
-  }
+    setSubmitErr(null);
+    const payload = s.prompts.filter((p) => hasAnswer(p.type, answers[p.id])).map((p) => ({ promptId: p.id, value: answers[p.id] }));
+    const r = await apiFetchWithRetry(`/api/candor/${s.id}/respond`, { method: "POST", keepalive: true, json: { answers: payload } }, { retryWrites: true });
+    setSubmitting(false);
+    if (!r.ok && r.status !== 409) { setSubmitErr(r.error ? `Not sent: ${r.error}` : "Not sent. Your answers are kept on this device, try again."); return; }
+    try { window.localStorage.removeItem(draftKey(s.id)); } catch { /* ignore */ }
+    setThanks(true);
+    void load();
+  }, [s, answeredCount, answers, confirm, load]);
+  useEffect(() => {
+    if (face !== "respond") return;
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void submit(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [face, submit]);
 
-  if (done || already) {
+  // ── Owner actions ─────────────────────────────────────────────────
+  const move = async (status: "ACTIVE" | "CLOSED", reopen = false) => {
+    if (!s) return;
+    const scope = s.department?.name ?? "everyone";
+    const ok = await confirm(
+      status === "CLOSED"
+        ? { title: `Close ${s.title}?`, description: "Nobody can answer after this. You can reopen it later.", confirmLabel: "Close session", destructive: false }
+        : reopen
+          ? { title: `Reopen ${s.title}?`, description: `Everyone in ${scope} who has not answered can answer again.`, confirmLabel: "Reopen", destructive: false }
+          : { title: `Launch ${s.title}?`, description: `Everyone in ${scope} can answer from now on, and is told so. The questions are fixed from then.`, confirmLabel: "Launch session", destructive: false },
+    );
+    if (!ok) return;
+    const r = await apiFetch(`/api/candor/${s.id}`, { method: "PATCH", json: { status } });
+    if (!r.ok) { toast(r.error || "Couldn't change the session", { tone: "danger" }); return; }
+    toast(status === "CLOSED" ? "Session closed" : reopen ? "Session reopened" : "Session launched");
+    void load();
+  };
+  const remove = async () => {
+    if (!s) return;
+    const ok = await confirm({ title: `Delete ${s.title}?`, description: "Nothing has been answered yet.", confirmLabel: "Delete draft", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/candor/${s.id}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete it", { tone: "danger" }); return; }
+    toast("Draft deleted");
+    router.push("/candor");
+  };
+
+  const back = { fallbackHref: "/candor", label: "Candor" };
+  if (error && !s) {
     return (
-      <div className="cnd-d__thanks">
-        <div className="cnd-d__thanks-art"><ShieldCheck /></div>
-        <h2>{done ? "Feedback received, thank you" : "You've already responded"}</h2>
-        <p>Your reply was recorded with <strong>no link to your identity</strong>. We note that you answered, so nobody answers twice, but never which answer is yours.</p>
-        <Link href="/candor" className="cnd-d__blank-cta"><ArrowLeft /> Back to Candor</Link>
-      </div>
+      <>
+        <OsPageHeader title="Candor session" back={back} />
+        <div className="mx-auto w-full max-w-[720px] px-6 py-6"><OsEmptyView variant="error" title="Couldn't load the session" hint={error} action={{ label: "Try again", onClick: () => void load() }} /></div>
+      </>
+    );
+  }
+  if (!s || !faces) {
+    return (
+      <>
+        <OsPageHeaderSkeleton />
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 py-6">{[0, 1].map((i) => <div key={i} className="rounded-lg border border-line p-6"><SkeletonLines lines={4} /></div>)}</div>
+      </>
     );
   }
 
-  return (
-    <div className="cnd-d__respond">
-      <div className="cnd-d__anon">
-        <Lock />
-        <span><strong>This is anonymous.</strong> Your answers are stored with no name, account, IP or device. We note only that you answered, so nobody answers twice. Nobody, including your manager, can see who wrote what.</span>
-      </div>
-
-      {session.description ? <p className="cnd-d__lede">{session.description}</p> : null}
-
-      <div className="cnd-d__qlist">
-        {prompts.map((p, i) => (
-          <div key={p.id} className="cnd-d__q">
-            <div className="cnd-d__q-head"><span className="cnd-d__q-num">{i + 1}</span><span className="cnd-d__q-text">{p.text}</span></div>
-            {p.type === "rating" ? (
-              <div className="cnd-d__rating">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    className={`cnd-d__rating-chip${rating[p.id] === n ? " is-on" : ""}`}
-                    onClick={() => setRating((s) => ({ ...s, [p.id]: n }))}
-                  >{n}</button>
-                ))}
-              </div>
-            ) : p.type === "start_stop_continue" ? (
-              <div className="cnd-d__ssc">
-                {(["start", "stop", "cont"] as const).map((k) => (
-                  <label key={k} className="cnd-d__ssc-field">
-                    <span>{k === "cont" ? "Continue" : k[0].toUpperCase() + k.slice(1)}</span>
-                    <textarea
-                      rows={2}
-                      value={ssc[p.id]?.[k] || ""}
-                      onChange={(e) => setSsc((s) => {
-                        const prev = s[p.id] ?? { start: "", stop: "", cont: "" };
-                        return { ...s, [p.id]: { ...prev, [k]: e.target.value } };
-                      })}
-                      placeholder={k === "start" ? "What should we start doing?" : k === "stop" ? "What should we stop?" : "What's working? Keep going"}
-                    />
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <textarea
-                className="cnd-d__q-input"
-                rows={3}
-                value={text[p.id] || ""}
-                onChange={(e) => setText((s) => ({ ...s, [p.id]: e.target.value }))}
-                placeholder="Type your honest answer…"
-              />
-            )}
-          </div>
-        ))}
-        {prompts.length === 0 ? <p className="cnd-d__muted">This session has no prompts yet.</p> : null}
-      </div>
-
-      <div className="cnd-d__actions">
-        <button type="button" className="cnd-d__btn cnd-d__btn--primary" disabled={submitting || prompts.length === 0} onClick={submit}>
-          {submitting ? <Dots variant="pending" /> : <Send />} Submit anonymously
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────── RESULTS (manager) ─────────────────────────── */
-
-function ResultsView({ session, onMutate, toast }: { session: ApiCandor; onMutate: () => void; toast: (m: string) => void }) {
-  const [data, setData] = useState<ResultsPayload | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/candor/${session.id}/results`);
-      if (res.status === 403) { setError("Only the person who ran this session, the People team or an Admin can see its results."); setData(null); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(await res.json());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
-      setData(null);
-    }
-  }, [session.id]);
-  useEffect(() => { void load(); }, [load]);
-
-  async function close() {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/candor", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: session.id, status: "CLOSED" }),
-      });
-      if (!res.ok) { toast("Couldn't close"); setBusy(false); return; }
-      toast("Session closed");
-      onMutate();
-    } catch { toast("Couldn't close"); setBusy(false); }
-  }
-
-  const total = data?.totalResponses ?? 0;
+  const st = candorStatusOf(s.status);
+  const primary = face === "editor"
+    ? { label: "Launch session", onClick: () => void move("ACTIVE") }
+    : face === "respond" && !thanks ? { label: submitting ? "Sending" : "Submit anonymously", onClick: () => void submit(), busy: submitting } : null;
+  const more = faces.canManage ? [
+    { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/candor/${s.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
+    ...(s.status === "ACTIVE" ? [{ label: "Close session", icon: Ban, onClick: () => void move("CLOSED") }] : []),
+    ...(s.status === "CLOSED" ? [{ label: "Reopen", icon: RotateCcw, onClick: () => void move("ACTIVE", true) }] : []),
+    ...(faces.canDelete ? [{ separator: true as const }, { label: "Delete draft", icon: Trash2, destructive: true, onClick: () => void remove() }] : []),
+  ] : undefined;
 
   return (
-    <div className="cnd-d__results">
-      <div className="cnd-d__anon">
-        <ShieldCheck />
-        <span><strong>Anonymous results.</strong> Replies are combined with no identity attached. There is no way to see who said what, by design.</span>
-      </div>
-
-      <div className="cnd-d__result-bar">
-        <div className="cnd-d__result-stat">
-          <span className="cnd-d__result-num">{total}</span>
-          <span className="cnd-d__result-lbl">response{total === 1 ? "" : "s"}</span>
-        </div>
-        <div className="cnd-d__result-meta">
-          <StatusChip status={session.status} />
-          {session.departmentId ? <span className="cnd-d__scope"><Building /> Department</span> : <span className="cnd-d__scope"><Globe /> Org-wide</span>}
-          {session.launchedAt ? <span>Launched {fmtDate(session.launchedAt)}</span> : null}
-          {session.closedAt ? <span>Closed {fmtDate(session.closedAt)}</span> : null}
-        </div>
-        <div className="cnd-d__result-actions">
-          {session.status === "ACTIVE" ? (
-            <button type="button" className="cnd-d__btn cnd-d__btn--close" disabled={busy} onClick={close}>
-              {busy ? <Dots variant="pending" /> : <CheckCircle2 />} Close session
-            </button>
+    <>
+      <Breadcrumb items={[{ label: "Candor", href: "/candor" }, { label: s.title }]} />
+      <OsPageHeader
+        title={s.title}
+        back={back}
+        titleSlot={<><h1 className="min-w-0 truncate text-title font-semibold text-ink">{s.title}</h1><ToneChip tone={st.tone} label={st.label} /></>}
+        actions={primary && !blockingLayerOpen ? (
+          <button type="button" onClick={primary.onClick} disabled={primary.busy} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-60">{primary.label}</button>
+        ) : undefined}
+        more={more}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 pb-10 pt-2">
+          {both && !thanks ? (
+            <div className="flex flex-col gap-1">
+              <div role="tablist" aria-label="Sections" className="flex h-9 items-center gap-1">
+                <ViewTab label="Respond" active={face === "respond" || face === "thanks"} onClick={() => setTab("respond")} />
+                <ViewTab label="Results" active={face === "results"} onClick={() => setTab("results")} />
+              </div>
+              {faces.hasResponded ? <p className="m-0 text-sm text-ink-2">You have answered. Answers cannot be changed once sent.</p> : null}
+            </div>
           ) : null}
-        </div>
-      </div>
 
-      {error ? (
-        <NotAvailable title="Couldn't load results" subtitle={error} />
-      ) : data === undefined ? (
-        <SkeletonRows />
-      ) : total === 0 ? (
-        <div className="cnd-d__blank cnd-d__blank--inline">
-          <div className="cnd-d__blank-art"><BarChart3 /></div>
-          <h2>No responses yet</h2>
-          <p>As people respond anonymously, aggregated answers appear here.</p>
-        </div>
-      ) : data?.belowFloor ? (
-        <div className="cnd-d__blank cnd-d__blank--inline">
-          <div className="cnd-d__blank-art"><BarChart3 /></div>
-          <h2>Results appear once {data.floor ?? 4} people have answered</h2>
-          <p>{total} so far. Waiting keeps a small team&apos;s answers from being traced to a person.</p>
-        </div>
-      ) : (
-        <div className="cnd-d__result-list">
-          {(data?.results ?? []).map((r, i) => (
-            <div key={r.prompt?.id || i} className="cnd-d__result-card">
-              <div className="cnd-d__q-head">
-                <span className="cnd-d__q-num">{i + 1}</span>
-                <span className="cnd-d__q-text">{r.prompt?.text || "Prompt"}</span>
-                <span className="cnd-d__result-count">{r.count} answer{r.count === 1 ? "" : "s"}</span>
-              </div>
-              {r.type === "rating" ? (
-                <RatingBreakdown r={r} />
-              ) : (
-                <div className="cnd-d__answers">
-                  {r.responses.length === 0 ? (
-                    <p className="cnd-d__muted">No answers to this prompt.</p>
-                  ) : (
-                    r.responses.map((v, j) => (
-                      <div key={j} className="cnd-d__answer">{String(v)}</div>
-                    ))
-                  )}
-                </div>
-              )}
+          {face === "editor" ? (
+            <CandorEditor session={s} onDelete={faces.canDelete ? () => void remove() : undefined} onSaved={(next) => setS((cur) => (cur ? { ...cur, ...next } : cur))} />
+          ) : face === "respond" && !thanks ? (
+            <>
+              <AnonymityNote mode="candor" />
+              {s.description ? <p className="m-0 whitespace-pre-wrap text-row text-ink-2">{s.description}</p> : null}
+              {s.prompts.map((p, i) => (
+                <QuestionRenderer key={p.id} index={i} question={{ id: p.id, text: p.text, type: p.type }} value={answers[p.id]} onChange={(v) => setAnswer(p.id, v)} />
+              ))}
+              <p className="m-0 text-sm text-ink-2">You can answer once. After you submit, your answers cannot be changed.</p>
+              {submitErr ? <p role="alert" className="m-0 text-sm text-danger-text">{submitErr}</p> : null}
+            </>
+          ) : face === "results" ? (
+            <CandorResults session={s} />
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <OsEmptyView title={thanks || faces.hasResponded ? "Thanks. Your answers are in." : "This session is not open for answers"} />
+              <Link href="/candor" className="text-sm font-medium text-brand-deep hover:underline">Back to Candor</Link>
             </div>
-          ))}
+          )}
+          {s.launchedAt && face !== "editor" && face !== "results" ? <p className="m-0 text-xs text-ink-3">Opened {formatDate(s.launchedAt, datePrefs, "date")}{s.closedAt ? ` · Closed ${formatDate(s.closedAt, datePrefs, "date")}` : ""}</p> : null}
         </div>
-      )}
+      </div>
+    </>
+  );
+}
+
+function CandorResults({ session }: { session: Session }) {
+  const datePrefs = useDatePrefs();
+  const [r, setR] = useState<Results | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const x = await apiFetch<Results>(`/api/candor/${session.id}/results`, { cache: "no-store" });
+    if (!x.ok) { setError(x.error || "Couldn't load the results"); return; }
+    setError(null);
+    setR(x.data);
+  }, [session.id]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
+  useEffect(() => { const again = () => void load(); window.addEventListener("focus", again); return () => window.removeEventListener("focus", again); }, [load]);
+  if (error && !r) return <OsEmptyView variant="error" title="Couldn't load the results" hint={error} action={{ label: "Try again", onClick: () => void load() }} />;
+  if (!r) return <SkeletonLines lines={6} />;
+  const meta = [`${r.totalResponses} ${r.totalResponses === 1 ? "answer" : "answers"}`, session.launchedAt ? `Opened ${formatDate(session.launchedAt, datePrefs, "date")}` : null, session.closedAt ? `Closed ${formatDate(session.closedAt, datePrefs, "date")}` : null].filter(Boolean).join(" · ");
+  if (r.belowFloor) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="m-0 text-sm text-ink-2">{meta}</p>
+        <OsEmptyView title={`Results appear once ${r.floor ?? ANONYMITY_FLOOR} people have answered. ${r.totalResponses} so far.`} hint="So nobody in a small team can be picked out from their answers." />
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="m-0 text-sm text-ink-2">{meta}</p>
+      {r.results.map((res, i) => (
+        <section key={res.prompt.id} className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-6">
+          <p className="m-0 text-row font-medium text-ink">{i + 1}. {res.prompt.text}</p>
+          {res.type === "rating" ? (
+            <div className="flex items-start gap-6">
+              <span className="text-xl font-semibold tabular-nums text-ink">{res.average ?? ""}</span>
+              <ul className="m-0 flex flex-1 list-none flex-col gap-1.5 p-0">
+                {[...res.distribution].reverse().map((d) => (
+                  <li key={d.value} className="grid grid-cols-[20px_1fr_40px] items-center gap-2 text-sm">
+                    <span className="tabular-nums text-ink-2">{d.value}</span>
+                    <span className="h-2 overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-[var(--os-ink-3)]" style={{ width: `${res.count ? (d.count / res.count) * 100 : 0}%` }} /></span>
+                    <span className="text-end tabular-nums text-ink-2">{d.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <ul className="m-0 flex max-h-[420px] list-none flex-col gap-2 overflow-y-auto p-0">
+              {res.responses.length ? res.responses.map((a, k) => (
+                <li key={k} className="whitespace-pre-wrap rounded-md border-s-2 border-line-strong bg-subtle px-3 py-2 text-row text-ink">
+                  {typeof a === "string" ? a : a && typeof a === "object"
+                    ? Object.entries(a as Record<string, string>).filter(([, v]) => v).map(([k2, v]) => `${k2.charAt(0).toUpperCase() + k2.slice(1)}: ${v}`).join("\n")
+                    : String(a)}
+                </li>
+              )) : <li className="text-sm text-ink-3">No answers to this question</li>}
+            </ul>
+          )}
+        </section>
+      ))}
     </div>
   );
 }
 
-function RatingBreakdown({ r }: { r: RatingResult }) {
-  const max = Math.max(1, ...r.distribution.map((d) => d.count));
-  return (
-    <div className="cnd-d__rating-result">
-      <div className="cnd-d__rating-avg">
-        <span className="cnd-d__rating-avg-num">{r.average ?? "No ratings"}</span>
-        <span className="cnd-d__rating-avg-lbl">avg / 5</span>
-      </div>
-      <div className="cnd-d__dist">
-        {r.distribution.map((d) => (
-          <div key={d.value} className="cnd-d__dist-row">
-            <span className="cnd-d__dist-key">{d.value}</span>
-            <span className="cnd-d__dist-track"><span className="cnd-d__dist-fill" style={{ width: `${(d.count / max) * 100}%` }} /></span>
-            <span className="cnd-d__dist-val">{d.count}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+type EditorState = { title: string; description: string; departmentId: string | null; prompts: CandorPrompt[] };
 
-function StatusChip({ status }: { status: CandorStatus }) {
-  const m = STATUS_META[status];
-  return (
-    <span className="cnd-d__status" style={{ ["--st-c" as string]: m.hue }}>
-      <m.Icon /> {m.label}
-    </span>
-  );
-}
-
-/* ─────────────────────────── EDITOR (owner / draft) ─────────────────────────── */
-
-function EditorView({ session, onMutate, toast }: { session: ApiCandor; onMutate: () => void; toast: (m: string) => void }) {
-  const [title, setTitle] = useState(session.title);
-  const [description, setDescription] = useState(session.description || "");
-  const [departmentId, setDepartmentId] = useState(session.departmentId || "");
-  const [prompts, setPrompts] = useState<Prompt[]>(() => {
-    const p = normalizePrompts(session.prompts);
-    return p.length ? p : [{ id: uid(), text: "", type: "text" }];
-  });
-  const [depts, setDepts] = useState<Dept[]>([]);
-  const [saving, setSaving] = useState<null | "save" | "launch">(null);
-
+function CandorEditor({ session, onDelete, onSaved }: { session: Session; onDelete?: () => void; onSaved: (next: Partial<Session>) => void }) {
+  const [state, setState] = useState<EditorState>({ title: session.title, description: session.description ?? "", departmentId: session.departmentId, prompts: session.prompts.length ? session.prompts : [] });
+  const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
+  const [menu, setMenu] = useState<{ id: string; anchor: { current: HTMLElement | null }; up?: () => void; down?: () => void } | null>(null);
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/departments");
-        if (!res.ok) return;
-        const data = await res.json();
-        const list = data.data ?? (Array.isArray(data) ? data : []);
-        setDepts(list.map((d: Record<string, unknown>) => ({ id: String(d.id), name: String(d.name) })));
-      } catch { /* ignore */ }
-    })();
+    void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((r) => { if (r.ok && Array.isArray(r.data)) setDepts(r.data); });
   }, []);
-
-  function setPromptText(pid: string, v: string) { setPrompts((s) => s.map((p) => (p.id === pid ? { ...p, text: v } : p))); }
-  function setPromptType(pid: string, v: PromptType) { setPrompts((s) => s.map((p) => (p.id === pid ? { ...p, type: v } : p))); }
-  function addPrompt() { setPrompts((s) => [...s, { id: uid(), text: "", type: "text" }]); }
-  function removePrompt(pid: string) { setPrompts((s) => (s.length <= 1 ? s : s.filter((p) => p.id !== pid))); }
-  function move(pid: string, dir: -1 | 1) {
-    setPrompts((s) => {
-      const i = s.findIndex((p) => p.id === pid);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= s.length) return s;
-      const next = [...s];
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
-  }
-
-  function cleanPrompts(): Prompt[] {
-    return prompts.map((p) => ({ ...p, text: p.text.trim() })).filter((p) => p.text.length > 0);
-  }
-
-  async function persist(launch: boolean) {
-    if (!title.trim()) { toast("Add a title"); return; }
-    const cleaned = cleanPrompts();
-    if (launch && cleaned.length === 0) { toast("Add at least one prompt to launch"); return; }
-    setSaving(launch ? "launch" : "save");
-    try {
-      const res = await fetch("/api/candor", {
+  const autosave = useAutosave({
+    snapshot: state,
+    enabled: true,
+    delay: 900,
+    localKey: `candor-editor:${session.id}`,
+    save: async (snap) => {
+      const r = await apiFetchWithRetry(`/api/candor/${session.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: session.id,
-          title: title.trim(),
-          description: description.trim(),
-          departmentId: departmentId || null,
-          prompts: cleaned.length ? cleaned : prompts.map((p) => ({ ...p, text: p.text.trim() })),
-          ...(launch ? { status: "ACTIVE" } : {}),
-        }),
-      });
-      if (!res.ok) { toast(launch ? "Couldn't launch" : "Couldn't save"); setSaving(null); return; }
-      toast(launch ? "Session launched" : "Draft saved");
-      onMutate();
-    } catch { toast(launch ? "Couldn't launch" : "Couldn't save"); setSaving(null); }
-  }
+        keepalive: true,
+        json: { title: snap.title.trim() || "Untitled session", description: snap.description, departmentId: snap.departmentId, prompts: snap.prompts.filter((p) => p.text.trim()).length ? snap.prompts.filter((p) => p.text.trim()) : undefined },
+      }, { retryWrites: true });
+      if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);
+      onSaved({ title: snap.title.trim() || "Untitled session" });
+    },
+  });
+  const nextId = useMemo(() => () => {
+    const used = new Set(state.prompts.map((p) => p.id));
+    let n = state.prompts.length + 1;
+    while (used.has(`p${n}`)) n += 1;
+    return `p${n}`;
+  }, [state.prompts]);
+  const setPrompt = (pid: string, patch: Partial<CandorPrompt>) => setState((s) => ({ ...s, prompts: s.prompts.map((p) => (p.id === pid ? { ...p, ...patch } : p)) }));
+  const input = "h-9 w-full rounded-md border border-line bg-raised px-3 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]";
 
   return (
-    <div className="cnd-d__editor">
-      <div className="cnd-d__anon cnd-d__anon--soft">
-        <Lock />
-        <span>Set this up, then launch. Responses stay <strong>anonymous</strong>: the results view never shows who answered.</span>
-      </div>
-
-      <div className="cnd-d__field">
-        <label>Title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Q3 team pulse" />
-      </div>
-
-      <div className="cnd-d__field">
-        <label>Description <span className="cnd-d__opt">optional</span></label>
-        <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Why you're asking, and how the feedback will be used." />
-      </div>
-
-      <div className="cnd-d__field">
-        <label>Who can respond</label>
-        <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-          <option value="">Everyone in the org</option>
-          {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-        <span className="cnd-d__hint">{departmentId ? "Only members of this department will see and can answer." : "Anyone in your organization can answer."}</span>
-      </div>
-
-      <div className="cnd-d__field">
-        <div className="cnd-d__field-row">
-          <label>Prompts</label>
-          <button type="button" className="cnd-d__mini" onClick={addPrompt}><Plus /> Add prompt</button>
+    <div className="flex flex-col gap-4">
+      <AnonymityNote mode="candor" />
+      <section className="flex flex-col gap-4 rounded-lg border border-line bg-raised p-6">
+        <header className="flex items-center gap-2">
+          <h2 className="m-0 flex-1 text-lg font-semibold text-ink">About this session</h2>
+          <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} onRetry={autosave.retriesExhausted ? autosave.retryNow : undefined} />
+        </header>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Title</span>
+          <input value={state.title} maxLength={200} onChange={(e) => setState((s) => ({ ...s, title: e.target.value }))} className={input} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Description</span>
+          <textarea value={state.description} rows={3} maxLength={5000} onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))} className="min-h-[76px] w-full resize-y rounded-md border border-line bg-raised px-3 py-2 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]" />
+        </label>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Who can answer</span>
+          <PickerButton ariaLabel="Who can answer" label={state.departmentId ? depts.find((d) => d.id === state.departmentId)?.name ?? session.department?.name ?? "A department" : "Everyone"}
+            selected={state.departmentId ?? "all"} sections={[{ options: [{ value: "all", label: "Everyone" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
+            onSelect={(v) => setState((s) => ({ ...s, departmentId: v === "all" ? null : v }))} />
+          <span className="text-xs text-ink-2">Only people in the scope you pick can see or answer this.</span>
         </div>
-        <div className="cnd-d__prompts">
-          {prompts.map((p, i) => (
-            <div key={p.id} className="cnd-d__prompt">
-              <span className="cnd-d__q-num">{i + 1}</span>
-              <div className="cnd-d__prompt-body">
-                <input value={p.text} onChange={(e) => setPromptText(p.id, e.target.value)} placeholder="Write a question…" />
-                <div className="cnd-d__prompt-foot">
-                  <select value={p.type} onChange={(e) => setPromptType(p.id, e.target.value as PromptType)}>
-                    {PROMPT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                  <div className="cnd-d__prompt-ctrls">
-                    <button type="button" onClick={() => move(p.id, -1)} disabled={i === 0} aria-label="Move up"><ChevronUp /></button>
-                    <button type="button" onClick={() => move(p.id, 1)} disabled={i === prompts.length - 1} aria-label="Move down"><ChevronDown /></button>
-                    <button type="button" onClick={() => removePrompt(p.id)} disabled={prompts.length <= 1} aria-label="Remove"><Trash2 /></button>
-                  </div>
-                </div>
+      </section>
+      <section className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-6">
+        <h2 className="m-0 text-lg font-semibold text-ink">Questions</h2>
+        {state.prompts.length ? (
+          <ReorderableList
+            items={state.prompts}
+            itemKey={(p) => p.id}
+            itemLabel={(p) => p.text}
+            onReorder={(next) => setState((s) => ({ ...s, prompts: next }))}
+            renderRow={(p, api) => (
+              <div className="flex items-center gap-2">
+                {api.grip}
+                <input value={p.text} maxLength={1000} placeholder={`Question ${api.index + 1}`} aria-label={`Question ${api.index + 1}`} onChange={(e) => setPrompt(p.id, { text: e.target.value })} className={input} />
+                <PickerButton ariaLabel={`Type of question ${api.index + 1}`} label={CANDOR_PROMPT_TYPES.find((t) => t.value === p.type)?.label ?? "Open text"} selected={p.type}
+                  sections={[{ options: CANDOR_PROMPT_TYPES }]} onSelect={(v) => setPrompt(p.id, { type: v as CandorPromptType })} className="shrink-0" />
+                <button type="button" aria-label={`More for question ${api.index + 1}`} onClick={(e) => setMenu({ id: p.id, anchor: { current: e.currentTarget }, up: api.moveUp, down: api.moveDown })} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><MoreHorizontal className="h-4 w-4" /></button>
+                <button type="button" aria-label={`Remove question ${api.index + 1}`} onClick={() => setState((s) => ({ ...s, prompts: s.prompts.filter((x) => x.id !== p.id) }))} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><X className="h-4 w-4" /></button>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="cnd-d__actions">
-        <button type="button" className="cnd-d__btn cnd-d__btn--ghost" disabled={saving !== null} onClick={() => persist(false)}>
-          {saving === "save" ? <Dots variant="pending" /> : <Edit3 />} Save draft
+            )}
+          />
+        ) : null}
+        <button type="button" onClick={() => setState((s) => ({ ...s, prompts: [...s.prompts, { id: nextId(), text: "", type: "text" }] }))} className="inline-flex h-9 items-center gap-2 self-start rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+          <Plus className="h-4 w-4" />{state.prompts.length ? "Add question" : "Add your first question"}
         </button>
-        <button type="button" className="cnd-d__btn cnd-d__btn--primary" disabled={saving !== null} onClick={() => persist(true)}>
-          {saving === "launch" ? <Dots variant="pending" /> : <Rocket />} Launch session
-        </button>
-      </div>
+      </section>
+      {onDelete ? (
+        <section className="flex items-center gap-3 rounded-lg border border-[var(--os-danger-border,var(--os-line))] bg-raised p-6">
+          <div className="min-w-0 flex-1">
+            <h2 className="m-0 text-lg font-semibold text-danger-text">Danger zone</h2>
+            <p className="m-0 text-sm text-ink-2">Delete this draft. Nothing has been answered yet.</p>
+          </div>
+          <button type="button" onClick={onDelete} className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-danger-text hover:bg-hover"><Trash2 className="h-4 w-4" />Delete this draft</button>
+        </section>
+      ) : null}
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={180} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label="Question actions">
+            {menu.up ? <MenuItem label="Move up" onClick={() => { menu.up?.(); setMenu(null); }} /> : null}
+            {menu.down ? <MenuItem label="Move down" onClick={() => { menu.down?.(); setMenu(null); }} /> : null}
+            <MenuItem icon={Trash2} label="Remove" destructive onClick={() => { const pid = menu.id; setMenu(null); setState((s) => ({ ...s, prompts: s.prompts.filter((x) => x.id !== pid) })); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
     </div>
   );
 }
+
+

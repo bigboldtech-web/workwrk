@@ -1,168 +1,174 @@
+// /api/reviews/[id]/calibration (spec-teams-performance /reviews/[id]
+// Calibration).
+//
+// GET    every review in reach with its numbers: KPI, self, manager, peer,
+//        SOP compliance, the composite from Settings > Scoring and reviews >
+//        Score weights (a part with no data is left out, never counted as
+//        zero), the performance band from Settings > Performance bands, the
+//        calibrated score, the 9-box potential and the outcome; plus the
+//        distribution over the org's own bands.
+// PATCH  { reviewId | reviewIds, calibratedScore?, calibrationNotes?,
+//        potential?, outcome? }: the cycle's runner (People team, Admin, the
+//        manager who started it), while the cycle is In calibration. A
+//        changed score needs a "why". It never moves the cycle: Start
+//        calibration and Finalize are the only moves (the old PATCH flipped
+//        an Active cycle into calibration on any Adjust click).
+//
+// Reach: the People team and Admin see every row; anyone else sees the
+// people in their CURRENT chain only, so a person who moved to another
+// manager leaves the old one's view.
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canManageReviewCycle, cycleSubjectReach } from "@/lib/people/review-cycle-access";
+import { calibrationNumbers, orgScoring, sopScoresFor } from "@/lib/performance/review-cycle.server";
+import { bandOf, isOutcome } from "@/lib/performance/review-cycle";
+import { logActivity } from "@/lib/activity";
 
-// GET: Get calibration view — all reviews with composite scores
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { id: cycleId } = await params;
   const orgId = getOrgId(session);
 
-  const cycle = await prisma.reviewCycle.findFirst({
-    where: { id: cycleId, organizationId: orgId },
-  });
+  const cycle = await prisma.reviewCycle.findFirst({ where: { id: cycleId, organizationId: orgId } });
   if (!cycle) return jsonError("Review cycle not found", 404);
 
-  // Performance data is people data (Phase 6 worst-case rule): the People
-  // team and Admin see every row; everyone else, the manager who started
-  // the cycle included, sees only the people in their CURRENT reporting
-  // chain, so a person who moved to another manager leaves the old one's
-  // view. The route used to hand every review in the cycle, org-wide, to
-  // any manager. Nobody in reach and not the runner: no calibration view.
   const reach = await cycleSubjectReach(session);
   const chain = reach ? [...reach] : null;
-  if (chain && chain.length === 0 && !(await canManageReviewCycle(session, cycle))) {
-    return jsonError("Forbidden", 403);
-  }
+  const canManage = await canManageReviewCycle(session, cycle);
+  if (chain && chain.length === 0 && !canManage) return jsonError("Forbidden", 403);
 
-  const reviews = await prisma.review.findMany({
-    where: { cycleId, ...(chain ? { subjectId: { in: chain } } : {}) },
-    include: {
-      subject: {
-        select: {
-          id: true, firstName: true, lastName: true,
-          department: { select: { name: true } },
-          role: { select: { title: true } },
+  const [reviews, scoring] = await Promise.all([
+    prisma.review.findMany({
+      where: { cycleId, ...(chain ? { subjectId: { in: chain } } : {}) },
+      include: {
+        subject: {
+          select: {
+            id: true, firstName: true, lastName: true, avatar: true,
+            department: { select: { name: true } },
+            role: { select: { title: true } },
+          },
         },
+        peerFeedback: { where: { status: "SUBMITTED" }, select: { rating: true, collaborationRating: true } },
       },
-      peerFeedback: {
-        where: { status: "SUBMITTED" },
-        select: { rating: true, collaborationRating: true },
-      },
-    },
-  });
+      orderBy: { subject: { firstName: "asc" } },
+    }),
+    orgScoring(orgId),
+  ]);
+  const sop = await sopScoresFor(reviews.map((r) => r.subjectId), { start: cycle.startDate, end: cycle.endDate });
 
-  // Calculate composite scores for each review
-  const calibrationData = reviews.map((review) => {
-    // KPI achievement (40%)
-    const kpiScore = review.kpiScore ?? 0;
-
-    // Manager rating (30%) — convert 1-5 to 0-100 if stored as behavioral avg
-    const managerRating = review.managerRating ?? 0;
-
-    // Self rating (15%) — average of KRA self-ratings
-    let selfRating = 0;
-    if (review.selfRatings) {
-      const sr = review.selfRatings as any;
-      const kraRatings = sr.kraRatings || [];
-      if (kraRatings.length > 0) {
-        const avg = kraRatings.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / kraRatings.length;
-        selfRating = Math.round(avg * 20); // Convert 1-5 to 0-100
-      }
-    }
-
-    // Peer rating (15%) — average of all peer feedback ratings
-    const peerRatings = review.peerFeedback
-      .map((f) => f.collaborationRating ?? f.rating)
-      .filter((r): r is number => r != null);
-    const peerRating = peerRatings.length > 0
-      ? Math.round((peerRatings.reduce((a, b) => a + b, 0) / peerRatings.length) * 20)
-      : 0;
-
-    // Composite: KPI(40%) + Manager(30%) + Self(15%) + Peer(15%)
-    const compositeScore = Math.round(
-      (kpiScore * 0.4) + (managerRating * 0.3) + (selfRating * 0.15) + (peerRating * 0.15)
-    );
-
+  const rows = reviews.map((review) => {
+    const n = calibrationNumbers({
+      kpiScore: review.kpiScore ?? null,
+      managerRating: review.managerRating ?? null,
+      selfRatings: review.selfRatings,
+      peerRatings: review.peerFeedback.map((f) => f.collaborationRating ?? f.rating),
+      sopScore: sop.get(review.subjectId) ?? null,
+    }, scoring.weights);
+    const finalScore = review.calibratedScore ?? n.composite;
     return {
       reviewId: review.id,
       subject: review.subject,
-      kpiScore,
-      selfRating,
-      managerRating,
-      peerRating,
-      compositeScore,
+      status: review.status,
+      kpiScore: n.kpi,
+      selfRating: n.self,
+      managerRating: n.manager,
+      peerRating: n.peer,
+      peerCount: review.peerFeedback.length,
+      sopScore: n.sop,
+      compositeScore: n.composite,
       calibratedScore: review.calibratedScore,
       calibrationNotes: review.calibrationNotes,
+      band: bandOf(finalScore, scoring.bands)?.label ?? null,
+      potential: review.potential ?? null,
       outcome: review.outcome,
-      status: review.status,
     };
   });
 
-  // Bell curve distribution
-  const distribution = { top: 0, high: 0, mid: 0, low: 0, bottom: 0 };
-  calibrationData.forEach((d) => {
-    const score = d.calibratedScore ?? d.compositeScore;
-    if (score >= 90) distribution.top++;
-    else if (score >= 75) distribution.high++;
-    else if (score >= 60) distribution.mid++;
-    else if (score >= 40) distribution.low++;
-    else distribution.bottom++;
-  });
-
-  const allTop = calibrationData.every((d) => (d.calibratedScore ?? d.compositeScore) >= 75);
+  const distribution = scoring.bands
+    .slice()
+    .sort((a, b) => b.min - a.min)
+    .map((b) => ({ label: b.label, min: b.min, max: b.max, count: rows.filter((r) => r.band === b.label).length }));
+  const scored = rows.filter((r) => (r.calibratedScore ?? r.compositeScore) != null);
+  const topTwo = new Set(distribution.slice(0, 2).map((d) => d.label));
+  const allTop = scored.length > 3 && scored.every((r) => r.band && topTwo.has(r.band));
 
   return jsonSuccess({
     cycle,
-    calibrationData: calibrationData.sort((a, b) => (b.calibratedScore ?? b.compositeScore) - (a.calibratedScore ?? a.compositeScore)),
+    canManage,
+    weights: scoring.weights,
+    bands: scoring.bands,
+    calibrationData: rows,
     distribution,
-    warning: allTop && calibrationData.length > 3 ? "All ratings are in the top band. Consider reviewing calibration for accuracy." : null,
+    warning: allTop ? "Everyone is in the top two bands. Check the calibration before you finalize." : null,
   });
 }
 
-// PATCH: Adjust calibration score for a review
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { id: cycleId } = await params;
-  const body = await req.json();
-  const { reviewId, calibratedScore, calibrationNotes } = body;
+  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  const ids = Array.isArray(body.reviewIds)
+    ? body.reviewIds.filter((x): x is string => typeof x === "string").slice(0, 500)
+    : typeof body.reviewId === "string" ? [body.reviewId] : [];
+  if (!ids.length) return jsonError("reviewId is required");
 
-  if (!reviewId) return jsonError("reviewId is required");
-  if (calibratedScore == null) return jsonError("calibratedScore is required");
+  const hasScore = body.calibratedScore !== undefined && body.calibratedScore !== null;
+  const score = hasScore ? Number(body.calibratedScore) : null;
+  if (hasScore && (!Number.isFinite(score) || (score as number) < 0 || (score as number) > 120)) return jsonError("The calibrated score must be 0 to 120", 400);
+  const notes = typeof body.calibrationNotes === "string" ? body.calibrationNotes.trim().slice(0, 5000) : undefined;
+  if (hasScore && !notes) return jsonError("Say why the score changes", 400);
+  if (hasScore && ids.length > 1) return jsonError("A calibrated score is set one person at a time", 400);
+  const potential = body.potential === undefined || body.potential === null ? undefined : Number(body.potential);
+  if (potential !== undefined && ![1, 2, 3].includes(potential)) return jsonError("Potential must be Low, Medium or High", 400);
+  const outcome = body.outcome === undefined || body.outcome === null || body.outcome === "" ? undefined : body.outcome;
+  if (outcome !== undefined && !isOutcome(outcome)) return jsonError("Unknown outcome", 400);
+  if (!hasScore && potential === undefined && outcome === undefined && notes === undefined) return jsonError("Nothing to change", 400);
 
-  // The review must belong to this cycle in this org, and calibrating is the
-  // cycle owner's act (the People team, Admin, or the manager who started it).
   const cycle = await prisma.reviewCycle.findFirst({ where: { id: cycleId, organizationId: getOrgId(session) } });
   if (!cycle) return jsonError("Review cycle not found", 404);
   if (!(await canManageReviewCycle(session, cycle))) {
     return jsonError("Only the People team, an Admin or the manager who started this cycle can calibrate it", 403);
   }
-  const review = await prisma.review.findFirst({
-    where: { id: reviewId, cycleId },
-  });
-  if (!review) return jsonError("Review not found", 404);
+  if (cycle.status !== "IN_CALIBRATION") return jsonError("Start calibration first", 409);
+
+  const reviews = await prisma.review.findMany({ where: { id: { in: ids }, cycleId }, select: { id: true, subjectId: true, status: true } });
+  if (reviews.length !== ids.length) return jsonError("Review not found", 404);
   const reach = await cycleSubjectReach(session);
-  if (reach && !reach.has(review.subjectId)) {
-    return jsonError("This person no longer reports to you, so their calibration is the People team's", 403);
+  if (reach && reviews.some((r) => !reach.has(r.subjectId))) {
+    return jsonError("Some of these people no longer report to you, so their calibration is the People team's", 403);
   }
+  if (reviews.some((r) => r.status === "COMPLETED")) return jsonError("A finalized review can no longer change", 409);
 
-  const updated = await prisma.review.update({
-    where: { id: reviewId },
-    data: {
-      calibratedScore,
-      calibrationNotes: calibrationNotes ?? undefined,
-      status: "CALIBRATION",
-      calibratedById: getUserId(session),
-      calibratedAt: new Date(),
-    },
+  const actor = getUserId(session);
+  await prisma.$transaction(
+    reviews.map((r) =>
+      prisma.review.update({
+        where: { id: r.id },
+        data: {
+          ...(hasScore ? { calibratedScore: score, status: "CALIBRATION" as const, calibratedById: actor, calibratedAt: new Date() } : {}),
+          ...(notes !== undefined ? { calibrationNotes: notes } : {}),
+          ...(potential !== undefined ? { potential } : {}),
+          ...(outcome !== undefined ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
+        },
+      }),
+    ),
+  );
+
+  logActivity({
+    type: "review_cycle.calibrate",
+    actorId: actor,
+    organizationId: getOrgId(session),
+    description: `Calibrated ${reviews.length} ${reviews.length === 1 ? "review" : "reviews"} in ${cycle.name}`,
+    targetId: cycle.id,
+    targetType: "ReviewCycle",
+    metadata: { reviewIds: ids, ...(hasScore ? { calibratedScore: score, notes } : {}), ...(potential !== undefined ? { potential } : {}), ...(outcome !== undefined ? { outcome } : {}) },
   });
 
-  // Update cycle status to IN_CALIBRATION if not already
-  await prisma.reviewCycle.update({
-    where: { id: cycleId },
-    data: { status: "IN_CALIBRATION" },
-  });
-
-  return jsonSuccess(updated);
+  return jsonSuccess({ updated: reviews.length });
 }

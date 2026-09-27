@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 import { subjectRowView } from "@/lib/people/review-visibility";
+import { cleanSelfRatings, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
 export async function GET(
@@ -31,14 +32,16 @@ export async function GET(
 
   if (!review) return jsonError("No review found for you in this cycle", 404);
 
-  // Auto-populate KPI scores for the review period
+  // Auto-populate KPI scores for the review period: records made inside
+  // the cycle's window, the same set the save averages into kpiScore, so
+  // the number shown and the number stored can never disagree.
   const kpiRecords = await prisma.kPIRecord.findMany({
-    where: { userId, kpi: { organizationId: orgId } },
+    where: { userId, kpi: { organizationId: orgId }, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
     include: {
       kpi: { select: { name: true, unit: true, kra: { select: { id: true, name: true } } } },
     },
     orderBy: { createdAt: "desc" },
-    take: 20,
+    take: 200,
   });
 
   // Calculate average KPI score
@@ -47,10 +50,9 @@ export async function GET(
 
   // SOP compliance
   const sopRecords = await prisma.sOPCompliance.findMany({
-    where: { userId },
+    where: { userId, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
     select: { score: true },
     orderBy: { createdAt: "desc" },
-    take: 10,
   });
   const sopScores = sopRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgSopScore = sopScores.length > 0 ? Math.round(sopScores.reduce((a, b) => a + b, 0) / sopScores.length) : null;
@@ -59,7 +61,7 @@ export async function GET(
   const kraAssignments = await prisma.kRAAssignment.findMany({
     where: { userId, status: "ACTIVE" },
     include: {
-      kra: { select: { id: true, name: true, category: true } },
+      kra: { select: { id: true, name: true, category: true, weight: true } },
     },
   });
 
@@ -131,16 +133,27 @@ export async function PATCH(
 
   const review = await prisma.review.findFirst({
     where: { cycleId, subjectId: userId },
-    include: { cycle: { select: { startDate: true, endDate: true } } },
+    include: { cycle: { select: { startDate: true, endDate: true, status: true, name: true } } },
   });
 
   if (!review) return jsonError("No review found for you in this cycle", 404);
-  if (review.status !== "PENDING" && review.status !== "SELF_ASSESSMENT") {
-    return jsonError("Self-assessment already submitted");
+  // A submitted review is read only, and only an Active cycle takes writes
+  // (lib/performance/review-cycle.ts). The old route let a draft save on a
+  // SUBMITTED review put it back to "not started", which the manager and
+  // the cycle's counts then read as never written.
+  if (review.status !== "PENDING") return jsonError("Your review is already submitted", 409);
+  if (!subjectMayWrite(review.cycle.status, review.status)) {
+    return jsonError(review.cycle.status === "DRAFT" ? "This cycle has not opened yet" : "This cycle no longer takes self reviews", 409);
   }
 
-  const body = await req.json();
-  const { selfRatings, submit } = body;
+  const body = (await req.json().catch(() => null)) ?? {};
+  const submit = body.submit === true;
+  const selfRatings = cleanSelfRatings(body.selfRatings);
+  if (submit) {
+    const kras = await prisma.kRAAssignment.findMany({ where: { userId, status: "ACTIVE" }, select: { kraId: true } });
+    const gap = selfReviewGap(selfRatings, kras.map((k) => k.kraId));
+    if (gap) return jsonError(gap, 400);
+  }
   // selfRatings: { kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals} }
 
   // NOTE: the old "task completion rate" metric is gone, honestly. It
@@ -165,28 +178,32 @@ export async function PATCH(
   const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgKpiScore = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
 
-  const updated = await prisma.review.update({
-    where: { id: review.id },
+  // Guarded on PENDING, so a submit racing an autosave cannot be undone by it.
+  const res = await prisma.review.updateMany({
+    where: { id: review.id, status: "PENDING" },
     data: {
-      selfRatings: selfRatings ?? undefined,
+      selfRatings,
       kpiScore: avgKpiScore,
-      status: submit ? "SELF_ASSESSMENT" : "PENDING",
-      ...(submit && { submittedAt: new Date() }),
+      ...(submit ? { status: "SELF_ASSESSMENT" as const, submittedAt: new Date() } : {}),
     },
   });
+  if (res.count === 0) return jsonError("Your review is already submitted", 409);
+  const updated = await prisma.review.findUniqueOrThrow({ where: { id: review.id } });
 
-  // Notify manager if submitted
-  if (submit) {
+  // Tell the reviewer (never the subject themself, when they have no manager).
+  if (submit && review.reviewerId !== userId) {
+    const me = await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+    const who = me ? `${me.firstName} ${me.lastName}`.trim() : "Someone you review";
     await prisma.notification.create({
       data: {
-        title: "Self-Assessment Submitted",
-        message: `${(session.user as { name?: string | null } | undefined)?.name || "An employee"} has submitted their self-assessment. Please complete the manager review.`,
+        title: `${who} submitted their review`,
+        message: `${review.cycle.name}: their manager review is yours to write.`,
         type: "review",
-        link: `/reviews/${cycleId}`,
+        link: `/reviews/${cycleId}?tab=team&person=${userId}`,
         userId: review.reviewerId,
       },
-    });
+    }).catch((e: unknown) => console.error("self review notification", e));
   }
 
-  return jsonSuccess(updated);
+  return jsonSuccess(subjectRowView(updated as unknown as Record<string, unknown>, userId));
 }

@@ -13,6 +13,7 @@
 // Anyone else gets the 404: the cycle is not discoverable to them, so its
 // name is never confirmed. Each section's API scopes its own rows again.
 
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
@@ -44,14 +45,25 @@ export default async function ReviewCycleDetailPage({ params }: { params: Promis
     ? await prisma.review.count({ where: { cycleId: id, subjectId: { in: chain } } })
     : 0;
 
+  const peopleOrAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
   const faces: CycleFaces = {
     self: subjectRows > 0,
     team: reviewerRows > 0,
     peer: peerRows > 0,
     canManage,
     chain: chainRows > 0,
+    // The Review cycles row (APP_RULES reviews): anyone with reports, the
+    // People team and Admin. A subject without it goes back to My profile,
+    // never to a page that would 404 for them.
+    canSeeList: peopleOrAdmin || chain.length > 0,
   };
   if (!faces.self && !faces.team && !faces.peer && !faces.canManage && !faces.chain) notFound();
 
-  return <ReviewDetailClient faces={faces} />;
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <Suspense>
+        <ReviewDetailClient cycleId={id} faces={faces} />
+      </Suspense>
+    </div>
+  );
 }

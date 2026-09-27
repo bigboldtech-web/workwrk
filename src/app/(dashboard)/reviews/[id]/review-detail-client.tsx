@@ -1,269 +1,57 @@
 "use client";
 
-import { BackButton } from "@/components/ui/back-button";
-import { Dots } from "@/components/ui/dots";
-import { SkeletonLines } from "@/components/ui/skeleton";
-import { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+// A review cycle's page (spec-teams-performance /reviews/[id]): one review
+// round, from the employee's own review through the manager's, calibration
+// and the final outcome.
+//
+// The sections come from who the viewer is IN the cycle (the server page
+// decides the faces; every section's API scopes its rows again):
+//   My review       the subject of a row                      MyReviewPanel
+//   Team            a reviewer, anyone above a subject, the    TeamPanel and
+//                   People team and Admin                      ManagerReviewDrawer
+//   Peer feedback   someone asked for peer feedback            PeerFeedbackPanel
+//   Calibration     the cycle's runner, once In calibration    CalibrationPanel
+// A viewer with one section sees no pill row. The old Dashboard tab is the
+// header's step dots and counts plus the Team table.
+//
+// The title row carries the ONE blue button for the viewer's next action
+// (Launch cycle, Submit my review, Open next review, Finalize outcomes), and
+// it is not rendered while a drawer or a modal with its own primary is open.
+// Every load renders a wired Retry in its own section (the old page swallowed
+// twelve failures in empty catch blocks); every save path autosaves with
+// keepalive, retry and a visible failure state.
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Ban, Bell, Download, FileText, Link2, Scale } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { OsPageHeader, OsPageHeaderSkeleton } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { useOsShell } from "@/components/layout/os/shell-context";
+import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  ArrowLeft,
-  Star,
-  Users,
-  CheckCircle,
-  BarChart3,
-  Send,
-  AlertTriangle,
-  UserPlus,
-  TrendingUp,
-  Shield,
-  Rocket,
-  FileText,
-  Download,
-} from "lucide-react";
-import { useAutosave } from "@/hooks/use-autosave";
-import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
-import { fetchWithRetry } from "@/lib/fetch-retry";
-import { NotFoundView } from "@/components/access/not-found-view";
-
-/* ── API payload shapes (the fields this page actually touches) ────
- * The routes mirror deep Prisma include trees; we type the slices the
- * UI reads instead of round-tripping the whole schema. */
-
-type Person = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  role?: { title?: string | null } | null;
-  department?: { name?: string | null } | null;
-};
-
-type Reflection = { wentWell?: string; couldImprove?: string; goals?: string };
-type SelfKraRating = { kraId: string; kraName?: string; rating: number; achievements?: string };
-type MgrKraRating = { kraId: string; kraName?: string; rating: number; comments?: string };
-
-type PeerFeedbackRow = {
-  id: string;
-  status?: string;
-  anonymous?: boolean;
-  giver?: Person | null;
-  receiver: Person;
-  strengths?: string | null;
-  improvements?: string | null;
-  collaborationRating?: number | null;
-  review?: { cycle?: { name?: string | null } | null } | null;
-};
-
-type ReviewRow = {
-  id: string;
-  status: string;
-  subject: Person;
-  outcome?: string | null;
-  overallScore?: number | null;
-  kpiScore?: number | null;
-  sopComplianceScore?: number | null;
-  managerComments?: string | null;
-  selfRatings?: { kraRatings?: SelfKraRating[]; reflection?: Reflection | null } | null;
-  managerAssessment?: {
-    kraRatings?: MgrKraRating[];
-    behavioral?: Record<string, number>;
-    overallComments?: string;
-    recommendation?: string;
-  } | null;
-  peerFeedback?: PeerFeedbackRow[];
-};
-
-type CycleStats = { total: number; selfDone: number; managerDone: number; calibrated: number; completed: number };
-
-type CycleData = {
-  id: string;
-  name: string;
-  type: string;
-  status: string;
-  startDate: string;
-  endDate: string;
-  stats?: CycleStats;
-  reviews?: ReviewRow[];
-};
-
-type OkrKeyResult = {
-  id: string;
-  title: string;
-  unit?: string | null;
-  currentValue?: number | null;
-  targetValue?: number | null;
-  checkIns?: { id: string }[];
-};
-type OkrRow = {
-  id: string;
-  title: string;
-  level?: string | null;
-  quarter?: string | null;
-  progress: number;
-  keyResults?: OkrKeyResult[];
-};
-
-type KraAssignment = { weightage?: number | null; kra: { id: string; name: string; category?: string | null } };
-
-type SelfData = {
-  review: ReviewRow;
-  metrics: {
-    avgKpiScore: number | null;
-    avgSopScore: number | null;
-    okrAvgProgress: number | null;
-    okrs?: OkrRow[];
-  };
-  kraAssignments?: KraAssignment[];
-};
-
-type CalibRow = {
-  reviewId: string;
-  subject: Person;
-  kpiScore: number;
-  selfRating: number;
-  managerRating: number;
-  peerRating: number;
-  compositeScore: number;
-  calibratedScore?: number | null;
-  calibrationNotes?: string | null;
-  outcome?: string | null;
-};
-type CalibrationPayload = {
-  warning?: string | null;
-  distribution: { bottom: number; low: number; mid: number; high: number; top: number };
-  calibrationData: CalibRow[];
-};
-
-type UserOpt = { id: string; firstName: string; lastName: string };
-
-// Shape returned by GET /api/reviews/[reviewId]/appraisal-letter.
-type AppraisalLetter = {
-  companyName: string;
-  employeeName: string;
-  employeeEmail?: string | null;
-  department?: string;
-  role?: string;
-  joinDate?: string | null;
-  cycleName: string;
-  cycleType: string;
-  periodStart?: string | null;
-  periodEnd?: string | null;
-  reviewerName?: string;
-  reviewerRole?: string;
-  overallScore: number;
-  performanceBand: string;
-  outcome?: string | null;
-  compositeScore?: number | null;
-  hikeRecommendation: { min: number; max: number; label: string };
-  managerComments?: string;
-  recommendation?: string;
-  kraRatings?: { kraName?: string; rating?: number; comments?: string }[];
-  behavioralRatings?: Record<string, number>;
-  selfReflection?: Reflection;
-  generatedAt: string;
-  reviewId: string;
-};
-
-function getScoreColor(score: number) {
-  if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[color:var(--accent-strong)]";
-  if (score >= 50) return "text-orange-400";
-  return "text-red-400";
-}
-
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "PENDING": return <Badge variant="secondary">Pending</Badge>;
-    case "SELF_ASSESSMENT": return <Badge className="bg-blue-500/20 text-blue-400">Self-Assessment Done</Badge>;
-    case "MANAGER_REVIEW": return <Badge className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">Manager Reviewed</Badge>;
-    case "CALIBRATION": return <Badge variant="warning">Calibrated</Badge>;
-    case "COMPLETED": return <Badge variant="success">Completed</Badge>;
-    default: return <Badge variant="secondary">{status}</Badge>;
-  }
-}
-
-function getOutcomeBadge(outcome: string) {
-  switch (outcome) {
-    case "PROMOTION_ELIGIBLE": return <Badge variant="success">Promotion Eligible</Badge>;
-    case "HIKE_ELIGIBLE": return <Badge className="bg-blue-500/20 text-blue-400">Hike Eligible</Badge>;
-    case "STATUS_QUO": return <Badge variant="warning">Status Quo</Badge>;
-    case "PIP_REQUIRED": return <Badge variant="destructive">PIP Required</Badge>;
-    case "EXIT_RECOMMENDATION": return <Badge variant="destructive">Exit Recommendation</Badge>;
-    default: return null;
-  }
-}
-
-function fmtDate(d?: string | null) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}
-
-const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
-
-// Self-contained printable letter — the "download" side of the appraisal
-// button. Opens as a standalone .html the user can save or print to PDF.
-function buildLetterHtml(l: AppraisalLetter): string {
-  const kraRows = (l.kraRatings ?? [])
-    .map((k) => `<tr><td>${esc(k.kraName || "—")}</td><td style="text-align:center">${esc(k.rating ?? "—")}/5</td><td>${esc(k.comments || "")}</td></tr>`)
-    .join("");
-  const behavioral = Object.entries(l.behavioralRatings ?? {})
-    .map(([k, v]) => `<li>${esc(k)}: <strong>${esc(v)}/5</strong></li>`)
-    .join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Appraisal Letter — ${esc(l.employeeName)}</title>
-<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#18181b;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.55}
-h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:#71717a;margin:24px 0 8px;border-bottom:1px solid #e4e4e7;padding-bottom:4px}
-.muted{color:#71717a;font-size:13px}.score{font-size:32px;font-weight:700;color:#0073EA}.band{display:inline-block;padding:2px 10px;border-radius:999px;background:#eef4ff;color:#0073EA;font-weight:600;font-size:13px}
-table{width:100%;border-collapse:collapse;font-size:13px}td,th{border:1px solid #e4e4e7;padding:6px 8px;text-align:left}th{background:#fafafa}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:13px}</style></head><body>
-<h1>${esc(l.companyName)}</h1><p class="muted">Performance Appraisal Letter · ${esc(l.cycleName)}</p>
-<h2>Employee</h2>
-<div class="grid"><div><strong>${esc(l.employeeName)}</strong></div><div>${esc(l.role || "")}</div>
-<div class="muted">${esc(l.department || "")}</div><div class="muted">${esc(l.employeeEmail || "")}</div>
-<div class="muted">Joined ${esc(fmtDate(l.joinDate))}</div><div class="muted">Reviewer: ${esc(l.reviewerName || "—")}</div></div>
-<h2>Review period</h2><p class="muted">${esc(fmtDate(l.periodStart))} → ${esc(fmtDate(l.periodEnd))} · ${esc(l.cycleType)}</p>
-<h2>Overall outcome</h2><p><span class="score">${esc(l.overallScore)}</span> &nbsp; <span class="band">${esc(l.performanceBand)}</span></p>
-<p class="muted">Recommended increment: <strong>${esc(l.hikeRecommendation?.label || "—")}</strong>${l.outcome ? ` · Outcome: ${esc(l.outcome.replace(/_/g, " "))}` : ""}</p>
-${kraRows ? `<h2>KRA ratings</h2><table><thead><tr><th>KRA</th><th>Rating</th><th>Comments</th></tr></thead><tbody>${kraRows}</tbody></table>` : ""}
-${behavioral ? `<h2>Behavioral</h2><ul>${behavioral}</ul>` : ""}
-${l.managerComments ? `<h2>Manager comments</h2><p>${esc(l.managerComments)}</p>` : ""}
-${l.recommendation ? `<h2>Recommendation</h2><p>${esc(l.recommendation)}</p>` : ""}
-<p class="muted" style="margin-top:32px">Generated ${esc(fmtDate(l.generatedAt))}</p>
-</body></html>`;
-}
-
-function downloadLetter(l: AppraisalLetter) {
-  const blob = new Blob([buildLetterHtml(l)], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `appraisal-${l.employeeName.replace(/\s+/g, "-").toLowerCase()}-${l.cycleName.replace(/\s+/g, "-").toLowerCase()}.html`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { ToneChip } from "@/components/people/person-bits";
+import { ReviewStepDots } from "@/components/performance/review-step-dots";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { cycleStatusOf, stepsPassed } from "@/lib/performance/review-cycle";
+import type { AppraisalLetter, CycleData, PanelPrimary } from "./cycle-types";
+import { buildLetterHtml, downloadLetter } from "./appraisal-letter";
+import { MyReviewPanel } from "./my-review-panel";
+import { TeamPanel } from "./team-panel";
+import { ManagerReviewDrawer } from "./manager-review-drawer";
+import { PeerFeedbackPanel } from "./peer-feedback-panel";
+import { CalibrationPanel } from "./calibration-panel";
 
 /**
- * Which sections this viewer gets (Phase 6: "review cycles whose sections
- * come from who you are in the cycle"). Decided on the server page from the
- * viewer's rows in the cycle (reviews/[id]/page.tsx); a section the viewer
- * has no part in is not rendered at all.
+ * Which sections this viewer gets, decided on the server page from the
+ * viewer's rows in the cycle (reviews/[id]/page.tsx).
  */
 export interface CycleFaces {
   /** The viewer is the subject of a review in this cycle. */
@@ -276,1294 +64,258 @@ export interface CycleFaces {
   canManage: boolean;
   /** Someone in the viewer's reporting chain is in this cycle. */
   chain: boolean;
+  /** The viewer holds the Review cycles row (so the back button can go there). */
+  canSeeList?: boolean;
 }
 
-const ALL_FACES: CycleFaces = { self: true, team: true, peer: true, canManage: true, chain: true };
+type Tab = "self" | "team" | "peer" | "calibration";
 
-const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
-  quality: { label: "Quality of Work", anchors: ["Consistently below standard", "Sometimes meets standard", "Meets expectations", "Often exceeds expectations", "Exceptional quality"] },
-  reliability: { label: "Reliability & Accountability", anchors: ["Unreliable", "Needs reminders", "Dependable", "Very reliable", "Exemplary accountability"] },
-  collaboration: { label: "Collaboration & Teamwork", anchors: ["Works in isolation", "Minimal collaboration", "Good team player", "Strong collaborator", "Exceptional team leader"] },
-  initiative: { label: "Initiative & Ownership", anchors: ["Passive", "Follows instructions", "Shows some initiative", "Proactive", "Drives change and innovation"] },
-  growth: { label: "Growth & Learning", anchors: ["No growth", "Slow learner", "Steady growth", "Fast learner", "Continuous self-improvement"] },
-};
+export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string; faces: CycleFaces }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const { toast } = useOsToast();
+  const { blockingLayerOpen } = useOsShell();
+  const { boot } = useBoot();
+  const confirm = useConfirm();
+  const datePrefs = useDatePrefs();
+  // A cycle's start and close are calendar days, stored at midnight UTC:
+  // read them as days, never shifted a day by the viewer's time zone.
+  const dayPrefs = { ...datePrefs, timezone: "UTC" };
+  const viewer = boot.viewer as { id: string; isAgent?: boolean };
 
-export default function ReviewCycleDetailPage({ faces = ALL_FACES }: { faces?: CycleFaces } = {}) {
-  const { id: cycleId } = useParams();
-
-  // Launch, calibrate and finalize are the cycle owner's (review-cycle-rules.ts).
-  const canLaunch = faces.canManage;
-  const tabs = [
-    faces.self ? "self-assessment" : null,
-    faces.team ? "manager-review" : null,
-    faces.peer ? "peer-feedback" : null,
-    faces.canManage ? "calibration" : null,
-    faces.canManage || faces.chain ? "dashboard" : null,
-  ].filter((t): t is string => t !== null);
-
+  // When the page opened: the "closes in N days" line reads it, and a
+  // render never reads the clock.
+  const [now] = useState(() => Date.now());
   const [cycle, setCycle] = useState<CycleData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Self-assessment state
-  const [selfData, setSelfData] = useState<SelfData | null>(null);
-  const [loadingSelf, setLoadingSelf] = useState(false);
-  const [kraRatings, setKraRatings] = useState<Record<string, { rating: number; achievements: string }>>({});
-  const [reflection, setReflection] = useState({ wentWell: "", couldImprove: "", goals: "" });
-  const [savingSelf, setSavingSelf] = useState(false);
-  // A save that did not land says so, in words, next to the buttons: a self
-  // review or a manager comment is never lost silently.
-  const [selfSaveError, setSelfSaveError] = useState<string | null>(null);
-  const [mgrSaveError, setMgrSaveError] = useState<string | null>(null);
-  const [peerSaveError, setPeerSaveError] = useState<string | null>(null);
-
-  // Manager review state
-  const [teamReviews, setTeamReviews] = useState<ReviewRow[]>([]);
-  const [loadingTeam, setLoadingTeam] = useState(false);
-  const [selectedReview, setSelectedReview] = useState<ReviewRow | null>(null);
-  const [mgrKraRatings, setMgrKraRatings] = useState<Record<string, { rating: number; comments: string }>>({});
-  const [behavioral, setBehavioral] = useState<Record<string, number>>({});
-  const [mgrComments, setMgrComments] = useState("");
-  const [mgrOutcome, setMgrOutcome] = useState("");
-  const [savingMgr, setSavingMgr] = useState(false);
-
-  // Peer feedback state
-  const [peerRequests, setPeerRequests] = useState<PeerFeedbackRow[]>([]);
-  const [loadingPeer, setLoadingPeer] = useState(false);
-  const [showPeerDialog, setShowPeerDialog] = useState<PeerFeedbackRow | null>(null);
-  const [peerStrengths, setPeerStrengths] = useState("");
-  const [peerImprovements, setPeerImprovements] = useState("");
-  const [peerCollabRating, setPeerCollabRating] = useState(0);
-  const [peerComments, setPeerComments] = useState("");
-  const [savingPeer, setSavingPeer] = useState(false);
-
-  // Peer request dialog (manager assigning peers)
-  const [showAssignPeersDialog, setShowAssignPeersDialog] = useState<ReviewRow | null>(null);
-  const [peerUserIds, setPeerUserIds] = useState<string[]>([]);
-  const [allUsers, setAllUsers] = useState<UserOpt[]>([]);
-  const [savingPeerReq, setSavingPeerReq] = useState(false);
-
-  // Calibration state
-  const [calibrationData, setCalibrationData] = useState<CalibrationPayload | null>(null);
-  const [loadingCalib, setLoadingCalib] = useState(false);
-  const [editingCalib, setEditingCalib] = useState<{ reviewId: string; score: string; notes: string } | null>(null);
-  const [savingCalib, setSavingCalib] = useState(false);
-
-  // Finalize state
-  const [savingFinalize, setSavingFinalize] = useState(false);
-
-  // Appraisal letter state — GET /api/reviews/[reviewId]/appraisal-letter
-  // (only valid once the review is COMPLETED/finalized).
-  const [letter, setLetter] = useState<AppraisalLetter | null>(null);
-  const [letterOpen, setLetterOpen] = useState(false);
-  const [letterLoadingId, setLetterLoadingId] = useState<string | null>(null);
-  const [letterError, setLetterError] = useState<string | null>(null);
-
-  // Launch state (DRAFT cycles — the cron notification lands here, so
-  // this page must carry the launch control, not just the list).
-  const [launching, setLaunching] = useState(false);
-  const [launchError, setLaunchError] = useState<string | null>(null);
-
-  const fetchCycle = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/reviews/${cycleId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCycle(data);
-      }
-    } catch {} finally { setLoading(false); }
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const r = await apiFetch<CycleData>(`/api/reviews/${cycleId}`, { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load this cycle"); return; }
+    setError(null);
+    setCycle(r.data);
   }, [cycleId]);
-
-  const fetchSelfAssessment = useCallback(async () => {
-    try {
-      setLoadingSelf(true);
-      const res = await fetch(`/api/reviews/${cycleId}/self-assessment`);
-      if (res.ok) {
-        const data = await res.json();
-        setSelfData(data);
-        // Pre-fill from existing data
-        if (data.review?.selfRatings) {
-          const sr = data.review.selfRatings;
-          const ratings: Record<string, { rating: number; achievements: string }> = {};
-          (sr.kraRatings || []).forEach((r: SelfKraRating) => { ratings[r.kraId] = { rating: r.rating, achievements: r.achievements || "" }; });
-          setKraRatings(ratings);
-          if (sr.reflection) setReflection(sr.reflection);
-        }
-      }
-    } catch {} finally { setLoadingSelf(false); }
-  }, [cycleId]);
-
-  const fetchTeamReviews = useCallback(async () => {
-    try {
-      setLoadingTeam(true);
-      const res = await fetch(`/api/reviews/${cycleId}/manager-review`);
-      if (res.ok) setTeamReviews(await res.json());
-    } catch {} finally { setLoadingTeam(false); }
-  }, [cycleId]);
-
-  const fetchPeerFeedback = useCallback(async () => {
-    try {
-      setLoadingPeer(true);
-      const res = await fetch(`/api/reviews/${cycleId}/peer-feedback`);
-      if (res.ok) setPeerRequests(await res.json());
-    } catch {} finally { setLoadingPeer(false); }
-  }, [cycleId]);
-
-  const fetchCalibration = useCallback(async () => {
-    try {
-      setLoadingCalib(true);
-      const res = await fetch(`/api/reviews/${cycleId}/calibration`);
-      if (res.ok) setCalibrationData(await res.json());
-    } catch {} finally { setLoadingCalib(false); }
-  }, [cycleId]);
-
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await fetch("/api/users?limit=500");
-      if (res.ok) {
-        const data = await res.json();
-        setAllUsers(Array.isArray(data) ? data : data.users ?? data.data ?? []);
-      }
-    } catch {}
-  }, []);
-
   useEffect(() => {
-    fetchCycle();
-    fetchSelfAssessment();
-    fetchTeamReviews();
-    fetchPeerFeedback();
-    fetchCalibration();
-    fetchUsers();
-  }, [fetchCycle, fetchSelfAssessment, fetchTeamReviews, fetchPeerFeedback, fetchCalibration, fetchUsers]);
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  // --- Handlers ---
+  const setParams = useCallback((patch: Record<string, string | null>, push = false) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    const s = next.toString();
+    const href = s ? `${pathname}?${s}` : pathname;
+    if (push) router.push(href, { scroll: false }); else router.replace(href, { scroll: false });
+  }, [sp, router, pathname]);
 
-  const handleSelfAssessment = async (submit: boolean) => {
-    setSavingSelf(true);
-    try {
-      const selfRatings = {
-        kraRatings: Object.entries(kraRatings).map(([kraId, data]) => ({
-          kraId,
-          kraName: selfData?.kraAssignments?.find((a) => a.kra.id === kraId)?.kra.name || "",
-          rating: data.rating,
-          achievements: data.achievements,
-        })),
-        reflection,
-      };
-      const res = await fetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selfRatings, submit }),
-      });
-      if (!res.ok) {
-        setSelfSaveError(await saveRefusal(res, submit ? "Your self review was not submitted." : "Your draft was not saved."));
-        return;
-      }
-      setSelfSaveError(null);
-      await fetchSelfAssessment();
-      await fetchCycle();
-    } catch {
-      setSelfSaveError(submit
-        ? "Your self review was not submitted. Check your connection and try again; your answers are still here."
-        : "Your draft was not saved. Check your connection and try again; your answers are still here.");
-    } finally { setSavingSelf(false); }
-  };
+  const status = cycle?.status ?? "DRAFT";
+  const v = cycle?.viewer;
+  const canManage = v?.canManage ?? faces.canManage;
+  const teamRows = useMemo(() => (cycle?.reviews ?? []).filter((r) => !r.peerOnly && r.subjectId !== viewer.id), [cycle, viewer.id]);
+  const tabs: Tab[] = [
+    faces.self ? "self" : null,
+    faces.team || faces.chain || (canManage && teamRows.length > 0) || (v?.peopleTeamOrAdmin && teamRows.length > 0) ? "team" : null,
+    faces.peer ? "peer" : null,
+    canManage && (status === "IN_CALIBRATION" || status === "COMPLETED") ? "calibration" : null,
+  ].filter((t): t is Tab => t !== null);
+  const asked = sp?.get("tab");
+  const tabAlias: Record<string, Tab> = { self: "self", "self-assessment": "self", team: "team", "manager-review": "team", peer: "peer", "peer-feedback": "peer", calibration: "calibration" };
+  const tab: Tab | null = (asked && tabAlias[asked] && tabs.includes(tabAlias[asked]) ? tabAlias[asked] : tabs[0]) ?? null;
+  const person = sp?.get("person") ?? null;
 
-  // Autosave hook for the self-assessment. Saves the draft (submit=false)
-  // every ~1.5s after the user pauses typing. The "Save Draft" button
-  // becomes mostly cosmetic, but we keep it so the user can do an
-  // explicit save if they want one.
-  const myReviewForAutosave = selfData?.review;
-  const canSelfAssessAutosave =
-    myReviewForAutosave && (myReviewForAutosave.status === "PENDING" || myReviewForAutosave.status === "SELF_ASSESSMENT");
-  const selfSnapshot = { kraRatings, reflection };
-  const autosaveSelf = useAutosave({
-    snapshot: selfSnapshot,
-    enabled: !!canSelfAssessAutosave,
-    delay: 1500,
-    localKey: cycleId ? `review-self:${cycleId}` : undefined,
-    save: async () => {
-      const selfRatings = {
-        kraRatings: Object.entries(kraRatings).map(([kraId, data]) => ({
-          kraId,
-          kraName: selfData?.kraAssignments?.find((a) => a.kra.id === kraId)?.kra.name || "",
-          rating: data.rating,
-          achievements: data.achievements,
-        })),
-        reflection,
-      };
-      // Throws on any refusal, so the hook shows "Not saved, retrying" and
-      // keeps the local backup, instead of calling a 401 or a 500 "Saved".
-      const res = await fetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selfRatings, submit: false }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-  });
+  // The primary the active panel hands up (Submit my review, Finalize).
+  const [panelPrimary, setPanelPrimary] = useState<PanelPrimary>(null);
+  const onPrimary = useCallback((p: PanelPrimary) => setPanelPrimary(p), []);
 
-  const handleManagerReview = async (reviewId: string, submit: boolean) => {
-    setSavingMgr(true);
-    try {
-      const managerAssessment = {
-        kraRatings: Object.entries(mgrKraRatings).map(([kraId, data]) => ({
-          kraId,
-          kraName: "",
-          rating: data.rating,
-          comments: data.comments,
-        })),
-        behavioral,
-        overallComments: mgrComments,
-        recommendation: mgrOutcome,
-      };
-      const res = await fetchWithRetry(`/api/reviews/${cycleId}/manager-review`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId, managerAssessment, outcome: submit ? mgrOutcome : undefined, managerComments: mgrComments, submit }),
-      });
-      if (!res.ok) {
-        setMgrSaveError(await saveRefusal(res, submit ? "Your review was not submitted." : "Your draft was not saved."));
-        return;
-      }
-      setMgrSaveError(null);
-      setSelectedReview(null);
-      await fetchTeamReviews();
-      await fetchCycle();
-    } catch {
-      setMgrSaveError(submit
-        ? "Your review was not submitted. Check your connection and try again; your comments are still here."
-        : "Your draft was not saved. Check your connection and try again; your comments are still here.");
-    } finally { setSavingMgr(false); }
-  };
-
-  // Autosave for the manager review while a reviewee is selected.
-  // Saves every ~1.5s of pause; final submission still goes through
-  // the explicit Submit button.
-  const autosaveMgr = useAutosave({
-    snapshot: { mgrKraRatings, behavioral, mgrComments, mgrOutcome },
-    enabled: !!selectedReview,
-    delay: 1500,
-    localKey: selectedReview ? `mgr-review:${selectedReview.id}` : undefined,
-    save: async () => {
-      if (!selectedReview) return;
-      const managerAssessment = {
-        kraRatings: Object.entries(mgrKraRatings).map(([kraId, data]) => ({
-          kraId,
-          kraName: "",
-          rating: data.rating,
-          comments: data.comments,
-        })),
-        behavioral,
-        overallComments: mgrComments,
-        recommendation: mgrOutcome,
-      };
-      const res = await fetchWithRetry(`/api/reviews/${cycleId}/manager-review`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId: selectedReview.id, managerAssessment, managerComments: mgrComments, submit: false }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-  });
-
-  const handlePeerSubmit = async (feedbackId: string) => {
-    setSavingPeer(true);
-    try {
-      const res = await fetchWithRetry(`/api/reviews/${cycleId}/peer-feedback`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feedbackId, strengths: peerStrengths, improvements: peerImprovements, collaborationRating: peerCollabRating, comments: peerComments }),
-      });
-      if (!res.ok) {
-        setPeerSaveError(await saveRefusal(res, "Your feedback was not submitted."));
-        return;
-      }
-      setPeerSaveError(null);
-      setShowPeerDialog(null);
-      setPeerStrengths(""); setPeerImprovements(""); setPeerCollabRating(0); setPeerComments("");
-      await fetchPeerFeedback();
-    } catch {
-      setPeerSaveError("Your feedback was not submitted. Check your connection and try again; your answers are still here.");
-    } finally { setSavingPeer(false); }
-  };
-
-  const handleAssignPeers = async (reviewId: string) => {
-    setSavingPeerReq(true);
-    try {
-      const res = await fetch(`/api/reviews/${cycleId}/peer-feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId, peerIds: peerUserIds }),
-      });
-      if (res.ok) {
-        setShowAssignPeersDialog(null);
-        setPeerUserIds([]);
-        await fetchTeamReviews();
-      }
-    } catch {} finally { setSavingPeerReq(false); }
-  };
-
-  const handleCalibrationSave = async () => {
-    if (!editingCalib) return;
-    setSavingCalib(true);
-    try {
-      const res = await fetch(`/api/reviews/${cycleId}/calibration`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId: editingCalib.reviewId, calibratedScore: parseFloat(editingCalib.score), calibrationNotes: editingCalib.notes }),
-      });
-      if (res.ok) {
-        setEditingCalib(null);
-        await fetchCalibration();
-        await fetchCycle();
-      }
-    } catch {} finally { setSavingCalib(false); }
-  };
-
-  // Launch a DRAFT cycle: POST /launch creates a Review row for every
-  // active employee (reviewer = their manager) and flips the cycle
-  // ACTIVE server-side. This is the only door out of DRAFT — a raw
-  // status PATCH is rejected while the cycle has zero reviews.
-  const handleLaunch = async () => {
+  // ── Actions ───────────────────────────────────────────────────────
+  const [launching, setLaunching] = useState(false);
+  const launch = async () => {
+    if (!cycle) return;
+    const ok = await confirm({ title: `Launch ${cycle.name}?`, description: "This creates a review for everyone it covers and emails each of them.", confirmLabel: "Launch", destructive: false });
+    if (!ok) return;
     setLaunching(true);
-    setLaunchError(null);
-    try {
-      const res = await fetch(`/api/reviews/${cycleId}/launch`, { method: "POST" });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setLaunchError(
-          res.status === 403
-            ? "Only managers/HR can launch review cycles."
-            : data?.error || "Couldn't launch the cycle.",
-        );
-        return;
-      }
-      await Promise.all([fetchCycle(), fetchSelfAssessment(), fetchTeamReviews()]);
-    } catch {
-      setLaunchError("Couldn't launch the cycle.");
-    } finally {
-      setLaunching(false);
-    }
+    const r = await apiFetch<{ count: number }>(`/api/reviews/${cycleId}/launch`, { method: "POST" });
+    setLaunching(false);
+    if (!r.ok) { toast(r.error || "Couldn't launch the cycle", { tone: "danger" }); return; }
+    toast(`Launched. ${r.data.count} ${r.data.count === 1 ? "person" : "people"} asked for a review.`);
+    router.refresh();
+    void load();
+  };
+  const remind = async () => {
+    const r = await apiFetch<{ notified: number }>(`/api/reviews/${cycleId}/reminders`, { method: "POST", json: {} });
+    if (!r.ok) { toast(r.error || "Couldn't send reminders", { tone: "danger" }); return; }
+    toast(r.data.notified ? `Reminded ${r.data.notified} ${r.data.notified === 1 ? "person" : "people"}` : "Nobody needed a reminder");
+  };
+  const cancel = async () => {
+    if (!cycle) return;
+    const ok = await confirm({ title: `Cancel ${cycle.name}?`, description: "Nothing is deleted. The cycle stops and nobody is asked for anything more.", confirmLabel: "Cancel cycle", cancelLabel: "Keep it", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews/${cycleId}/cancel`, { method: "POST", json: {} });
+    if (!r.ok) { toast(r.error || "Couldn't cancel the cycle", { tone: "danger" }); return; }
+    toast("Cycle cancelled");
+    void load();
+  };
+  const startCalibration = async () => {
+    if (!cycle) return;
+    const ok = await confirm({ title: `Start calibration for ${cycle.name}?`, description: "Managers can no longer change a review they submitted after this. Anyone not done yet can still submit.", confirmLabel: "Start calibration", destructive: false });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews`, { method: "PATCH", json: { id: cycleId, status: "IN_CALIBRATION" } });
+    if (!r.ok) { toast(r.error || "Couldn't start calibration", { tone: "danger" }); return; }
+    toast("Calibration started");
+    await load();
+    setParams({ tab: "calibration" });
   };
 
-  // Generate the appraisal letter for a single finalized review. The route
-  // key is the REVIEW id (not the cycle id) and 400s unless COMPLETED.
-  const handleGenerateLetter = async (reviewId: string) => {
-    setLetterLoadingId(reviewId);
-    setLetterError(null);
-    try {
-      const res = await fetch(`/api/reviews/${reviewId}/appraisal-letter`);
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setLetterError(data?.error || "Couldn't generate the appraisal letter.");
-        setLetterOpen(true);
-        return;
-      }
-      setLetter(data as AppraisalLetter);
-      setLetterOpen(true);
-    } catch {
-      setLetterError("Couldn't generate the appraisal letter.");
-      setLetterOpen(true);
-    } finally {
-      setLetterLoadingId(null);
-    }
-  };
+  // ── Appraisal letter ──────────────────────────────────────────────
+  const [letter, setLetter] = useState<{ reviewId: string; data: AppraisalLetter | null; error: string | null } | null>(null);
+  const openLetter = useCallback(async (reviewId: string) => {
+    setLetter({ reviewId, data: null, error: null });
+    const r = await apiFetch<AppraisalLetter>(`/api/reviews/${cycleId}/appraisal-letter?reviewId=${encodeURIComponent(reviewId)}`, { cache: "no-store" });
+    setLetter({ reviewId, data: r.ok ? r.data : null, error: r.ok ? null : r.error || "Couldn't make the appraisal letter" });
+  }, [cycleId, setLetter]);
 
-  const handleFinalize = async () => {
-    if (!calibrationData?.calibrationData) return;
-    setSavingFinalize(true);
-    try {
-      const outcomes = calibrationData.calibrationData
-        .filter((d) => d.outcome)
-        .map((d) => ({
-          reviewId: d.reviewId,
-          outcome: d.outcome,
-          overallScore: d.calibratedScore ?? d.compositeScore,
-        }));
-      const res = await fetch(`/api/reviews/${cycleId}/finalize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outcomes }),
-      });
-      if (res.ok) {
-        await fetchCycle();
-        await fetchCalibration();
-      }
-    } catch {} finally { setSavingFinalize(false); }
-  };
+  // ── The next action (one blue on screen) ──────────────────────────
+  const myRow = (cycle?.reviews ?? []).find((r) => r.subjectId === viewer.id && !r.peerOnly);
+  const outstanding = teamRows.filter((r) => r.reviewerId === viewer.id && (r.status === "PENDING" || r.status === "SELF_ASSESSMENT"));
+  let primary: PanelPrimary = null;
+  if (canManage && status === "DRAFT") primary = { label: "Launch cycle", onClick: () => void launch(), busy: launching };
+  else if (tab === "self" && panelPrimary) primary = panelPrimary;
+  else if (tab === "calibration" && panelPrimary) primary = panelPrimary;
+  else if (tab === "team" && outstanding.length && (status === "ACTIVE" || status === "IN_CALIBRATION")) primary = { label: "Open next review", onClick: () => setParams({ person: outstanding[0].subjectId }, true) };
+  const showPrimary = primary && !blockingLayerOpen && !person && !letter;
 
-  if (loading) {
+  const back = faces.canSeeList !== false ? { fallbackHref: "/reviews", label: "Review cycles" } : { fallbackHref: "/people/me", label: "My profile" };
+  const moreEntries = cycle ? [
+    { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/reviews/${cycleId}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
+    ...((canManage || v?.inChain || v?.isReviewer) && (status === "ACTIVE" || status === "IN_CALIBRATION") ? [{ label: "Send a reminder", icon: Bell, onClick: () => void remind() }] : []),
+    ...(myRow && myRow.status === "COMPLETED" ? [{ label: "Download my appraisal letter", icon: FileText, onClick: () => void openLetter(myRow.id) }] : []),
+    ...(v?.peopleTeamOrAdmin && !viewer.isAgent ? [{ label: "Export cycle CSV", icon: Download, onClick: () => { window.location.href = `/api/export/reviews/${cycleId}`; } }] : []),
+    ...(canManage && status === "ACTIVE" ? [{ label: "Start calibration", icon: Scale, onClick: () => void startCalibration() }] : []),
+    ...(canManage && !viewer.isAgent && (status === "DRAFT" || status === "ACTIVE") ? [{ separator: true as const }, { label: "Cancel cycle", icon: Ban, destructive: true, onClick: () => void cancel() }] : []),
+  ] : [];
+
+  if (error && !cycle) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-48 bg-zinc-50 rounded animate-pulse" />
-        <div className="h-32 bg-white rounded-lg border border-zinc-200 animate-pulse" />
-        <div className="h-64 bg-white rounded-lg border border-zinc-200 animate-pulse" />
-      </div>
+      <>
+        <OsPageHeader title="Review cycle" back={back} />
+        <div className="px-6 py-6"><OsEmptyView variant="error" title="Couldn't load this cycle" hint={error} action={{ label: "Try again", onClick: () => void load() }} /></div>
+      </>
+    );
+  }
+  if (!cycle) {
+    return (
+      <>
+        <OsPageHeaderSkeleton />
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-6 py-6" aria-busy="true">
+          <SkeletonLines lines={2} />
+          {[0, 1, 2].map((i) => <div key={i} className="rounded-lg border border-line p-6"><SkeletonLines lines={4} /></div>)}
+        </div>
+      </>
     );
   }
 
-  // The in-shell 404 (spec-shell 2.4): the same view as any unknown object.
-  if (!cycle) return <NotFoundView />;
+  const st = cycleStatusOf(status);
+  const closed = status === "COMPLETED" || status === "CANCELLED";
+  const passed = stepsPassed(status, cycle.stats);
+  const daysLeft = Math.ceil((new Date(cycle.endDate).getTime() - now) / 86_400_000);
+  const stalled = status === "ACTIVE" && daysLeft < 0;
+  const above = canManage || v?.inChain || v?.peopleTeamOrAdmin || v?.isReviewer;
+  const pct = cycle.stats.total ? Math.round((cycle.stats.completed / cycle.stats.total) * 100) : 0;
+  const wide = tab === "team" || tab === "calibration";
 
-  const stats: CycleStats = cycle.stats ?? { total: 0, selfDone: 0, managerDone: 0, calibrated: 0, completed: 0 };
-  const myReview = selfData?.review;
-  const canSelfAssess = myReview && (myReview.status === "PENDING" || myReview.status === "SELF_ASSESSMENT");
-
-  const cycleStatusColor = cycle.status === "ACTIVE" ? "var(--os-c-orange)"
-                         : cycle.status === "IN_CALIBRATION" ? "var(--os-c-teal)"
-                         : cycle.status === "COMPLETED" ? "var(--os-c-green)"
-                         : "var(--os-c-blue)";
-  const cycleProgress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
   return (
-    <div className="space-y-3 animate-fade-in">
-      <section className="rvwd__hero" style={{ ["--hero-c" as unknown as string]: cycleStatusColor }}>
-        <span className="rvwd__hero-accent" aria-hidden="true" />
-        {/* A subject with no Review cycles row goes back to My profile, so
-            the button never points at a page that 404s for them. */}
-        {faces.canManage || faces.chain || faces.team
-          ? <BackButton fallbackHref="/reviews" label="Review cycles" />
-          : <BackButton fallbackHref="/people/me" label="My profile" />}
-        <div className="rvwd__hero-meta">
-          <span className="rvwd__hero-status">{cycle.status.replace(/_/g, " ")}</span>
-          <span className="rvwd__hero-type">{cycle.type.replace(/_/g, " ")}</span>
-          <span className="rvwd__hero-dates">
-            {new Date(cycle.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            {" → "}
-            {new Date(cycle.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-          </span>
+    <>
+      <Breadcrumb items={faces.canSeeList !== false ? [{ label: "Review cycles", href: "/reviews" }, { label: cycle.name }] : [{ label: cycle.name }]} />
+      <OsPageHeader
+        title={cycle.name}
+        back={back}
+        titleSlot={
+          <>
+            <h1 className="min-w-0 truncate text-title font-semibold text-ink">{cycle.name}</h1>
+            <ToneChip tone={st.tone} label={st.label} />
+          </>
+        }
+        actions={showPrimary && primary ? (
+          <button type="button" onClick={primary.onClick} disabled={primary.busy} title={primary.title}
+            className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-60">
+            {primary.busy ? "Working" : primary.label}
+          </button>
+        ) : undefined}
+        more={moreEntries}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={`mx-auto flex w-full flex-col gap-4 px-6 pb-10 pt-2 ${wide ? "max-w-[1152px]" : "max-w-[720px]"}`}>
+          {/* The meta strip: steps, period, what is left. */}
+          <div className="flex min-h-14 flex-wrap items-center gap-x-6 gap-y-2">
+            <ReviewStepDots passed={passed} stalled={stalled} withLabels />
+            <span className="text-sm text-ink-2">
+              {formatDate(cycle.startDate, dayPrefs, "date")} to {formatDate(cycle.endDate, dayPrefs, "date")}
+              {" · "}
+              {closed ? (status === "CANCELLED" ? "Cancelled" : "Closed") : daysLeft < 0 ? `Closed for answers ${-daysLeft} ${-daysLeft === 1 ? "day" : "days"} ago` : daysLeft === 0 ? "Closes today" : `Closes in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`}
+            </span>
+            {above && cycle.stats.total ? (
+              <span className="flex items-center gap-2 text-sm text-ink-2">
+                {cycle.stats.completed} of {cycle.stats.total} reviews complete
+                <span className="h-1 w-[120px] overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} /></span>
+              </span>
+            ) : faces.self && !closed ? (
+              <span className="text-sm text-ink-2">Your review is due {formatDate(cycle.endDate, dayPrefs, "date")}</span>
+            ) : null}
+          </div>
+
+          {closed && !primary ? <p className="m-0 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">{status === "CANCELLED" ? "This cycle was cancelled. Nothing more is asked of anyone." : "This cycle is closed. Scores and outcomes are final."}</p> : null}
+          {status === "DRAFT" && canManage ? (
+            <p className="m-0 rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">Nobody has been added yet. Launching the cycle creates a review for everyone it covers ({cycle.createdBy && !v?.peopleTeamOrAdmin ? "the people who report to you" : "as set when it was created"}).</p>
+          ) : null}
+
+          {tabs.length > 1 ? (
+            <div role="tablist" aria-label="Sections" className="flex h-9 items-center gap-1">
+              {tabs.map((t) => (
+                <ViewTab key={t} label={t === "self" ? "My review" : t === "team" ? "Team" : t === "peer" ? "Peer feedback" : "Calibration"} active={tab === t} onClick={() => setParams({ tab: t === tabs[0] ? null : t, person: null })} />
+              ))}
+            </div>
+          ) : null}
+
+          {tab === "self" ? (
+            <MyReviewPanel cycleId={cycleId} cycleStatus={status} cycleEnd={cycle.endDate} words={cycle.scale.words} bands={cycle.bands} onPrimary={onPrimary} onChanged={() => void load()} onOpenLetter={(id) => void openLetter(id)} />
+          ) : tab === "team" ? (
+            <TeamPanel cycleId={cycleId} cycleStatus={status} rows={teamRows} viewerId={viewer.id} isAgent={!!viewer.isAgent}
+              onOpen={(id) => setParams({ person: id, tab: tabs[0] === "team" ? null : "team" }, true)} onOpenLetter={(id) => void openLetter(id)} onChanged={() => void load()} />
+          ) : tab === "peer" ? (
+            <PeerFeedbackPanel cycleId={cycleId} cycleStatus={status} words={cycle.scale.words} />
+          ) : tab === "calibration" ? (
+            <CalibrationPanel cycleId={cycleId} cycleStatus={status} isAgent={!!viewer.isAgent} onPrimary={onPrimary} onChanged={() => void load()} />
+          ) : status === "DRAFT" ? null : (
+            <p className="m-0 text-row text-ink-2">Nothing in this cycle is yours to do.</p>
+          )}
         </div>
-        <h1 className="rvwd__hero-name">{cycle.name}</h1>
-        <div className="rvwd__hero-progress">
-          <div className="rvwd__hero-bar"><div className="rvwd__hero-bar-fill" style={{ width: `${cycleProgress}%` }} /></div>
-          <span className="rvwd__hero-pct">{cycleProgress}%</span>
-        </div>
-        <div className="rvwd__hero-stats">
-          <div><span>Total</span><strong>{stats.total ?? 0}</strong></div>
-          <div className="rvwd__hero-stat--self"><span>Self done</span><strong>{stats.selfDone ?? 0}</strong></div>
-          <div className="rvwd__hero-stat--mgr"><span>Mgr done</span><strong>{stats.managerDone ?? 0}</strong></div>
-          <div className="rvwd__hero-stat--cal"><span>Calibrated</span><strong>{stats.calibrated ?? 0}</strong></div>
-          <div className="rvwd__hero-stat--done"><span>Completed</span><strong>{stats.completed ?? 0}</strong></div>
-        </div>
+      </div>
 
-        {/* DRAFT cycles haven't generated any per-person reviews yet —
-            launching is what creates them (one per active employee,
-            reviewer = their manager) and moves the cycle to Active.
-            Manager tier only: mirrors the API's isManager gate, so
-            non-managers never see a launch button that just 403s. */}
-        {cycle.status === "DRAFT" && canLaunch && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3">
-            <div className="flex-1 min-w-[220px]">
-              <p className="text-xs font-medium">This cycle hasn&apos;t been launched yet</p>
-              <p className="text-xs text-zinc-500">
-                Launching creates a review for every active employee and notifies them to
-                start their self-assessment.
-              </p>
-              {launchError && <p className="text-xs text-[#E2445C] mt-1">{launchError}</p>}
-            </div>
-            <Button onClick={handleLaunch} disabled={launching} className="gap-2">
-              <Rocket size={14} />
-              {launching ? "Launching..." : "Launch cycle"}
-            </Button>
-          </div>
-        )}
-      </section>
+      {person && tab === "team" ? (
+        <ManagerReviewDrawer key={person} cycleId={cycleId} cycleName={cycle.name} subjectId={person} onClose={() => setParams({ person: null })} onSaved={() => void load()} />
+      ) : null}
 
-      {/* Tabs */}
-      <Tabs defaultValue={tabs[0] ?? "dashboard"}>
-        <TabsList>
-          {faces.self ? <TabsTrigger value="self-assessment" className="gap-2"><Star size={14} /> My review</TabsTrigger> : null}
-          {faces.team ? <TabsTrigger value="manager-review" className="gap-2"><Users size={14} /> Manager reviews</TabsTrigger> : null}
-          {faces.peer ? <TabsTrigger value="peer-feedback" className="gap-2"><Send size={14} /> Peer feedback</TabsTrigger> : null}
-          {faces.canManage ? <TabsTrigger value="calibration" className="gap-2"><BarChart3 size={14} /> Calibration</TabsTrigger> : null}
-          {faces.canManage || faces.chain ? <TabsTrigger value="dashboard" className="gap-2"><TrendingUp size={14} /> Dashboard</TabsTrigger> : null}
-        </TabsList>
-
-        {/* ===== SELF-ASSESSMENT TAB ===== */}
-        <TabsContent value="self-assessment" className="mt-4 space-y-4">
-          {loadingSelf ? (
-            <Card><CardContent className="p-8"><SkeletonLines lines={4} /></CardContent></Card>
-          ) : !selfData || !myReview ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">No review found for you in this cycle.</CardContent></Card>
-          ) : (
-            <>
-              {/* Status */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-500">Your review status:</span>
-                {getStatusBadge(myReview.status)}
-                {myReview.status !== "PENDING" && myReview.status !== "SELF_ASSESSMENT" && (
-                  <span className="text-xs text-green-400">Self-assessment submitted</span>
-                )}
-                {/* Autosave indicator. Visible while the draft is editable. */}
-                {canSelfAssessAutosave && (
-                  <AutosaveIndicator className="ml-auto" status={autosaveSelf.status} lastSavedAt={autosaveSelf.lastSavedAt} labels={{ idle: "Autosave on" }} onRetry={autosaveSelf.retriesExhausted ? autosaveSelf.retryNow : undefined} />
-                )}
-              </div>
-
-              {/* Auto-populated Metrics (READ ONLY) */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-xs">Auto-Populated Metrics</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-zinc-500"}`}>
-                        {selfData.metrics.avgKpiScore ?? "N/A"}
-                      </p>
-                      <p className="text-xs text-zinc-500">Avg KPI Score</p>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-zinc-500"}`}>
-                        {selfData.metrics.avgSopScore ?? "N/A"}
-                      </p>
-                      <p className="text-xs text-zinc-500">SOP Compliance</p>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.okrAvgProgress != null ? getScoreColor(selfData.metrics.okrAvgProgress) : "text-zinc-500"}`}>
-                        {selfData.metrics.okrAvgProgress != null ? `${selfData.metrics.okrAvgProgress}%` : "N/A"}
-                      </p>
-                      <p className="text-xs text-zinc-500">OKR Progress</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* OKRs you owned this period — pre-populated from your
-                  check-ins so you barely have to re-write what you
-                  shipped. */}
-              {(selfData.metrics.okrs?.length ?? 0) > 0 && (
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-xs">Your OKRs this period</CardTitle></CardHeader>
-                  <CardContent className="space-y-3">
-                    {selfData.metrics.okrs?.map((okr) => (
-                      <div key={okr.id} className="rounded-lg border border-zinc-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-3 mb-2">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium truncate">{okr.title}</p>
-                            <p className="text-xs text-zinc-500">{okr.level} · {okr.quarter || "—"}</p>
-                          </div>
-                          <span className={`text-xs font-mono tabular-nums shrink-0 ${getScoreColor(okr.progress)}`}>
-                            {okr.progress}%
-                          </span>
-                        </div>
-                        {okr.keyResults?.map((kr) => (
-                          <div key={kr.id} className="mt-1.5 text-xs flex items-center gap-2">
-                            <span className="text-zinc-500 truncate flex-1">{kr.title}</span>
-                            <span className="font-mono tabular-nums">
-                              {kr.currentValue}/{kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
-                            </span>
-                            <span className="font-mono tabular-nums text-zinc-500 w-12 text-right">
-                              {kr.checkIns?.length ?? 0} check-in{(kr.checkIns?.length ?? 0) === 1 ? "" : "s"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                    <p className="text-xs text-zinc-500 leading-relaxed pt-1">
-                      These came from your own check-ins during this review period. Use them as
-                      proof points in the reflection below.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* KRA Self-Ratings */}
-              {(selfData.kraAssignments?.length ?? 0) > 0 && (
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-xs">Rate Your KRA Performance</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    {selfData.kraAssignments?.map((a) => (
-                      <div key={a.kra.id} className="rounded-lg border border-zinc-200 bg-white p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <div>
-                            <p className="text-xs font-medium">{a.kra.name}</p>
-                            <Badge variant="outline" className="text-xs">{a.kra.category}</Badge>
-                          </div>
-                          <span className="text-xs text-zinc-500">{a.weightage}% weightage</span>
-                        </div>
-                        <div className="space-y-2 mt-3">
-                          <Label className="text-xs">Self Rating (1-5)</Label>
-                          <div className="flex gap-1">
-                            {[1, 2, 3, 4, 5].map((n) => (
-                              <button
-                                key={n}
-                                disabled={!canSelfAssess}
-                                onClick={() => setKraRatings((prev) => ({ ...prev, [a.kra.id]: { ...prev[a.kra.id], rating: n, achievements: prev[a.kra.id]?.achievements || "" } }))}
-                                className={`h-8 w-8 rounded text-xs font-semibold transition-colors ${
-                                  kraRatings[a.kra.id]?.rating === n
-                                    ? "bg-[#0073EA] text-white"
-                                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                                } ${!canSelfAssess ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                              >
-                                {n}
-                              </button>
-                            ))}
-                          </div>
-                          <Label className="text-xs">Key Achievements</Label>
-                          <Textarea
-                            disabled={!canSelfAssess}
-                            placeholder="Describe your key achievements for this KRA..."
-                            value={kraRatings[a.kra.id]?.achievements || ""}
-                            onChange={(e) => setKraRatings((prev) => ({ ...prev, [a.kra.id]: { ...prev[a.kra.id], rating: prev[a.kra.id]?.rating || 0, achievements: e.target.value } }))}
-                            className="min-h-[60px]"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Self-Reflection */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-xs">Self-Reflection</CardTitle></CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs">What went well this period?</Label>
-                    <Textarea disabled={!canSelfAssess} placeholder="Your wins and achievements..." value={reflection.wentWell} onChange={(e) => setReflection((r) => ({ ...r, wentWell: e.target.value }))} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">What could improve?</Label>
-                    <Textarea disabled={!canSelfAssess} placeholder="Areas for improvement..." value={reflection.couldImprove} onChange={(e) => setReflection((r) => ({ ...r, couldImprove: e.target.value }))} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Goals for next period</Label>
-                    <Textarea disabled={!canSelfAssess} placeholder="What do you plan to achieve..." value={reflection.goals} onChange={(e) => setReflection((r) => ({ ...r, goals: e.target.value }))} />
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Submit buttons */}
-              {canSelfAssess && selfSaveError ? (
-                <p role="alert" className="text-sm text-danger-text text-right">{selfSaveError}</p>
-              ) : null}
-              {canSelfAssess && (
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => handleSelfAssessment(false)} disabled={savingSelf}>
-                    {savingSelf ? "Saving..." : "Save Draft"}
-                  </Button>
-                  <Button onClick={() => handleSelfAssessment(true)} disabled={savingSelf}>
-                    {savingSelf ? "Submitting..." : "Submit Self-Assessment"}
-                  </Button>
-                </div>
-              )}
-
-              {/* View completed review */}
-              {myReview.status === "COMPLETED" && myReview.outcome && (
-                <Card className="border-green-500/30 bg-green-500/5">
-                  <CardContent className="p-5">
-                    <h3 className="font-semibold mb-2">Your Review Results</h3>
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <p className="text-xs text-zinc-500">Overall Score</p>
-                        <p className={`text-2xl font-semibold font-mono ${getScoreColor(myReview.overallScore || 0)}`}>{myReview.overallScore ?? "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-zinc-500">Outcome</p>
-                        {getOutcomeBadge(myReview.outcome)}
-                      </div>
-                    </div>
-                    {myReview.managerComments && (
-                      <div className="mt-3 border-t border-zinc-200 pt-3">
-                        <p className="text-xs text-zinc-500 mb-1">Manager Comments</p>
-                        <p className="text-xs">{myReview.managerComments}</p>
-                      </div>
-                    )}
-                    <div className="mt-4 border-t border-zinc-200 pt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => handleGenerateLetter(myReview.id)}
-                        disabled={letterLoadingId === myReview.id}
-                      >
-                        {letterLoadingId === myReview.id ? <Dots variant="pending" /> : <FileText size={14} />}
-                        Generate appraisal letter
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </>
-          )}
-        </TabsContent>
-
-        {/* ===== MANAGER REVIEW TAB ===== */}
-        <TabsContent value="manager-review" className="mt-4 space-y-4">
-          {loadingTeam ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">Loading team reviews...</CardContent></Card>
-          ) : teamReviews.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">No team members to review in this cycle.</CardContent></Card>
-          ) : !selectedReview ? (
-            /* Team list */
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-xs">Your Team&apos;s Reviews</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {teamReviews.map((review) => (
-                  <div
-                    key={review.id}
-                    className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3 hover:bg-zinc-50/50 cursor-pointer transition-colors"
-                    onClick={() => {
-                      setSelectedReview(review);
-                      // Pre-fill if existing manager assessment
-                      if (review.managerAssessment) {
-                        const ma = review.managerAssessment;
-                        const ratings: Record<string, { rating: number; comments: string }> = {};
-                        (ma.kraRatings || []).forEach((r) => { ratings[r.kraId] = { rating: r.rating, comments: r.comments || "" }; });
-                        setMgrKraRatings(ratings);
-                        setBehavioral(ma.behavioral || {});
-                        setMgrComments(ma.overallComments || review.managerComments || "");
-                        setMgrOutcome(ma.recommendation || review.outcome || "");
-                      } else {
-                        setMgrKraRatings({});
-                        setBehavioral({});
-                        setMgrComments(review.managerComments || "");
-                        setMgrOutcome(review.outcome || "");
-                      }
-                    }}
-                  >
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback className="text-xs">{review.subject.firstName[0]}{review.subject.lastName[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium">{review.subject.firstName} {review.subject.lastName}</p>
-                      <p className="text-xs text-zinc-500">{review.subject.role?.title || ""} {review.subject.department ? `· ${review.subject.department.name}` : ""}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {getStatusBadge(review.status)}
-                      {review.status === "COMPLETED" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2"
-                          title="Generate appraisal letter"
-                          onClick={(e) => { e.stopPropagation(); void handleGenerateLetter(review.id); }}
-                          disabled={letterLoadingId === review.id}
-                        >
-                          {letterLoadingId === review.id ? <Dots variant="pending" /> : <FileText size={14} className="text-zinc-500" />}
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={(e) => { e.stopPropagation(); setShowAssignPeersDialog(review); }}>
-                        <UserPlus size={14} className="text-zinc-500" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ) : (
-            /* Individual manager review form */
-            <>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedReview(null)}>
-                <ArrowLeft size={14} className="mr-1" /> Back to Team
-              </Button>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs">
-                    Reviewing: {selectedReview.subject.firstName} {selectedReview.subject.lastName}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2 mb-4">
-                    {getStatusBadge(selectedReview.status)}
-                    {selectedReview.kpiScore != null && (
-                      <span className="text-xs text-zinc-500">KPI Score: <span className={`font-mono ${getScoreColor(selectedReview.kpiScore)}`}>{selectedReview.kpiScore}</span></span>
-                    )}
-                    {selectedReview.sopComplianceScore != null && (
-                      <span className="text-xs text-zinc-500">SOP: <span className="font-mono">{selectedReview.sopComplianceScore}%</span></span>
-                    )}
-                  </div>
-
-                  {/* Self-assessment preview */}
-                  {selectedReview.selfRatings && (
-                    <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
-                      <p className="text-xs font-medium text-zinc-500 mb-2">Employee&apos;s Self-Assessment</p>
-                      {(selectedReview.selfRatings.kraRatings || []).map((r) => (
-                        <div key={r.kraId} className="mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs">{r.kraName}</span>
-                            <span className="text-xs font-mono text-[color:var(--accent-strong)]">{r.rating}/5</span>
-                          </div>
-                          {r.achievements && <p className="text-xs text-zinc-500 ml-2">{r.achievements}</p>}
-                        </div>
-                      ))}
-                      {selectedReview.selfRatings.reflection && (
-                        <div className="mt-2 space-y-1 border-t border-zinc-200 pt-2">
-                          {selectedReview.selfRatings.reflection.wentWell && <p className="text-xs text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
-                          {selectedReview.selfRatings.reflection.couldImprove && <p className="text-xs text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Peer feedback preview */}
-                  {(selectedReview.peerFeedback?.length ?? 0) > 0 && (
-                    <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
-                      <p className="text-xs font-medium text-zinc-500 mb-2">Peer Feedback ({selectedReview.peerFeedback?.length ?? 0})</p>
-                      {selectedReview.peerFeedback?.map((pf, i: number) => (
-                        <div key={i} className="mb-2 text-xs">
-                          {!pf.anonymous && pf.giver && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
-                          {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
-                          {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
-                          {pf.collaborationRating && <span className="text-zinc-500">Collaboration: {pf.collaborationRating}/5</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Behavioral Ratings */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-xs">Behavioral Assessment</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                  {Object.entries(behavioralLabels).map(([key, { label, anchors }]) => (
-                    <div key={key}>
-                      <Label className="text-xs">{label}</Label>
-                      <div className="flex gap-1 mt-1">
-                        {[1, 2, 3, 4, 5].map((n) => (
-                          <button
-                            key={n}
-                            onClick={() => setBehavioral((prev) => ({ ...prev, [key]: n }))}
-                            className={`flex-1 h-9 rounded text-xs transition-colors ${
-                              behavioral[key] === n
-                                ? "bg-[#0073EA] text-white"
-                                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                            }`}
-                            title={anchors[n - 1]}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-xs text-zinc-500 mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {/* Manager Comments & Outcome */}
-              <Card>
-                <CardContent className="p-4 space-y-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs">Overall Manager Comments</Label>
-                    <Textarea placeholder="Your overall assessment..." value={mgrComments} onChange={(e) => setMgrComments(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Outcome Recommendation</Label>
-                    <Select value={mgrOutcome} onValueChange={setMgrOutcome}>
-                      <SelectTrigger><SelectValue placeholder="Select outcome" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PROMOTION_ELIGIBLE">Promotion Eligible</SelectItem>
-                        <SelectItem value="HIKE_ELIGIBLE">Hike Eligible</SelectItem>
-                        <SelectItem value="STATUS_QUO">Status Quo</SelectItem>
-                        <SelectItem value="PIP_REQUIRED">PIP Required</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="flex justify-end gap-2 items-center">
-                <AutosaveIndicator className="mr-auto" status={autosaveMgr.status} lastSavedAt={autosaveMgr.lastSavedAt} labels={{ idle: "Autosave on" }} onRetry={autosaveMgr.retriesExhausted ? autosaveMgr.retryNow : undefined} />
-                {mgrSaveError ? <p role="alert" className="basis-full order-first text-sm text-danger-text">{mgrSaveError}</p> : null}
-                <Button variant="outline" onClick={() => handleManagerReview(selectedReview.id, false)} disabled={savingMgr}>
-                  {savingMgr ? "Saving..." : "Save Draft"}
-                </Button>
-                <Button onClick={() => handleManagerReview(selectedReview.id, true)} disabled={savingMgr}>
-                  {savingMgr ? "Submitting..." : "Submit Manager Review"}
-                </Button>
-              </div>
-            </>
-          )}
-        </TabsContent>
-
-        {/* ===== PEER FEEDBACK TAB ===== */}
-        <TabsContent value="peer-feedback" className="mt-4 space-y-4">
-          {loadingPeer ? (
-            <Card><CardContent className="p-8"><SkeletonLines lines={4} /></CardContent></Card>
-          ) : peerRequests.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">No peer feedback requests for you in this cycle.</CardContent></Card>
-          ) : (
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-xs">Peer Feedback Requests</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {peerRequests.map((pf) => (
-                  <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3">
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback className="text-xs">{pf.receiver.firstName[0]}{pf.receiver.lastName[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium">Feedback for: {pf.receiver.firstName} {pf.receiver.lastName}</p>
-                      <p className="text-xs text-zinc-500">{pf.review?.cycle?.name || ""}</p>
-                    </div>
-                    {pf.status === "SUBMITTED" ? (
-                      <Badge variant="success" className="text-xs">Submitted</Badge>
-                    ) : (
-                      <Button size="sm" onClick={() => setShowPeerDialog(pf)}>Give Feedback</Button>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* ===== CALIBRATION TAB ===== */}
-        <TabsContent value="calibration" className="mt-4 space-y-4">
-          {loadingCalib ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">Loading calibration data...</CardContent></Card>
-          ) : !calibrationData ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">Calibration data not available. You may not have manager access.</CardContent></Card>
-          ) : (
-            <>
-              {calibrationData.warning && (
-                <div className="flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
-                  <AlertTriangle size={16} className="text-orange-400" />
-                  <p className="text-xs text-orange-400">{calibrationData.warning}</p>
-                </div>
-              )}
-
-              {/* Bell Curve Distribution */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-xs">Rating Distribution</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="flex items-end gap-2 h-24">
-                    {[
-                      { label: "<40", count: calibrationData.distribution.bottom, color: "bg-red-500" },
-                      { label: "40-59", count: calibrationData.distribution.low, color: "bg-orange-500" },
-                      { label: "60-74", count: calibrationData.distribution.mid, color: "bg-yellow-500" },
-                      { label: "75-89", count: calibrationData.distribution.high, color: "bg-[#0073EA]" },
-                      { label: "90+", count: calibrationData.distribution.top, color: "bg-green-500" },
-                    ].map((band) => {
-                      const maxCount = Math.max(...Object.values(calibrationData.distribution) as number[], 1);
-                      const height = (band.count / maxCount) * 100;
-                      return (
-                        <div key={band.label} className="flex-1 flex flex-col items-center gap-1">
-                          <span className="text-xs font-mono">{band.count}</span>
-                          <div className={`w-full rounded-t ${band.color}`} style={{ height: `${Math.max(height, 4)}%` }} />
-                          <span className="text-xs text-zinc-500">{band.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Calibration Table */}
-              <Card>
-                <CardContent className="p-0">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-zinc-200">
-                        <th className="text-left p-3 text-xs font-medium text-zinc-500 uppercase">Person</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">KPI</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Self</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Mgr</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Peer</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Composite</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Calibrated</th>
-                        <th className="text-center p-3 text-xs font-medium text-zinc-500 uppercase">Outcome</th>
-                        <th className="text-right p-3 text-xs font-medium text-zinc-500 uppercase">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {calibrationData.calibrationData.map((d) => (
-                        <tr key={d.reviewId} className="border-b border-zinc-200/50 hover:bg-zinc-50/50">
-                          <td className="p-3">
-                            <p className="text-xs font-medium">{d.subject.firstName} {d.subject.lastName}</p>
-                            <p className="text-xs text-zinc-500">{d.subject.department?.name}</p>
-                          </td>
-                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.kpiScore)}`}>{d.kpiScore}</td>
-                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.selfRating)}`}>{d.selfRating}</td>
-                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.managerRating)}`}>{d.managerRating}</td>
-                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.peerRating)}`}>{d.peerRating}</td>
-                          <td className={`p-3 text-center font-mono text-xs font-semibold ${getScoreColor(d.compositeScore)}`}>{d.compositeScore}</td>
-                          <td className="p-3 text-center">
-                            {d.calibratedScore != null ? (
-                              <span className={`font-mono text-xs font-semibold ${getScoreColor(d.calibratedScore)}`}>{d.calibratedScore}</span>
-                            ) : (
-                              <span className="text-xs text-zinc-500">—</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-center">{d.outcome ? getOutcomeBadge(d.outcome) : <span className="text-xs text-zinc-500">—</span>}</td>
-                          <td className="p-3 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => setEditingCalib({ reviewId: d.reviewId, score: String(d.calibratedScore ?? d.compositeScore), notes: d.calibrationNotes || "" })}
-                            >
-                              Adjust
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </CardContent>
-              </Card>
-
-              {/* Finalize Button */}
-              {cycle.status !== "COMPLETED" && (
-                <div className="flex justify-end">
-                  <Button onClick={handleFinalize} disabled={savingFinalize} className="gap-2">
-                    <Shield size={14} />
-                    {savingFinalize ? "Finalizing..." : "Finalize All Outcomes"}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </TabsContent>
-
-        {/* ===== DASHBOARD TAB ===== */}
-        <TabsContent value="dashboard" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-xs">Review Cycle Progress</CardTitle></CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-5 gap-3">
-                {[
-                  { label: "Total Reviews", value: stats.total, icon: Users, color: "text-zinc-500" },
-                  { label: "Self-Assessment Done", value: stats.selfDone, icon: Star, color: "text-blue-400" },
-                  { label: "Manager Review Done", value: stats.managerDone, icon: CheckCircle, color: "text-[color:var(--accent-strong)]" },
-                  { label: "Calibrated", value: stats.calibrated, icon: BarChart3, color: "text-orange-400" },
-                  { label: "Completed", value: stats.completed, icon: CheckCircle, color: "text-green-400" },
-                ].map((stat) => (
-                  <div key={stat.label} className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                    <stat.icon size={16} className={`mx-auto mb-1 ${stat.color}`} />
-                    <p className="text-lg font-semibold font-mono">{stat.value}</p>
-                    <p className="text-xs text-zinc-500">{stat.label}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* People who haven't completed */}
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-xs">Pending Actions</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {cycle.reviews?.filter((r) => r.status === "PENDING").length === 0 ? (
-                <p className="text-xs text-zinc-500 text-center py-4">Everyone has started their reviews!</p>
-              ) : (
-                cycle.reviews?.filter((r) => r.status === "PENDING").map((r) => (
-                  <div key={r.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-2">
-                    <Avatar className="h-7 w-7">
-                      <AvatarFallback className="text-xs">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs">{r.subject.firstName} {r.subject.lastName}</p>
-                    </div>
-                    <Badge variant="warning" className="text-xs">Self-Assessment Pending</Badge>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* ===== DIALOGS ===== */}
-
-      {/* Peer Feedback Dialog */}
-      <Dialog open={!!showPeerDialog} onOpenChange={(open) => { if (!open) setShowPeerDialog(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Peer Feedback for {showPeerDialog?.receiver?.firstName} {showPeerDialog?.receiver?.lastName}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-xs">What does this person do well?</Label>
-              <Textarea placeholder="Their strengths and contributions..." value={peerStrengths} onChange={(e) => setPeerStrengths(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">What could this person improve?</Label>
-              <Textarea placeholder="Areas for growth..." value={peerImprovements} onChange={(e) => setPeerImprovements(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Collaboration Rating (1-5)</Label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setPeerCollabRating(n)}
-                    className={`h-9 w-9 rounded text-xs font-semibold transition-colors ${
-                      peerCollabRating === n ? "bg-[#0073EA] text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Additional Comments</Label>
-              <Textarea placeholder="Any other feedback..." value={peerComments} onChange={(e) => setPeerComments(e.target.value)} />
-            </div>
-          </div>
-          {peerSaveError ? <p role="alert" className="text-sm text-danger-text">{peerSaveError}</p> : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPeerDialog(null)}>Cancel</Button>
-            <Button onClick={() => { if (showPeerDialog) void handlePeerSubmit(showPeerDialog.id); }} disabled={savingPeer || !peerStrengths.trim()}>
-              {savingPeer ? "Submitting..." : "Submit Feedback"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Assign Peers Dialog */}
-      <Dialog open={!!showAssignPeersDialog} onOpenChange={(open) => { if (!open) { setShowAssignPeersDialog(null); setPeerUserIds([]); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Assign Peer Reviewers for {showAssignPeersDialog?.subject?.firstName} {showAssignPeersDialog?.subject?.lastName}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <p className="text-xs text-zinc-500">Select 2-3 peers to provide feedback. They will be notified.</p>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {allUsers
-                .filter((u) => u.id !== showAssignPeersDialog?.subject?.id)
-                .map((u) => (
-                  <label key={u.id} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2 cursor-pointer hover:bg-zinc-50/50">
-                    <input
-                      type="checkbox"
-                      checked={peerUserIds.includes(u.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) setPeerUserIds((prev) => [...prev, u.id]);
-                        else setPeerUserIds((prev) => prev.filter((id) => id !== u.id));
-                      }}
-                      className="rounded"
-                    />
-                    <span className="text-xs">{u.firstName} {u.lastName}</span>
-                  </label>
-                ))}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAssignPeersDialog(null)}>Cancel</Button>
-            <Button onClick={() => { if (showAssignPeersDialog) void handleAssignPeers(showAssignPeersDialog.id); }} disabled={savingPeerReq || peerUserIds.length === 0}>
-              {savingPeerReq ? "Assigning..." : `Assign ${peerUserIds.length} Peers`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Calibration Adjust Dialog */}
-      <Dialog open={!!editingCalib} onOpenChange={(open) => { if (!open) setEditingCalib(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Adjust Calibration Score</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-xs">Calibrated Score (0-120)</Label>
-              <Input type="number" min="0" max="120" value={editingCalib?.score || ""} onChange={(e) => setEditingCalib((prev) => prev ? { ...prev, score: e.target.value } : null)} />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Justification</Label>
-              <Textarea placeholder="Reason for adjustment..." value={editingCalib?.notes || ""} onChange={(e) => setEditingCalib((prev) => prev ? { ...prev, notes: e.target.value } : null)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingCalib(null)}>Cancel</Button>
-            <Button onClick={handleCalibrationSave} disabled={savingCalib}>
-              {savingCalib ? "Saving..." : "Save Adjustment"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Appraisal Letter Dialog */}
-      <Dialog open={letterOpen} onOpenChange={(open) => { if (!open) { setLetterOpen(false); setLetter(null); setLetterError(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><FileText size={16} /> Appraisal Letter</DialogTitle>
-          </DialogHeader>
-          {letterError ? (
-            <div className="py-6 text-center">
-              <AlertTriangle size={20} className="mx-auto mb-2 text-orange-400" />
-              <p className="text-xs text-zinc-500">{letterError}</p>
-            </div>
-          ) : !letter ? (
-            <div className="py-8 text-center text-xs text-zinc-500">Generating…</div>
-          ) : (
-            <div className="space-y-4 py-2">
-              <div>
-                <h3 className="text-base font-semibold">{letter.companyName}</h3>
-                <p className="text-xs text-zinc-500">Performance Appraisal · {letter.cycleName}</p>
-              </div>
-              <div className="rounded-lg border border-zinc-200 p-3">
-                <p className="text-xs font-medium">{letter.employeeName}</p>
-                <p className="text-xs text-zinc-500">
-                  {[letter.role, letter.department].filter(Boolean).join(" · ") || "—"}
-                </p>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Period {fmtDate(letter.periodStart)} → {fmtDate(letter.periodEnd)} · Reviewer {letter.reviewerName || "—"}
-                </p>
-              </div>
-              <div className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3">
-                <div>
-                  <p className="text-micro text-zinc-500 uppercase">Overall</p>
-                  <p className={`text-3xl font-semibold font-mono ${getScoreColor(letter.overallScore)}`}>{letter.overallScore}</p>
-                </div>
-                <div>
-                  <p className="text-micro text-zinc-500 uppercase">Band</p>
-                  <Badge className="bg-blue-500/15 text-blue-500">{letter.performanceBand}</Badge>
-                </div>
-                <div>
-                  <p className="text-micro text-zinc-500 uppercase">Recommended increment</p>
-                  <p className="text-xs font-semibold">{letter.hikeRecommendation?.label || "—"}</p>
-                </div>
-                {letter.outcome && (
-                  <div className="ml-auto">{getOutcomeBadge(letter.outcome)}</div>
-                )}
-              </div>
-              {(letter.kraRatings?.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-zinc-500 mb-1">KRA ratings</p>
-                  <div className="space-y-1">
-                    {letter.kraRatings?.map((k, i) => (
-                      <div key={i} className="flex items-center justify-between text-xs border-b border-zinc-100 py-1">
-                        <span>{k.kraName || "—"}</span>
-                        <span className="font-mono">{k.rating ?? "—"}/5</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {letter.managerComments && (
-                <div>
-                  <p className="text-xs font-medium text-zinc-500 mb-1">Manager comments</p>
-                  <p className="text-xs">{letter.managerComments}</p>
-                </div>
-              )}
-              {letter.recommendation && (
-                <div>
-                  <p className="text-xs font-medium text-zinc-500 mb-1">Recommendation</p>
-                  <p className="text-xs">{letter.recommendation}</p>
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setLetterOpen(false); setLetter(null); setLetterError(null); }}>Close</Button>
-            {letter && (
-              <Button className="gap-2" onClick={() => downloadLetter(letter)}>
-                <Download size={14} /> Download
-              </Button>
+      {letter ? (
+        <Dialog open onOpenChange={(o) => { if (!o) setLetter(null); }}>
+          <DialogContent className="max-w-[720px]">
+            <DialogHeader>
+              <DialogTitle>Appraisal letter</DialogTitle>
+              <DialogDescription>A preview of the file you can download, save or print.</DialogDescription>
+            </DialogHeader>
+            {letter.error ? (
+              <p role="alert" className="m-0 text-sm text-danger-text">{letter.error}. <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => void openLetter(letter.reviewId)}>Try again</button></p>
+            ) : !letter.data ? (
+              <SkeletonLines lines={8} />
+            ) : (
+              <iframe title="Appraisal letter preview" sandbox="" srcDoc={buildLetterHtml(letter.data)} className="h-[56vh] w-full rounded-md border border-line bg-white" />
             )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setLetter(null)}>Close</Button>
+              {letter.data ? <Button variant="ghost" onClick={() => downloadLetter(letter.data!)}>Download</Button> : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </>
   );
-}
-
-/** The words for a refused save: the server's own reason when it gave one. */
-async function saveRefusal(res: Response, lead: string): Promise<string> {
-  let reason = "";
-  try {
-    const j = (await res.json()) as { error?: unknown };
-    if (typeof j?.error === "string") reason = j.error;
-  } catch { /* no body */ }
-  if (res.status === 401) return `${lead} Your session ended; sign in again and your answers will still be here.`;
-  return reason ? `${lead} ${reason}.`.replace(/\.\.$/, ".") : `${lead} Try again.`;
 }

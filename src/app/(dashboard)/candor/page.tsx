@@ -3,6 +3,7 @@
 // an open session (or who has answered one) gets the respondent face with
 // no create controls; anyone else and every Guest gets the in-shell 404.
 
+import { Suspense } from "react";
 import { cultureGate } from "@/lib/people/culture-gate";
 import CandorClient from "./candor-client";
 
@@ -10,5 +11,11 @@ export const dynamic = "force-dynamic";
 
 export default async function CandorPage() {
   const g = await cultureGate("candor", "/candor");
-  return <CandorClient canCreate={g.organiser} />;
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <Suspense>
+        <CandorClient canCreate={g.organiser} />
+      </Suspense>
+    </div>
+  );
 }

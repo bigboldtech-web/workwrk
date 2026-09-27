@@ -5,6 +5,7 @@ import { isHrAdminLevel } from "@/lib/alignment-scope";
 import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { peerAggregate } from "@/lib/people/anonymity";
 import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
+import { orgScoring } from "@/lib/performance/review-cycle.server";
 
 export async function GET(
   _req: NextRequest,
@@ -133,13 +134,35 @@ export async function GET(
   const counted = cycle.reviews.filter((r) => lensOf(r) === "full");
   const total = counted.length;
   const selfDone = counted.filter((r) => r.status !== "PENDING").length;
-  const managerDone = counted.filter((r) => ["CALIBRATION", "COMPLETED"].includes(r.status)).length;
+  // A submitted manager review is MANAGER_REVIEW: the old count read only
+  // CALIBRATION and COMPLETED, so "Manager done" stayed at 0 until calibration.
+  const managerDone = counted.filter((r) => ["MANAGER_REVIEW", "CALIBRATION", "COMPLETED"].includes(r.status)).length;
   const calibrated = counted.filter((r) => r.calibratedScore != null).length;
   const completed = counted.filter((r) => r.status === "COMPLETED").length;
+
+  // What the page needs to decide its sections without guessing from a
+  // role: whether the caller runs the cycle, the org's scale words and
+  // bands (Settings > Scoring and reviews), and who started it.
+  const [canManage, scoring, starter] = await Promise.all([
+    canManageReviewCycle(session, cycle),
+    orgScoring(orgId),
+    cycle.createdById ? prisma.user.findUnique({ where: { id: cycle.createdById }, select: { id: true, firstName: true, lastName: true } }) : Promise.resolve(null),
+  ]);
 
   return jsonSuccess({
     ...cycle,
     reviews,
     stats: { total, selfDone, managerDone, calibrated, completed },
+    viewer: {
+      canManage,
+      peopleTeamOrAdmin: hrAdmin,
+      isSubject: cycle.reviews.some((r) => r.subjectId === callerId),
+      isReviewer: cycle.reviews.some((r) => r.reviewerId === callerId && r.subjectId !== callerId),
+      isPeer: cycle.reviews.some((r) => r.peerFeedback.some((pf) => pf.giverId === callerId && pf.receiverId !== callerId)),
+      inChain: cycle.reviews.some((r) => r.subjectId !== callerId && treeSet.has(r.subjectId)),
+    },
+    scale: scoring.scale,
+    bands: scoring.bands,
+    createdBy: starter ? { id: starter.id, name: `${starter.firstName} ${starter.lastName}`.trim() } : null,
   });
 }

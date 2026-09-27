@@ -1,612 +1,519 @@
 "use client";
 
-/* Talent — 9-box assessment grid + segment lists.
- *
- *  GET  /api/talent-assessment
- *  POST /api/talent-assessment   { userId, period, performance, potential, ... }
- */
+// Talent (spec-teams-performance /talent): where your people sit on
+// performance and potential, and the way to place them.
+//
+//   views     the periods as pills, newest first (?period=): the current
+//             fiscal quarter by default, then the others, "..." for the
+//             rest and All periods. A period is one of this fiscal year's
+//             quarters, a period someone was placed for, or a completed
+//             review cycle's name: a bounded list, never free text.
+//   toolbar   Filter (search, Department, Job title, Reports to, Action,
+//             Not yet placed) | Grid or List, the ONE blue Place person,
+//             "..." Display (List columns), Fill from scores (a confirm that
+//             names the count), Export CSV (never an Agent), Scoring and
+//             reviews (Owner and Admin)
+//   Grid      the neutral 9-box (NineBoxGrid); a cell opens the 360 detail
+//             panel with its people, each a link, with Move on the grid,
+//             Open profile and Remove placement in its "..."
+//   List      a TableCard with the checkbox column: Move on the grid,
+//             Remove placement, Export selected
+//
+// The population is the viewer's scope (the People team and Admin: the
+// org; a manager: their chain), and a person never sees their own
+// placement (DECIDED), on the grid, in the list or in a picker.
 
-import { Dots } from "@/components/ui/dots";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import Link from "next/link";
-import {
-  Users2,
-  Plus,
-  Star,
-  Award,
-  AlertTriangle,
-  Heart,
-  Briefcase,
-  TrendingUp,
-  ChevronRight,
-  Activity,
-  Target,
-  Calendar,
-  X,
-  Wand2,
-  Search,
-} from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download, Grid3x3, List, MoreHorizontal, Move, Plus, Settings2, Trash2, UserRound, Wand2, X } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C } from "@/components/layout/os/catalog";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Picker } from "@/components/ui/picker";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableCard, BulkAction, RowMoreButton, type TableColumn } from "@/components/ui/table-card";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { PickerButton } from "@/components/dashboards/widget-registry";
+import { PeoplePickerField, PersonAvatar, personName, type PickPerson } from "@/components/people/person-bits";
+import { NineBoxGrid } from "@/components/performance/nine-box-grid";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { BOX_KEYS, TALENT_ACTIONS, actionLabel, boxDescription, boxLabel, levelLabel, type BoxKey } from "@/lib/performance/talent";
 
-type ApiAssessment = {
+type UserLite = { id: string; firstName: string | null; lastName: string | null; avatar: string | null; managerId: string | null; department: { id: string; name: string } | null; role: { id: string; title: string } | null };
+type Placement = {
   id: string;
   userId: string;
   period: string;
   performance: 1 | 2 | 3;
   potential: 1 | 2 | 3;
   boxPosition: string;
-  action?: string | null;
-  notes?: string | null;
-  createdAt: string;
+  action: string | null;
+  notes: string | null;
+  source: string;
   updatedAt: string;
-  user?: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null; department?: { name?: string | null } | null; role?: { title?: string | null } | null } | null;
+  user: UserLite | null;
+  placedBy: { id: string; name: string } | null;
 };
-
-type UserOpt = {
-  id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  role?: { title?: string | null } | null;
-  department?: { name?: string | null } | null;
-};
-
-// Talent + performance scores use a "YYYY-MM" period key (the perf engine
-// writes that shape), so a new manual placement lands in the same snapshot.
-function currentPeriod() {
-  return new Date().toISOString().slice(0, 7);
-}
-
-const BOX_LABELS: Record<string, string> = {
-  "3-3": "Stars", "3-2": "High perf", "3-1": "Workhorses",
-  "2-3": "Future leaders", "2-2": "Core players", "2-1": "Steady",
-  "1-3": "Diamonds", "1-2": "Inconsistent", "1-1": "At risk",
-};
-const BOX_LONG: Record<string, string> = {
-  "3-3": "High performance · High potential",
-  "3-2": "High performance · Medium potential",
-  "3-1": "High performance · Low potential",
-  "2-3": "Medium performance · High potential",
-  "2-2": "Medium performance · Medium potential",
-  "2-1": "Medium performance · Low potential",
-  "1-3": "Low performance · High potential",
-  "1-2": "Low performance · Medium potential",
-  "1-1": "Low performance · Low potential",
-};
-const BOX_COLORS: Record<string, string> = {
-  "3-3": C.green, "3-2": C.teal,  "3-1": C.blue,
-  "2-3": C.indigo, "2-2": C.purple, "2-1": C.pink,
-  "1-3": C.orange, "1-2": C.brown, "1-1": C.red,
-};
-
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) {
-  const fa = (f ?? "")[0] ?? "";
-  const la = (l ?? "")[0] ?? "";
-  return ((fa + la) || "?").toUpperCase();
-}
-
-// Grid is laid out with potential decreasing top-to-bottom (3 high at top) and performance increasing left-to-right
-// Cell order in CSS grid (row-major): (potential 3, perf 1), (potential 3, perf 2), (potential 3, perf 3), then potential 2 row, then potential 1 row
-const GRID_ORDER: { pot: 1 | 2 | 3; perf: 1 | 2 | 3; key: string }[] = [
-  { pot: 3, perf: 1, key: "1-3" }, { pot: 3, perf: 2, key: "2-3" }, { pot: 3, perf: 3, key: "3-3" },
-  { pot: 2, perf: 1, key: "1-2" }, { pot: 2, perf: 2, key: "2-2" }, { pot: 2, perf: 3, key: "3-2" },
-  { pot: 1, perf: 1, key: "1-1" }, { pot: 1, perf: 2, key: "2-1" }, { pot: 1, perf: 3, key: "3-1" },
+type PeriodsResponse = { periods: Array<{ key: string; count: number }>; current: string };
+type OptionalCol = "performance" | "potential" | "action" | "period" | "by" | "on";
+const OPTIONAL_COLS: Array<{ key: OptionalCol; label: string }> = [
+  { key: "performance", label: "Performance" },
+  { key: "potential", label: "Potential" },
+  { key: "action", label: "Action" },
+  { key: "period", label: "Period" },
+  { key: "by", label: "Placed by" },
+  { key: "on", label: "Placed on" },
 ];
+const ALL = "__all";
 
-export default function TalentPage() {
-  const [assessments, setAssessments] = useState<ApiAssessment[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedBox, setSelectedBox] = useState<string | null>(null);
-  // null = "All periods". Defaults to the latest period once data loads so
-  // the box shows one coherent snapshot instead of stacking every cycle.
-  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
-  const [periodTouched, setPeriodTouched] = useState(false);
-  const { rowVersion } = useOsShell();
+export default function TalentClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
   const { toast } = useOsToast();
+  const { prefs, patchPrefs } = useOsShell();
+  const { boot } = useBoot();
+  const confirm = useConfirm();
+  const datePrefs = useDatePrefs();
+  const { openSettings } = useSettingsNav();
+  const viewer = boot.viewer as { id: string; orgRole?: string; isAgent?: boolean };
+  const orgAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
 
-  // Placement modal — closes the circular gap: manual 9-box placement that
-  // POSTs /api/talent-assessment, plus an auto-place-from-scores path.
-  const [placeOpen, setPlaceOpen] = useState(false);
-  const [placeSeed, setPlaceSeed] = useState<{ userId?: string; performance?: 1 | 2 | 3; potential?: 1 | 2 | 3; action?: string; notes?: string } | null>(null);
-  const [users, setUsers] = useState<UserOpt[]>([]);
-  const [autoBusy, setAutoBusy] = useState(false);
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    const s = next.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+  }, [sp, router, pathname]);
 
+  // ── Periods ───────────────────────────────────────────────────────
+  const [periods, setPeriods] = useState<PeriodsResponse | null>(null);
+  const [periodsError, setPeriodsError] = useState<string | null>(null);
+  const loadPeriods = useCallback(async () => {
+    const r = await apiFetch<PeriodsResponse>("/api/talent-assessment/periods", { cache: "no-store" });
+    if (!r.ok) { setPeriodsError(r.error || "Couldn't load the periods"); return; }
+    setPeriodsError(null);
+    setPeriods(r.data);
+  }, []);
+  useEffect(() => { const t = setTimeout(() => { void loadPeriods(); }, 0); return () => clearTimeout(t); }, [loadPeriods]);
+  const periodParam = sp?.get("period") ?? "";
+  const period = periodParam || periods?.current || "";
+  const allPeriods = period === ALL;
+
+  const view = sp?.get("view") === "list" ? "list" : "grid";
+  const q = sp?.get("q") ?? "";
+  const dept = sp?.get("dept") ?? "";
+  const title = sp?.get("title") ?? "";
+  const reportsTo = sp?.get("reportsTo") ?? "";
+  const action = sp?.get("action") ?? "";
+  const unplaced = sp?.get("unplaced") === "1";
+  const filters = [q, dept, title, reportsTo, action, unplaced ? "1" : ""].filter(Boolean).length;
+
+  // ── Placements ────────────────────────────────────────────────────
+  const [rows, setRows] = useState<Placement[] | null>(null);
+  const [rowsFor, setRowsFor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/talent-assessment");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiAssessment[] = data?.data ?? (Array.isArray(data) ? data : []);
-      setAssessments(list);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("talent");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  // Assessable people for the placement picker. /api/users self-scopes
-  // (org-wide levels see everyone, line managers see their team), which
-  // matches the talent-assessment POST authority.
+    if (!period) return;
+    const r = await apiFetch<Placement[]>(`/api/talent-assessment${allPeriods ? "" : `?period=${encodeURIComponent(period)}`}`, { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load the talent grid"); toast(r.error || "Couldn't load the talent grid", { tone: "danger" }); return; }
+    setError(null);
+    setRows(Array.isArray(r.data) ? r.data : []);
+    setRowsFor(period);
+  }, [period, allPeriods, toast]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
+  // A finalize on a cycle writes placements: come back to fresh ones.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/users?limit=500");
-        if (!res.ok) return;
-        const data = await res.json();
-        const list: UserOpt[] = Array.isArray(data) ? data : data.data ?? data.users ?? [];
-        if (!cancelled) setUsers(list);
-      } catch { /* picker just stays empty */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    const again = () => { void load(); void loadPeriods(); };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [load, loadPeriods]);
 
-  const openPlace = useCallback((seed?: typeof placeSeed) => { setPlaceSeed(seed ?? null); setPlaceOpen(true); }, []);
+  // ── People not yet placed (the List view's "Not yet placed") ──────
+  const [unplacedPeople, setUnplacedPeople] = useState<UserLite[] | null>(null);
+  useEffect(() => {
+    if (!unplaced || allPeriods || !period) return;
+    let live = true;
+    void apiFetch<{ data: UserLite[] }>(`/api/talent-assessment/people?unplacedFor=${encodeURIComponent(period)}`, { cache: "no-store" }).then((r) => { if (live) setUnplacedPeople(r.ok ? r.data.data : []); });
+    return () => { live = false; };
+  }, [unplaced, allPeriods, period, rows]);
 
-  // After a successful placement, jump the grid to that period so the new
-  // row is visible in one coherent snapshot, then refetch.
-  const handlePlaced = useCallback((period: string) => {
-    setPeriodTouched(true);
-    setSelectedPeriod(period);
+  const matches = useCallback((u: UserLite | null) => {
+    if (!u) return false;
+    if (q && !personName(u).toLowerCase().includes(q.toLowerCase())) return false;
+    if (dept && u.department?.id !== dept) return false;
+    if (title && u.role?.id !== title) return false;
+    if (reportsTo && u.managerId !== reportsTo) return false;
+    return true;
+  }, [q, dept, title, reportsTo]);
+  const shown = useMemo(() => (unplaced ? [] : (rows ?? []).filter((p) => matches(p.user) && (!action || p.action === action))), [rows, matches, action, unplaced]);
+  const cells = useMemo(() => {
+    const c: Partial<Record<BoxKey, Array<{ id: string; firstName: string | null; lastName: string | null; avatar: string | null }>>> = {};
+    for (const p of shown) if (p.user && BOX_KEYS.includes(p.boxPosition as BoxKey)) (c[p.boxPosition as BoxKey] ??= []).push(p.user);
+    return c;
+  }, [shown]);
+  const depts = useMemo(() => [...new Map((rows ?? []).filter((p) => p.user?.department).map((p) => [p.user!.department!.id, p.user!.department!.name])).entries()], [rows]);
+  const titles = useMemo(() => [...new Map((rows ?? []).filter((p) => p.user?.role).map((p) => [p.user!.role!.id, p.user!.role!.title])).entries()], [rows]);
+
+  // ── Display columns (List) ────────────────────────────────────────
+  const stored = ((prefs.home as { teams?: { surface?: Record<string, { viewOptions?: { columns?: Record<string, boolean> } }> } } | undefined)
+    ?.teams?.surface?.talent?.viewOptions?.columns) ?? {};
+  const [colsLocal, setColsLocal] = useState<Partial<Record<OptionalCol, boolean>>>({});
+  const cols = Object.fromEntries(OPTIONAL_COLS.map((c) => [c.key, colsLocal[c.key] ?? stored[c.key] ?? true])) as Record<OptionalCol, boolean>;
+  const setCol = (k: OptionalCol, on: boolean) => {
+    setColsLocal((c) => ({ ...c, [k]: on }));
+    void patchPrefs({ home: { teams: { surface: { talent: { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => { if (!ok) toast("Couldn't save that setting", { tone: "danger" }); });
+  };
+
+  // ── Actions ───────────────────────────────────────────────────────
+  const [cell, setCell] = useState<BoxKey | null>(null);
+  const [cellFor, setCellFor] = useState(period);
+  if (cellFor !== period) { setCellFor(period); setCell(null); }
+  const [place, setPlace] = useState<null | { people: UserLite[]; box: BoxKey | null; action: string | null; notes: string; period: string }>(null);
+  const [menu, setMenu] = useState<{ p: Placement | null; u: UserLite; anchor: RefObject<HTMLElement | null> } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(filters > 0);
+  const [draftQ, setDraftQ] = useState(q);
+  const [reportsPick, setReportsPick] = useState<PickPerson | null>(null);
+  useEffect(() => {
+    if (draftQ === q) return;
+    const t = setTimeout(() => setParams({ q: draftQ.trim() || null }), 250);
+    return () => clearTimeout(t);
+  }, [draftQ, q, setParams]);
+  const clearFilters = () => { setDraftQ(""); setReportsPick(null); setParams({ q: null, dept: null, title: null, reportsTo: null, action: null, unplaced: null }); };
+
+  const removePlacement = async (p: Placement) => {
+    const ok = await confirm({ title: `Remove ${p.user ? personName(p.user) : "this person"} from the grid?`, description: `They go back to not placed for ${p.period}. Nothing else about them changes.`, confirmLabel: "Remove", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/talent-assessment/${p.id}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't remove the placement", { tone: "danger" }); return; }
+    toast("Placement removed");
     void load();
-  }, [load]);
+    void loadPeriods();
+  };
+  const removeMany = async (ids: string[]) => {
+    const ok = await confirm({ title: `Remove ${ids.length} ${ids.length === 1 ? "placement" : "placements"}?`, description: "They go back to not placed for that period.", confirmLabel: "Remove", destructive: true });
+    if (!ok) return;
+    let failed = 0;
+    for (const id of ids) { const r = await apiFetch(`/api/talent-assessment/${id}`, { method: "DELETE" }); if (!r.ok) failed += 1; }
+    toast(failed ? `Removed ${ids.length - failed}. ${failed} could not be removed.` : `Removed ${ids.length}`, failed ? { tone: "danger" } : undefined);
+    setSelected(new Set());
+    void load();
+  };
+  const fill = async () => {
+    if (allPeriods || !period) return;
+    const c = await apiFetch<{ wouldPlace: number; skipped: number }>(`/api/talent-assessment/fill?period=${encodeURIComponent(period)}`, { cache: "no-store" });
+    if (!c.ok) { toast(c.error || "Couldn't count who to place", { tone: "danger" }); return; }
+    if (!c.data.wouldPlace) { toast(`Nobody to place: everyone with a performance score is already placed for ${period}`); return; }
+    const ok = await confirm({ title: `Place ${c.data.wouldPlace} ${c.data.wouldPlace === 1 ? "person" : "people"}?`, description: `${c.data.wouldPlace === 1 ? "This person has" : "They have"} a performance score and no placement for ${period}. Potential starts at Medium. You can move anyone afterwards.`, confirmLabel: "Place", destructive: false });
+    if (!ok) return;
+    const r = await apiFetch<{ placed: number }>("/api/talent-assessment/fill", { method: "POST", json: { period } });
+    if (!r.ok) { toast(r.error || "Couldn't place them", { tone: "danger" }); return; }
+    toast(`Placed ${r.data.placed} ${r.data.placed === 1 ? "person" : "people"}`);
+    void load();
+    void loadPeriods();
+  };
+  const exportHref = (ids?: string[]) => `/api/talent-assessment?format=csv${allPeriods ? "" : `&period=${encodeURIComponent(period)}`}${ids?.length ? `&ids=${ids.join(",")}` : ""}`;
+  const openPlace = (people: UserLite[], box: BoxKey | null, existing?: Placement | null) => {
+    setPlace({ people, box, action: existing?.action ?? null, notes: existing?.notes ?? "", period: existing?.period ?? (allPeriods ? periods?.current ?? "" : period) });
+  };
 
-  // Auto-place is a write, so it is a POST (a GET never writes): the route
-  // seeds a placement for every unplaced person in scope who has a
-  // performance score, mapping score to box, then the grid reloads.
-  const handleAutoPlace = useCallback(async (period: string) => {
-    setAutoBusy(true);
-    try {
-      const res = await fetch("/api/talent-assessment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ autoPlace: true, period }),
-      });
-      if (!res.ok) { toast("Couldn't auto-place from scores"); return; }
-      const data = await res.json().catch(() => null);
-      const placed = typeof data?.placed === "number" ? data.placed : (typeof data?.data?.placed === "number" ? data.data.placed : null);
-      setPeriodTouched(true);
-      setSelectedPeriod(period);
-      await load();
-      toast(placed === 0 ? `Nobody new to place from scores · ${period}` : `Auto-placed ${placed ?? ""} from performance scores · ${period}`.replace("  ", " "));
-    } catch {
-      toast("Couldn't auto-place from scores");
-    } finally { setAutoBusy(false); }
-  }, [toast, load]);
+  const periodList = periods?.periods ?? [];
+  const pills = periodList.slice(0, 3);
+  const overflow = periodList.slice(3);
+  const activeInOverflow = overflow.some((p) => p.key === period);
 
-  // Distinct periods, newest first (works for "YYYY-Qn" and "YYYY-MM").
-  const periods = useMemo(
-    () => Array.from(new Set((assessments ?? []).map((a) => a.period))).sort((a, b) => b.localeCompare(a)),
-    [assessments],
-  );
+  const columns: TableColumn<Placement>[] = [
+    { key: "person", label: "Person", title: true, width: "minmax(200px,1.6fr)", render: (p) => (
+      <span className="flex min-w-0 items-center gap-2">{p.user ? <PersonAvatar person={p.user} size={28} /> : null}<span className="min-w-0 truncate">{p.user ? personName(p.user) : ""}</span></span>
+    ) },
+    { key: "box", label: "Box", width: "minmax(170px,1fr)", render: (p) => <span className="truncate" title={boxDescription(p.boxPosition)}>{boxLabel(p.boxPosition)}</span> },
+    ...(cols.performance ? [{ key: "performance", label: "Performance", width: "110px", hideBelow: 760, render: (p: Placement) => <span>{levelLabel(p.performance)}</span> }] : []),
+    ...(cols.potential ? [{ key: "potential", label: "Potential", width: "100px", hideBelow: 760, render: (p: Placement) => <span>{levelLabel(p.potential)}</span> }] : []),
+    ...(cols.action ? [{ key: "action", label: "Action", width: "150px", hideBelow: 880, render: (p: Placement) => (p.action ? <span className="inline-flex h-6 items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{actionLabel(p.action)}</span> : null) }] : []),
+    ...(cols.period ? [{ key: "period", label: "Period", width: "130px", hideBelow: 980, render: (p: Placement) => <span className="truncate text-ink-2">{p.period}</span> }] : []),
+    ...(cols.by ? [{ key: "by", label: "Placed by", width: "150px", hideBelow: 1100, render: (p: Placement) => <span className="truncate text-ink-2">{p.source === "SCORES" ? "From scores" : p.source === "CALIBRATION" ? "From a review cycle" : p.placedBy?.name ?? ""}</span> }] : []),
+    ...(cols.on ? [{ key: "on", label: "Placed on", width: "120px", hideBelow: 1200, render: (p: Placement) => <span className="tabular-nums text-ink-2">{formatDate(p.updatedAt, datePrefs, "date")}</span> }] : []),
+  ];
+  const unplacedColumns: TableColumn<UserLite>[] = [
+    { key: "person", label: "Person", title: true, width: "minmax(220px,2fr)", render: (u) => <span className="flex min-w-0 items-center gap-2"><PersonAvatar person={u} size={28} /><span className="min-w-0 truncate">{personName(u)}</span></span> },
+    { key: "dept", label: "Department", width: "minmax(140px,1fr)", render: (u) => <span className="truncate text-ink-2">{u.department?.name ?? ""}</span> },
+    { key: "title", label: "Job title", width: "minmax(140px,1fr)", render: (u) => <span className="truncate text-ink-2">{u.role?.title ?? ""}</span> },
+  ];
 
-  // Default to the latest period the first time data arrives.
-  useEffect(() => {
-    if (!periodTouched && selectedPeriod === null && periods.length > 0) {
-      setSelectedPeriod(periods[0]);
-    }
-  }, [periods, periodTouched, selectedPeriod]);
-
-  const visible = useMemo(
-    () => (selectedPeriod ? (assessments ?? []).filter((a) => a.period === selectedPeriod) : (assessments ?? [])),
-    [assessments, selectedPeriod],
-  );
-
-  const byBox = useMemo(() => {
-    const m = new Map<string, ApiAssessment[]>();
-    for (const k of Object.keys(BOX_LABELS)) m.set(k, []);
-    for (const a of visible) {
-      if (!m.has(a.boxPosition)) m.set(a.boxPosition, []);
-      m.get(a.boxPosition)!.push(a);
-    }
-    return m;
-  }, [visible]);
-
-  const stats = useMemo(() => {
-    const stars = (byBox.get("3-3") ?? []).length;
-    const futureLeaders = (byBox.get("2-3") ?? []).length + (byBox.get("1-3") ?? []).length;
-    const atRisk = (byBox.get("1-1") ?? []).length + (byBox.get("1-2") ?? []).length;
-    const core = (byBox.get("2-2") ?? []).length + (byBox.get("3-2") ?? []).length + (byBox.get("2-1") ?? []).length;
-    return { total: visible.length, stars, futureLeaders, atRisk, core };
-  }, [visible, byBox]);
-
-  const selectedAssessments = selectedBox ? (byBox.get(selectedBox) ?? []) : [];
+  const cellRows = cell ? shown.filter((p) => p.boxPosition === cell) : [];
+  const loading = rows === null || rowsFor !== period;
 
   return (
     <>
+      <Breadcrumb items={[{ label: "Talent (9-box)" }]} />
       <OsPageHeader
         title="Talent"
-        actions={
-          <div className="tal__head-actions">
-            <Link href="/people" className="os-head__link"><Briefcase /> People</Link>
-            <Link href="/reviews" className="os-head__link"><Award /> Reviews</Link>
-          </div>
-        }
-        primary={{ label: "New assessment", onClick: () => openPlace() }}
+        askAi
+        views={periods ? (
+          <>
+            {pills.map((p) => <ViewTab key={p.key} label={p.key} active={period === p.key} onClick={() => setParams({ period: p.key === periods.current ? null : p.key })} />)}
+            {overflow.length ? (
+              <span className="relative">
+                <ViewTab label={activeInOverflow ? period : "•••"} active={activeInOverflow} onClick={() => setOverflowOpen((v) => !v)} />
+                {overflowOpen ? (
+                  <Picker open onClose={() => setOverflowOpen(false)} ariaLabel="More periods" selected={period} className="absolute start-0 top-8 z-50"
+                    sections={[{ options: overflow.map((p) => ({ value: p.key, label: p.key, hint: p.count ? String(p.count) : undefined })) }]}
+                    onSelect={(v) => { setOverflowOpen(false); setParams({ period: v }); }} />
+                ) : null}
+              </span>
+            ) : null}
+            <ViewTab label="All periods" active={allPeriods} onClick={() => setParams({ period: ALL })} />
+          </>
+        ) : undefined}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: filters },
+          switcher: { value: view, options: [{ key: "grid", label: "Grid", icon: Grid3x3 }, { key: "list", label: "List", icon: List }], onChange: (k) => setParams({ view: k === "list" ? "list" : null }) },
+          // One blue on screen: the modal's own Place person replaces it.
+          ...(place ? {} : { primary: { label: "Place person", icon: Plus, onClick: () => openPlace([], cell) } }),
+          menu: [
+            ...(view === "list" ? OPTIONAL_COLS.map((c) => ({ label: `Show ${c.label}`, checked: cols[c.key], keepOpen: true, onClick: () => setCol(c.key, !cols[c.key]) })) : []),
+            ...(!allPeriods ? [...(view === "list" ? [{ separator: true as const }] : []), { label: "Fill from scores", icon: Wand2, onClick: () => void fill() }] : []),
+            ...(!viewer.isAgent ? [{ label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref(); } }] : []),
+            ...(orgAdmin ? [{ separator: true as const }, { label: "Scoring and reviews", icon: Settings2, onClick: () => openSettings("/settings/scoring") }] : []),
+          ],
+        }}
       />
-
-      <div className="tal">
-        <div className="tal__kpis">
-          <KpiTile accent="var(--os-c-green)"  Icon={Star}          label="Stars"          value={`${stats.stars}`}         sub="3·3 perf × potential" />
-          <KpiTile accent="var(--os-c-blue)" Icon={TrendingUp}    label="Future leaders" value={`${stats.futureLeaders}`} sub="high potential" />
-          <KpiTile accent="var(--os-brand)" Icon={Heart}         label="Core players"   value={`${stats.core}`}          sub="solid middle" />
-          <KpiTile accent="var(--os-c-red)"    Icon={AlertTriangle} label="At risk"        value={`${stats.atRisk}`}        sub="needs attention" />
-        </div>
-
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load assessments" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
-        ) : assessments === null ? (
-          <SkeletonRows />
-        ) : stats.total === 0 ? (
-          <OsEmptyView
-            context="goals"
-            title="No talent assessments yet"
-            hint="Place each person on the 9-box by performance and potential."
-            action={{ label: "Place first person", onClick: () => openPlace() }}
-          />
-        ) : (
-          <div className="tal__grid-wrap">
-            {periods.length > 0 && (
-              <div className="tal__toolbar" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <Calendar style={{ width: 14, height: 14, color: "var(--os-ink-3)" }} />
-                <span style={{ fontSize: 12, color: "var(--os-ink-3)" }}>Period</span>
-                <select
-                  value={selectedPeriod ?? "__all__"}
-                  onChange={(e) => { setPeriodTouched(true); setSelectedPeriod(e.target.value === "__all__" ? null : e.target.value); setSelectedBox(null); }}
-                  style={{ height: 28, padding: "0 8px", borderRadius: 6, border: "1px solid var(--os-line)", fontSize: 12.5, background: "var(--os-surface, #fff)", color: "var(--os-ink)" }}
-                >
-                  <option value="__all__">All periods</option>
-                  {periods.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <span style={{ fontSize: 11.5, color: "var(--os-ink-3)" }}>{stats.total} assessed</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button
-                    type="button"
-                    onClick={() => void handleAutoPlace(selectedPeriod ?? currentPeriod())}
-                    disabled={autoBusy}
-                    title="Seed placements for anyone with a performance score but no assessment yet"
-                    style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid var(--os-line)", background: "var(--os-surface, #fff)", color: "var(--os-ink)", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, cursor: autoBusy ? "default" : "pointer" }}
-                  >
-                    {autoBusy ? <Dots variant="pending" /> : <Wand2 style={{ width: 13, height: 13 }} />}
-                    Auto-place from scores
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openPlace()}
-                    style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "none", background: "#0073EA", color: "#fff", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-                  >
-                    <Plus style={{ width: 13, height: 13 }} /> New
-                  </button>
-                </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-8 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="people" activeCount={filters} onClearAll={clearFilters}
+          search={{ value: draftQ, onChange: setDraftQ, placeholder: "Search people" }}>
+          {depts.length ? <FilterGroup label="Department">{depts.map(([id, name]) => <FilterRow key={id} label={name} checked={dept === id} onCheckedChange={(on) => setParams({ dept: on ? id : null })} />)}</FilterGroup> : null}
+          {titles.length ? <FilterGroup label="Job title">{titles.map(([id, name]) => <FilterRow key={id} label={name} checked={title === id} onCheckedChange={(on) => setParams({ title: on ? id : null })} />)}</FilterGroup> : null}
+          <FilterGroup label="Reports to">
+            <li className="px-1 py-1">
+              <PeoplePickerField ariaLabel="Reports to" managersOnly value={reportsTo ? [reportsTo] : []} people={reportsPick ? [reportsPick] : []} placeholder="Anyone"
+                onChange={(ids, picked) => { setReportsPick(picked[0] ?? null); setParams({ reportsTo: ids[0] ?? null }); }} />
+            </li>
+          </FilterGroup>
+          <FilterGroup label="Action">{TALENT_ACTIONS.map((a) => <FilterRow key={a.value} label={a.label} checked={action === a.value} onCheckedChange={(on) => setParams({ action: on ? a.value : null })} />)}</FilterGroup>
+          {!allPeriods ? <FilterGroup label="Placement"><FilterRow label="Not yet placed" checked={unplaced} onCheckedChange={(on) => setParams({ unplaced: on ? "1" : null, view: on ? "list" : null })} /></FilterGroup> : null}
+        </FilterPanel>
+        <div className="flex min-w-0 flex-1 gap-4">
+          <div className="min-w-0 flex-1">
+            {(error && !rows) || (periodsError && !periods) ? (
+              <OsEmptyView variant="error" title="Couldn't load the talent grid" hint={error ?? periodsError ?? undefined} action={{ label: "Try again", onClick: () => { void loadPeriods(); void load(); } }} />
+            ) : unplaced ? (
+              <TableCard
+                ariaLabel="People not yet placed"
+                columns={unplacedColumns}
+                rows={unplacedPeople}
+                rowKey={(u) => u.id}
+                rowMenu={(u) => <RowMoreButton label={`Actions for ${personName(u)}`} onClick={(e) => setMenu({ p: null, u, anchor: { current: e.currentTarget } })} />}
+                empty={<span className="text-row text-ink-2">Everyone you can see is placed for {period}</span>}
+                footer={unplacedPeople ? { total: unplacedPeople.length, noun: "people not yet placed", from: unplacedPeople.length ? 1 : 0, to: unplacedPeople.length, hidePaging: true } : undefined}
+              />
+            ) : view === "list" ? (
+              <TableCard
+                ariaLabel="Placements"
+                columns={columns}
+                rows={loading ? null : shown}
+                rowKey={(p) => p.id}
+                rowHref={(p) => `/people/${p.userId}`}
+                selectable
+                selected={selected}
+                onSelectedChange={setSelected}
+                rowMenu={(p) => (p.user ? <RowMoreButton label={`Actions for ${personName(p.user)}`} onClick={(e) => setMenu({ p, u: p.user!, anchor: { current: e.currentTarget } })} /> : null)}
+                empty={filters ? <span className="text-row text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span> : <span className="text-row text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}{!allPeriods ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</span>}
+                bulkActions={
+                  <>
+                    <BulkAction icon={Move} label="Move on the grid" onClick={() => openPlace(shown.filter((p) => selected.has(p.id) && p.user).map((p) => p.user!), null)} />
+                    {!viewer.isAgent ? <BulkAction icon={Trash2} label="Remove placement" destructive onClick={() => void removeMany([...selected])} /> : null}
+                    {!viewer.isAgent ? <BulkAction icon={Download} label="Export selected" onClick={() => { window.location.href = exportHref([...selected]); }} /> : null}
+                  </>
+                }
+                footer={loading ? undefined : { total: shown.length, noun: "placements", from: shown.length ? 1 : 0, to: shown.length, hidePaging: true }}
+              />
+            ) : loading ? (
+              <div className="grid max-w-[900px] grid-cols-3 gap-px" aria-busy="true" aria-label="Loading the talent grid">
+                {Array.from({ length: 9 }, (_, i) => <Skeleton key={i} className="h-[148px] w-full rounded-none" />)}
               </div>
-            )}
-            {/* 9-box grid */}
-            <section className="tal__box">
-              <header className="tal__box-head">
-                <h2><Target /> 9-box matrix</h2>
-                <span className="tal__box-sub">click a cell to see who&apos;s there</span>
-              </header>
-              <div className="tal__box-area">
-                <div className="tal__axis-y">
-                  <span>High</span>
-                  <span className="tal__axis-y-label">POTENTIAL</span>
-                  <span>Low</span>
-                </div>
-                <div className="tal__cells">
-                  {GRID_ORDER.map(({ key }) => {
-                    const items = byBox.get(key) ?? [];
-                    const color = BOX_COLORS[key];
-                    const isSelected = selectedBox === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        className={`tal__cell${isSelected ? " is-selected" : ""}${items.length === 0 ? " is-empty" : ""}`}
-                        style={{ ["--cell-c" as unknown as string]: color }}
-                        onClick={() => setSelectedBox(isSelected ? null : key)}
-                      >
-                        <span className="tal__cell-label">{BOX_LABELS[key]}</span>
-                        <span className="tal__cell-count">{items.length}</span>
-                        <div className="tal__cell-avs">
-                          {items.slice(0, 5).map((a) => (
-                            <span key={a.id} className="tal__cell-av" style={{ background: avColor(a.userId) }} title={a.user ? `${a.user.firstName} ${a.user.lastName}` : ""}>
-                              {initials(a.user?.firstName, a.user?.lastName)}
-                            </span>
-                          ))}
-                          {items.length > 5 && <span className="tal__cell-more">+{items.length - 5}</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <NineBoxGrid cells={cells} selected={cell} onSelect={(k) => setCell((c) => (c === k ? null : k))} />
+                {shown.length === 0 ? (
+                  filters ? (
+                    <p className="m-0 text-sm text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></p>
+                  ) : (
+                    <p className="m-0 text-sm text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}.{!allPeriods ? <> <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</p>
+                  )
+                ) : null}
               </div>
-              <div className="tal__axis-x">
-                <span>Low</span>
-                <span className="tal__axis-x-label">PERFORMANCE</span>
-                <span>High</span>
-              </div>
-            </section>
-
-            {/* Selected cell detail */}
-            {selectedBox && (
-              <section className="tal__detail" style={{ ["--detail-c" as unknown as string]: BOX_COLORS[selectedBox] }}>
-                <header className="tal__detail-head">
-                  <span className="tal__detail-tag">{BOX_LABELS[selectedBox]}</span>
-                  <h2>{BOX_LONG[selectedBox]}</h2>
-                  <span className="tal__detail-count">{selectedAssessments.length} {selectedAssessments.length === 1 ? "person" : "people"}</span>
-                </header>
-                {selectedAssessments.length === 0 ? (
-                  <div className="tal__detail-empty">No one currently in this box.</div>
-                ) : (
-                  <div className="tal__people">
-                    {selectedAssessments.map((a) => (
-                      <Link key={a.id} href={`/people/${a.userId}`} className="tal__person">
-                        <span className="tal__person-av" style={{ background: avColor(a.userId) }}>
-                          {initials(a.user?.firstName, a.user?.lastName)}
-                        </span>
-                        <div className="tal__person-info">
-                          <div className="tal__person-name">{a.user ? `${a.user.firstName ?? ""} ${a.user.lastName ?? ""}`.trim() : "Unknown"}</div>
-                          <div className="tal__person-role">{a.user?.role?.title ?? "—"}{a.user?.department?.name ? ` · ${a.user.department.name}` : ""}</div>
-                          {a.action && <div className="tal__person-action"><Activity /> {a.action}</div>}
-                        </div>
-                        <span className="tal__person-period">{a.period}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPlace({ userId: a.userId, performance: a.performance, potential: a.potential, action: a.action ?? undefined, notes: a.notes ?? undefined }); }}
-                          title="Re-place this person"
-                          style={{ marginRight: 6, height: 24, padding: "0 8px", borderRadius: 5, border: "1px solid var(--os-line)", background: "var(--os-surface, #fff)", color: "var(--os-ink-2, var(--os-ink))", fontSize: 11.5, cursor: "pointer" }}
-                        >
-                          Reassess
-                        </button>
-                        <ChevronRight className="tal__person-arrow" />
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
             )}
           </div>
-        )}
+          {view === "grid" && cell && !unplaced ? (
+            <aside className="w-[360px] shrink-0 self-start rounded-lg border border-line bg-raised" aria-label={boxLabel(cell)}>
+              <header className="flex items-start gap-2 border-b border-line-soft px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="m-0 text-lg font-semibold text-ink">{boxLabel(cell)}</h2>
+                  <p className="m-0 text-sm text-ink-2">{boxDescription(cell)} · {cellRows.length} {cellRows.length === 1 ? "person" : "people"}</p>
+                </div>
+                <button type="button" aria-label="Close" onClick={() => setCell(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><X className="h-4 w-4" /></button>
+              </header>
+              {cellRows.length ? (
+                <ul className="m-0 list-none divide-y divide-line-soft p-0">
+                  {cellRows.map((p) => p.user ? (
+                    <li key={p.id} className="flex min-h-9 items-center gap-2 px-4 py-1.5">
+                      <PersonAvatar person={p.user} size={24} />
+                      <Link href={`/people/${p.userId}`} className="min-w-0 flex-1 truncate text-row text-ink hover:underline">{personName(p.user)}</Link>
+                      {p.action ? <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{actionLabel(p.action)}</span> : null}
+                      <button type="button" aria-label={`Actions for ${personName(p.user)}`} aria-haspopup="menu" onClick={(e) => setMenu({ p, u: p.user!, anchor: { current: e.currentTarget } })}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                        <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                      </button>
+                    </li>
+                  ) : null)}
+                </ul>
+              ) : <p className="m-0 px-4 py-3 text-sm text-ink-2">Nobody here{allPeriods ? "" : ` for ${period}`}.</p>}
+            </aside>
+          ) : null}
+        </div>
       </div>
 
-      {placeOpen && (
-        <PlaceModal
-          users={users}
-          seed={placeSeed}
-          defaultPeriod={selectedPeriod ?? currentPeriod()}
-          onClose={() => { setPlaceOpen(false); setPlaceSeed(null); }}
-          onPlaced={(period) => { setPlaceOpen(false); setPlaceSeed(null); handlePlaced(period); }}
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label="Placement actions">
+            <MenuItem icon={Move} label={menu.p ? "Move on the grid" : "Place on the grid"} onClick={() => { const m = menu; setMenu(null); openPlace([m.u], m.p ? (m.p.boxPosition as BoxKey) : null, m.p); }} />
+            <MenuItem icon={UserRound} label="Open profile" onClick={() => { const id = menu.u.id; setMenu(null); router.push(`/people/${id}`); }} />
+            {menu.p && !viewer.isAgent ? <><MenuSeparator /><MenuItem icon={Trash2} label="Remove placement" destructive onClick={() => { const p = menu.p!; setMenu(null); void removePlacement(p); }} /></> : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
+
+      {place ? (
+        <PlacePersonDialog
+          initial={place}
+          periods={periodList.map((p) => p.key)}
+          onClose={() => setPlace(null)}
+          onPlaced={(n) => { setPlace(null); setSelected(new Set()); toast(n === 1 ? "Placed on the grid" : `Placed ${n} people`); void load(); void loadPeriods(); }}
         />
-      )}
+      ) : null}
     </>
   );
 }
 
-/* ── Placement modal — writes a TalentAssessment via POST /api/talent-assessment.
- *  Click a cell in the mini 9-box to set performance × potential, pick the
- *  person, add an action + notes. Upsert-backed, so re-placing overwrites. */
-function PlaceModal({
-  users, seed, defaultPeriod, onClose, onPlaced,
+function PlacePersonDialog({
+  initial,
+  periods,
+  onClose,
+  onPlaced,
 }: {
-  users: UserOpt[];
-  seed: { userId?: string; performance?: 1 | 2 | 3; potential?: 1 | 2 | 3; action?: string; notes?: string } | null;
-  defaultPeriod: string;
+  initial: { people: UserLite[]; box: BoxKey | null; action: string | null; notes: string; period: string };
+  periods: string[];
   onClose: () => void;
-  onPlaced: (period: string) => void;
+  onPlaced: (n: number) => void;
 }) {
-  const [userId, setUserId] = useState(seed?.userId ?? "");
-  const [period, setPeriod] = useState(defaultPeriod);
-  const [performance, setPerformance] = useState<1 | 2 | 3 | null>(seed?.performance ?? null);
-  const [potential, setPotential] = useState<1 | 2 | 3 | null>(seed?.potential ?? null);
-  const [action, setAction] = useState(seed?.action ?? "");
-  const [notes, setNotes] = useState(seed?.notes ?? "");
-  const [query, setQuery] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const [people, setPeople] = useState<UserLite[]>(initial.people);
+  const [box, setBox] = useState<BoxKey | null>(initial.box);
+  const [period, setPeriod] = useState(initial.period);
+  const [action, setAction] = useState<string | null>(initial.action);
+  const [notes, setNotes] = useState(initial.notes);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<UserLite[]>([]);
+  const [pickOpen, setPickOpen] = useState(false);
+  const fixedPeople = initial.people.length > 0;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    if (!pickOpen) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ data: UserLite[] }>(`/api/talent-assessment/people?q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => { if (r.ok) setFound(r.data.data); });
+    }, q ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [pickOpen, q]);
 
-  const boxKey = performance && potential ? `${performance}-${potential}` : null;
-  const filteredUsers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => `${u.firstName ?? ""} ${u.lastName ?? ""}`.toLowerCase().includes(q));
-  }, [users, query]);
-  const canSave = !!userId && !!period.trim() && !!performance && !!potential && !saving;
-
+  const dirty = (!fixedPeople && people.length > 0) || box !== initial.box || notes !== initial.notes || action !== initial.action;
+  const requestClose = async () => {
+    if (busy) return;
+    if (dirty && !(await confirm({ title: "Discard this placement?", description: "Nothing has been placed yet.", confirmLabel: "Discard", destructive: true }))) return;
+    onClose();
+  };
   const save = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/talent-assessment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, period: period.trim(), performance, potential, action: action.trim() || null, notes: notes.trim() || null }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(res.status === 403 ? "Only managers can place people on the 9-box." : data?.error || "Couldn't save the placement.");
-        return;
-      }
-      onPlaced(period.trim());
-    } catch {
-      setError("Couldn't save the placement.");
-    } finally {
-      setSaving(false);
+    if (!people.length) { setErr("Pick who to place."); return; }
+    if (!box) { setErr("Pick a box on the grid."); return; }
+    if (!period) { setErr("Pick a period."); return; }
+    const [performance, potential] = box.split("-").map(Number);
+    setBusy(true);
+    setErr(null);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const p of people) {
+      const r = await apiFetch("/api/talent-assessment", { method: "POST", json: { userId: p.id, period, performance, potential, action, notes: notes.trim() || null } });
+      if (r.ok) ok += 1; else failed.push(`${personName(p)}: ${r.error || "not saved"}`);
     }
+    setBusy(false);
+    if (failed.length) { setErr(`Not placed: ${failed.join("; ")}`); if (!ok) return; }
+    onPlaced(ok);
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 pt-[10vh] px-4"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Place person on 9-box"
-        className="w-full max-w-[560px] bg-white dark:bg-[#14171D] rounded-xl shadow-2xl border border-zinc-200 dark:border-[#2A2F38] overflow-hidden max-h-[86vh] flex flex-col"
-      >
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-zinc-100 dark:border-[#2A2F38]">
-          <h2 className="text-base font-semibold" style={{ color: "var(--os-ink)" }}>Place on 9-box</h2>
-          <button type="button" onClick={onClose} className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-[#20242C]" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
+    <Dialog open onOpenChange={(v) => { if (!v) void requestClose(); }}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{fixedPeople && people.length === 1 ? `Place ${personName(people[0])}` : fixedPeople ? `Move ${people.length} people` : "Place person"}</DialogTitle>
+          <DialogDescription>Where they sit on performance and potential for a period.</DialogDescription>
+        </DialogHeader>
+        {!fixedPeople ? (
+          <div className="relative flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Person</span>
+            <button type="button" onClick={() => setPickOpen((v) => !v)} className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-row text-ink hover:bg-hover">
+              {people[0] ? <><PersonAvatar person={people[0]} size={20} /><span className="truncate">{personName(people[0])}</span></> : <span className="text-ink-3">Pick someone you can see</span>}
+            </button>
+            {pickOpen ? (
+              <Picker open onClose={() => setPickOpen(false)} ariaLabel="Person" alwaysSearch searchPlaceholder="Search people" onSearchChange={setQ} className="absolute start-0 top-16 z-50" width={360}
+                emptyLabel="Nobody by that name in your scope"
+                sections={[{ options: found.map((u) => ({ value: u.id, label: personName(u), description: [u.role?.title, u.department?.name].filter(Boolean).join(" · ") || undefined })) }]}
+                onSelect={(id) => { const u = found.find((x) => x.id === id); if (u) setPeople([u]); setPickOpen(false); }} />
+            ) : null}
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Box</span>
+          <NineBoxGrid size="mini" cells={{}} selected={box} onSelect={setBox} />
         </div>
-
-        <div className="px-5 py-4 space-y-4 overflow-y-auto">
-          {/* Person */}
-          <div className="space-y-1.5">
-            <label className="text-xs uppercase tracking-wide text-zinc-400">Person</label>
-            <div className="flex items-center gap-2 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8">
-              <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter people…"
-                className="flex-1 bg-transparent text-base focus:outline-none"
-                style={{ color: "var(--os-ink)" }}
-              />
-            </div>
-            <select
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              size={4}
-              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] text-base p-1 bg-white dark:bg-[#14171D]"
-              style={{ color: "var(--os-ink)" }}
-            >
-              {filteredUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim()}{u.role?.title ? ` · ${u.role.title}` : ""}
-                </option>
-              ))}
-            </select>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Period</span>
+            <PickerButton ariaLabel="Period" label={period || <span className="text-ink-3">Pick a period</span>} selected={period} sections={[{ options: periods.map((p) => ({ value: p, label: p })) }]} onSelect={setPeriod} />
           </div>
-
-          {/* Mini 9-box placement */}
-          <div className="space-y-1.5">
-            <label className="text-xs uppercase tracking-wide text-zinc-400">Placement · click a box</label>
-            <div className="flex gap-2">
-              <div className="flex flex-col items-center justify-between py-1 text-micro font-semibold text-zinc-400" style={{ writingMode: "vertical-rl" as const }}>
-                <span>HIGH</span><span>POTENTIAL</span><span>LOW</span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 flex-1">
-                {GRID_ORDER.map(({ key, perf, pot }) => {
-                  const selected = boxKey === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => { setPerformance(perf); setPotential(pot); }}
-                      className="rounded-md border text-left px-2 py-2 transition-colors"
-                      style={{
-                        borderColor: selected ? BOX_COLORS[key] : "var(--os-line, #e4e4e7)",
-                        background: selected ? BOX_COLORS[key] : "transparent",
-                        color: selected ? "#fff" : "var(--os-ink-2, #52525b)",
-                        boxShadow: selected ? `0 0 0 1px ${BOX_COLORS[key]}` : "none",
-                      }}
-                    >
-                      <div className="text-xs font-semibold leading-tight">{BOX_LABELS[key]}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex justify-between text-micro font-semibold text-zinc-400 pl-6 pr-1">
-              <span>LOW</span><span>PERFORMANCE</span><span>HIGH</span>
-            </div>
-            {boxKey && (
-              <p className="text-xs text-zinc-500">Selected: <span style={{ color: BOX_COLORS[boxKey], fontWeight: 600 }}>{BOX_LABELS[boxKey]}</span> · {BOX_LONG[boxKey]}</p>
-            )}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Action</span>
+            <PickerButton ariaLabel="Action" label={action ? actionLabel(action) : "None"} selected={action ?? "none"}
+              sections={[{ options: [{ value: "none", label: "None" }, ...TALENT_ACTIONS] }]} onSelect={(v) => setAction(v === "none" ? null : v)} />
           </div>
-
-          {/* Period */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs uppercase tracking-wide text-zinc-400">Period</label>
-              <input
-                type="text"
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                placeholder="2026-08"
-                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-base bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
-                style={{ color: "var(--os-ink)" }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs uppercase tracking-wide text-zinc-400">Action (optional)</label>
-              <input
-                type="text"
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                placeholder="e.g. Promote, Develop, Coach"
-                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-base bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
-                style={{ color: "var(--os-ink)" }}
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <label className="text-xs uppercase tracking-wide text-zinc-400">Notes (optional)</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Calibration rationale, development focus…"
-              rows={3}
-              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 py-2 text-base bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA] resize-none"
-              style={{ color: "var(--os-ink)" }}
-            />
-          </div>
-
-          {error && <p className="text-sm text-[#E2445C]">{error}</p>}
         </div>
-
-        <div className="border-t border-zinc-100 dark:border-[#2A2F38] px-5 py-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-base font-medium" style={{ color: "var(--os-ink)" }}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={!canSave}
-            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-white text-base font-medium"
-            style={{ background: canSave ? "#0073EA" : "#9dbfe8", cursor: canSave ? "pointer" : "default" }}
-          >
-            {saving ? <Dots variant="pending" /> : <Plus className="w-3.5 h-3.5" />}
-            {saving ? "Placing…" : "Place person"}
-          </button>
-        </div>
-      </div>
-    </div>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-ink">Notes</span>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} maxLength={5000} className="min-h-[76px] w-full resize-y rounded-md border border-line bg-raised px-3 py-2 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]" />
+        </label>
+        {err ? <p role="alert" className="m-0 text-sm text-danger-text">{err}</p> : null}
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => void requestClose()} disabled={busy}>Cancel</Button>
+          <Button onClick={() => void save()} disabled={busy}>{busy ? "Placing" : "Place person"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Users2; label: string; value: string; sub: string }) {
-  return (
-    <div className="tal__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="tal__kpi-accent" aria-hidden="true" />
-      <div className="tal__kpi-row">
-        <div className="tal__kpi-icon"><Icon /></div>
-        <div className="tal__kpi-label">{label}</div>
-      </div>
-      <div className="tal__kpi-value">{value}</div>
-      <div className="tal__kpi-sub">{sub}</div>
-    </div>
-  );
-}
+

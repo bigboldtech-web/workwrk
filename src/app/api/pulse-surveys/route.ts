@@ -1,87 +1,87 @@
+// /api/pulse-surveys: surveys (spec-teams-performance /surveys).
+//
+// GET ?view=answer (default) | all | closed  &page=&limit=
+//      answer  the Open surveys the viewer is in the audience of, with
+//              hasResponded. NO response counts or rates: an employee's
+//              surveys page holds only surveys and the word Answer.
+//      all     Draft and Open surveys the viewer runs (the People team and
+//              Admin: every survey), with audience size, responses and rate
+//      closed  the same for Closed surveys
+//      Asking for all or closed without running surveys returns the answer
+//      view flagged `downgraded`, so the page can say why.
+// POST { title, questions, status: "DRAFT" | "ACTIVE", audienceType, ids,
+//      anonymous, frequency, closesAt }: Save as draft, or Publish (which
+//      notifies the audience with a link to the survey itself).
+
 import { NextRequest } from "next/server";
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { sendEmail } from "@/lib/email";
-import { genericNotificationTemplate } from "@/lib/email-templates";
-import { resolveUserIdsByTags, getUserTagIds } from "@/lib/user-tags";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
-import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
-import { canManageSurvey } from "@/lib/people/survey-audience";
+import { audienceLabel, audienceUserWhere, notifySurveyAudience, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
+import { cleanSurveyQuestions } from "@/lib/performance/survey";
+import { surveyOpenNow } from "@/lib/people/survey-audience";
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"]);
+const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-
+  const ctx = await surveyCtx(session);
+  if (!ctx) return jsonError("Not found", 404);
   const orgId = getOrgId(session);
-  const userId = getUserId(session);
+  const sp = new URL(req.url).searchParams;
+  const runs = await cultureOrganiserFromSession(session);
+  const asked = sp.get("view");
+  const downgraded = (asked === "all" || asked === "closed") && !runs;
+  const view = downgraded ? "answer" : asked === "all" || asked === "closed" ? asked : "answer";
+  const page = Math.max(1, Number(sp.get("page") ?? "1") || 1);
+  const limit = Math.min(100, Math.max(1, Number(sp.get("limit") ?? "40") || 40));
 
-  const viewer = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, officeId: true, departmentId: true, accessLevel: true },
+  const where: Prisma.PulseSurveyWhereInput = {
+    organizationId: orgId,
+    status: view === "answer" ? "ACTIVE" : view === "closed" ? "CLOSED" : { in: ["DRAFT", "ACTIVE"] },
+  };
+  const all = await prisma.pulseSurvey.findMany({
+    where,
+    include: { responses: { where: { userId: ctx.userId }, select: { id: true } }, _count: { select: { responses: true } } },
+    orderBy: view === "closed" ? { closedAt: "desc" } : { createdAt: "desc" },
   });
-  const viewerIsManager = await cultureOrganiserFromSession(session);
-  const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
-  // The viewer's own person-tags — decides membership in a TAGS survey.
-  const viewerTagIds = await getUserTagIds(orgId, userId);
-
-  const surveys = await prisma.pulseSurvey.findMany({
-    where: { organizationId: orgId },
-    include: {
-      responses: { where: { userId }, select: { id: true } },
-      _count: { select: { responses: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
+  const now = new Date();
+  const mine = all.filter((s) => {
+    const f = surveyFaces(ctx, s, s.responses.length > 0);
+    return view === "answer" ? f.inAudience && surveyOpenNow(s, now) : f.canManage;
   });
+  const total = mine.length;
+  const pageRows = mine.slice((page - 1) * limit, page * limit);
 
-  const totalUsers = await prisma.user.count({ where: { organizationId: orgId, deletedAt: null } });
-
-  // Count audience size per survey (for response rate)
-  async function audienceSize(s: typeof surveys[number]): Promise<number> {
-    if (s.audienceType === "ALL") return totalUsers;
-    const where: any = { organizationId: orgId, deletedAt: null };
-    if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
-    if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
-    if (s.audienceType === "USERS") where.id = { in: s.userIds };
-    if (s.audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(orgId, s.tagIds) };
-    return prisma.user.count({ where });
-  }
-
-  function viewerIsInAudience(s: typeof surveys[number]) {
-    if (s.audienceType === "ALL") return true;
-    if (s.audienceType === "OFFICES") return !!viewer?.officeId && s.officeIds.includes(viewer.officeId);
-    if (s.audienceType === "DEPARTMENTS") return !!viewer?.departmentId && s.departmentIds.includes(viewer.departmentId);
-    if (s.audienceType === "USERS") return s.userIds.includes(userId);
-    if (s.audienceType === "TAGS") return s.tagIds.some((t) => viewerTagIds.includes(t));
-    return false;
-  }
-
-  const sizes = await Promise.all(surveys.map(audienceSize));
-
-  const shaped = surveys
-    .map((s, i) => ({ survey: s, size: sizes[i] }))
-    // A respondent sees the surveys sent to them once they are live, never
-    // a DRAFT (which is not theirs to launch, and not yet a question).
-    .filter(({ survey }) => viewerIsManager || (survey.status !== "DRAFT" && viewerIsInAudience(survey)))
-    .map(({ survey: s, size }) => ({
-      ...s,
+  const data = await Promise.all(pageRows.map(async (s) => {
+    const base = {
+      id: s.id,
+      title: s.title,
+      status: s.status,
+      anonymous: s.anonymous,
+      questionCount: Array.isArray(s.questions) ? s.questions.length : 0,
+      closesAt: s.closesAt,
+      closedAt: s.closedAt,
+      createdAt: s.createdAt,
+      frequency: s.frequency,
       hasResponded: s.responses.length > 0,
-      inAudience: viewerIsInAudience(s),
+    };
+    if (view === "answer") return base;
+    const size = await prisma.user.count({ where: await audienceUserWhere(orgId, s) });
+    return {
+      ...base,
+      audienceType: s.audienceType,
+      audience: await audienceLabel(orgId, s),
       audienceSize: size,
-      responseRate: size > 0 ? Math.round((s._count.responses / size) * 100) : 0,
       totalResponses: s._count.responses,
-      totalUsers,
-      canManage: canManageSurvey({
-        callerId: userId,
-        createdById: s.createdById,
-        peopleTeamOrAdmin: peopleOrAdmin,
-        legacyManagerTier: isManager(session),
-      }),
-    }));
+      responseRate: size > 0 ? Math.round((s._count.responses / size) * 100) : 0,
+    };
+  }));
 
-  return jsonSuccess(shaped);
+  return jsonSuccess({ data, view, downgraded, canRun: runs, pagination: { total, page, limit, hasMore: page * limit < total } });
 }
 
 export async function POST(req: NextRequest) {
@@ -90,167 +90,58 @@ export async function POST(req: NextRequest) {
   if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const body = await req.json();
-  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, tagIds, anonymous, closesAt } = body;
+  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+  if (!title) return jsonError("Give the survey a title");
+  const cleaned = cleanSurveyQuestions(body.questions);
+  if (!cleaned.ok) return jsonError(cleaned.error);
+  const status = body.status === "DRAFT" ? "DRAFT" : "ACTIVE";
 
-  if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) {
-    return jsonError("Title and questions required");
-  }
-
-  // Normalize closesAt — reject malformed strings and past dates. Past
-  // dates would trigger immediate close on the next cron tick, which
-  // is almost always a user mistake.
   let resolvedClosesAt: Date | null = null;
-  if (closesAt) {
-    const d = new Date(closesAt);
+  if (body.closesAt) {
+    const d = new Date(String(body.closesAt));
     if (isNaN(d.getTime())) return jsonError("Invalid close date");
     if (d.getTime() <= Date.now()) return jsonError("Close date must be in the future");
     resolvedClosesAt = d;
   }
+  const resolvedFrequency = typeof body.frequency === "string" && VALID_FREQUENCIES.has(body.frequency) ? body.frequency : null;
+  if (resolvedFrequency && !resolvedClosesAt) return jsonError("A repeating survey needs a close date so we know when to start the next one");
 
-  const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
-  const resolvedFrequency = typeof frequency === "string" && VALID_FREQUENCIES.has(frequency) ? frequency : null;
-  if (resolvedFrequency && !resolvedClosesAt) {
-    return jsonError("Recurring surveys need a close date so we know when to rotate");
-  }
-
-  const resolvedAudienceType = typeof audienceType === "string" && AUDIENCE_TYPES.has(audienceType) ? audienceType : "ALL";
-  const resolvedOfficeIds = resolvedAudienceType === "OFFICES" && Array.isArray(officeIds) ? officeIds.filter((x: unknown) => typeof x === "string") : [];
-  const resolvedDepartmentIds = resolvedAudienceType === "DEPARTMENTS" && Array.isArray(departmentIds) ? departmentIds.filter((x: unknown) => typeof x === "string") : [];
-  const resolvedUserIds = resolvedAudienceType === "USERS" && Array.isArray(userIds) ? userIds.filter((x: unknown) => typeof x === "string") : [];
-  const resolvedTagIds = resolvedAudienceType === "TAGS" && Array.isArray(tagIds) ? tagIds.filter((x: unknown) => typeof x === "string") : [];
-
-  if (resolvedAudienceType === "OFFICES" && resolvedOfficeIds.length === 0) return jsonError("Pick at least one office");
-  if (resolvedAudienceType === "DEPARTMENTS" && resolvedDepartmentIds.length === 0) return jsonError("Pick at least one department");
-  if (resolvedAudienceType === "USERS" && resolvedUserIds.length === 0) return jsonError("Pick at least one user");
-  if (resolvedAudienceType === "TAGS" && resolvedTagIds.length === 0) return jsonError("Pick at least one tag");
-
-  // Validate IDs belong to the org
-  if (resolvedOfficeIds.length > 0) {
-    const valid = await prisma.office.findMany({ where: { id: { in: resolvedOfficeIds }, organizationId: orgId }, select: { id: true } });
-    if (valid.length !== resolvedOfficeIds.length) return jsonError("One or more offices invalid", 400);
-  }
-  if (resolvedDepartmentIds.length > 0) {
-    const valid = await prisma.department.findMany({ where: { id: { in: resolvedDepartmentIds }, organizationId: orgId }, select: { id: true } });
-    if (valid.length !== resolvedDepartmentIds.length) return jsonError("One or more departments invalid", 400);
-  }
-  if (resolvedUserIds.length > 0) {
-    const valid = await prisma.user.findMany({ where: { id: { in: resolvedUserIds }, organizationId: orgId, deletedAt: null }, select: { id: true } });
-    if (valid.length !== resolvedUserIds.length) return jsonError("One or more users invalid", 400);
-  }
-  if (resolvedTagIds.length > 0) {
-    const valid = await prisma.tag.findMany({ where: { id: { in: resolvedTagIds }, organizationId: orgId, archived: false }, select: { id: true } });
-    if (valid.length !== resolvedTagIds.length) return jsonError("One or more tags invalid", 400);
-  }
+  const audienceType = typeof body.audienceType === "string" && AUDIENCE_TYPES.has(body.audienceType) ? body.audienceType : "ALL";
+  const list = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.length > 0))] : []);
+  const officeIds = audienceType === "OFFICES" ? list(body.officeIds) : [];
+  const departmentIds = audienceType === "DEPARTMENTS" ? list(body.departmentIds) : [];
+  const userIds = audienceType === "USERS" ? list(body.userIds) : [];
+  const tagIds = audienceType === "TAGS" ? list(body.tagIds) : [];
+  if (audienceType === "OFFICES" && !officeIds.length) return jsonError("Pick at least one office");
+  if (audienceType === "DEPARTMENTS" && !departmentIds.length) return jsonError("Pick at least one department");
+  if (audienceType === "USERS" && !userIds.length) return jsonError("Pick at least one person");
+  if (audienceType === "TAGS" && !tagIds.length) return jsonError("Pick at least one tag");
+  if (officeIds.length && (await prisma.office.count({ where: { id: { in: officeIds }, organizationId: orgId } })) !== officeIds.length) return jsonError("One or more offices invalid", 400);
+  if (departmentIds.length && (await prisma.department.count({ where: { id: { in: departmentIds }, organizationId: orgId } })) !== departmentIds.length) return jsonError("One or more departments invalid", 400);
+  if (userIds.length && (await prisma.user.count({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null } })) !== userIds.length) return jsonError("One or more people invalid", 400);
+  if (tagIds.length && (await prisma.tag.count({ where: { id: { in: tagIds }, organizationId: orgId, archived: false } })) !== tagIds.length) return jsonError("One or more tags invalid", 400);
 
   const survey = await prisma.pulseSurvey.create({
     data: {
-      title: title.trim(),
-      questions: questions as any,
+      title,
+      questions: cleaned.questions as unknown as Prisma.InputJsonValue,
       frequency: resolvedFrequency,
-      status: "ACTIVE",
-      audienceType: resolvedAudienceType,
-      officeIds: resolvedOfficeIds,
-      departmentIds: resolvedDepartmentIds,
-      userIds: resolvedUserIds,
-      tagIds: resolvedTagIds,
-      // Default anonymous unless the caller explicitly opts out.
-      anonymous: anonymous === false ? false : true,
+      status,
+      audienceType,
+      officeIds,
+      departmentIds,
+      userIds,
+      tagIds,
+      anonymous: body.anonymous === false ? false : true,
       closesAt: resolvedClosesAt,
       organizationId: orgId,
-      // The creator owns the survey (access-model-spec 3.3).
       createdById: getUserId(session),
     },
   });
 
-  // Resolve audience → in-app notifications + emails (non-blocking)
-  notifyAudience(
-    orgId,
-    survey.id,
-    survey.title,
-    resolvedAudienceType,
-    resolvedOfficeIds,
-    resolvedDepartmentIds,
-    resolvedUserIds,
-    resolvedTagIds,
-  ).catch((e) => console.error("[Survey] notifyAudience failed:", e));
-
-  return jsonSuccess(survey, 201);
-}
-
-async function notifyAudience(
-  orgId: string,
-  surveyId: string,
-  title: string,
-  audienceType: string,
-  officeIds: string[],
-  departmentIds: string[],
-  userIds: string[],
-  tagIds: string[],
-) {
-  const where: any = { organizationId: orgId, deletedAt: null };
-  if (audienceType === "OFFICES") where.officeId = { in: officeIds };
-  else if (audienceType === "DEPARTMENTS") where.departmentId = { in: departmentIds };
-  else if (audienceType === "USERS") where.id = { in: userIds };
-  else if (audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(orgId, tagIds) };
-  // ALL → no extra filter
-
-  const audience = await prisma.user.findMany({
-    where,
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-    },
-  });
-
-  if (audience.length === 0) return;
-
-  const message = `A new pulse survey "${title}" is waiting for your input.`;
-  await prisma.notification.createMany({
-    data: audience.map((u) => ({
-      title: "New pulse survey",
-      message,
-      type: "survey",
-      link: "/surveys",
-      userId: u.id,
-    })),
-  });
-
-  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const actionLink = `${baseUrl}/surveys`;
-
-  // Respect per-user email preferences (dailyDigest opt-in stays digest-only)
-  const userIdList = audience.map((u) => u.id);
-  const prefs = await prisma.emailPreference.findMany({
-    where: { userId: { in: userIdList } },
-    select: { userId: true },
-  });
-  // Users without an EmailPreference row: default to email on (consistent with schema defaults)
-  const prefMap = new Map(prefs.map((p) => [p.userId, true]));
-
-  for (const u of audience) {
-    if (!u.email) continue;
-    if (prefMap.has(u.id) === false) prefMap.set(u.id, true); // default on
-    const { subject, html } = genericNotificationTemplate({
-      heading: "New Pulse Survey",
-      recipientName: u.firstName,
-      subjectText: "You've been included in a new pulse survey. Your responses stay anonymous and help shape the team.",
-      itemTitle: title,
-      itemDetails: "Takes about a minute",
-      actionLabel: "Respond now",
-      actionLink,
-    });
-    sendEmail({
-      to: u.email,
-      subject,
-      html,
-      template: "survey-published",
-      variables: { surveyId, title },
-      organizationId: orgId,
-      userId: u.id,
-      category: "survey",
-    }).catch((err) => console.error(`[Survey] email to ${u.email} failed:`, err));
+  if (status === "ACTIVE") {
+    notifySurveyAudience(survey, orgId).catch((e) => console.error("[Survey] notify failed:", e));
   }
+  return jsonSuccess(survey, 201);
 }

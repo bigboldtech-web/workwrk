@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { isInReportTree } from "@/lib/reporting-line";
+import { peerCandidateWhere } from "@/lib/performance/review-cycle.server";
 
 // GET: Get peer feedback requests for current user (to give) or for a review (as manager)
 export async function GET(
@@ -85,9 +86,10 @@ export async function POST(
   const orgId = getOrgId(session);
   const review = await prisma.review.findFirst({
     where: { id: reviewId, cycleId, cycle: { organizationId: orgId } },
-    include: { cycle: { select: { name: true } }, subject: { select: { firstName: true, lastName: true } } },
+    include: { cycle: { select: { name: true, status: true } }, subject: { select: { firstName: true, lastName: true } } },
   });
   if (!review) return jsonError("Review not found", 404);
+  if (review.cycle.status !== "ACTIVE" && review.cycle.status !== "IN_CALIBRATION") return jsonError("This cycle no longer takes feedback", 409);
   // Who picks the peers: the review's reviewer, anyone with the subject in
   // their reporting chain, or the People team and Admin, whatever their
   // access level (the same facts the /reviews/[id] team face reads).
@@ -97,15 +99,25 @@ export async function POST(
     if (reach && !reach.has(review.subjectId)) return jsonError("Forbidden", 403);
   }
 
-  // Peers must be active people in this org, never the subject, each once.
+  // Peers must be people who work with the subject (the same rule the
+  // picker lists, review-cycle.server.ts peerCandidateWhere), each once,
+  // never the subject. A bulk request (skipInvalid) keeps the ones that fit
+  // this subject and reports the rest instead of failing the whole batch.
   const requested = [...new Set(peerIds.filter((p: unknown): p is string => typeof p === "string" && p.length > 0))];
+  if (requested.length > 5) return jsonError("Ask up to five people at a time", 400);
+  const subj = await prisma.user.findUnique({ where: { id: review.subjectId }, select: { id: true, managerId: true, departmentId: true, officeId: true } });
+  const candidate = await peerCandidateWhere(orgId, { id: review.subjectId, managerId: subj?.managerId ?? null, departmentId: subj?.departmentId ?? null, officeId: subj?.officeId ?? null });
   const valid = await prisma.user.findMany({
-    where: { id: { in: requested.filter((p) => p !== review.subjectId) }, organizationId: orgId, deletedAt: null },
+    where: { AND: [candidate, { id: { in: requested } }] },
     select: { id: true },
   });
   const validPeerIds = valid.map((u) => u.id);
-  if (validPeerIds.length === 0) return jsonError("Pick at least one person in your organization other than the person being reviewed");
-  if (validPeerIds.length !== requested.length) return jsonError("Some of the people picked are not in your organization, have left, or are the person being reviewed");
+  const skipInvalid = body.skipInvalid === true;
+  if (validPeerIds.length === 0) {
+    if (skipInvalid) return jsonSuccess({ created: 0, skipped: requested.length }, 200);
+    return jsonError("Pick people who work with them: their department, their office, their manager or their team");
+  }
+  if (!skipInvalid && validPeerIds.length !== requested.length) return jsonError("Some of the people picked do not work with them, have left, or are the person being reviewed");
 
   // Create peer feedback records
   const feedbackData = validPeerIds.map((peerId: string) => ({
@@ -123,16 +135,16 @@ export async function POST(
 
   // Notify peers
   const notifications = validPeerIds.map((peerId: string) => ({
-    title: "Peer Feedback Requested",
-    message: `Please provide feedback for ${review.subject.firstName} ${review.subject.lastName} as part of ${review.cycle.name}.`,
+    title: `Feedback on ${review.subject.firstName} ${review.subject.lastName}`.trim(),
+    message: `${review.cycle.name}: your name is not shown to them.`,
     type: "review",
-    link: `/reviews/${cycleId}`,
+    link: `/reviews/${cycleId}?tab=peer`,
     userId: peerId,
   }));
 
   await prisma.notification.createMany({ data: notifications });
 
-  return jsonSuccess({ message: `${validPeerIds.length} peer feedback requests created` }, 201);
+  return jsonSuccess({ message: `${validPeerIds.length} peer feedback requests created`, created: validPeerIds.length, skipped: requested.length - validPeerIds.length }, 201);
 }
 
 // PATCH: Submit peer feedback
@@ -154,15 +166,21 @@ export async function PATCH(
     where: { id: feedbackId, giverId: userId, review: { cycleId } },
   });
   if (!feedback) return jsonError("Feedback request not found", 404);
-  if (feedback.status === "SUBMITTED") return jsonError("Feedback already submitted");
+  if (feedback.status === "SUBMITTED") return jsonError("Feedback already submitted", 409);
+  const cyc = await prisma.reviewCycle.findFirst({ where: { id: cycleId, organizationId: getOrgId(session) }, select: { status: true } });
+  if (!cyc || (cyc.status !== "ACTIVE" && cyc.status !== "IN_CALIBRATION")) return jsonError("This cycle no longer takes feedback", 409);
+  if (typeof collaborationRating !== "number" || !Number.isInteger(collaborationRating) || collaborationRating < 1 || collaborationRating > 5) {
+    return jsonError("Rate how they collaborate, 1 to 5", 400);
+  }
+  const t = (v: unknown) => (typeof v === "string" ? v.slice(0, 10_000) : null);
 
   const updated = await prisma.peerFeedback.update({
     where: { id: feedbackId },
     data: {
-      strengths,
-      improvements,
+      strengths: t(strengths),
+      improvements: t(improvements),
       collaborationRating,
-      comments,
+      comments: t(comments),
       rating: collaborationRating,
       status: "SUBMITTED",
     },

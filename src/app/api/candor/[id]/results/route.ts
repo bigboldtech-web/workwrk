@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { ANONYMITY_FLOOR, shuffled } from "@/lib/people/anonymity";
+import { normalizeCandorPrompts } from "@/lib/performance/candor";
 
 type Prompt = { id: string; text: string; type: string };
 type Answer = { promptId: string; value: unknown };
@@ -46,7 +47,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // Aggregate results per prompt
-  const prompts: Prompt[] = Array.isArray(candor.prompts) ? (candor.prompts as unknown as Prompt[]) : [];
+  // The prompts' stable ids (lib/performance/candor.ts), the same ids the
+  // respond route keyed every answer to.
+  const prompts: Prompt[] = normalizeCandorPrompts(candor.prompts);
   const aggregated = prompts.map((prompt) => {
     const promptAnswers = responses
       .map((r) => {

@@ -1,9 +1,19 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { cycleViewerCtx, orgScoring } from "@/lib/performance/review-cycle.server";
+import { bandOf } from "@/lib/performance/review-cycle";
 
-// GET: Generate appraisal letter data for a completed review
+// GET /api/reviews/[cycleId]/appraisal-letter?reviewId=: the letter for one
+// completed review. The route takes the CYCLE id like every sibling route,
+// with the review in ?reviewId= (spec-teams-performance /reviews/[id] Data:
+// the client called it with a review id while every sibling passes a cycle
+// id). A call with no ?reviewId= still reads [id] as a review id, for one
+// release, so an old link keeps working.
+//
+// Readers: the subject, the reviewer, anyone above the subject in the chain,
+// the People team and Admin. The band is the org's own (Settings > Scoring
+// and reviews > Performance bands), not a fifth hard-coded table.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -11,14 +21,16 @@ export async function GET(
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const { id: reviewId } = await params;
+  const { id } = await params;
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
+  const qReview = new URL(req.url).searchParams.get("reviewId");
+  const reviewId = qReview ?? id;
 
   const review = await prisma.review.findFirst({
     // Org-scoped: an appraisal letter carries a person's PII + comp data,
     // so it must never resolve a review from another organization.
-    where: { id: reviewId, subject: { organizationId: orgId } },
+    where: { id: reviewId, subject: { organizationId: orgId }, ...(qReview ? { cycleId: id } : {}) },
     include: {
       subject: {
         select: {
@@ -39,7 +51,9 @@ export async function GET(
   // over the subject (self / report tree / org-wide) may read the letter.
   const isSubject = review.subject?.id === callerId;
   const isReviewer = review.reviewer?.id === callerId;
-  if (!isSubject && !isReviewer && !(await canTouchUserAlignment(session, review.subjectId))) {
+  const ctx = await cycleViewerCtx();
+  const above = !!ctx && (ctx.peopleTeamOrAdmin || ctx.chain.has(review.subjectId));
+  if (!isSubject && !isReviewer && !above) {
     return jsonError("You can only view appraisal letters for yourself or your reports.", 403);
   }
 
@@ -54,20 +68,20 @@ export async function GET(
     orderBy: { period: "desc" },
   });
 
-  // Get performance band and hike recommendation
-  const score = review.overallScore || review.calibratedScore || (review.compositeScore as number) || 0;
-  const band = score >= 90 ? "Outstanding" : score >= 80 ? "Exceeds Expectations" : score >= 70 ? "Meets Expectations" : score >= 50 ? "Needs Improvement" : "Below Expectations";
-
-  // Hike recommendation based on band
-  const hikeRecommendation: Record<string, { min: number; max: number; label: string }> = {
-    "Outstanding": { min: 15, max: 25, label: "15-25%" },
-    "Exceeds Expectations": { min: 10, max: 15, label: "10-15%" },
-    "Meets Expectations": { min: 5, max: 10, label: "5-10%" },
-    "Needs Improvement": { min: 0, max: 5, label: "0-5%" },
-    "Below Expectations": { min: 0, max: 0, label: "No hike recommended" },
-  };
-
-  const hike = hikeRecommendation[band] || hikeRecommendation["Meets Expectations"];
+  // The performance band from the org's bands, and the increment ladder by
+  // the band's rank (top band first), so a renamed band keeps its ladder.
+  const score = review.overallScore ?? review.calibratedScore ?? review.compositeScore ?? 0;
+  const scoring = await orgScoring(orgId);
+  const found = bandOf(score, scoring.bands);
+  const band = found?.label ?? "";
+  const rank = found ? [...scoring.bands].sort((a, b) => b.min - a.min).findIndex((b) => b.label === found.label && b.min === found.min) : -1;
+  const LADDER = [
+    { min: 15, max: 25, label: "15-25%" },
+    { min: 10, max: 15, label: "10-15%" },
+    { min: 5, max: 10, label: "5-10%" },
+    { min: 0, max: 5, label: "0-5%" },
+  ];
+  const hike = rank >= 0 && rank < LADDER.length ? LADDER[rank] : { min: 0, max: 0, label: "No hike recommended" };
 
   // Extract assessment details (Json columns → indexable record).
   const managerAssessment = review.managerAssessment as Record<string, unknown> | null;
