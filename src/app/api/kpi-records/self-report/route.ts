@@ -11,7 +11,9 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { notifyKpiSubmitted } from "@/lib/kpi-review.server";
+import { kpiWriteStatus } from "@/lib/kpi-record-status";
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 
 export async function POST(req: NextRequest) {
@@ -50,6 +52,13 @@ export async function POST(req: NextRequest) {
   }
   const rows = records as SelfReportRecordInput[];
 
+  const before = await prisma.kPIRecord.findMany({
+    where: { userId, period, kpiId: { in: rows.map((r) => r.kpiId) } },
+    select: { kpiId: true, status: true },
+  });
+  const wasSubmitted = new Set(before.filter((b) => b.status === "SUBMITTED").map((b) => b.kpiId));
+  const beforeBy = new Map(before.map((b) => [b.kpiId, b]));
+
   const ops = rows
     .filter((r) => allowedKpiIds.has(r.kpiId))
     .map((r) => {
@@ -57,6 +66,10 @@ export async function POST(req: NextRequest) {
       if (!kpi) return null;
 
       const actual = r.actualValue != null ? Number(r.actualValue) : null;
+      // A blank on a row a manager already decided is not a change: skip it
+      // rather than wipe the approved number.
+      const prior = beforeBy.get(r.kpiId);
+      if (actual == null && (prior?.status === "APPROVED" || prior?.status === "REJECTED")) return null;
       // Direction-aware, null-target-safe. Score null when no line exists —
       // except a QUALITATIVE KPI, whose rubric rating scores against the
       // scale ceiling resolveKpiLine supplies.
@@ -79,6 +92,7 @@ export async function POST(req: NextRequest) {
           notes: r.notes || null,
           evidence: r.evidence || null,
           status: actual != null ? "SUBMITTED" : "PENDING",
+          reviewedById: null,
         },
         update: {
           actualValue: actual,
@@ -86,13 +100,20 @@ export async function POST(req: NextRequest) {
           score,
           notes: r.notes || null,
           evidence: r.evidence || null,
-          status: actual != null ? "SUBMITTED" : "PENDING",
+          // src/lib/kpi-record-status.ts: SUBMITTED with a number; a blank
+          // save never undoes a manager's decision.
+          status: kpiWriteStatus({ actorId: userId, subjectId: userId, actual, existing: beforeBy.get(r.kpiId) ?? null }).status,
+          // The person's own number: no manager has decided on it yet.
+          ...(actual != null ? { reviewedById: null } : {}),
         },
       });
     })
     .filter((op): op is NonNullable<typeof op> => op !== null);
 
   const results = await prisma.$transaction(ops);
+  // The people whose queue these land in hear about it once (kpi_submitted).
+  const fresh = results.filter((r) => r.status === "SUBMITTED" && !wasSubmitted.has(r.kpiId)).length;
+  void notifyKpiSubmitted({ userId, organizationId: getOrgId(session), period, count: fresh });
 
   return jsonSuccess({ saved: results.length, period, status: "SUBMITTED" });
 }

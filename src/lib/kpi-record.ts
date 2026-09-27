@@ -3,6 +3,7 @@
 // sends them back. The KPIRecord status enum already models the loop
 // (PENDING → SUBMITTED → APPROVED | REJECTED), so no migration is needed.
 
+import { notifyKpiDecision } from "@/lib/kpi-review.server";
 import { prisma } from "@/lib/prisma";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { kpiDirection } from "@/lib/alignment";
@@ -158,34 +159,37 @@ export async function countKpiReviewsForManager(managerId: string, organizationI
 }
 
 /**
- * Transition a SUBMITTED KPI record to APPROVED / REJECTED, store the
- * manager note, and notify the report. (Caller authorizes.) REJECTED
- * records re-surface in the IC's "to score" list so they can resubmit.
+ * Decide on a SUBMITTED KPI record: approve, send back with a note, or
+ * reopen a decision (the Undo on the toast) back to SUBMITTED. The caller
+ * authorizes. reviewedById records who decided; a manager note is written
+ * only when one is given, so approving without a note never wipes the note
+ * already on the row. The Inbox row goes through src/lib/kpi-review.server.ts
+ * with literal types the inbox-kinds completeness test can see.
  */
 export async function actOnKpiRecord(
   recordId: string,
-  args: { action: "approve" | "request_changes"; notes?: string },
-): Promise<void> {
-  const next: KPIRecordStatus = args.action === "approve" ? "APPROVED" : "REJECTED";
+  args: { action: "approve" | "request_changes" | "reopen"; notes?: string; actorId: string },
+): Promise<{ status: KPIRecordStatus }> {
+  const next: KPIRecordStatus = args.action === "approve" ? "APPROVED" : args.action === "request_changes" ? "REJECTED" : "SUBMITTED";
+  const note = typeof args.notes === "string" && args.notes.trim() ? args.notes.trim() : undefined;
   const updated = await prisma.kPIRecord.update({
     where: { id: recordId },
-    data: { status: next, managerNotes: args.notes ?? null },
+    data: {
+      status: next,
+      ...(note !== undefined ? { managerNotes: note } : {}),
+      reviewedById: args.action === "reopen" ? null : args.actorId,
+    },
     include: { kpi: { select: { name: true } } },
   });
-
-  await prisma.notification.create({
-    data: {
+  if (args.action !== "reopen") {
+    await notifyKpiDecision({
       userId: updated.userId,
-      type: args.action === "approve" ? "kpi_approved" : "kpi_changes_requested",
-      title: args.action === "approve" ? "KPI score approved" : "KPI score sent back",
-      message:
-        args.action === "approve"
-          ? `Your "${updated.kpi.name}" KPI for ${updated.period} was approved.`
-          : `Your "${updated.kpi.name}" KPI for ${updated.period} needs changes.${args.notes ? ` Note: ${args.notes}` : ""}`,
-      // The IC's scoring surface: their own profile hosts the KPI
-      // recorder ("Record my numbers") + KPI history, where a REJECTED
-      // record re-surfaces for resubmission. "/today" had neither.
-      link: `/people/${updated.userId}`,
-    },
-  });
+      actorId: args.actorId,
+      kpiName: updated.kpi.name,
+      period: updated.period,
+      decision: args.action,
+      notes: note ?? null,
+    });
+  }
+  return { status: next };
 }

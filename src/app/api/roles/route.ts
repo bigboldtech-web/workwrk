@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.kRA.findMany({
       where: { organizationId: orgId, roleId: { not: null } },
-      select: { roleId: true, _count: { select: { kpis: true } } },
+      select: { roleId: true, weight: true, _count: { select: { kpis: true } } },
     }),
   ]);
 
@@ -51,9 +51,14 @@ export async function GET(req: NextRequest) {
   const removedByRole = new Map(removed.map((r) => [r.roleId, r._count._all]));
 
   const kpiCountByRole = new Map<string, number>();
+  // The KRA weights of a job title summed (spec-goals /kra-kpi Weights
+  // column), so the list needs no client-side join over every KRA.
+  const weightByRole = new Map<string, number>();
   for (const kra of kraKpiCounts) {
     if (!kra.roleId) continue;
     kpiCountByRole.set(kra.roleId, (kpiCountByRole.get(kra.roleId) ?? 0) + kra._count.kpis);
+    const w = typeof kra.weight === "number" && Number.isFinite(kra.weight) ? kra.weight : 0;
+    weightByRole.set(kra.roleId, (weightByRole.get(kra.roleId) ?? 0) + w);
   }
 
   const rows = roles.map((r) => ({
@@ -62,6 +67,7 @@ export async function GET(req: NextRequest) {
     // name every new reader uses until the column is renamed at step 8.
     seniority: r.level,
     kpiCount: kpiCountByRole.get(r.id) ?? 0,
+    weightTotal: Math.round(weightByRole.get(r.id) ?? 0),
     removedHolders: removedByRole.get(r.id) ?? 0,
   }));
   if (new URL(req.url).searchParams.get("withAccess") === "1") {

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canEditOkrOwner } from "@/lib/alignment-scope";
+import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import {
@@ -33,8 +34,9 @@ export async function POST(
     select: { ownerId: true },
   });
   if (!okrRef) return jsonError("OKR not found", 404);
-  if (!(await canEditOkrOwner(session, okrRef.ownerId))) {
-    return jsonError("You can only check in on your own goals or your reports' goals.", 403);
+  // Contributors check in too (spec-goals access: Can edit = check in).
+  if (!(await canEditOkrOwner(session, okrRef.ownerId)) && !(await isGoalContributor(session, okrId))) {
+    return jsonError("You need Can edit on this goal to check in.", 403);
   }
 
   const kr = await prisma.keyResult.findFirst({
@@ -48,7 +50,7 @@ export async function POST(
   // than accept a value we would then ignore on read.
   if (kr.kpiId) {
     return jsonError(
-      `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}" — record the KPI reading instead of checking in here.`,
+      `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}". Record the KPI number instead of checking in here.`,
       409,
     );
   }

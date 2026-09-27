@@ -1,8 +1,8 @@
-// /okrs — goals list. The gate runs HERE, server-side, before the client
+// /okrs: the goals list. The gate runs HERE, server-side, before the client
 // body renders: requireGoalsPage resolves the session (bounce to /login
-// otherwise). Row-level visibility is the API's job — GET /api/okrs
+// otherwise). Row-level visibility is the API's job: GET /api/okrs
 // filters three-door (employee: own + audience + COMPANY; manager:
-// + report tree; admin/HR: org-wide) — and /okrs/[id] re-checks the same
+// + report tree; admin/HR: org-wide), and /okrs/[id] re-checks the same
 // rule per goal via requireGoalPage, so a guessed URL never leaks a goal.
 //
 // Query params, one URL per view (spec-goals section 1 naming canon):

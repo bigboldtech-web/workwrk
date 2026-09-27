@@ -1,62 +1,71 @@
 "use client";
 
-/* KRA / KPI — the job-title-first alignment workspace.
- *
- * KRAs and KPIs are managed PER JOB TITLE, never as a flat wall: this
- * page is the role picker. Each row is a job title with its headcount
- * and "N KRAs · M KPIs"; selecting one opens the role's definition
- * workspace (/people/roles/[id]) where the template is edited. Legacy
- * KRAs that belong to no job title are SURFACED in a separate
- * "Needs a job title" section for an admin to attach — never deleted,
- * never auto-assigned.
- *
- *  GET   /api/roles          — job titles + KRA/KPI counts
- *  GET   /api/kras?limit=500 — global KRA/KPI search index (scoped)
- *  GET   /api/kras/orphans   — roleId-null KRAs (kras.edit only)
- *  PATCH /api/kras           — attach an orphan to a job title
- */
+// KRAs & KPIs (spec-goals section 2 /kra-kpi): the library of what each job
+// title is responsible for (KRAs) and how it is measured (KPIs). Every Member
+// reads; the People team and admins (the kras.create / kras.edit
+// permissions the routes ask) create and file.
+//
+//   Views row   Job titles (/kra-kpi) · Needs a job title (?view=orphans,
+//               editors only, with its count)
+//   Toolbar     Filter (search across job titles, KRAs and KPIs; Department;
+//               Seniority; Has no KRAs yet; Weights not 100%) · Sort · the
+//               one blue New KRA with New KPI on its chevron ("Which KRA?"
+//               first, then the KPI dialog) · "..." Display > Show job
+//               titles with no KRAs (home.kraKpi.showEmptyTitles)
+//   Body        one TableCard grouped by department; a row opens the job
+//               title page (/people/roles/[id]) where KRAs and KPIs are
+//               edited. The orphans view files each KRA to a job title
+//               (Attach) or clears it (Not a KRA), never silently.
+//
+// ?new=kra (and the retired ?new=1) opens New KRA; ?new=kpi opens Which KRA?
+// then New KPI. Closing clears the param, so the Teams "+" works again.
+// Moved, not dropped: the four stat tiles are the views row count and the
+// footer; the "Inside job titles" matches are the Filter search, shown as a
+// suffix on the matched job title's own row.
 
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import {
-  Target, Plus, Search, ChevronRight, Briefcase, Users,
-  AlertTriangle, Gauge, Star,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Copy, ExternalLink, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { TeamStatTile } from "@/components/team/ui";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { AvatarStack } from "@/components/ui/avatar-stack";
+import { ToneChip } from "@/components/people/person-bits";
 import { KraDialog } from "@/components/alignment/kra-dialog";
 import { KpiDialog } from "@/components/alignment/kpi-dialog";
-import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
 import { usePermission } from "@/hooks/use-permission";
 import { useRole } from "@/hooks/use-role";
-import { useBoot } from "@/components/layout/os/boot-context";
 import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
+import { SENIORITY_OPTIONS, seniorityLabel } from "@/lib/people/seniority";
+import { kraKpiSurfacePrefs, type KraKpiSurfacePrefs } from "@/lib/people-prefs";
+import { apiFetch } from "@/lib/api-fetch";
 
 type ApiRole = {
   id: string;
   title: string;
   level?: string;
-  description?: string | null;
+  seniority?: string;
   department?: { id: string; name: string } | null;
   _count?: { users?: number; kraTemplates?: number };
   kpiCount?: number;
+  weightTotal?: number;
 };
 
 type ApiKra = {
   id: string;
   name: string;
-  description?: string | null;
   roleId?: string | null;
   role?: { id: string; title: string } | null;
-  /** Role-level default weightage (0-100) — the share of the job title
-   *  this area carries. Summed per role for the "weight N%" chip. */
-  weight?: number;
-  kpis?: { id: string; name: string; unit?: string | null; isNorthStar?: boolean }[];
+  kpis?: { id: string; name: string }[];
 };
 
 type OrphanKra = {
@@ -64,18 +73,19 @@ type OrphanKra = {
   name: string;
   description?: string | null;
   kpis: { id: string; name: string; isNorthStar?: boolean }[];
-  activeAssignees: { id: string; firstName?: string | null; lastName?: string | null; role?: { id: string; title: string } | null }[];
+  activeAssignees: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null }[];
   totalAssignments: number;
-  assigneeRoles: { id: string; title: string }[];
   suggestedRole: { id: string; title: string } | null;
 };
 
-const LEVEL_SHORT: Record<string, string> = {
-  C_LEVEL: "C-Suite", VP: "VP", DIRECTOR: "Director", MANAGER: "Manager",
-  TEAM_LEAD: "Team lead", EMPLOYEE: "IC", HR: "HR", COMPANY_ADMIN: "Admin", SUPER_ADMIN: "Super",
-};
-
-const NO_DEPT = "No department";
+type Sort = "title" | "people" | "kras" | "department";
+const SORTS: Array<{ value: Sort; label: string }> = [
+  { value: "title", label: "Job title A to Z" },
+  { value: "people", label: "People" },
+  { value: "kras", label: "KRAs" },
+  { value: "department", label: "Department" },
+];
+const NO_DEPT = "__none";
 
 /** The "Which KRA?" rows, grouped by job title (orphans last). */
 function kraPickerSections(kras: ApiKra[]): PickerSectionDef[] {
@@ -90,546 +100,382 @@ function kraPickerSections(kras: ApiKra[]): PickerSectionDef[] {
     .map(([label, options]) => ({ label, options }));
 }
 
+/** Every KRA in the library, page by page (no silent 500 cap). */
+async function loadLibrary(): Promise<ApiKra[]> {
+  const out: ApiKra[] = [];
+  for (let page = 1; page <= 40; page++) {
+    const r = await apiFetch<{ data: ApiKra[]; pagination?: { totalPages?: number; total?: number } }>(`/api/kras?limit=500&page=${page}&scope=library`, { cache: "no-store" });
+    if (!r.ok) break;
+    const rows = Array.isArray(r.data?.data) ? r.data.data : [];
+    out.push(...rows);
+    const pages = r.data?.pagination?.totalPages ?? 1;
+    if (page >= pages || rows.length === 0) break;
+  }
+  return out;
+}
+
 export default function KraKpiPage() {
-  const [roles, setRoles] = useState<ApiRole[] | null>(null);
-  const [kras, setKras] = useState<ApiKra[]>([]);
-  const [orphans, setOrphans] = useState<OrphanKra[] | null>(null); // null = hidden (no permission)
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [newOpen, setNewOpen] = useState(false);
-  // New KPI: "Which KRA?" first (a Picker), then KpiDialog under that KRA
-  // (spec-goals section 2 `/kra-kpi`, PO-17: the Teams "+" New KPI finally
-  // lands on a KPI control).
-  const [kraPickOpen, setKraPickOpen] = useState(false);
-  const [kpiFor, setKpiFor] = useState<{ id: string; name: string } | null>(null);
-  const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
   const router = useRouter();
-  // Every Member reads the library (Phase 6, the `kra-kpi` APP_RULES row);
-  // the create controls render only for the kras.create permission the
-  // routes ask. While the matrix loads nothing write-shaped renders.
-  const canCreate = usePermission("kras", "create") === true;
-  // "New job title" asks the Job titles write rule, not the KRA one
-  // (lib/people/job-title-access), so the action never lands on a page
-  // that cannot create.
-  const { isManager: legacyManagerTier } = useRole();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const { toast } = useOsToast();
+  const { prefs, patchPrefs, rowVersion } = useOsShell();
   const { boot } = useBoot();
+  const canCreate = usePermission("kras", "create") === true;
+  const { isManager: legacyManagerTier } = useRole();
   const canCreateTitle = legacyManagerTier || jobTitleWriterByFacts(boot.viewer);
 
-  // The Teams "+" routes here with ?new=kra (New KRA) or ?new=kpi (New KPI);
-  // ?new=1 is the retired form of ?new=kra. Each opens once, and closing
-  // clears the param so a refresh does not re-open it.
-  const searchParams = useSearchParams();
-  const newParam = searchParams.get("new");
-  const didAutoOpen = useRef<string | null>(null);
-  useEffect(() => {
-    if (!canCreate || !newParam || didAutoOpen.current === newParam) return;
-    didAutoOpen.current = newParam;
-    if (newParam === "kra" || newParam === "1") setNewOpen(true);
-    else if (newParam === "kpi") setKraPickOpen(true);
-  }, [newParam, canCreate]);
-  const clearNewParam = useCallback(() => {
-    if (!newParam) return;
-    didAutoOpen.current = null;
-    router.replace("/kra-kpi", { scroll: false });
-  }, [newParam, router]);
+  const [roles, setRoles] = useState<ApiRole[] | null>(null);
+  const [kras, setKras] = useState<ApiKra[]>([]);
+  const [orphans, setOrphans] = useState<OrphanKra[] | null>(null); // null = not an editor
+  const [orphansKnown, setOrphansKnown] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [depts, setDepts] = useState<string[]>([]);
+  const [seniority, setSeniority] = useState<string[]>([]);
+  const [noKras, setNoKras] = useState(false);
+  const [weightsOff, setWeightsOff] = useState(false);
+  const [sort, setSort] = useState<Sort>("title");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [newOpen, setNewOpen] = useState<{ roleId?: string } | null>(null);
+  const [kraPickOpen, setKraPickOpen] = useState(false);
+  const [kpiFor, setKpiFor] = useState<{ id: string; name: string } | null>(null);
+  const [menu, setMenu] = useState<{ row: ApiRole; anchor: RefObject<HTMLElement | null> } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const stored = kraKpiSurfacePrefs(prefs.home);
+  const [localPrefs, setLocalPrefs] = useState<Partial<KraKpiSurfacePrefs>>({});
+  const display = { ...stored, ...localPrefs };
+  const setDisplay = (patch: Partial<KraKpiSurfacePrefs>) => {
+    setLocalPrefs((l) => ({ ...l, ...patch }));
+    void patchPrefs({ home: { kraKpi: patch } }).then((ok) => { if (!ok) toast("Couldn't save that setting. It applies until you leave.", { tone: "danger" }); });
+  };
+
+  const view = sp?.get("view") === "orphans" ? "orphans" : "titles";
+  const newParam = sp?.get("new") ?? null;
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    const s = next.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+  }, [sp, router, pathname]);
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/roles");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRoles(data.data ?? (Array.isArray(data) ? data : []));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-    // Best-effort extras — never block the role list.
-    // scope=library: every definition in the org, for every Member.
-    fetch("/api/kras?limit=500&scope=library")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const list: ApiKra[] = d?.data?.items ?? d?.data?.data ?? (Array.isArray(d?.data) ? d.data : []);
-        setKras(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {});
-    fetch("/api/kras/orphans")
-      .then((r) => (r.ok ? r.json() : null))
-      // The route answers { orphans, total } at the TOP level (jsonSuccess
-      // does not wrap); reading d.data.orphans kept this section hidden for
-      // everyone, editors included.
-      .then((d) => setOrphans(d?.orphans ?? d?.data?.orphans ?? null))
-      .catch(() => setOrphans(null));
+    const r = await apiFetch<ApiRole[] | { data: ApiRole[] }>("/api/roles?fresh=1", { cache: "no-store" });
+    if (!r.ok) { setLoadError(`${r.error || "Couldn't load job titles"}${r.status ? ` (${r.status})` : ""}`); return; }
+    setLoadError(null);
+    setRoles(Array.isArray(r.data) ? r.data : r.data.data ?? []);
+    void loadLibrary().then(setKras).catch(() => {});
+    // The route answers { orphans, total } at the top level; a 403 means
+    // the viewer is not an editor, and the view does not render.
+    void apiFetch<{ orphans: OrphanKra[] }>("/api/kras/orphans", { cache: "no-store" }).then((o) => { setOrphans(o.ok ? o.data.orphans ?? [] : null); setOrphansKnown(true); });
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
   const v = rowVersion("kra-kpi");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  useEffect(() => { if (v <= 0) return; const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [v, load]);
+  useEffect(() => {
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
 
-  const q = search.trim().toLowerCase();
+  // A plain Member on a pasted ?view=orphans: the Job titles view, the
+  // parameter stripped and one notice line (access 5.5 rule 4).
+  useEffect(() => {
+    if (!(view === "orphans" && orphansKnown && orphans === null)) return;
+    const t = setTimeout(() => {
+      setNotice("Only the People team and admins file KRAs to job titles.");
+      setParams({ view: null });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [view, orphansKnown, orphans, setParams]);
 
-  const filteredRoles = useMemo(() => {
-    let list = roles ?? [];
-    if (q) {
-      list = list.filter((r) =>
-        r.title.toLowerCase().includes(q) ||
-        (r.department?.name ?? "").toLowerCase().includes(q) ||
-        (LEVEL_SHORT[r.level ?? ""] ?? "").toLowerCase().includes(q));
-    }
-    return list;
-  }, [roles, q]);
+  // The armed latch: ?new=kra|1|kpi opens once per arrival; closing clears it.
+  const armed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!canCreate || !newParam || armed.current === newParam) return;
+    armed.current = newParam;
+    const t = setTimeout(() => {
+      if (newParam === "kra" || newParam === "1") setNewOpen({});
+      else if (newParam === "kpi") setKraPickOpen(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [newParam, canCreate]);
+  const clearNew = useCallback(() => { armed.current = null; if (newParam) setParams({ new: null }); }, [newParam, setParams]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, ApiRole[]>();
-    for (const r of filteredRoles) {
-      const dept = r.department?.name ?? NO_DEPT;
-      if (!m.has(dept)) m.set(dept, []);
-      m.get(dept)!.push(r);
-    }
-    return Array.from(m.entries())
-      .sort(([a], [b]) => (a === NO_DEPT ? 1 : b === NO_DEPT ? -1 : a.localeCompare(b)))
-      .map(([name, items]) => ({ name, items: items.slice().sort((a, b) => a.title.localeCompare(b.title)) }));
-  }, [filteredRoles]);
-
-  // Global search: KRA / KPI hits that jump to their job title.
-  const definitionMatches = useMemo(() => {
-    if (!q) return [];
-    const rows: { key: string; kind: "KRA" | "KPI"; label: string; sub: string; roleId: string | null }[] = [];
-    for (const k of kras) {
-      const roleTitle = k.role?.title ?? "Needs a job title";
-      if (k.name.toLowerCase().includes(q)) {
-        rows.push({ key: `kra-${k.id}`, kind: "KRA", label: k.name, sub: roleTitle, roleId: k.role?.id ?? null });
-      }
-      for (const p of k.kpis ?? []) {
-        if (p.name.toLowerCase().includes(q)) {
-          rows.push({ key: `kpi-${p.id}`, kind: "KPI", label: p.name, sub: `${k.name} · ${roleTitle}`, roleId: k.role?.id ?? null });
-        }
-      }
-    }
-    return rows.slice(0, 12);
-  }, [kras, q]);
-
-  // Per-role KRA weight sums for the "weight N%" chip — the picker
-  // shows at a glance which job titles actually sum to 100%. The chip
-  // only renders when the loaded KRA list covers the role's FULL
-  // template set (team-scoped /api/kras can return a partial slice for
-  // managers; a partial sum would be a lie, so it renders nothing).
-  const weightByRole = useMemo(() => {
-    const m = new Map<string, { sum: number; count: number }>();
+  const needle = q.trim().toLowerCase();
+  // KRA and KPI name matches, per job title, for the Filter search.
+  const matchesByRole = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!needle) return m;
     for (const k of kras) {
       const rid = k.roleId ?? k.role?.id;
-      if (!rid) continue;
-      const cur = m.get(rid) ?? { sum: 0, count: 0 };
-      cur.sum += typeof k.weight === "number" && Number.isFinite(k.weight) ? k.weight : 0;
-      cur.count += 1;
-      m.set(rid, cur);
+      if (!rid || m.has(rid)) continue;
+      if (k.name.toLowerCase().includes(needle)) { m.set(rid, k.name); continue; }
+      const kpi = (k.kpis ?? []).find((p) => p.name.toLowerCase().includes(needle));
+      if (kpi) m.set(rid, kpi.name);
     }
     return m;
-  }, [kras]);
+  }, [kras, needle]);
 
-  const stats = useMemo(() => {
-    const list = roles ?? [];
-    const roleKras = list.reduce((acc, r) => acc + (r._count?.kraTemplates ?? 0), 0);
-    const roleKpis = list.reduce((acc, r) => acc + (r.kpiCount ?? 0), 0);
-    const orphanCount = orphans?.length ?? 0;
-    const orphanKpis = (orphans ?? []).reduce((acc, o) => acc + o.kpis.length, 0);
-    return {
-      jobTitles: list.length,
-      kras: roleKras + orphanCount,
-      kpis: roleKpis + orphanKpis,
-      orphanCount,
-    };
-  }, [roles, orphans]);
+  const deptOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of roles ?? []) m.set(r.department?.id ?? NO_DEPT, r.department?.name ?? "No department");
+    return [...m.entries()].sort((a, b) => (a[0] === NO_DEPT ? 1 : b[0] === NO_DEPT ? -1 : a[1].localeCompare(b[1])));
+  }, [roles]);
+
+  const shown = useMemo(() => {
+    if (!roles) return null;
+    let list = roles.filter((r) => {
+      const kraCount = r._count?.kraTemplates ?? 0;
+      if (!display.showEmptyTitles && kraCount === 0 && !noKras) return false;
+      if (depts.length && !depts.includes(r.department?.id ?? NO_DEPT)) return false;
+      if (seniority.length && !seniority.includes(r.seniority ?? r.level ?? "")) return false;
+      if (noKras && kraCount > 0) return false;
+      if (weightsOff && (kraCount === 0 || (r.weightTotal ?? 0) === 100 || (r.weightTotal ?? 0) === 0)) return false;
+      if (needle && !(r.title.toLowerCase().includes(needle) || matchesByRole.has(r.id))) return false;
+      return true;
+    });
+    list = [...list].sort((a, b) =>
+      sort === "people" ? (b._count?.users ?? 0) - (a._count?.users ?? 0) || a.title.localeCompare(b.title)
+        : sort === "kras" ? (b._count?.kraTemplates ?? 0) - (a._count?.kraTemplates ?? 0) || a.title.localeCompare(b.title)
+          : a.title.localeCompare(b.title));
+    const deptName = (r: ApiRole) => r.department?.name ?? "￿";
+    return list.sort((a, b) => deptName(a).localeCompare(deptName(b)));
+  }, [roles, display.showEmptyTitles, depts, seniority, noKras, weightsOff, needle, matchesByRole, sort]);
+
+  const groupSize = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of shown ?? []) m.set(r.department?.id ?? NO_DEPT, (m.get(r.department?.id ?? NO_DEPT) ?? 0) + 1);
+    return m;
+  }, [shown]);
+
+  const columns = useMemo<TableColumn<ApiRole>[]>(() => [
+    { key: "title", label: "Job title", title: true, width: "minmax(220px,2fr)", render: (r) => (
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate">{r.title}</span>
+        {matchesByRole.has(r.id) && !r.title.toLowerCase().includes(needle) ? <span className="truncate text-sm font-normal text-ink-2">· matched {matchesByRole.get(r.id)}</span> : null}
+      </span>
+    ) },
+    { key: "seniority", label: "Seniority", width: "130px", hideBelow: 720, render: (r) => <span className="text-sm text-ink-2">{r.seniority || r.level ? seniorityLabel(r.seniority ?? r.level) : "None"}</span> },
+    { key: "people", label: "People", width: "90px", numeric: true, render: (r) => <span className="tabular-nums">{r._count?.users ?? 0}</span> },
+    { key: "kras", label: "KRAs", width: "150px", render: (r) => {
+      const k = r._count?.kraTemplates ?? 0;
+      return k === 0 ? <span className="text-ink-2">No KRAs yet</span> : <span className="tabular-nums">{k} {k === 1 ? "KRA" : "KRAs"} · {r.kpiCount ?? 0} {r.kpiCount === 1 ? "KPI" : "KPIs"}</span>;
+    } },
+    { key: "weights", label: "Weights", width: "140px", hideBelow: 900, render: (r) => {
+      if ((r._count?.kraTemplates ?? 0) === 0) return null;
+      const w = r.weightTotal ?? 0;
+      // No weights set at all is "Not set", not an alarm on every row.
+      if (w === 0) return <span className="text-sm text-ink-2">Not set</span>;
+      return w === 100 ? <span className="tabular-nums">100%</span> : <ToneChip tone="warning" label={`${w}% not 100%`} />;
+    } },
+  ], [matchesByRole, needle]);
+
+  const orphanColumns = useMemo<TableColumn<OrphanKra>[]>(() => [
+    { key: "name", label: "KRA", title: true, width: "minmax(200px,1.2fr)", render: (o) => <span className="truncate">{o.name}</span> },
+    { key: "desc", label: "Description", width: "minmax(200px,1.5fr)", hideBelow: 900, render: (o) => <span className="line-clamp-2 text-sm text-ink-2">{o.description ?? ""}</span> },
+    { key: "kpis", label: "KPIs", width: "70px", numeric: true, render: (o) => <span className="tabular-nums">{o.kpis.length}</span> },
+    { key: "used", label: "Used by", width: "120px", render: (o) => o.activeAssignees.length
+      ? <AvatarStack people={o.activeAssignees.map((a) => ({ id: a.id, firstName: a.firstName ?? null, lastName: a.lastName ?? null, avatar: a.avatar ?? null }))} max={3} size={24} />
+      : <span className="text-sm text-ink-2">Nobody</span> },
+    { key: "suggested", label: "Suggested", width: "160px", hideBelow: 720, render: (o) => <span className="truncate text-sm text-ink-2">{o.suggestedRole?.title ?? "None"}</span> },
+    { key: "actions", label: "", width: "220px", render: (o) => <OrphanActions orphan={o} roles={roles ?? []} onDone={(msg) => { toast(msg); void load(); }} /> },
+  ], [roles, toast, load]);
+
+  const filterCount = (needle ? 1 : 0) + depts.length + seniority.length + (noKras ? 1 : 0) + (weightsOff ? 1 : 0);
+  const clearFilters = () => { setQ(""); setDepts([]); setSeniority([]); setNoKras(false); setWeightsOff(false); };
+  const toggle = (list: string[], val: string, on: boolean) => (on ? [...list, val] : list.filter((x) => x !== val));
+  const showViews = orphans !== null;
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
-          <span className="text-zinc-300">/</span>
-          <span>KRAs &amp; KPIs</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
-            <Target className="h-5 w-5 text-[#0073EA]" />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900">KRAs &amp; KPIs</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">
-            {roles === null
-              ? null
-              : `${stats.jobTitles} job title${stats.jobTitles === 1 ? "" : "s"} · ${stats.kras} KRA${stats.kras === 1 ? "" : "s"} · ${stats.kpis} KPI${stats.kpis === 1 ? "" : "s"}`}
-          </span>
-          <div className="flex-1" />
-          {/* "KPI review cycle" and "Reviews" left the header: they are the
-              Teams sidebar rows KPI reviews (/team/kpi-reviews, which the old
-              /kra-kpi/review now 308s to) and Review cycles (/reviews). */}
-          {canCreate ? (
-            <span className="relative inline-flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setKraPickOpen(true)}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50"
-              >
-                <Gauge className="w-3.5 h-3.5 text-zinc-400" /> New KPI
-              </button>
-              <button
-                type="button"
-                onClick={() => setNewOpen(true)}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060c2]"
-              >
-                <Plus className="w-3.5 h-3.5" /> New KRA
-              </button>
-              <Picker
-                open={kraPickOpen}
-                onClose={() => { setKraPickOpen(false); if (newParam === "kpi") clearNewParam(); }}
-                align="end"
-                ariaLabel="Which KRA?"
-                searchPlaceholder="Which KRA?"
-                alwaysSearch
-                emptyLabel={kras.length === 0 ? "No KRAs yet. Create a KRA first." : "No matches"}
-                sections={kraPickerSections(kras)}
-                onSelect={(value) => {
-                  const k = kras.find((x) => x.id === value);
-                  setKraPickOpen(false);
-                  if (k) setKpiFor({ id: k.id, name: k.name });
-                }}
-              />
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-2 text-base text-zinc-500 max-w-[720px]">
-          KRAs and KPIs live inside job titles. Pick a job title to see what
-          it owns: every person holding that title inherits the template, and
-          quarterly targets live on each person&rsquo;s goals.
-        </p>
+    <>
+      <OsPageHeader
+        title="KRAs & KPIs"
+        views={showViews ? (
+          <>
+            <ViewTab label="Job titles" active={view === "titles"} onClick={() => setParams({ view: null })} />
+            <ViewTab label="Needs a job title" active={view === "orphans"} onClick={() => setParams({ view: "orphans" })}
+              trailing={orphans && orphans.length ? <span className="text-xs font-medium text-ink-2">{orphans.length}</span> : undefined} />
+          </>
+        ) : undefined}
+        toolbar={{
+          filter: view === "titles" ? { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filterCount } : undefined,
+          sort: view === "titles" ? { onClick: () => setSortOpen((x) => !x), label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title" } : undefined,
+          primary: canCreate ? { label: "New KRA", onClick: () => setNewOpen({}), split: { label: "New KPI", onClick: () => setKraPickOpen(true) } } : undefined,
+          menu: [{ label: "Show job titles with no KRAs", checked: display.showEmptyTitles, keepOpen: true, onClick: () => setDisplay({ showEmptyTitles: !display.showEmptyTitles }) }],
+        }}
+      />
+      {notice ? <p className="os-chrome px-6 pb-1 text-sm text-ink-2">{notice}</p> : null}
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort job titles" selected={sort}
+              sections={[{ options: SORTS.map((s) => ({ value: s.value, label: s.label })) }]}
+              onSelect={(val) => { setSortOpen(false); setSort(val as Sort); }} />
+          </div>
+        ) : null}
+        {kraPickOpen ? (
+          <div className="absolute end-6 top-0 z-40">
+            <Picker open align="end" onClose={() => { setKraPickOpen(false); if (newParam === "kpi") clearNew(); }}
+              ariaLabel="Which KRA?" searchPlaceholder="Which KRA?" alwaysSearch
+              emptyLabel={kras.length === 0 ? "No KRAs yet. Create a KRA first." : "No matches"}
+              sections={kraPickerSections(kras)}
+              onSelect={(value) => {
+                const k = kras.find((x) => x.id === value);
+                setKraPickOpen(false);
+                if (k) setKpiFor({ id: k.id, name: k.name });
+                else if (newParam === "kpi") clearNew();
+              }} />
+          </div>
+        ) : null}
       </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1100px] mx-auto w-full">
-        {/* Stat strip */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <TeamStatTile icon={Briefcase} label="Job titles" value={stats.jobTitles} accent="#0073EA" sub="each owns its template" />
-          <TeamStatTile icon={Target} label="KRAs" value={stats.kras} accent="#14B8A6" sub="areas of responsibility" />
-          <TeamStatTile icon={Gauge} label="KPI gauges" value={stats.kpis} accent="#71717A" sub="running measures" />
-          {/* Editors only (the orphans route asks kras.edit): a tile that
-              read "admin-only view" to everyone else carried nothing. */}
-          {orphans !== null ? (
-            <TeamStatTile
-              icon={AlertTriangle}
-              label="Needs a job title"
-              value={stats.orphanCount}
-              accent={stats.orphanCount > 0 ? "#F59E0B" : "#00C875"}
-              sub={stats.orphanCount > 0 ? "orphan KRAs to attach" : "every KRA has a home"}
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        {view === "titles" ? (
+          <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="job titles" activeCount={filterCount} onClearAll={clearFilters}
+            search={{ value: q, onChange: setQ, placeholder: "Job titles, KRAs, KPIs" }}>
+            {deptOptions.length ? (
+              <FilterGroup label="Department">
+                {deptOptions.map(([id, name]) => <FilterRow key={id} label={name} checked={depts.includes(id)} onCheckedChange={(on) => setDepts((c) => toggle(c, id, on))} />)}
+              </FilterGroup>
+            ) : null}
+            <FilterGroup label="Seniority">
+              {SENIORITY_OPTIONS.map((s) => <FilterRow key={s.value} label={s.label} checked={seniority.includes(s.value)} onCheckedChange={(on) => setSeniority((c) => toggle(c, s.value, on))} />)}
+            </FilterGroup>
+            <FilterGroup label="KRAs">
+              <FilterRow label="Has no KRAs yet" checked={noKras} onCheckedChange={setNoKras} />
+              <FilterRow label="Weights not 100%" checked={weightsOff} onCheckedChange={setWeightsOff} />
+            </FilterGroup>
+          </FilterPanel>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {loadError && !roles ? (
+            <OsEmptyView variant="error" title="Couldn't load job titles" hint={loadError} action={{ label: "Retry", onClick: () => void load() }} />
+          ) : view === "orphans" && orphans !== null ? (
+            <TableCard ariaLabel="KRAs that need a job title" columns={orphanColumns} rows={orphans} rowKey={(o) => o.id}
+              empty={<span className="text-row text-ink-2">Every KRA has a job title</span>}
+              footer={{ total: orphans.length, noun: "KRAs", from: orphans.length ? 1 : 0, to: orphans.length }} />
+          ) : roles && roles.length === 0 ? (
+            <OsEmptyView context="goals" title="No job titles yet"
+              action={canCreateTitle ? { label: "Create job titles", onClick: () => router.push("/people/roles?new=1") } : undefined} />
+          ) : (
+            <TableCard
+              ariaLabel="Job titles"
+              columns={columns}
+              rows={shown}
+              rowKey={(r) => r.id}
+              rowHref={(r) => `/people/roles/${r.id}`}
+              groupOf={(r) => {
+                const key = r.department?.id ?? NO_DEPT;
+                return { key, label: r.department?.name ?? "No department", count: groupSize.get(key) ?? null };
+              }}
+              collapsedGroups={collapsed}
+              onToggleGroup={(key) => setCollapsed((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
+              rowMenu={(r) => (
+                <button type="button" aria-label={`Actions for ${r.title}`} aria-haspopup="menu"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ row: r, anchor: { current: e.currentTarget } }); }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              )}
+              empty={<span className="text-row text-ink-2">No job titles match · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>}
+              footer={shown ? { total: shown.length, noun: "job titles", from: shown.length ? 1 : 0, to: shown.length } : undefined}
             />
-          ) : null}
+          )}
         </div>
-
-        {/* Search */}
-        <div className="flex items-center gap-2 h-9 px-3 rounded-lg border border-zinc-200 bg-white max-w-[480px] focus-within:border-[#0073EA]">
-          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search job titles, KRAs, KPIs…"
-            aria-label="Search job titles, KRAs and KPIs"
-            className="flex-1 bg-transparent text-base outline-none placeholder:text-zinc-400"
-          />
-        </div>
-
-        {/* KRA / KPI matches that jump to their role */}
-        {q && definitionMatches.length > 0 ? (
-          <section>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">Inside job titles</h2>
-            <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100">
-              {definitionMatches.map((m) => (
-                <Link
-                  key={m.key}
-                  href={m.roleId ? `/people/roles/${m.roleId}` : "#orphans"}
-                  className="flex items-center gap-2.5 px-3 py-2 hover:bg-zinc-50"
-                >
-                  {m.kind === "KRA"
-                    ? <Target className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                    : <Gauge className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
-                  <span className="text-micro font-semibold uppercase tracking-wide text-zinc-400 w-7 shrink-0">{m.kind}</span>
-                  <span className="text-base text-zinc-800 truncate">{m.label}</span>
-                  <span className="text-xs text-zinc-400 truncate">{m.sub}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-zinc-300 ml-auto shrink-0" />
-                </Link>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {/* Job titles */}
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load job titles" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
-        ) : roles === null ? (
-          <SkeletonRows />
-        ) : roles.length === 0 ? (
-          <OsEmptyView
-            context="goals"
-            title="No job titles yet"
-            hint="KRAs and KPIs live inside job titles, so create those first."
-            action={canCreateTitle ? { label: "New job title", onClick: () => router.push("/people/roles?new=1") } : undefined}
-          />
-        ) : filteredRoles.length === 0 && definitionMatches.length === 0 ? (
-          <div className="py-16 text-center text-base text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>
-        ) : (
-          grouped.map((g) => (
-            <section key={g.name}>
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{g.name}</h2>
-              <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100">
-                {g.items.map((r) => <RoleRow key={r.id} role={r} weight={weightByRole.get(r.id)} />)}
-              </div>
-            </section>
-          ))
-        )}
-
-        {/* Orphan KRAs — surfaced, never deleted, never auto-assigned */}
-        {orphans !== null && orphans.length > 0 ? (
-          <section id="orphans" className="pt-2">
-            <div className="rounded-xl border border-amber-200 bg-white">
-              <div className="flex items-center gap-2.5 px-4 pt-3.5">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-50">
-                  <AlertTriangle size={15} className="text-amber-500" />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-zinc-900 leading-tight">Needs a job title</h2>
-                  <p className="text-xs text-zinc-500">
-                    These KRAs belong to no role, so nobody inherits them. Attach
-                    each one to the job title it belongs to — nothing is deleted.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 divide-y divide-zinc-100 border-t border-zinc-100">
-                {orphans.map((o) => (
-                  <OrphanRow
-                    key={o.id}
-                    orphan={o}
-                    roles={roles ?? []}
-                    onAttached={(msg) => { toast(msg); void load(); }}
-                  />
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : null}
       </div>
-
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label={`Actions for ${menu.row.title}`}>
+            <MenuItem icon={ExternalLink} label="Open job title" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/roles/${id}`); }} />
+            {canCreate ? <MenuItem icon={Plus} label="New KRA here" onClick={() => { const id = menu.row.id; setMenu(null); setNewOpen({ roleId: id }); }} /> : null}
+            <MenuSeparator />
+            <MenuItem icon={Copy} label="Copy link" onClick={async () => {
+              const id = menu.row.id;
+              setMenu(null);
+              try { await navigator.clipboard.writeText(`${window.location.origin}/people/roles/${id}`); toast("Link copied"); } catch { toast("Couldn't copy the link", { tone: "danger" }); }
+            }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
       {kpiFor ? (
         <KpiDialog
           open
-          onOpenChange={(o) => { if (!o) { setKpiFor(null); if (newParam === "kpi") clearNewParam(); } }}
+          onOpenChange={(o) => { if (!o) { setKpiFor(null); if (newParam === "kpi") clearNew(); } }}
           kraId={kpiFor.id}
           kraName={kpiFor.name}
           onSaved={(msg) => { toast(msg); void load(); }}
         />
       ) : null}
       <KraDialog
-        open={newOpen}
-        onOpenChange={(o) => { setNewOpen(o); if (!o && (newParam === "kra" || newParam === "1")) clearNewParam(); }}
+        open={newOpen !== null}
+        defaultRoleId={newOpen?.roleId ?? null}
+        onOpenChange={(o) => { if (!o) { setNewOpen(null); if (newParam === "kra" || newParam === "1") clearNew(); } }}
         roles={(roles ?? []).map((r) => ({ id: r.id, title: r.title }))}
         onSaved={(msg) => { toast(msg); void load(); }}
       />
-    </div>
+    </>
   );
 }
 
-function RoleRow({ role: r, weight }: { role: ApiRole; weight?: { sum: number; count: number } }) {
-  const kraCount = r._count?.kraTemplates ?? 0;
-  const kpiCount = r.kpiCount ?? 0;
-  const people = r._count?.users ?? 0;
-  // Only claim a weight total when the loaded KRAs cover the whole role.
-  const weightSum = weight && kraCount > 0 && weight.count === kraCount ? Math.round(weight.sum) : null;
-  return (
-    <Link href={`/people/roles/${r.id}`} className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
-        <Briefcase className="w-3.5 h-3.5 text-[#0073EA]" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2 min-w-0">
-          <span className="text-base font-medium text-zinc-900 truncate">{r.title}</span>
-          {r.level ? (
-            <span className="text-micro font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide shrink-0">
-              {LEVEL_SHORT[r.level] ?? r.level}
-            </span>
-          ) : null}
-        </span>
-        <span className="block text-xs text-zinc-400 truncate">
-          {r.department?.name ?? "No department"}
-        </span>
-      </span>
-      <span className="inline-flex items-center gap-1 text-sm text-zinc-500 shrink-0" title={`${people} person${people === 1 ? "" : "s"} holding this title`}>
-        <Users className="w-3.5 h-3.5 text-zinc-400" /> {people}
-      </span>
-      {kraCount === 0 ? (
-        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-600 shrink-0">
-          <AlertTriangle className="w-3 h-3" /> No KRAs yet
-        </span>
-      ) : (
-        <span className="text-sm text-zinc-500 tabular-nums shrink-0">
-          {kraCount} KRA{kraCount === 1 ? "" : "s"} · {kpiCount} KPI{kpiCount === 1 ? "" : "s"}
-        </span>
-      )}
-      {weightSum != null ? (
-        weightSum === 100 ? (
-          <span
-            className="inline-flex items-center rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-600 tabular-nums shrink-0"
-            title="KRA weights total 100%"
-          >
-            weight 100%
-          </span>
-        ) : (
-          <span
-            className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-600 tabular-nums shrink-0"
-            title={`KRA weights total ${weightSum}%, should be 100%`}
-          >
-            <AlertTriangle className="w-3 h-3" /> weight {weightSum}%
-          </span>
-        )
-      ) : null}
-      <ChevronRight className="w-4 h-4 text-zinc-300 shrink-0" />
-    </Link>
-  );
-}
-
-function OrphanRow({
-  orphan: o,
-  roles,
-  onAttached,
-}: {
-  orphan: OrphanKra;
-  roles: ApiRole[];
-  onAttached: (msg: string) => void;
-}) {
-  const [roleId, setRoleId] = useState("");
-  const [busy, setBusy] = useState(false);
+function OrphanActions({ orphan: o, roles, onDone }: { orphan: OrphanKra; roles: ApiRole[]; onDone: (msg: string) => void }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
 
-  // Not every legacy row is a real KRA. Vague, everyone-owns-it entries
-  // ("Collaboration", "Quality of work") measure nobody and belong to no
-  // job title — the admin clears them here rather than force-fitting them
-  // onto a role. Guarded by a destructive confirm that names what goes.
+  const attach = async (roleId: string, title: string) => {
+    setBusy(true);
+    const r = await apiFetch("/api/kras", { method: "PATCH", json: { id: o.id, roleId } });
+    setBusy(false);
+    if (!r.ok) { toast(r.error || "Couldn't attach the KRA", { tone: "danger" }); return; }
+    onDone(`Attached ${o.name} to ${title}`);
+  };
   const remove = async () => {
-    const kpiNote = o.kpis.length > 0 ? ` and its ${o.kpis.length} KPI${o.kpis.length === 1 ? "" : "s"}` : "";
-    const peopleNote = o.activeAssignees.length > 0
-      ? ` It is currently assigned to ${o.activeAssignees.length} person${o.activeAssignees.length === 1 ? "" : "s"}.`
-      : "";
+    setMenuOpen(false);
+    const names = o.activeAssignees.map((a) => `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim()).filter(Boolean);
     const ok = await confirm({
-      title: "Delete this KRA",
-      description: `Delete "${o.name}"${kpiNote}?${peopleNote} This cannot be undone.`,
+      title: `Delete ${o.name}?`,
+      description: `${o.kpis.length ? `Its ${o.kpis.length} ${o.kpis.length === 1 ? "KPI goes" : "KPIs go"} with it. ` : ""}${names.length ? `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} will lose it. ` : ""}This can't be undone.`,
       destructive: true,
-      confirmLabel: "Delete KRA",
+      confirmLabel: "Not a KRA",
     });
     if (!ok) return;
     setBusy(true);
-    try {
-      const res = await fetch(`/api/kras?id=${encodeURIComponent(o.id)}`, { method: "DELETE" });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast(d?.error ?? "Couldn't delete the KRA");
-        return;
-      }
-      onAttached(`Deleted "${o.name}"`);
-    } catch {
-      toast("Couldn't delete the KRA");
-    } finally {
-      setBusy(false);
-    }
+    const r = await apiFetch(`/api/kras?id=${encodeURIComponent(o.id)}`, { method: "DELETE" });
+    setBusy(false);
+    if (!r.ok) { toast(r.error || "Couldn't delete the KRA", { tone: "danger" }); return; }
+    onDone(`Deleted ${o.name}`);
   };
-
-  const attach = async (targetRoleId: string, targetTitle: string) => {
-    if (!targetRoleId) return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/kras", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: o.id, roleId: targetRoleId }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast(d?.error ?? "Couldn't attach the KRA");
-        return;
-      }
-      onAttached(`Attached "${o.name}" to ${targetTitle}`);
-    } catch {
-      toast("Couldn't attach the KRA");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const assignees = o.activeAssignees
-    .map((a) => [a.firstName, a.lastName].filter(Boolean).join(" ").trim())
-    .filter(Boolean);
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
-      <Target className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-      <span className="min-w-0 flex-1 basis-52">
-        <span className="flex items-center gap-2">
-          <span className="text-base font-medium text-zinc-900 truncate">{o.name}</span>
-          <span className="text-xs text-zinc-400 shrink-0">
-            {o.kpis.length} KPI{o.kpis.length === 1 ? "" : "s"}
-          </span>
-          {o.kpis.some((k) => k.isNorthStar) ? (
-            <Star className="w-3 h-3 text-amber-400 shrink-0" style={{ fill: "currentColor" }} />
-          ) : null}
-        </span>
-        {assignees.length > 0 ? (
-          <span className="block text-xs text-zinc-400 truncate">
-            Assigned to {assignees.slice(0, 3).join(", ")}{assignees.length > 3 ? ` +${assignees.length - 3}` : ""}
-          </span>
-        ) : (
-          <span className="block text-xs text-zinc-400">No active assignees</span>
-        )}
-      </span>
-
-      {o.suggestedRole ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void attach(o.suggestedRole!.id, o.suggestedRole!.title)}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[#0073EA]/30 bg-[#0073EA]/5 text-sm font-medium text-[#0073EA] hover:bg-[#0073EA]/10 disabled:opacity-50 shrink-0"
-          title="All active assignees hold this job title"
-        >
-          Attach to {o.suggestedRole.title}
-        </button>
+    <span className="relative flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <button type="button" disabled={busy}
+        onClick={() => (o.suggestedRole ? void attach(o.suggestedRole.id, o.suggestedRole.title) : setPickOpen(true))}
+        className="inline-flex h-7 items-center rounded-md border border-line bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50">
+        Attach
+      </button>
+      <button ref={menuRef} type="button" aria-label={`More for ${o.name}`} onClick={() => setMenuOpen((x) => !x)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      <MorePortal anchorRef={menuRef} width={200} open={menuOpen} placement="below" onClose={() => setMenuOpen(false)}>
+        <MenuList aria-label={`More for ${o.name}`}>
+          <MenuItem icon={ExternalLink} label="Attach to..." onClick={() => { setMenuOpen(false); setPickOpen(true); }} />
+          <MenuSeparator />
+          <MenuItem icon={Trash2} label="Not a KRA" destructive onClick={() => void remove()} />
+        </MenuList>
+      </MorePortal>
+      {pickOpen ? (
+        <Picker open onClose={() => setPickOpen(false)} ariaLabel="Attach to job title" searchPlaceholder="Search job titles"
+          sections={[{ options: roles.map((r) => ({ value: r.id, label: r.title, hint: r.department?.name ?? undefined })) }]}
+          onSelect={(val) => { setPickOpen(false); const r = roles.find((x) => x.id === val); if (r) void attach(r.id, r.title); }}
+          className="absolute end-0 top-8 z-50" />
       ) : null}
-
-      <span className="inline-flex items-center gap-1.5 shrink-0">
-        <select
-          value={roleId}
-          onChange={(e) => setRoleId(e.target.value)}
-          disabled={busy}
-          aria-label={`Job title for ${o.name}`}
-          className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-sm text-zinc-700 focus:outline-none focus:border-[#0073EA]"
-        >
-          <option value="">Choose job title…</option>
-          {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
-        </select>
-        <button
-          type="button"
-          disabled={busy || !roleId}
-          onClick={() => {
-            const picked = roles.find((r) => r.id === roleId);
-            if (picked) void attach(picked.id, picked.title);
-          }}
-          className="h-7 px-2.5 rounded-md bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-800 disabled:opacity-40"
-        >
-          Attach
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void remove()}
-          title="Not a KRA — delete it"
-          className="h-7 px-2.5 rounded-md text-sm font-medium text-[#E2445C] hover:bg-[#E2445C]/10 disabled:opacity-40"
-        >
-          Not a KRA
-        </button>
-      </span>
-    </div>
+    </span>
   );
 }

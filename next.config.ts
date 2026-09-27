@@ -357,10 +357,10 @@ const nextConfig: NextConfig = {
       // Phase 6, spec-goals section 0. /goals was a dead path the nav config
       // referenced; it is the Goals list. The query string passes through.
       { source: "/goals", destination: "/okrs", permanent: true },
-      // The second manager KPI workflow merged into KPI reviews. The old page
-      // was the per-person monthly entry, so it lands on that view, and
-      // ?period= (and any other param) passes through.
-      { source: "/kra-kpi/review", destination: "/team/kpi-reviews?view=record", permanent: true },
+      // The second manager KPI workflow merged into KPI reviews: one page,
+      // person by person, month by month, where a manager both approves and
+      // records. ?period= (and any other param) passes through.
+      { source: "/kra-kpi/review", destination: "/team/kpi-reviews", permanent: true },
       // Bare /account had no page (a 404 inside the takeover).
       { source: "/account", destination: "/account/profile", permanent: true },
       //

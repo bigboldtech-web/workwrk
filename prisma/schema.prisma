@@ -2762,6 +2762,10 @@ model OKR {
   startDate      DateTime?
   endDate        DateTime?
   quarter        String? // "Q2 2026"
+  // Phase 6 (spec-goals): when a person marked the goal complete. The status
+  // column is re-derived from the targets, so completion needs its own
+  // column that nothing re-derives. Null = not marked complete.
+  completedAt    DateTime?
   // Check-in rhythm. Drives the reminder cron + the "stale" badge on
   // the personal hero. Defaults to weekly because that's what most
   // teams settle on.

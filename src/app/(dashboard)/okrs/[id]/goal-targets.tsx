@@ -1,31 +1,25 @@
 "use client";
 
-// GoalTargets — the ClickUp-style "Targets" card on the goal detail page
-// (Key Results = Targets). Header carries "+ Add"; each target is a row:
-// owner avatar, title, right-aligned thin progress bar with a caption +
-// current/target fraction, and a "…" menu (Check in / Delete target).
-// Clicking a row (or "Check in") opens the ClickUp-style check-in MODAL
-// (okr-checkin-modal — mechanics untouched, direction-aware math stays
-// server-side). KPI-linked targets are measured BY their gauge; the modal
-// shows the "record the KPI reading instead" notice for them.
-//
-// Empty state is honest ClickUp copy + "Create a Target" — no fake numbers.
-// The composer POSTs /api/okrs/[id]/key-results; row delete goes through
-// DELETE /api/okrs/[id]/key-results/[krId] with useConfirm. Both gate on
-// canEdit (the exact canEditOkrOwner rule those routes enforce), then
-// router.refresh() so the server-rendered ring/Timeline repaint.
+// Targets card on the goal page (spec-goals /okrs/[id] body 3). One 36px
+// row per target: name · "Start 0 to Now 42 to Target 100 units" · a 72px
+// bar and % · the last check-in · a 28px Check in for people who may check in
+// (owner, contributors, the owner's manager chain, the People team, Admin) ·
+// a row "..." (Check in, View history, Delete target for target writers).
+// A target fed by a KPI shows "From KPI {name}" instead of Check in; the
+// server refuses hand check-ins on it (409). The last row is "+ Add target",
+// an inline composer (name, start, target, unit; Enter saves, Esc cancels)
+// for target writers. Writes: POST /api/okrs/[id]/key-results, DELETE
+// /api/okrs/[id]/key-results/[krId], POST /api/okrs/[id]/check-in, then
+// router.refresh() so the ring, the verdict and Activity repaint.
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Pencil, Plus, Target as TargetIcon, Trash2 } from "lucide-react";
-import { Dots } from "@/components/ui/dots";
-import { Input } from "@/components/ui/input";
+import { History, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
-import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { OkrCheckInModal } from "./okr-checkin-modal";
 
 export interface TargetRowData {
@@ -36,7 +30,7 @@ export interface TargetRowData {
   targetValue: number;
   currentValue: number;
   progress: number;
-  /** Measured by a linked role KPI — check-ins are refused server-side. */
+  /** Measured by a linked role KPI: check-ins are refused server-side. */
   isDerived: boolean;
   kpiName: string | null;
   /** Pre-formatted relative time of the last check-in (server clock). */
@@ -47,60 +41,50 @@ function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 }
 
-export function GoalTargets({ okrId, canEdit, owner, targets }: {
+export function GoalTargets({ okrId, canEdit, canCheckIn, targets, onHistory }: {
   okrId: string;
-  /** canEditOkrOwner — the gate POST/DELETE key-results + check-in enforce. */
+  /** Target writer (add, delete): canEditOkrOwner, the key-results routes' gate. */
   canEdit: boolean;
-  /** The goal's accountable owner — targets inherit their avatar. */
-  owner: PersonRef | null;
+  /** May check in: target writers plus the goal's contributors. */
+  canCheckIn: boolean;
   targets: TargetRowData[];
+  /** Scroll to the Activity card ("View history"). */
+  onHistory?: () => void;
 }) {
   const [adding, setAdding] = useState(false);
-
   return (
-    <section className="okrd-card">
-      <header>
-        <h2>Targets</h2>
-        <div className="okrd-card__tools">
-          {targets.length > 0 && <span className="okrd-card__count">{targets.length}</span>}
-          {canEdit && (
-            <button type="button" className="okrd-add" onClick={() => setAdding((v) => !v)}>
-              <Plus /> Add
+    <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-targets-h">
+      <h2 id="goal-targets-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
+        Targets {targets.length ? <span className="text-xs font-medium text-ink-2">{targets.length}</span> : null}
+      </h2>
+      <ol className="m-0 mt-3 flex list-none flex-col p-0">
+        {targets.length === 0 && !adding ? (
+          <li className="flex h-9 items-center text-row text-ink-2">
+            No targets yet{canEdit ? <> · <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setAdding(true)}>Add a target</button></> : null}
+          </li>
+        ) : null}
+        {targets.map((t) => (
+          <TargetRow key={t.id} okrId={okrId} target={t} canEdit={canEdit} canCheckIn={canCheckIn} onHistory={onHistory} />
+        ))}
+        {adding ? <TargetComposer okrId={okrId} onDone={() => setAdding(false)} /> : null}
+        {canEdit && !adding && targets.length > 0 ? (
+          <li>
+            <button type="button" onClick={() => setAdding(true)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-1 text-row text-ink-2 hover:text-ink">
+              <Plus className="h-4 w-4" aria-hidden /> Add target
             </button>
-          )}
-        </div>
-      </header>
-
-      {targets.length === 0 && !adding ? (
-        <div className="okrd-targets-empty">
-          <TargetIcon />
-          <p>Targets are specific and measurable pieces that must be accomplished in order to reach your Goal.</p>
-          {canEdit && (
-            <button type="button" className="okrd-cta" onClick={() => setAdding(true)}>
-              Create a Target
-            </button>
-          )}
-        </div>
-      ) : (
-        <ol className="okrd-targets">
-          {targets.map((t) => (
-            <TargetRow key={t.id} okrId={okrId} target={t} owner={owner} canEdit={canEdit} />
-          ))}
-        </ol>
-      )}
-
-      {adding && <TargetComposer okrId={okrId} onDone={() => setAdding(false)} />}
+          </li>
+        ) : null}
+      </ol>
     </section>
   );
 }
 
-/* ── one target row (expandable to the inline check-in) ─────────────── */
-
-function TargetRow({ okrId, target: t, owner, canEdit }: {
+function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory }: {
   okrId: string;
   target: TargetRowData;
-  owner: PersonRef | null;
   canEdit: boolean;
+  canCheckIn: boolean;
+  onHistory?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -109,127 +93,77 @@ function TargetRow({ okrId, target: t, owner, canEdit }: {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      const el = e.target as Node;
-      if (panelRef.current?.contains(el) || btnRef.current?.contains(el)) return;
-      setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
-    window.addEventListener("mousedown", onClick);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onClick);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
-
   const pct = Math.max(0, Math.min(100, t.progress));
+  const unit = t.unit?.trim();
 
   const del = async () => {
     setMenuOpen(false);
     const ok = await confirm({
-      title: "Delete target",
-      description: `Delete "${t.title}"? Its check-in history goes with it, and the Goal's progress re-rolls from what's left. This can't be undone.`,
+      title: `Delete ${t.title}?`,
+      description: "Its check-ins go with it and the goal's progress re-rolls from the targets left. This can't be undone.",
       destructive: true,
-      confirmLabel: "Delete",
+      confirmLabel: "Delete target",
     });
     if (!ok) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/okrs/${okrId}/key-results/${t.id}`, { method: "DELETE" });
-      if (res.ok) {
-        toast("Target deleted");
-        router.refresh();
-      } else {
-        const d = await res.json().catch(() => ({}));
-        toast(d?.error ?? "Couldn't delete target");
-      }
+      if (res.ok) { toast("Target deleted"); router.refresh(); }
+      else { const d = await res.json().catch(() => ({})); toast(d?.error ?? "Couldn't delete the target", { tone: "danger" }); }
     } catch {
-      toast("Couldn't delete target");
+      toast("Couldn't delete the target", { tone: "danger" });
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <li className="okrd-target">
-      <button
-        type="button"
-        className="okrd-target__row"
-        onClick={() => setCheckinOpen(true)}
-        aria-haspopup="dialog"
-      >
-        {owner ? (
-          <PersonAvatar person={owner} size={24} />
-        ) : (
-          <span className="okrd-target__noowner" aria-hidden>?</span>
-        )}
-        <span className="okrd-target__text">
-          <span className="okrd-target__title">{t.title}</span>
-          <span className="okrd-target__sub">
-            {t.isDerived && t.kpiName
-              ? `measured by KPI · ${t.kpiName}`
-              : t.lastCheckIn
-                ? `last check-in ${t.lastCheckIn}`
-                : "no check-ins yet"}
-          </span>
-        </span>
-        <span className="okrd-target__prog">
-          <span className="okrd-target__cap">{t.unit?.trim() || "value"}</span>
-          <span className="okrd-target__track">
-            <span className="okrd-target__fill" style={{ width: `${pct}%` }} />
-          </span>
-        </span>
-        <span className="okrd-target__frac">{fmtNum(t.currentValue)}/{fmtNum(t.targetValue)}</span>
-      </button>
-
-      <span className="okrd-target__menu" data-open={menuOpen ? "true" : "false"}>
-        <button
-          ref={btnRef}
-          type="button"
-          className="okrd-target__menu-btn"
-          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
-          title="Target actions"
-          aria-label="Target actions"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-        >
-          <MoreHorizontal />
-        </button>
-        <MorePortal anchorRef={btnRef} panelRef={panelRef} width={190} open={menuOpen} placement="below">
-          <MenuList className="min-w-[190px]" onClick={(e) => e.stopPropagation()}>
-            <MenuItem
-              icon={Pencil}
-              label={canEdit && !t.isDerived ? "Check in" : "View target"}
-              onClick={() => { setMenuOpen(false); setCheckinOpen(true); }}
-            />
-            {canEdit && (
-              <>
-                <MenuSeparator />
-                <MenuItem icon={Trash2} label="Delete target" destructive onClick={del} busy={busy} />
-              </>
-            )}
-          </MenuList>
-        </MorePortal>
+    <li className="os-row group flex h-9 min-w-0 items-center gap-3 border-b border-line last:border-b-0">
+      <span className="min-w-0 flex-1 truncate text-row text-ink" title={t.title}>{t.title}</span>
+      <span className="shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
+        {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}
       </span>
-
-      {checkinOpen && (
-        <OkrCheckInModal
-          okrId={okrId}
-          target={t}
-          canEdit={canEdit}
-          onClose={() => setCheckinOpen(false)}
-        />
-      )}
+      <span className="flex shrink-0 items-center gap-2">
+        <span className="h-1 w-[72px] overflow-hidden rounded-full bg-surface-2" aria-hidden>
+          <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>
+      </span>
+      <span className="hidden w-20 shrink-0 truncate text-xs text-ink-2 xl:inline">
+        {t.isDerived ? `From KPI ${t.kpiName ?? ""}`.trim() : t.lastCheckIn ?? "No check-ins"}
+      </span>
+      {canCheckIn && !t.isDerived ? (
+        <button type="button" onClick={() => setCheckinOpen(true)} className="inline-flex h-7 shrink-0 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+          Check in
+        </button>
+      ) : null}
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        aria-label={`Actions for ${t.title}`}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      <MorePortal anchorRef={btnRef} width={200} open={menuOpen} placement="below" onClose={() => setMenuOpen(false)}>
+        <MenuList aria-label={`Actions for ${t.title}`}>
+          <MenuItem icon={Pencil} label={canCheckIn && !t.isDerived ? "Check in" : "View target"} onClick={() => { setMenuOpen(false); setCheckinOpen(true); }} />
+          {onHistory ? <MenuItem icon={History} label="View history" onClick={() => { setMenuOpen(false); onHistory(); }} /> : null}
+          {canEdit ? (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={Trash2} label="Delete target" destructive onClick={() => void del()} busy={busy} />
+            </>
+          ) : null}
+        </MenuList>
+      </MorePortal>
+      {checkinOpen ? <OkrCheckInModal okrId={okrId} target={t} canEdit={canCheckIn} onClose={() => setCheckinOpen(false)} /> : null}
     </li>
   );
 }
-
-/* ── inline composer ("+ Add" / "Create a Target") ──────────────────── */
 
 function TargetComposer({ okrId, onDone }: { okrId: string; onDone: () => void }) {
   const router = useRouter();
@@ -241,79 +175,45 @@ function TargetComposer({ okrId, onDone }: { okrId: string; onDone: () => void }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit() {
     if (!title.trim() || saving) return;
     const start = Number(startValue);
     const target = Number(targetValue);
-    if (Number.isNaN(start) || Number.isNaN(target)) {
-      setError("Start and Target must be numbers");
-      return;
-    }
+    if (!Number.isFinite(start) || !Number.isFinite(target)) { setError("Start and Target must be numbers."); return; }
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/okrs/${okrId}/key-results`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          startValue: start,
-          targetValue: target,
-          unit: unit.trim() || null,
-        }),
+        body: JSON.stringify({ title: title.trim(), startValue: start, targetValue: target, unit: unit.trim() || null }),
       });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d?.error ?? `HTTP ${res.status}`);
-      }
-      toast("Target created");
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d?.error ?? `Couldn't add it (${res.status})`); }
+      toast("Target added");
       onDone();
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create the target");
+      setError(err instanceof Error ? err.message : "Couldn't add the target");
     } finally {
       setSaving(false);
     }
   }
-
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") { e.preventDefault(); void submit(); }
+    if (e.key === "Escape") { e.stopPropagation(); onDone(); }
+  };
+  const field = "h-8 min-w-0 rounded-md border border-line bg-raised px-2 text-sm text-ink focus:border-brand focus:outline-none";
   return (
-    <form className="okrd-composer" onSubmit={submit}>
-      <div>
-        <label className="okrd-composer__label" htmlFor="okrd-target-name">Target name</label>
-        <Input
-          id="okrd-target-name"
-          autoFocus
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="What measurable result defines success?"
-          className="h-8 text-base"
-        />
+    <li className="flex flex-col gap-2 border-b border-line py-2 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2" onKeyDown={onKey}>
+        <input autoFocus aria-label="Target name" placeholder="Target name" value={title} onChange={(e) => setTitle(e.target.value)} className={`${field} flex-1`} />
+        <input aria-label="Start" type="number" step="any" value={startValue} onChange={(e) => setStartValue(e.target.value)} className={`${field} w-20 tabular-nums`} />
+        <input aria-label="Target" type="number" step="any" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} className={`${field} w-20 tabular-nums`} />
+        <input aria-label="Unit" placeholder="Unit" value={unit} onChange={(e) => setUnit(e.target.value)} className={`${field} w-24`} />
+        <Button type="button" variant="ghost" size="sm" onClick={onDone} disabled={saving}>Cancel</Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => void submit()} disabled={saving || !title.trim()}>{saving ? "Adding" : "Add"}</Button>
       </div>
-      <div className="okrd-composer__grid">
-        <div>
-          <label className="okrd-composer__label" htmlFor="okrd-target-start">Start</label>
-          <Input id="okrd-target-start" type="number" step="any" value={startValue} onChange={(e) => setStartValue(e.target.value)} className="h-8 text-base" />
-        </div>
-        <div>
-          <label className="okrd-composer__label" htmlFor="okrd-target-target">Target</label>
-          <Input id="okrd-target-target" type="number" step="any" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} className="h-8 text-base" />
-        </div>
-        <div>
-          <label className="okrd-composer__label" htmlFor="okrd-target-unit">Unit <em>(optional)</em></label>
-          <Input id="okrd-target-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="%, $, users…" className="h-8 text-base" />
-        </div>
-      </div>
-      {error && <p className="okrd-composer__error">{error}</p>}
-      <div className="okrd-composer__actions">
-        <Button type="button" variant="outline" size="sm" onClick={onDone} disabled={saving}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={saving || !title.trim()}>
-          {saving ? <Dots variant="pending" /> : null}
-          Create a Target
-        </Button>
-      </div>
-    </form>
+      {error ? <p role="alert" className="m-0 text-sm text-danger-text">{error}</p> : null}
+    </li>
   );
 }

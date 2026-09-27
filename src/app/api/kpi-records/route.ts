@@ -4,6 +4,8 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-scope";
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
+import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { kpiActorCtx, mayActOnKpisOf, notifyKpiRecordedForYou, notifyKpiSubmitted } from "@/lib/kpi-review.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -13,8 +15,8 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const userId = url.searchParams.get("userId");
   const kpiId = url.searchParams.get("kpiId");
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10) || 50));
   const skip = (page - 1) * limit;
 
   // Three-door scoping: employees read their own records, managers their
@@ -22,13 +24,23 @@ export async function GET(req: NextRequest) {
   // performance data — never org-public.
   const visibleIds = await visibleAlignmentUserIds(session);
   if (visibleIds !== null && userId && !visibleIds.includes(userId)) {
-    return jsonError("You can only view KPI records for yourself or your reports.", 403);
+    // The KPI reviews reach: dotted-line managers and the People team read
+    // the people they act on.
+    const ctx = await kpiActorCtx();
+    if (!ctx || !mayActOnKpisOf(ctx, userId)) {
+      return jsonError("You can only view KPI records for yourself or your reports.", 403);
+    }
   }
+  // ?period=YYYY-MM and ?status=SUBMITTED,APPROVED narrow the read.
+  const period = url.searchParams.get("period");
+  const statuses = (url.searchParams.get("status") ?? "").split(",").filter((x): x is "PENDING" | "SUBMITTED" | "APPROVED" | "REJECTED" => ["PENDING", "SUBMITTED", "APPROVED", "REJECTED"].includes(x));
 
   const where = {
     kpi: { organizationId: orgId },
     ...(userId ? { userId } : visibleIds !== null ? { userId: { in: visibleIds } } : {}),
     ...(kpiId ? { kpiId } : {}),
+    ...(period && /^\d{4}-\d{2}$/.test(period) ? { period } : {}),
+    ...(statuses.length ? { status: { in: statuses } } : {}),
   };
 
   const [records, total] = await Promise.all([
@@ -63,8 +75,14 @@ export async function POST(req: NextRequest) {
   // Peers can no longer overwrite each other's submitted numbers.
   const callerId = getUserId(session);
   const isSelf = userId === callerId;
-  if (!(await canTouchUserAlignment(session, userId))) {
-    return jsonError("You can only record KPI numbers for yourself or your reports.", 403);
+  // Can edit on the person (src/lib/kpi-review.server.ts): the solid tree
+  // as before, plus dotted-line managers, the People team and Admin, who
+  // see the same people in the KPI reviews queue.
+  if (!isSelf && !(await canTouchUserAlignment(session, userId))) {
+    const ctx = await kpiActorCtx();
+    if (!ctx || !mayActOnKpisOf(ctx, userId)) {
+      return jsonError("You can only record KPI numbers for yourself or your reports.", 403);
+    }
   }
 
   const orgId = getOrgId(session);
@@ -97,8 +115,18 @@ export async function POST(req: NextRequest) {
     actual,
   );
 
-  // Manager notes belong to the review loop — a self-report can't write them.
+  // Manager notes belong to the review loop: a self-report can't write them.
   const reviewNotes = isSelf ? undefined : managerNotes;
+
+  // The status rule (src/lib/kpi-record-status.ts, golden-tested): a number
+  // a manager records on someone's behalf lands APPROVED with reviewedById;
+  // a person's own number lands SUBMITTED; a blank save never downgrades a
+  // decided row.
+  const existing = await prisma.kPIRecord.findUnique({
+    where: { kpiId_userId_period: { kpiId, userId, period } },
+    select: { status: true, reviewedById: true },
+  });
+  const decision = kpiWriteStatus({ actorId: callerId, subjectId: userId, actual, existing });
 
   const record = await prisma.kPIRecord.upsert({
     where: { kpiId_userId_period: { kpiId, userId, period } },
@@ -109,21 +137,30 @@ export async function POST(req: NextRequest) {
       targetValue: target ?? 0,
       actualValue: actual,
       score,
-      notes,
+      notes: isSelf ? notes : undefined,
       managerNotes: reviewNotes ?? null,
-      evidence,
-      status: actual != null ? "SUBMITTED" : "PENDING",
+      evidence: isSelf ? evidence : undefined,
+      status: decision.status,
+      reviewedById: decision.reviewedById ?? null,
     },
     update: {
       actualValue: actual,
       targetValue: target ?? 0,
       score,
-      notes,
+      // A manager's save never overwrites the person's own note or evidence.
+      ...(isSelf ? { notes, evidence } : {}),
       ...(reviewNotes !== undefined && { managerNotes: reviewNotes }),
-      evidence,
-      status: actual != null ? "SUBMITTED" : "PENDING",
+      status: decision.status,
+      ...(decision.reviewedById !== undefined ? { reviewedById: decision.reviewedById } : {}),
     },
   });
+
+  if (!isSelf && decision.status === "APPROVED" && existing?.status !== "APPROVED") {
+    void notifyKpiRecordedForYou({ userId, actorId: callerId, period, count: 1 });
+  }
+  if (isSelf && decision.status === "SUBMITTED" && existing?.status !== "SUBMITTED") {
+    void notifyKpiSubmitted({ userId, organizationId: orgId, period, count: 1 });
+  }
 
   // Auto-recalculate performance score
   triggerRecalculation(userId, orgId);

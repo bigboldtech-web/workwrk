@@ -1,27 +1,34 @@
-// Manager acts on a report's submitted KPI score. Mirrors
-// /api/weekly-reviews/[id]/manager-review: auth → fetch → gate
-// (manager-of-report or org admin) → SUBMITTED-only → self-act refusal →
-// delegate to the helper (status transition + notification).
+// PATCH /api/kpi-records/[id]/manager-review: a manager decides on a
+// person's KPI number (spec-goals /team/kpi-reviews).
+//   { action: "approve" }                         SUBMITTED -> APPROVED
+//   { action: "request_changes", notes }          SUBMITTED -> REJECTED (a
+//                                                 note is required: "change
+//                                                 this" with no word is worse
+//                                                 than nothing)
+//   { action: "reopen" }                          APPROVED or REJECTED ->
+//                                                 SUBMITTED, the toast's Undo;
+//                                                 only the person who made
+//                                                 the decision, or an Admin
+// Gate: Can edit on the person (src/lib/kpi-review.server.ts: the chain,
+// solid or dotted, the People team, Admin), never your own number.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { isInReportTree } from "@/lib/reporting-line";
 import { actOnKpiRecord } from "@/lib/kpi-record";
-
-const ORG_ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
 
 const bodySchema = z.object({
-  action: z.enum(["approve", "request_changes"]),
+  action: z.enum(["approve", "request_changes", "reopen"]),
   notes: z.string().max(5000).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  const u = session.user as { id?: string; organizationId?: string };
   if (!u.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
@@ -32,28 +39,36 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const row = await prisma.kPIRecord.findUnique({
     where: { id },
-    select: { id: true, userId: true, status: true, kpi: { select: { organizationId: true } } },
+    select: { id: true, userId: true, status: true, reviewedById: true, kpi: { select: { organizationId: true } } },
   });
   if (!row || row.kpi.organizationId !== u.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-
   if (row.userId === u.id) {
-    return NextResponse.json({ error: "Cannot review your own KPI" }, { status: 400 });
+    return NextResponse.json({ error: "You can't review your own KPI number." }, { status: 400 });
   }
-
-  const isOrgAdmin = ORG_ADMIN_LEVELS.has(u.accessLevel ?? "EMPLOYEE");
-  if (!isOrgAdmin && !(await isInReportTree(u.id, row.userId))) {
+  const ctx = await kpiActorCtx();
+  if (!ctx || !mayActOnKpisOf(ctx, row.userId)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (row.status !== "SUBMITTED") {
-    return NextResponse.json(
-      { error: `Cannot act on a ${row.status.toLowerCase()} KPI score` },
-      { status: 400 },
-    );
+  const { action } = parsed.data;
+  if (action === "request_changes" && !parsed.data.notes?.trim()) {
+    return NextResponse.json({ error: "Say what should change." }, { status: 400 });
+  }
+  if (action === "reopen") {
+    if (row.status !== "APPROVED" && row.status !== "REJECTED") {
+      return NextResponse.json({ error: `Nothing to undo on a ${row.status.toLowerCase()} number.` }, { status: 400 });
+    }
+    // Undo is the decider's (or an Admin's): a second manager never quietly
+    // reopens someone else's decision.
+    if (row.reviewedById && row.reviewedById !== u.id && !ctx.isAdmin) {
+      return NextResponse.json({ error: "Only the person who decided can undo it." }, { status: 403 });
+    }
+  } else if (row.status !== "SUBMITTED") {
+    return NextResponse.json({ error: `Can't act on a ${row.status.toLowerCase()} KPI number.` }, { status: 400 });
   }
 
-  await actOnKpiRecord(id, { action: parsed.data.action, notes: parsed.data.notes });
-  return NextResponse.json({ ok: true });
+  const result = await actOnKpiRecord(id, { action, notes: parsed.data.notes, actorId: u.id });
+  return NextResponse.json({ ok: true, status: result.status });
 }

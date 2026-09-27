@@ -1,15 +1,17 @@
 "use client";
 
-// OkrLinkedWork — attach existing Spaces & Boards (the "projects" that
-// move an objective) to an OKR via EntityLink. Link-only by design:
-// progress still comes from manual KR check-ins (no auto-rollup). Reuses
-// the generic LinkExistingPicker; hydration (name + href) comes from
-// /api/entity-links so we don't re-fetch per row.
+// Linked work card on the goal page (spec-goals /okrs/[id] body 5): the
+// KRAs, Spaces, Lists and canvases that move this goal, linked through
+// EntityLink. The Effort card and the verdict read these links (hours and
+// tasks from the linked work), so a link is how work counts toward a goal.
+// Reuses LinkExistingPicker; names and hrefs come hydrated from
+// /api/entity-links. Adds and removes check the response and say so when
+// one fails; nothing is shown as linked that is not.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, FolderKanban, Target, Link2, X, ExternalLink, Frame } from "lucide-react";
-import { Dots } from "@/components/ui/dots";
+import { Boxes, FolderKanban, Target, Plus, X, Frame } from "lucide-react";
+import { useOsToast } from "@/components/layout/os/toast";
 import { LinkExistingPicker } from "@/components/board-view/link-existing-picker";
 import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -44,16 +46,18 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="space-y-4">
+    <section id="goal-linked-work" className="flex flex-col gap-4 rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-linked-h">
+      <h2 id="goal-linked-h" className="m-0 text-base font-semibold text-ink">Linked work</h2>
       <LinkRow
         kind="KRA"
         title="KRAs"
+        kindLabel="KRA"
         Icon={Target}
         okrId={okrId}
         items={kras}
         canEdit={canEdit}
         onReload={load}
-        emptyHint="Link the KRAs (key result areas) whose work drives this objective."
+        emptyHint="Nothing linked yet"
         loadCandidates={async () => {
           const res = await fetch("/api/kras?limit=200");
           const data = await res.json().catch(() => ({}));
@@ -65,12 +69,13 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
       <LinkRow
         kind="SPACE"
         title="Spaces"
+        kindLabel="Space"
         Icon={Boxes}
         okrId={okrId}
         items={spaces}
         canEdit={canEdit}
         onReload={load}
-        emptyHint="Link a Space this objective drives — its boards, docs and tasks live there."
+        emptyHint="Nothing linked yet"
         loadCandidates={async () => {
           const res = await fetch("/api/spaces");
           const data = await res.json().catch(() => ({}));
@@ -81,13 +86,14 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
       />
       <LinkRow
         kind="BOARD"
-        title="Boards"
+        title="Lists"
+        kindLabel="List"
         Icon={FolderKanban}
         okrId={okrId}
         items={boards}
         canEdit={canEdit}
         onReload={load}
-        emptyHint="Link a Board (project/sprint) whose work ladders up to this objective."
+        emptyHint="Nothing linked yet"
         loadCandidates={async () => {
           const res = await fetch("/api/boards?all=1");
           const data = await res.json().catch(() => ({}));
@@ -99,13 +105,13 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
       <LinkRow
         kind="WHITEBOARD"
         title="Canvases"
-        kindLabel="canvas"
+        kindLabel="Canvas"
         Icon={Frame}
         okrId={okrId}
         items={canvases}
         canEdit={canEdit}
         onReload={load}
-        emptyHint="Link a Canvas — a strategy map, a diagram, a retro — that frames this objective."
+        emptyHint="Nothing linked yet"
         loadCandidates={async () => {
           const res = await fetch("/api/whiteboards");
           const data = await res.json().catch(() => ({}));
@@ -114,7 +120,7 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
         }}
         fallbackHref={(id) => `/canvas/${id}`}
       />
-    </div>
+    </section>
   );
 }
 
@@ -135,48 +141,56 @@ function LinkRow({
   fallbackHref: (id: string) => string;
 }) {
   const router = useRouter();
+  const { toast } = useOsToast();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-
   const linkedIds = useMemo(() => (items ?? []).map((i) => i.targetId), [items]);
 
   const pick = async (candidate: { id: string }) => {
     setBusy(true);
     try {
-      await fetch("/api/entity-links", {
+      const res = await fetch("/api/entity-links", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ source: { type: "OKR", id: okrId }, target: { type: kind, id: candidate.id } }),
       });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast(d?.error ?? "Couldn't link it", { tone: "danger" });
+      }
       onReload();
+      router.refresh();
+    } catch {
+      toast("Couldn't link it", { tone: "danger" });
     } finally {
       setBusy(false);
     }
   };
 
   const remove = async (linkId: string) => {
-    await fetch(`/api/entity-links/${linkId}`, { method: "DELETE" });
+    const res = await fetch(`/api/entity-links/${linkId}`, { method: "DELETE" }).catch(() => null);
+    if (!res || !res.ok) toast("Couldn't remove the link", { tone: "danger" });
     onReload();
+    router.refresh();
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2 relative">
-        <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5">
-          <Icon className="h-3 w-3" />
+      <div className="relative flex items-center justify-between">
+        <h3 className="m-0 flex items-center gap-1.5 text-sm font-medium text-ink-2">
+          <Icon className="h-4 w-4" aria-hidden />
           {title}
-          {items ? <span className="text-zinc-400 normal-case font-normal">· {items.length}</span> : null}
+          {items && items.length ? <span className="text-xs text-ink-3">{items.length}</span> : null}
         </h3>
         {canEdit ? (
-          <div className="relative flex items-center gap-2">
+          <div className="relative flex items-center">
             <button
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
               disabled={busy}
-              className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50"
             >
-              {busy ? <Dots variant="pending" /> : <Link2 className="h-3 w-3" />}
-              Link
+              <Plus className="h-4 w-4" aria-hidden /> Link {kindLabel ?? title.toLowerCase().replace(/s$/, "")}
             </button>
             <LinkExistingPicker
               open={pickerOpen}
@@ -189,42 +203,32 @@ function LinkRow({
           </div>
         ) : null}
       </div>
-
       {items === null ? (
-        <div className="text-xs text-zinc-400">Loading…</div>
+        <span className="mt-1 block h-5 w-1/3 animate-pulse rounded bg-surface-2" aria-hidden />
       ) : items.length === 0 ? (
-        <div className="text-xs text-zinc-400 leading-relaxed">{emptyHint}</div>
+        <p className="m-0 mt-1 text-sm text-ink-3">{emptyHint}</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="m-0 mt-1 flex list-none flex-col p-0">
           {items.map((it) => {
-            // Canonical in data; opened in the section the person is in (Work).
             const href = it.target?.href ?? fallbackHref(it.targetId);
             return (
-              <li key={it.id} className="group flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 hover:bg-zinc-50">
-                <Icon className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <li key={it.id} className="group flex h-9 items-center gap-2 border-b border-line last:border-b-0">
                 <button
                   type="button"
                   onClick={() => router.push(sectionHrefNow(href))}
-                  className="flex-1 min-w-0 text-left text-xs font-medium truncate hover:text-zinc-700"
+                  className="min-w-0 flex-1 truncate text-start text-row text-ink hover:underline"
                 >
-                  {it.target?.title || "Untitled"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.push(sectionHrefNow(href))}
-                  className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-zinc-100 inline-flex items-center justify-center text-zinc-400"
-                  aria-label="Open"
-                >
-                  <ExternalLink className="h-3 w-3" />
+                  {it.target?.title ?? "Untitled"}
+                  {it.target?.subtitle ? <span className="ms-2 text-xs text-ink-2">{it.target.subtitle}</span> : null}
                 </button>
                 {canEdit ? (
                   <button
                     type="button"
                     onClick={() => void remove(it.id)}
-                    className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-red-50 inline-flex items-center justify-center text-zinc-400 hover:text-red-500"
-                    aria-label="Remove link"
+                    aria-label={`Unlink ${it.target?.title ?? "this"}`}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 opacity-0 hover:bg-hover hover:text-ink focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-4 w-4" />
                   </button>
                 ) : null}
               </li>

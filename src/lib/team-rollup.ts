@@ -165,11 +165,17 @@ async function aggregateForUserIds(userIds: string[], organizationId: string): P
 export async function getDirectorRollup(args: {
   directorId: string;
   organizationId: string;
+  /**
+   * The People team and Admin read the organization (spec-goals
+   * /team/rollup): the top of the org, everyone with no manager, stands in
+   * for "the director's direct reports". Omit for a viewer's own chain.
+   */
+  rootIds?: string[];
 }): Promise<DirectorRollup> {
   const { directorId, organizationId } = args;
 
-  // 1. Director's direct reports (solid + dotted, one level).
-  const directIds = await getAllDirectReports(directorId);
+  // 1. Director's direct reports (solid + dotted, one level), or the roots.
+  const directIds = args.rootIds ?? (await getAllDirectReports(directorId));
   if (directIds.length === 0) {
     return {
       directorId,

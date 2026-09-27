@@ -25,6 +25,10 @@ export interface TeamMember {
   email: string;
   avatar: string | null;
   via: "solid" | "dotted";
+  /** The person's job title (Role.title), null when unset. */
+  jobTitle: string | null;
+  /** A direct report of the manager (solid managerId or a dotted line). */
+  direct: boolean;
   // Aggregates
   activeKras: Array<{ id: string; name: string; weightage: number }>;
   kpis: {
@@ -69,11 +73,19 @@ export interface TeamAlignment {
 export async function getTeamAlignment(args: {
   managerId: string;
   organizationId: string;
+  /**
+   * The People team and Admin see the organization (spec-goals
+   * /team/alignment: "People team and Admin over the org"): everyone in it
+   * who is not removed, the viewer excepted.
+   */
+  orgWide?: boolean;
 }): Promise<TeamAlignment> {
   const { managerId, organizationId } = args;
 
-  // 1. Resolve solid + dotted reports (excluding the manager).
-  const effective = await getEffectiveReportTree(managerId, { maxDepth: 6 });
+  // 1. Resolve solid + dotted reports (excluding the manager), or the org.
+  const effective = args.orgWide
+    ? (await prisma.user.findMany({ where: { organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } })).map((u) => u.id)
+    : await getEffectiveReportTree(managerId, { maxDepth: 6 });
   const reportIds = effective.filter((id) => id !== managerId);
 
   if (reportIds.length === 0) {
@@ -95,7 +107,7 @@ export async function getTeamAlignment(args: {
   // 3. Fetch reports' core profile.
   const users = await prisma.user.findMany({
     where: { id: { in: reportIds }, organizationId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
+    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true, role: { select: { title: true } } },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
   });
   const validIds = users.map((u) => u.id);
@@ -173,6 +185,8 @@ export async function getTeamAlignment(args: {
       email: u.email,
       avatar: u.avatar,
       via: dottedSet.has(u.id) ? "dotted" : "solid",
+      jobTitle: u.role?.title ?? null,
+      direct: u.managerId === managerId || dottedSet.has(u.id),
       activeKras: krasByUser.get(u.id) ?? [],
       kpis,
       sops,

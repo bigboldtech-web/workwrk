@@ -1,74 +1,56 @@
-// /team/kpi-reviews: the manager's KPI page. Two views, one URL each:
-//   (default)       Awaiting approval: SUBMITTED numbers with inline Approve
-//                   and Request changes, then "Recently acted".
-//   ?view=record    Record numbers: the per-person monthly entry that lived
-//                   at /kra-kpi/review (which now 308s here, carrying
-//                   ?period=), so a manager can still record on behalf.
-// The two merge into one per-person table in the KPI reviews build
-// (spec-goals section 4 step 5); until then both halves stay reachable.
+// /team/kpi-reviews: KPI reviews, the manager's one KPI page (spec-goals
+// section 2). Per person, per month: approve what they recorded, ask for a
+// change, or record the number yourself. It absorbed the two pages that did
+// this job: /kra-kpi/review (the typing page, which 308s here carrying
+// ?period=) and the old approval queue (the "Awaiting approval" cards and
+// the retired ?view=record tab, both this one table now).
+//
+// Gate: the `kpi-reviews` APP_RULES row (anyone with reports over their
+// chain, the People team and Admin over the org); anyone else gets the
+// in-shell 404. ?person= outside the viewer's reach is a 404 too, so the
+// page never confirms who else exists. ?period=YYYY-MM picks the month (a
+// future or malformed month falls back to the current one).
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { gatePage } from "@/lib/access/gate";
 import { listKpiReviewsForManager } from "@/lib/kpi-record";
-import { KpiReviewsClient } from "@/components/team/kpi-reviews-client";
-import Link from "next/link";
-import { ViewTab } from "@/components/ui/view-tabs";
-import RecordNumbers from "@/app/(dashboard)/kra-kpi/review/review-client";
-import { Award } from "lucide-react";
+import { currentKpiPeriod, resolveKpiPeriod } from "@/lib/kpi-period";
+import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
+import { KpiReviewsView } from "@/components/team/kpi-reviews-view";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamKpiReviewsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
-  const view = sp.view === "record" ? "record" : "approve";
+export default async function TeamKpiReviewsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
+  const u = session.user as { id?: string; organizationId?: string };
   if (!u.id || !u.organizationId) redirect("/login");
-
-  // The one gate shape (Phase 6): the `kpi-reviews` APP_RULES row, anyone with
-  // reports (solid or dotted) over their chain, the People team and Admin
-  // over the org; anyone else gets the in-shell 404.
   await gatePage("view", { type: "app", key: "kpi-reviews" }, { callbackUrl: "/team/kpi-reviews" });
 
-  const [pending, acted] = view === "approve"
-    ? await Promise.all([
-        // Every pending number (the badge's own where clause, uncapped);
-        // the acted history is the last 30 days, bounded by time, not rows.
-        listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED" }),
-        listKpiReviewsForManager(u.id, u.organizationId, { statuses: ["APPROVED", "REJECTED"], sinceDays: 30 }),
-      ])
-    : [[], []];
+  const sp = await searchParams;
+  const period = resolveKpiPeriod(typeof sp.period === "string" ? sp.period : undefined);
+  const person = typeof sp.person === "string" && sp.person ? sp.person : null;
+  const ctx = await kpiActorCtx();
+  if (!ctx) redirect("/login");
+  if (person && (person === u.id || !mayActOnKpisOf(ctx, person))) notFound();
+
+  // Submitted numbers from any month (the sidebar badge's own rule), so a
+  // number sent in for last month is never hidden behind the month control.
+  const waiting = await listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED" });
+  const byMonth = new Map<string, number>();
+  for (const w of waiting) byMonth.set(w.period, (byMonth.get(w.period) ?? 0) + 1);
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
-          <span className="text-zinc-300">/</span>
-          <span>KPI reviews</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#f59e0b]/10 shrink-0">
-            <Award className="h-5 w-5 text-[#f59e0b]" />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900">KPI reviews</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">approve the numbers your people record, or record them yourself</span>
-        </div>
-        <div className="mt-3 flex items-center gap-1" role="tablist">
-          <ViewTab label="Awaiting approval" active={view === "approve"} href="/team/kpi-reviews" />
-          <ViewTab label="Record numbers" active={view === "record"} href="/team/kpi-reviews?view=record" />
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
-        {view === "record" ? <RecordNumbers embedded period={typeof sp.period === "string" ? sp.period : undefined} /> : <KpiReviewsClient pending={pending} acted={acted} />}
-      </div>
+    <div className="flex h-full flex-col bg-surface">
+      <KpiReviewsView
+        initialPeriod={period}
+        currentPeriod={currentKpiPeriod()}
+        initialPerson={person}
+        otherMonths={[...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([p, count]) => ({ period: p, count }))}
+        viewerId={u.id}
+      />
     </div>
   );
 }

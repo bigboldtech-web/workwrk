@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const ids = items.map((i: any) => i.id);
+  const ids = (items as Array<{ id: string }>).map((i) => i.id);
   const owned = await prisma.oKR.findMany({
     where: { id: { in: ids }, organizationId: orgId },
     select: { id: true },

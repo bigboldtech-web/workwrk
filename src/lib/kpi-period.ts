@@ -1,7 +1,7 @@
 // The month a KPI "Record numbers" view writes to (KPIRecord.period, always
 // the canonical "YYYY-MM" month key, see lib/alignment.ts latestKpiValues).
 //
-// /kra-kpi/review 308s to /team/kpi-reviews?view=record carrying ?period=
+// /kra-kpi/review 308s to /team/kpi-reviews carrying ?period=
 // (spec-goals section 0), so a stored link to a past month opens that month.
 // A future month, a malformed value or nothing at all falls back to the
 // current month: a manager can never record a number for a month that has
@@ -47,4 +47,25 @@ export function kpiPeriodLabel(period: string): string {
   if (!m) return period;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, 1);
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+/** The month key `delta` months from `period` ("2026-09", -1 -> "2026-08"). */
+export function shiftKpiPeriod(period: string, delta: number): string {
+  const m = MONTH_KEY.exec(period);
+  if (!m) return period;
+  const idx = Number(m[1]) * 12 + (Number(m[2]) - 1) + delta;
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`;
+}
+
+/**
+ * May a manager record a number for this month on KPI reviews? The current
+ * month and the one before it, the same two the employee's own recorder
+ * offers (spec-goals /people/me?tab=kras contract), so a number a person
+ * forgot at month end can still land. Older months open read only: saving
+ * there would rescore a closed month. Approving a submitted number is
+ * allowed in any month (the person already wrote it).
+ */
+export function isKpiPeriodWritable(period: string, now: Date = new Date()): boolean {
+  const current = currentKpiPeriod(now);
+  return period === current || period === shiftKpiPeriod(current, -1);
 }

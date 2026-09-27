@@ -1,15 +1,15 @@
 "use client";
 
-// GoalAudiencePicker — ONE multi-select for a goal's audience, mixing
+// GoalAudiencePicker: ONE multi-select for a goal's audience, mixing
 // people, departments and roles in grouped sections. Same popover pattern
 // as board-view/assignee-picker (search on top, MenuItem rows), but
 // absolute-positioned so it survives the goal modal's transformed
 // DialogContent; selection is a list of
-// { type: "USER"|"DEPARTMENT"|"ROLE", id } refs — the API resolves them
+// { type: "USER"|"DEPARTMENT"|"ROLE", id } refs: the API resolves them
 // to people at read time, so a department/role entry follows the org
 // chart instead of freezing a member list.
 //
-// Also exports MemberAvatarStack — the resolved-members avatar stack with
+// Also exports MemberAvatarStack: the resolved-members avatar stack with
 // a "+N" overflow chip used on the goals list and goal detail.
 
 import { useEffect, useRef, useState } from "react";
@@ -41,7 +41,7 @@ export function MemberAvatarStack({
   size = 22,
 }: {
   members: AudienceMember[];
-  /** Full member count — anything beyond the preview renders as "+N". */
+  /** Full member count: anything beyond the preview renders as "+N". */
   total: number;
   size?: number;
 }) {
@@ -128,7 +128,7 @@ export function GoalAudiencePicker({
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  // Departments + roles are small lookup lists — fetch once per open,
+  // Departments + roles are small lookup lists: fetch once per open,
   // filter client-side. People are server-searched (debounced), same as
   // the existing assignee picker.
   useEffect(() => {
@@ -190,7 +190,7 @@ export function GoalAudiencePicker({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="flex h-8 w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-left text-base text-zinc-800 hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+        className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-raised px-2.5 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand"
         aria-label="Edit goal audience"
       >
         <UsersRound className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
@@ -201,7 +201,7 @@ export function GoalAudiencePicker({
       {open ? (
         // Absolute (not fixed): the goal modal centres its DialogContent with a
         // CSS transform, and a position:fixed child anchors to that transformed
-        // box, not the viewport — which flung this popover off-screen (the
+        // box, not the viewport: which flung this popover off-screen (the
         // "owner/contributors don't work" bug). Absolute anchors to this
         // relative wrapper, so it stays put inside the dialog AND on the inline
         // goal-detail usage. Staying a DOM child also keeps the dialog's focus
@@ -295,9 +295,9 @@ export function GoalAudiencePicker({
                   leading={
                     <span
                       className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md"
-                      style={t.color ? { background: `${t.color}1a` } : { background: "#f4f4f5" }}
+                      style={t.color ? { background: `${t.color}1a` } : { background: "var(--os-surface-2)" }}
                     >
-                      <Tag className="h-3.5 w-3.5" style={{ color: t.color ?? "#71717a" }} />
+                      <Tag className="h-3.5 w-3.5" style={{ color: t.color ?? "var(--os-ink-2)" }} />
                     </span>
                   }
                   label={t.name}

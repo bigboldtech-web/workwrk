@@ -1,82 +1,98 @@
 "use client";
 
-// GoalAssessment — the automated "on track?" card. Reads the goal's real
-// signals (progress vs pace, check-in freshness, effort) and shows a verdict
-// with a short, grounded explanation and one recommended next step. The verdict
-// itself is deterministic; an AI writes the narrative (falls back to a plain
-// one when no AI key). Mirrors GoalEffort's shape + styling.
+// The On track? block inside the goal page's Summary card (spec-goals
+// /okrs/[id] body 1). The verdict is the ONE deterministic verdict
+// (src/lib/goal-verdict.ts), the same one the goal's /okrs row shows; the
+// server page passes it in so it paints at once, and GET /api/okrs/[id]/assess
+// adds the pace line, the headline, two or three reasons and one next step
+// (written by the org's AI when one is configured, never changing the word).
+// Loading is a three-line skeleton; a failure says so with Retry.
 
-import { useEffect, useState } from "react";
-import { TrendingUp, AlertTriangle, TrendingDown, Sparkles, ArrowRight } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowRight, Clock, Sparkles } from "lucide-react";
+import { ToneChip } from "@/components/people/person-bits";
+import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
 
-type Verdict = "on_track" | "at_risk" | "off_track";
 interface Assessment {
-  verdict: Verdict;
+  verdict: GoalVerdict;
   headline: string;
   reasons: string[];
   recommendation: string;
   progress: number | null;
   pctTimeElapsed: number | null;
   daysLeft: number | null;
+  daysSinceCheckin: number | null;
+  isStale: boolean;
   source: "ai" | "heuristic";
 }
 
-const VERDICT: Record<Verdict, { label: string; color: string; bg: string; Icon: typeof TrendingUp }> = {
-  on_track: { label: "On track", color: "#16a34a", bg: "rgba(22,163,74,.10)", Icon: TrendingUp },
-  at_risk: { label: "At risk", color: "#c2820b", bg: "rgba(245,158,11,.12)", Icon: AlertTriangle },
-  off_track: { label: "Off track", color: "#E2445C", bg: "rgba(226,68,92,.10)", Icon: TrendingDown },
-};
+const CADENCE_WORD: Record<string, string> = { WEEKLY: "weekly", BIWEEKLY: "every two weeks", MONTHLY: "monthly" };
 
-export function GoalAssessment({ okrId }: { okrId: string }) {
+export function GoalAssessment({ okrId, initialVerdict, cadence, canCheckIn, onCheckIn }: {
+  okrId: string;
+  initialVerdict: GoalVerdict;
+  cadence: string;
+  canCheckIn: boolean;
+  onCheckIn?: () => void;
+}) {
   const [data, setData] = useState<Assessment | null>(null);
   const [err, setErr] = useState(false);
-
+  const [tick, setTick] = useState(0);
+  const retry = useCallback(() => { setErr(false); setData(null); setTick((n) => n + 1); }, []);
   useEffect(() => {
     let active = true;
-    fetch(`/api/okrs/${okrId}/assess`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
+    fetch(`/api/okrs/${okrId}/assess`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j) => { if (active) setData(j.data ?? j); })
       .catch(() => { if (active) setErr(true); });
     return () => { active = false; };
-  }, [okrId]);
+  }, [okrId, tick]);
 
-  if (err) return <p style={{ fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>Couldn&apos;t load the assessment.</p>;
-  if (!data) return <p style={{ fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>Assessing…</p>;
-
-  const v = VERDICT[data.verdict] ?? VERDICT.at_risk;
-  const pace = data.progress != null && data.pctTimeElapsed != null
-    ? `${data.progress}% done · ${data.pctTimeElapsed}% of time used${data.daysLeft != null ? ` · ${data.daysLeft}d left` : ""}`
-    : null;
+  const verdict = data?.verdict ?? initialVerdict;
+  const chip = verdictChip(verdict);
+  const pace = data ? [
+    data.progress != null ? `${data.progress}% done` : null,
+    data.pctTimeElapsed != null ? `${data.pctTimeElapsed}% of time used` : null,
+    data.daysLeft != null ? `${data.daysLeft} ${data.daysLeft === 1 ? "day" : "days"} left` : null,
+  ].filter(Boolean).join(" · ") : "";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: v.bg, color: v.color, fontSize: 13, fontWeight: 600 }}>
-          <v.Icon style={{ width: 15, height: 15 }} /> {v.label}
-        </span>
-        {pace ? <span style={{ fontSize: 12.5, color: "var(--os-ink-3, #9aa3b2)", fontVariantNumeric: "tabular-nums" }}>{pace}</span> : null}
+    <div className="mt-4 flex flex-col gap-2" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-ink-2">On track?</span>
+        <ToneChip tone={chip.tone} label={chip.label} />
+        {pace ? <span className="text-sm tabular-nums text-ink-2">{pace}</span> : null}
       </div>
-
-      <p style={{ margin: 0, fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: "var(--os-ink, #1e293b)" }}>{data.headline}</p>
-
-      {data.reasons.length > 0 ? (
-        <ul style={{ display: "flex", flexDirection: "column", gap: 5, margin: 0, paddingLeft: 16 }}>
-          {data.reasons.map((r, i) => (
-            <li key={i} style={{ fontSize: 13, lineHeight: 1.45, color: "var(--os-ink-2, #52525b)" }}>{r}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {data.recommendation ? (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 11px", borderRadius: 10, background: "var(--os-surface-1, #f4f4f5)" }}>
-          <ArrowRight style={{ width: 15, height: 15, marginTop: 1, color: "#0073EA", flex: "none" }} />
-          <span style={{ fontSize: 13, lineHeight: 1.45, color: "var(--os-ink, #1e293b)" }}><strong style={{ fontWeight: 600 }}>Next:</strong> {data.recommendation}</span>
+      {err ? (
+        <p className="m-0 text-sm text-ink-2">Couldn&apos;t assess this goal · <button type="button" onClick={retry} className="text-brand-deep hover:underline">Retry</button></p>
+      ) : !data ? (
+        <div className="flex flex-col gap-1.5" aria-hidden>
+          <span className="h-4 w-3/5 animate-pulse rounded bg-surface-2" />
+          <span className="h-3 w-4/5 animate-pulse rounded bg-surface-2" />
+          <span className="h-3 w-2/5 animate-pulse rounded bg-surface-2" />
         </div>
-      ) : null}
-
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--os-ink-3, #9aa3b2)" }}>
-        <Sparkles style={{ width: 11, height: 11 }} /> {data.source === "ai" ? "AI assessment from live goal data" : "Auto-assessed from live goal data"}
-      </span>
+      ) : (
+        <>
+          <p className="m-0 text-row font-medium text-ink">{data.headline}</p>
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+            {data.reasons.map((r, i) => <li key={i} className="text-sm text-ink-2">{r}</li>)}
+          </ul>
+          {data.isStale && verdict !== "completed" ? (
+            <p className="m-0 flex items-center gap-1.5 text-sm text-warning-text">
+              <Clock className="h-4 w-4" aria-hidden />
+              {data.daysSinceCheckin != null ? `Last check-in ${data.daysSinceCheckin} days ago` : "No check-in yet"}, cadence is {CADENCE_WORD[cadence] ?? cadence.toLowerCase()}.
+              {canCheckIn && onCheckIn ? <button type="button" onClick={onCheckIn} className="text-brand-deep hover:underline">Check in</button> : null}
+            </p>
+          ) : null}
+          <p className="m-0 flex items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink">
+            <ArrowRight className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
+            <span><span className="font-medium">Next:</span> {data.recommendation}</span>
+          </p>
+          <p className="m-0 flex items-center gap-1 text-xs text-ink-2">
+            {data.source === "ai" ? <><Sparkles className="h-3 w-3" aria-hidden /> AI summary from live goal data</> : "Assessed from live goal data"}
+          </p>
+        </>
+      )}
     </div>
   );
 }

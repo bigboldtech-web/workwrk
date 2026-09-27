@@ -1,11 +1,8 @@
-// GET /api/okrs/[id]/effort — the AUTOMATED effort signal for a goal.
-//
-// Honest, never self-reported: it derives "how much real work is moving this
-// goal" from the Tasks under the goal's linked KRAs (OKR → KRA via EntityLink).
-// Sums logged hours, counts done vs open, finds who's contributing and when it
-// last moved. If nothing's linked, it says so (nudge to link a board/KRA).
-//
-// Visibility mirrors the goal itself (canSeeGoal); no extra data leaks.
+// GET /api/okrs/[id]/effort: the AUTOMATED effort signal for a goal (the
+// Effort card): hours, tasks done and open, who is driving it and when it
+// last moved, from every piece of work linked to the goal (KRAs, Lists,
+// Spaces; src/lib/goal-effort.ts). Contributors carry their avatar.
+// Visibility mirrors the goal itself (canSeeGoal). Reads only.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";

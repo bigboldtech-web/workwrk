@@ -1,15 +1,22 @@
-/* Goal detail — server-rendered for fast first paint, mirroring ClickUp's
- * goal page translated to the house design system (brand blue #0073EA,
- * flat Monday-clean, zinc neutrals — no purple):
- *
- *   Neutral hero band: "All Goals" crumb, LARGE progress ring left (the
- *   one rollup number, "—" when nothing is measured), title + inline "…"
- *   menu, description, meta chips; hero right: due date, owner,
- *   contributors stack.
- *   Below, white cards: Targets (key results as rows + "+ Add", inline
- *   check-ins — GoalTargets), Timeline (check-in history), cascade
- *   context (parent / children), linked work, custom fields.
- */
+// The goal page (spec-goals section 2 /okrs/[id]). Server rendered.
+//
+//   Title row   BackButton to the view this goal belongs to for the viewer
+//               (Company goals for a company goal, Team goals when the viewer
+//               manages the owner and neither owns nor contributes, else My
+//               goals), the title, and "..." (Edit, Assign owner, Copy link,
+//               Mark complete, Delete) for editors, or Copy link alone
+//   Banner      a Can view viewer gets "View only. Ask {owner} for edit
+//               access." with Request, and no write control anywhere below
+//   Column 720  Summary (ring, title, description, the ONE verdict with its
+//               pace line and next step) · Details (Owner, Contributors,
+//               Level, Part of, Dates with the derived quarter, Check-ins) ·
+//               Targets · Effort · Linked work · Supports this goal (only the
+//               children the viewer can see) · Activity (paged)
+//
+// Roles on a goal: the owner, the owner's manager chain, the org-wide levels
+// (canEditOkrOwner) edit everything; Contributors (GoalAssignee, resolved at
+// read time) check in; everyone else who can see it (canSeeGoal: company
+// goals, their department's, a manager's tree) reads it.
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -18,87 +25,32 @@ import { requireGoalPage } from "@/lib/page-gates";
 import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
-import {
-  AlertTriangle,
-  Calendar,
-  Clock,
-  ChevronRight,
-  Building2,
-  Users,
-  User as UserIcon,
-} from "lucide-react";
-import { PersonAvatar } from "@/components/board-view/assignee-picker";
+import { goalsWithLinkedWork } from "@/lib/goal-effort";
+import { verdictForGoal } from "@/lib/goal-verdict";
+import { goalQuarterLabel } from "@/lib/fiscal-quarter";
+import { formatDate, formatRelative } from "@/lib/format/date";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { getTeamUserIds } from "@/lib/team";
+import { isGoalContributor } from "@/lib/goals/goal-contributor";
+import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
-import { GoalEffort } from "./goal-effort";
-import { GoalAssessment } from "./goal-assessment";
-import { GoalDetailMenu } from "./goal-detail-menu";
-import { GoalTargets, type TargetRowData } from "./goal-targets";
+import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
+import { CopyLinkButton, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
+import type { TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
-import { BackButton } from "@/components/ui/back-button";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Brand blue — the ONE accent; ClickUp's purple translates to this. */
-const BRAND = "#0073EA";
-
-const CADENCE_DAYS: Record<string, number> = {
-  WEEKLY: 7,
-  BIWEEKLY: 14,
-  MONTHLY: 31,
-};
-
-const STATUS_META: Record<string, { color: string; label: string }> = {
-  ON_TRACK: { color: "#16a34a", label: "On track" },
-  AT_RISK: { color: "#f59e0b", label: "At risk" },
-  BEHIND: { color: "#E2445C", label: "Behind" },
-  COMPLETED: { color: BRAND, label: "Completed" },
-};
-
-const LEVEL_ICON: Record<string, { Icon: typeof Building2; label: string }> = {
-  COMPANY:    { Icon: Building2, label: "Company" },
-  DEPARTMENT: { Icon: Users,     label: "Department" },
-  INDIVIDUAL: { Icon: UserIcon,  label: "Individual" },
-};
-
-function fmtDate(d: Date | null | undefined): string {
-  if (!d) return "—";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-function fmtShort(d: Date): string {
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-function relDays(d: Date): string {
-  const days = Math.floor((Date.now() - d.getTime()) / DAY_MS);
-  if (days < 1) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  return fmtShort(d);
-}
-// Staleness math lives here (not in the component body) so the impure
-// Date.now() stays out of render — this is a server page, so
-// per-request "now" is the correct reference point.
-function checkinRecency(lastCheckIn: Date | null, cadenceDays: number, completed: boolean) {
-  const now = Date.now();
-  return {
-    isStale:
-      !completed && (!lastCheckIn || now - lastCheckIn.getTime() > cadenceDays * DAY_MS),
-    daysSinceLastCheckin: lastCheckIn
-      ? Math.floor((now - lastCheckIn.getTime()) / DAY_MS)
-      : null,
-  };
-}
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import type { EditableGoal } from "@/components/okrs/create-goal-modal";
 
 export const dynamic = "force-dynamic";
 
-export default async function OkrDetailPage(
-  { params }: { params: Promise<{ id: string }> },
-) {
+const LEVEL_WORD: Record<string, string> = { COMPANY: "Company", DEPARTMENT: "Department", INDIVIDUAL: "Individual" };
+const CADENCE_WORD: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Every two weeks", MONTHLY: "Monthly", NONE: "No reminders" };
+
+export default async function OkrDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  // Three-door gate, server-side, BEFORE any data renders: notFound()
-  // unless canSeeGoal says yes (COMPANY → everyone; own/audience → you;
-  // report tree → managers; org-wide levels → all). A guessed URL to
-  // another team's goal 404s here.
+  // notFound() unless canSeeGoal: a goal is never discoverable, so a
+  // guessed URL to someone else's goal is the in-shell 404.
   const viewer = await requireGoalPage(id);
   const orgId = viewer.organizationId;
 
@@ -108,106 +60,76 @@ export default async function OkrDetailPage(
       keyResults: {
         orderBy: { createdAt: "asc" },
         include: {
-          checkIns: {
-            orderBy: { createdAt: "desc" },
-            take: 10,
-          },
+          checkIns: { orderBy: { createdAt: "desc" }, take: 1 },
           kpi: { select: KR_KPI_SELECT },
         },
       },
-      children: { select: { id: true, title: true, progress: true, level: true, status: true } },
+      children: { select: { id: true, title: true, progress: true, level: true, status: true, ownerId: true, departmentId: true } },
     },
   });
   if (!okr) notFound();
 
-  // The same derived numbers every other surface shows: KPI-linked KRs
-  // report the gauge's latest reading, and the goal's progress/status
-  // roll up from live KRs + measured children (org-wide context, so a
-  // parent is right even when the viewer can't see every child).
-  const [keyResults, rollupCtx] = await Promise.all([
+  const sessionLike = { user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel } };
+  const [keyResults, rollupCtx, linked, parent, owner, audienceEntries, membersByOkr, org, canDelete, canEditGoal, contributor] = await Promise.all([
     enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
     computeGoalRollups(orgId),
+    goalsWithLinkedWork(orgId, [okr.id]),
+    okr.parentId
+      ? prisma.oKR.findFirst({ where: { id: okr.parentId, organizationId: orgId }, select: { id: true, title: true, level: true, ownerId: true, departmentId: true } })
+      : Promise.resolve(null),
+    okr.ownerId
+      ? prisma.user.findUnique({ where: { id: okr.ownerId }, select: { id: true, firstName: true, lastName: true, avatar: true, email: true } })
+      : Promise.resolve(null),
+    listGoalAssigneeEntries(okr.id),
+    resolveGoalMembersBatch(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
+    prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
+    canDeleteGoal(sessionLike, okr.ownerId),
+    canEditOkrOwner(sessionLike, okr.ownerId),
+    isGoalContributor(sessionLike, okr.id),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
   const measured = rollup.source !== "NONE";
-
-  const checkinUserIds = Array.from(
-    new Set(okr.keyResults.flatMap((kr) => kr.checkIns.map((c) => c.userId))),
-  );
-  const checkinUsers = checkinUserIds.length > 0
-    ? await prisma.user.findMany({
-        where: { id: { in: checkinUserIds } },
-        select: { id: true, firstName: true, lastName: true },
-      })
-    : [];
-  const userById = new Map(checkinUsers.map((u) => [u.id, u]));
-
-  const [parent, owner, audienceEntries, membersByOkr] = await Promise.all([
-    okr.parentId
-      ? prisma.oKR.findUnique({
-          where: { id: okr.parentId },
-          select: { id: true, title: true, level: true, ownerId: true, departmentId: true },
-        })
-      : Promise.resolve(null),
-    okr.ownerId
-      ? prisma.user.findUnique({
-          where: { id: okr.ownerId },
-          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
-        })
-      : Promise.resolve(null),
-    // Audience: labeled entries feed the edit picker; resolved members
-    // (owner + direct + dept members + role holders, ACTIVE only,
-    // resolved NOW) feed the avatar stack.
-    listGoalAssigneeEntries(okr.id),
-    resolveGoalMembersBatch(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
-  ]);
+  const { verdict } = verdictForGoal({
+    goal: okr,
+    rollup: { progress: rollup.progress, source: rollup.source },
+    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: kr.kpiId != null })),
+    hasLinkedWork: linked.has(okr.id),
+  });
   const audienceMembers = membersByOkr.get(okr.id) ?? [];
+  const fiscalStart = (org?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
+  const quarter = goalQuarterLabel(okr.endDate, fiscalStart);
 
-  // The cascade crumb links up to the parent goal — but only show it if the
-  // viewer is actually allowed to see that parent. Otherwise a private goal
-  // nested above one you can see would leak its title through the crumb.
-  const sessionLike = {
-    user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel },
+  // Part of shows only when the viewer can see the parent (never a leaked
+  // title); Supports this goal lists only the children they can see.
+  const parentVisible = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
+  const children = (await Promise.all(okr.children.map(async (c) => ((await canSeeGoal(sessionLike, c)) ? c : null)))).filter((c): c is NonNullable<typeof c> => c !== null);
+
+  const isOwner = okr.ownerId === viewer.id;
+  const canCheckIn = canEditGoal || contributor;
+  const viewOnly = !canCheckIn;
+  const mayAssign = legacyIsManagerLevel(viewer.accessLevel) && canEditGoal;
+
+  // Back target (spec-goals section 1 back rule).
+  let back = { fallbackHref: "/okrs", label: "My goals" };
+  if (okr.level === "COMPANY") back = { fallbackHref: "/okrs?view=company", label: "Company goals" };
+  else if (!isOwner && !contributor && okr.ownerId && (await getTeamUserIds(orgId, viewer.id)).includes(okr.ownerId)) {
+    back = { fallbackHref: "/okrs?view=team", label: "Team goals" };
+  }
+
+  const editable: EditableGoal = {
+    id: okr.id,
+    title: okr.title,
+    description: okr.description,
+    level: okr.level,
+    ownerId: okr.ownerId,
+    owner: owner ? { id: owner.id, firstName: owner.firstName, lastName: owner.lastName, avatar: owner.avatar, email: owner.email } : null,
+    quarter: okr.quarter,
+    startDate: okr.startDate?.toISOString() ?? null,
+    endDate: okr.endDate?.toISOString() ?? null,
+    checkInCadence: okr.checkInCadence,
+    parentId: okr.parentId,
   };
-  const parentCrumb = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
-  // Same predicates the APIs enforce — the header's "…"/right-click menu
-  // only shows Delete when DELETE /api/okrs/[id] will honor it, and
-  // Edit / Assign owner when PATCH /api/okrs will. canEditGoal also gates
-  // Targets writes (add / delete / check-in — the key-results routes'
-  // exact rule).
-  const [canDelete, canEditGoal] = await Promise.all([
-    canDeleteGoal(sessionLike, okr.ownerId),
-    canEditOkrOwner(sessionLike, okr.ownerId),
-  ]);
 
-  const lastCheckIn = okr.keyResults
-    .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
-    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
-
-  // NONE = the owner opted this goal out of check-in reminders. Treat it
-  // like COMPLETED for staleness — never nag (mirrors the okr-reminders
-  // cron, which skips NONE goals), so the detail page and the cron agree.
-  const cadenceOff = okr.checkInCadence === "NONE";
-  const cadenceDays = CADENCE_DAYS[okr.checkInCadence] ?? 7;
-  const { isStale, daysSinceLastCheckin } = checkinRecency(
-    lastCheckIn,
-    cadenceDays,
-    okr.status === "COMPLETED" || cadenceOff,
-  );
-
-  // Contributors + linked-work edits go through the assignees / entity-links
-  // APIs, both of which enforce canEditOkrOwner. Gate the affordance on the
-  // SAME predicate (canEditGoal) so a manager outside the owner's report line
-  // isn't shown a picker that then 403s on every add/remove.
-  const canEditLinks = canEditGoal;
-  const ownerName = owner ? `${owner.firstName} ${owner.lastName}`.trim() : "Unassigned";
-  // Status follows the rollup: derived thresholds while the goal is
-  // measured, the stored value otherwise — same rule as the APIs.
-  const status = STATUS_META[rollup.status] ?? { color: BRAND, label: rollup.status };
-  const level = LEVEL_ICON[okr.level] ?? LEVEL_ICON.INDIVIDUAL;
-
-  // Targets card rows — everything serializable, relative times formatted
-  // on the server clock so the client island never disagrees with SSR.
   const targetRows: TargetRowData[] = keyResults.map((kr) => ({
     id: kr.id,
     title: kr.title,
@@ -218,284 +140,143 @@ export default async function OkrDetailPage(
     progress: kr.progress,
     isDerived: Boolean(kr.isDerived),
     kpiName: kr.kpi?.name ?? null,
-    lastCheckIn: kr.checkIns[0] ? relDays(kr.checkIns[0].createdAt) : null,
+    lastCheckIn: kr.checkIns[0] ? formatRelative(kr.checkIns[0].createdAt) : null,
   }));
 
-  type FlatCheckIn = {
-    id: string;
-    krId: string;
-    krTitle: string;
-    value: number;
-    unit: string | null;
-    note: string | null;
-    userName: string;
-    createdAt: Date;
-  };
-  const allCheckIns: FlatCheckIn[] = okr.keyResults
-    .flatMap((kr) =>
-      kr.checkIns.map((c) => {
-        const u = userById.get(c.userId);
-        return {
-          id: c.id,
-          krId: kr.id,
-          krTitle: kr.title,
-          value: c.value,
-          unit: kr.unit,
-          note: c.note,
-          userName: u ? `${u.firstName} ${u.lastName}`.trim() : "Someone",
-          createdAt: c.createdAt,
-        };
-      }),
-    )
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 12);
+  const ownerName = owner ? `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email : null;
+  const overdue = verdict !== "completed" && isPast(okr.endDate);
+  const dates = [
+    okr.startDate ? formatDate(okr.startDate, null, "date") : null,
+    okr.endDate ? formatDate(okr.endDate, null, "date") : null,
+  ];
 
   return (
-    <div className="okrd">
-      {/* Neutral hero band */}
-      <header className="okrd__hero">
-        <div className="okrd__hero-in">
-          <div className="okrd__crumbs">
-            <BackButton
-              fallbackHref={okr.level === "COMPANY" ? "/okrs?view=company" : "/okrs"}
-              label={okr.level === "COMPANY" ? "Company goals" : "Goals"}
-            />
-          </div>
-          <div className="okrd__hero-grid">
-            <div className="okrd__ring">
-              <ProgressRing value={rollup.progress} measured={measured} />
-            </div>
-            <div className="okrd__hero-main">
-              <div className="okrd__title-row">
-                <h1 className="okrd__title">{okr.title}</h1>
-                <GoalDetailMenu
-                  goal={{
-                    id: okr.id,
-                    title: okr.title,
-                    description: okr.description,
-                    level: okr.level,
-                    ownerId: okr.ownerId,
-                    owner: owner
-                      ? { id: owner.id, firstName: owner.firstName, lastName: owner.lastName, avatar: owner.avatar, email: owner.email }
-                      : null,
-                    quarter: okr.quarter,
-                    startDate: okr.startDate?.toISOString() ?? null,
-                    endDate: okr.endDate?.toISOString() ?? null,
-                    checkInCadence: okr.checkInCadence,
-                  }}
-                  canDelete={canDelete}
-                  canEdit={canEditGoal}
-                />
-              </div>
-              {okr.description && <p className="okrd__desc">{okr.description}</p>}
-              <div className="okrd__meta">
-                <span className="okrd__chip"><level.Icon /> {level.label}</span>
-                <span
-                  className="okrd__chip okrd__chip--status"
-                  style={{ color: status.color, background: `color-mix(in srgb, ${status.color} 12%, transparent)` }}
-                >
-                  {status.label}
-                </span>
-                {okr.quarter && <span className="okrd__chip">{okr.quarter}</span>}
-                <span className="okrd__chip"><Calendar /> {fmtDate(okr.startDate)} → {fmtDate(okr.endDate)}</span>
-                <span className="okrd__chip">
-                  <Clock /> {cadenceOff ? "No check-in reminders" : `${okr.checkInCadence.toLowerCase()} check-ins`}
-                </span>
-              </div>
-            </div>
-            <div className="okrd__hero-side">
-              <div className="okrd__side-block">
-                <span className="okrd__side-label">Due date</span>
-                <span className="okrd__due">{okr.endDate ? fmtShort(okr.endDate) : "—"}</span>
-              </div>
-              <div className="okrd__side-block">
-                <span className="okrd__side-label">Owner</span>
-                {owner ? (
-                  <span className="okrd__owner">
-                    <PersonAvatar person={owner} size={24} /> {ownerName}
-                  </span>
-                ) : (
-                  <span className="okrd__owner okrd__owner--none">Unassigned</span>
-                )}
-              </div>
-              <div className="okrd__side-block">
-                <span className="okrd__side-label">Contributors</span>
-                {/* One shared goal, many contributors — resolved avatar
-                    stack + (for editors) the mixed people/departments/
-                    roles picker. */}
-                <OkrAudience
-                  okrId={okr.id}
-                  canEdit={canEditLinks}
-                  initialEntries={audienceEntries}
-                  initialMembers={audienceMembers.slice(0, 5)}
-                  initialTotal={audienceMembers.length}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="flex h-full flex-col overflow-y-auto bg-surface">
+      <Breadcrumb items={[{ label: "Goals", href: back.fallbackHref }, { label: okr.title }]} />
+      <OsPageHeader
+        title={okr.title}
+        back={back}
+        actions={canEditGoal ? (
+          <GoalDetailMenu goal={editable} canDelete={canDelete} canEdit={canEditGoal} canAssignOwner={mayAssign}
+            completed={okr.completedAt != null} afterDelete={back.fallbackHref} />
+        ) : <CopyLinkButton okrId={okr.id} />}
+      />
+      {viewOnly ? <GoalReadOnlyStrip okrId={okr.id} ownerFirstName={owner?.firstName ?? null} /> : null}
 
-      <div className="okrd__cards">
-        {/* Stale warning */}
-        {isStale && (
-          <div className="okrd__stale">
-            <AlertTriangle />
-            <div>
-              <strong>Check-in overdue.</strong>{" "}
-              <span>
-                {daysSinceLastCheckin === null
-                  ? "No check-ins yet."
-                  : `Last check-in was ${daysSinceLastCheckin} day${daysSinceLastCheckin === 1 ? "" : "s"} ago.`}
-                {" "}Cadence is {okr.checkInCadence.toLowerCase()}.
-              </span>
+      <div className="os-chrome mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 py-6 md:px-6">
+        {/* 1. Summary */}
+        <section data-goal-hero className="rounded-lg border border-line bg-raised p-6" aria-label="Summary">
+          <div className="flex gap-5">
+            <GoalRing value={rollup.progress} measured={measured} />
+            <div className="min-w-0 flex-1">
+              <h1 className="m-0 text-xl font-semibold text-ink">{okr.title}</h1>
+              {okr.description ? (
+                <p className="m-0 mt-1 whitespace-pre-wrap text-base text-ink-2">{okr.description}</p>
+              ) : canEditGoal ? (
+                <p className="m-0 mt-1"><GoalEditLink goal={editable} label="Add a description" /></p>
+              ) : null}
             </div>
           </div>
-        )}
+          <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} />
+        </section>
 
-        {/* Targets (key results) */}
-        <GoalTargets
+        {/* 2. Details */}
+        <dl className="m-0 flex flex-col" aria-label="Details">
+          <DetailRow label="Owner">
+            {owner ? <span className="flex min-w-0 items-center gap-2"><Avatar person={owner} size={24} /><span className="truncate">{ownerName}</span></span> : <span className="text-ink-2">No owner</span>}
+            {mayAssign ? <span className="ms-2"><GoalEditLink goal={editable} label={owner ? "Change" : "Assign"} /></span> : null}
+          </DetailRow>
+          <DetailRow label="Contributors">
+            <OkrAudience okrId={okr.id} canEdit={canEditGoal} initialEntries={audienceEntries} initialMembers={audienceMembers.slice(0, 5)} initialTotal={audienceMembers.length} />
+          </DetailRow>
+          <DetailRow label="Level"><span>{LEVEL_WORD[okr.level] ?? okr.level}</span></DetailRow>
+          <DetailRow label="Part of">
+            {parentVisible ? (
+              <Link href={`/okrs/${parentVisible.id}`} className="flex min-w-0 items-center gap-2 hover:underline">
+                <span className="truncate">{parentVisible.title}</span>
+                <span className="shrink-0 text-xs text-ink-2">{LEVEL_WORD[parentVisible.level]}</span>
+              </Link>
+            ) : canEditGoal && !okr.parentId ? <GoalEditLink goal={editable} label="Add" focusParent /> : <span className="text-ink-2">{okr.parentId ? "A goal you can't see" : "None"}</span>}
+          </DetailRow>
+          <DetailRow label="Dates">
+            <span className={overdue ? "text-danger-text" : ""}>
+              {!dates[0] && !dates[1] ? "No dates" : `${dates[0] ?? "No start"} to ${dates[1] ?? "no due date"}`}{quarter ? ` · ${quarter}` : ""}{overdue ? " · overdue" : ""}
+            </span>
+          </DetailRow>
+          <DetailRow label="Check-ins"><span>{CADENCE_WORD[okr.checkInCadence] ?? okr.checkInCadence}</span></DetailRow>
+        </dl>
+
+        {/* 3 to 7 */}
+        <GoalWorkCards
           okrId={okr.id}
           canEdit={canEditGoal}
-          owner={owner}
+          canCheckIn={canCheckIn}
           targets={targetRows}
-        />
-
-        {/* Timeline — the goal's check-in history, newest first */}
-        <section className="okrd-card">
-          <header>
-            <h2>Timeline</h2>
-            {allCheckIns.length > 0 && <span className="okrd-card__count">{allCheckIns.length}</span>}
-          </header>
-          {allCheckIns.length === 0 ? (
-            <div className="okrd-card__empty">No activity yet — target check-ins land here.</div>
-          ) : (
-            <ol className="okrd-tl">
-              {allCheckIns.map((c) => (
-                <li key={c.id}>
-                  <div className="okrd-tl__main">
-                    <div className="okrd-tl__line">
-                      <span className="okrd-tl__title">{c.krTitle}</span>
-                      <span className="okrd-tl__value">→ {c.value}{c.unit ?? ""}</span>
-                    </div>
-                    {c.note && (
-                      <p className="okrd-tl__note"><span>Note</span>{c.note}</p>
-                    )}
-                  </div>
-                  <span className="okrd-tl__when">{relDays(c.createdAt)}, by {c.userName}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
-
-        {/* Cascade context */}
-        {parentCrumb && (
-          <section className="okrd-card">
-            <header><h2>Cascades from</h2></header>
-            <Link href={`/okrs/${parentCrumb.id}`} className="okrd-parent">
-              <span className="okrd-parent__level">{parentCrumb.level}</span>
-              <span className="okrd-parent__title">{parentCrumb.title}</span>
-              <ChevronRight />
-            </Link>
-          </section>
-        )}
-
-        {okr.children.length > 0 && (
-          <section className="okrd-card">
-            <header>
-              <h2>Cascades to</h2>
-              <span className="okrd-card__count">{okr.children.length}</span>
-            </header>
-            <ul className="okrd-children">
-              {okr.children.map((c) => {
-                // Children show their ROLLED-UP number — the same one
-                // their own detail page shows, never the stale column.
-                const childRoll = goalRollupFor(rollupCtx, c);
-                const childMeasured = childRoll.source !== "NONE";
-                return (
-                  <li key={c.id}>
-                    <Link href={`/okrs/${c.id}`}>
-                      <span className="okrd-child__level">{c.level}</span>
-                      <span className="okrd-child__title">{c.title}</span>
-                      <div className="okrd-child__bar">
-                        <div className="okrd-child__bar-track">
-                          {/* Neutral empty track when nothing is measured. */}
-                          {childMeasured && (
-                            <div className="okrd-child__bar-fill" style={{ width: `${childRoll.progress}%` }} />
-                          )}
-                        </div>
-                        <span>{childMeasured ? `${childRoll.progress}%` : "—"}</span>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
-
-        {/* On track? — automated verdict from the goal's live signals */}
-        <section className="okrd-card">
-          <header><h2>On track?</h2></header>
-          <div className="okrd-card__cf">
-            <GoalAssessment okrId={okr.id} />
-          </div>
-        </section>
-
-        {/* Effort — automated signal derived from the goal's linked work */}
-        <section className="okrd-card">
-          <header><h2>Effort</h2></header>
-          <div className="okrd-card__cf">
-            <GoalEffort okrId={okr.id} />
-          </div>
-        </section>
-
-        {/* Linked work */}
-        <section className="okrd-card">
-          <header><h2>Linked work</h2></header>
-          <div className="okrd-card__cf">
-            <OkrLinkedWork okrId={okr.id} canEdit={canEditLinks} />
-          </div>
-        </section>
-
-        {/* Custom fields intentionally omitted: the only way to DEFINE a field
-            is Studio, which isn't built yet, so the panel's empty state would
-            dead-end on /studio. Re-add this section once Studio ships. */}
+          linked={<OkrLinkedWork okrId={okr.id} canEdit={canEditGoal} />}
+        >
+          {children.length > 0 ? (
+            <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-children-h">
+              <h2 id="goal-children-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
+                Supports this goal <span className="text-xs font-medium text-ink-2">{children.length}</span>
+              </h2>
+              <ul className="m-0 mt-2 flex list-none flex-col p-0">
+                {children.map((c) => {
+                  const roll = goalRollupFor(rollupCtx, c);
+                  const cm = roll.source !== "NONE";
+                  return (
+                    <li key={c.id} className="border-b border-line last:border-b-0">
+                      <Link href={`/okrs/${c.id}`} className="os-row flex h-9 items-center gap-3 hover:bg-hover">
+                        <span className="min-w-0 flex-1 truncate text-row text-ink">{c.title}</span>
+                        <span className="shrink-0 text-xs text-ink-2">{LEVEL_WORD[c.level]}</span>
+                        <span className="h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+                          {cm ? <span className="block h-full rounded-full bg-brand" style={{ width: `${roll.progress}%` }} /> : null}
+                        </span>
+                        <span className="w-20 shrink-0 text-end text-sm tabular-nums text-ink-2">{cm ? `${roll.progress}%` : "Not measured"}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
+        </GoalWorkCards>
       </div>
     </div>
   );
 }
 
-/* SVG ring (no extra deps) — the LARGE hero ring, ClickUp-style, in brand
- * blue. An unmeasured goal (no KRs, no children, nothing hand-set) shows
- * an honest "—" over a neutral track, never a 0% that reads as "behind". */
-function ProgressRing({ value, measured = true }: { value: number; measured?: boolean }) {
-  const pct = Math.max(0, Math.min(100, value));
-  const size = 108;
-  const half = size / 2;
-  const r = 46;
-  const C = 2 * Math.PI * r;
-  const offset = C * (1 - pct / 100);
+/** Server clock, read outside render so the page body stays pure. */
+function isPast(d: Date | null): boolean {
+  return d != null && d.getTime() < Date.now();
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={measured ? `${pct}% complete` : "Not measured yet"}>
-      <circle cx={half} cy={half} r={r} fill="var(--os-canvas)" stroke="var(--os-line)" strokeWidth="7" />
-      {measured && (
-        <circle
-          cx={half} cy={half} r={r}
-          fill="none"
-          stroke={BRAND}
-          strokeWidth="7"
-          strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={offset}
-          transform={`rotate(-90 ${half} ${half})`}
-          style={{ transition: "stroke-dashoffset 600ms ease" }}
-        />
-      )}
-      <text x={half} y={half + 8} textAnchor="middle" fontSize="23" fontWeight="700" fill="var(--os-ink)">
-        {measured ? `${pct}%` : "—"}
-      </text>
-    </svg>
+    <div className="flex min-h-9 items-center gap-3 py-1">
+      <dt className="w-[120px] shrink-0 text-sm font-medium text-ink-2">{label}</dt>
+      <dd className="m-0 flex min-w-0 flex-1 items-center text-row text-ink">{children}</dd>
+    </div>
+  );
+}
+
+/** The goal ring (design-system): 96px, stroke 6, brand on surface-2. */
+function GoalRing({ value, measured }: { value: number; measured: boolean }) {
+  const pct = Math.max(0, Math.min(100, value));
+  const size = 96;
+  const r = 44;
+  const C = 2 * Math.PI * r;
+  return (
+    <div className="relative h-24 w-24 shrink-0" role="img" aria-label={measured ? `${pct}% complete` : "Not measured"}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+        <circle cx={48} cy={48} r={r} fill="none" stroke="var(--os-surface-2)" strokeWidth="6" />
+        {measured ? (
+          <circle cx={48} cy={48} r={r} fill="none" stroke="var(--os-brand)" strokeWidth="6" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 48 48)" />
+        ) : null}
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-center">
+        {measured ? <span className="text-xl font-semibold tabular-nums text-ink">{pct}%</span> : <span className="px-3 text-sm leading-tight text-ink-2">Not measured</span>}
+      </span>
+    </div>
   );
 }

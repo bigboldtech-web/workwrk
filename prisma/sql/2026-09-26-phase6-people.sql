@@ -108,3 +108,12 @@ END $$;
 ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "firstName" TEXT;
 ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "lastName" TEXT;
 ALTER TABLE "Invitation" ADD COLUMN IF NOT EXISTS "phone" TEXT;
+
+-- 10. OKR.completedAt (Stage D, goals): "Mark complete" on a goal. The goal's
+--     status column is re-derived from its targets on every check-in
+--     (persistGoalRollupChain), so writing status COMPLETED on a measured
+--     goal did not stick: the next read put it back. The moment a person
+--     marked it complete now lives in its own column, which nothing
+--     re-derives; the verdict reads it (src/lib/goal-verdict.ts). Nullable;
+--     every existing goal reads as not marked complete.
+ALTER TABLE "OKR" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMP(3);

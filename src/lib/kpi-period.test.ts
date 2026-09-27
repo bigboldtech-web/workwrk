@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentKpiPeriod, isKpiPeriodOpen, kpiPeriodLabel, resolveKpiPeriod } from "./kpi-period";
+import { currentKpiPeriod, isKpiPeriodOpen, isKpiPeriodWritable, kpiPeriodLabel, resolveKpiPeriod, shiftKpiPeriod } from "./kpi-period";
 
 const now = new Date(Date.UTC(2026, 8, 27, 12, 0, 0)); // 27 Sep 2026, UTC
 
@@ -39,5 +39,18 @@ describe("kpi period", () => {
   it("labels a month key", () => {
     expect(kpiPeriodLabel("2026-08")).toBe("August 2026");
     expect(kpiPeriodLabel("junk")).toBe("junk");
+  });
+});
+
+describe("shiftKpiPeriod and isKpiPeriodWritable", () => {
+  it("walks across years", () => {
+    expect(shiftKpiPeriod("2026-01", -1)).toBe("2025-12");
+    expect(shiftKpiPeriod("2025-12", 1)).toBe("2026-01");
+  });
+  it("the current and previous month take numbers", () => {
+    const now = new Date("2026-09-15T00:00:00Z");
+    expect(isKpiPeriodWritable("2026-09", now)).toBe(true);
+    expect(isKpiPeriodWritable("2026-08", now)).toBe(true);
+    expect(isKpiPeriodWritable("2026-07", now)).toBe(false);
   });
 });

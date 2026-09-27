@@ -25,6 +25,10 @@ import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { GoalLevel, Prisma } from "@/generated/prisma";
+import { filterGoals, orderGoals, paginate, parseGoalsListQuery } from "@/lib/goals/goal-list";
+import { rollupVerdict, verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
+import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/lib/goal-effort";
+import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
 // clients may still send "TEAM" — map it to DEPARTMENT, mirroring the
@@ -41,25 +45,23 @@ export async function GET(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const url = new URL(req.url);
-  const level = url.searchParams.get("level");
+  const q = parseGoalsListQuery(url.searchParams);
   const quarter = url.searchParams.get("quarter");
   const ownerId = url.searchParams.get("ownerId");
-  // ?mine=1 — only goals the CALLER personally carries: owned by them, or
-  // where they are a resolved audience member (their user row, their
-  // department, their role). A filter WITHIN visibility, not a new door —
-  // org-wide viewers get the same narrowing. Backs /okrs?mine=1.
-  const mineOnly = url.searchParams.get("mine") === "1";
-  // ?team=1 — a manager's report tree: goals owned by (or audience-covering) a
-  // team member. Managers/org-wide only; a non-manager gets their normal view.
-  const teamOnly = url.searchParams.get("team") === "1";
-  // ?withEffort=1 — attach a lightweight per-goal effort summary (hours / open
-  // tasks / last activity) derived from linked-KRA tasks. Used by Team Goals.
+  // Views (spec-goals /okrs): My goals = goals the caller owns or is a
+  // resolved contributor on (their user row, department, job title, tags),
+  // plus their department's goals; Team goals = the report tree (the org for
+  // org-wide levels); Company goals = level COMPANY. The retired ?mine=1,
+  // ?team=1 and ?level=company map onto them (parseGoalsListQuery).
+  const mineOnly = q.view === "mine";
+  const teamOnly = q.view === "team";
+  // ?withEffort=1: attach the per-goal effort summary (hours, open tasks,
+  // last activity) from every piece of linked work. Team goals reads it.
   const withEffort = url.searchParams.get("withEffort") === "1";
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
-  const levelFilter = normalizeGoalLevel(level);
-  if (levelFilter) where.level = levelFilter;
+  if (q.view === "company") where.level = "COMPANY";
   if (quarter) {
     and.push({ OR: [{ quarter }, { quarter: null }, { quarter: "" }] });
   }
@@ -68,24 +70,25 @@ export async function GET(req: NextRequest) {
   const callerId = getUserId(session);
   const orgWide = isOrgWideAlignment(session);
   // departmentId + roleId feed audience resolution for the three-door
-  // filter AND ?mine=1 — fetched once when either needs it.
+  // filter AND My goals, fetched once when either needs it.
   const me = !orgWide || mineOnly
     ? await prisma.user.findUnique({
         where: { id: callerId },
         select: { departmentId: true, roleId: true },
       })
     : null;
-  // The caller's own person-tags — goals targeting any of them are visible.
+  // The caller's own person-tags: goals targeting any of them are visible.
   const myTagIds = !orgWide || mineOnly ? await getUserTagIds(orgId, callerId) : [];
+  const treeIds = await getTeamUserIds(orgId, callerId);
+  const hasTree = isManager(session) || treeIds.length > 1;
 
   // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
   // is not org-public: everyone sees COMPANY objectives and their own
-  // department's TEAM objectives; a person always sees their own — owned
-  // OR resolved-member via the goal's audience (their user row, their
-  // department, their role — resolved at read time, so new hires inherit
-  // and leavers drop out); a manager additionally sees their report
-  // tree's (owned or audience-covered, plus unowned objectives, which
-  // managers create); admin / exec / HR see the org.
+  // department's objectives; a person always sees their own (owned or a
+  // resolved member through the goal's audience, resolved at read time, so
+  // new hires inherit and leavers drop out); a manager additionally sees
+  // their report tree's (owned or audience-covered, plus unowned
+  // objectives, which managers create); admin, exec and HR see the org.
   if (!orgWide) {
     const visible: Prisma.OKRWhereInput[] = [
       { level: "COMPANY" },
@@ -93,19 +96,15 @@ export async function GET(req: NextRequest) {
     ];
     if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
     visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
-    // A manager at any tier, or anyone with people reporting to them.
-    const treeIds = await getTeamUserIds(orgId, callerId);
-    if (isManager(session) || treeIds.length > 1) {
-      const teamIds = treeIds;
-      visible.push({ ownerId: { in: teamIds } });
+    if (hasTree) {
+      visible.push({ ownerId: { in: treeIds } });
       visible.push({ ownerId: null });
-      visible.push(...(await teamAudienceVisibilityOr(teamIds)));
+      visible.push(...(await teamAudienceVisibilityOr(treeIds)));
     }
     and.push({ OR: visible });
   }
   if (mineOnly) {
-    // My goals (Phase 6: bare /okrs). Also the viewer's own department's
-    // DEPARTMENT goals, which the retired unfiltered default showed them:
+    // My goals also carries the viewer's own department's DEPARTMENT goals:
     // until the department-goal GoalAssignee backfill has run in an org,
     // those goals have no audience row, and dropping them here would lose
     // them from the one view that should carry them.
@@ -119,144 +118,211 @@ export async function GET(req: NextRequest) {
   }
   if (teamOnly && orgWide) {
     // Team goals for an org-wide level is the org (spec-goals section 1:
-    // "People team and Admin over the org"), the list their unfiltered
-    // default used to be. No narrowing beyond visibility.
+    // "People team and Admin over the org"). No narrowing beyond visibility.
+  } else if (teamOnly && hasTree) {
+    // The report tree, never the viewer's own goals (those are My goals).
+    // Unowned goals stay in the manager's view: managers create them and
+    // must be able to find them.
+    const reports = treeIds.filter((id) => id !== callerId);
+    and.push({ OR: [{ ownerId: { in: reports } }, { ownerId: null }, ...(await teamAudienceVisibilityOr(reports))] });
   } else if (teamOnly) {
-    const teamIds = await getTeamUserIds(orgId, callerId);
-    // A manager at any tier, or anyone with people reporting to them (the
-    // fact the sidebar row and the page read). Unowned goals stay in the
-    // manager's view, as they were in the retired default: managers create
-    // them and must be able to find them.
-    if (isManager(session) || teamIds.length > 1) {
-      and.push({ OR: [{ ownerId: { in: teamIds } }, { ownerId: null }, ...(await teamAudienceVisibilityOr(teamIds))] });
-    }
+    // Team goals for someone nobody reports to is empty, never their own
+    // visible goals under a Team title (the page shows My goals instead).
+    and.push({ id: { in: [] } });
   }
   if (and.length > 0) where.AND = and;
 
-  const okrs = await prisma.oKR.findMany({
+  // Every visible goal, uncapped: the verdict filter and sort need them
+  // all, and the page is sliced after (the retired take: 100 silently
+  // dropped goals in larger orgs).
+  const all = await prisma.oKR.findMany({
     where,
-    include: {
-      keyResults: {
-        include: {
-          _count: { select: { checkIns: true } },
-          // The role-level gauge this KR pushes, when linked.
-          kpi: { select: KR_KPI_SELECT },
-        },
-        orderBy: { createdAt: "asc" },
-      },
-      children: { select: { id: true, title: true, progress: true, level: true, ownerId: true } },
+    select: {
+      id: true, title: true, level: true, ownerId: true, status: true, progress: true, startDate: true, endDate: true,
+      createdAt: true, completedAt: true, checkInCadence: true,
+      keyResults: { select: { id: true, kpiId: true } },
     },
     orderBy: [{ level: "asc" }, { createdAt: "desc" }],
-    take: 100,
   });
 
-  // Derivation is read-side: a KR linked to a KPI reports the gauge's latest
-  // reading, not the hand-typed number still sitting on its row. Objective
-  // progress/status then roll up through the org-wide goal graph — a leaf
-  // from its live KRs, a parent from its KRs + measured children — via
-  // computeGoalRollups, the ONE rollup implementation, so this list shows
-  // exactly the number the detail page / dashboard / profile hero show.
-  // ownerId is a bare column (no Prisma relation), so resolve the single
-  // accountable owner per goal in ONE batch query — the list card renders
-  // the real person (avatar + name), never a bare id or "Unassigned".
-  const ownerIds = Array.from(
-    new Set(okrs.map((o) => o.ownerId).filter((v): v is string => Boolean(v))),
-  );
-  const [groups, audiences, rollupCtx, owners] = await Promise.all([
-    enrichKeyResultGroups(
-      okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
-    ),
-    // Resolved assignee summaries — avatars + overflow count, never raw
-    // join rows. Resolution happens here, at read time.
-    summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+  const [rollupCtx, linked, lastCheckIns, fiscal] = await Promise.all([
     computeGoalRollups(orgId),
-    ownerIds.length > 0
-      ? prisma.user.findMany({
-          where: { id: { in: ownerIds } },
-          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+    goalsWithLinkedWork(orgId, all.map((o) => o.id)),
+    all.length
+      ? prisma.kRCheckIn.groupBy({
+          by: ["keyResultId"],
+          where: { keyResultId: { in: all.flatMap((o) => o.keyResults.map((k) => k.id)) } },
+          _max: { createdAt: true },
         })
-      : Promise.resolve([]),
+      : Promise.resolve([] as Array<{ keyResultId: string; _max: { createdAt: Date | null } }>),
+    prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
   ]);
-  const ownerById = new Map(owners.map((u) => [u.id, u]));
+  const lastByKr = new Map(lastCheckIns.map((r) => [r.keyResultId, r._max.createdAt]));
+  const now = new Date();
+  const fiscalStart = (fiscal?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
 
-  // Per-goal Delete gate, resolved ONCE for the whole list (not N tree
-  // walks): org admins delete anything; a manager deletes their report
-  // tree's goals plus unowned ones; everyone else only their own. This is
-  // the exact rule DELETE /api/okrs/[id] enforces (canDeleteGoal), so the
-  // row's "…"/right-click Delete only appears when the API will honor it.
-  const deleteCallerId = getUserId(session);
-  const deleteOrgAdmin = isOrgAdminLevel(session);
-  const deleteTeamIds =
-    !deleteOrgAdmin && isManager(session)
-      ? new Set(await getTeamUserIds(orgId, deleteCallerId))
-      : null;
-  const canDeleteOkr = (ownerId: string | null): boolean => {
-    if (deleteOrgAdmin) return true;
-    if (ownerId === deleteCallerId) return true;
-    if (deleteTeamIds === null) return false; // not a manager
-    if (!ownerId) return true; // unowned objectives are manager-owned
-    return deleteTeamIds.has(ownerId);
-  };
-  // Per-goal Edit gate — the exact rule PATCH /api/okrs enforces (owner /
-  // tree-manager / org-wide alignment levels, canEditOkrOwner's ladder),
-  // so the row's Edit affordance only appears when the API will honor it.
-  // Edit is deliberately broader than Delete: DIRECTOR/VP/C_LEVEL/HR may
-  // edit any goal but not wipe it. deleteTeamIds is reusable here — it is
-  // null only for org admins (orgWideEdit covers them) or non-managers.
-  const orgWideEdit = isOrgWideAlignment(session);
-  const canEditOkr = (ownerId: string | null): boolean => {
-    if (orgWideEdit) return true;
-    if (ownerId === deleteCallerId) return true;
-    if (deleteTeamIds === null) return false; // not a manager
-    if (!ownerId) return true; // unowned objectives are manager-editable
-    return deleteTeamIds.has(ownerId);
+  const ownerIdsAll = Array.from(new Set(all.map((o) => o.ownerId).filter((v): v is string => Boolean(v))));
+  const ownersAll = ownerIdsAll.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIdsAll } },
+        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+      })
+    : [];
+  const ownerById = new Map(ownersAll.map((u) => [u.id, u]));
+  const nameOf = (id: string | null) => {
+    const u = id ? ownerById.get(id) : null;
+    return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email : "";
   };
 
-  // Batched effort (Team Goals): 2 queries for the whole list. Sum hours + open
-  // tasks + last activity from the Tasks under each goal's linked KRAs.
-  const effortByGoal = new Map<string, { totalHours: number; tasksOpen: number; lastActivityAt: Date | null }>();
-  if (withEffort && okrs.length > 0) {
-    const links = await prisma.entityLink.findMany({
-      where: { organizationId: orgId, sourceType: "OKR", sourceId: { in: okrs.map((o) => o.id) }, targetType: "KRA" },
-      select: { sourceId: true, targetId: true },
-    });
-    const kraToGoals = new Map<string, string[]>();
-    for (const l of links) kraToGoals.set(l.targetId, [...(kraToGoals.get(l.targetId) ?? []), l.sourceId]);
-    const kraIds = [...kraToGoals.keys()];
-    if (kraIds.length > 0) {
-      const tasks = await prisma.task.findMany({
-        where: { organizationId: orgId, kraId: { in: kraIds } },
-        select: { kraId: true, hoursSpent: true, status: true, completedAt: true, updatedAt: true },
-      });
-      for (const t of tasks) {
-        const act = t.completedAt ?? t.updatedAt;
-        for (const gid of (t.kraId ? kraToGoals.get(t.kraId) ?? [] : [])) {
-          const cur = effortByGoal.get(gid) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null };
-          cur.totalHours += t.hoursSpent ?? 0;
-          if (t.status !== "COMPLETED") cur.tasksOpen += 1;
-          if (act && (!cur.lastActivityAt || act > cur.lastActivityAt)) cur.lastActivityAt = act;
-          effortByGoal.set(gid, cur);
-        }
-      }
-      for (const e of effortByGoal.values()) e.totalHours = Math.round(e.totalHours * 10) / 10;
+  const assessed = all.map((o) => {
+    const rollup = goalRollupFor(rollupCtx, o);
+    const { verdict, signals } = verdictForGoal({
+      goal: o,
+      rollup: { progress: rollup.progress, source: rollup.source },
+      targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: k.kpiId != null })),
+      hasLinkedWork: linked.has(o.id),
+    }, now);
+    let last: Date | null = null;
+    for (const k of o.keyResults) {
+      const d = lastByKr.get(k.id) ?? null;
+      if (d && (!last || d > last)) last = d;
     }
+    return {
+      ...o,
+      progress: rollup.progress,
+      rollupStatus: rollup.status,
+      progressSource: rollup.source,
+      verdict,
+      isStale: signals.isStale,
+      lastCheckInAt: last,
+      ownerName: nameOf(o.ownerId),
+    };
+  });
+
+  // Direct reports (Filter > Direct reports only): solid reports plus dotted.
+  let directIds: Set<string> | null = null;
+  if (teamOnly && q.direct) {
+    const [solid, dotted] = await Promise.all([
+      prisma.user.findMany({ where: { organizationId: orgId, managerId: callerId, deletedAt: null }, select: { id: true } }),
+      prisma.userDottedLine.findMany({ where: { managerId: callerId }, select: { userId: true } }),
+    ]);
+    directIds = new Set([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
   }
 
-  const enriched = okrs.map((okr, i) => {
-    const keyResults = groups[i];
-    const rollup = goalRollupFor(rollupCtx, okr);
+  const filtered = filterGoals(assessed, q, { quarterStart: fiscalQuarterStart(now, fiscalStart), directIds });
+
+  // Team goals group headers, computed over every filtered row (not the
+  // page), so a header's numbers are the person's real totals.
+  const effortAll = teamOnly || withEffort
+    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now)
+    : new Map<string, GoalEffort>();
+  const groupVerdict = new Map<string, GoalVerdict | null>();
+  const groups: Array<{
+    key: string; ownerId: string | null; name: string; avatar: string | null;
+    goals: number; avgProgress: number | null; hoursThisMonth: number; lastMovedAt: Date | null; verdict: GoalVerdict | null;
+  }> = [];
+  if (teamOnly) {
+    const byOwner = new Map<string, typeof filtered>();
+    for (const r of filtered) {
+      const k = r.ownerId ?? "__unowned";
+      byOwner.set(k, [...(byOwner.get(k) ?? []), r]);
+    }
+    for (const [k, rows] of byOwner) {
+      const measured = rows.filter((r) => r.progressSource !== "NONE");
+      const v = rollupVerdict(rows.map((r) => r.verdict));
+      if (k !== "__unowned") groupVerdict.set(k, v);
+      let lastMoved: Date | null = null;
+      let hours = 0;
+      for (const r of rows) {
+        const e = effortAll.get(r.id);
+        hours += e?.hoursThisMonth ?? 0;
+        for (const d of [e?.lastActivityAt ?? null, r.lastCheckInAt]) if (d && (!lastMoved || d > lastMoved)) lastMoved = d;
+      }
+      const owner = k === "__unowned" ? null : ownerById.get(k) ?? null;
+      groups.push({
+        key: k,
+        ownerId: k === "__unowned" ? null : k,
+        name: k === "__unowned" ? "Unassigned" : nameOf(k),
+        avatar: owner?.avatar ?? null,
+        goals: rows.length,
+        avgProgress: measured.length ? Math.round(measured.reduce((s, r) => s + r.progress, 0) / measured.length) : null,
+        hoursThisMonth: Math.round(hours * 10) / 10,
+        lastMovedAt: lastMoved,
+        verdict: v,
+      });
+    }
+  }
+  const ordered = orderGoals(filtered, q.view === "all" ? "mine" : q.view, q.sort, groupVerdict);
+  const paged = q.page != null ? paginate(ordered, q.page, q.pageSize) : { rows: ordered, page: 1, total: ordered.length };
+  const pageIds = paged.rows.map((r) => r.id);
+
+  // The heavier enrichment runs for the rows on this page only.
+  const okrs = pageIds.length
+    ? await prisma.oKR.findMany({
+        where: { id: { in: pageIds } },
+        include: {
+          keyResults: {
+            include: {
+              _count: { select: { checkIns: true } },
+              kpi: { select: KR_KPI_SELECT },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+          children: { select: { id: true, title: true, progress: true, level: true, ownerId: true } },
+        },
+      })
+    : [];
+  const byId = new Map(okrs.map((o) => [o.id, o]));
+  const pageOkrs = pageIds.map((id) => byId.get(id)).filter((o): o is NonNullable<typeof o> => !!o);
+  const assessedById = new Map(paged.rows.map((r) => [r.id, r]));
+
+  const [groupsKr, audiences] = await Promise.all([
+    enrichKeyResultGroups(pageOkrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults }))),
+    summarizeGoalAudiences(orgId, pageOkrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+  ]);
+
+  // Per-goal Delete gate, resolved ONCE for the whole list (not N tree
+  // walks): the exact rule DELETE /api/okrs/[id] enforces (canDeleteGoal),
+  // so the row's Delete only appears when the API will honor it.
+  const deleteOrgAdmin = isOrgAdminLevel(session);
+  const deleteTeamIds = !deleteOrgAdmin && isManager(session) ? new Set(treeIds) : null;
+  const canDeleteOkr = (oid: string | null): boolean => {
+    if (deleteOrgAdmin) return true;
+    if (oid === callerId) return true;
+    if (deleteTeamIds === null) return false;
+    if (!oid) return true;
+    return deleteTeamIds.has(oid);
+  };
+  // Per-goal Edit gate: the exact rule PATCH /api/okrs enforces.
+  const orgWideEdit = isOrgWideAlignment(session);
+  const canEditOkr = (oid: string | null): boolean => {
+    if (orgWideEdit) return true;
+    if (oid === callerId) return true;
+    if (deleteTeamIds === null) return false;
+    if (!oid) return true;
+    return deleteTeamIds.has(oid);
+  };
+
+  const enriched = pageOkrs.map((okr, i) => {
+    const a = assessedById.get(okr.id)!;
+    const e = effortAll.get(okr.id);
     return {
       ...okr,
-      keyResults,
+      keyResults: groupsKr[i],
       owner: okr.ownerId ? ownerById.get(okr.ownerId) ?? null : null,
       canDelete: canDeleteOkr(okr.ownerId),
       canEdit: canEditOkr(okr.ownerId),
-      ...(withEffort ? { effort: effortByGoal.get(okr.id) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
-      progress: rollup.progress,
-      status: rollup.status,
-      // "NONE" = nothing measurable and nothing hand-set — clients show
-      // an honest "—" instead of a fake 0% that reads as "behind".
-      progressSource: rollup.source,
+      ...(withEffort || teamOnly ? { effort: e ? { totalHours: e.totalHours, tasksOpen: e.tasksOpen, lastActivityAt: e.lastActivityAt } : { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
+      progress: a.progress,
+      status: a.rollupStatus,
+      verdict: a.verdict,
+      isStale: a.isStale,
+      lastCheckInAt: a.lastCheckInAt,
+      lastMovedAt: [e?.lastActivityAt ?? null, a.lastCheckInAt].reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null),
+      quarterLabel: goalQuarterLabel(okr.endDate, fiscalStart),
+      // "NONE" = nothing measurable and nothing hand-set: clients show
+      // "Not measured" instead of a fake 0%.
+      progressSource: a.progressSource,
       children: okr.children.map((c) => {
         const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
         return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
@@ -265,7 +331,35 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return jsonSuccess(enriched);
+  // The legacy shape (a bare array) for callers that do not page.
+  if (q.page == null) return jsonSuccess(enriched);
+
+  // Team goals: the people in the chain with no goals at all, named once
+  // under the table (a group needs a row, so they are not groups).
+  let noGoals: Array<{ id: string; firstName: string | null; lastName: string | null; avatar: string | null; email: string }> = [];
+  if (teamOnly && !orgWide && q.verdicts.length === 0 && !q.nudge && !q.q && q.owners.length === 0) {
+    const withGoals = new Set(all.map((o) => o.ownerId).filter(Boolean) as string[]);
+    const pool = (directIds ? [...directIds] : treeIds.filter((id) => id !== callerId)).filter((id) => !withGoals.has(id));
+    noGoals = pool.length
+      ? await prisma.user.findMany({ where: { id: { in: pool }, organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true, firstName: true, lastName: true, avatar: true, email: true }, orderBy: { firstName: "asc" } })
+      : [];
+  }
+
+  return jsonSuccess({
+    data: enriched,
+    pagination: { page: paged.page, pageSize: q.pageSize, total: paged.total },
+    // Group sizes across every filtered row, so a level header's count is
+    // the real one, not the rows on this page.
+    counts: {
+      COMPANY: filtered.filter((r) => r.level === "COMPANY").length,
+      DEPARTMENT: filtered.filter((r) => r.level === "DEPARTMENT").length,
+      INDIVIDUAL: filtered.filter((r) => r.level === "INDIVIDUAL").length,
+    },
+    ...(teamOnly ? { groups, noGoals } : {}),
+    canTeam: orgWide || hasTree,
+    // The owner and level fields: the tier POST and PATCH accept them from.
+    mayAssignOwners: isManager(session),
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -426,9 +520,9 @@ export async function POST(req: NextRequest) {
       data: {
         userId: okr.ownerId,
         type: "okr_assigned",
-        title: "New OKR Assigned to You",
+        title: "You were given a goal",
         message: okr.title,
-        link: "/okrs",
+        link: `/okrs/${okr.id}`,
       },
     }).catch((err) => console.error("[OKR] Notification failed:", err));
 
@@ -447,7 +541,7 @@ export async function POST(req: NextRequest) {
           itemTitle: okr.title,
           itemDetails: `${body.level || "INDIVIDUAL"} · ${body.quarter || "This quarter"}`,
           actionLabel: "View OKR",
-          actionLink: `${baseUrl}/okrs`,
+          actionLink: `${baseUrl}/okrs/${okr.id}`,
           note: okr.description || undefined,
         });
         sendEmail({
@@ -542,7 +636,32 @@ export async function PATCH(req: NextRequest) {
       select: { id: true },
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
+    // Part of can never point below the goal itself: walk up from the new
+    // parent, and refuse when the walk reaches this goal (a cycle would
+    // make both goals roll up into each other).
+    const seen = new Set<string>();
+    let cursor: string | null = updates.parentId;
+    while (cursor && !seen.has(cursor)) {
+      if (cursor === id) return jsonError("That goal is part of this one, so it can't also contain it.", 400);
+      seen.add(cursor);
+      const up: { parentId: string | null } | null = await prisma.oKR.findFirst({ where: { id: cursor, organizationId: orgId }, select: { parentId: true } });
+      cursor = up?.parentId ?? null;
+    }
   }
+  if (updates.parentId === "") updates.parentId = null;
+
+  // Mark complete (spec-goals /okrs row menu): status is re-derived from the
+  // targets on every read, so the person's decision lives in completedAt,
+  // which nothing re-derives. `completed: false` (or a status other than
+  // COMPLETED) reopens it.
+  const completedFlag = typeof rawUpdates.completed === "boolean"
+    ? rawUpdates.completed
+    : "status" in updates
+      ? updates.status === "COMPLETED"
+      : undefined;
+  if (completedFlag === true && !existing.completedAt) updates.completedAt = new Date();
+  if (completedFlag === false && existing.completedAt) updates.completedAt = null;
+  if (completedFlag === true) updates.status = "COMPLETED";
 
   // Audience full-replacement: `assignees: [{type, id}]` becomes the
   // goal's exact audience (validated, de-duped, org-checked; diff-synced

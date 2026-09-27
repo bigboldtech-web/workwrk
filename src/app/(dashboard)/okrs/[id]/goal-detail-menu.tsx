@@ -1,13 +1,14 @@
 "use client";
 
-// GoalDetailMenu — the "…" overflow + right-click affordance in the goal
-// detail header. Reuses the same GoalRowMoreMenu the OKRs list uses (Open is
-// hidden — you're already here) and hosts the shared create/edit goal modal
-// so Edit / Assign owner work from the detail page too. On a successful
-// delete it routes back to /okrs; after an edit it router.refresh()es so the
-// server-rendered header repaints with the new values. Right-click anywhere
-// on the header (except links/buttons/inputs) opens the same menu at the
-// cursor, mirroring the list card's context menu.
+// The goal page's title-row "..." (spec-goals /okrs/[id]): Edit goal ·
+// Assign owner · Copy link · Mark complete · Delete goal, each rendered only
+// when the API allows it (GoalRowMoreMenu, the same menu as the /okrs rows).
+// Right-click on the Summary card (any element carrying data-goal-hero)
+// opens the same menu at the pointer. After a delete the router goes to the
+// view the back button names (`afterDelete`), never a bare /okrs.
+//
+// Also exports GoalEditLink, a text link that opens the Edit modal (the
+// Details row's Part of "Add" and the summary's "Add a description").
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,41 +16,43 @@ import { GoalRowMoreMenu } from "@/components/okrs/goal-row-more-menu";
 import { CreateGoalModal, type EditableGoal } from "@/components/okrs/create-goal-modal";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 
-export function GoalDetailMenu({ goal, canDelete, canEdit }: {
+export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, completed, afterDelete }: {
   goal: EditableGoal;
-  /** canDeleteGoal — mirrors DELETE /api/okrs/[id]. */
   canDelete: boolean;
-  /** canEditOkrOwner — mirrors PATCH /api/okrs. */
   canEdit: boolean;
+  canAssignOwner: boolean;
+  completed: boolean;
+  afterDelete: string;
 }) {
   const router = useRouter();
   const menuRef = useRef<ContextMenuHandle>(null);
-  const rootRef = useRef<HTMLSpanElement>(null);
   const [editing, setEditing] = useState<{ focusOwner?: boolean } | null>(null);
 
   useEffect(() => {
-    const head = rootRef.current?.closest(".okrd__hero") as HTMLElement | null;
-    if (!head) return;
     const onCtx = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest("a, button, input, textarea, [contenteditable=true]")) return;
+      const t = e.target as HTMLElement;
+      if (!t.closest("[data-goal-hero]")) return;
+      if (t.closest("a, button, input, textarea, [contenteditable=true]")) return;
       e.preventDefault();
       menuRef.current?.openAtPoint(e.clientX, e.clientY);
     };
-    head.addEventListener("contextmenu", onCtx);
-    return () => head.removeEventListener("contextmenu", onCtx);
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
   }, []);
 
   return (
-    <span ref={rootRef} className="okrd__menu">
+    <>
       <GoalRowMoreMenu
         ref={menuRef}
         goal={{ id: goal.id, title: goal.title }}
         canDelete={canDelete}
         canEdit={canEdit}
+        canAssignOwner={canAssignOwner}
+        completed={completed}
         showOpen={false}
         onEdit={(opts) => setEditing({ focusOwner: opts?.focusOwner })}
-        onDeleted={() => { router.push("/okrs"); router.refresh(); }}
-        triggerClassName="okrd__menu-btn"
+        onChanged={() => router.refresh()}
+        onDeleted={() => { router.push(afterDelete); router.refresh(); }}
       />
       {editing !== null && (
         <CreateGoalModal
@@ -62,6 +65,20 @@ export function GoalDetailMenu({ goal, canDelete, canEdit }: {
           onSaved={() => { setEditing(null); router.refresh(); }}
         />
       )}
-    </span>
+    </>
+  );
+}
+
+export function GoalEditLink({ goal, label, focusParent = false }: { goal: EditableGoal; label: string; focusParent?: boolean }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="text-row text-brand-deep hover:underline">{label}</button>
+      {open ? (
+        <CreateGoalModal key={`${goal.id}-edit-link`} open level={goal.level} goal={goal} focusParent={focusParent}
+          onClose={() => setOpen(false)} onSaved={() => { setOpen(false); router.refresh(); }} />
+      ) : null}
+    </>
   );
 }
