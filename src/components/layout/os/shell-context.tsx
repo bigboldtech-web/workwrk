@@ -27,7 +27,16 @@ function readPanelFits() {
 }
 
 /** The folded keys whose launcher entry follows APP_RULES rather than a tier. */
-const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation"]);
+const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation", "reviews", "candor", "surveys"]);
+
+/** The launcher rule of an audience-gated key: APP_RULES, plus the two respondent doors (the Teams rows' rule). */
+function launcherAudienceAllows(key: string, v: { orgRole: string; peopleTeam?: boolean; hasReports?: boolean; candorInvited?: boolean; surveyTargeted?: boolean }): boolean {
+  if (appAudienceAllows(key as AppKey, v)) return true;
+  if (v.orgRole === "GUEST") return false;
+  if (key === "candor") return v.candorInvited === true;
+  if (key === "surveys") return v.surveyTargeted === true;
+  return false;
+}
 
 /**
  * LayerStack (spec-shell.md sections 1.5 and 2.1): every open overlay
@@ -608,7 +617,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // team and Admin"), so the palette never offers a page that would 404.
   const launcherApps = useMemo<AppEntry[]>(
     () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys), includeFolded: true })
-      .filter((a) => !AUDIENCE_KEYS.has(a.key) || appAudienceAllows(a.key as AppKey, boot.viewer)),
+      .filter((a) => !AUDIENCE_KEYS.has(a.key) || launcherAudienceAllows(a.key, boot.viewer)),
     [railConfig, accessLevel, activeModuleKeys, boot.viewer],
   );
   const askAiVisible = useMemo(

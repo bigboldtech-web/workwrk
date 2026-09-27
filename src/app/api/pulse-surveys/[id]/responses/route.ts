@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, getUserI
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { canManageSurvey } from "@/lib/people/survey-audience";
+import { ANONYMITY_FLOOR, meetsAnonymityFloor, shuffled } from "@/lib/people/anonymity";
 
 /**
  * Manager-only aggregate view of a pulse survey's responses.
@@ -23,7 +24,13 @@ import { canManageSurvey } from "@/lib/people/survey-audience";
  * Privacy contract:
  *   Attribution is returned only when `survey.anonymous === false`. The
  *   creator of the survey explicitly opts into attribution at create/edit
- *   time — we never back-door it.
+ *   time; we never back-door it.
+ *   An ANONYMOUS survey also keeps the four-answer floor (DECIDED, the same
+ *   one candor results keep, lib/people/anonymity.ts): below it only the
+ *   count comes back, a question answered by fewer than four people shows
+ *   only its count, text answers come back in random order with no time,
+ *   and there is no daily trend or first/last answer time, so neither the
+ *   order nor a timestamp can point at who wrote what.
  */
 
 interface Question {
@@ -109,6 +116,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as any as Question[]) : [];
 
+  const anonymous = survey.anonymous !== false;
+  const surveyBelowFloor = anonymous && !meetsAnonymityFloor(responses.length);
+
   const perQuestion = questions.map((q) => {
     const valuesWithMeta: { value: string | number | string[]; createdAt: Date; user: any | null }[] = [];
     for (const r of responses) {
@@ -129,6 +139,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     }
 
+    if (anonymous && (surveyBelowFloor || !meetsAnonymityFloor(valuesWithMeta.length))) {
+      return hiddenBelowFloor(q, valuesWithMeta.length, surveyBelowFloor);
+    }
+    if (anonymous) {
+      if (q.type === "rating") return { ...ratingSummary(q, valuesWithMeta as any, 1, 5), trend: [] };
+      if (q.type === "nps") return { ...ratingSummary(q, valuesWithMeta as any, 0, 10), trend: [] };
+    }
     if (q.type === "rating") return ratingSummary(q, valuesWithMeta as any, 1, 5);
     if (q.type === "nps") return ratingSummary(q, valuesWithMeta as any, 0, 10);
     if (q.type === "single_choice") return choiceSummary(q, valuesWithMeta, "single_choice", q.options || []);
@@ -140,9 +157,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       text: q.text,
       kind: "text" as const,
       totalAnswered: valuesWithMeta.length,
-      responses: valuesWithMeta.map((v) => ({
+      responses: (anonymous ? shuffled(valuesWithMeta) : valuesWithMeta).map((v) => ({
         value: String(v.value),
-        createdAt: v.createdAt,
+        createdAt: anonymous ? null : v.createdAt,
         respondent: includeUser && v.user
           ? { id: v.user.id, name: `${v.user.firstName} ${v.user.lastName}`, office: v.user.office, department: v.user.department }
           : null,
@@ -168,14 +185,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       anonymous: survey.anonymous,
     },
     totalResponses: responses.length,
+    belowFloor: surveyBelowFloor,
+    anonymityFloor: ANONYMITY_FLOOR,
     summary: {
       npsScore,           // -100..+100, or null if no NPS question
-      firstResponseAt: responses.length > 0 ? responses[responses.length - 1].createdAt : null,
-      lastResponseAt: responses.length > 0 ? responses[0].createdAt : null,
+      firstResponseAt: !anonymous && responses.length > 0 ? responses[responses.length - 1].createdAt : null,
+      lastResponseAt: !anonymous && responses.length > 0 ? responses[0].createdAt : null,
     },
     filters: { officeId: officeId || null, departmentId: departmentId || null },
     questions: perQuestion,
   });
+}
+
+/** A question an anonymous survey keeps to its count (under the floor). */
+function hiddenBelowFloor(q: Question, answered: number, surveyBelowFloor: boolean) {
+  const kind = q.type === "rating" || q.type === "nps" || q.type === "single_choice" || q.type === "multi_choice" || q.type === "yes_no" ? q.type : "text";
+  return {
+    questionId: q.id,
+    text: q.text,
+    kind,
+    // Under the survey-wide floor even the per-question count stays back:
+    // with one answer in, "1 answered" on a question says who skipped it.
+    totalAnswered: surveyBelowFloor ? 0 : answered,
+    belowFloor: true,
+    min: q.type === "nps" ? 0 : 1,
+    max: q.type === "nps" ? 10 : 5,
+    average: null,
+    distribution: [],
+    trend: [],
+    options: [],
+    responses: [],
+  };
 }
 
 function computeNps(distribution: { value: number; count: number }[], total: number): number | null {

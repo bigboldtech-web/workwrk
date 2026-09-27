@@ -92,7 +92,7 @@ export interface BootPayload {
     lastName: string | null;
     email: string | null;
     avatar: string | null;
-    /** Null until the presence columns exist (settings spec 9.5). */
+    /** The viewer's status (settings spec 9.5); null when none, expired, or the columns are absent. */
     presenceStatus: string | null;
     presenceUntil: string | null;
   };
@@ -283,7 +283,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ counts: await counts(userId, orgId) }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    const [org, user, prefs, cf, timer, idle] = await Promise.all([
+    const [org, user, prefs, cf, timer, idle, presence] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: orgId },
         select: { id: true, name: true, logo: true, plan: true, settings: true },
@@ -296,6 +296,11 @@ export async function GET(req: NextRequest) {
       countsAndFacts(userId, orgId),
       activeTimer(userId, orgId),
       idleUntil(req),
+      // Its own query, so a database without the Phase 6 presence columns
+      // yet answers "no status" instead of failing boot.
+      prisma.user
+        .findUnique({ where: { id: userId }, select: { presenceStatus: true, presenceUntil: true } })
+        .catch(() => null),
     ]);
 
     if (!org || !user || user.deletedAt) {
@@ -354,8 +359,10 @@ export async function GET(req: NextRequest) {
         lastName: user.lastName ?? null,
         email: user.email ?? null,
         avatar: user.avatar ?? null,
-        presenceStatus: null,
-        presenceUntil: null,
+        // An expired status (presenceUntil in the past) reads as none.
+        ...(presence?.presenceStatus && (!presence.presenceUntil || presence.presenceUntil.getTime() > Date.now())
+          ? { presenceStatus: presence.presenceStatus, presenceUntil: presence.presenceUntil?.toISOString() ?? null }
+          : { presenceStatus: null, presenceUntil: null }),
       },
       apps,
       launcherApps,

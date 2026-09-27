@@ -33,6 +33,9 @@ import { KraDialog } from "@/components/alignment/kra-dialog";
 import { KpiDialog } from "@/components/alignment/kpi-dialog";
 import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
 import { usePermission } from "@/hooks/use-permission";
+import { useRole } from "@/hooks/use-role";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
 
 type ApiRole = {
   id: string;
@@ -106,6 +109,12 @@ export default function KraKpiPage() {
   // the create controls render only for the kras.create permission the
   // routes ask. While the matrix loads nothing write-shaped renders.
   const canCreate = usePermission("kras", "create") === true;
+  // "New job title" asks the Job titles write rule, not the KRA one
+  // (lib/people/job-title-access), so the action never lands on a page
+  // that cannot create.
+  const { isManager: legacyManagerTier } = useRole();
+  const { boot } = useBoot();
+  const canCreateTitle = legacyManagerTier || jobTitleWriterByFacts(boot.viewer);
 
   // The Teams "+" routes here with ?new=kra (New KRA) or ?new=kpi (New KPI);
   // ?new=1 is the retired form of ?new=kra. Each opens once, and closing
@@ -247,7 +256,7 @@ export default function KraKpiPage() {
           <h1 className="text-base font-semibold text-zinc-900">KRAs &amp; KPIs</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">
             {roles === null
-              ? "loading…"
+              ? null
               : `${stats.jobTitles} job title${stats.jobTitles === 1 ? "" : "s"} · ${stats.kras} KRA${stats.kras === 1 ? "" : "s"} · ${stats.kpis} KPI${stats.kpis === 1 ? "" : "s"}`}
           </span>
           <div className="flex-1" />
@@ -360,7 +369,7 @@ export default function KraKpiPage() {
             context="goals"
             title="No job titles yet"
             hint="KRAs and KPIs live inside job titles, so create those first."
-            action={canCreate ? { label: "New job title", onClick: () => router.push("/people/roles?new=1") } : undefined}
+            action={canCreateTitle ? { label: "New job title", onClick: () => router.push("/people/roles?new=1") } : undefined}
           />
         ) : filteredRoles.length === 0 && definitionMatches.length === 0 ? (
           <div className="py-16 text-center text-base text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>

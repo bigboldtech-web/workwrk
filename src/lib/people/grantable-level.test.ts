@@ -6,14 +6,19 @@ describe("grantableAccessLevel", () => {
     expect(grantableAccessLevel("MANAGER", undefined)).toBe("EMPLOYEE");
     expect(grantableAccessLevel("MANAGER", "")).toBe("EMPLOYEE");
   });
-  it("a manager can never mint an admin, a director or HR", () => {
+  it("a manager or director can never mint an admin, a director or HR", () => {
     for (const l of ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "DIRECTOR", "VP", "C_LEVEL", "MANAGER", "TEAM_LEAD"]) {
       expect(grantableAccessLevel("MANAGER", l), l).toBeNull();
-      expect(grantableAccessLevel("HR", l), l).toBeNull();
       expect(grantableAccessLevel("DIRECTOR", l), l).toBeNull();
     }
     expect(grantableAccessLevel("MANAGER", "EMPLOYEE")).toBe("EMPLOYEE");
     expect(grantableAccessLevel("MANAGER", "AGENT")).toBe("AGENT");
+  });
+  it("HR places a new hire at any non-admin level, never an admin", () => {
+    for (const l of ACCESS_LEVELS) {
+      const admin = l === "SUPER_ADMIN" || l === "COMPANY_ADMIN";
+      expect(grantableAccessLevel("HR", l), l).toBe(admin ? null : l);
+    }
   });
   it("a company admin gives anything but SUPER_ADMIN; a super admin gives anything", () => {
     for (const l of ACCESS_LEVELS) {

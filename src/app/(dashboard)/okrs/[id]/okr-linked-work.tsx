@@ -8,7 +8,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, FolderKanban, Target, Link2, X, ExternalLink, Loader2, Frame } from "lucide-react";
+import { Boxes, FolderKanban, Target, Link2, X, ExternalLink, Frame } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { LinkExistingPicker } from "@/components/board-view/link-existing-picker";
 import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -174,7 +175,7 @@ function LinkRow({
               disabled={busy}
               className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
+              {busy ? <Dots variant="pending" /> : <Link2 className="h-3 w-3" />}
               Link
             </button>
             <LinkExistingPicker

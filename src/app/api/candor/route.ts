@@ -12,7 +12,7 @@ export async function GET() {
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const userIsManager = await cultureOrganiserFromSession(session);
+  const userIsManager = await cultureOrganiserFromSession(session, "candor");
 
   // Get user's department
   const me = await prisma.user.findUnique({
@@ -48,13 +48,26 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  // Responses are anonymous by design — there is no userId on CandorResponse,
-  // so we can't (and must never) tell the server "who already answered". The
-  // client uses a localStorage guard for that; here we only return counts.
+  // Responses are anonymous by design: there is no userId on CandorResponse.
+  // WHO answered (never what) lives in CandorRespondent (Phase 6), so the
+  // viewer's own "already answered" comes back here and the form never
+  // reopens on a second device. A database without the table yet answers
+  // false and the client falls back to its browser flag.
+  let answered = new Set<string>();
+  try {
+    const rows = await prisma.candorRespondent.findMany({
+      where: { userId, sessionId: { in: sessions.map((s) => s.id) } },
+      select: { sessionId: true },
+    });
+    answered = new Set(rows.map((r) => r.sessionId));
+  } catch (e) {
+    if ((e as { code?: string })?.code !== "P2021") throw e;
+  }
   const enriched = sessions.map((s) => ({
     ...s,
     responseCount: s._count.responses,
     isOwner: s.createdBy === userId,
+    hasResponded: answered.has(s.id),
   }));
 
   return jsonSuccess(enriched);
@@ -63,7 +76,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!(await cultureOrganiserFromSession(session))) return jsonError("Only managers, the People team and Admins can create Candor sessions", 403);
+  if (!(await cultureOrganiserFromSession(session, "candor"))) return jsonError("Only managers, the People team and Admins can create Candor sessions", 403);
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);

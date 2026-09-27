@@ -25,6 +25,6 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const raw = url.searchParams.get("status");
   const status = raw === "DRAFT" || raw === "SUBMITTED" || raw === "ACKNOWLEDGED" ? raw : undefined;
-  const reviews = await listReviewsForManager(u.id, { status });
+  const reviews = await listReviewsForManager(u.id, { status, take: 100 });
   return NextResponse.json({ reviews });
 }

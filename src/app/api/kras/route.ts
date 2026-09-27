@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
         },
         _count: { select: { assignments: true } },
       },
-      orderBy: { name: "asc" },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       ...skipTake(pagination),
     }),
     prisma.kRA.count({ where }),

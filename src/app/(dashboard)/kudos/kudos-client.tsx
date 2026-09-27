@@ -161,7 +161,7 @@ export default function KudosPage() {
         title="Kudos"
         actions={
           <div className="kud__head-actions">
-            <Link href="/people" className="os-head__link"><Users /> People</Link>
+            <Link href="/people" className="os-head__link"><Users /> Directory</Link>
           </div>
         }
         primary={{ label: "Give kudos", onClick: () => { setGiveTo(undefined); setGiveOpen(true); } }}

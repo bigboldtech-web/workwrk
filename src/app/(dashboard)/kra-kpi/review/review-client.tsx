@@ -32,7 +32,8 @@ import { OsPageHeader } from "@/components/layout/os/page-header";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { getScoringBands, bandFor, DEFAULT_SCORING_BANDS, type ScoringBand } from "@/lib/review-cadence";
-import { kpiPeriodLabel, resolveKpiPeriod } from "@/lib/kpi-period";
+import { currentKpiPeriod, isKpiPeriodOpen, kpiPeriodLabel, resolveKpiPeriod } from "@/lib/kpi-period";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 
 /* localStorage-backed drafts so unsaved manager edits survive a refresh.
  * Keyed per subject+period. Cleared once the draft is saved server-side. */
@@ -147,6 +148,9 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
   // not-future month), else the current month (src/lib/kpi-period.ts).
   const period$ = resolveKpiPeriod(period);
   const monthLbl = kpiPeriodLabel(period$);
+  // A past month is read only: saving there would overwrite a closed
+  // month's numbers and set an approved record back to submitted.
+  const readOnly = !isKpiPeriodOpen(period$);
 
   // Org scoring bands drive the score-chip color + legend (set in
   // Settings → Scoring & reviews).
@@ -170,10 +174,9 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
       // the old read listed the viewer themself and, for org-wide levels,
       // the first hundred people in the org). scope=team is the same solid
       // tree POST /api/kpi-records gates on; the viewer is filtered out.
-      const res = await fetch(`/api/users?scope=team&limit=500`);
-      if (!res.ok) throw new Error(`users ${res.status}`);
-      const data = await res.json();
-      const list: ApiUser[] = (data?.data?.items ?? data?.data ?? []).filter((u: ApiUser) => u.id !== myId);
+      // Every page of the tree, never the first 500 (fetch-all-pages.ts).
+      const { items } = await fetchAllPages<ApiUser>("/api/users?scope=team");
+      const list: ApiUser[] = items.filter((u: ApiUser) => u.id !== myId);
       setReports(list);
       setSelectedId((cur) => cur ?? list[0]?.id ?? null);
     } catch (e) {
@@ -200,12 +203,10 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
       const kraIds = Array.from(new Set(assignments.map((a) => a.kraId)));
       let kraMap = new Map<string, ApiKra>();
       if (kraIds.length > 0) {
-        const krasRes = await fetch("/api/kras?limit=500&scope=library");
-        if (krasRes.ok) {
-          const k = await krasRes.json();
-          const kraList: ApiKra[] = k?.data?.items ?? k?.data ?? [];
-          kraMap = new Map(kraList.filter((kk) => kraIds.includes(kk.id)).map((kk) => [kk.id, kk]));
-        }
+        // Every page of the library, so a KRA past the 500th never drops
+        // out of the entry grid (fetch-all-pages.ts).
+        const kraList = await fetchAllPages<ApiKra>("/api/kras?scope=library").then((r) => r.items).catch(() => [] as ApiKra[]);
+        kraMap = new Map(kraList.filter((kk) => kraIds.includes(kk.id)).map((kk) => [kk.id, kk]));
       }
 
       const kpis: SubjectState["kpis"] = [];
@@ -236,7 +237,7 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
 
       // Re-hydrate any unsaved draft from localStorage so a refresh
       // mid-review doesn't lose the manager's typing.
-      const restoredDraft = loadDraft(userId, period$);
+      const restoredDraft = isKpiPeriodOpen(period$) ? loadDraft(userId, period$) : new Map<string, DraftPatch>();
       setSubjectMap((prev) => {
         const n = new Map(prev);
         n.set(userId + ":" + period$, { user, kpis, records: recordMap, draft: restoredDraft });
@@ -254,7 +255,7 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
   const subject = selectedId ? subjectMap.get(selectedId + ":" + period$) : undefined;
 
   function setDraft(kpiId: string, patch: { actual?: string; notes?: string }) {
-    if (!selectedId) return;
+    if (!selectedId || readOnly) return;
     setSubjectMap((prev) => {
       const n = new Map(prev);
       const key = selectedId + ":" + period$;
@@ -269,7 +270,7 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
   }
 
   async function saveAll() {
-    if (!subject || !selectedId) return;
+    if (!subject || !selectedId || readOnly) return;
     setBusy(true);
     let saved = 0;
     // DATA INTEGRITY: a row is only "saved" on a 2xx, and only saved rows
@@ -358,6 +359,12 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
           }
         />
       )}
+      {readOnly ? (
+        <p className="pb-2 text-sm text-ink-2">
+          {monthLbl} is closed, so its numbers are read only. New numbers record against{" "}
+          <Link href="?view=record" className="text-brand hover:underline">{kpiPeriodLabel(currentKpiPeriod())}</Link>.
+        </p>
+      ) : null}
       <div className="review">
 
       {loadError ? (
@@ -460,6 +467,7 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
                               type="number"
                               value={rawActual}
                               onChange={(e) => setDraft(k.kpiId, { actual: e.target.value })}
+                              disabled={readOnly}
                               placeholder="—"
                               step="any"
                             />
@@ -471,6 +479,7 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
                               rows={2}
                               value={draft.notes ?? rec?.managerNotes ?? ""}
                               onChange={(e) => setDraft(k.kpiId, { notes: e.target.value })}
+                              disabled={readOnly}
                               placeholder="Coaching, context, what changed this period…"
                             />
                           </label>
@@ -484,9 +493,11 @@ export default function ReviewPage({ embedded = false, period }: { embedded?: bo
                   <div className="review-pane__progress">
                     {subject.kpis.filter((k) => subject.records.get(k.kpiId)?.actualValue != null).length} / {subject.kpis.length} KPIs scored for {monthLbl}
                   </div>
-                  <button type="button" className="review-pane__save" onClick={saveAll} disabled={busy || subject.draft.size === 0}>
-                    {busy ? "Saving…" : <><Save /> Save {subject.draft.size > 0 ? `(${subject.draft.size})` : ""}</>}
-                  </button>
+                  {readOnly ? null : (
+                    <button type="button" className="review-pane__save" onClick={saveAll} disabled={busy || subject.draft.size === 0}>
+                      {busy ? "Saving…" : <><Save /> Save {subject.draft.size > 0 ? `(${subject.draft.size})` : ""}</>}
+                    </button>
+                  )}
                 </footer>
               </>
             )}

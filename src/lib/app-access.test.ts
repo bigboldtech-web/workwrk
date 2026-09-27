@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ACCESS } from "./app-access";
+import { APP_ACCESS, APP_ACCESS_BY_KEY } from "./app-access";
 import { visibleRailApps } from "./rail-apps";
 import { WORK_HOME_HREF } from "./nav/route-hub";
 
@@ -97,7 +97,9 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
     // row 4), so the Talk hub survives on it and the row stays reachable.
     expect(launcher.map((a) => a.key)).toContain("chat");
     expect(launcher.map((a) => a.key)).toContain("announcements");
-    expect(launcher.map((a) => a.key)).not.toContain("reviews"); // manager tier
+    // Review cycles carries no tier: the palette filters it on APP_RULES
+    // (reports, People team, Admin) in shell-context.tsx, like Assets.
+    expect(APP_ACCESS_BY_KEY.reviews.requiredAccess).toBeUndefined();
     expect(launcher.map((a) => a.key)).toContain("kudos"); // every Member (Phase 6)
   });
 });

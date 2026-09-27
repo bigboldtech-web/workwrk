@@ -39,8 +39,10 @@ export default async function TeamKpiReviewsPage({
 
   const [pending, acted] = view === "approve"
     ? await Promise.all([
-        listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED", take: 50 }),
-        listKpiReviewsForManager(u.id, u.organizationId, { statuses: ["APPROVED", "REJECTED"], take: 30 }),
+        // Every pending number (the badge's own where clause, uncapped);
+        // the acted history is the last 30 days, bounded by time, not rows.
+        listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED" }),
+        listKpiReviewsForManager(u.id, u.organizationId, { statuses: ["APPROVED", "REJECTED"], sinceDays: 30 }),
       ])
     : [[], []];
 

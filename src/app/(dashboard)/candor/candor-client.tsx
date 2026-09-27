@@ -100,7 +100,7 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
       });
       if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
       const created = await res.json().catch(() => null);
-      toast("Draft created — set it up, then launch");
+      toast("Draft created. Set it up, then launch");
       if (created?.id) { router.push(`/candor/${created.id}`); return; }
       void load();
     } catch { toast("Couldn't create"); }
@@ -172,7 +172,7 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
         <div className="cnd__privacy-banner">
           <Lock />
           <span>
-            <strong>Responses are anonymous by design.</strong> No identity, IP, or device data is stored against a response — just the prompt + reply text.
+            <strong>Responses are anonymous by design.</strong> No identity, IP, or device data is stored against a response, just the prompt and reply text.
           </span>
         </div>
 

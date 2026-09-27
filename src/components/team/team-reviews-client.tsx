@@ -5,6 +5,7 @@
 // (KPI snapshots, KRA progress, narratives) and exposes Approve /
 // Request-changes actions.
 
+import { apiFetchWithRetry } from "@/lib/api-fetch";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -41,16 +42,19 @@ export function TeamReviewsClient({ pending, acted }: Props) {
     setBusyId(id);
     setError(null);
     try {
-      const res = await fetch(`/api/weekly-reviews/${id}/manager-review`, {
+      // keepalive: a note typed as the tab closes is still sent; a lost
+      // connection or a 5xx retries with backoff; anything else shows the
+      // server's words, never the browser's raw "Failed to fetch". The row
+      // stays pending on failure, so the decision can be sent again.
+      const res = await apiFetchWithRetry(`/api/weekly-reviews/${id}/manager-review`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        keepalive: true,
         // The one payload both entry points write (spec-teams-performance
         // section 0, PO-1): { decision, notes }.
-        body: JSON.stringify({ decision: action === "approve" ? "APPROVED" : "CHANGES_REQUESTED", notes }),
-      });
-      const data = await res.json().catch(() => ({}));
+        json: { decision: action === "approve" ? "APPROVED" : "CHANGES_REQUESTED", notes },
+      }, { retryWrites: true });
       if (!res.ok) {
-        setError(data?.error ?? "Failed to save");
+        setError(res.error ? `Not saved: ${res.error}. Your note is kept, try again.` : "Not saved. Your note is kept, try again.");
         return;
       }
       // Move from pending → acted locally.
@@ -68,8 +72,8 @@ export function TeamReviewsClient({ pending, acted }: Props) {
       }
       setOpenId(null);
       router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save");
+    } catch {
+      setError("Not saved. Your note is kept, try again.");
     } finally {
       setBusyId(null);
     }

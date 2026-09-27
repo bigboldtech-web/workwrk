@@ -18,7 +18,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -211,7 +211,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
 
               <div className="mt-4 flex justify-center">
                 <Button type="submit" disabled={saving || !hasDelta} className="h-9 px-6">
-                  {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {saving && <Dots variant="pending" />}
                   Save update
                 </Button>
               </div>

@@ -37,7 +37,6 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { NewReviewCycleDialog } from "./new-review-dialog";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useBoot } from "@/components/layout/os/boot-context";
-import { useRole } from "@/hooks/use-role";
 
 type CycleStatus = "DRAFT" | "ACTIVE" | "IN_CALIBRATION" | "COMPLETED" | "CANCELLED";
 
@@ -102,14 +101,16 @@ export default function ReviewsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Phase 6: the page opens to anyone with reports, the People team and
-  // Admin. Starting a cycle asks POST /api/reviews's manager tier as well;
-  // launching, moving and finalizing one is the People team's, Admin's, or
+  // Admin, and each of them may start a cycle (DECIDED: a manager runs a
+  // cycle for their chain; POST /api/reviews asks the same facts through
+  // mayStartReviewCycles). The facts come from boot, which is server
+  // rendered, so a hard load of ?new=1 never reads a half-resolved session.
+  // Launching, moving and finalizing one is the People team's, Admin's, or
   // the manager's who started it (review-cycle-rules.ts), so no control
   // renders for a cycle the viewer cannot change.
   const { boot } = useBoot();
-  const { isManager: legacyManagerTier } = useRole();
   const peopleOrAdmin = boot.viewer.peopleTeam || boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
-  const canCreate = peopleOrAdmin || (boot.viewer.hasReports && legacyManagerTier);
+  const canCreate = peopleOrAdmin || boot.viewer.hasReports;
   const canManage = useCallback(
     (c: ApiCycle) => peopleOrAdmin || (!!c.createdById && c.createdById === boot.viewer.id),
     [peopleOrAdmin, boot.viewer.id],

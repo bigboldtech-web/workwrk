@@ -32,11 +32,15 @@ const ROWS: readonly Row[] = [
   { key: "timesheets", label: "Timesheets", defaultHref: "/timesheets" },
   { key: "meetings", label: "Meetings", defaultHref: "/meetings" },
   { key: "clock", label: "Clock in/out", defaultHref: "/clock" },
-  { key: "reviews", label: "Review cycles", defaultHref: "/reviews", requiredAccess: "manager" },
-  { key: "candor", label: "Candor", defaultHref: "/candor", requiredAccess: "manager" },
+  // Review cycles, Candor and Surveys follow APP_RULES (reports, People
+  // team, Admin; Candor and Surveys also their respondents), which no tier
+  // can express: the palette filters them on appAudienceAllows plus the
+  // respondent facts (shell-context.tsx), like Assets.
+  { key: "reviews", label: "Review cycles", defaultHref: "/reviews" },
+  { key: "candor", label: "Candor", defaultHref: "/candor" },
   { key: "announcements", label: "Announcements", defaultHref: "/announcements" },
   { key: "kudos", label: "Kudos", defaultHref: "/kudos" },
-  { key: "surveys", label: "Surveys", defaultHref: "/surveys", requiredAccess: "hr-admin" },
+  { key: "surveys", label: "Surveys", defaultHref: "/surveys" },
   // Tools: every Member. Assets: anyone with reports, the People team and
   // Admin, which no tier can express, so the row and the palette gate on
   // appAudienceAllows (src/lib/nav/app-audience.ts) and the page on gatePage.

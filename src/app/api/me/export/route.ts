@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, jsonError } from "@/lib/api-helpers";
+import { subjectRowView } from "@/lib/people/review-visibility";
 
 /**
  * GDPR Article 15 / CCPA Right to Know — exports a copy of the requester's
@@ -70,10 +71,14 @@ export async function GET() {
         notifications,
         kpiRecords,
         kraAssignments,
-        reviewsAsSubject,
+        // The subject's own rows keep the product's rules (review-visibility):
+        // no manager draft, calibration or 9-box potential.
+        reviewsAsSubject: reviewsAsSubject.map((r) => subjectRowView(r, userId)),
         reviewsAsReviewer,
         feedbackGiven,
-        feedbackReceived,
+        // DECIDED: the subject reads the aggregate of peer feedback, never
+        // the written answers, a single peer's rating or who wrote them.
+        feedbackReceived: feedbackReceived.map((f) => ({ ...f, giverId: null, rating: null, collaborationRating: null, strengths: null, improvements: null, comments: null })),
         meetingAttendances,
         actionItems,
         checkIns,

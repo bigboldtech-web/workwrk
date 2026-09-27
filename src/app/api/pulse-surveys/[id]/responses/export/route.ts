@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, isManager, jsonError, getUserId } from "@/l
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { canManageSurvey } from "@/lib/people/survey-audience";
+import { ANONYMITY_FLOOR, meetsAnonymityFloor, shuffled } from "@/lib/people/anonymity";
 
 /**
  * CSV export of all responses to a single pulse survey.
@@ -14,7 +15,10 @@ import { canManageSurvey } from "@/lib/people/survey-audience";
  * 4180 so Excel / Sheets ingest it cleanly.
  *
  * Same privacy contract as the aggregate endpoint: attribution columns
- * only appear when `survey.anonymous === false`. Accepts `officeId` and
+ * only appear when `survey.anonymous === false`. An anonymous survey
+ * exports nothing below the four-answer floor (409), and above it the rows
+ * come out in random order with no submitted_at, so neither can point at
+ * who answered. Accepts `officeId` and
  * `departmentId` query params so the export matches what the manager
  * sees in the filtered view.
  */
@@ -103,15 +107,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as any as Question[]) : [];
 
+  if (!includeUser && !meetsAnonymityFloor(responses.length)) {
+    return jsonError(`Results open once ${ANONYMITY_FLOOR} people have answered, to protect who answered.`, 409);
+  }
+  const rows = includeUser ? responses : shuffled(responses);
+
   // Build header row.
-  const header: string[] = ["submitted_at"];
+  const header: string[] = includeUser ? ["submitted_at"] : [];
   if (includeUser) header.push("respondent", "email", "office", "department");
   for (const q of questions) header.push(q.text);
 
   const lines: string[] = [header.map(csvEscape).join(",")];
 
-  for (const r of responses) {
-    const row: (string | number)[] = [r.createdAt.toISOString()];
+  for (const r of rows) {
+    const row: (string | number)[] = includeUser ? [r.createdAt.toISOString()] : [];
     if (includeUser) {
       const u: any = (r as any).user;
       row.push(

@@ -2,7 +2,7 @@
 
 /* People · Directory — photo-card "who's who" of the company.
  *
- *  GET /api/users?limit=500
+ *  GET /api/users?scope=directory (every page, lib/fetch-all-pages.ts)
  *
  * Layout:
  *   Breadcrumb header (Teams / Directory) with icon tile + org nav links.
@@ -24,6 +24,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { TeamStatTile, TeamAvatar } from "@/components/team/ui";
 import { useToast } from "@/components/ui/toast";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 
 type ApiUser = {
   id: string;
@@ -88,10 +89,8 @@ export default function PeopleDirectoryPage() {
       // includeDeleted feeds the "Former" tab only — every other view
       // works off the active split below, so removed people never leak
       // into headcount, department chips, or the grouped grid.
-      const res = await fetch("/api/users?limit=500&includeDeleted=true&scope=directory");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiUser[] = data?.data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);
+      // Every page, never the first 500 (fetch-all-pages.ts).
+      const { items: list } = await fetchAllPages<ApiUser>("/api/users?includeDeleted=true&scope=directory");
       setUsers(list.filter((u) => !u.deletedAt && u.status !== "TERMINATED"));
       setFormer(list.filter((u) => Boolean(u.deletedAt)));
       setLoadError(null);
@@ -200,8 +199,10 @@ export default function PeopleDirectoryPage() {
   const stats = useMemo(() => {
     const list = users ?? [];
     const newHires = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY).length;
-    return { total: list.length, depts: depts.length, newHires };
-  }, [users, depts.length]);
+    // Real departments only: the synthetic "Unassigned" chip is a filter,
+    // not a department, so this matches the Org chart's count.
+    return { total: list.length, depts: depts.filter((d) => d.id !== "__none").length, newHires };
+  }, [users, depts]);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -216,13 +217,13 @@ export default function PeopleDirectoryPage() {
             <Users className="h-5 w-5 text-[#0073EA]" />
           </span>
           <h1 className="text-base font-semibold text-zinc-900">Directory</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">{users === null ? "loading…" : `${stats.total} people · ${stats.depts} departments`}</span>
+          <span className="text-xs text-zinc-400 hidden sm:inline">{users === null ? null : `${stats.total} people · ${stats.depts} departments`}</span>
           <div className="flex-1" />
           <Link href="/organization" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Network className="w-3.5 h-3.5 text-zinc-400" /> Org chart
           </Link>
           <Link href="/people/roles" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <Briefcase className="w-3.5 h-3.5 text-zinc-400" /> Roles
+            <Briefcase className="w-3.5 h-3.5 text-zinc-400" /> Job titles
           </Link>
         </div>
       </div>

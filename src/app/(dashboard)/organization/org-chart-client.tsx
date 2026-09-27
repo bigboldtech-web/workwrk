@@ -2,7 +2,7 @@
 
 /* Organization — org chart page.
  *
- *  GET /api/users?limit=500
+ *  GET /api/users?scope=directory (every page, lib/fetch-all-pages.ts)
  *  GET /api/departments
  *  GET /api/offices
  *  GET /api/roles
@@ -23,6 +23,7 @@ import {
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { TeamStatTile, TeamCard, TeamAvatar } from "@/components/team/ui";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 
 type ApiUser = {
   id: string;
@@ -119,7 +120,12 @@ export default function OrganizationPage() {
     Promise.all([
       // Every Member reads the whole tree (Phase 6): the directory card
       // projection, never people data.
-      fetch("/api/users?limit=500&scope=directory"),
+      // Every page, never the first 500 (fetch-all-pages.ts): the tree
+      // renders every root.
+      fetchAllPages<ApiUser>("/api/users?scope=directory").then(
+        (r) => new Response(JSON.stringify({ data: r.items })),
+        () => new Response("", { status: 500 }),
+      ),
       fetch("/api/departments"),
       fetch("/api/offices"),
       fetch("/api/roles"),
@@ -239,7 +245,7 @@ export default function OrganizationPage() {
           <TeamStatTile icon={Users} label="People" value={stats.people} accent="#0073EA" sub={`${stats.withManager} reporting`} />
           <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#71717A" sub="org units" />
           <TeamStatTile icon={MapPin} label="Offices" value={stats.offices} accent="#f59e0b" sub={stats.hq ? `HQ: ${stats.hq}` : "no HQ set"} />
-          <TeamStatTile icon={Briefcase} label="Roles" value={stats.roles} accent="#16a34a" sub="job titles" />
+          <TeamStatTile icon={Briefcase} label="Job titles" value={stats.roles} accent="#16a34a" sub="defined" />
         </div>
 
         {loadError ? (
@@ -250,7 +256,7 @@ export default function OrganizationPage() {
           <TeamCard
             title="Reporting hierarchy"
             subtitle={`${stats.topLayer} at the top · ${stats.people} total`}
-            action={<Link href="/people" className="inline-flex items-center gap-1 text-sm text-[var(--os-brand)] hover:underline">All people <ArrowRight className="w-3 h-3" /></Link>}
+            action={<Link href="/people" className="inline-flex items-center gap-1 text-sm text-[var(--os-brand)] hover:underline">Directory <ArrowRight className="w-3 h-3" /></Link>}
           >
             <div className="space-y-0.5">
               {tree.slice(0, 8).map((node) => (

@@ -61,7 +61,7 @@ export interface RoleBundle {
 const personName = (p: Person | null) => p ? ([p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email) : "Unassigned";
 const initials = (p: Person) => ([p.firstName?.[0], p.lastName?.[0]].filter(Boolean).join("") || p.email[0] || "?").toUpperCase();
 
-export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; canEdit: boolean; view: "overview" | "instances" }) {
+export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, view }: { bundle: RoleBundle; canEdit: boolean; canEditIdentity?: boolean; view: "overview" | "instances" }) {
   const roleId = bundle.role.id;
   return (
     <>
@@ -73,7 +73,7 @@ export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; c
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {view === "overview" ? (
           <div className="max-w-5xl mx-auto space-y-4">
-            <IdentityCard bundle={bundle} canEdit={canEdit} />
+            <IdentityCard bundle={bundle} canEdit={canEditIdentity} />
             <AlignmentCard bundle={bundle} canEdit={canEdit} />
             <BoundaryCard bundle={bundle} canEdit={canEdit} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { mayWriteJobTitles } from "@/lib/people/job-title-access.server";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -50,7 +51,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await mayWriteJobTitles(session))) return jsonError("Forbidden", 403);
 
   const body = await req.json();
   const { title, description, level, departmentId } = body;

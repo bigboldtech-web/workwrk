@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
+import { subjectRowView } from "@/lib/people/review-visibility";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
 export async function GET(
@@ -103,7 +104,9 @@ export async function GET(
     : Math.round(derivedOkrs.reduce((s, o) => s + (o.progress || 0), 0) / derivedOkrs.length);
 
   return jsonSuccess({
-    review,
+    // The subject's own row never carries the manager's draft, calibration
+    // or the 9-box potential (lib/people/review-visibility.ts).
+    review: subjectRowView(review, userId),
     metrics: {
       kpiRecords,
       avgKpiScore,

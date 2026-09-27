@@ -1560,16 +1560,18 @@ const GOALS_ROWS = [
 
 function GoalsSidebar() {
   const activeHref = useActiveRowHref(GOALS_ROWS);
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
-  const isManager = canAccessTier("manager", accessLevel);
+  // The same facts as the Work sidebar's Goals group and /okrs (hasReports,
+  // the People team, Admin), never the legacy tier, so the two can't drift.
+  const { boot } = useBoot();
+  const v = boot.viewer;
+  const seesTeam = v.hasReports || v.peopleTeam || v.orgRole === "OWNER" || v.orgRole === "ADMIN";
   return (
     <>
       <ul>
         {/* My goals is primary: what I own or am assigned. Team goals (my
-            report tree) is manager-only. Company objectives show as context
-            inside each view, with no "All goals" firehose. */}
-        {GOALS_ROWS.filter((r) => isManager || r.href !== "/okrs?view=team").map((r) => (
+            report tree) is for the viewers above. Company objectives show as
+            context inside each view, with no "All goals" firehose. */}
+        {GOALS_ROWS.filter((r) => seesTeam || r.href !== "/okrs?view=team").map((r) => (
           <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
         ))}
       </ul>
@@ -1798,10 +1800,11 @@ export const APPS: AppEntry[] = [
   // "Review cycles", not "Reviews": the Teams sidebar's weekly "Reviews"
   // queue keeps that name, and the two colliding was the confusion.
   // Phase 6: the page gate is app:reviews (anyone with reports, the People
-  // team, Admin), so the palette row follows the manager tier instead of
-  // hr-admin. The two-row linksSidebar is unreachable (reviews folds into
-  // the Teams hub, whose sidebar renders), kept only as the entry's shape.
-  { key: "reviews", label: "Review cycles", Icon: ClipboardList, defaultHref: "/reviews", category: "People", requiredAccess: "manager",
+  // team, Admin), which no tier expresses, so the palette row follows
+  // appAudienceAllows (shell-context.tsx AUDIENCE_KEYS). The two-row
+  // linksSidebar is unreachable (reviews folds into the Teams hub, whose
+  // sidebar renders), kept only as the entry's shape.
+  { key: "reviews", label: "Review cycles", Icon: ClipboardList, defaultHref: "/reviews", category: "People",
     // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
     // reviews-client.tsx, so repeat "+" clicks re-open it).
     createActions: [{ label: "Start review cycle", icon: ClipboardList, href: "/reviews?new=1", requiredAccess: "manager" }],
@@ -1809,7 +1812,7 @@ export const APPS: AppEntry[] = [
       { href: "/reviews", label: "Review cycles", Icon: ClipboardList },
       { href: "/talent",  label: "Talent (9-box)", Icon: Grid3x3 },
     ]) },
-  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People", requiredAccess: "manager",
+  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
   // Every Member reads announcements (sidebar-map section 4 row 4; the page
   // renders read-only below manager). Ungated here so the Talk hub and its
@@ -1819,7 +1822,7 @@ export const APPS: AppEntry[] = [
   // Every Member gives and reads kudos (access 5.2.1 `kudos`).
   { key: "kudos", label: "Kudos", Icon: Heart, defaultHref: "/kudos", category: "People",
     Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: Heart }]) },
-  { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People", requiredAccess: "hr-admin",
+  { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
   // ── People resourcing: provisioning what employees need to do work.

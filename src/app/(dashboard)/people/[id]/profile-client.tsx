@@ -996,6 +996,10 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
     return (
       <div className="px-6 py-4 max-w-[720px] mx-auto">
         {crumb}
+        {/* back-map: /people/[id] full page backs to the Directory. */}
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-3">
+          <BackButton fallbackHref="/people" label="Directory" />
+        </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex items-start gap-4">
             <TeamAvatar name={fullName} avatar={user.avatar} size={64} />
@@ -1572,7 +1576,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                   <TeamAvatar name={`${r.firstName ?? ""} ${r.lastName ?? ""}`.trim()} avatar={r.avatar} size={40} />
                   <div>
                     <p className="text-xs font-medium">{r.firstName} {r.lastName}</p>
-                    <p className="text-xs text-zinc-500">{r.role?.title || "No role"}</p>
+                    <p className="text-xs text-zinc-500">{r.role?.title || "No job title"}</p>
                   </div>
                 </div>
               ))}

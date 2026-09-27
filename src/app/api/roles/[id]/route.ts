@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { mayWriteJobTitles } from "@/lib/people/job-title-access.server";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { KPI_ORDER } from "@/lib/alignment";
 
 // GET: the full role-definition bundle — the Block-B view of a role.
@@ -64,7 +65,7 @@ export async function PUT(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await mayWriteJobTitles(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
@@ -97,7 +98,7 @@ export async function DELETE(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await mayWriteJobTitles(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);

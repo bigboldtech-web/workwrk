@@ -170,6 +170,11 @@ function appEnforcement(): Record<`app.${AppKey}`, string> {
   for (const key of APP_KEYS) {
     out[`app.${key}`] = `the ${key} hub or route layout, via gatePage("view", { type: "app", key: "${key}" })`;
   }
+  // The one sanctioned exception to the app-key 404 (access 5.5): /team and
+  // /team/workload render LockedPage without Request access, so they ask
+  // can() through their own gate instead of gatePage.
+  out["app.team"] = `src/app/(dashboard)/team/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "team" }) with LockedPage)`;
+  out["app.workload"] = `src/app/(dashboard)/team/workload/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "workload" }) with LockedPage)`;
   return out;
 }
 

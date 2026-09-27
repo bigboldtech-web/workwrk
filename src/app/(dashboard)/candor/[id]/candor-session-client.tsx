@@ -70,6 +70,8 @@ type ApiCandor = {
   createdBy: string;
   responseCount?: number;
   isOwner?: boolean;
+  /** The server's record (CandorRespondent) that this viewer has answered. */
+  hasResponded?: boolean;
 };
 
 type Dept = { id: string; name: string };
@@ -213,11 +215,14 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
   const [ssc, setSsc] = useState<Record<string, SscValue>>({});
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  // Soft "already responded" guard. Anonymity means the server literally
-  // cannot dedupe by person, so we remember locally. Lazy + SSR-safe: this
-  // subtree only ever mounts on the client (parent shows Loading during SSR),
-  // so there's no hydration mismatch and no setState-in-effect.
-  const [already] = useState<boolean>(() => {
+  // "Already responded" comes from the server (GET /api/candor reads
+  // CandorRespondent, which records WHO answered and never what), so a
+  // second device or cleared storage never reopens a form that cannot be
+  // sent. The browser flag stays as a fallback for a database that has not
+  // had the Phase 6 SQL yet. Lazy + SSR-safe: this subtree only mounts on
+  // the client, so there is no hydration mismatch.
+  const [already, setAlready] = useState<boolean>(() => {
+    if (session.hasResponded) return true;
     if (typeof window === "undefined") return false;
     try { return !!localStorage.getItem(storageKey); } catch { return false; }
   });
@@ -255,8 +260,17 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers }),
       });
+      if (res.status === 409) {
+        // Answered already (another device, or a double click): nothing to
+        // retry, so say so instead of a failure that can never clear.
+        try { localStorage.setItem(storageKey, "1"); } catch { /* ignore */ }
+        setAlready(true);
+        onMutate();
+        return;
+      }
       if (!res.ok) {
-        toast(res.status === 403 ? "This session isn't open to you" : "Couldn't submit — try again");
+        const d = await res.json().catch(() => ({}));
+        toast(res.status === 403 ? (d?.error ?? "This session isn't open to you") : "Couldn't submit. Your answers are still here, try again.");
         setSubmitting(false);
         return;
       }
@@ -264,7 +278,7 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
       setDone(true);
       onMutate();
     } catch {
-      toast("Couldn't submit — try again");
+      toast("Couldn't submit. Your answers are still here, try again.");
       setSubmitting(false);
     }
   }
@@ -273,8 +287,8 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
     return (
       <div className="cnd-d__thanks">
         <div className="cnd-d__thanks-art"><ShieldCheck /></div>
-        <h2>{done ? "Feedback received — thank you" : "You've already responded"}</h2>
-        <p>Your reply was recorded with <strong>no link to your identity</strong>. There is no name, account, IP, or device stored against it, so it can never be traced back to you.</p>
+        <h2>{done ? "Feedback received, thank you" : "You've already responded"}</h2>
+        <p>Your reply was recorded with <strong>no link to your identity</strong>. We note that you answered, so nobody answers twice, but never which answer is yours.</p>
         <Link href="/candor" className="cnd-d__blank-cta"><ArrowLeft /> Back to Candor</Link>
       </div>
     );
@@ -284,7 +298,7 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
     <div className="cnd-d__respond">
       <div className="cnd-d__anon">
         <Lock />
-        <span><strong>This is anonymous.</strong> We send only your answers — never your name, account, IP, or device. Nobody, including your manager, can see who wrote what.</span>
+        <span><strong>This is anonymous.</strong> Your answers are stored with no name, account, IP or device. We note only that you answered, so nobody answers twice. Nobody, including your manager, can see who wrote what.</span>
       </div>
 
       {session.description ? <p className="cnd-d__lede">{session.description}</p> : null}
@@ -316,7 +330,7 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
                         const prev = s[p.id] ?? { start: "", stop: "", cont: "" };
                         return { ...s, [p.id]: { ...prev, [k]: e.target.value } };
                       })}
-                      placeholder={k === "start" ? "What should we start doing?" : k === "stop" ? "What should we stop?" : "What's working — keep going?"}
+                      placeholder={k === "start" ? "What should we start doing?" : k === "stop" ? "What should we stop?" : "What's working? Keep going"}
                     />
                   </label>
                 ))}
@@ -384,7 +398,7 @@ function ResultsView({ session, onMutate, toast }: { session: ApiCandor; onMutat
     <div className="cnd-d__results">
       <div className="cnd-d__anon">
         <ShieldCheck />
-        <span><strong>Anonymous results.</strong> Replies are aggregated with no identity attached — there is no way to see who said what, by design.</span>
+        <span><strong>Anonymous results.</strong> Replies are combined with no identity attached. There is no way to see who said what, by design.</span>
       </div>
 
       <div className="cnd-d__result-bar">
@@ -458,7 +472,7 @@ function RatingBreakdown({ r }: { r: RatingResult }) {
   return (
     <div className="cnd-d__rating-result">
       <div className="cnd-d__rating-avg">
-        <span className="cnd-d__rating-avg-num">{r.average ?? "—"}</span>
+        <span className="cnd-d__rating-avg-num">{r.average ?? "No ratings"}</span>
         <span className="cnd-d__rating-avg-lbl">avg / 5</span>
       </div>
       <div className="cnd-d__dist">
@@ -555,7 +569,7 @@ function EditorView({ session, onMutate, toast }: { session: ApiCandor; onMutate
     <div className="cnd-d__editor">
       <div className="cnd-d__anon cnd-d__anon--soft">
         <Lock />
-        <span>Set this up, then launch. Responses stay <strong>anonymous</strong> — the results view never shows who answered.</span>
+        <span>Set this up, then launch. Responses stay <strong>anonymous</strong>: the results view never shows who answered.</span>
       </div>
 
       <div className="cnd-d__field">

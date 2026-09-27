@@ -28,9 +28,13 @@ export default async function TeamReviewsPage() {
   // over the org; anyone else gets the in-shell 404.
   await gatePage("view", { type: "app", key: "weekly-reviews" }, { callbackUrl: "/team/reviews" });
 
+  // Pending is every review awaiting this manager (uncapped, the same where
+  // clause as the sidebar badge, so the two never disagree). Acted is the
+  // last 30 days of decisions on their reports, plus the ones they made
+  // themselves elsewhere (a skip-level Approve on the Alignment board).
   const [pending, acted] = await Promise.all([
-    listReviewsForManager(u.id, { status: "SUBMITTED", take: 50 }),
-    listReviewsForManager(u.id, { status: "ACKNOWLEDGED", take: 30 }),
+    listReviewsForManager(u.id, { status: "SUBMITTED" }),
+    listReviewsForManager(u.id, { status: "ACKNOWLEDGED", sinceDays: 30, alsoDecidedBy: true }),
   ]);
 
   return (

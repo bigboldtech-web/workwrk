@@ -30,9 +30,18 @@ export interface CultureGateResult {
 
 /**
  * The create rule, one place: the legacy manager tier (isManager, the same
- * predicate POST /api/candor asks), the People team, Owner or Admin.
+ * predicate POST /api/candor asks), the People team, Owner or Admin. Candor
+ * also takes anyone with reports (APP_RULES.candor is
+ * reports-people-team-admin, and the Teams sidebar row shows to them), so
+ * a manager by reporting line at Employee access holds the page its row
+ * points to and can run a session.
  */
-export function isCultureOrganiser(v: { managerTier: boolean; orgRole: string; peopleTeam?: boolean }): boolean {
+export function isCultureOrganiser(
+  v: { managerTier: boolean; orgRole: string; peopleTeam?: boolean; hasReports?: boolean },
+  key: "candor" | "surveys" = "surveys",
+): boolean {
+  if (v.orgRole === "GUEST") return false;
+  if (key === "candor" && v.hasReports === true) return true;
   return v.managerTier || v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true;
 }
 
@@ -44,11 +53,12 @@ export async function cultureGate(key: "kudos" | "candor" | "surveys", callbackU
   // Guests never reach the Teams hub (access 2.3).
   if (viewer.orgRole === "GUEST") notFound();
   const session = (await getServerSession(authOptions)) as SessionLike;
-  const organiser = isCultureOrganiser({
+  const organiser = key === "kudos" ? false : isCultureOrganiser({
     managerTier: await sessionOnLegacyManagerTier(session),
     orgRole: viewer.orgRole,
     peopleTeam: viewer.peopleTeam,
-  });
+    hasReports: (viewer.reportTree?.size ?? 0) > 0,
+  }, key);
   const base = { userId: viewer.userId, organizationId: viewer.organizationId, organiser };
   if (key === "kudos" || organiser) return base;
 
@@ -75,9 +85,9 @@ export async function cultureGate(key: "kudos" | "candor" | "surveys", callbackU
  * legacy manager tier first (no extra query), then the engine's Viewer for
  * the People team and Admin.
  */
-export async function cultureOrganiserFromSession(session: SessionLike): Promise<boolean> {
+export async function cultureOrganiserFromSession(session: SessionLike, key: "candor" | "surveys" = "surveys"): Promise<boolean> {
   if (await sessionOnLegacyManagerTier(session)) return true;
   const v = await viewerFromSession();
   if (!v) return false;
-  return isCultureOrganiser({ managerTier: false, orgRole: v.orgRole, peopleTeam: v.peopleTeam });
+  return isCultureOrganiser({ managerTier: false, orgRole: v.orgRole, peopleTeam: v.peopleTeam, hasReports: (v.reportTree?.size ?? 0) > 0 }, key);
 }

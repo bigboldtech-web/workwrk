@@ -7,6 +7,7 @@
 // race-free even if two tabs try to create simultaneously.
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 
 export interface KpiSnapshot {
   kpiId: string;
@@ -242,30 +243,70 @@ export interface ManagerReviewQueueItem extends WeeklyReviewDoc {
 }
 
 /**
+ * Whose weekly reviews a manager's queue holds: the people who report to
+ * them NOW (User.managerId), whoever was recorded on the row when it was
+ * submitted, plus rows recorded to them whose subject has no manager today.
+ * A report who moved takes their pending review to the new manager (the
+ * old one no longer sees it or decides it), and nobody's review is left in
+ * a queue nobody reads.
+ */
+export function managerQueueWhere(managerId: string): Prisma.WeeklyReviewWhereInput {
+  return {
+    OR: [
+      { user: { managerId, deletedAt: null } },
+      { managerId, user: { managerId: null, deletedAt: null } },
+    ],
+  };
+}
+
+/**
  * How many weekly reviews await `managerId`'s decision: the SAME where clause
  * listReviewsForManager runs for the /team/reviews queue (status SUBMITTED),
  * uncapped, so the sidebar badge and the queue can never disagree.
  */
 export async function countReviewsAwaitingManager(managerId: string): Promise<number> {
-  return prisma.weeklyReview.count({ where: { managerId, status: "SUBMITTED" } });
+  return prisma.weeklyReview.count({ where: { AND: [managerQueueWhere(managerId), { status: "SUBMITTED" }] } });
 }
 
 /**
- * Reviews where the caller is the recorded `managerId`. Optionally
- * filtered by status. Includes the subject so the queue can render
- * who-and-when at a glance.
+ * The manager queue (managerQueueWhere), optionally by status. Uncapped
+ * unless `take` is passed. `alsoDecidedBy` adds the rows the caller decided
+ * themselves (from the activity log), so a skip-level manager or the People
+ * team who approved on the Alignment board sees that row under Acted.
+ * `since` bounds a history list by time rather than by a row cap.
+ * Includes the subject so the queue can render who-and-when at a glance.
  */
 export async function listReviewsForManager(
   managerId: string,
-  opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED"; take?: number } = {},
+  opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED"; take?: number; since?: Date; sinceDays?: number; alsoDecidedBy?: boolean } = {},
 ): Promise<ManagerReviewQueueItem[]> {
+  if (opts.sinceDays && !opts.since) opts = { ...opts, since: new Date(Date.now() - opts.sinceDays * 24 * 60 * 60 * 1000) };
+  let decidedIds: string[] = [];
+  if (opts.alsoDecidedBy) {
+    const logs = await prisma.activityLog.findMany({
+      where: {
+        actorId: managerId,
+        type: "weekly_review_decided",
+        targetType: "weekly_review",
+        ...(opts.since ? { createdAt: { gte: opts.since } } : {}),
+      },
+      select: { targetId: true },
+    });
+    decidedIds = [...new Set(logs.map((l) => l.targetId).filter((x): x is string => !!x))];
+  }
+  const population: Prisma.WeeklyReviewWhereInput = decidedIds.length
+    ? { OR: [managerQueueWhere(managerId), { id: { in: decidedIds } }] }
+    : managerQueueWhere(managerId);
   const rows = await prisma.weeklyReview.findMany({
     where: {
-      managerId,
-      ...(opts.status ? { status: opts.status } : {}),
+      AND: [
+        population,
+        opts.status ? { status: opts.status } : {},
+        opts.since ? { OR: [{ reviewedAt: { gte: opts.since } }, { reviewedAt: null, updatedAt: { gte: opts.since } }] } : {},
+      ],
     },
     orderBy: [{ submittedAt: "desc" }, { periodStart: "desc" }],
-    take: opts.take ?? 100,
+    ...(opts.take ? { take: opts.take } : {}),
   });
 
   const subjectIds = Array.from(new Set(rows.map((r) => r.userId)));

@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Loader2 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -342,7 +342,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
             Cancel
           </Button>
           <Button size="sm" onClick={() => void submit()} disabled={saving || !title.trim()}>
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {saving ? <Dots variant="pending" /> : null}
             {isEdit ? "Save changes" : "Create goal"}
           </Button>
         </DialogFooter>

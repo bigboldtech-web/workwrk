@@ -17,7 +17,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, MoreHorizontal, Pencil, Plus, Target as TargetIcon, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Target as TargetIcon, Trash2 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
@@ -309,7 +310,7 @@ function TargetComposer({ okrId, onDone }: { okrId: string; onDone: () => void }
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={saving || !title.trim()}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {saving ? <Dots variant="pending" /> : null}
           Create a Target
         </Button>
       </div>

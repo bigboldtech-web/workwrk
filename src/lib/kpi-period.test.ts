@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { currentKpiPeriod, kpiPeriodLabel, resolveKpiPeriod } from "./kpi-period";
+import { currentKpiPeriod, isKpiPeriodOpen, kpiPeriodLabel, resolveKpiPeriod } from "./kpi-period";
 
-const now = new Date(2026, 8, 27, 12, 0, 0); // 27 Sep 2026, local time
+const now = new Date(Date.UTC(2026, 8, 27, 12, 0, 0)); // 27 Sep 2026, UTC
 
 describe("kpi period", () => {
   it("defaults to the current month", () => {
@@ -23,6 +23,17 @@ describe("kpi period", () => {
     expect(resolveKpiPeriod("2026-W38", now)).toBe("2026-09");
     expect(resolveKpiPeriod("2026-Q3", now)).toBe("2026-09");
     expect(resolveKpiPeriod("", now)).toBe("2026-09");
+  });
+
+  it("uses the UTC month, the one the boot badge counts", () => {
+    expect(currentKpiPeriod(new Date(Date.UTC(2026, 8, 30, 23, 30, 0)))).toBe("2026-09");
+    expect(currentKpiPeriod(new Date(Date.UTC(2026, 9, 1, 0, 30, 0)))).toBe("2026-10");
+  });
+
+  it("keeps a past month read only", () => {
+    expect(isKpiPeriodOpen("2026-09", now)).toBe(true);
+    expect(isKpiPeriodOpen("2026-08", now)).toBe(false);
+    expect(isKpiPeriodOpen(resolveKpiPeriod("2025-12", now), now)).toBe(false);
   });
 
   it("labels a month key", () => {

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
-import { canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { isInReportTree } from "@/lib/reporting-line";
 
 // GET: Get peer feedback requests for current user (to give) or for a review (as manager)
@@ -30,12 +30,14 @@ export async function GET(
     // the People team and Admin.
     const review = await prisma.review.findFirst({
       where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
-      select: { id: true, subjectId: true, reviewerId: true, cycle: { select: { createdById: true } } },
+      select: { id: true, subjectId: true, reviewerId: true },
     });
     if (!review || review.subjectId === userId) return jsonError("Not found", 404);
     const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
-    const owner = await canManageReviewCycle(session, review.cycle);
-    const allowed = owner || review.reviewerId === userId || (await isInReportTree(userId, review.subjectId));
+    // The cycle's starting manager reads through their CURRENT chain only
+    // (isInReportTree), like calibration and finalize (cycleSubjectReach):
+    // a report who moved to another manager leaves the old one's reach.
+    const allowed = peopleOrAdmin || review.reviewerId === userId || (await isInReportTree(userId, review.subjectId));
     if (!allowed) return jsonError("Not found", 404);
     const feedback = await prisma.peerFeedback.findMany({
       where: { reviewId },
@@ -80,8 +82,9 @@ export async function POST(
     return jsonError("reviewId and peerIds array are required");
   }
 
+  const orgId = getOrgId(session);
   const review = await prisma.review.findFirst({
-    where: { id: reviewId, cycleId },
+    where: { id: reviewId, cycleId, cycle: { organizationId: orgId } },
     include: { cycle: { select: { name: true } }, subject: { select: { firstName: true, lastName: true } } },
   });
   if (!review) return jsonError("Review not found", 404);
@@ -94,8 +97,18 @@ export async function POST(
     if (reach && !reach.has(review.subjectId)) return jsonError("Forbidden", 403);
   }
 
+  // Peers must be active people in this org, never the subject, each once.
+  const requested = [...new Set(peerIds.filter((p: unknown): p is string => typeof p === "string" && p.length > 0))];
+  const valid = await prisma.user.findMany({
+    where: { id: { in: requested.filter((p) => p !== review.subjectId) }, organizationId: orgId, deletedAt: null },
+    select: { id: true },
+  });
+  const validPeerIds = valid.map((u) => u.id);
+  if (validPeerIds.length === 0) return jsonError("Pick at least one person in your organization other than the person being reviewed");
+  if (validPeerIds.length !== requested.length) return jsonError("Some of the people picked are not in your organization, have left, or are the person being reviewed");
+
   // Create peer feedback records
-  const feedbackData = peerIds.map((peerId: string) => ({
+  const feedbackData = validPeerIds.map((peerId: string) => ({
     reviewId,
     giverId: peerId,
     receiverId: review.subjectId,
@@ -109,7 +122,7 @@ export async function POST(
   });
 
   // Notify peers
-  const notifications = peerIds.map((peerId: string) => ({
+  const notifications = validPeerIds.map((peerId: string) => ({
     title: "Peer Feedback Requested",
     message: `Please provide feedback for ${review.subject.firstName} ${review.subject.lastName} as part of ${review.cycle.name}.`,
     type: "review",
@@ -119,7 +132,7 @@ export async function POST(
 
   await prisma.notification.createMany({ data: notifications });
 
-  return jsonSuccess({ message: `${peerIds.length} peer feedback requests created` }, 201);
+  return jsonSuccess({ message: `${validPeerIds.length} peer feedback requests created` }, 201);
 }
 
 // PATCH: Submit peer feedback

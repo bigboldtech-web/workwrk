@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { isHrAdminLevel } from "@/lib/alignment-scope";
 import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { peerAggregate } from "@/lib/people/anonymity";
+import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
 
 export async function GET(
   _req: NextRequest,
@@ -18,14 +19,16 @@ export async function GET(
   const hrAdmin = isHrAdminLevel(session) || (await isPeopleTeamOrAdmin(session));
 
   // Below hr-admin the caller sees only review rows they are IN: their
-  // own, ones they review, and (managers) their report tree's.
+  // own, ones they review, (managers) their report tree's, and (a peer
+  // asked for feedback) the rows they give feedback on, which they read
+  // through the peer lens only (lib/people/review-visibility.ts).
   let reviewsWhere: { OR: Array<Record<string, unknown>> } | undefined;
   let treeIds: string[] = [callerId];
   if (!hrAdmin) {
     // The reporting chain (solid plus dotted), whatever the caller's access
     // level: the same facts the page faces read (reviews/[id]/page.tsx).
     treeIds = [callerId, ...(await chainOf(callerId))];
-    reviewsWhere = { OR: [{ subjectId: { in: treeIds } }, { reviewerId: callerId }] };
+    reviewsWhere = { OR: [{ subjectId: { in: treeIds } }, { reviewerId: callerId }, { peerFeedback: { some: { giverId: callerId } } }] };
   }
   const treeSet = new Set(treeIds);
 
@@ -71,17 +74,26 @@ export async function GET(
   // Peer feedback: below hr-admin, a row is visible only to its giver,
   // its receiver, or a manager with the subject in their tree — and an
   // anonymous giver stays anonymous (field names kept, values nulled).
+  const lensOf = (review: { subjectId: string; reviewerId: string }) =>
+    reviewLens({ callerId, hrAdmin, subjectId: review.subjectId, reviewerId: review.reviewerId, inTree: treeSet.has(review.subjectId) });
   const reviews = cycle.reviews.map((review) => {
+    const lens = lensOf(review);
     // DECIDED (Phase 6): the subject of peer feedback sees the aggregate
     // rating only, and only once four peers have answered (the anonymity
     // floor): never a peer's own row, rating, answers or name. The rows they
-    // wrote themselves about someone else are theirs to see.
-    if (!hrAdmin && review.subjectId === callerId) {
+    // wrote themselves about someone else are theirs to see. Their own row
+    // never carries the manager's draft, calibration or 9-box potential.
+    if (lens === "subject") {
       return {
-        ...review,
+        ...subjectRowView(review, callerId),
         peerFeedback: review.peerFeedback.filter((pf) => pf.giverId === callerId && pf.receiverId !== callerId),
         peerSummary: peerAggregate(review.peerFeedback.filter((pf) => pf.receiverId === callerId)),
       };
+    }
+    // A peer respondent outside the subject's chain: the header and the
+    // feedback they gave, nothing of the review itself.
+    if (lens === "peer") {
+      return peerRowView({ ...review, peerFeedback: review.peerFeedback.filter((pf) => pf.giverId === callerId) });
     }
     return {
     ...review,
@@ -116,12 +128,14 @@ export async function GET(
     };
   });
 
-  // Calculate stats
-  const total = reviews.length;
-  const selfDone = reviews.filter((r) => r.status !== "PENDING").length;
-  const managerDone = reviews.filter((r) => ["CALIBRATION", "COMPLETED"].includes(r.status)).length;
-  const calibrated = reviews.filter((r) => r.calibratedScore != null).length;
-  const completed = reviews.filter((r) => r.status === "COMPLETED").length;
+  // Calculate stats over the rows the caller reads in full (a peer-only
+  // row is not a review they run, and a subject's calibration stays back).
+  const counted = cycle.reviews.filter((r) => lensOf(r) === "full");
+  const total = counted.length;
+  const selfDone = counted.filter((r) => r.status !== "PENDING").length;
+  const managerDone = counted.filter((r) => ["CALIBRATION", "COMPLETED"].includes(r.status)).length;
+  const calibrated = counted.filter((r) => r.calibratedScore != null).length;
+  const completed = counted.filter((r) => r.status === "COMPLETED").length;
 
   return jsonSuccess({
     ...cycle,

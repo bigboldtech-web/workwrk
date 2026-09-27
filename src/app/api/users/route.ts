@@ -91,9 +91,11 @@ export async function GET(req: NextRequest) {
     where.AND = andClause;
   }
 
-  const orderBy: Prisma.UserOrderByWithRelationInput = pagination.sortBy
-    ? ({ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput)
-    : { firstName: "asc" };
+  // id breaks ties so page N and page N+1 never overlap or skip a person
+  // (fetch-all-pages.ts walks every page for the directory and org chart).
+  const orderBy: Prisma.UserOrderByWithRelationInput[] = pagination.sortBy
+    ? [{ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput, { id: "asc" }]
+    : [{ firstName: "asc" }, { id: "asc" }];
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({

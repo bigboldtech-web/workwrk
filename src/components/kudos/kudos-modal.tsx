@@ -186,7 +186,7 @@ export function KudosModal({
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium">{person.firstName} {person.lastName}</p>
                       <p className="text-xs text-muted">
-                        {person.role?.title || "No role"}{person.department?.name ? ` · ${person.department.name}` : ""}
+                        {person.role?.title || "No job title"}{person.department?.name ? ` · ${person.department.name}` : ""}
                       </p>
                     </div>
                   </button>
@@ -207,7 +207,7 @@ export function KudosModal({
               </Avatar>
               <div className="flex-1">
                 <p className="text-xs font-medium">{selectedPerson.firstName} {selectedPerson.lastName}</p>
-                <p className="text-xs text-muted">{selectedPerson.role?.title || "No role"}</p>
+                <p className="text-xs text-muted">{selectedPerson.role?.title || "No job title"}</p>
               </div>
               {!preselectedUserId && (
                 <Button variant="ghost" size="sm" onClick={() => setStep("select")}>

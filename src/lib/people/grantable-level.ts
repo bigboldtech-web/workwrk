@@ -7,9 +7,13 @@
 // The rule, by the smallest worst case:
 //   - An org admin (COMPANY_ADMIN, SUPER_ADMIN) may give any level except
 //     SUPER_ADMIN, which only a SUPER_ADMIN may give.
+//   - HR (the People team's level) places a new hire at any level that is
+//     not an admin level, as it could before this rule: EMPLOYEE, AGENT,
+//     TEAM_LEAD, MANAGER, DIRECTOR, VP, C_LEVEL and HR. It never mints
+//     COMPANY_ADMIN or SUPER_ADMIN, the one real escalation.
 //   - Everyone else who may create people at all gives EMPLOYEE or AGENT,
 //     the two levels that carry no management or admin right. Placing
-//     someone higher is an admin's act in Members.
+//     someone higher is an admin's or HR's act.
 //   - An absent level is EMPLOYEE (the column default); an unknown string is
 //     refused, never guessed.
 //
@@ -29,5 +33,6 @@ export function grantableAccessLevel(callerLevel: string | null | undefined, req
   const level = requested as GrantableLevel;
   if (callerLevel === "SUPER_ADMIN") return level;
   if (callerLevel === "COMPANY_ADMIN") return level === "SUPER_ADMIN" ? null : level;
+  if (callerLevel === "HR") return level === "SUPER_ADMIN" || level === "COMPANY_ADMIN" ? null : level;
   return level === "EMPLOYEE" || level === "AGENT" ? level : null;
 }

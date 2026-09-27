@@ -88,19 +88,25 @@ type ResultQuestion =
       questionId: string; text: string; kind: "rating" | "nps"; totalAnswered: number;
       min: number; max: number; average: number | null;
       distribution: { value: number; count: number }[];
+      belowFloor?: boolean;
     }
   | {
       questionId: string; text: string; kind: "single_choice" | "multi_choice" | "yes_no";
       totalAnswered: number; options: { value: string; count: number }[];
+      belowFloor?: boolean;
     }
   | {
       questionId: string; text: string; kind: "text"; totalAnswered: number;
-      responses: { value: string; createdAt: string; respondent: { id: string; name: string } | null }[];
+      responses: { value: string; createdAt: string | null; respondent: { id: string; name: string } | null }[];
+      belowFloor?: boolean;
     };
 
 interface ResultsResp {
   survey: { id: string; title: string; status: string; anonymous: boolean };
   totalResponses: number;
+  /** An anonymous survey under the four-answer floor: only the count shows. */
+  belowFloor?: boolean;
+  anonymityFloor?: number;
   summary: { npsScore: number | null; firstResponseAt: string | null; lastResponseAt: string | null };
   questions: ResultQuestion[];
 }
@@ -328,10 +334,10 @@ function RespondPanel({
         return;
       }
       setDone(true);
-      toast(viewer.hasResponded ? "Response updated" : "Response submitted — thank you");
+      toast(viewer.hasResponded ? "Response updated" : "Response submitted, thank you");
       await onSubmitted();
     } catch {
-      toast("Network error — couldn't submit.");
+      toast("Network error, couldn't submit. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -605,6 +611,8 @@ function ResultsPanel({
   }
 
   const total = results.totalResponses;
+  const floor = results.anonymityFloor ?? 4;
+  const canExport = total > 0 && !results.belowFloor;
 
   return (
     <div className="flex flex-col gap-4">
@@ -619,11 +627,11 @@ function ResultsPanel({
         <a
           href={`/api/pulse-surveys/${surveyId}/responses/export`}
           className={`self-center inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border text-base font-medium ${
-            total > 0
+            canExport
               ? "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
               : "border-[var(--os-line)] text-[var(--os-ink-4)] pointer-events-none opacity-50"
           }`}
-          {...(total > 0 ? {} : { "aria-disabled": true, tabIndex: -1 })}
+          {...(canExport ? {} : { "aria-disabled": true, tabIndex: -1 })}
         >
           <Download className="w-3.5 h-3.5" /> Export CSV
         </a>
@@ -632,12 +640,14 @@ function ResultsPanel({
       {anonymous ? (
         <div className="flex items-start gap-2 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3.5 py-2.5 text-sm text-[var(--os-ink-3)]">
           <Lock className="w-3.5 h-3.5 mt-[1px] shrink-0" />
-          <span>Anonymous survey — only combined results are shown. Individual respondents are never identified.</span>
+          <span>Anonymous survey: only combined results show, and nothing shows until {floor} people have answered. Individual respondents are never identified.</span>
         </div>
       ) : null}
 
       {total === 0 ? (
         <StatePanel Icon={BarChart3} title="No responses yet" subtitle="Results appear here as people respond." inline />
+      ) : results.belowFloor ? (
+        <StatePanel Icon={Lock} title={`${total} of ${floor} answers needed`} subtitle={`Results open once ${floor} people have answered, so nobody's answer can be singled out.`} inline />
       ) : (
         <div className="flex flex-col gap-3">
           {results.questions.map((q) => <ResultCard key={q.questionId} q={q} anonymous={anonymous} />)}
@@ -656,9 +666,12 @@ function ResultCard({ q, anonymous }: { q: ResultQuestion; anonymous: boolean })
       </div>
 
       <div className="mt-3">
+        {q.belowFloor ? (
+          <div className="text-sm text-[var(--os-ink-4)]">Fewer than 4 people answered this question, so its answers stay hidden to protect who answered.</div>
+        ) : null}
         {/* switch narrows the discriminated union reliably where a nested
             ternary did not (TS widened `q` back in the final else). */}
-        {(() => {
+        {q.belowFloor ? null : (() => {
           switch (q.kind) {
             case "rating":
             case "nps":
@@ -724,7 +737,7 @@ function TextResult({
   responses,
   anonymous,
 }: {
-  responses: { value: string; createdAt: string; respondent: { id: string; name: string } | null }[];
+  responses: { value: string; createdAt: string | null; respondent: { id: string; name: string } | null }[];
   anonymous: boolean;
 }) {
   if (responses.length === 0) return <div className="text-sm text-[var(--os-ink-4)]">No text responses.</div>;
@@ -734,7 +747,7 @@ function TextResult({
         <div key={i} className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2">
           <div className="text-base text-[var(--os-ink)] whitespace-pre-wrap break-words">{r.value}</div>
           <div className="mt-1 text-xs text-[var(--os-ink-4)]">
-            {!anonymous && r.respondent ? r.respondent.name : "Anonymous"} · {fmtDate(r.createdAt)}
+            {!anonymous && r.respondent ? r.respondent.name : "Anonymous"}{r.createdAt ? ` · ${fmtDate(r.createdAt)}` : ""}
           </div>
         </div>
       ))}

@@ -22,6 +22,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     where: { id, organizationId: orgId, status: "ACTIVE" },
   });
   if (!candor) return jsonError("Session not found or not active", 404);
+  // The organiser never answers their own session: their answer would count
+  // toward the four-answer floor and unlock results they know three people
+  // wrote (the page and the boot count already leave them out).
+  if (candor.createdBy === userId) return jsonError("You run this session, so you can't answer it", 403);
 
   // Authz: a department-scoped session only accepts responses from members of
   // that department (mirrors the list-visibility gate in /api/candor GET).

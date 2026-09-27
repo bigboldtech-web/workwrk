@@ -124,7 +124,8 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   page("workspace", "structure", "Structure", "/settings/structure", {
     group: "People",
     tabs: ["departments", "titles", "offices", "orgchart"],
-    aliases: ["/settings/hierarchy"],
+    // No /settings/hierarchy alias: that URL 308s to /organization, the one
+    // org chart (next.config.ts), so search and the resolver agree with it.
     keywords: ["departments", "job titles", "offices", "org chart", "reporting", "hierarchy"],
   }),
   page("workspace", "access", "Access", "/settings/access", {

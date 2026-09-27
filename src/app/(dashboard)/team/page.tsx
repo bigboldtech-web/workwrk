@@ -21,7 +21,8 @@ import { teamAppGate, TEAM_LOCKED_SENTENCE } from "@/lib/people/team-gate";
 import { LockedPage } from "@/components/access";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
-import { listKpiReviewsForManager } from "@/lib/kpi-record";
+import { countKpiReviewsForManager } from "@/lib/kpi-record";
+import { countReviewsAwaitingManager } from "@/lib/weekly-review";
 
 export const dynamic = "force-dynamic";
 
@@ -57,13 +58,14 @@ export default async function TeamOverviewPage() {
     teamIds
       ? prisma.kPI.count({ where: { organizationId: orgId, kra: { assignments: { some: { userId: { in: teamIds }, status: "ACTIVE" } } } } })
       : prisma.kPI.count({ where: { organizationId: orgId } }),
-    prisma.weeklyReview.count({ where: { organizationId: orgId, managerId: me, status: "SUBMITTED" } }),
-    // Same source as /team/kpi-reviews (recursive effective tree), so the
-    // badge always matches the queue it links to.
-    listKpiReviewsForManager(me, orgId, { status: "SUBMITTED", take: 50 }),
+    // The sidebar badges' own counts (weekly-review.ts managerQueueWhere and
+    // the recursive effective tree), uncapped, so this page, the badges and
+    // the queues they link to always name the same number.
+    countReviewsAwaitingManager(me),
+    countKpiReviewsForManager(me, orgId),
     prisma.user.count({ where: { ...peopleWhere, kraAssignments: { none: {} } } }),
   ]);
-  const kpiToApprove = kpiReviewQueue.length;
+  const kpiToApprove = kpiReviewQueue;
 
   // Sub-teams (/team/rollup, the second view of Alignment) only when at
   // least one of the viewer's people manages people of their own, so the

@@ -30,21 +30,29 @@ const PILL_COUNT = 8;
 export default async function WeeklyReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<{ week?: string; review?: string }>;
 }) {
   const { viewer } = await gatePage("view", { type: "app", key: "home" }, { callbackUrl: "/me/weekly-review" });
   // A Guest has no KRAs, no manager chain and no heartbeat to file.
   if (viewer.orgRole === "GUEST") notFound();
 
   const sp = await searchParams;
-  const asked = parseWeekKey(sp.week) ?? weekStartOf(new Date());
+  // ?review=<id> (the Inbox row of a manager's decision) opens that
+  // review's own week. Only the viewer's own review resolves; anything else
+  // falls back to ?week= or this week, never another person's row.
+  const linked = !sp.week && sp.review
+    ? await prisma.weeklyReview
+        .findFirst({ where: { id: sp.review, userId: viewer.userId }, select: { periodStart: true } })
+        .catch(() => null)
+    : null;
+  const asked = linked ? weekStartOf(linked.periodStart) : parseWeekKey(sp.week) ?? weekStartOf(new Date());
   const askedKey = weekKey(asked);
   const current = isCurrentWeek(askedKey);
 
   const review = current
     ? await getOrCreateWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId })
     : await prisma.weeklyReview
-        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: asked } } })
+        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: linked?.periodStart ?? asked } } })
         .then((row) => (row ? JSON.parse(JSON.stringify(row)) : null))
         .catch(() => null);
 

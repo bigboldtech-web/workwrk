@@ -15,6 +15,7 @@
 //
 // Server only (prisma).
 
+import { currentKpiPeriod } from "@/lib/kpi-period";
 import { prisma } from "@/lib/prisma";
 import { countKpiReviewsForManager } from "@/lib/kpi-record";
 import { countReviewsAwaitingManager } from "@/lib/weekly-review";
@@ -61,10 +62,8 @@ function safe<T>(label: string, fallback: T, p: Promise<T>): Promise<T> {
   });
 }
 
-/** "YYYY-MM" for the current month, the KPIRecord.period format. */
-export function currentKpiPeriod(now: Date = new Date()): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
+/** "YYYY-MM" for the current month: the one helper the Record numbers view uses too. */
+export { currentKpiPeriod };
 
 export async function hasReportsFor(userId: string): Promise<boolean> {
   // The engine's viewer (src/lib/access/viewer.ts reportTreeFor) counts the
@@ -151,15 +150,17 @@ export async function teamsFactsAndCounts(
   let surveyTargeted = false;
   for (const s of surveys) {
     const answered = s.responses.length > 0;
-    if (answered) surveyTargeted = true;
-    if (surveyOpenNow(s, now) && inSurveyAudience(s, viewer)) {
-      surveyTargeted = true;
-      if (!answered) surveysOpen += 1;
-    }
+    if (surveyDoorOpen(s, viewer, now)) surveyTargeted = true;
+    if (surveyOpenNow(s, now) && inSurveyAudience(s, viewer) && !answered) surveysOpen += 1;
   }
 
   const candorOpen = candorIds.filter((id) => !answeredCandor.has(id)).length;
-  const candorInvited = candorIds.length > 0 || answeredCandor.size > 0;
+  // The respondent door: an ACTIVE session in the viewer's audience that
+  // someone else runs (answered or not, it is still listed to them). A
+  // session they answered that has since CLOSED is not: GET /api/candor
+  // lists only active sessions to a respondent, so the row would open an
+  // empty page forever.
+  const candorInvited = candorIds.length > 0;
 
   return {
     facts: { hasReports, candorInvited, surveyTargeted },
@@ -172,17 +173,28 @@ export async function teamsFactsAndCounts(
  * the boot pass uses, so the Candor row and the page it opens always agree.
  */
 export async function candorInvitedFor(userId: string, orgId: string, departmentId: string | null): Promise<boolean> {
-  const [open, answered] = await Promise.all([
-    safe("candor", [] as string[], openCandorIds(userId, orgId, departmentId)),
-    safe("candorRespondent", new Set<string>(), answeredCandorIds(userId)),
-  ]);
-  return open.length > 0 || answered.size > 0;
+  const open = await safe("candor", [] as string[], openCandorIds(userId, orgId, departmentId));
+  return open.length > 0;
+}
+
+/**
+ * The survey respondent door, the rule GET /api/pulse-surveys lists by: a
+ * live (not Draft) survey whose audience includes the viewer today, which
+ * is open now or which they answered. A survey they answered before moving
+ * out of its audience is not listed to them, so it does not hold the row.
+ */
+function surveyDoorOpen(
+  s: { status: string; closesAt: Date | null; audienceType: string; officeIds: string[]; departmentIds: string[]; userIds: string[]; tagIds: string[]; responses: { id: string }[] },
+  viewer: { userId: string; officeId: string | null; departmentId: string | null; tagIds: string[] },
+  now: Date,
+): boolean {
+  if (s.status === "DRAFT" || !inSurveyAudience(s, viewer)) return false;
+  return s.responses.length > 0 || surveyOpenNow(s, now);
 }
 
 /**
  * The surveyTargeted fact alone, for the /surveys page gate: the same rule
- * as the boot pass (an open survey whose audience includes the viewer, or a
- * survey they have already answered).
+ * as the boot pass (surveyDoorOpen).
  */
 export async function surveyTargetedFor(
   userId: string,
@@ -210,5 +222,5 @@ export async function surveyTargetedFor(
     safe("tags", [] as string[], getUserTagIds(orgId, userId)),
   ]);
   const viewer = { userId, officeId: me.officeId, departmentId: me.departmentId, tagIds };
-  return surveys.some((s) => s.responses.length > 0 || (surveyOpenNow(s, now) && inSurveyAudience(s, viewer)));
+  return surveys.some((s) => surveyDoorOpen(s, viewer, now));
 }

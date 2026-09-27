@@ -28,6 +28,8 @@ import { usePrompt, useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useRole } from "@/hooks/use-role";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
 
 // Every AccessLevel the schema knows today, plus "OTHER" — a safe bucket
 // for levels a future migration adds before this page learns about them.
@@ -89,10 +91,12 @@ export default function RolesPage() {
   const promptDialog = usePrompt();
   const router = useRouter();
   // Phase 6: every Member reads Job titles. The create and delete controls
-  // render only for the viewer POST and DELETE /api/roles admit (the manager
-  // tier today), never as a button that 403s.
-  // The legacy client helper's manager tier, the one POST/DELETE ask today.
-  const { isManager: canEdit } = useRole();
+  // render only for the viewer POST and DELETE /api/roles admit (Owner,
+  // Admin, the People team, and the legacy manager tier that could do it
+  // yesterday: lib/people/job-title-access), never as a button that 403s.
+  const { isManager: legacyManagerTier } = useRole();
+  const { boot } = useBoot();
+  const canEdit = legacyManagerTier || jobTitleWriterByFacts(boot.viewer);
 
   const load = useCallback(async () => {
     try {
@@ -124,25 +128,25 @@ export default function RolesPage() {
   const deleteRole = useCallback(async (r: ApiRole) => {
     const holders = r._count?.users ?? 0;
     if (holders > 0) {
-      toast(`${holders} ${holders === 1 ? "person holds" : "people hold"} this role — reassign them first.`);
+      toast(`${holders} ${holders === 1 ? "person holds" : "people hold"} this job title. Reassign them first.`);
       return;
     }
     if (!(await confirm({
-      title: `Delete role "${r.title}"?`,
-      description: "Its KRA templates detach and stay in the library. No people are affected — deletion is refused while anyone holds the role.",
-      confirmLabel: "Delete role",
+      title: `Delete job title "${r.title}"?`,
+      description: "Its KRA templates detach and stay in the library. No people are affected: deletion is refused while anyone holds the job title.",
+      confirmLabel: "Delete job title",
       destructive: true,
     }))) return;
     const res = await fetch(`/api/roles/${r.id}`, { method: "DELETE" });
     if (res.ok) { toast("Role deleted"); void load(); }
     else {
       const d = await res.json().catch(() => ({}));
-      toast(d?.error ?? "Couldn't delete the role");
+      toast(d?.error ?? "Couldn't delete the job title");
     }
   }, [confirm, toast, load]);
 
   async function quickAdd() {
-    const title = (await promptDialog({ title: "Role title?" }))?.trim();
+    const title = (await promptDialog({ title: "Job title name" }))?.trim();
     if (!title) return;
     try {
       const res = await fetch("/api/roles", {
@@ -152,7 +156,7 @@ export default function RolesPage() {
       if (!res.ok) throw new Error(`POST ${res.status}`);
       const data = await res.json().catch(() => null);
       const created = data?.data ?? data;
-      toast("Role created");
+      toast("Job title created");
       // Quick-add only asks for a title — land on the role page where
       // level / department / description are edited, instead of leaving
       // a default-EMPLOYEE role buried in the list.
@@ -161,7 +165,7 @@ export default function RolesPage() {
         return;
       }
       void load();
-    } catch { toast("Couldn't create role"); }
+    } catch { toast("Couldn't create the job title"); }
   }
 
   // The Teams "+" → New role routes here with ?new=1; fire quickAdd once.
@@ -239,8 +243,8 @@ export default function RolesPage() {
           <h1 className="text-base font-semibold text-zinc-900">Job titles</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">
             {roles === null
-              ? "loading…"
-              : `${stats.total} role${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
+              ? null
+              : `${stats.total} job title${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
           </span>
           <div className="flex-1" />
           <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
@@ -263,8 +267,8 @@ export default function RolesPage() {
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
         {/* KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <TeamStatTile icon={Briefcase} label="Roles defined" value={stats.total} accent="#0073EA" sub="job titles" />
-          <TeamStatTile icon={Users} label="Headcount" value={stats.totalHeadcount} accent="#14B8A6" sub="filling roles" />
+          <TeamStatTile icon={Briefcase} label="Job titles" value={stats.total} accent="#0073EA" sub="defined" />
+          <TeamStatTile icon={Users} label="Headcount" value={stats.totalHeadcount} accent="#14B8A6" sub="holding a job title" />
           <TeamStatTile icon={UserX} label="Unfilled" value={stats.unfilled} accent={stats.unfilled > 0 ? "#F59E0B" : "#00C875"} sub={stats.unfilled > 0 ? "needs hiring" : "all positions filled"} />
           <TeamStatTile icon={Layers} label="Levels" value={stats.levelCount} accent="#71717A" sub="org tiers in use" />
         </div>
@@ -276,8 +280,8 @@ export default function RolesPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search role title, department, description…"
-              aria-label="Search roles"
+              placeholder="Search job title, department, description…"
+              aria-label="Search job titles"
             />
           </div>
           <label className="rls__unfilled-toggle">
@@ -316,20 +320,20 @@ export default function RolesPage() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load roles" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
+          <OsEmptyView variant="error" title="Couldn't load job titles" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : roles === null ? (
           <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
             context="list"
-            title="No roles defined yet"
+            title="No job titles yet"
             hint={canEdit ? "Add the job titles people hold. A job title carries its KRAs, KPIs and SOPs; access is set per person in Members." : "Nobody has added job titles yet."}
             action={canEdit ? { label: "New job title", onClick: () => { void quickAdd(); } } : undefined}
           />
         ) : grouped.length === 0 ? (
           <div className="rls__empty">
             <Search />
-            <div>No roles match these filters.</div>
+            <div>No job titles match these filters.</div>
             <button type="button" className="rls__empty-reset" onClick={() => { setSearch(""); setLevelFilter(null); setShowUnfilledOnly(false); }}>Clear filters</button>
           </div>
         ) : (
@@ -342,7 +346,7 @@ export default function RolesPage() {
               <header className="rls__group-head">
                 <span className="rls__group-pill">{LEVEL_SHORT[g.level]}</span>
                 <h2 className="rls__group-title">{LEVEL_LABELS[g.level]}</h2>
-                <span className="rls__group-count">{g.items.length} role{g.items.length === 1 ? "" : "s"}</span>
+                <span className="rls__group-count">{g.items.length} job title{g.items.length === 1 ? "" : "s"}</span>
                 <span className="rls__group-headcount">
                   {g.items.reduce((acc, r) => acc + (r._count?.users ?? 0), 0)} people
                 </span>

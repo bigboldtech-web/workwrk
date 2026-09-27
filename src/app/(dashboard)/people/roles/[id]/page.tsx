@@ -15,6 +15,9 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { KPI_ORDER } from "@/lib/alignment";
 import { RoleWorkspace } from "./role-workspace";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { gatePage } from "@/lib/access/gate";
+import { viewerFromSession } from "@/lib/access/viewer";
+import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,9 @@ export default async function RolePage(props: {
   const sp = await props.searchParams;
   const view = sp.view === "instances" ? "instances" : "overview";
 
+  // The Teams app gate every sibling route asks (Guests never see the
+  // Teams hub: in-shell 404), before anything about the job title renders.
+  await gatePage("view", { type: "app", key: "teams" }, { callbackUrl: `/people/roles/${id}` });
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
@@ -35,6 +41,10 @@ export default async function RolePage(props: {
   // copy). It is the tier PUT /api/roles/[id] and the workspace's write
   // routes ask, so the page never renders a control whose save 403s.
   const canEdit = legacyIsManagerLevel(u.accessLevel ?? "EMPLOYEE");
+  // The title and mission (PUT/DELETE /api/roles/[id]) also take Owner,
+  // Admin and the People team (lib/people/job-title-access), so the person
+  // who created a job title from the Teams "+" can name it.
+  const canEditIdentity = canEdit || jobTitleWriterByFacts(await viewerFromSession());
 
   const role = await prisma.role.findFirst({
     where: { id, organizationId: orgId },
@@ -171,7 +181,7 @@ export default async function RolePage(props: {
         </div>
       </div>
 
-      <RoleWorkspace bundle={bundle} canEdit={canEdit} view={view} />
+      <RoleWorkspace bundle={bundle} canEdit={canEdit} canEditIdentity={canEditIdentity} view={view} />
     </div>
   );
 }

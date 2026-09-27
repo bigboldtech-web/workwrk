@@ -6,14 +6,28 @@
 // A future month, a malformed value or nothing at all falls back to the
 // current month: a manager can never record a number for a month that has
 // not started, and a typo never lands a number somewhere unexpected.
+// A past month OPENS READ ONLY (isKpiPeriodOpen): saving there would upsert
+// over a closed month's numbers and set an APPROVED record back to
+// SUBMITTED, silently rescoring history. The old page never wrote a past
+// month, so none of its capability is lost.
+//
+// The month is the UTC month, the same one the boot "My KPIs due" badge
+// counts (src/lib/people/teams-counts.ts re-exports this helper), so the
+// badge and the Record numbers view always name the same month and server
+// render and hydration agree whatever the browser's timezone.
 //
 // Pure: no React, no Prisma.
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
-/** The current month's key in local time, e.g. "2026-09". */
+/** The current month's key (UTC), e.g. "2026-09". */
 export function currentKpiPeriod(now: Date = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Only the current month takes new numbers from the Record numbers view. */
+export function isKpiPeriodOpen(period: string, now: Date = new Date()): boolean {
+  return period === currentKpiPeriod(now);
 }
 
 /** A requested month when it is a valid, not-future month key; else the current one. */

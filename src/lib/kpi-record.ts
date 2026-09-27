@@ -102,8 +102,9 @@ export interface KpiReviewQueueItem {
 export async function listKpiReviewsForManager(
   managerId: string,
   organizationId: string,
-  opts: { status?: KPIRecordStatus; statuses?: KPIRecordStatus[]; take?: number } = {},
+  opts: { status?: KPIRecordStatus; statuses?: KPIRecordStatus[]; take?: number; since?: Date; sinceDays?: number } = {},
 ): Promise<KpiReviewQueueItem[]> {
+  if (opts.sinceDays && !opts.since) opts = { ...opts, since: new Date(Date.now() - opts.sinceDays * 24 * 60 * 60 * 1000) };
   const tree = await getEffectiveReportTree(managerId);
   const reportIds = tree.filter((id) => id !== managerId);
   if (reportIds.length === 0) return [];
@@ -115,13 +116,15 @@ export async function listKpiReviewsForManager(
       : {};
 
   const rows = await prisma.kPIRecord.findMany({
-    where: { userId: { in: reportIds }, kpi: { organizationId }, ...statusWhere },
+    where: { userId: { in: reportIds }, kpi: { organizationId }, ...statusWhere, ...(opts.since ? { updatedAt: { gte: opts.since } } : {}) },
     include: {
       kpi: { select: { id: true, name: true, unit: true, targetLabel: true } },
       user: { select: { id: true, firstName: true, lastName: true } },
     },
     orderBy: { updatedAt: "desc" },
-    take: opts.take ?? 50,
+    // Uncapped unless the caller asks: a queue shows every row its badge
+    // counts (countKpiReviewsForManager), never the first 50.
+    ...(opts.take ? { take: opts.take } : {}),
   });
 
   return rows.map((r) => ({

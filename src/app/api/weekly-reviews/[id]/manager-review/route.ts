@@ -8,10 +8,13 @@
 // Request changes, and the /team/reviews queue. A request for changes
 // needs a note. REOPEN is the toast's Undo.
 //
-// Who may decide: the review's recorded manager; anyone above the subject
-// in the reporting tree, solid or dotted (the Alignment board lists the
-// recursive tree, so a skip-level Approve used to 403); the People team;
-// Owner and Admin. Never the subject themself.
+// Who may decide: anyone above the subject in the CURRENT reporting tree,
+// solid or dotted (the Alignment board lists the recursive tree, so a
+// skip-level Approve used to 403); the People team; Owner and Admin; and
+// the recorded manager only while the subject has no manager today. A
+// manager a report has moved away from no longer decides their reviews:
+// the review moves to the new manager's queue (managerQueueWhere). Never
+// the subject themself.
 //
 // On a decision the employee gets an Inbox row, both the employee and the
 // deciding manager get the `review.decided` event so both badges and both
@@ -28,7 +31,6 @@ import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { isSeededPeopleTeam } from "@/lib/access/org-role";
 import { parseWeeklyDecision, weeklyDecisionBlocked, weeklyReopenBlocked } from "@/lib/people/weekly-decision";
 import { publishToUser } from "@/lib/realtime-bus";
-import { logActivity } from "@/lib/activity";
 import { parseAccessSettings } from "@/lib/access/settings";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -57,7 +59,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Cannot act on your own review" }, { status: 400 });
   }
 
-  const isRecordedManager = row.managerId === u.id;
   const isOrgAdmin = legacyIsAdminLevel(u.accessLevel);
   const org = await prisma.organization.findUnique({ where: { id: u.organizationId }, select: { settings: true } });
   // The People team list is stored as access.peopleTeamUserIds; read it the
@@ -68,8 +69,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     isOrgAdmin ||
     parseAccessSettings(settings.access).peopleTeamUserIds.includes(u.id) ||
     isSeededPeopleTeam(u.accessLevel);
-  let allowed = isRecordedManager || peopleTeamOrAdmin;
-  if (!allowed) allowed = await isInReportTree(u.id, row.userId);
+  let allowed = peopleTeamOrAdmin || (await isInReportTree(u.id, row.userId));
+  if (!allowed && row.managerId === u.id) {
+    const subject = await prisma.user.findUnique({ where: { id: row.userId }, select: { managerId: true } });
+    allowed = !subject?.managerId;
+  }
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const blocked = weeklyDecisionBlocked(row.status, parsed.decision);
@@ -83,9 +87,55 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       select: { actorId: true, metadata: true },
     });
     const lastDecision = (last?.metadata as { decision?: string } | null)?.decision;
-    const deciderId = last && lastDecision !== "REOPEN" ? last.actorId : null;
+    // No log row at all (a decision from before the log, or a log write that
+    // failed): the recorded manager stands in as the decider, so the Undo
+    // is never refused to the person who most likely made it.
+    const deciderId = last ? (lastDecision !== "REOPEN" ? last.actorId : null) : row.managerId;
     const reopenBlocked = weeklyReopenBlocked({ actorId: u.id, deciderId, peopleTeamOrAdmin, reviewedAt: row.reviewedAt });
     if (reopenBlocked) return NextResponse.json({ error: reopenBlocked }, { status: 403 });
+  }
+
+  // The decision's activity row is written AWAITED, never fire-and-forget:
+  // it is who may Undo, and for a REOPEN it is the only copy of the note the
+  // Undo withdraws (the row's managerNotes is cleared). So a REOPEN writes
+  // it FIRST and refuses to reopen when it cannot be written: the note is
+  // never lost.
+  const decisionLog = {
+    type: "weekly_review_decided",
+    actorId: u.id,
+    organizationId: u.organizationId,
+    description:
+      parsed.decision === "REOPEN"
+        ? "Reopened a weekly review"
+        : parsed.decision === "APPROVED"
+          ? "Approved a weekly review"
+          : "Asked for changes to a weekly review",
+    targetId: row.id,
+    targetType: "weekly_review",
+    severity: "info",
+    metadata: {
+      decision: parsed.decision,
+      subjectId: row.userId,
+      recordedManagerId: row.managerId,
+      notes: parsed.decision === "REOPEN" ? null : parsed.notes,
+      ...(parsed.decision === "REOPEN"
+        ? { previousDecision: row.managerStatus, previousNotes: row.managerNotes, previousReviewedAt: row.reviewedAt?.toISOString() ?? null }
+        : {}),
+    },
+  };
+  const writeLog = async (): Promise<boolean> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await prisma.activityLog.create({ data: decisionLog });
+        return true;
+      } catch (e) {
+        console.error("weekly review decision log", e);
+      }
+    }
+    return false;
+  };
+  if (parsed.decision === "REOPEN" && !(await writeLog())) {
+    return NextResponse.json({ error: "Couldn't reopen right now, nothing changed. Try again." }, { status: 503 });
   }
 
   let review;
@@ -97,6 +147,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   // One Inbox row per review decision, addressed by the review, so an Undo
   // can rewrite the row it belongs to instead of leaving "approved" standing.
+  // /me/weekly-review resolves ?review= to that review's own week, so
+  // "asked for changes" on an earlier week opens that week, not this one.
   const inboxLink = `/me/weekly-review?review=${row.id}`;
 
   const actor = await prisma.user.findUnique({ where: { id: u.id }, select: { firstName: true, lastName: true } });
@@ -146,30 +198,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  logActivity({
-    type: "weekly_review_decided",
-    actorId: u.id,
-    organizationId: u.organizationId,
-    description:
-      parsed.decision === "REOPEN"
-        ? "Reopened a weekly review"
-        : parsed.decision === "APPROVED"
-          ? "Approved a weekly review"
-          : "Asked for changes to a weekly review",
-    targetId: row.id,
-    targetType: "weekly_review",
-    // The words are kept here too: a REOPEN clears managerNotes on the row,
-    // so the note it withdrew lives on in `previousNotes` (never lost).
-    metadata: {
-      decision: parsed.decision,
-      subjectId: row.userId,
-      recordedManagerId: row.managerId,
-      notes: parsed.decision === "REOPEN" ? null : parsed.notes,
-      ...(parsed.decision === "REOPEN"
-        ? { previousDecision: row.managerStatus, previousNotes: row.managerNotes, previousReviewedAt: row.reviewedAt }
-        : {}),
-    },
-  });
+  // A decision's log row (a REOPEN wrote its own before the change). The
+  // decision itself already stands on the row; a log that still fails after
+  // retries is reported, and the Undo falls back to the recorded manager.
+  if (parsed.decision !== "REOPEN") await writeLog();
 
   // Both sidebars' Weekly reviews badge and both surfaces refetch.
   for (const uid of new Set([row.userId, u.id, row.managerId].filter((x): x is string => !!x))) {
