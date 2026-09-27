@@ -22,7 +22,8 @@
 import { GaugeCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getTeamUserIds } from "@/lib/team";
-import { getBoardForReader } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { teamAppGate, WORKLOAD_LOCKED_SENTENCE } from "@/lib/people/team-gate";
 import {
@@ -54,18 +55,15 @@ export default async function TeamWorkloadPage() {
   // same sentence rather than an empty grid.
   if (teamIds.length <= 1) return locked;
 
-  // Readable boards (per-board visibility composed the same way the
-  // Everything feed does it) — carrying each board's status set so the
-  // done check runs against the board's OWN statuses, not the default trio.
+  // Readable boards, from the one resolver over ONE world (never a gate call
+  // per List), carrying each board's status set so the done check runs
+  // against the board's OWN statuses, not the default trio.
   const boards = await prisma.board.findMany({
     where: { organizationId: u.organizationId, archivedAt: null },
     select: { id: true, statuses: true },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const readable = await Promise.all(
-    boards.map(async (b) => ((await getBoardForReader(b.id, u.id!, accessLevel)) ? b : null)),
-  );
-  const readableBoards = readable.filter((b): b is (typeof boards)[number] => b !== null);
+  const listRoles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "list", boards.map((b) => b.id));
+  const readableBoards = boards.filter((b) => roleAtLeast(listRoles.get(b.id) ?? "none", "VIEW"));
   const readableIds = readableBoards.map((b) => b.id);
   const statusesByBoard = new Map(readableBoards.map((b) => [b.id, getBoardStatuses(b)] as const));
 

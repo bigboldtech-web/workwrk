@@ -10,7 +10,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
-import { docAccessible } from "@/lib/doc-access";
+import { canCreateDocAt, docAccess } from "@/lib/doc-access";
+import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { DOC_ANCHOR_REFUSAL, createRefusal, isDocAnchorKind } from "@/lib/access/node-rules";
+import { docAnchorPlaceOf, docPlaceLive } from "@/lib/access/node-placement";
 
 const bodySchema = z.object({
   entityType: z.string().min(1).max(40),
@@ -25,12 +28,21 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  // M2: the one doc of an entity exists for the anchors the model knows
+  // (DOC_ANCHOR_KINDS) and a person's own note; any other string is refused
+  // before anything is read (round six, item 4).
+  if (parsed.data.entityType !== "NOTEPAD" && !isDocAnchorKind(parsed.data.entityType)) {
+    return NextResponse.json({ error: DOC_ANCHOR_REFUSAL, code: "invalid_anchor", message: DOC_ANCHOR_REFUSAL }, { status: 400 });
+  }
 
-  // Phase 37 — gate the parent entity. Without this, find-or-create
-  // would let a probe with a guessed parent ID either surface an
-  // existing doc on a private parent or mint a new one. 404-not-403
-  // so the gate doesn't leak existence.
-  const ok = await docAccessible(parsed.data, ctx.userId, ctx.accessLevel);
+  // Gate the parent entity. Without this, find-or-create would let a probe
+  // with a guessed parent ID either surface an existing doc on a private
+  // parent or mint a new one. 404-not-403 so the gate doesn't leak existence.
+  // FINDING the one doc of an entity needs Can view where it lives; MAKING it
+  // needs Can edit there (the placement rule, node-rules P1), below.
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  const anchor = { entityType: parsed.data.entityType, entityId: parsed.data.entityId };
+  const ok = await canReadDocPlace(nodeCtx, anchor, null);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Look for an existing, non-archived doc on this entity.
@@ -42,7 +54,21 @@ export async function POST(req: Request) {
       archivedAt: null,
     },
   });
-  if (existing) return NextResponse.json({ doc: existing, created: false });
+  if (existing) {
+    // An existing doc is handed back only to someone who can open it: a
+    // restricted doc on a readable anchor stays closed to the unlisted.
+    if (!(await docAccess(nodeCtx, existing.id))) return NextResponse.json({ error: "not found" }, { status: 404 });
+    return NextResponse.json({ doc: existing, created: false });
+  }
+
+  if (!(await docPlaceLive(ctx.orgId, { ...anchor, parentId: null }))) {
+    const message = "That place is in Trash or gone, so nothing can be added to it.";
+    return NextResponse.json({ error: message, code: "conflict", message }, { status: 400 });
+  }
+  if (!(await canCreateDocAt(nodeCtx, anchor, null))) {
+    const message = createRefusal("doc", (await docAnchorPlaceOf(ctx.orgId, anchor)) ?? null);
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
+  }
 
   const title = parsed.data.title ?? "Untitled note";
   const content = {};

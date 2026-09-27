@@ -23,6 +23,7 @@
 // Server-safe: no hooks. The two interactive pieces (Request access, the
 // module switch) are client islands rendered as children.
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Hash, Lock } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
@@ -162,15 +163,34 @@ export interface LockedPageProps {
   glyph?: "lock" | "hash";
   /** The owner's avatar beside their name (spec-talk 2.2 States). */
   ownerAvatar?: string | null;
+  /** One text link so the viewer leaves with somewhere to go (Connections to Integrations). */
+  elsewhere?: { href: string; label: string };
+  /**
+   * A ROLE denial (access 5.5 item 3, spec-ai-automation 1.4 item 5): the
+   * Owners and Admins who hold the role, as mailto avatars, and an "Ask an
+   * admin" primary that writes to all of them. Only when there is no object
+   * to request.
+   */
+  admins?: OrgAdmin[];
   back: BackTarget;
 }
 
-export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId, primaryLabel, glyph, ownerAvatar, back }: LockedPageProps) {
+export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId, primaryLabel, glyph, ownerAvatar, elsewhere, admins, back }: LockedPageProps) {
+  const adminEmails = (admins ?? []).map((a) => a.email).filter((e): e is string => !!e);
   const primary = joinChannelId
     ? <JoinChannelButton conversationId={joinChannelId} label={primaryLabel ?? "Join channel"} />
     : requestAccess
       ? <RequestAccessButton {...requestAccess} owner={owner ?? null} label={primaryLabel} />
-      : undefined;
+      : adminEmails.length
+        ? (
+            <a
+              href={`mailto:${adminEmails.join(",")}?subject=${encodeURIComponent(name ? `Access to ${name}` : "Access")}`}
+              className="os-chrome inline-flex h-9 items-center rounded-md bg-brand px-4 text-base font-medium text-white hover:bg-[var(--os-brand-hover)]"
+            >
+              {primaryLabel ?? "Ask an admin"}
+            </a>
+          )
+        : undefined;
   // A Join page is an invitation, not a refusal, so it defaults to the hash.
   const kind = glyph ?? (joinChannelId ? "hash" : "lock");
   return (
@@ -193,6 +213,12 @@ export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId
           </span>
           Owned by {owner.name}
         </span>
+      ) : null}
+      {!requestAccess && !joinChannelId && admins?.length ? <AdminAvatars admins={admins} /> : null}
+      {elsewhere ? (
+        <Link href={elsewhere.href} className="mt-2 text-sm font-medium text-brand-deep hover:underline underline-offset-4">
+          {elsewhere.label}
+        </Link>
       ) : null}
     </DenialBlock>
   );
@@ -238,15 +264,34 @@ export interface AppOffProps {
   isAdmin: boolean;
   admins?: OrgAdmin[];
   back: BackTarget;
+  /**
+   * The `ai` key's second off switch (spec-ai-automation 1.4): "AI features
+   * for members" on Settings > Data turns the app off without hiding it, so
+   * the sentence and the Admin's door name that page instead of Apps.
+   */
+  reason?: "hidden" | "ai-disabled";
 }
 
-export function AppOff({ label, isAdmin, admins = [], back }: AppOffProps) {
+export function AppOff({ label, isAdmin, admins = [], back, reason = "hidden" }: AppOffProps) {
+  const aiOff = reason === "ai-disabled";
   return (
     <DenialBlock
-      title={`${label} is hidden in this workspace`}
-      sentence={isAdmin ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.` : `Ask a workspace admin to turn ${label} on.`}
+      title={aiOff ? "AI is turned off for this workspace" : `${label} is hidden in this workspace`}
+      sentence={
+        aiOff
+          ? isAdmin
+            ? "AI features for members are off in Settings. Turn them back on from Data."
+            : "Ask a workspace admin to turn AI features on."
+          : isAdmin
+            ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.`
+            : `Ask a workspace admin to turn ${label} on.`
+      }
       back={back}
-      primary={isAdmin ? <SettingsLink href="/settings/apps" label="Open Apps & modules" /> : undefined}
+      primary={
+        isAdmin ? (
+          aiOff ? <SettingsLink href="/settings/data" label="Open Data" /> : <SettingsLink href="/settings/apps" label="Open Apps & modules" />
+        ) : undefined
+      }
     >
       {isAdmin ? null : <AdminAvatars admins={admins} />}
     </DenialBlock>

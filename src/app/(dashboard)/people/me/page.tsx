@@ -17,8 +17,9 @@ export default async function MyProfilePage({
   const user = await requireSessionUser();
   // Carry the query across the redirect: /people/me?tab=kras is the
   // contract the Work sidebar's "My KRAs & KPIs" row and the KPI Inbox rows
-  // link to (spec-goals section 2 `/people/me?tab=kras`), and a dropped
-  // ?tab= would land them on the wrong tab.
+  // link to (spec-goals section 2 `/people/me?tab=kras`), and
+  // /people/me?tab=assets opens a Member's own kit (spec-tools-misc 2.2); a
+  // dropped ?tab= would land either on the wrong tab.
   const sp = await searchParams;
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) {

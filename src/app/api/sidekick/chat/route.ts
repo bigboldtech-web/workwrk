@@ -16,6 +16,7 @@
 // logged as an AgentRun row when the session is agent-scoped, for
 // audit + cost analytics.
 
+import { requireApp } from "@/lib/app-gate";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -28,11 +29,11 @@ import { TOOLS, toolsForSession } from "@/lib/agents/tools";
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
 
-const DEFAULT_SYSTEM_PROMPT = `You are Sidekick, the AI assistant inside WorkwrK — a modular Work OS.
+const DEFAULT_SYSTEM_PROMPT = `You are Ask AI, the assistant inside WorkwrK, a people and project management workspace.
 
-You help the user with everyday work tasks across whatever products their team has installed: boards (Work), SOPs, OKRs, Meetings, Culture, CRM, ITSM, Marketing, Dev, Legal, and more.
+You help the user with everyday work: their Spaces, Lists and tasks, docs, forms and tables, SOPs, goals, KRAs and KPIs, meetings, weekly reviews and kudos. You act as the user, so you can only see and change what they can.
 
-When the user asks you to do something you can act on inside WorkwrK (create a task, log a lead, file a ticket, send kudos, etc.) and you have a tool for it, USE THE TOOL. Don't just describe what you would do — actually do it.
+When the user asks you to do something you can act on inside WorkwrK (create a task, schedule a meeting, send kudos and so on) and you have a tool for it, use the tool. Do not just describe what you would do: do it.
 
 When the user asks for advice or drafting (writing copy, brainstorming, summarizing), respond directly with markdown.
 
@@ -71,7 +72,7 @@ async function ctxAndSession(sessionId: string) {
 }
 
 // Augment the system prompt with the user's current app+board context
-// so the model doesn't have to ask "which board?" — it already knows.
+// so the model doesn't have to ask "which board?", it already knows.
 // We pull the product display name from the catalog and the board's
 // display name + tagline from the boards registry. For Studio boards
 // we hit the DB to enumerate the column list so the model can write
@@ -97,7 +98,7 @@ async function buildContextPrefix(
       `## Current context\n` +
       `The user is right now looking at the **${board.name}** board inside **${productName}**.\n` +
       (board.tagline ? `Board tagline: ${board.tagline}\n` : "") +
-      `Default the user's questions to this surface unless they explicitly point elsewhere — they almost certainly mean this board when they say "this", "here", "the deals", "the leads", etc.\n`
+      `Default the user's questions to this surface unless they explicitly point elsewhere, they almost certainly mean this board when they say "this", "here", "the deals", "the leads", etc.\n`
     );
   }
   return (
@@ -107,6 +108,10 @@ async function buildContextPrefix(
 }
 
 export async function POST(req: Request) {
+  // The ai app key first (access 5.2.1): Guests 404, and a hidden app or AI
+  // features turned off answer 403 app_off before anything is written.
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) {
@@ -141,8 +146,8 @@ export async function POST(req: Request) {
 
   // 3. Resolve agent + tools + system prompt + model.
   // Two sources of product scope on a session:
-  //   - `agent.productSlug` — agent-bound session (Ria the SDR, etc.)
-  //   - `chat.productContext` — board-opened session (clicked Sidekick
+  //   - `agent.productSlug`, agent-bound session (Ria the SDR, etc.)
+  //   - `chat.productContext`, board-opened session (clicked Sidekick
   //     while on /crm/pipeline). No agent persona, just contextual.
   // Both feed into `toolsForSession` so the model gets the right
   // create-tools lit up either way. Board context also augments the
@@ -285,7 +290,7 @@ export async function POST(req: Request) {
   } catch (err) {
     errorText = err instanceof Error ? err.message : "Claude request failed";
     if (!assistantText) {
-      assistantText = `Sorry — I hit an error reaching the model.\n\n\`${errorText}\``;
+      assistantText = `Sorry, I hit an error reaching the model.\n\n\`${errorText}\``;
     }
   }
 

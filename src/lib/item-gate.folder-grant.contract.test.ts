@@ -1,20 +1,24 @@
 // A folder grantee reads the tasks of the Lists under the folder they were
-// granted, and writes none of them.
+// granted, with the role the grant gives them and nothing more.
 //
-// Before this, the List page showed a folder grantee its tasks (the List page
-// gates with getBoardForReaderOrFolderGrantee, board.ts), but every
-// /api/items/[id]* door gated through gateItem, whose List role came from
-// getBoardForReader alone, and answered 404: the task drawer, the subtasks
-// pill and the realtime refresh all dead-ended on a task the List had just
-// drawn. Bird's eye shows the same reader the same cards, so it has to open.
+// Before this, the List page showed a folder grantee its tasks, but every
+// /api/items/[id]* door gated through gateItem, whose List role came from a
+// reader that knew nothing of Folder grants, and answered 404: the task
+// drawer, the subtasks pill and the realtime refresh all dead-ended on a task
+// the List had just drawn. Bird's eye shows the same reader the same cards,
+// so it has to open.
 //
-// Two halves, because vitest here runs pure modules in node with no database:
+// The one node-access resolver answers it now: the List's role for this
+// viewer is decided over one world (the List's own grant, its owner, its
+// Folder chain with the Folder grant's own role, its Space, the PRIVATE cut),
+// so a Folder grant with Can view reads and one with Can edit writes, exactly
+// as the grant says (node-rules W1). Two halves, because vitest here runs
+// pure modules in node with no database:
 //
-//   1. the SOURCE half: gateItem asks the folder-grant door ONLY after
-//      getBoardForReader refused, asks only the grant half (never the wrapper,
-//      which would run getBoardForReader a second time), and it can only ever
-//      yield VIEW; the crumbs' listIsReadable asks the List page's own gate,
-//      split into its two halves the same way;
+//   1. the SOURCE half: gateItem asks the resolver ONCE for the List, after
+//      the org-admin short cut, never a per-helper ladder and never a second
+//      reader or a legacy folder door; the crumbs' listIsReadable asks the
+//      same resolver's Can view;
 //   2. the DECISION half: a List role of VIEW lets the task be read and never
 //      edited, moved, archived or deleted.
 
@@ -35,26 +39,21 @@ function between(src: string, from: string, to: string): string {
   return src.slice(start, end);
 }
 
-describe("gateItem gives a folder grantee VIEW, and only VIEW", () => {
+describe("gateItem takes a folder grantee's role from the one resolver", () => {
   const listRoleBlock = between(code, 'let listRole: ItemDecision["role"] = "none";', "const creatorId");
 
-  it("asks the folder-grant door only after the reader gate refused", () => {
-    const reader = listRoleBlock.indexOf("await getBoardForReader(item.boardId");
-    const grantee = listRoleBlock.indexOf("folderGrantCovers(item.board.folderId, c.userId)");
-    expect(reader).toBeGreaterThan(-1);
-    expect(grantee).toBeGreaterThan(reader);
-    expect(listRoleBlock).toMatch(/\} else if \(item\.board\.folderId\) \{/);
+  it("asks the resolver once for the List, over one world", () => {
+    expect(listRoleBlock).toMatch(/await nodeRole\(nodeCtxFromLevel\(c\.userId, c\.organizationId, c\.accessLevel\), \{ kind: "list", id: item\.boardId \}\)/);
+    expect(listRoleBlock.match(/nodeRole\(/g)?.length).toBe(1);
   });
 
-  it("runs the reader gate once: never the wrapper that repeats it", () => {
-    expect(listRoleBlock.match(/getBoardForReader\(/g)?.length).toBe(1);
-    expect(code).not.toMatch(/getBoardForReaderOrFolderGrantee\(/);
+  it("runs no second reader and no legacy folder door", () => {
+    expect(listRoleBlock).not.toMatch(/getBoardForReader\(|canContributeBoard\(|canEditBoard\(/);
+    expect(code).not.toMatch(/getBoardForReaderOrFolderGrantee\(|folderGrantCovers\(|accessibleFolderIds\(/);
   });
 
-  it("can only ever yield VIEW through the folder grant", () => {
-    const branch = listRoleBlock.slice(listRoleBlock.indexOf("} else if (item.board.folderId) {"));
-    expect(branch).toMatch(/\? "VIEW" : "none"/);
-    expect(branch).not.toMatch(/"EDIT"|"FULL"/);
+  it("reads the Space Owner rung as Full access and fabricates nothing else", () => {
+    expect(listRoleBlock).toMatch(/listRole = d\.role === "none" \? "none" : d\.role === "OWNER" \? "FULL" : d\.role;/);
   });
 
   it("keeps the org-admin short cut ahead of every List read", () => {
@@ -63,10 +62,8 @@ describe("gateItem gives a folder grantee VIEW, and only VIEW", () => {
 
   it("links a grantee's crumbs to the List page that opens for them", () => {
     const readable = between(code, "export async function listIsReadable", "\n}\n");
-    const reader = readable.indexOf("await getBoardForReader(item.boardId, c.userId, c.accessLevel)");
-    const grant = readable.indexOf("folderGrantCovers(item.board.folderId, c.userId)");
-    expect(reader).toBeGreaterThan(-1);
-    expect(grant).toBeGreaterThan(reader);
+    expect(readable).toMatch(/await getBoardForReader\(item\.boardId, c\.userId, c\.accessLevel\)/);
+    expect(readable).not.toMatch(/folderGrantCovers/);
   });
 });
 

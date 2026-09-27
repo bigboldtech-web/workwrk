@@ -7,11 +7,11 @@
 
 import { NextResponse } from "next/server";
 import { LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 import { AUTOMATION_ACTIONS } from "@/lib/automation/registry-actions";
 
 export async function GET() {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   return NextResponse.json(

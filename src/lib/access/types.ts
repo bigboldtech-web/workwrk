@@ -485,6 +485,12 @@ export interface OrgFacts {
   activeModules: Set<string>;
   apps: AppsConfig;
   peopleTeamIds: string[];
+  /**
+   * settings.data.aiEnabled ("AI features for members"). Optional so every
+   * existing literal still compiles; absent reads as on. Rule 2 turns the
+   * `ai` app key off when this is false (spec-ai-automation section 1.4).
+   */
+  aiEnabled?: boolean;
 }
 
 export interface AccessFacts {

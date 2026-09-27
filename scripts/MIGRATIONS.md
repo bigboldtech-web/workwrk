@@ -894,9 +894,12 @@ Founder step, production, one release from now:
 
 ```
 DIRECT_URL= DATABASE_URL="<prod url>" npx prisma db execute \
-  --file prisma/sql/2026-09-22-drop-announcement-dismissal.sql \
-  --schema prisma/schema.prisma
+  --file prisma/sql/2026-09-22-drop-announcement-dismissal.sql
 ```
+
+(No `--schema`: Prisma 7 removed the flag from `db execute`, and passing it
+is a hard CLI error. The command reads `prisma.config.ts`, as
+`prisma/sql/README.md` says.)
 
 ## Phase 4, stage E: announcements, what changed in data terms
 
@@ -1016,6 +1019,154 @@ Owner the holder) before the Phase 8 write. The local run of 2026-09-23 (Acme Co
 - **Where a response went** is recorded on new responses only, under the reserved `$went` key of `FormSubmission.data` (a task id on the List, a row id on the table, or the reason it was not sent). Responses written before this release show "Not sent" in the Went to column with no reason; nothing rewrites them.
 - **Deleting responses** (one, or all behind a typed confirm) is new and is a hard delete by the form's creator or an admin. A single deleted response is written in full to the audit log first (`form.response.deleted`, `oldValue.data`), so an admin can read it back; "Delete all" records the count (`form.responses.deleted`).
 - **New cron row, NOT installed**: "Form responses daily summary", `POST /api/cron/form-daily-summary`, 8 AM daily, in `scripts/CRON-SETUP.md`. It is fail-closed (503 with no `CRON_SECRET`). Until the founder adds it, a form set to "Send a daily summary instead" is quiet.
+
+## One access model (2026-09-24): `scripts/report-folder-overgrants.ts` (DRY RUN ONLY) and `scripts/apply-private-rule.ts`
+
+**What.** This release puts every node (Space, Folder, List, doc, table, canvas, form) on one access resolver (`src/lib/access/node-access.ts`) and one Manage access dialog. It fixes the reported bug ("admin on a folder gives the entire Space") **forward**: from this release a grant on a Folder never climbs to its Space or to sibling Folders, and the canvas Share chip no longer writes a Space row. **No existing row is touched on deploy.** Two scripts help the founder look at what the bug may have left behind and choose each workspace's rule for Private items.
+
+**Why a report and not a clean-up.** A Space row the bug wrote and a Space row someone meant to write look the same in the database. Removing one by script would take access away from people who were given it on purpose, so neither script ever revokes a grant.
+
+**Schema.** `prisma/sql/2026-09-24-access-grants.sql` adds the `AccessGrant` table (person grants on tables, canvases and forms). It is in the deploy manifest, so `npm run build` applies it before `next build`. By hand on the box: `npx prisma db execute --file prisma/sql/2026-09-24-access-grants.sql`, then `npx prisma generate`. Every reader answers "no grants" while the table is absent.
+
+### `report-folder-overgrants.ts`: what it lists, per workspace
+
+- **A. Space and Folder granted together** (a heuristic, never proof): every Folder grant whose person also holds a Space row in that Folder's Space, with both roles, both dates and both inviters. **SAME INVITER WITHIN WINDOW** marks the pairs one person wrote within `--window-minutes` (default 30) with a Space row below Owner.
+- **A2. Space rows possibly written by the canvas Share**: Space rows (below Owner) whose inviter created or last edited a canvas in that Space within the window. **These cannot be told apart from deliberate Space shares.**
+- **B. Folder grants inside an org-wide Space**, each marked "restriction impossible without changing the Space to Space members". Everyone at the org opens the whole of an org-wide Space, so the Folder grant only adds edit or manage rights on that Folder.
+- **C. What the strict Private rule would change**: one sub-section per row of `NODE_ACCESS_DELTAS` (C1 N1, C2 N2, C3 N3, C4 N4, C5 N6, C6 N7), each row a person, a node, the change and the row that gives today's reach. **C7 (N5)** is strict only too: a sub-page would follow its parent page, and C7 names the people who open a sub-page today and would not. Under the legacy rule every page made before the workspace's cutoff keeps today's reach (see "The legacy cutoff" below). C8 lists anything the named rows do not explain (it should be empty).
+- **D. Totals.**
+
+`--write` is refused with exit code 2. The report never writes.
+
+```
+# Local (agents may run this; reads only)
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/report-folder-overgrants.ts --report /tmp/folder-overgrants.md
+#   --org <organizationId>    one workspace only
+#   --window-minutes <n>      the SAME INVITER window, default 30
+
+# Production, on /www/wwwroot/workwrk.com with the production DATABASE_URL in the env (reads only)
+npx tsx scripts/report-folder-overgrants.ts --report ./folder-overgrants.md
+```
+
+### How to act on the report
+
+- **An A row**: confirm with the person (and whoever invited them) whether the Space row was meant. If it was not, remove the Space row from that Space's Manage access dialog ("..." on the Space, Manage access). The dialog says when the person still reaches the Space some other way, and it refuses to remove the last Full access holder.
+- **In an org-wide Space (the Space's visibility is Everyone at the org), removing the Space row changes nothing**: the person still opens the whole Space as every org member does (section B). To restrict, change the Space to Space members first, and expect everyone without a row to lose it.
+- **An A2 row** may be a deliberate share. Treat it like an A row: ask first.
+- **Nothing is revoked automatically**, by these scripts or by the release.
+
+### The legacy cutoff: existing rows keep today's reach, new grants follow the new rules
+
+The legacy floor (the reach a person had before this release) is kept for the rows that existed before it, and only for them. Each workspace records the instant this release first decided access in it, `Organization.settings.accessLegacyCutoff` (an ISO time). The first request that reads it stamps it, with one guarded UPDATE that only writes while the key is absent, so it is set once on deploy day and never moves (changing the Private rule rewrites `accessModel`, a different key).
+
+- A SpaceMember, FolderMember or BoardMember row created **before** the cutoff keeps everything it gave before (A8), under the legacy rule.
+- A row created **at or after** the cutoff (a grant from the Manage access dialog, a member route, an accepted email invitation) follows the new rules only (A2): a Folder grant does not reach a Private List or a Private sub-folder inside it that does not name the person.
+- A sub-page made before the cutoff keeps today's reach (every page with no location opened to the org); one made after it follows its parent page (A6).
+- **Nothing to run.** No row is rewritten. If the key cannot be read or written, every row reads as existing: today's answer, never a loss.
+- To look at it: `SELECT "settings"->>'accessLegacyCutoff' FROM "Organization" WHERE "id" = '<orgId>';`. Do not edit it by hand: moving it later would give newer grants the older reach, and moving it earlier would take reach away from rows that had it.
+
+### `apply-private-rule.ts`: the rule for Private items, per workspace
+
+Every existing workspace starts under the **legacy** rule: a person keeps at least the reach they had before this release (the legacy floor), so nothing that works today stops working on deploy. Under the **strict** rule an item marked Private inside a shared container is reached only by the people it names. **The founder applies the strict rule one workspace at a time, after reading that workspace's section C.** The rule is `Organization.settings.accessModel.privateRule`; absent reads as legacy.
+
+The script is a dry run by default: it prints the workspace's current rule and the C totals. `--write` sets (`strict`, `legacy`) or removes (`clear`) that one settings key through `writeOrgSettingsKeys` and records an `access.private_rule_changed` activity row, in one transaction. It never touches a grant row, so `--rule legacy` or `--rule clear` puts every person's reach back exactly as it was.
+
+```
+# Local (agents may run this)
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict            # dry run
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
+  npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict --write    # apply
+
+# Production (the founder only, after reading section C of the report for that workspace)
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict              # dry run first
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict --write      # apply
+npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule clear --write       # undo: back to legacy
+#   --actor <email or id>     who the activity row names (default: the workspace's first active Owner, else Admin)
+```
+
+## 2026-09-26: reserved field keys, a read-only report for the founder
+
+- **No schema change and no data script.** The field-keys fix (4c1c0c66) stops NEW custom fields from taking a built-in column's key and reads existing clashes safely, so nothing must run for the product to be correct.
+- **One read-only report to run on the box, once, after this deploys**: `npx tsx scripts/report-reserved-field-keys.ts`. It prints, per org, every custom field whose key is reserved and flags "SHARED SLOT" where a field shares the task's own metadata slot (for example a field keyed `description`, which is literally the task body). It writes nothing. Locally it found 1 harmless view-level clash in 258 Lists. If prod shows a SHARED SLOT row, bring it back for a human decision; do not script a rename.
+
+## Phase 7 (AI, automation and add-ons), stage A: two request tables, one reversible cleanup
+
+- **Schema**: `prisma/sql/2026-09-24-phase7-requests.sql` creates `IntegrationRequest` ("Request this" on /integrations, unique on organizationId, key and userId) and `AppSuggestion` ("Suggest an app" on Marketplace). Two new tables, no existing column touched. It is in the deploy manifest (`scripts/deploy-migrations.mjs`). By hand: `npx prisma db execute --file prisma/sql/2026-09-24-phase7-requests.sql`, then `npx prisma generate`. Deploy order is free: the catalogue reads zero counts and the two request routes answer a named 503 while the tables are absent. (Prisma 7's `db execute` no longer takes `--schema`; it reads `prisma.config.ts`, whose datasource is `DIRECT_URL || DATABASE_URL`.)
+- **`scripts/cleanup-legacy-automation-workflows.ts`** removes the legacy Autopilot rows: `Workflow` rows with `kind = AUTOMATION`, which only the deleted `/autopilot` mock and `/api/autopilot/*` ever wrote and which nothing ever ran (`src/lib/workflows/runtime.ts` `triggerEvent` has no caller). APPROVAL rows are never touched. Dry run by default: it prints the rows per organization. `--export <file>` writes every AUTOMATION row with its `WorkflowRun` rows as JSON, and `--write` refuses to run without `--export` in the same command, so the delete always has its undo; it then asserts zero remain. `--restore <file>` recreates the rows from an export, skipping ids that already exist. Local run on 2026-09-27: 0 AUTOMATION rows and 0 APPROVAL rows, report at `phase7-reports/cleanup-legacy-automation-dry-run.txt` and the (empty) export at `phase7-reports/cleanup-legacy-automation-export.json` under the Phase 7 scratchpad, both written by the dry run with `--export`. Production, founder's step:
+  ```
+  DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/cleanup-legacy-automation-workflows.ts                       # read the report
+  DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/cleanup-legacy-automation-workflows.ts --export legacy-automation.json --write
+  ```
+  Keep the JSON: `--restore legacy-automation.json` is the way back.
+- **No data step, behaviour changes to know about**:
+  - Tool and Asset deletes go to the one Trash (TrashType `tool` with its `ToolShare` rows, and `asset`) instead of erasing the row. Past deletes are already gone; nothing is backfilled.
+  - `GET /api/assets?assignedToId=` now narrows within the caller's scope instead of skipping it. A colleague's profile Assets tab shows only what the viewer may already see (their own kit, their reports' kit, or everything for an org-wide role).
+  - `GET /api/integrations` returns the connector catalogue. Its old body returned every `Integration` row with its `config` (API keys) to any signed-in person and had no caller in the app; the rows, without config, are `?records=1` for Owners and Admins.
+  - Agent writes (add, create, pause, schedule, Run now, remove) are Owner and Admin. Adding a catalog agent always was; creating a custom agent and scheduling one were manager and above. Agent runs: Owners and Admins read every run; everyone else reads autonomous runs and their own.
+  - Build apps is Owner and Admin (APP_RULES.build), pages and API alike, including `/api/build/generate`, which any member could call. **The Member exception, one exception so nobody loses what they could do before:** in an org that has built apps, a Member keeps USING them (the list shows the org's live apps plus their own archived ones; open any of them, add, change and delete rows) and gets an APPS > Build apps row; on the apps THEY created they also keep archive and restore. Creating a new app and AI generation are Owner and Admin (`src/lib/build/gate.ts`), and that is the one narrowing. **Founder decision still open, reported as a spec conflict** (spec-tools-misc 2.3 open question 1): whether a Member may build their own apps, as they could at HEAD. Before shipping, count who made the apps on production:
+    ```sql
+    SELECT u."accessLevel", a.status, count(*) AS apps,
+           count(*) FILTER (WHERE jsonb_array_length(COALESCE(a.ui->'rows', '[]'::jsonb)) > 0) AS apps_with_rows
+    FROM "App" a LEFT JOIN "User" u ON u.id = a."createdById"
+    GROUP BY 1, 2 ORDER BY 1, 2;
+    ```
+    Apps created at a Member level are the ones whose makers can no longer make another; if that count is not zero, decide before the deploy.
+  - Automation writes are unchanged (create, edit, publish, activate, deactivate and retry for a manager or above; delete and connections for Owner and Admin), but the Automation pages are now open to every Member to read, with every write control hidden for a viewer the write routes refuse (`GET /api/automation/me`).
+  - The Cashkr-era automation triggers (leads, quotes, pickups, payments) and the Leads template are hidden, not deleted: an org that sets `Organization.settings.automation.legacyTriggers = true` gets them back, and a workflow already on one keeps it.
+  - `settings.data.aiEnabled === false` turns the `ai` app key off (Ask AI and Agents answer `AppOff`, the API 403 `app_off`; scheduled agents skip the org), and the model calls of this phase's other surfaces answer 403 `ai_off` (`src/lib/ai/ai-off-gate.ts`: the meeting summary `POST /api/ai`, `/api/ai/cmdk-summary`, `/api/ai/inbox-suggestion`, `/api/build/generate`); absent reads as on. Automations are unaffected. **Still to follow with the switch's writer (Phase 8, Data > Retention and privacy):** the AI calls owned by other hubs (docs write/ask/summarize/extract-table, tables ask, canvas generate/analyze, forms generate, notetaker process, KRA and SOP generate, OKR assess, board field suggest, file summarize) do not read the switch yet. No org can turn it off before Phase 8 ships the control.
+
+## Phase 7 (AI, automation and add-ons), stage C: the automation hub, one small table and one cron row
+
+One additive schema file, `prisma/sql/2026-09-27-automation-cron-tick.sql` (the `AutomationCronTick` table, in the deploy manifest; see `prisma/sql/README.md`), and no data script. What the founder has to do beyond the manifest is one cron row:
+
+- **`POST /api/cron/automation-schedule`** fires the two time triggers (a task's date arrives, every time period). The row is written in `scripts/CRON-SETUP.md` (every 5 minutes, `x-cron-secret`) and is NOT installed until the founder adds it to the root crontab. Until it runs, the two time triggers read "Not live yet" everywhere (the builder, the Workflows list, Templates): the cron stamps `AutomationCronTick` on every tick and the trigger catalog treats a stamp older than twenty minutes as not live, so a workflow on a time trigger can be published but is never shown as live on a host where nothing fires it. The endpoint FAILS CLOSED in production: with `CRON_SECRET` unset it answers 503 instead of running for anyone who POSTs to it.
+- The webhook signing secret lives in the existing `IntegrationConnection.metadataJson` (the raw value is what signs each delivery; the API never returns it after the one-time display and the page gets only its last four characters), so connecting, rotating and disconnecting need no column. An org that connected the webhook before this stage has no secret until an Owner or Admin presses Save on Connections again, which makes one.
+- `definition.scope` lives in the existing `AutomationWorkflow.definition` JSON. A row with no `scope` reads as Everywhere, so old workflows keep running exactly as before.
+- Version restore writes a new `AutomationWorkflowVersion` row (and keeps the replaced draft as its own row when nothing else holds it). The engine runs the PUBLISHED version, not the draft, so a restore or a saved draft changes nothing live until Republish.
+
+## Phase 7 (AI, automation and add-ons), stage E: the legacy Marketing module becomes a Space
+
+No schema file: the two markers the resolver reads live in JSON columns that already exist (`Space.settings.legacySource = "marketing"` and `Board.settings.legacyKind` of `campaigns`, `content` or `events`; the spec's `metadata` column does not exist on either model), and the write-back is `customFields.migratedItemId` on each `Campaign`, `ContentItem` and `EventBrief` row. Two steps for the founder, in this order:
+
+1. **Seed the rewritten "Marketing" Space template** (`space.marketing` in `prisma/seed-templates.ts`: three Lists, Campaigns, Content and Events, each with its own statuses and fields; it used to be two Lists with no fields). Idempotent by key, and an org that adopted the key keeps its own row:
+   ```
+   DIRECT_URL= DATABASE_URL=<prod> npx tsx prisma/seed-templates.ts            # report
+   DIRECT_URL= DATABASE_URL=<prod> npx tsx prisma/seed-templates.ts --write
+   ```
+2. **`scripts/migrate-marketing.ts`** moves every organization's legacy rows onto tasks in a Marketing Space built from that template (`src/lib/marketing/legacy-import.ts` does the work; the same function sits behind the "Marketing (legacy)" row on Settings > Data, so an Owner can run their own org from the page instead). Dry run by default with a per-org report (rows read, already moved, to write, statuses that moved to a neighbour, owners no longer members, campaigns in another currency, columns folded into the description); `--org <id>` for one org; `--report <file>` saves it (`.json` for the full structure). Idempotent: the Space and Lists are found by their markers and a row whose `migratedItemId` names a task that still exists is skipped, so a second run moves only what the first did not. **Nothing is deleted**: the three tables and every row stay, each gaining `migratedItemId`. The write is not one transaction (it goes through `createSpace`, `applyListTemplate` and `createBoardItem`, the product's own creators, so the Space has its owner row, the Lists their views and every task its activity line); a run that stops part-way is resumed by running it again, and every run ends with a read-back that asserts every row points at a task on its List. Local run on 2026-09-27 against the test org (8 rows: 3 campaigns, 3 content, 2 events, one owner dropped, one status moved per kind, one campaign in EUR noted in its description): report and write log under the Phase 7 scratchpad (`phase7-reports/migrate-marketing-*.txt`); the second run reported 8 already moved, 0 to write. Production, founder's step:
+   ```
+   DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/migrate-marketing.ts --report marketing-dry-run.txt   # read it
+   DIRECT_URL= DATABASE_URL=<prod> npx tsx scripts/migrate-marketing.ts --write --report marketing-write.txt
+   ```
+   The Space is created visible to the whole organization, because the legacy pages answered to any signed-in employee; narrowing it afterwards is the Owner's call. **One narrowing to know about, stated on the page's confirm, its success toast and the script's report:** the old pages let ANY signed-in employee add and edit campaigns, content and events; after the run every Member can VIEW the Space and its three Lists, and editing needs Space membership, which an Owner grants from the Space's share dialog. Nobody loses a record; a Member who edited yesterday edits again once added. Money fields on the Lists carry the org currency (`settings.currency`); a campaign stored in another currency does NOT have its budget or spend written into those columns (it would render under the wrong symbol and be summed with the rest): its figures go into the description as "Budget: 5,000.00 EUR" and "Spent: ..." lines, and the raw numbers sit under `metadata.legacyMarketing.budget` and `.spent` with `.currency`. The CSV export carries every row's own currency in a column, so it is the exact copy.
+
+   **Guards on the write** (each reviewed against the worst case):
+   - **The template is checked, not trusted.** The import refuses unless the built-in `space.marketing` template holds the three Lists by name, each with its own statuses and its own fields; an older seed (two Lists, no fields) is refused with the reason, since a run marks every row and there is no second chance. So step 1 above really is first: the "Import" button on Settings > Data answers "The Marketing Space template is not ready on this workspace yet" until the re-seed has run.
+   - **One write at a time per organization.** The write holds a per-org advisory lock (`pg_try_advisory_xact_lock(hashtext('legacy-marketing-import:<orgId>'))` on a transaction kept open for the run); a second Owner's click, or the script overlapping a click, is told "An import is already running for this workspace" and writes nothing.
+   - **A marker Space in any state is the marker.** An archived (trashed) Marketing Space, or List, still counts as migrated: no second Space is ever built beside it, the old `/marketing` links still resolve to it, the Data page says it is in Trash with a link to Trash, and the import answers "Restore it from Trash first" while it is there.
+   - **The crash window re-links instead of duplicating.** If the process dies between creating a task and marking its row, the next run finds the task on the marker List by its provenance (`metadata.legacyMarketing.id`), writes the missing `migratedItemId` back and reports it as "re-linked", so no row ever gets two tasks.
+   - **Counts are exact on the run where they matter.** `written` moves with every row, so a run that stops part-way reports what it actually wrote; the page shows the partial report with "run Import again to finish" (the API answers 200 with the report, the report's own `error` says it stopped).
+   - **The read-back checks existence, not the List**, so a migrated task a person has since moved to another List (theirs to do) no longer fails a later re-run.
+   - **A trashed task counts as moved**, in either of the two ways a task reaches Trash: archived in place (`archivedAt`, Trash > Archived) or deleted into a `TrashItem` snapshot (Trash > Deleted, which removes the `Item` row; on its own, or inside the snapshot of the List, Folder or Space it was deleted with). The rule is `legacyRowState` in `src/lib/marketing/legacy-map.ts`: a row is moved when any task, live or in Trash, carries its marker (the row's `migratedItemId`, or the task's `metadata.legacyMarketing`). `/marketing/{id}` for a campaign whose task is in Trash lands on the Campaigns List with "That campaign's task is in Trash", never inside the trashed task; the Settings > Data row says "moved, then put in Trash. Restore it from Trash." and offers no Import for it; the report counts it as "in Trash" and writes no task for it, so restoring the trashed task never makes two. Before 2026-09-27 only the `Item` table was read, so a task deleted to Trash counted as never moved and Import made a second one. Only a task deleted for good from Trash leaves its row importable again.
+   - **A re-date writes the zone with the dates.** The correction of tasks an earlier run wrote verbatim sets `metadata.legacyMarketing.dateZone` in the same transaction as `startAt` and `dueAt`, and a task whose provenance names a `dateZone` is never corrected again, so a later run by an Owner in another zone cannot move its dates a second time.
+
+- **Before the run**: `/marketing` and its four children send an Owner or Admin to `/settings/data?tab=import&legacy=marketing` (the row scrolls into view and pulses; for a workspace that never held a row it says so and links the Marketing Space template instead of showing nothing) and everyone else to the in-shell 404; a Guest always gets the 404. **After the run**: they 308 to the Space, the List or the task (`/marketing/{id}` to the campaign's task; a campaign created after the import lands on the Campaigns List with the notice "That campaign was not moved yet. An Owner or Admin can bring it over from Settings > Data", which deviates from spec 2.11's "It is in the list" because the campaign is not in the List; an id no campaign ever had is a 404). The five marketing pages are deleted; the whole thing is `src/app/(dashboard)/marketing/[[...slug]]/page.tsx`. **Two things to know when checking it:** (1) on a hard load the 308 and 307 are RSC redirects inside a 200 body (the page sits under the dashboard's streaming boundary, which the in-shell 404 needs), so curl and link unfurlers see 200 with no Location header while every browser lands on the target; do not file the 200 as a regression. (2) `ROUTE_HUB` keeps a `/marketing: home` row and a `ROUTE_TITLES` entry although spec-tools-misc section 4 says the prefix is dropped: the route-hub completeness test requires a row or a listed redirect exemption for every directory under `(dashboard)`, the resolver never paints, so no rail pill or crumb is ever derived from it; a deliberate, harmless deviation.
+- **Kept for one release**: `GET /api/marketing/campaigns`, `/content` and `/events`, now Owner and Admin only through the Data gate (they answered any session and their POST and PATCH handlers let any employee create and patch campaigns; those handlers are gone). Delete the three routes with the next release, after the production run. The CSV export (`GET /api/marketing/legacy/export?entity=`) stays as long as the tables do.
+- **Removed with the pages** (each had no other consumer, checked by grep): `src/lib/dept-home.ts` and `src/components/dashboard/dept-workspace-banner.tsx` (routed to /crm, /itsm, /legal, all long gone); the product-catalog entries `workwrk-assets` and `workwrk-campaigns` with their department recommendations, the `workwrk-campaigns` board tree, the Mira agent (its product is off-scope and `PRODUCT_TOOL_NAMES` already excluded it from `available`) and the "Q4 campaign launch" quick-start template (it wrote rows into the retired tables); the `GRAD` gradient map; the `.mkt`, `.camp`, `.cmps`, `.evts` and `.lib` CSS families. Existing `Product` and `ProductInstallation` rows for the two slugs stay in the database and are ignored: `seed-products.ts` only upserts what the catalog names.
+
+## Phase 7 (AI, automation and add-ons), close: deviations to ratify and two decided additions deferred
+
+No data step. This section is the founder's list of where the shipped hub reads differently from the canon and why, and of the two decided additions (competitor-gap 2026-09 section 7, decision 9 and gap 18) that did not ship in this phase.
+
+- **Deferred, not dropped, the two "AI inline first" items still open.** (1) **AI field autofill** (ClickUp's AI field): no "Fill with AI" on a custom field yet. The inline entry points that did ship are the task strip, the list-row menu and the doc editor's `/ai` slash row; the only field-level AI call today is the Fields panel's name suggestions (`POST /api/boards/[id]/fields/suggest`), which suggests fields, not values. (2) **Agents that write project updates and standups into Talk channels**: no agent tool posts a message. The reason is mechanical, not a decision: posting into a conversation (membership check, markup strip, realtime publish, the Inbox notification keys) lives inside `POST /api/conversations/[id]/messages` and has no server library function, so an agent tool would have to copy that pipeline or call the route as the person. Extracting it is Talk-unit work; when that helper exists the tool is one `ToolDefinition` in `src/lib/agents/tools.ts` gated like the other agent writes. Both stay on the Phase 8 list.
+- **`/sidekick?q=<text>` prefills and focuses the composer instead of sending.** spec-ai-automation's URL-state table says the text is sent immediately. The shipped behaviour waits for the person to read and press send, because a link (a Slack message, a bookmark, a palette row) firing a model call and a persisted chat turn on click is the worst case for a Member who did not write the text. One keypress more; nothing lost. Ratify or flip: the send is one line in `src/app/(dashboard)/sidekick/page.tsx` (the `ask` intent).
+- **The CHATS "All chats" ghost row renders always**, not only past fifteen chats: it is also the door to Pinned and Archived and the one place an archived chat is restored, so hiding it under fifteen chats would leave an archived chat with no way back for a person with few chats. The label switches to "See all chats" past fifteen.
+- **Build apps for a Member (the Member exception)** is above, in stage A, with the SQL to run before deciding.
+- **A Member who created a Build app keeps managing it** (rename, fields, archive, restore, delete) through `canManageBuildApp`, the same rule as before this phase; a Member gets 403 on every other app. The new Edit fields modal (`/build/[slug]` "…") never touches rows: a removed field hides its column and every row keeps its values under the old key.
+- **`/marketing` is now a redirect exemption** (`REDIRECT_ROUTES`) rather than a `home` hub row, which is what spec-tools-misc section 1 asked; the note in stage E that kept the row is superseded.
+- **Not in this phase, for Phase 8's Settings > Apps and modules > Automations card:** the "Automation settings" row on the Workflows page "…" and the "Pause all automations" text link on Usage both point at that card, so they are added with it, not before it.
 
 ## Phase 6 (People), stage A: one SQL file, four backfills, two reports
 

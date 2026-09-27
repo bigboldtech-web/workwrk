@@ -1,4 +1,4 @@
-// decide() — the pure resolver. Given AccessFacts, answer one action.
+// decide(), the pure resolver. Given AccessFacts, answer one action.
 //
 // This file is the whole algorithm of spec section 4: fourteen rules, in the
 // spec's order, each commented with its number and one sentence. No database,
@@ -383,7 +383,12 @@ function rule2(facts: AccessFacts): Decision | null {
   if (appKey) {
     const rule: AppRule | undefined = APP_RULES[appKey];
     const pinned = rule?.alwaysPinned === true;
-    const hidden = !pinned && (facts.org.apps.hidden ?? []).includes(appKey);
+    // spec-ai-automation section 1.4, the one line asked of rule 2: the `ai`
+    // app key also resolves off when the org turned "AI features for
+    // members" off (settings.data.aiEnabled === false). Only the `ai` key:
+    // automations are not AI, so /automation/* keeps its own key and stays.
+    const aiOff = appKey === "ai" && facts.org.aiEnabled === false;
+    const hidden = aiOff || (!pinned && (facts.org.apps.hidden ?? []).includes(appKey));
     const floor = pinned ? undefined : facts.org.apps.minAccess?.[appKey];
     if (hidden || (floor && !clearsAppFloor(floor, facts))) {
       return {
@@ -919,7 +924,7 @@ function decideOrg(facts: AccessFacts): Decision {
 
 // ── The entry point ───────────────────────────────────────────────
 
-/** decide(facts, action) — the pure half of can(). Rules 1 to 14, in order. */
+/** decide(facts, action), the pure half of can(). Rules 1 to 14, in order. */
 export function decide(facts: AccessFacts, action: Action): Decision {
   // Rule 1: the viewer half runs before anything else (invariant 1).
   const r1 = rule1Viewer(facts, action);

@@ -13,6 +13,7 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { axisIdOf, fieldKeyOfId } from "@/lib/field-keys";
 
 interface BoardPivotViewProps {
   boardId: string;
@@ -61,7 +62,9 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
     ];
     for (const f of fields) {
       if (f.type === "DROPDOWN" || f.type === "MULTI_SELECT" || f.type === "LABELS" || f.type === "TSHIRT_SIZE") {
-        opts.push({ key: f.key, label: f.label });
+        // An older field keyed "owner" or "status" is its own axis
+        // ("field:owner"), never the built-in one (field-keys.ts).
+        opts.push({ key: axisIdOf(f.key), label: f.label });
       }
     }
     return opts;
@@ -83,7 +86,7 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
     if (axis === "status") return [it.status ?? "__unset__"];
     if (axis === "owner") return [it.ownerId ?? "__unset__"];
     if (axis === "priority") return [it.priority ?? "__unset__"];
-    const raw = it.metadata?.[axis];
+    const raw = it.metadata?.[fieldKeyOfId(axis)];
     if (Array.isArray(raw)) return raw.length ? raw.map(String) : ["__unset__"];
     return [raw == null || raw === "" ? "__unset__" : String(raw)];
   }, []);
@@ -113,7 +116,7 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
         .sort((a, b) => a[1].localeCompare(b[1]))
         .forEach(([k, label]) => add(k, label, null));
     } else {
-      const field = fields.find((f) => f.key === axis);
+      const field = fields.find((f) => axisIdOf(f.key) === axis);
       for (const c of field?.options?.choices ?? []) add(c.value, c.label, c.color ?? null);
     }
     // Leftovers (custom values) then Unset last.

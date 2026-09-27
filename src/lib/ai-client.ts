@@ -51,7 +51,7 @@ export async function getAnthropicForOrg(organizationId: string): Promise<Resolv
           preferredModel: secret.preferredModel,
         };
       } catch (err) {
-        console.error("[ai-client] BYOK key failed to decrypt — falling back to shared:", err);
+        console.error("[ai-client] BYOK key failed to decrypt, falling back to shared:", err);
         // Fall through to shared key.
       }
     }
@@ -62,6 +62,23 @@ export async function getAnthropicForOrg(organizationId: string): Promise<Resolv
     source: "shared",
     preferredModel: null,
   };
+}
+
+/**
+ * Whether an AI key exists for this org: its own BYOK secret (with the
+ * feature on) or the shared WorkwrK key. Reads presence only, never the key.
+ * The Ask AI surfaces use it to show "not set up" instead of a composer whose
+ * every answer would fail.
+ */
+export async function isAiConfigured(organizationId: string): Promise<boolean> {
+  if ((process.env.ANTHROPIC_API_KEY ?? "").trim().length > 0) return true;
+  const byok = await hasFeature(organizationId, "byok").catch(() => ({ enabled: false }));
+  if (!byok.enabled) return false;
+  const secret = await prisma.orgSecret.findUnique({
+    where: { organizationId_provider: { organizationId, provider: "anthropic" } },
+    select: { id: true },
+  });
+  return Boolean(secret);
 }
 
 /** Convenience: pick the model to use for a given org + caller intent.

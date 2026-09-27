@@ -1,30 +1,30 @@
 "use client";
 
-// Add / edit an asset. Create mode POSTs /api/assets; edit mode PATCHes
-// /api/assets/[id]. Offers only fields the Asset model + routes accept
-// (name, type, brand, model, serial, IMEI, purchase date/cost, warranty,
-// condition, notes, and — edit only — status). Assignment is a separate
-// row action, so this form never sets an owner.
+// Add and edit an asset (spec-tools-misc 2.2), 560 wide on ui/dialog and
+// the tokens. Create mode POSTs /api/assets; edit mode PATCHes
+// /api/assets/[id]. Only fields the Asset model and routes accept (name,
+// type, brand, model, serial, IMEI, purchase date and cost, warranty,
+// condition, notes and, on edit only, status). Assignment is a separate
+// action, so this form never sets an owner. "(required)" is a word, never a
+// red asterisk. One primary: "Add asset" or "Save".
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { apiFetch } from "@/lib/api-fetch";
+import { useOrgCurrency } from "@/lib/org/use-org-currency";
 import {
   ASSET_TYPES, ASSET_CONDITIONS, ASSET_STATUSES,
   CONDITION_LABEL, STATUS_LABEL, typeLabel,
   type ApiAsset,
 } from "./types";
 
-const SELECT_CLASS =
-  "flex h-10 w-full rounded-lg border border-border bg-white dark:bg-surface-2 px-3 py-2 text-base text-foreground " +
-  "transition-fast hover:border-muted-2/60 focus-visible:outline-none focus-visible:border-[color:var(--accent)] " +
-  "focus-visible:ring-[3px] focus-visible:ring-[color:var(--accent)]/15 disabled:cursor-not-allowed disabled:opacity-50";
+const INPUT = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base font-normal text-ink placeholder:text-ink-3";
+const SELECT_CLASS = `${INPUT} appearance-none`;
+const LABEL = "flex flex-col gap-1 text-sm font-medium text-ink";
 
 type FormState = {
   name: string; type: string; brand: string; model: string;
@@ -67,185 +67,152 @@ export function AssetFormDialog({
   onSaved: () => void;
 }) {
   const isEdit = Boolean(asset);
-  const toast = useToast();
+  const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const { currency } = useOrgCurrency();
   const [form, setForm] = useState<FormState>(() => initialState(asset ?? null));
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initialState(asset ?? null));
+
+  async function close() {
+    if (dirty && !(await confirm({ title: isEdit ? "Discard the changes?" : "Discard this asset?", description: "What you typed here is not saved.", confirmLabel: "Discard", destructive: true }))) return;
+    onOpenChange(false);
+  }
 
   // Re-seed whenever the dialog opens (or the target asset changes) so a
-  // reused instance never shows a previous asset's values.
-  useEffect(() => {
-    if (open) setForm(initialState(asset ?? null));
-  }, [open, asset]);
+  // reused instance never shows a previous asset's values. Adjusted during
+  // render (the React "store previous props" pattern), not in an effect.
+  const seed = open ? (asset?.id ?? "new") : null;
+  const [seeded, setSeeded] = useState<string | null>(null);
+  if (seed !== seeded) {
+    setSeeded(seed);
+    if (seed) setForm(initialState(asset ?? null));
+  }
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
   const submit = async () => {
-    if (!form.name.trim()) {
-      toast.error("Name is required");
+    if (!form.name.trim()) { setProblem("Give the asset a name."); return; }
+    setProblem(null);
+    setSaving(true);
+    const payload: Record<string, unknown> = {
+      name: form.name.trim(),
+      type: form.type,
+      brand: form.brand.trim() || null,
+      model: form.model.trim() || null,
+      serialNumber: form.serialNumber.trim() || null,
+      imeiNumber: form.imeiNumber.trim() || null,
+      purchaseDate: form.purchaseDate || null,
+      purchaseCost: form.purchaseCost.trim() || null,
+      warrantyExpiry: form.warrantyExpiry || null,
+      condition: form.condition,
+      notes: form.notes.trim() || null,
+    };
+    if (isEdit) payload.status = form.status;
+    const r = await apiFetch(isEdit ? `/api/assets/${asset!.id}` : "/api/assets", { method: isEdit ? "PATCH" : "POST", json: payload });
+    setSaving(false);
+    if (!r.ok) {
+      setProblem(r.status === 403 ? "You can't change assets." : (r.error || (isEdit ? "Couldn't save the asset." : "Couldn't add the asset.")));
       return;
     }
-    setSaving(true);
-    try {
-      const payload: Record<string, unknown> = {
-        name: form.name.trim(),
-        type: form.type,
-        brand: form.brand.trim() || null,
-        model: form.model.trim() || null,
-        serialNumber: form.serialNumber.trim() || null,
-        imeiNumber: form.imeiNumber.trim() || null,
-        purchaseDate: form.purchaseDate || null,
-        purchaseCost: form.purchaseCost.trim() || null,
-        warrantyExpiry: form.warrantyExpiry || null,
-        condition: form.condition,
-        notes: form.notes.trim() || null,
-      };
-      if (isEdit) payload.status = form.status;
-
-      const res = await fetch(
-        isEdit ? `/api/assets/${asset!.id}` : "/api/assets",
-        {
-          method: isEdit ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      );
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast.error(
-          isEdit ? "Couldn't save asset" : "Couldn't add asset",
-          res.status === 403 ? "You don't have permission for this." : (d?.error ?? `HTTP ${res.status}`),
-        );
-        return;
-      }
-      toast.success(isEdit ? "Asset saved" : "Asset added");
-      onOpenChange(false);
-      onSaved();
-    } catch {
-      toast.error("Network error", "Please try again.");
-    } finally {
-      setSaving(false);
-    }
+    toast(isEdit ? "Asset saved" : `${form.name.trim()} added`);
+    onOpenChange(false);
+    onSaved();
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) void close(); else onOpenChange(true); }}>
+      <DialogContent className="max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit asset" : "Add asset"}</DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? "Update this asset's details, condition and status."
-              : "Register a physical asset. You can assign it to a person afterward."}
+            {isEdit ? "Change its details, condition and status." : "A physical thing the company owns. You can assign it to a person afterwards."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-3.5 py-1">
-          <div className="grid gap-1.5">
-            <Label htmlFor="ast-name">Name<span className="text-[#E2445C]"> *</span></Label>
-            <Input
-              id="ast-name"
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder='e.g. "MacBook Pro 16&quot; — Design"'
-              autoFocus
-            />
-          </div>
+        <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+          <label className={LABEL}>
+            <span>Name <span className="font-normal text-ink-2">(required)</span></span>
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="MacBook Pro 16, Design" autoFocus maxLength={120} className={INPUT} />
+          </label>
 
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-type">Type</Label>
-              <select
-                id="ast-type"
-                className={SELECT_CLASS}
-                value={form.type}
-                onChange={(e) => set("type", e.target.value)}
-              >
-                {ASSET_TYPES.map((t) => (
-                  <option key={t} value={t}>{typeLabel(t)}</option>
-                ))}
+          <div className="grid grid-cols-2 gap-3">
+            <label className={LABEL}>
+              Type
+              <select className={SELECT_CLASS} value={form.type} onChange={(e) => set("type", e.target.value)}>
+                {ASSET_TYPES.map((t) => <option key={t} value={t}>{typeLabel(t)}</option>)}
               </select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-condition">Condition</Label>
-              <select
-                id="ast-condition"
-                className={SELECT_CLASS}
-                value={form.condition}
-                onChange={(e) => set("condition", e.target.value)}
-              >
-                {ASSET_CONDITIONS.map((c) => (
-                  <option key={c} value={c}>{CONDITION_LABEL[c]}</option>
-                ))}
+            </label>
+            <label className={LABEL}>
+              Condition
+              <select className={SELECT_CLASS} value={form.condition} onChange={(e) => set("condition", e.target.value)}>
+                {ASSET_CONDITIONS.map((c) => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
               </select>
-            </div>
+            </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-brand">Brand</Label>
-              <Input id="ast-brand" value={form.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Apple" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-model">Model</Label>
-              <Input id="ast-model" value={form.model} onChange={(e) => set("model", e.target.value)} placeholder="A2991" />
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className={LABEL}>
+              Brand
+              <input value={form.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Apple" maxLength={80} className={INPUT} />
+            </label>
+            <label className={LABEL}>
+              Model
+              <input value={form.model} onChange={(e) => set("model", e.target.value)} placeholder="A2991" maxLength={80} className={INPUT} />
+            </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-serial">Serial number</Label>
-              <Input id="ast-serial" value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} placeholder="C02…" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-imei">IMEI</Label>
-              <Input id="ast-imei" value={form.imeiNumber} onChange={(e) => set("imeiNumber", e.target.value)} placeholder="For phones / tablets" />
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className={LABEL}>
+              Serial number
+              <input value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} maxLength={80} className={`${INPUT} font-mono text-sm`} />
+            </label>
+            <label className={LABEL}>
+              IMEI
+              <input value={form.imeiNumber} onChange={(e) => set("imeiNumber", e.target.value)} placeholder="Phones and tablets" maxLength={40} className={`${INPUT} font-mono text-sm`} />
+            </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-3.5">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-pdate">Purchase date</Label>
-              <Input id="ast-pdate" type="date" value={form.purchaseDate} onChange={(e) => set("purchaseDate", e.target.value)} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-pcost">Cost</Label>
-              <Input id="ast-pcost" type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => set("purchaseCost", e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-warranty">Warranty ends</Label>
-              <Input id="ast-warranty" type="date" value={form.warrantyExpiry} onChange={(e) => set("warrantyExpiry", e.target.value)} />
-            </div>
+          <div className="grid grid-cols-3 gap-3">
+            <label className={LABEL}>
+              Purchase date
+              <input type="date" value={form.purchaseDate} onChange={(e) => set("purchaseDate", e.target.value)} className={INPUT} />
+            </label>
+            <label className={LABEL}>
+              <span>Cost <span className="font-normal text-ink-2">({currency})</span></span>
+              <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => set("purchaseCost", e.target.value)} placeholder="0.00" className={`${INPUT} tabular-nums`} />
+            </label>
+            <label className={LABEL}>
+              Warranty ends
+              <input type="date" value={form.warrantyExpiry} onChange={(e) => set("warrantyExpiry", e.target.value)} className={INPUT} />
+            </label>
           </div>
 
-          {isEdit && (
-            <div className="grid gap-1.5">
-              <Label htmlFor="ast-status">Status</Label>
-              <select
-                id="ast-status"
-                className={SELECT_CLASS}
-                value={form.status}
-                onChange={(e) => set("status", e.target.value)}
-              >
-                {ASSET_STATUSES.map((s) => (
-                  <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                ))}
+          {isEdit ? (
+            <label className={LABEL}>
+              Status
+              <select className={SELECT_CLASS} value={form.status} onChange={(e) => set("status", e.target.value)}>
+                {ASSET_STATUSES.filter((s) => s !== "ASSIGNED" || asset?.status === "ASSIGNED").map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
               </select>
-              <p className="text-xs text-muted-2">Assignment is managed from the row actions menu.</p>
-            </div>
-          )}
+              <span className="text-xs font-normal text-ink-2">Assigned is set by assigning it to someone, from the row menu.</span>
+            </label>
+          ) : null}
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="ast-notes">Notes</Label>
-            <Textarea id="ast-notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Anything worth recording…" />
-          </div>
+          <label className={LABEL}>
+            Notes
+            <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} maxLength={2000} className="rounded-md border border-line-strong bg-raised px-3 py-2 text-base font-normal text-ink placeholder:text-ink-3" />
+          </label>
+
+          {problem ? <p role="alert" className="text-sm text-danger-text">{problem}</p> : null}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={() => void submit()} disabled={saving}>
-            {saving ? "Saving…" : isEdit ? "Save changes" : "Add asset"}
-          </Button>
+          <button type="button" onClick={() => void close()} disabled={saving} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
+          <button type="button" onClick={() => void submit()} disabled={saving} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-50">
+            {isEdit ? "Save" : "Add asset"}
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

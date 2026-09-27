@@ -158,4 +158,19 @@ describe("the List's own fields", () => {
     expect(toggleStoredListField(["vendor"], "budget")).toEqual(["vendor", "budget"]);
     expect(toggleStoredListField(["vendor", "budget"], "vendor")).toEqual(["budget"]);
   });
+
+  // An older List may hold a field keyed "tags", beside the built-in Tags.
+  it("keeps a field keyed like a built-in apart from that built-in", () => {
+    const clashing = [{ key: "tags", label: "Tags (ours)" }];
+    // The built-in Tags checked: the field stays unchecked.
+    expect(listFieldRows({ fields: clashing, stored: ["status", "tags"], hasValue: none })[0].checked).toBe(false);
+    // Checking the field stores its own id and leaves the built-in alone.
+    const next = toggleStoredListField([], "tags");
+    expect(next).toEqual(["field:tags"]);
+    expect(next.filter(isItemFieldKey)).toEqual([]);
+    expect(resolveVisibleListFields({ fields: clashing, stored: next, hasValue: none })).toEqual(["tags"]);
+    expect(resolveVisibleFields({ stored: next, hasValue: none })).not.toContain("tags");
+    // And unchecking it removes only its own id.
+    expect(toggleStoredListField(["tags", "field:tags"], "tags")).toEqual(["tags"]);
+  });
 });

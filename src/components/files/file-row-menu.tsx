@@ -75,7 +75,7 @@ export function FileRowMenu({ file, onClose, onChanged, onPreview }: {
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const { railApps } = useOsShell();
+  const { askAiVisible } = useOsShell();
   const { boot } = useBoot();
   const confirm = useConfirm();
   const [mode, setMode] = useState<"menu" | "rename" | "move">("menu");
@@ -83,7 +83,7 @@ export function FileRowMenu({ file, onClose, onChanged, onPreview }: {
   const [fav, setFav] = useState(!!file.favorite);
   const [busy, setBusy] = useState<string | null>(null);
   const canEdit = file.canEdit !== false;
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
   const done = (kind: FileMenuChange) => { onChanged?.(kind); dispatchFilesChanged(); };
 
   function copyLink() {

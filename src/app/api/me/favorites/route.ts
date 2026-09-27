@@ -32,11 +32,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserPreference } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { orgRoleOf } from "@/lib/access/org-role";
-import { unscopedTableReadable } from "@/lib/table-gate";
-import { getBoardForReader } from "@/lib/board";
-import { getSpaceForReader } from "@/lib/space";
-import { docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeKind, type NodeRef } from "@/lib/access/node-rules";
+import { readableFileRows } from "@/lib/file-access";
 
 /** The eight kinds, and the preference key each one is stored under (form added in Phase 5). */
 export const FAVORITE_KINDS = [
@@ -122,9 +120,10 @@ export async function GET(req: Request) {
       : Promise.resolve([]),
     stored.favoriteFormIds.length
       ? prisma.formDefinition.findMany({
-          // A Guest reaches only the forms they made (GET /api/forms scopes
-          // the same way), so a star on any other form is not readable.
-          where: { organizationId, id: { in: stored.favoriteFormIds }, ...(orgRoleOf({ accessLevel }) === "GUEST" ? { createdById: userId } : {}) },
+          // Every starred form that still exists: whether the viewer can open
+          // it is the resolver's answer below (a Guest reaches the forms they
+          // made and the ones they were given).
+          where: { organizationId, id: { in: stored.favoriteFormIds } },
           select: { id: true, name: true },
         })
       : Promise.resolve([]),
@@ -137,7 +136,7 @@ export async function GET(req: Request) {
     stored.favoriteFileIds.length
       ? prisma.fileEntry.findMany({
           where: { organizationId, id: { in: stored.favoriteFileIds } },
-          select: { id: true, name: true, spaceId: true },
+          select: { id: true, name: true, spaceId: true, spaceFolderId: true },
         })
       : Promise.resolve([]),
   ]);
@@ -162,8 +161,26 @@ export async function GET(req: Request) {
     return i < 0 ? Number.MAX_SAFE_INTEGER : i;
   };
 
-  const readableSpace = async (spaceId: string | null) =>
-    spaceId ? Boolean(await getSpaceForReader(spaceId, userId, accessLevel)) : true;
+  // ONE world for every starred node, from the one resolver: each object is
+  // gated on its own role (a Folder on the Folder, a List on the List, a doc
+  // with its parent pages and restriction), never a call per row.
+  const nodeCtx = nodeCtxFromLevel(userId, organizationId, u.accessLevel);
+  const live = <T extends { id: string; archivedAt?: Date | null }>(xs: T[]) => xs.filter((x) => !x.archivedAt);
+  const refs: NodeRef[] = [
+    ...live(spaces).map((r) => ({ kind: "space" as const, id: r.id })),
+    ...live(folders).map((r) => ({ kind: "folder" as const, id: r.id })),
+    ...live(boards).map((r) => ({ kind: "list" as const, id: r.id })),
+    ...live(docs).map((r) => ({ kind: "doc" as const, id: r.id })),
+    ...tables.map((r) => ({ kind: "table" as const, id: r.id })),
+    ...forms.map((r) => ({ kind: "form" as const, id: r.id })),
+    ...canvases.map((r) => ({ kind: "canvas" as const, id: r.id })),
+  ];
+  const [decisions, readableFiles] = await Promise.all([
+    nodeRoles(nodeCtx, refs),
+    readableFileRows(files, { organizationId, userId, accessLevel }),
+  ]);
+  const opens = (kind: NodeKind, id: string) => roleAtLeast(decisions.get(`${kind}:${id}`)?.role ?? "none", "VIEW");
+  const fileOk = new Set(readableFiles.map((f) => f.id));
 
   const rows: FavoriteRow[] = [];
   // Starred objects that are archived: still alive, still starred, not listed.
@@ -175,7 +192,7 @@ export async function GET(req: Request) {
 
   for (const s of spaces) {
     if (s.archivedAt) continue;
-    if (!(await getSpaceForReader(s.id, userId, accessLevel))) continue;
+    if (!opens("space", s.id)) continue;
     rows.push({
       kind: "space",
       id: s.id,
@@ -189,7 +206,9 @@ export async function GET(req: Request) {
   }
   for (const f of folders) {
     if (f.archivedAt) continue;
-    if (!(await readableSpace(f.spaceId))) continue;
+    // The role on the Folder itself: a Folder grantee keeps it, a Private
+    // Folder that does not name the viewer does not show.
+    if (!opens("folder", f.id)) continue;
     rows.push({
       kind: "folder",
       id: f.id,
@@ -205,7 +224,7 @@ export async function GET(req: Request) {
     if (b.archivedAt) continue;
     // A List is gated on the List, not on its Space: a direct grant reaches a
     // List inside a Space the viewer is not on.
-    if (!(await getBoardForReader(b.id, userId, accessLevel))) continue;
+    if (!opens("list", b.id)) continue;
     rows.push({
       kind: "list",
       id: b.id,
@@ -219,7 +238,7 @@ export async function GET(req: Request) {
   }
   for (const d of docs) {
     if (d.archivedAt) continue;
-    if (!(await docAccessible(d, userId, accessLevel))) continue;
+    if (!opens("doc", d.id)) continue;
     const docMeta = (d.content as { meta?: { icon?: unknown } } | null)?.meta;
     rows.push({
       kind: "doc",
@@ -233,8 +252,8 @@ export async function GET(req: Request) {
     });
   }
   for (const t of tables) {
-    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
-    if (t.spaceId ? !(await readableSpace(t.spaceId)) : !unscopedTableReadable(t.createdById, userId, accessLevel)) continue;
+    // No Space: org-wide for Members, a Guest's own only (node-access R7).
+    if (!opens("table", t.id)) continue;
     rows.push({
       kind: "table",
       id: t.id,
@@ -246,9 +265,10 @@ export async function GET(req: Request) {
       order: orderOf("favoriteTableIds", t.id),
     });
   }
-  // A form has no Space of its own and every member of the org can open it
-  // while the access engine is inert, so an alive form is a readable one.
+  // A form has no Space of its own: every Member opens it, a Guest the ones
+  // they made or were given (node-access R9).
   for (const f of forms) {
+    if (!opens("form", f.id)) continue;
     rows.push({
       kind: "form",
       id: f.id,
@@ -261,7 +281,7 @@ export async function GET(req: Request) {
     });
   }
   for (const w of canvases) {
-    if (!(await readableSpace(w.spaceId))) continue;
+    if (!opens("canvas", w.id)) continue;
     rows.push({
       kind: "canvas",
       id: w.id,
@@ -274,7 +294,7 @@ export async function GET(req: Request) {
     });
   }
   for (const f of files) {
-    if (!(await readableSpace(f.spaceId))) continue;
+    if (!fileOk.has(f.id)) continue;
     rows.push({
       kind: "file",
       id: f.id,

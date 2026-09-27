@@ -80,11 +80,50 @@ const ENG: StatusRow[] = [
   { value: "DONE", label: "DONE", color: HUE.green, group: "DONE" },
 ];
 
-const MARKETING: StatusRow[] = [
-  { value: "PLANNED", label: "PLANNED", color: HUE.sky, group: "ACTIVE" },
-  { value: "IN_PROGRESS", label: "IN PROGRESS", color: HUE.blue, group: "ACTIVE" },
-  { value: "PUBLISHED", label: "PUBLISHED", color: HUE.green, group: "DONE" },
+/* The legacy Marketing module's three record kinds, as three Lists with their
+ * own statuses (spec-tools-misc section 2.7 "where the work goes"). The value
+ * sets are the legacy enums' own, minus the two nobody could reach from any
+ * screen (APPROVED on a campaign, REGISTERING on an event), so the importer
+ * (scripts/migrate-marketing.ts) maps every stored row onto a status that
+ * exists. Content keeps its full editorial ladder. */
+const CAMPAIGNS: StatusRow[] = [
+  { value: "PLANNING", label: "PLANNING", color: HUE.slate, group: "ACTIVE" },
+  { value: "ACTIVE", label: "ACTIVE", color: HUE.blue, group: "ACTIVE" },
+  { value: "PAUSED", label: "PAUSED", color: HUE.amber, group: "ACTIVE" },
+  { value: "COMPLETED", label: "COMPLETED", color: HUE.green, group: "DONE" },
+  { value: "CANCELLED", label: "CANCELLED", color: HUE.stone, group: "CLOSED" },
 ];
+
+const CONTENT: StatusRow[] = [
+  { value: "IDEA", label: "IDEA", color: HUE.mist, group: "ACTIVE" },
+  { value: "IN_DRAFT", label: "IN DRAFT", color: HUE.sky, group: "ACTIVE" },
+  { value: "IN_REVIEW", label: "IN REVIEW", color: HUE.amber, group: "ACTIVE" },
+  { value: "APPROVED", label: "APPROVED", color: HUE.cyan, group: "ACTIVE" },
+  { value: "SCHEDULED", label: "SCHEDULED", color: HUE.blue, group: "ACTIVE" },
+  { value: "PUBLISHED", label: "PUBLISHED", color: HUE.green, group: "DONE" },
+  { value: "ARCHIVED", label: "ARCHIVED", color: HUE.stone, group: "CLOSED" },
+];
+
+const EVENTS: StatusRow[] = [
+  { value: "PLANNING", label: "PLANNING", color: HUE.slate, group: "ACTIVE" },
+  { value: "PROMOTING", label: "PROMOTING", color: HUE.sky, group: "ACTIVE" },
+  { value: "LIVE", label: "LIVE", color: HUE.blue, group: "ACTIVE" },
+  { value: "COMPLETED", label: "COMPLETED", color: HUE.green, group: "DONE" },
+  { value: "CANCELLED", label: "CANCELLED", color: HUE.stone, group: "CLOSED" },
+];
+
+/** A List field on a seeded template: the FieldDef shape src/lib/field-catalog.ts reads. */
+type SeedField = {
+  key: string;
+  label: string;
+  type: string;
+  position: number;
+  options?: { choices?: Array<{ value: string; label: string; color?: string }>; currency?: string; decimals?: number };
+};
+
+function choices(values: string[]): Array<{ value: string; label: string }> {
+  return values.map((label) => ({ value: label.toUpperCase().replace(/[^A-Z0-9]+/g, "_"), label }));
+}
 
 const OPS: StatusRow[] = [
   { value: "PLANNING", label: "PLANNING", color: HUE.grey, group: "ACTIVE" },
@@ -150,7 +189,9 @@ function spacePreset(args: {
   complexity: SeedRow["complexity"];
   statuses: StatusRow[];
   defaultView: "TABLE" | "KANBAN";
-  lists: Array<{ name: string }>;
+  /** A List may carry its own statuses and fields (per-List statuses are a
+   *  first-class List capability; the Space workflow is only the default). */
+  lists: Array<{ name: string; statuses?: StatusRow[]; fields?: SeedField[]; defaultView?: "TABLE" | "KANBAN" }>;
   icon: string;
   color: string;
 }): SeedRow {
@@ -169,8 +210,9 @@ function spacePreset(args: {
       workflow: { statuses: args.statuses, defaultView: args.defaultView },
       lists: args.lists.map((l) => ({
         name: l.name,
-        statuses: args.statuses,
-        defaultView: args.defaultView,
+        statuses: l.statuses ?? args.statuses,
+        defaultView: l.defaultView ?? args.defaultView,
+        ...(l.fields && l.fields.length ? { fields: l.fields } : {}),
       })),
     } as Prisma.InputJsonValue,
   };
@@ -402,6 +444,37 @@ const DOC_TEMPLATES: SeedRow[] = [
   }),
 ];
 
+/** The three Marketing Lists' fields, keyed so the importer writes the same keys. */
+export const MARKETING_FIELDS = {
+  campaigns: [
+    { key: "channel", label: "Channel", type: "DROPDOWN", position: 0, options: { choices: choices(["Email", "Paid search", "Social", "Outbound", "Event", "Content", "Webinar"]) } },
+    { key: "budget", label: "Budget", type: "MONEY", position: 1, options: { decimals: 2 } },
+    { key: "spent", label: "Spent", type: "MONEY", position: 2, options: { decimals: 2 } },
+    { key: "goal_metric", label: "Goal metric", type: "DROPDOWN", position: 3, options: { choices: choices(["Leads", "MQLs", "Pipeline", "Brand"]) } },
+    { key: "goal_target", label: "Goal target", type: "NUMBER", position: 4 },
+    { key: "goal_actual", label: "Goal actual", type: "NUMBER", position: 5 },
+    { key: "utm_campaign", label: "UTM campaign", type: "TEXT", position: 6 },
+  ] as SeedField[],
+  content: [
+    { key: "type", label: "Type", type: "DROPDOWN", position: 0, options: { choices: choices(["Blog post", "Email", "Social post", "Video", "Podcast", "Whitepaper", "Ebook", "Case study", "Webinar", "One pager", "Press release", "Other"]) } },
+    { key: "channel", label: "Channel", type: "DROPDOWN", position: 1, options: { choices: choices(["Blog", "LinkedIn", "Twitter", "Email", "YouTube", "TikTok"]) } },
+    { key: "link", label: "Link", type: "URL", position: 2 },
+    { key: "brief_link", label: "Brief", type: "URL", position: 3 },
+    { key: "draft_link", label: "Draft", type: "URL", position: 4 },
+  ] as SeedField[],
+  events: [
+    { key: "format", label: "Format", type: "DROPDOWN", position: 0, options: { choices: choices(["In-person", "Virtual", "Hybrid"]) } },
+    { key: "event_type", label: "Type", type: "DROPDOWN", position: 1, options: { choices: choices(["Conference", "Trade show", "Webinar", "Customer event", "Field event"]) } },
+    { key: "location", label: "Location", type: "TEXT", position: 2 },
+    { key: "capacity", label: "Capacity", type: "NUMBER", position: 3 },
+    { key: "registered", label: "Registered", type: "NUMBER", position: 4 },
+    { key: "attended", label: "Attended", type: "NUMBER", position: 5 },
+    { key: "budget", label: "Budget", type: "MONEY", position: 6, options: { decimals: 2 } },
+    { key: "spend", label: "Spend", type: "MONEY", position: 7, options: { decimals: 2 } },
+    { key: "page_link", label: "Page link", type: "URL", position: 8 },
+  ] as SeedField[],
+} as const;
+
 export const SEED_TEMPLATES: SeedRow[] = [
   spacePreset({
     key: "space.starter",
@@ -436,14 +509,27 @@ export const SEED_TEMPLATES: SeedRow[] = [
     icon: "GitBranch",
     color: HUE.blue,
   }),
+  // Three Lists with their own statuses and fields: the shape the legacy
+  // Marketing module's campaigns, content and events land in when an Owner
+  // or Admin runs the import (src/lib/marketing/legacy-import.ts). Dates use
+  // the built-in Start and Due date columns, which is what the Calendar and
+  // Gantt views read, so the template adds no date field of its own. The
+  // MARKETING_FIELDS export is what the importer keys its values on. The
+  // Space's own set is the Campaigns set, so a fourth List a person adds to
+  // the Space starts with statuses that match one of the three, not a set
+  // none of them uses.
   spacePreset({
     key: "space.marketing",
     name: "Marketing",
-    description: "Campaigns and a content calendar, planned through to published.",
+    description: "Campaigns, content and events as three Lists, each with its own statuses and fields.",
     complexity: "BEGINNER",
-    statuses: MARKETING,
+    statuses: CAMPAIGNS,
     defaultView: "KANBAN",
-    lists: [{ name: "Campaigns" }, { name: "Content calendar" }],
+    lists: [
+      { name: "Campaigns", statuses: CAMPAIGNS, fields: MARKETING_FIELDS.campaigns },
+      { name: "Content", statuses: CONTENT, fields: MARKETING_FIELDS.content, defaultView: "TABLE" },
+      { name: "Events", statuses: EVENTS, fields: MARKETING_FIELDS.events, defaultView: "TABLE" },
+    ],
     icon: "Megaphone",
     color: HUE.orange,
   }),

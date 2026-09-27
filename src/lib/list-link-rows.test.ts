@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardItemRow, StatusOption } from "./board-items-shared";
 import {
   addLinkReasonMessage,
+  applyRowPatchReport,
   boardStatusFor,
   distinctSectionLabels,
   homeStatusForBoardStatus,
@@ -11,6 +12,7 @@ import {
   linkedRowAccess,
   linkedRowEditable,
   linkedRowKind,
+  mergeMetadataPatch,
   mergeRefetchedRow,
   optimisticLinkedStatus,
   planBulkStatus,
@@ -404,5 +406,56 @@ describe("distinctSectionLabels", () => {
     const out = distinctSectionLabels(input);
     expect(out[0]).toBe(input[0]);
     expect(out[1]).toBe(input[1]);
+  });
+});
+
+// The report a renderer hands its host after an edit (the List-view "edited
+// custom field shows the old value until reload" bug): the patch itself
+// travels, and each holder merges it into its OWN metadata copy.
+describe("mergeMetadataPatch / applyRowPatchReport", () => {
+  it("merges the named keys, deletes on null, and never mutates its input", () => {
+    const current = { a: 1, b: "x" };
+    const out = mergeMetadataPatch(current, { b: "y", c: true, a: null });
+    expect(out).toEqual({ b: "y", c: true });
+    expect(current).toEqual({ a: 1, b: "x" });
+    expect(mergeMetadataPatch(undefined, { k: "v" })).toEqual({ k: "v" });
+  });
+
+  it("folds a metadataPatch into the HOST's own copy of the blob", () => {
+    const host = row({ metadata: { field_a: "old", description: "body" } });
+    const out = applyRowPatchReport(host, { metadataPatch: { field_a: "new" } });
+    expect(out.metadata).toEqual({ field_a: "new", description: "body" });
+    // The held row object itself is left alone; the host swaps in the result.
+    expect(host.metadata).toEqual({ field_a: "old", description: "body" });
+  });
+
+  it("worst case: a report can never revert a key it does not name", () => {
+    // The host copy is AHEAD of the reporter: another surface (the drawer, a
+    // poll) already gave it field_b's newer value. The report was built from
+    // an older snapshot but names only field_a, so field_b must survive.
+    const host = row({ metadata: { field_a: "old", field_b: "newer-elsewhere" } });
+    const out = applyRowPatchReport(host, { metadataPatch: { field_a: "typed" } });
+    expect(out.metadata).toEqual({ field_a: "typed", field_b: "newer-elsewhere" });
+  });
+
+  it("applies row fields as before, and a whole metadata row field still replaces", () => {
+    const host = row({ status: "TO_DO", metadata: { field_a: "old", gone: 1 } });
+    const patched = applyRowPatchReport(host, { status: "DOING" });
+    expect(patched.status).toBe("DOING");
+    expect(patched.metadata).toEqual({ field_a: "old", gone: 1 });
+    // A server-truth reply (a Connect commit) hands the whole blob: replace.
+    const replaced = applyRowPatchReport(host, { metadata: { field_a: "server" } });
+    expect(replaced.metadata).toEqual({ field_a: "server" });
+  });
+
+  it("a linked-row report carries listLink and the patch together", () => {
+    const held = linkedRoot({ metadata: { field_a: "old" } });
+    const out = applyRowPatchReport(held, {
+      metadataPatch: { field_a: "new" },
+      listLink: { ...held.listLink!, homeStatus: { value: "BUILDING", label: "Building", color: "#0073EA", group: "ACTIVE" } },
+    });
+    expect(out.metadata).toEqual({ field_a: "new" });
+    expect(out.listLink?.homeStatus?.value).toBe("BUILDING");
+    expect(out.boardId).toBe(held.boardId);
   });
 });

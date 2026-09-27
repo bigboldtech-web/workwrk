@@ -12,7 +12,9 @@ import {
 } from "@/lib/review-cadence";
 import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings";
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
+import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
 /** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
@@ -74,7 +76,11 @@ export async function GET() {
         industry: settings.industry || "",
         teamSize: settings.teamSize || "",
         timezone: settings.timezone || "Asia/Kolkata",
-        currency: settings.currency || "INR",
+        // ONE fallback for an unset currency, shared with GET /api/boot (and
+        // through it Assets, the asset dialog and the marketing importer).
+        // This line used to say "INR" while boot said USD, so Settings >
+        // Locale showed rupees for an org whose register priced in dollars.
+        currency: orgCurrencyFromSettings(settings),
         fiscalYearStart: settings.fiscalYearStart || 4,
         language: settings.language || "en",
         reviewFrequency: settings.reviewFrequency || "QUARTERLY",
@@ -162,21 +168,21 @@ export async function PATCH(req: Request) {
     }
 
     const currentSettings = (org.settings as SettingsBlob | null) || {};
+    // Every section below writes ONLY its own top-level keys of the shared
+    // settings column, in one statement (src/lib/org-settings-write.ts), so a
+    // save here never erases a key another writer changed a moment before
+    // (a doc's sharing, branding, the access model). A section that merges
+    // inside its key still reads that key from currentSettings.
 
     // Handle company profile update directly
     if (companyProfile) {
-      await prisma.organization.update({
-        where: { id: orgId },
-        data: {
-          settings: { ...currentSettings, companyProfile },
-        },
-      });
+      await writeOrgSettingsKeys(orgId, { companyProfile });
       return NextResponse.json({ success: true });
     }
 
     switch (section) {
       case "general": {
-        const updateData: { name?: string; domain?: string | null; settings?: SettingsBlob } = {};
+        const updateData: { name?: string; domain?: string | null } = {};
         if (data.name) updateData.name = data.name;
         if (data.domain !== undefined) updateData.domain = data.domain;
 
@@ -190,13 +196,11 @@ export async function PATCH(req: Request) {
         if (data.scoreWeights !== undefined) generalSettings.scoreWeights = data.scoreWeights;
         if (data.scoringBands !== undefined) generalSettings.scoringBands = data.scoringBands;
 
-        if (Object.keys(generalSettings).length > 0) {
-          updateData.settings = { ...currentSettings, ...generalSettings };
-        }
-
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: updateData,
+        await prisma.$transaction(async (tx) => {
+          if (Object.keys(updateData).length > 0) {
+            await tx.organization.update({ where: { id: orgId }, data: updateData });
+          }
+          if (Object.keys(generalSettings).length > 0) await writeOrgSettingsKeys(orgId, generalSettings, tx);
         });
         break;
       }
@@ -224,49 +228,22 @@ export async function PATCH(req: Request) {
           }
           scoring.behavioralAnchors = data.behavioralAnchors;
         }
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: { settings: { ...currentSettings, ...scoring } },
-        });
+        await writeOrgSettingsKeys(orgId, scoring);
         break;
       }
 
       case "notifications": {
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: {
-            settings: {
-              ...currentSettings,
-              notifications: data,
-            },
-          },
-        });
+        await writeOrgSettingsKeys(orgId, { notifications: data });
         break;
       }
 
       case "security": {
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: {
-            settings: {
-              ...currentSettings,
-              security: data,
-            },
-          },
-        });
+        await writeOrgSettingsKeys(orgId, { security: data });
         break;
       }
 
       case "modules": {
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: {
-            settings: {
-              ...currentSettings,
-              enabledModules: normalizeEnabledModules(data.enabledModules),
-            },
-          },
-        });
+        await writeOrgSettingsKeys(orgId, { enabledModules: normalizeEnabledModules(data.enabledModules) });
         break;
       }
 
@@ -283,10 +260,7 @@ export async function PATCH(req: Request) {
           return NextResponse.json({ error: "Invalid access settings" }, { status: 400 });
         }
         const merged = { ...parseAccessSettings(currentSettings.access), ...partial.data };
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: { settings: { ...currentSettings, access: merged } },
-        });
+        await writeOrgSettingsKeys(orgId, { access: merged });
         break;
       }
 
@@ -302,10 +276,7 @@ export async function PATCH(req: Request) {
           return NextResponse.json({ error: `Invalid process settings${issue ? `: ${issue.path.join(".") || "body"} ${issue.message}` : ""}` }, { status: 400 });
         }
         const merged = { ...parseProcessSettings(currentSettings.process).value, ...partial.data };
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: { settings: { ...currentSettings, process: merged } },
-        });
+        await writeOrgSettingsKeys(orgId, { process: merged });
         break;
       }
 

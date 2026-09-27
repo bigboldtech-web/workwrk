@@ -172,13 +172,7 @@ export async function saveWeeklyReviewDraft(
   if (patch.highlights !== undefined) data.highlights = patch.highlights;
   if (patch.blockers !== undefined) data.blockers = patch.blockers;
   if (patch.plan !== undefined) data.plan = patch.plan;
-  // Guarded on the status the decision starts from, so two people deciding
-  // at once cannot both win: the second finds the row already moved and
-  // gets WeeklyDecisionConflict (the route answers 409).
-  const from = decision === "REOPEN" ? ("ACKNOWLEDGED" as const) : ("SUBMITTED" as const);
-  const res = await prisma.weeklyReview.updateMany({ where: { id: reviewId, status: from }, data });
-  if (res.count === 0) throw new WeeklyDecisionConflict();
-  const updated = await prisma.weeklyReview.findUniqueOrThrow({ where: { id: reviewId } });
+  const updated = await prisma.weeklyReview.update({ where: { id: reviewId }, data });
   return shapeFromRow(updated);
 }
 
@@ -339,6 +333,12 @@ export async function actOnReview(
           reviewedAt: new Date(),
           status: "ACKNOWLEDGED" as const,
         };
-  const updated = await prisma.weeklyReview.update({ where: { id: reviewId }, data });
+  // Guarded on the status the decision starts from, so two people deciding
+  // at once cannot both win: the second finds the row already moved and
+  // gets WeeklyDecisionConflict (the route answers 409).
+  const from = decision === "REOPEN" ? ("ACKNOWLEDGED" as const) : ("SUBMITTED" as const);
+  const res = await prisma.weeklyReview.updateMany({ where: { id: reviewId, status: from }, data });
+  if (res.count === 0) throw new WeeklyDecisionConflict();
+  const updated = await prisma.weeklyReview.findUniqueOrThrow({ where: { id: reviewId } });
   return shapeFromRow(updated);
 }

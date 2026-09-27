@@ -37,9 +37,14 @@ export default async function SpacesIndexPage() {
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
   if (!u.id || !u.organizationId) redirect("/login");
 
+  // Path Spaces too (a Space the viewer only passes through on the way to a
+  // Folder, List, doc, table or canvas they were given): their cards show the
+  // name and the tile, nothing else. Counts are what the viewer's tree
+  // renders, never a total that includes what they cannot open.
   const spaces = await listSpacesForUser(u.id, u.organizationId, {
     accessLevel: u.accessLevel,
-    includeFolderContainers: true,
+    paths: true,
+    counts: true,
   });
   // The same gate `POST /api/spaces` applies (MANAGER_LEVELS), so the button
   // never renders for someone the route would 403.
@@ -68,7 +73,18 @@ export default async function SpacesIndexPage() {
         </div>
       ) : (
         <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {spaces.map((s) => (
+          {spaces.map((s) => s.access === "path" ? (
+            <li key={s.id}>
+              <div className="relative rounded-lg border border-line bg-raised p-4 hover:bg-hover transition-colors">
+                <Link href={`/spaces/${s.slug}`} className="block">
+                  <div className="flex items-center gap-2">
+                    <EntityTile size="md" icon={s.icon} color={s.color} name={s.name} />
+                    <span className="font-medium text-base text-ink truncate">{s.name}</span>
+                  </div>
+                </Link>
+              </div>
+            </li>
+          ) : (
             <li key={s.id}>
               <div className="relative rounded-lg border border-line bg-raised p-4 hover:bg-hover transition-colors group/space">
                 <Link href={`/spaces/${s.slug}`} className="block">
@@ -88,9 +104,9 @@ export default async function SpacesIndexPage() {
                     <p className="text-base text-ink-2 line-clamp-2">{s.description}</p>
                   ) : null}
                   <div className="mt-2 flex items-center gap-3 text-xs text-ink-2">
-                    <span>{s.boardCount} list{s.boardCount === 1 ? "" : "s"}</span>
-                    <span>{s.folderCount} folder{s.folderCount === 1 ? "" : "s"}</span>
-                    <span>{s.memberCount} member{s.memberCount === 1 ? "" : "s"}</span>
+                    <span>{s.boardCount ?? 0} list{s.boardCount === 1 ? "" : "s"}</span>
+                    <span>{s.folderCount ?? 0} folder{s.folderCount === 1 ? "" : "s"}</span>
+                    <span>{s.memberCount ?? 0} member{s.memberCount === 1 ? "" : "s"}</span>
                   </div>
                 </Link>
                 <div className="absolute top-3 end-3 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -107,9 +123,9 @@ export default async function SpacesIndexPage() {
                       spaceId: s.id,
                       spaceSlug: s.slug,
                       spaceName: s.name,
-                      contents: `${s.boardCount} lists · ${s.folderCount} folders · ${s.memberCount} members`,
+                      contents: `${s.boardCount ?? 0} lists · ${s.folderCount ?? 0} folders · ${s.memberCount ?? 0} members`,
                     }}
-                    role={s.role}
+                    role={s.role ?? undefined}
                   />
                 </div>
               </div>

@@ -9,9 +9,15 @@
 //   Open · Open in new tab (not in the builder) · separator ·
 //   Open the form (the responder) · Copy link · Copy embed code (public link
 //   on) · separator · Rename (inline) · Duplicate · Add to / Remove from
-//   favorites · separator · Share... · separator · Export responses as CSV
-//   (never an Agent) · separator · Move to Trash (the maker or an admin;
-//   confirm naming the form and its response count)
+//   favorites · separator · Manage access (Who has access below Full access;
+//   never an Agent) · separator · Export responses as CSV (never an Agent) ·
+//   separator · Move to Trash (the maker or an admin; confirm naming the form
+//   and its response count)
+//
+// Manage access is the one dialog every node uses; the form's public link,
+// its embed code and the responder link live inside it. FormRowMenuHost
+// mounts it and hands the public link's new state back to its host, so the
+// Copy embed code row follows a change.
 //
 // WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
 // object-href.ts). Open, Open in new tab and the "Copy made" toast build the
@@ -21,8 +27,9 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Code2, Copy, Download, ExternalLink, Link2, Pencil, Send, Share2, Star, Trash2 } from "lucide-react";
+import { ClipboardList, Code2, Copy, Download, ExternalLink, Link2, Pencil, Send, Star, Trash2, UserPlus, Users } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -30,7 +37,7 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { apiFetch } from "@/lib/api-fetch";
 import { downloadUrl } from "@/lib/download";
-import { ObjectShareDialog, embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
+import { embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
 import { currentOpenObject } from "@/components/layout/os/work-placement";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -64,7 +71,8 @@ export function FormRowMenu({
   context: FormMenuContext;
   onClose: () => void;
   onChanged?: (kind: FormMenuChange, next?: Partial<FormMenuTarget>) => void;
-  onShare?: (resolved: FormMenuTarget) => void;
+  /** Opens the Manage access dialog, read only below Full access (absent = no access row). */
+  onShare?: (resolved: FormMenuTarget, readOnly: boolean) => void;
   onRenameInline?: () => void;
 }) {
   const router = useRouter();
@@ -100,6 +108,8 @@ export function FormRowMenu({
   const canManage = form.canManage ?? resolved?.canManage ?? false;
   const isPublic = resolved?.isPublic ?? form.isPublic ?? false;
   const pending = !known && resolved === null;
+  // The access row waits for the manage right only, so its label never flips.
+  const manageKnown = form.canManage !== undefined || resolved !== null;
   const isAgent = boot.viewer.isAgent;
   const title = form.name || "Untitled form";
   const full: FormMenuTarget = { ...form, ...(resolved ?? {}), isFavorite: fav, canManage };
@@ -203,10 +213,14 @@ export function FormRowMenu({
       <MenuItem icon={Pencil} label="Rename" onClick={() => { if (onRenameInline) { onClose(); onRenameInline(); } else { setName(form.name); setMode("rename"); } }} />
       <MenuItem icon={Copy} label="Duplicate" busy={busy === "duplicate"} onClick={() => void duplicate()} />
       <MenuItem icon={Star} iconFilled={fav} label={fav ? "Remove from favorites" : "Add to favorites"} onClick={() => void toggleFav()} />
-      {onShare ? (
+      {onShare && manageKnown ? (
         <>
           <MenuSeparator />
-          <MenuItem icon={Share2} label="Share…" onClick={() => { onClose(); onShare(full); }} />
+          <MenuItem
+            icon={canManage ? UserPlus : Users}
+            label={canManage ? "Manage access" : "Who has access"}
+            onClick={() => { onClose(); onShare(full, !canManage); }}
+          />
         </>
       ) : null}
       {!isAgent ? (
@@ -258,7 +272,10 @@ export function FormRowMenuHost({ menu, context, onChanged, onRenameInline }: {
   onRenameInline?: () => void;
 }) {
   const dummy = useRef<HTMLElement | null>(null);
-  const [share, setShare] = useState<FormMenuTarget | null>(null);
+  // The form the dialog is about outlives the menu, and stays set while the
+  // dialog closes so it animates out whole.
+  const [share, setShare] = useState<{ form: FormMenuTarget; readOnly: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const s = menu.state;
   return (
     <>
@@ -270,27 +287,23 @@ export function FormRowMenuHost({ menu, context, onChanged, onRenameInline }: {
             context={context}
             onClose={menu.close}
             onChanged={(kind, next) => onChanged?.(kind, s.form, next)}
-            onShare={(f) => setShare(f)}
+            onShare={(f, readOnly) => { setShare({ form: f, readOnly }); setShareOpen(true); }}
             onRenameInline={onRenameInline}
           />
         </MorePortal>
       ) : null}
       {share ? (
-        <ObjectShareDialog
-          open
-          mode={share.canManage ? "share" : "who"}
-          onClose={() => setShare(null)}
-          object={{
-            kind: "form",
-            id: share.id,
-            name: share.name,
-            isPublic: !!share.isPublic,
-            canManage: !!share.canManage,
-            publicLinksAllowed: share.publicLinksAllowed !== false,
-            anchorName: share.destinationName ?? null,
-            ownerName: share.ownerName ?? null,
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          target={{ kind: "form", id: share.form.id, name: share.form.name || "Untitled form" }}
+          readOnly={share.readOnly}
+          onChanged={(panel) => {
+            // The public link lives in the dialog: its state goes back to the
+            // host so the Copy embed code row follows it. No publicLink means off.
+            if (panel) onChanged?.("public", share.form, { isPublic: !!panel.general.publicLink?.on });
+            dispatchFormsChanged();
           }}
-          onPublicChange={(isPublic) => { onChanged?.("public", share, { isPublic }); dispatchFormsChanged(); }}
         />
       ) : null}
     </>

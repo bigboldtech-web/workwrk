@@ -15,6 +15,8 @@
 // apiFetch turns it into the Session-expired dialog); a failure is a 500 the
 // boot screen renders as ErrorState, never a trip to /onboard.
 
+import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
+import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
@@ -28,6 +30,7 @@ import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import { parseAccessSettings } from "@/lib/access/settings";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
@@ -113,6 +116,14 @@ export interface BootPayload {
      * section 2, /docs and /canvas confirm copy).
      */
     trashDays: number;
+    /**
+     * settings.data.aiEnabled, "AI features for members" (default on). The
+     * shell's Ask AI entry points (panel, header slot, Cmd+J, palette row)
+     * render only when it is on; the page gate enforces it server side.
+     */
+    aiEnabled: boolean;
+    /** settings.currency (Settings > Locale and work week), USD when unset. */
+    currency: string;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -294,7 +305,7 @@ export async function GET(req: NextRequest) {
     const settings = (org.settings ?? {}) as {
       setupCompleted?: unknown;
       companyProfile?: { mission?: unknown; values?: unknown; splash?: unknown };
-      access?: { peopleTeam?: unknown };
+      access?: unknown;
     };
     const profile = settings.companyProfile ?? {};
     const mission = typeof profile.mission === "string" ? profile.mission.trim() : "";
@@ -303,13 +314,15 @@ export async function GET(req: NextRequest) {
       : [];
     const splash: SplashPolicy =
       typeof profile.splash === "string" && SPLASH_VALUES.has(profile.splash) ? (profile.splash as SplashPolicy) : "first-open-daily";
-    // The engine's rule (src/lib/access/viewer.ts hydrate): the stored
-    // People-team list, or an HR-level user while toggle 6 is unset (spec 10
-    // step 0 "People team = users at HR until toggle 6 exists"). Boot used to
-    // read the list alone, so an HR person's chrome disagreed with every
-    // server gate that let them in.
+    // The engine's rule, both halves of it (src/lib/access/resolve.ts
+    // isPeopleTeam): the configured People team (access.peopleTeamUserIds,
+    // read through parseAccessSettings as src/lib/access/facts.ts
+    // loadOrgFacts does), OR an HR-level user, whom viewer.ts hydrate always
+    // counts (spec 10 step 0 "People team = users at HR until toggle 6
+    // exists"). Boot used to read a stale key alone, so an HR person's chrome
+    // disagreed with every server gate that let them in.
     const peopleTeam =
-      (Array.isArray(settings.access?.peopleTeam) && (settings.access!.peopleTeam as unknown[]).includes(userId)) ||
+      parseAccessSettings(settings.access).peopleTeamUserIds.includes(userId) ||
       isSeededPeopleTeam(user.accessLevel ?? null);
 
     const accessLevel = user.accessLevel ?? null;
@@ -355,6 +368,8 @@ export async function GET(req: NextRequest) {
         plan: String(org.plan),
         culture: { mission, values, splash },
         trashDays: retentionDays((settings as { retention?: { trashDays?: unknown } }).retention?.trashDays),
+        aiEnabled: aiEnabledFromSettings(settings),
+        currency: orgCurrencyFromSettings(settings),
       },
       counts: cf.counts,
       timer,

@@ -1,4 +1,4 @@
-// POST /api/spaces/[id]/duplicate — copy a room, not just its nameplate.
+// POST /api/spaces/[id]/duplicate: copy a room, not just its nameplate.
 //
 // Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 1 (Space "…" row
 // 16): "copies Folders, Lists, statuses, fields and views (today it copies name
@@ -20,9 +20,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canEditSpace, getSpaceForReader, uniqueSpaceSlug } from "@/lib/space";
+import { canContributeSpace, canEditSpace, getSpaceForReader, uniqueSpaceSlug } from "@/lib/space";
 import { duplicateBoard } from "@/lib/board";
-import { folderVisibleTo } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (!(await canEditSpace(id, u.id, accessLevel))) {
-    return NextResponse.json({ error: "You need edit access to duplicate this Space." }, { status: 403 });
+    return NextResponse.json({ error: "You need Full access to this Space to duplicate it." }, { status: 403 });
+  }
+  // Full access on the Space duplicates it, as it always has (the placement
+  // rule's P7: nothing that works for a Space OWNER or ADMIN changes). A Space
+  // OWNER or ADMIN who is not a manager has always copied their own Space;
+  // round one asked for the manager floor POST /api/spaces takes, which broke
+  // that while the Space menu still offered Duplicate. A copy that lands
+  // under a parent Space is made INSIDE that parent (P1), so it also needs Can
+  // edit on it, and never lands under an archived one (P3).
+  if (src.parentSpaceId) {
+    const parent = await prisma.space.findFirst({ where: { id: src.parentSpaceId, organizationId }, select: { archivedAt: true } });
+    if (parent?.archivedAt) {
+      return NextResponse.json({ error: "The Space above this one is archived. Restore it first to add a copy there." }, { status: 400 });
+    }
+    if (!(await canContributeSpace(src.parentSpaceId, u.id, accessLevel))) {
+      return NextResponse.json({ error: "You need Can edit on the Space above this one to add a copy there." }, { status: 403 });
+    }
   }
 
   const name = `${src.name} (copy)`;
@@ -85,16 +102,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let copiedLists = 0;
 
   // Root-level Lists first, then the folder tree breadth-first. A copy never
-  // widens access: a PRIVATE folder or List the actor cannot read is skipped
-  // rather than cloned into a Space they own.
-  const isOrgAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
+  // widens access: a Folder or List the actor cannot open (a PRIVATE one that
+  // does not name them, or anything under one) is skipped rather than cloned
+  // into a Space they own. ONE world decides every Folder and List of the
+  // source, never a gate call per row.
+  const [srcFolders, srcLists] = await Promise.all([
+    prisma.folder.findMany({ where: { organizationId, spaceId: src.id, archivedAt: null }, select: { id: true } }),
+    prisma.board.findMany({ where: { organizationId, spaceId: src.id, archivedAt: null }, select: { id: true } }),
+  ]);
+  const refs: NodeRef[] = [
+    ...srcFolders.map((f) => ({ kind: "folder" as const, id: f.id })),
+    ...srcLists.map((l) => ({ kind: "list" as const, id: l.id })),
+  ];
+  const decisions = await nodeRoles(nodeCtxFromLevel(u.id, organizationId, accessLevel), refs);
+  const readable = (ref: NodeRef) => roleAtLeast(decisions.get(refKey(ref))?.role ?? "none", "VIEW");
   const tally = { skipped: 0, failed: 0 };
   copiedLists += await copyListsInto(
     { organizationId, sourceSpaceId: src.id, sourceFolderId: null },
     { spaceId: space.id, folderId: null },
     u.id,
     includeTasks,
-    isOrgAdmin,
+    readable,
     tally,
   );
 
@@ -109,7 +137,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       select: { id: true, name: true, description: true, icon: true, color: true, visibility: true, ownerId: true, position: true, settings: true },
     });
     for (const kid of kids) {
-      if (!folderVisibleTo(kid, u.id, accessLevel)) { tally.skipped += 1; continue; }
+      if (!readable({ kind: "folder", id: kid.id })) { tally.skipped += 1; continue; }
       const created = await prisma.folder.create({
         data: {
           organizationId,
@@ -132,7 +160,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         { spaceId: space.id, folderId: created.id },
         u.id,
         includeTasks,
-        isOrgAdmin,
+        readable,
         tally,
       );
       queue.push({ sourceId: kid.id, targetId: created.id, depth: node.depth + 1 });
@@ -154,7 +182,7 @@ async function copyListsInto(
   to: { spaceId: string; folderId: string | null },
   actorId: string,
   includeTasks: boolean,
-  isOrgAdmin: boolean,
+  readable: (ref: NodeRef) => boolean,
   tally: { skipped: number; failed: number },
 ): Promise<number> {
   const lists = await prisma.board.findMany({
@@ -168,7 +196,7 @@ async function copyListsInto(
   });
   let copied = 0;
   for (const list of lists) {
-    if (!isOrgAdmin && list.visibility === "PRIVATE" && list.ownerId !== actorId) { tally.skipped += 1; continue; }
+    if (!readable({ kind: "list", id: list.id })) { tally.skipped += 1; continue; }
     let clone: { id: string } | null = null;
     try {
       clone = await duplicateBoard(list.id, actorId, from.organizationId, { includeTasks });

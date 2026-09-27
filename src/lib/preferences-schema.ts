@@ -297,6 +297,12 @@ export const RESERVED_SURFACE_KEYS: readonly string[] = [
   "folder",
   "templates",
   "trash",
+  // The AI hub's list surfaces (spec-ai-automation 1.7): the same
+  // { columns, sortKey, viewOptions } shape, written by other hubs.
+  "sidekick.allChats",
+  "agents.runs",
+  "automation.workflows",
+  "automation.logs",
 ];
 
 export const workPatchSchema = z.strictObject({

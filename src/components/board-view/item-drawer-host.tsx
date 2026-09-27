@@ -46,7 +46,7 @@ import { clearTaskDrawer, openTask, readTaskDrawer } from "@/lib/nav/open-task";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { emitItemChanged } from "@/lib/realtime-events";
 import { BackButton, goBackOr } from "@/components/ui/back-button";
-import { ShareBoardDialog } from "@/components/layout/os/share-board-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { TaskDetailBody } from "./task-detail-body";
 import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
 import { TaskListsChip, useTaskLists } from "./task-lists-chip";
@@ -79,7 +79,7 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   const hardLoad = isInitialEntryPath(`/item/${itemId}`);
   const { data: session } = useSession();
   const { boot } = useBoot();
-  const { openSidekick } = useOsShell();
+  const { openSidekick, askAiVisible } = useOsShell();
   const { toast } = useOsToast();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
@@ -175,7 +175,9 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
   }, [close, expanded]);
 
   const statuses = board?.statuses?.length ? board.statuses : [...DEFAULT_STATUS_OPTIONS];
-  const aiOn = Boolean(boot.prefs?.modules?.activeAppKeys?.includes("ai"));
+  // "ai" was never a module key, so this read false for everyone and the
+  // task strip never offered Ask AI. The one shell fact decides now.
+  const aiOn = askAiVisible;
   const isWatching = Boolean(currentUserId && watcherIds.includes(currentUserId));
   const gone = useCallback(() => {
     if (item) emitItemChanged(item.id, item.boardId ?? null, true);
@@ -430,12 +432,12 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         </div>
       </Drawer>
       {board?.slug ? (
-        <ShareBoardDialog
+        // A task's access is its List's: the List's Manage access dialog,
+        // write or read as the server says the viewer may on that List.
+        <ShareDialog
           open={shareOpen}
           onOpenChange={setShareOpen}
-          boardId={board.id}
-          boardName={board.name}
-          initialVisibility={board.visibility ?? "WORKSPACE"}
+          target={{ kind: "list", id: board.id, name: board.name, visibility: board.visibility ?? "WORKSPACE" }}
           onChanged={() => void task.reload()}
         />
       ) : null}

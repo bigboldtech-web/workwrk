@@ -12,10 +12,11 @@
 // to a session (they respond), and Surveys renders for every TARGETED Member
 // (they respond), because both pages have a respondent face.
 //
-// Pure: imports only the access tables (pure) and the active-row resolver.
+// Pure: imports only the audience mirror over the access tables (pure) and
+// the active-row resolver.
 
-import { APP_RULES } from "@/lib/access/settings";
 import type { AppKey } from "@/lib/access/types";
+import { appAudienceAllows } from "./app-audience";
 import { resolveActiveRow } from "./route-hub";
 
 export type TeamsSection = "personal" | "people" | "alignment" | "performance" | "culture" | "resourcing";
@@ -79,40 +80,19 @@ export interface TeamsViewer {
   peopleTeam: boolean;
   candorInvited?: boolean;
   surveyTargeted?: boolean;
-  /**
-   * BRIDGE, one row only: /assets is still gated by its layout's manager
-   * tier (requireManagerOr404, the tools-misc unit's page), not by its app
-   * row. Until that page moves onto gatePage("view", { type: "app", key:
-   * "assets" }), the Assets row also needs the tier, so it never opens onto
-   * the 404 for a Member who has reports but no manager-tier level.
-   */
-  legacyManagerTier?: boolean;
+  // No legacyManagerTier here any more: the Assets bridge that read it ended
+  // when /assets moved onto the app-key gate (AppKeyGate, Phase 7), so the
+  // Assets row is its APP_RULES audience like every other row.
 }
 
-function isAdmin(v: TeamsViewer): boolean {
-  return v.orgRole === "OWNER" || v.orgRole === "ADMIN";
-}
-
-/** The APP_RULES audience over the boot facts (resolve.ts appAudienceAllows). */
+/**
+ * The APP_RULES audience over the boot facts. It is the one client mirror of
+ * resolve.ts appAudienceAllows (src/lib/nav/app-audience.ts, which the AI
+ * sidebar and the palette read too), so a Teams row and its page gate can
+ * never drift apart. Guests are refused one level up, in teamsRowVisible.
+ */
 export function teamsAudienceAllows(app: AppKey, v: TeamsViewer): boolean {
-  const rule = APP_RULES[app];
-  if (!rule) return false;
-  if (v.orgRole === "GUEST") return rule.guest !== "none" && rule.audience === "signed-in";
-  switch (rule.audience) {
-    case "signed-in":
-    case "member":
-      return true;
-    case "reports-people-team-admin":
-      // An Agent cannot be a manager (access 2.4), so hasReports is false for
-      // one by construction; the check stays on the facts, not the flag.
-      return isAdmin(v) || v.peopleTeam || v.hasReports;
-    case "people-team-admin":
-      return isAdmin(v) || v.peopleTeam;
-    case "owner-admin":
-      return isAdmin(v);
-    default:
-      return false;
-  }
+  return appAudienceAllows(app, v);
 }
 
 /** Does this viewer get this row? */
@@ -120,7 +100,6 @@ export function teamsRowVisible(row: TeamsRow, v: TeamsViewer): boolean {
   // Guests never see the Teams hub (access 2.3).
   if (v.orgRole === "GUEST") return false;
   if (!row.app) return true;
-  if (row.key === "assets") return teamsAudienceAllows("assets", v) && v.legacyManagerTier !== false;
   if (teamsAudienceAllows(row.app, v)) return true;
   // The two respondent doors (sidebar-map section 5 rows 17 and 18).
   if (row.key === "candor") return v.candorInvited === true;

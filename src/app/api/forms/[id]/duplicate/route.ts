@@ -2,7 +2,8 @@
 //
 // The form row menu's Duplicate (spec-tables-forms section 2 /forms). The
 // copy is a new form named "Copy of {name}", made by the caller, with the
-// source's description, fields, destination and field mapping, and NO
+// source's description, fields, destination (when the caller can write there
+// too) and field mapping, and NO
 // responses (answers belong to the form they were given to). Its public link
 // is OFF: publishing is a separate, confirmed act.
 //
@@ -21,6 +22,9 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { copyName } from "@/lib/tables-forms-list";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { checkFormDestination } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -29,10 +33,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const userId = getUserId(session);
   const { id } = await params;
 
+  // Can view on the form (the one resolver): a Member always, a Guest when
+  // they made it or were given it. Any other id is the same 404.
   const viewer = await viewerFromSession().catch(() => null);
-  const guest = viewer?.orgRole === "GUEST";
-  const source = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId, ...(guest ? { createdById: userId } : {}) } });
-  if (!source) return jsonError("not found", 404);
+  const source = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId } });
+  if (!source || !viewer) return jsonError("not found", 404);
+  if (!roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), { kind: "form", id })).role, "VIEW")) return jsonError("not found", 404);
+
+  // Every response to the copy is written into its destination, and the copy
+  // is the caller's own form, so a destination is carried over only when the
+  // caller can write there too (Can edit, the placement rule, node-rules P1).
+  // Otherwise the copy starts with no destination: a Can view holder of a
+  // form never gets a form of their own that writes into a List or table
+  // they cannot. The answer says so, so the toast can.
+  const ctx = nodeCtxFromViewer(viewer);
+  const keepBoard = source.targetBoardId ? (await checkFormDestination(ctx, { boardId: source.targetBoardId })).ok : false;
+  const keepTable = source.targetTableId ? (await checkFormDestination(ctx, { tableId: source.targetTableId })).ok : false;
+  const clearedDestination = (!!source.targetBoardId && !keepBoard) || (!!source.targetTableId && !keepTable);
 
   // The additive `settings` bucket rides along when the column exists; the
   // spread keeps this route working for the one release it may be absent.
@@ -47,13 +64,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       description: source.description,
       fields: source.fields as Prisma.InputJsonValue,
       isPublic: false,
-      targetBoardId: source.targetBoardId,
-      targetTableId: source.targetTableId,
+      targetBoardId: keepBoard ? source.targetBoardId : null,
+      targetTableId: keepTable ? source.targetTableId : null,
       fieldMappings: source.fieldMappings as Prisma.InputJsonValue,
       createdById: userId,
       ...(settings && typeof settings === "object" ? { settings: settings as Prisma.InputJsonValue } : {}),
     } as Prisma.FormDefinitionUncheckedCreateInput,
   });
 
-  return jsonSuccess({ id: copy.id }, 201);
+  return jsonSuccess({ id: copy.id, clearedDestination }, 201);
 }

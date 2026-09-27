@@ -423,6 +423,45 @@ export function mergeRefetchedRow(
   return { action: "merge", row: merged };
 }
 
+/**
+ * What a renderer reports to its host after an optimistic edit. Row fields
+ * ride as themselves. A custom-field edit rides as `metadataPatch`, the same
+ * patch the request carried, never as a merged blob: each holder merges the
+ * patch into its OWN copy of `metadata` (applyRowPatchReport), so a report
+ * can only change the keys the edit named. Sending the reporter's merged
+ * blob would revert every other key the host learned elsewhere (the drawer,
+ * the poll), and sending no metadata at all left the host's old value to win
+ * the next renderer resync: the edited cell showed the old value until a
+ * full reload.
+ */
+export type RowPatchReport = Partial<BoardItemRow> & { metadataPatch?: Record<string, unknown> };
+
+/** The optimistic twin of the server-side metadataPatch merge: null deletes the key. */
+export function mergeMetadataPatch(
+  current: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(current ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete next[k];
+    else next[k] = v;
+  }
+  return next;
+}
+
+/**
+ * Fold a report into the row a host holds. `metadataPatch` merges into THIS
+ * row's own metadata; a report that instead carries a whole `metadata` row
+ * field (a server-truth reply, e.g. a Connect commit) replaces it like any
+ * other row field, exactly as before.
+ */
+export function applyRowPatchReport(row: BoardItemRow, report: RowPatchReport): BoardItemRow {
+  const { metadataPatch, ...fields } = report;
+  const next: BoardItemRow = { ...row, ...fields };
+  if (metadataPatch) next.metadata = mergeMetadataPatch(next.metadata, metadataPatch);
+  return next;
+}
+
 function updatedTs(r: BoardItemRow): number {
   return r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
 }

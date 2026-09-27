@@ -29,6 +29,7 @@
 
 import { z } from "zod";
 import { FILTER_OPERATORS, type FilterOperatorName } from "@/lib/list-comfort";
+import { fieldKeyOfId } from "@/lib/field-keys";
 
 export const WIDGET_LIMIT = 30;
 export const GRID_COLS = 12;
@@ -36,7 +37,11 @@ export const MAX_WIDGET_LISTS = 50;
 export const MAX_WIDGET_RULES = 20;
 export const MAX_LIST_ROWS = 50;
 
-/** The built-in fields a filter may name; anything else is a custom field key. */
+/**
+ * The built-in fields a filter may name; anything else is a custom field's
+ * id: its key, or "field:<key>" for a key one of these also is
+ * (field-keys.ts ruleFieldIdOf). Redaction reads the id's stored key.
+ */
 export const BUILTIN_FILTER_FIELDS = ["status", "assignee", "priority", "due", "tags", "title", "type"] as const;
 const BUILTIN_FIELDS: ReadonlySet<string> = new Set(BUILTIN_FILTER_FIELDS);
 
@@ -444,7 +449,7 @@ export function redactWidgetForReader(w: Widget, ctx: RedactContext): Widget | H
   if (w.source.kind === "lists" && lists.length === 0) return hidden(w);
   const keys = new Set<string>();
   for (const id of lists) for (const k of ctx.fieldKeysByList.get(id) ?? []) keys.add(k);
-  const known = (field: string) => BUILTIN_FIELDS.has(field) || keys.has(field);
+  const known = (field: string) => BUILTIN_FIELDS.has(field) || keys.has(fieldKeyOfId(field));
   const source: WidgetSource = w.source.kind === "lists" ? { kind: "lists", listIds: w.source.listIds.filter((id) => lists.includes(id)) } : w.source;
   const filter: WidgetFilter = { ...w.filter, rules: w.filter.rules.filter((r) => known(r.field)) };
   if (w.kind === "chart" && typeof w.groupBy === "object" && !keys.has(w.groupBy.field)) return hidden(w);
@@ -497,7 +502,7 @@ export function cardVisibility(w: Widget, ctx: RedactContext): CardVisibility {
   if (w.kind === "stat" && w.metric.op === "sum" && !keys.has(w.metric.fieldKey)) return { kind: "hidden" };
   const readable = new Set(lists);
   const hiddenListIds = w.source.kind === "lists" ? w.source.listIds.filter((id) => !readable.has(id)) : [];
-  const hiddenRules = w.filter.rules.filter((r) => !BUILTIN_FIELDS.has(r.field) && !keys.has(r.field)).map((r) => ({ ...r }));
+  const hiddenRules = w.filter.rules.filter((r) => !BUILTIN_FIELDS.has(r.field) && !keys.has(fieldKeyOfId(r.field))).map((r) => ({ ...r }));
   if (hiddenListIds.length === 0 && hiddenRules.length === 0) return { kind: "full" };
   return { kind: "partial", hiddenListIds, hiddenRules };
 }

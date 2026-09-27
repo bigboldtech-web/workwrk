@@ -42,6 +42,7 @@ import {
   refetchedFromRow,
   statusPickerFor,
   writeContext,
+  type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { LinkedRowIndicator } from "./linked-row-indicator";
@@ -68,7 +69,7 @@ interface BoardKanbanViewProps {
    *  learns about every card mutation — otherwise its next re-render clobbers
    *  the local copy (new cards vanish, archived cards resurrect). */
   onItemCreated?: (item: BoardItemRow) => void;
-  onItemPatched?: (id: string, patch: Partial<BoardItemRow>) => void;
+  onItemPatched?: (id: string, patch: RowPatchReport) => void;
   onItemRemoved?: (id: string) => void;
   onItemsRefreshed?: (items: BoardItemRow[]) => void;
   /** Space-module gating — hides the card's Priority / Tags / Start-timer when off. */

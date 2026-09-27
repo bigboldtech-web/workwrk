@@ -6,10 +6,24 @@
 //
 // Rows, in the spec's order, each rendered only when the role allows it:
 //   Open · Open beside · Copy link (cmd L) · Add to / Remove from favorites ·
-//   Rename (inline) · New doc inside · Move to… · Share · Duplicate (cmd D) ·
-//   separator · Move to Trash (destructive; Full access, or own creation at
-//   Can edit; Agents never)
-// A Can view viewer's menu is Open, Open beside, Copy link, Add to favorites.
+//   Rename (inline) · New doc inside · Move to… · Manage access · Duplicate
+//   (cmd D) · separator · Move to Trash (destructive; Full access, or own
+//   creation at Can edit; Agents never)
+// Duplicate and Move to… also need their write to be able to pass: the
+// menu reads GET /api/docs/[id]?menu=1 on open (docMenuOffers below), so a
+// person granted one doc is not offered a copy or a destination the server
+// refuses, and a refusal toasts the server's sentence, never a bare code.
+// A Can view viewer's menu is Open, Open beside, Copy link, Add to favorites
+// and Who has access.
+//
+// THE ACCESS ROW IS FOR EVERY READER (problem 51). It sat inside the Can edit
+// block and read "Share" at Full access only, so a Can view or Can comment
+// holder had no way to see who else can open the doc, and a Can edit holder,
+// who may change a doc's sharing (MANAGE_BAR.doc), was never offered it. It
+// now reads "Manage access" from Can edit up and "Who has access" below, and
+// opens the one Manage access dialog: DocRowMenuHost mounts it when its host
+// passes no dialog of its own, so the Work tree, the Docs sidebar and /docs
+// all get it. Agents never share, so they get no row.
 //
 // It is a MenuList body. Hosts mount it in a MorePortal anchored to the row's
 // "..." (or at the right-click point), or use `useDocRowMenu()` + `DocRowMenuHost`,
@@ -29,8 +43,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Share2, Star, Trash2, LayoutTemplate,
+  Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Star, Trash2, LayoutTemplate, UserPlus, Users,
 } from "lucide-react";
+import { ShareDialog } from "@/components/access/share-dialog";
+import { MANAGE_BAR, panelAtLeast, type PanelRole } from "@/lib/access/access-panel";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { Picker } from "@/components/ui/picker";
@@ -47,8 +63,47 @@ import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object
 
 export type DocMenuRole = "full" | "edit" | "comment" | "view";
 
-/** GET /api/docs/[id]'s role fields, read when a host cannot pass the role. */
-type ResolvedRole = { role: DocMenuRole; own: boolean };
+/**
+ * GET /api/docs/[id]'s role fields, read when a host cannot pass the role.
+ * canShare is the server's own answer to "may this viewer change who can open
+ * it": a locked doc reads Can comment below Full access, yet its editors still
+ * manage its sharing, so the role alone would mislabel the access row.
+ */
+type ResolvedRole = { role: DocMenuRole; own: boolean; canShare?: boolean };
+
+/**
+ * GET /api/docs/[id]?menu=1's answer to "what can this viewer do from here",
+ * built on the rules the writes apply (menuCaps in the route). Duplicate
+ * needs the right to add a doc where this one lives; a move offers "No
+ * location" and each Space only when the PUT would take it.
+ */
+export interface DocMenuCaps {
+  canDuplicate: boolean;
+  move: { none: boolean; spaces: SpaceRow[] };
+}
+
+export interface DocMenuOffers {
+  duplicate: boolean;
+  move: boolean;
+  moveNone: boolean;
+  /** The Spaces the picker lists; null = not known, so openMove reads /api/spaces. */
+  moveSpaces: SpaceRow[] | null;
+}
+
+/**
+ * Which of Duplicate and Move to… the menu offers. A Can edit role alone used
+ * to show both, so a person granted one doc was offered a copy, "No location"
+ * and every Space, and each could only fail. With the caps, a row shows only
+ * when its write can pass, and Move to… hides when no destination can.
+ * "pending" (the caps are loading) offers neither yet; "unknown" (the read
+ * failed) keeps the rows the role gave before, and the write stays the gate.
+ */
+export function docMenuOffers(canEdit: boolean, caps: DocMenuCaps | "pending" | "unknown"): DocMenuOffers {
+  if (!canEdit || caps === "pending") return { duplicate: false, move: false, moveNone: false, moveSpaces: [] };
+  if (caps === "unknown") return { duplicate: true, move: true, moveNone: true, moveSpaces: null };
+  const spaces = caps.move.spaces;
+  return { duplicate: caps.canDuplicate, move: caps.move.none || spaces.length > 0, moveNone: caps.move.none, moveSpaces: spaces };
+}
 
 export interface DocMenuTarget {
   id: string;
@@ -70,7 +125,14 @@ export interface DocMenuTarget {
   spaceSlug?: string | null;
 }
 
-export type DocMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "child-created" | "moved" | "templated";
+export type DocMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "child-created" | "moved" | "templated" | "shared";
+
+const PANEL_ROLE_OF: Record<DocMenuRole, PanelRole> = { full: "FULL", edit: "EDIT", comment: "COMMENT", view: "VIEW" };
+
+/** Can this role change who can open the doc? Can edit and up (MANAGE_BAR.doc, today's doc sharing rule). */
+export function docRoleManagesAccess(role: DocMenuRole): boolean {
+  return panelAtLeast(PANEL_ROLE_OF[role], MANAGE_BAR.doc);
+}
 
 export function dispatchDocsChanged() {
   if (typeof window === "undefined") return;
@@ -85,8 +147,12 @@ export interface DocRowMenuProps {
   context: "table" | "tree" | "editor";
   onClose: () => void;
   onChanged?: (kind: DocMenuChange) => void;
-  /** The host opens its Share dialog for this doc (absent = no Share row). */
-  onShare?: () => void;
+  /**
+   * Opens the Manage access dialog for this doc, read only when the menu knows
+   * the viewer cannot change it (absent = no access row; DocRowMenuHost always
+   * passes one).
+   */
+  onShare?: (readOnly: boolean) => void;
   /** Editor context: extra rows the host renders between the shared rows and Trash. */
   extraRows?: React.ReactNode;
   /** The editor focuses its title instead of the inline rename row. */
@@ -102,33 +168,57 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
   const [name, setName] = useState(doc.title);
   const [fav, setFav] = useState(!!doc.favorite);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  // "No location" when the caps could not be read: set from the move rule's own answer (openMove).
+  const [rootPick, setRootPick] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   // A host that knows the role passes it; otherwise it is resolved on open.
   // Until it lands, only the rows every role holds are rendered.
   const [resolved, setResolved] = useState<ResolvedRole | null>(null);
+  // What Duplicate and Move may offer. Read on every open, a host that
+  // passes the role included, since no host knows where the viewer may add
+  // docs; one lean read (?menu=1) answers both questions.
+  const [caps, setCaps] = useState<DocMenuCaps | "pending" | "unknown">("pending");
   const roleKnown = doc.role !== undefined;
   useEffect(() => {
-    if (roleKnown) return;
     let alive = true;
     void (async () => {
-      const r = await apiFetch<{ myRole?: string; canManage?: boolean; doc?: { createdById?: string | null } }>(`/api/docs/${doc.id}`, { cache: "no-store" });
+      const r = await apiFetch<{ myRole?: string; canManage?: boolean; canShare?: boolean; doc?: { createdById?: string | null } } & Partial<DocMenuCaps>>(`/api/docs/${doc.id}?menu=1`, { cache: "no-store" });
       if (!alive) return;
-      if (!r.ok) { setResolved({ role: "view", own: false }); return; }
-      const myRole = r.data.myRole === "view" ? "view" : r.data.myRole === "comment" ? "comment" : "edit";
-      setResolved({ role: r.data.canManage ? "full" : myRole, own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id });
+      if (!r.ok) {
+        if (!roleKnown) setResolved({ role: "view", own: false });
+        setCaps("unknown");
+        return;
+      }
+      if (!roleKnown) {
+        const myRole = r.data.myRole === "view" ? "view" : r.data.myRole === "comment" ? "comment" : "edit";
+        setResolved({
+          role: r.data.canManage ? "full" : myRole,
+          own: !!r.data.doc?.createdById && r.data.doc.createdById === boot.viewer.id,
+          canShare: typeof r.data.canShare === "boolean" ? r.data.canShare : undefined,
+        });
+      }
+      const move = r.data.move;
+      setCaps(typeof r.data.canDuplicate === "boolean" && move && Array.isArray(move.spaces)
+        ? { canDuplicate: r.data.canDuplicate, move: { none: !!move.none, spaces: move.spaces } }
+        : "unknown");
     })();
     return () => { alive = false; };
   }, [roleKnown, doc.id, boot.viewer.id]);
   const role: DocMenuRole = doc.role ?? resolved?.role ?? "view";
   const own = doc.own ?? resolved?.own ?? false;
-  const pending = !roleKnown && resolved === null;
   const canEdit = role === "full" || role === "edit";
+  const offers = docMenuOffers(canEdit, caps);
+  const rolePending = !roleKnown && resolved === null;
+  // The skeleton holds the place of rows still to come: the role's, or at
+  // Can edit the Duplicate and Move rows the caps decide.
+  const pending = rolePending || (canEdit && caps === "pending");
   const canTrash = role === "full" || (role === "edit" && own);
-  // Share writes the member map: Full access only, the same rule the header's
-  // ShareOrRoleChip renders (Can edit shares only under toggle 4, which no
-  // surface reads yet), so the two doors never disagree.
-  const canShare = role === "full";
+  // The same rule the header's chip and the server's canShare use, so the
+  // two doors never disagree. Until the role lands the row waits behind the
+  // skeleton rather than reading one label and then the other.
+  const managesAccess = resolved?.canShare ?? docRoleManagesAccess(role);
+  const showAccessRow = !!onShare && !rolePending;
   const title = doc.title || "Untitled doc";
   const trashDays = boot.org.trashDays;
 
@@ -212,15 +302,22 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
 
   async function openMove() {
     setMode("move");
+    if (offers.moveSpaces) { setSpaces(offers.moveSpaces); return; }
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces", { cache: "no-store" });
-      const list = r.ok ? (Array.isArray(r.data) ? r.data : r.data.spaces ?? r.data.data ?? []) : [];
+      // The caps could not be read: ask the move rule itself for the places
+      // (the placement rule, P5), never the whole Space list, which offered
+      // Spaces the PUT then refused. "No location" too only when it is taken.
+      const r = await apiFetch<{ root: { pickable: boolean } | null; spaces?: Array<SpaceRow & { pickable: boolean }> }>(`/api/move/destinations?kind=doc&id=${encodeURIComponent(doc.id)}`, { cache: "no-store" });
+      const list = r.ok ? (r.data.spaces ?? []).filter((s) => s.pickable) : [];
+      setRootPick(r.ok && r.data.root?.pickable === true);
       setSpaces(list.map((s) => ({ id: s.id, name: s.name, slug: s.slug, icon: s.icon ?? null, color: s.color ?? null })));
     }
   }
 
   async function moveTo(value: string) {
-    const body = value === "none" ? { entityType: null, entityId: null } : { entityType: "SPACE", entityId: value };
+    // A moved doc leaves any parent page: a page lives where its parent lives
+    // (the placement rule, P3), so a place of its own means no parent.
+    const body = value === "none" ? { entityType: null, entityId: null, parentId: null } : { entityType: "SPACE", entityId: value, parentId: null };
     setBusy("move");
     const r = await apiFetch(`/api/docs/${doc.id}`, { method: "PUT", json: body });
     setBusy(null);
@@ -291,11 +388,14 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
           ariaLabel={`Move ${title}`}
           searchPlaceholder="Find a Space"
           backdrop={false}
-          selected={doc.entityType === "SPACE" ? doc.entityId ?? null : !doc.entityType ? "none" : null}
+          // A host that passes no anchor (undefined: the Space tree) does not
+          // know where the doc lives, so nothing is ticked. Reading undefined
+          // as "none" ticked No location on a doc inside a Folder.
+          selected={doc.entityType === "SPACE" ? doc.entityId ?? null : doc.entityType === null ? "none" : null}
           onSelect={(v) => void moveTo(v)}
           emptyLabel="No Spaces"
           sections={[
-            { options: [{ value: "none", label: "No location", description: "A standalone doc" }] },
+            ...((offers.moveSpaces ? offers.moveNone : rootPick) ? [{ options: [{ value: "none", label: "No location", description: "A standalone doc" }] }] : []),
             { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
           ]}
         />
@@ -319,9 +419,19 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
         <>
           <MenuItem icon={Pencil} label="Rename" onClick={() => { if (onRenameInline) { onClose(); onRenameInline(); } else { setName(doc.title); setMode("rename"); } }} />
           <MenuItem icon={Plus} label="New doc inside" onClick={() => void newInside()} />
-          <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} />
-          {onShare && canShare ? <MenuItem icon={Share2} label="Share" onClick={() => { onClose(); onShare(); }} /> : null}
-          <MenuItem icon={Copy} label="Duplicate" shortcut="⌘D" busy={busy === "duplicate"} onClick={() => void duplicate()} />
+          {offers.move ? <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} /> : null}
+        </>
+      ) : null}
+      {showAccessRow ? (
+        <MenuItem
+          icon={managesAccess ? UserPlus : Users}
+          label={managesAccess ? "Manage access" : "Who has access"}
+          onClick={() => { onClose(); onShare?.(!managesAccess); }}
+        />
+      ) : null}
+      {canEdit ? (
+        <>
+          {offers.duplicate ? <MenuItem icon={Copy} label="Duplicate" shortcut="⌘D" busy={busy === "duplicate"} onClick={() => void duplicate()} /> : null}
           {role === "full" ? <MenuItem icon={LayoutTemplate} label="Save as template" busy={busy === "template"} onClick={() => void saveAsTemplate()} /> : null}
         </>
       ) : null}
@@ -378,6 +488,11 @@ export function useDocRowMenu() {
   return { state, openAt, openFrom, open, close };
 }
 
+/**
+ * The menu at its anchor, and the Manage access dialog its access row opens.
+ * A host that passes `onShare` opens a dialog of its own; every other host
+ * gets this one, so no doc row is left without a way to see who has access.
+ */
 export function DocRowMenuHost({ menu, context, onChanged, onShare }: {
   menu: ReturnType<typeof useDocRowMenu>;
   context: "table" | "tree" | "editor";
@@ -385,17 +500,37 @@ export function DocRowMenuHost({ menu, context, onChanged, onShare }: {
   onShare?: (doc: DocMenuTarget) => void;
 }) {
   const dummy = useRef<HTMLElement | null>(null);
+  // The doc the dialog is about outlives the menu (which closes as the row is
+  // clicked), and stays set while the dialog closes so it animates out whole.
+  const [share, setShare] = useState<{ doc: DocMenuTarget; readOnly: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const s = menu.state;
-  if (!s) return null;
   return (
-    <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
-      <DocRowMenu
-        doc={s.doc}
-        context={context}
-        onClose={menu.close}
-        onChanged={(kind) => onChanged?.(kind, s.doc)}
-        onShare={onShare ? () => onShare(s.doc) : undefined}
-      />
-    </MorePortal>
+    <>
+      {s ? (
+        <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
+          <DocRowMenu
+            doc={s.doc}
+            context={context}
+            onClose={menu.close}
+            onChanged={(kind) => onChanged?.(kind, s.doc)}
+            onShare={(readOnly) => {
+              if (onShare) { onShare(s.doc); return; }
+              setShare({ doc: s.doc, readOnly });
+              setShareOpen(true);
+            }}
+          />
+        </MorePortal>
+      ) : null}
+      {!onShare && share ? (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          target={{ kind: "doc", id: share.doc.id, name: share.doc.title || "Untitled doc" }}
+          readOnly={share.readOnly}
+          onChanged={() => { onChanged?.("shared", share.doc); dispatchDocsChanged(); }}
+        />
+      ) : null}
+    </>
   );
 }

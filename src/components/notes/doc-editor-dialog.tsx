@@ -165,8 +165,8 @@ export function DocEditorDialog({
                 type="button"
                 onClick={onOpenSidekick}
                 className="p-1.5 rounded-md hover:bg-surface-2 text-muted-2 hover:text-foreground"
-                aria-label="Open Sidekick"
-                title="Open Sidekick"
+                aria-label="Ask AI"
+                title="Ask AI"
               >
                 <MessageCircle size={14} />
               </button>

@@ -5,7 +5,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { whiteboardReadable } from "@/lib/whiteboard-gate";
+import { canCreateAt, nodeCtxFromLevel } from "@/lib/access/node-access";
+import { createRefusal } from "@/lib/access/node-rules";
+import { PlacementConflict, lockParentFolder } from "@/lib/access/node-placement";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,30 +19,50 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     where: { id, organizationId: ctx.orgId, archivedAt: null },
   });
   if (!source) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (source.spaceId) {
-    const level = ctx.accessLevel ?? "EMPLOYEE";
-    if (!(await getSpaceForReader(source.spaceId, ctx.userId, level))) return NextResponse.json({ error: "not found" }, { status: 404 });
-    // The copy lands in the same Space, so that needs edit.
-    if (!(await canEditSpace(source.spaceId, ctx.userId, level))) {
-      return NextResponse.json({ error: "You need edit access to that Space." }, { status: 403 });
-    }
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
+  if (!(await whiteboardReadable(nodeCtx, source))) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // The copy lands beside the original, so it takes the one create rule
+  // there (node-rules P1): Can edit or higher on its Folder, or on its Space
+  // at the root; any Member for a canvas in no Space. Can view never creates.
+  const container = source.folderId && source.spaceId
+    ? { kind: "folder" as const, id: source.folderId }
+    : source.spaceId ? { kind: "space" as const, id: source.spaceId } : null;
+  if (!(await canCreateAt(nodeCtx, container, "canvas"))) {
+    return NextResponse.json({ error: createRefusal("canvas", container) }, { status: 403 });
   }
 
-  const whiteboard = await prisma.whiteboard.create({
-    data: {
-      organizationId: ctx.orgId,
-      name: `Copy of ${source.name}`.slice(0, 160),
-      description: source.description,
-      productSlug: source.productSlug,
-      spaceId: source.spaceId,
-      folderId: source.folderId,
-      ownerId: ctx.userId,
-      lastEditedById: ctx.userId,
-      lastEditedAt: new Date(),
-      scene: (source.scene ?? {}) as object,
-      thumbnail: source.thumbnail,
-    },
-    select: { id: true, name: true, createdAt: true },
-  });
-  return NextResponse.json({ whiteboard });
+  // The create half of P3: in a Folder, the copy's Space is read from the
+  // Folder under a share lock inside the write, never copied from the source
+  // row, so a move of that Folder meanwhile can never split the copy from it.
+  try {
+    const whiteboard = await prisma.$transaction(async (tx) => {
+      let spaceId = source.spaceId;
+      const folderId = container?.kind === "folder" ? container.id : null;
+      if (folderId) {
+        const parent = await lockParentFolder(tx, ctx.orgId, folderId);
+        if (!parent) throw new PlacementConflict("That folder just moved or went to Trash. Try again.");
+        spaceId = parent.spaceId;
+      }
+      return tx.whiteboard.create({
+        data: {
+          organizationId: ctx.orgId,
+          name: `Copy of ${source.name}`.slice(0, 160),
+          description: source.description,
+          productSlug: source.productSlug,
+          spaceId,
+          folderId,
+          ownerId: ctx.userId,
+          lastEditedById: ctx.userId,
+          lastEditedAt: new Date(),
+          scene: (source.scene ?? {}) as object,
+          thumbnail: source.thumbnail,
+        },
+        select: { id: true, name: true, createdAt: true },
+      });
+    });
+    return NextResponse.json({ whiteboard });
+  } catch (err) {
+    if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });
+    throw err;
+  }
 }

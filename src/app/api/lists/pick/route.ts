@@ -19,8 +19,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canContributeBoard } from "@/lib/board";
 import { listSpacesForUser } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 const MAX_LIMIT = 100;
 
@@ -37,7 +38,10 @@ export async function GET(req: Request) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(url.searchParams.get("limit")) || 40));
   const cursor = url.searchParams.get("cursor") ?? null;
 
-  const spaces = await listSpacesForUser(userId, organizationId, { accessLevel });
+  // The Spaces the viewer holds a role on, and the ones they only pass
+  // through on the way to something they were given (a Folder or a List
+  // grant): the Lists of both are candidates, and the write check decides.
+  const spaces = await listSpacesForUser(userId, organizationId, { accessLevel, paths: true });
   const spaceIds = spaces.map((s) => s.id);
   const candidates = await prisma.board.findMany({
     where: {
@@ -53,10 +57,10 @@ export async function GET(req: Request) {
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
 
-  const allowedFlags = await Promise.all(
-    candidates.map((b) => canContributeBoard(b.id, userId, accessLevel)),
-  );
-  const allowed = candidates.filter((_, i) => allowedFlags[i]);
+  // ONE world for every candidate (never a check per row): Can edit or
+  // higher on the List, the same answer PATCH /api/items/[id] gives.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(userId, organizationId, accessLevel), "list", candidates.map((b) => b.id));
+  const allowed = candidates.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "EDIT"));
 
   const folderIds = [...new Set(allowed.map((b) => b.folderId).filter((x): x is string => !!x))];
   const folders = folderIds.length

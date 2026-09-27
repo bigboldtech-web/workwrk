@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 /**
  * Cancel a pending tenant deletion. Only works during the soft-delete
@@ -38,16 +39,16 @@ export async function POST(_req: NextRequest) {
     return jsonError("Organization is not pending deletion", 409);
   }
 
-  const settings = (org.settings ?? {}) as OrgSettingsWithDeletion;
-  const { cancelledAt: _ca, cancelledById: _cb, scheduledHardDeleteAt: _sh, ...rest } = settings;
-  void _ca; void _cb; void _sh;
-
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: {
-      status: "ACTIVE",
-      settings: rest as never,
-    },
+  // The status and the removal of the three deletion keys together; only
+  // those keys of the shared settings column are touched.
+  const clear: Record<keyof Pick<OrgSettingsWithDeletion, "cancelledAt" | "cancelledById" | "scheduledHardDeleteAt">, null> = {
+    cancelledAt: null,
+    cancelledById: null,
+    scheduledHardDeleteAt: null,
+  };
+  await prisma.$transaction(async (tx) => {
+    await tx.organization.update({ where: { id: orgId }, data: { status: "ACTIVE" } });
+    await writeOrgSettingsKeys(orgId, clear, tx);
   });
 
   logAuditEvent({

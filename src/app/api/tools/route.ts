@@ -1,77 +1,106 @@
+// GET  /api/tools: the tools this viewer can see (tool-access.ts).
+//   ?q=          name, website or description contains
+//   ?category=   exact category ("none" for no category)
+// The list never carries the saved login: `hasLogin` says whether there is
+// one, and GET /api/tools/[id] returns it to someone who can see the tool.
+// POST /api/tools: add a tool (a manager or above, unchanged).
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
+import { canAddTool, canManageTool, hasLogin, seesAllTools } from "@/lib/tools/tool-access";
+import { requireTools } from "@/lib/tools/tool-server";
 
-// GET: List tools — admins see all, employees see only shared with them
-export async function GET() {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
+export async function GET(req: NextRequest) {
+  const v = await requireTools();
+  if ("error" in v) return v.error;
+  const sp = new URL(req.url).searchParams;
+  const q = (sp.get("q") ?? "").trim().slice(0, 200);
+  const category = (sp.get("category") ?? "").trim();
 
-  const orgId = getOrgId(session);
-  const userId = getUserId(session);
-  const accessLevel = (session.user as any).accessLevel;
-  const isAdmin = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "HR"].includes(accessLevel);
+  const mine = await prisma.toolShare.findMany({ where: { userId: v.userId, tool: { organizationId: v.orgId } }, select: { toolId: true, sharedAt: true } });
+  const sharedAt = new Map(mine.map((s) => [s.toolId, s.sharedAt]));
 
-  if (isAdmin) {
-    // Admins see all tools with share info
-    const tools = await prisma.tool.findMany({
-      where: { organizationId: orgId },
-      include: { shares: { select: { userId: true, sharedAt: true } } },
-      orderBy: { createdAt: "desc" },
-    });
-    return jsonSuccess(tools);
-  }
-
-  // Employees see only tools shared with them — credentials included
-  const shares = await prisma.toolShare.findMany({
-    where: { userId },
-    include: {
-      tool: {
-        select: { id: true, name: true, description: true, url: true, icon: true, category: true, credentials: true },
-      },
+  const tools = await prisma.tool.findMany({
+    where: {
+      organizationId: v.orgId,
+      ...(seesAllTools(v) ? {} : { OR: [{ addedBy: v.userId }, { id: { in: [...sharedAt.keys()] } }] }),
+      ...(q ? { AND: [{ OR: [
+        { name: { contains: q, mode: "insensitive" as const } },
+        { url: { contains: q, mode: "insensitive" as const } },
+        { description: { contains: q, mode: "insensitive" as const } },
+      ] }] } : {}),
+      ...(category === "none" ? { category: null } : category ? { category } : {}),
     },
-    orderBy: { sharedAt: "desc" },
+    select: {
+      id: true, name: true, description: true, url: true, icon: true, category: true, credentials: true,
+      addedBy: true, createdAt: true, updatedAt: true,
+      shares: { select: { userId: true, sharedAt: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 500,
   });
 
-  return jsonSuccess(shares.map((s) => ({ ...s.tool, sharedAt: s.sharedAt })));
+  const peopleIds = [...new Set(tools.flatMap((t) => [t.addedBy, ...t.shares.map((s) => s.userId)]))];
+  const people = peopleIds.length
+    ? await prisma.user.findMany({ where: { id: { in: peopleIds }, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } })
+    : [];
+  const person = new Map(people.map((p) => [p.id, { id: p.id, name: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "Someone", avatar: p.avatar }]));
+
+  return jsonSuccess({
+    tools: tools.map(({ credentials, shares, ...t }) => {
+      const manage = canManageTool(v, t);
+      return {
+        ...t,
+        hasLogin: hasLogin(credentials),
+        canManage: manage,
+        sharedAt: sharedAt.get(t.id) ?? null,
+        addedByPerson: person.get(t.addedBy) ?? null,
+        // Who it is shared with: shown to the people who can change it, and
+        // as a count to everyone else.
+        sharedWith: manage ? shares.map((s) => person.get(s.userId)).filter(Boolean) : [],
+        shareCount: shares.length,
+      };
+    }),
+    canAdd: canAddTool(v),
+    seesAll: seesAllTools(v),
+  });
 }
 
-// POST: Add a new tool (admin only)
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  const v = await requireTools();
+  if ("error" in v) return v.error;
+  if (!canAddTool(v)) return jsonError("Only a manager or an admin can add tools.", 403);
 
-  const orgId = getOrgId(session);
-  const userId = getUserId(session);
-  const body = await req.json();
-  const { name, description, url, icon, category, credentials } = body;
-
-  if (!name?.trim()) return jsonError("Tool name is required");
+  const body = await req.json().catch(() => null);
+  const name = typeof body?.name === "string" ? body.name.trim().slice(0, 120) : "";
+  if (!name) return jsonError("Tool name is required");
+  const str = (x: unknown, max: number) => (typeof x === "string" && x.trim() ? x.trim().slice(0, max) : null);
+  const credentials = body?.credentials && typeof body.credentials === "object" && hasLogin(body.credentials) ? body.credentials : undefined;
 
   const tool = await prisma.tool.create({
     data: {
-      name: name.trim(),
-      description: description || null,
-      url: url || null,
-      icon: icon || null,
-      category: category || null,
-      credentials: credentials || undefined,
-      addedBy: userId,
-      organizationId: orgId,
+      name,
+      description: str(body?.description, 2000),
+      url: str(body?.url, 500),
+      icon: str(body?.icon, 16),
+      category: str(body?.category, 60),
+      credentials,
+      addedBy: v.userId,
+      organizationId: v.orgId,
     },
+    select: { id: true, name: true, url: true, category: true },
   });
 
-  // Tools with shared credentials are a security surface — admins
-  // need to be able to trace who added what and when.
-  const hasCredentials = credentials !== undefined && credentials !== null;
-  if (hasCredentials) {
+  // Tools with a saved login are a security surface: admins need to trace
+  // who added what and when.
+  if (credentials) {
     logAuditEvent({
       type: "tool_created",
-      actorId: userId,
-      organizationId: orgId,
-      description: `Added tool "${tool.name}" with shared credentials`,
+      actorId: v.userId,
+      organizationId: v.orgId,
+      description: `Added tool "${tool.name}" with a saved login`,
       targetId: tool.id,
       targetType: "tool",
       metadata: { url: tool.url ?? null, category: tool.category ?? null, hasCredentials: true },
@@ -79,8 +108,8 @@ export async function POST(req: NextRequest) {
   } else {
     logActivity({
       type: "tool_created",
-      actorId: userId,
-      organizationId: orgId,
+      actorId: v.userId,
+      organizationId: v.orgId,
       description: `Added tool "${tool.name}"`,
       targetId: tool.id,
       targetType: "tool",

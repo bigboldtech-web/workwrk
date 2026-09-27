@@ -70,9 +70,9 @@ describe("who sees which row", () => {
     expect(visibleTeamsRows(admin).length).toBeGreaterThan(TEAMS_SEARCH_THRESHOLD);
   });
 
-  it("Assets waits for its page's manager tier (the tools-misc bridge)", () => {
-    expect(keys({ ...manager, legacyManagerTier: false })).not.toContain("assets");
-    expect(keys({ ...manager, legacyManagerTier: true })).toContain("assets");
+  it("Assets follows its APP_RULES audience alone (the page is on the app-key gate)", () => {
+    expect(keys(manager)).toContain("assets");
+    expect(keys(member)).not.toContain("assets");
   });
 
   it("a Guest sees nothing: the Teams hub is never shown to a Guest", () => {

@@ -114,13 +114,13 @@ function newFieldId() { return Math.random().toString(36).slice(2, 10); }
 export default function FormsPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { rowVersion, prefs, patchPrefs, railApps } = useOsShell();
+  const { rowVersion, prefs, patchPrefs, askAiVisible } = useOsShell();
   const { boot } = useBoot();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const fmt = useFormat();
   const isAgent = boot.viewer.isAgent;
-  const aiEntitled = railApps.some((a) => a.key === "ai");
+  const aiEntitled = askAiVisible;
   const tablesOn = Array.isArray(prefs.modules?.activeAppKeys) && prefs.modules.activeAppKeys.includes("tables");
 
   // /forms?mine=1 (the deleted FormsSidebar "My Forms" row) becomes ?view=mine.

@@ -181,7 +181,8 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
-import { ObjectShareDialog, embedSnippet } from "@/components/tables/object-share-dialog";
+import { embedSnippet } from "@/components/tables/object-share-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { TableRowMenu } from "@/components/tables/table-row-menu";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { csvExportCell, csvFormulaSafe } from "@/lib/csv";
@@ -240,6 +241,8 @@ type TableSettings = { namedRanges?: NamedRangeDef[] };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null;
   /** Creator or admin (GET /api/tables/[id], lib/object-manage): may delete the table or change its public link. */
   canManage?: boolean;
+  /** Can edit or higher (GET /api/tables/[id]); false for a Can view role, which reads only (node-rules R7b). */
+  canEdit?: boolean;
   /** The org's toggle 10 (lib/public-links): whether the Share dialog's Public link row exists. */
   publicLinksAllowed?: boolean };
 
@@ -1003,8 +1006,8 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const { toast, dismiss: dismissToast } = useOsToast();
   const confirm = useConfirm();
   const promptDialog = usePrompt();
-  const { prefs, patchPrefs, railApps, bumpRowVersion } = useOsShell();
-  const aiEntitled = railApps.some((a) => a.key === "ai");
+  const { prefs, patchPrefs, askAiVisible, bumpRowVersion } = useOsShell();
+  const aiEntitled = askAiVisible;
   const [tableId, setTableId] = useState<string | null>(null);
   // The Share dialog, About, the in-place CSV import, full screen.
   const [shareMode, setShareMode] = useState<"share" | "who" | null>(null);
@@ -5506,8 +5509,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       barCell = {
         address: `${columnLetter(colIndex)}${rowNumber}`,
         source: src ?? cellText(activeColDef, activeCellRow),
-        readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
-        readOnlyReason: activeColDef.type === "formula"
+        readOnly: table.canEdit === false || activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
+        readOnlyReason: table.canEdit === false
+          ? "You have Can view on this table, so it reads only."
+          : activeColDef.type === "formula"
           ? "This column computes its formula. Edit it from the column menu (Edit formula)."
           : computedCol
             ? "This column is computed. Configure it from the column menu."
@@ -5522,10 +5527,11 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
 
   /* ── The sheet's chrome: role, menus, toolbar popovers ─────────────── */
 
-  // Read implies write on a table until the access engine lands Can view
-  // (docs/plans/tables.md 3a), so every reader is at least Can edit; the
-  // creator and Owners/Admins hold Full access (lib/object-manage).
-  const shareRole = table.canManage ? "FULL" : "EDIT";
+  // Full access on the table (GET /api/tables/[id] canManage: its maker, the
+  // admins, a Space manager or a Full grant) gets Share, everyone else the
+  // chip, and both open the one Manage access dialog. A Can view role reads
+  // only (node-rules R7b), and the chip says so.
+  const shareRole = table.canManage ? "FULL" : table.canEdit === false ? "VIEW" : "EDIT";
   const tableName = table.name || UNTITLED_TABLE_NAME;
   const colIndexOf = (colId: string | undefined) => (colId ? table.columns.findIndex((c) => c.id === colId) : -1);
   const activeColIdx = colIndexOf(activeCell?.colId);
@@ -6141,7 +6147,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
                       <Plus style={{ width: 15, height: 15 }} />
                     </button>
                   }
-                  readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
+                  readOnlyCols={new Set(table.columns.filter((c) => table.canEdit === false || c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
                 />
               </div>
               {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): floats top-right
@@ -6501,20 +6507,21 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         }}
       />
 
-      <ObjectShareDialog
+      {/* The one Manage access dialog: people, the public link, its embed
+          code and the internal link. Its public link state flows back into
+          the sheet so the Public glyph and the embed row stay true. */}
+      <ShareDialog
         open={shareMode !== null}
-        mode={shareMode ?? "who"}
-        onClose={() => setShareMode(null)}
-        object={{
-          kind: "table",
-          id: table.id,
-          name: tableName,
-          isPublic: !!table.isPublic,
-          canManage: !!table.canManage,
-          publicLinksAllowed: table.publicLinksAllowed !== false,
-          anchorName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null,
+        onOpenChange={(o) => { if (!o) setShareMode(null); }}
+        target={{ kind: "table", id: table.id, name: tableName }}
+        readOnly={!table.canManage}
+        onChanged={(panel) => {
+          if (panel) {
+            const isPublic = !!panel.general.publicLink?.on;
+            setTable((prev) => (prev ? { ...prev, isPublic } : prev));
+          }
+          notifyTablesChanged();
         }}
-        onPublicChange={(isPublic) => { setTable((prev) => (prev ? { ...prev, isPublic } : prev)); notifyTablesChanged(); }}
       />
       <TableAboutDialog
         open={aboutOpen}

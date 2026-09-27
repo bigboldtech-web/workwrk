@@ -52,14 +52,14 @@ export function CreateMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const { openCreateTask, openCreateList, openTemplateCenter, openSidekick, railApps, canCreateSpace } = useOsShell();
+  const { openCreateTask, openCreateList, openTemplateCenter, openSidekick, askAiVisible, canCreateSpace } = useOsShell();
   const { isGuest } = useViewerRole();
   // The popover content only mounts when open, so this runs on the client.
   const [voice] = useState(() => hasSpeechRecognition());
   const [spaceOpen, setSpaceOpen] = useState(false);
 
   const close = () => onOpenChange(false);
-  const aiVisible = railApps.some((a) => a.key === "ai");
+  const aiVisible = askAiVisible;
   const isMember = !isGuest;
   // POST /api/spaces refuses below the manager tier, so the Space row is
   // absent (never disabled) for everyone else: a row that appears always

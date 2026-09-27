@@ -10,8 +10,13 @@
 //   1. de-dupe the recipient list
 //   2. drop the ACTOR (nobody is notified about their own click)
 //   3. keep only real, live members of the item's organization
-//   4. `filterNotifyUsers(...)`: the /settings/notifications inbox toggle
-//   5. one `createMany`
+//   4. keep only people who can open the task: a reader of its List (the one
+//      resolver, src/lib/access/node-access.ts), its owner or an assignee
+//      (the assignment grant), its creator, or a reader of a List it is
+//      linked into. A row names the task, so it never reaches anyone the
+//      task is hidden from (a watcher who has since lost the List, say).
+//   5. `filterNotifyUsers(...)`: the /settings/notifications inbox toggle
+//   6. one `createMany`
 //
 // A future producer that wants to notify about an item calls one of these
 // exports; it cannot reach the table without passing the prefs gate.
@@ -27,6 +32,8 @@ import { prisma } from "@/lib/prisma";
 import { filterNotifyUsers, type NotifyType } from "@/lib/notify-prefs";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { notifyTargets, readWatchers } from "@/lib/item-watchers";
+import { usersWhoCanRead } from "@/lib/access/node-access";
+import { linkedListsOf } from "@/lib/list-links-server";
 
 /**
  * Deep link to the standalone task detail page.
@@ -73,6 +80,51 @@ interface EmitArgs {
   title: string;
   message: string;
   link: string;
+  /** The task the row names: recipients who cannot open it are dropped (step 4). */
+  itemId?: string;
+}
+
+/**
+ * Who among `ids` can open this task, with the same answers the item gate
+ * gives (src/lib/item-gate.ts): the assignment grant (owner and assignees),
+ * the creator, a reader of the home List and a reader of a List the task is
+ * linked into. One world per List, never a query per recipient. Fails
+ * closed: an error here tells nobody, because telling the wrong person
+ * leaks the task's title.
+ */
+export async function taskReaders(organizationId: string, itemId: string, ids: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (ids.length === 0) return out;
+  const item = await prisma.item.findFirst({
+    where: { id: itemId, organizationId },
+    select: { id: true, boardId: true, parentItemId: true, ownerId: true, assigneeIds: true, board: { select: { archivedAt: true } } },
+  });
+  if (!item) return out;
+  for (const id of ids) if (id === item.ownerId || item.assigneeIds.includes(id)) out.add(id);
+  const created = await prisma.itemActivity
+    .findFirst({
+      where: { organizationId, entityType: "BOARD_ITEM", entityId: itemId, action: "CREATED" },
+      orderBy: { createdAt: "asc" },
+      select: { actorId: true },
+    })
+    .catch(() => null);
+  if (created?.actorId && ids.includes(created.actorId)) out.add(created.actorId);
+
+  let rest = ids.filter((id) => !out.has(id));
+  if (rest.length === 0) return out;
+  const home = await usersWhoCanRead(organizationId, { kind: "list", id: item.boardId }, { among: rest });
+  for (const id of home.keys()) out.add(id);
+
+  rest = rest.filter((id) => !out.has(id));
+  if (rest.length === 0 || item.board.archivedAt) return out;
+  const { links } = await linkedListsOf(item).catch(() => ({ links: [] as Array<{ boardId: string }> }));
+  for (const l of links) {
+    if (rest.length === 0) break;
+    const linked = await usersWhoCanRead(organizationId, { kind: "list", id: l.boardId }, { among: rest });
+    for (const id of linked.keys()) out.add(id);
+    rest = rest.filter((id) => !out.has(id));
+  }
+  return out;
 }
 
 /**
@@ -93,8 +145,14 @@ async function emit(args: EmitArgs): Promise<number> {
     });
     if (members.length === 0) return 0;
 
+    // Only people who can open the task the row names.
+    const readers = args.itemId
+      ? await taskReaders(args.organizationId, args.itemId, members.map((m) => m.id))
+      : new Set(members.map((m) => m.id));
+    if (readers.size === 0) return 0;
+
     // THE preference gate: /settings/notifications inbox toggles.
-    const wanted = await filterNotifyUsers(members.map((m) => m.id), args.prefKey);
+    const wanted = await filterNotifyUsers([...readers], args.prefKey);
     if (wanted.size === 0) return 0;
 
     const created = await prisma.notification.createMany({
@@ -171,6 +229,7 @@ export async function notifyItemAssigned(args: {
     title: args.item.title,
     message: `${who} ${args.reassigned ? "reassigned you" : "assigned you"} this task${due ? ` · due ${due}` : ""}`,
     link: itemLink(args.item.id),
+    itemId: args.item.id,
   });
 }
 
@@ -237,6 +296,7 @@ export async function notifyItemStatusChanged(args: {
     title: args.item.title,
     message: `${who} moved this from ${from} to ${to}`,
     link: itemLink(args.item.id),
+    itemId: args.item.id,
   });
 }
 
@@ -285,6 +345,7 @@ export async function notifyItemCommented(args: {
     title: args.item.title,
     message: snippet ? `${who} commented: ${snippet}` : `${who} commented on this task`,
     link: itemLink(args.item.id, args.updateId),
+    itemId: args.item.id,
   });
 }
 

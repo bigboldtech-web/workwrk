@@ -12,8 +12,8 @@ import { askSidekick } from "./empty-view";
 import { useOsShell } from "./shell-context";
 
 export function AskSidekickButton({ prompt, className }: { prompt?: string; className?: string }) {
-  const { railApps } = useOsShell();
-  if (!railApps.some((a) => a.key === "ai")) return null;
+  const { askAiVisible } = useOsShell();
+  if (!askAiVisible) return null;
   return (
     <button
       type="button"

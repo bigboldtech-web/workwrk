@@ -29,6 +29,7 @@ import { isSeededPeopleTeam } from "@/lib/access/org-role";
 import { parseWeeklyDecision, weeklyDecisionBlocked, weeklyReopenBlocked } from "@/lib/people/weekly-decision";
 import { publishToUser } from "@/lib/realtime-bus";
 import { logActivity } from "@/lib/activity";
+import { parseAccessSettings } from "@/lib/access/settings";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -59,8 +60,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const isRecordedManager = row.managerId === u.id;
   const isOrgAdmin = legacyIsAdminLevel(u.accessLevel);
   const org = await prisma.organization.findUnique({ where: { id: u.organizationId }, select: { settings: true } });
-  const list = (org?.settings as { access?: { peopleTeam?: unknown } } | null)?.access?.peopleTeam;
-  const peopleTeamOrAdmin = isOrgAdmin || (Array.isArray(list) && list.includes(u.id)) || isSeededPeopleTeam(u.accessLevel);
+  // The People team list is stored as access.peopleTeamUserIds; read it the
+  // way the access engine does (src/lib/access/facts.ts) so a configured
+  // member who is not HR-level is not refused here.
+  const settings = (org?.settings ?? {}) as { access?: unknown };
+  const peopleTeamOrAdmin =
+    isOrgAdmin ||
+    parseAccessSettings(settings.access).peopleTeamUserIds.includes(u.id) ||
+    isSeededPeopleTeam(u.accessLevel);
   let allowed = isRecordedManager || peopleTeamOrAdmin;
   if (!allowed) allowed = await isInReportTree(u.id, row.userId);
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });

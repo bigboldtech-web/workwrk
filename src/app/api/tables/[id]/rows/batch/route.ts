@@ -36,8 +36,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { DataTableRow, Prisma } from "@/generated/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { TABLE_EDIT_REFUSAL, tableRoleFor } from "@/lib/table-gate";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
 const MAX_OPS = 500;
@@ -84,13 +84,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   //
   // spaceId === null means the table hangs off no Space, so there is no
   // Space ACL to consult: org scoping above is the whole gate.
-  if (table.spaceId) {
-    const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
-    if (!space) return jsonError("not found", 404);
-  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
-    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
-    return jsonError("not found", 404);
-  }
+  // The one resolver's table rule (R7), the same gate every sibling route uses.
+  const role = await tableRoleFor(table.id, orgId, userId, accessLevel);
+  if (!role) return jsonError("not found", 404);
+  // A batch writes (clears or deletes) up to MAX_OPS rows: Can edit on the
+  // table, never Can view (R7b).
+  if (!roleAtLeast(role, "EDIT")) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const body = await req.json().catch(() => null);
   const updates: { id: string; values: Record<string, unknown>; expect?: Record<string, unknown>; position?: number }[] =

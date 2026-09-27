@@ -14,13 +14,18 @@
 // that cannot be cleared — while the pane stops pretending the object is still
 // there.
 //
-// It is deliberately ONE batched query per kind, and it resolves only the
-// kinds a notification can actually point at. Anything it does not know about
-// comes back absent from the map, which the caller reads as "openable": an
-// external href or a route with no object behind it is not a locked object.
+// It is ONE world for every target the page shows (the one node-access
+// resolver, src/lib/access/node-access.ts), so the Inbox answers exactly what
+// the object's own page answers: a task by its List's role or the assignment
+// grant, a doc by its anchor, parent page, listings and restricted flag, a
+// Folder by its own grants and the PRIVATE cut, a table, canvas or form by
+// its container and its grants. Anything it does not know about comes back
+// absent from the map, which the caller reads as "openable": an external
+// href or a route with no object behind it is not a locked object.
 
 import { prisma } from "@/lib/prisma";
-import { docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { NotificationTarget, TargetKind, UnreadableReason } from "./notification-target";
 
 export interface TargetVerdict {
@@ -34,7 +39,10 @@ export function targetKey(target: Pick<NotificationTarget, "kind" | "id">): stri
 }
 
 /** The kinds this module resolves. Everything else is left openable. */
-const RESOLVED: readonly TargetKind[] = ["item", "board", "space", "folder", "doc", "sop"];
+const RESOLVED: readonly TargetKind[] = ["item", "board", "space", "folder", "doc", "sop", "table", "canvas", "form"];
+
+/** A row that exists, whether it is archived, and the node it is (a task is its List). */
+interface Found { archived: boolean; ref: NodeRef | null; mine?: boolean }
 
 /**
  * A verdict per distinct target. Absent from the map = nothing to check.
@@ -61,159 +69,66 @@ export async function readableTargets(
     byKind.set(t.kind, set);
   }
   if (byKind.size === 0) return out;
+  const ids = (k: TargetKind) => [...(byKind.get(k) ?? [])];
+  const where = { organizationId };
 
-  await Promise.all([
-    resolveItems(out, userId, organizationId, byKind.get("item")),
-    resolveBoards(out, userId, organizationId, byKind.get("board")),
-    resolveSpaces(out, userId, organizationId, byKind.get("space")),
-    resolveFolders(out, userId, organizationId, byKind.get("folder")),
-    resolveDocs(out, userId, organizationId, accessLevel, byKind.get("doc")),
-    resolveSops(out, organizationId, byKind.get("sop")),
+  // Which rows exist (and are live), one query per kind asked for.
+  const [items, boards, spaces, folders, docs, sops, tables, canvases, forms] = await Promise.all([
+    ids("item").length ? prisma.item.findMany({ where: { ...where, id: { in: ids("item") } }, select: { id: true, archivedAt: true, ownerId: true, assigneeIds: true, boardId: true, board: { select: { archivedAt: true } } } }) : [],
+    // A board link carries the SLUG, not the id, so both are matched.
+    ids("board").length ? prisma.board.findMany({ where: { ...where, OR: [{ id: { in: ids("board") } }, { slug: { in: ids("board") } }] }, select: { id: true, slug: true, archivedAt: true } }) : [],
+    ids("space").length ? prisma.space.findMany({ where: { ...where, OR: [{ id: { in: ids("space") } }, { slug: { in: ids("space") } }] }, select: { id: true, slug: true, archivedAt: true } }) : [],
+    ids("folder").length ? prisma.folder.findMany({ where: { ...where, id: { in: ids("folder") } }, select: { id: true, archivedAt: true } }) : [],
+    ids("doc").length ? prisma.doc.findMany({ where: { ...where, id: { in: ids("doc") } }, select: { id: true, archivedAt: true } }) : [],
+    ids("sop").length ? prisma.sOP.findMany({ where: { ...where, id: { in: ids("sop") } }, select: { id: true } }) : [],
+    ids("table").length ? prisma.dataTable.findMany({ where: { ...where, id: { in: ids("table") } }, select: { id: true } }) : [],
+    ids("canvas").length ? prisma.whiteboard.findMany({ where: { ...where, id: { in: ids("canvas") } }, select: { id: true, archivedAt: true } }) : [],
+    ids("form").length ? prisma.formDefinition.findMany({ where: { ...where, id: { in: ids("form") } }, select: { id: true } }) : [],
   ]);
 
-  return out;
-}
-
-function verdictsFor(
-  out: Map<string, TargetVerdict>,
-  kind: TargetKind,
-  asked: Set<string>,
-  alive: Map<string, { archived: boolean; readable: boolean }>,
-): void {
-  for (const id of asked) {
-    const row = alive.get(id);
-    if (!row) out.set(`${kind}:${id}`, { readable: false, reason: "deleted" });
-    else if (row.archived) out.set(`${kind}:${id}`, { readable: false, reason: "moved" });
-    else if (!row.readable) out.set(`${kind}:${id}`, { readable: false, reason: "no_access" });
-    else out.set(`${kind}:${id}`, { readable: true, reason: null });
-  }
-}
-
-async function resolveItems(out: Map<string, TargetVerdict>, userId: string, organizationId: string, ids?: Set<string>) {
-  if (!ids?.size) return;
-  const rows = await prisma.item.findMany({
-    where: { id: { in: [...ids] }, organizationId },
-    select: {
-      id: true, archivedAt: true, ownerId: true, assigneeIds: true,
-      board: {
-        select: {
-          id: true, archivedAt: true, visibility: true,
-          members: { where: { userId }, select: { userId: true } },
-          space: { select: { visibility: true, archivedAt: true, members: { where: { userId }, select: { userId: true } } } },
-        },
-      },
-    },
-  });
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const r of rows) {
+  const found = new Map<string, Found>();
+  for (const r of items) {
     // Access rule 9: being assigned a task grants Can edit on that task, List
     // membership or no. The task page short-circuits on exactly this, so the
     // Inbox must agree with it or an assignee is told they cannot open a task
     // that opens perfectly well.
     const mine = r.ownerId === userId || (r.assigneeIds ?? []).includes(userId);
-    const board = r.board;
-    const listReadable =
-      !!board &&
-      board.archivedAt === null &&
-      (board.members.length > 0 ||
-        (board.space ? board.space.visibility === "ORG" || board.space.members.length > 0 : false));
-    alive.set(r.id, { archived: r.archivedAt !== null, readable: mine || listReadable });
+    found.set(`item:${r.id}`, { archived: r.archivedAt !== null || r.board?.archivedAt != null, ref: { kind: "list", id: r.boardId }, mine });
   }
-  verdictsFor(out, "item", ids, alive);
-}
-
-async function resolveBoards(out: Map<string, TargetVerdict>, userId: string, organizationId: string, ids?: Set<string>) {
-  if (!ids?.size) return;
-  // A board link carries the SLUG, not the id, so both are matched.
-  const rows = await prisma.board.findMany({
-    where: { organizationId, OR: [{ id: { in: [...ids] } }, { slug: { in: [...ids] } }] },
-    select: {
-      id: true, slug: true, archivedAt: true,
-      members: { where: { userId }, select: { userId: true } },
-      space: { select: { visibility: true, members: { where: { userId }, select: { userId: true } } } },
-    },
-  });
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const r of rows) {
-    const readable =
-      r.members.length > 0 || (r.space ? r.space.visibility === "ORG" || r.space.members.length > 0 : false);
-    const value = { archived: r.archivedAt !== null, readable };
-    alive.set(r.id, value);
-    alive.set(r.slug, value);
+  for (const r of boards) {
+    const v: Found = { archived: r.archivedAt !== null, ref: { kind: "list", id: r.id } };
+    found.set(`board:${r.id}`, v);
+    found.set(`board:${r.slug}`, v);
   }
-  verdictsFor(out, "board", ids, alive);
-}
-
-async function resolveSpaces(out: Map<string, TargetVerdict>, userId: string, organizationId: string, ids?: Set<string>) {
-  if (!ids?.size) return;
-  const rows = await prisma.space.findMany({
-    where: { organizationId, OR: [{ id: { in: [...ids] } }, { slug: { in: [...ids] } }] },
-    select: {
-      id: true, slug: true, archivedAt: true, visibility: true,
-      members: { where: { userId }, select: { userId: true } },
-    },
-  });
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const r of rows) {
-    const value = { archived: r.archivedAt !== null, readable: r.visibility === "ORG" || r.members.length > 0 };
-    alive.set(r.id, value);
-    alive.set(r.slug, value);
+  for (const r of spaces) {
+    const v: Found = { archived: r.archivedAt !== null, ref: { kind: "space", id: r.id } };
+    found.set(`space:${r.id}`, v);
+    found.set(`space:${r.slug}`, v);
   }
-  verdictsFor(out, "space", ids, alive);
-}
+  for (const r of folders) found.set(`folder:${r.id}`, { archived: r.archivedAt !== null, ref: { kind: "folder", id: r.id } });
+  for (const r of docs) found.set(`doc:${r.id}`, { archived: r.archivedAt !== null, ref: { kind: "doc", id: r.id } });
+  // SOPs sit outside this access model: a live SOP is openable here and its
+  // own page applies the SOP centre's folder rules.
+  for (const r of sops) found.set(`sop:${r.id}`, { archived: false, ref: null });
+  for (const r of tables) found.set(`table:${r.id}`, { archived: false, ref: { kind: "table", id: r.id } });
+  for (const r of canvases) found.set(`canvas:${r.id}`, { archived: r.archivedAt !== null, ref: { kind: "canvas", id: r.id } });
+  for (const r of forms) found.set(`form:${r.id}`, { archived: false, ref: { kind: "form", id: r.id } });
 
-async function resolveFolders(out: Map<string, TargetVerdict>, userId: string, organizationId: string, ids?: Set<string>) {
-  if (!ids?.size) return;
-  const rows = await prisma.folder.findMany({
-    where: { id: { in: [...ids] }, organizationId },
-    select: {
-      id: true, archivedAt: true,
-      members: { where: { userId }, select: { userId: true } },
-      space: { select: { visibility: true, members: { where: { userId }, select: { userId: true } } } },
-    },
-  });
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const r of rows) {
-    const readable =
-      r.members.length > 0 || (r.space ? r.space.visibility === "ORG" || r.space.members.length > 0 : false);
-    alive.set(r.id, { archived: r.archivedAt !== null, readable });
+  const refs = [...found.values()].map((f) => f.ref).filter((r): r is NodeRef => r !== null);
+  const decisions = refs.length ? await nodeRoles(nodeCtxFromLevel(userId, organizationId, accessLevel), refs) : new Map();
+
+  for (const [kind, set] of byKind) {
+    for (const id of set) {
+      const key = `${kind}:${id}`;
+      const f = found.get(key);
+      if (!f) out.set(key, { readable: false, reason: "deleted" });
+      else if (f.archived) out.set(key, { readable: false, reason: "moved" });
+      else {
+        const role = f.ref ? decisions.get(`${f.ref.kind}:${f.ref.id}`)?.role ?? "none" : "VIEW";
+        const readable = !!f.mine || roleAtLeast(role, "VIEW");
+        out.set(key, readable ? { readable: true, reason: null } : { readable: false, reason: "no_access" });
+      }
+    }
   }
-  verdictsFor(out, "folder", ids, alive);
-}
-
-async function resolveDocs(
-  out: Map<string, TargetVerdict>,
-  userId: string,
-  organizationId: string,
-  accessLevel: string | null | undefined,
-  ids?: Set<string>,
-) {
-  if (!ids?.size) return;
-  const rows = await prisma.doc.findMany({
-    where: { id: { in: [...ids] }, organizationId },
-    select: { id: true, archivedAt: true, entityType: true, entityId: true },
-  });
-  // `docAccessible` is the same gate the Docs pages use, so this answer can
-  // never be wider than what /docs/[id] itself would allow.
-  const verdicts = await Promise.all(
-    rows.map(async (r) => ({
-      id: r.id,
-      archived: r.archivedAt !== null,
-      readable: await docAccessible({ entityType: r.entityType, entityId: r.entityId }, userId, accessLevel),
-    })),
-  );
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const v of verdicts) alive.set(v.id, { archived: v.archived, readable: v.readable });
-  verdictsFor(out, "doc", ids, alive);
-}
-
-async function resolveSops(out: Map<string, TargetVerdict>, organizationId: string, ids?: Set<string>) {
-  if (!ids?.size) return;
-  const rows = await prisma.sOP.findMany({
-    where: { id: { in: [...ids] }, organizationId },
-    select: { id: true },
-  });
-  const alive = new Map<string, { archived: boolean; readable: boolean }>();
-  for (const r of rows) alive.set(r.id, { archived: false, readable: true });
-  verdictsFor(out, "sop", ids, alive);
+  return out;
 }

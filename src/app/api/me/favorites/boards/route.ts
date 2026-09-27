@@ -11,7 +11,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getBoardForReader } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -25,16 +26,14 @@ export async function GET() {
     : [];
   if (ids.length === 0) return NextResponse.json({ boards: [] });
 
-  // Pull then visibility-gate per board (Phase 23). Slow path for
-  // many starred boards is fine — favorites are typically < 10 per user.
+  // Pull, then keep the Lists the viewer can still open: one world for every
+  // starred List (the one resolver), never a gate call per row.
   const rows = await prisma.board.findMany({
     where: { organizationId: u.organizationId, id: { in: ids }, archivedAt: null },
     select: { id: true, slug: true, name: true, icon: true, color: true, visibility: true, spaceId: true },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (b) => ((await getBoardForReader(b.id, u.id!, accessLevel)) ? b : null)),
-  )).filter((b): b is NonNullable<typeof b> => b !== null);
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "list", rows.map((b) => b.id));
+  const visible = rows.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW"));
 
   // Preserve the user's saved order.
   const order = new Map(ids.map((id, i) => [id, i]));

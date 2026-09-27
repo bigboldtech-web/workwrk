@@ -7,9 +7,10 @@
 //
 // 1. THE GATE. `GET /api/trash` was `isManager`, so a plain Member who deleted
 //    their own list got "Trash is for managers" and had to find a manager to
-//    get it back (work-tasks #11). It is `accessibleIds(type, FULL)` per source
-//    now, plus "rows you deleted yourself", with Owner and Admin over the org.
-//    The sets narrow; nobody sees more than before.
+//    get it back (work-tasks #11). It is Full access on the row's own node or
+//    its container, from the one node-access resolver over ONE world for the
+//    rows on the page, plus "rows you deleted yourself", with Owner and Admin
+//    over the org. The sets narrow; nobody sees more than before.
 //
 // 2. THE ARCHIVED HALF. The route read `TrashItem` snapshots plus archived
 //    Docs, Canvases and Contracts, and nothing else. Archiving a Space, a
@@ -22,11 +23,15 @@
 //    and a second caller (a poll, a prefetch) doubled the destruction. The
 //    purge is a cron row now (scripts/CRON-SETUP.md).
 //
-// Server-only: imports prisma and the access engine.
+// Server-only: imports prisma and the node-access resolver.
 
 import { prisma } from "./prisma";
-import { accessibleIds } from "./access/ids";
 import type { Viewer } from "./access/types";
+import { nodeCtxFromViewer, nodeRole, nodeRoles } from "./access/node-access";
+import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type Place, type PlaceKind } from "./access/node-rules";
+import { loadWorld } from "./access/node-world";
+import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
+import { canCreateDocAt } from "./access/node-access";
 import { freeTrashStorage, restoreFromTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
@@ -150,12 +155,11 @@ export async function trashRetentionDays(organizationId: string): Promise<number
 }
 
 /**
- * What the viewer may see and restore, as id sets.
- *
- * `accessibleIds` answers for Spaces, Folders, Lists, Tables and Canvases.
- * The other types have no id set yet, so for those the rule is the narrow half
- * alone: rows the viewer deleted. Narrow is the safe direction; widening one
- * of them is adding a case to `accessibleIds`, not a special case here.
+ * What the viewer may see and restore, as id sets: the Spaces, Folders,
+ * Lists, Tables and Canvases among the candidates on which they hold Full
+ * access. The other types have no node of their own in the resolver, so for
+ * those the rule is the narrow half alone: rows the viewer deleted. Narrow is
+ * the safe direction.
  */
 export interface TrashScope {
   all: boolean;
@@ -167,25 +171,54 @@ export interface TrashScope {
   canvases: Set<string>;
 }
 
-export async function trashScope(viewer: Viewer): Promise<TrashScope> {
+/** The node ids a page of Trash rows names: their own ids and their anchors. */
+export interface TrashCandidates {
+  spaces: Set<string>;
+  folders: Set<string>;
+  lists: Set<string>;
+  tables: Set<string>;
+  canvases: Set<string>;
+}
+
+function candidatesOf(rows: Array<{ anchor: { spaceId?: string | null; folderId?: string | null; boardId?: string | null }; ownId?: string | null; type: TrashTypeKey | null }>): TrashCandidates {
+  const c: TrashCandidates = { spaces: new Set(), folders: new Set(), lists: new Set(), tables: new Set(), canvases: new Set() };
+  for (const r of rows) {
+    if (r.anchor.spaceId) c.spaces.add(r.anchor.spaceId);
+    if (r.anchor.folderId) c.folders.add(r.anchor.folderId);
+    if (r.anchor.boardId) c.lists.add(r.anchor.boardId);
+    if (!r.ownId) continue;
+    if (r.type === "space") c.spaces.add(r.ownId);
+    else if (r.type === "folder") c.folders.add(r.ownId);
+    else if (r.type === "list") c.lists.add(r.ownId);
+    else if (r.type === "table") c.tables.add(r.ownId);
+    else if (r.type === "canvas") c.canvases.add(r.ownId);
+  }
+  return c;
+}
+
+export async function trashScope(viewer: Viewer, candidates: TrashCandidates): Promise<TrashScope> {
   if (viewerIsOwnerOrAdmin(viewer)) {
     return { all: true, userId: viewer.userId, spaces: new Set(), folders: new Set(), lists: new Set(), tables: new Set(), canvases: new Set() };
   }
-  const [spaces, folders, lists, tables, canvases] = await Promise.all([
-    accessibleIds(viewer, "space", "FULL"),
-    accessibleIds(viewer, "folder", "FULL"),
-    accessibleIds(viewer, "list", "FULL"),
-    accessibleIds(viewer, "table", "FULL"),
-    accessibleIds(viewer, "whiteboard", "FULL"),
-  ]);
+  const refs: NodeRef[] = [
+    ...[...candidates.spaces].map((id) => ({ kind: "space" as const, id })),
+    ...[...candidates.folders].map((id) => ({ kind: "folder" as const, id })),
+    ...[...candidates.lists].map((id) => ({ kind: "list" as const, id })),
+    ...[...candidates.tables].map((id) => ({ kind: "table" as const, id })),
+    ...[...candidates.canvases].map((id) => ({ kind: "canvas" as const, id })),
+  ];
+  // ONE world for every node the rows name, never a gate call per row.
+  const decisions = await nodeRoles(nodeCtxFromViewer(viewer), refs);
+  const full = (ref: NodeRef) => roleAtLeast(decisions.get(refKey(ref))?.role ?? "none", "FULL");
+  const keep = (kind: NodeRef["kind"], ids: Set<string>) => new Set([...ids].filter((id) => full({ kind, id })));
   return {
     all: false,
     userId: viewer.userId,
-    spaces: new Set(spaces.readable),
-    folders: new Set(folders.readable),
-    lists: new Set(lists.readable),
-    tables: new Set(tables.readable),
-    canvases: new Set(canvases.readable),
+    spaces: keep("space", candidates.spaces),
+    folders: keep("folder", candidates.folders),
+    lists: keep("list", candidates.lists),
+    tables: keep("table", candidates.tables),
+    canvases: keep("canvas", candidates.canvases),
   };
 }
 
@@ -321,12 +354,26 @@ interface RawRow {
    */
   scopeOwnerId: string | null;
   deletedAt: Date;
+  /**
+   * Where the row comes back to, as the restore's landing check reads it
+   * (archiveLanding, snapshotLanding): the container and what the row is
+   * there, or null when the restore asks nothing of a place. The listing
+   * answers `restorable` from it, so the page offers Restore exactly where
+   * the route would restore (P5 for Trash).
+   */
+  landing: TrashLanding | null;
 }
+
+/** A row's landing: the place it comes back into and what it is there ("task" for a task on its List). */
+type TrashLanding = { place: Place; what: PlaceKind | "task" };
 
 export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<TrashPage> {
   const orgId = viewer.organizationId;
-  const [scope, days] = await Promise.all([trashScope(viewer), trashRetentionDays(orgId)]);
-  const { rows: raw, capped } = query.tab === "deleted" ? await readDeleted(orgId) : await readArchived(orgId);
+  const [{ rows: raw, capped }, days] = await Promise.all([
+    query.tab === "deleted" ? readDeleted(orgId) : readArchived(orgId),
+    trashRetentionDays(orgId),
+  ]);
+  const scope = await trashScope(viewer, candidatesOf(raw));
 
   // Scope, then filter, then sort, then page. Scoping first is what makes the
   // total honest: a count over rows the viewer cannot see is not their total.
@@ -376,12 +423,17 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
   const actorById = new Map(actors.map((a) => [a.id, a]));
 
   // A task whose List is gone cannot come back: the row it would go in does
-  // not exist. Saying so beats a Restore button that 409s.
-  const missingParents = await missingParentIds(page);
+  // not exist. Saying so beats a Restore button that 409s. And a row the
+  // viewer may not restore where it now lands (the placement rule P1, the
+  // same check the restore runs) says so too, instead of offering a Restore
+  // the route refuses (round four, break 3).
+  const [missingParents, landingBlocked] = await Promise.all([missingParentIds(page), landingRefusals(viewer, page)]);
 
   const rows: TrashRow[] = page.map((r) => {
     const actor = r.deletedById ? actorById.get(r.deletedById) : null;
-    const parentGone = missingParents.has(r.id);
+    const listState = missingParents.get(r.id) ?? null;
+    const parentGone = listState !== null;
+    const blocked = landingBlocked.get(r.id) ?? null;
     return {
       id: r.id,
       type: r.type,
@@ -406,11 +458,13 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
           : null,
       deletedAt: r.deletedAt.toISOString(),
       daysLeft: query.tab === "archived" ? null : daysLeft(r.deletedAt, days),
-      restorable: !parentGone,
+      restorable: !parentGone && !blocked,
       // A task is the one row that can be re-homed: its snapshot carries a
-      // boardId, and any List the viewer may write to will hold it.
-      needsTarget: parentGone && r.type === "task",
-      blockedReason: parentGone ? "Its list is gone" : null,
+      // boardId, and any List the viewer may write to will hold it. An
+      // archived task (no snapshot) comes back in place or not at all, so
+      // with its List in Trash it says so instead of offering a new home.
+      needsTarget: r.type === "task" && (listState === "gone" || (listState === "archived" && parseRowId(r.id).archive === null)),
+      blockedReason: listState === "gone" ? "Its list is gone" : listState === "archived" ? LIST_IN_TRASH_FOR_TASK : blocked,
     };
   });
 
@@ -497,9 +551,172 @@ async function readDeleted(organizationId: string): Promise<{ rows: RawRow[]; ca
       // A snapshot's deleter IS its actor; there is no second person.
       scopeOwnerId: s.deletedById,
       deletedAt: s.deletedAt,
+      landing: snapshotLandingOf(s.entityType, s.snapshot),
     };
   });
   return { rows, capped };
+}
+
+/** Where a snapshot row comes back to, as snapshotLanding reads it. */
+function snapshotLandingOf(entityType: string, snapshot: unknown): TrashLanding | null {
+  const row = ((snapshot as SnapshotShape)?.row ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof row[k] === "string" && row[k] ? (row[k] as string) : null);
+  const inTree = (folder: string | null, space: string | null): Place => (folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null);
+  switch (entityType) {
+    case "folder": {
+      const place = inTree(str("parentFolderId"), str("spaceId"));
+      return place ? { place, what: "folder" } : null;
+    }
+    case "board": {
+      const place = inTree(str("folderId"), str("spaceId"));
+      return place ? { place, what: "list" } : null;
+    }
+    case "whiteboard":
+      return { place: inTree(str("folderId"), str("spaceId")), what: "canvas" };
+    case "table": {
+      const space = str("spaceId");
+      return { place: space ? { kind: "space", id: space } : null, what: "table" };
+    }
+    case "item": {
+      const board = str("boardId");
+      return board ? { place: { kind: "list", id: board }, what: "task" } : null;
+    }
+    case "note":
+      return docLandingOf({ entityType: str("entityType"), entityId: str("entityId"), parentId: str("parentId"), boardId: null });
+    case "file":
+      return { place: inTree(str("spaceFolderId"), str("spaceId")), what: "file" };
+    case "form": {
+      const board = str("targetBoardId");
+      const table = str("targetTableId");
+      return board ? { place: { kind: "list", id: board }, what: "form" } : table ? { place: { kind: "table", id: table }, what: "form" } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Where a doc comes back to: its parent page, else its anchor (a task's doc
+ * onto the task's List, `boardId` when the read resolved it). A note, a doc
+ * pinned to a task this read did not resolve, and any other anchor type ask
+ * nothing here; the restore itself still runs docLanding.
+ */
+function docLandingOf(d: { entityType: string | null; entityId: string | null; parentId: string | null; boardId: string | null }): TrashLanding | null {
+  if (d.entityType === "NOTEPAD") return null;
+  if (d.parentId) return { place: { kind: "doc", id: d.parentId }, what: "doc" };
+  if (!d.entityType || !d.entityId) return { place: null, what: "doc" };
+  switch (d.entityType) {
+    case "SPACE": return { place: { kind: "space", id: d.entityId }, what: "doc" };
+    case "FOLDER": return { place: { kind: "folder", id: d.entityId }, what: "doc" };
+    case "BOARD": return { place: { kind: "list", id: d.entityId }, what: "doc" };
+    case "BOARD_ITEM": return d.boardId ? { place: { kind: "list", id: d.boardId }, what: "doc" } : null;
+    default: return null;
+  }
+}
+
+/**
+ * The rows on this page the restore would refuse where they now land, with
+ * the sentence it would answer. First the place itself, for everyone: a
+ * Folder, Space or parent page that is gone or in Trash refuses the restore
+ * whoever asks (landingCheck, docLanding), an org admin included. Then, for
+ * a viewer who is not an org owner or admin, P1 on the container as it is
+ * now (landingCheck), over ONE world for the whole page. A List a task or a
+ * form comes back to is not blocked here: a task's is missingParentIds
+ * (Restore to...), a form's is no write at all (formLanding). Round six, item
+ * 2: the page offered Restore for a sub-folder whose parent Folder was
+ * itself in Trash, and the restore answered 409.
+ */
+async function landingRefusals(viewer: Viewer, page: readonly RawRow[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const landed = page.filter((r): r is RawRow & { landing: TrashLanding } => r.landing !== null);
+  if (!landed.length) return out;
+  const gone = await landingPlaceBlocks(viewer.organizationId, landed);
+  for (const r of landed) {
+    const { place, what } = r.landing;
+    if (!place || (place.kind === "list" && what !== "doc")) continue;
+    const why = gone.get(refKey(place));
+    if (why) out.set(r.id, why);
+  }
+  if (viewerIsOwnerOrAdmin(viewer)) return out;
+  const places = new Map<string, NodeRef>();
+  for (const r of landed) if (r.landing.place && !out.has(r.id)) places.set(refKey(r.landing.place), r.landing.place);
+  const { rows, grants } = await loadWorld(nodeCtxFromViewer(viewer), [...places.values()], { chain: true });
+  const ev = new NodeEvaluator(rows, grants);
+  for (const r of landed) {
+    if (out.has(r.id)) continue;
+    const { place, what } = r.landing;
+    if (place?.kind === "folder" && !rows.folders.has(place.id)) continue;
+    if (place?.kind === "space" && !rows.spaces.has(place.id)) continue;
+    if (place?.kind === "list" && !rows.lists.has(place.id)) continue;
+    if (place?.kind === "table" && !rows.tables.has(place.id)) continue;
+    if (place?.kind === "doc" && !rows.docs.has(place.id)) continue;
+    const ok = what === "task"
+      ? roleAtLeast(ev.effective(place as NodeRef).role, "EDIT")
+      : createDecision(rows, grants, place, what);
+    if (!ok) out.set(r.id, CANT_RESTORE_HERE);
+  }
+  return out;
+}
+
+const FOLDER_GONE = "The folder it lived in is gone.";
+const SPACE_ARCHIVED = "The Space it lived in is archived. Restore that Space first.";
+const SPACE_GONE = "The Space it lived in is gone.";
+const LIST_GONE_FOR_DOC = "The List it lived in is gone or in Trash. Restore that List first.";
+const PAGE_GONE = "The page it lived in is gone or in Trash. Restore that page first.";
+
+/**
+ * The landing places on this page that are gone or in Trash, keyed by
+ * refKey, each with the sentence the restore answers: a Folder that is gone
+ * (in Trash when a snapshot of it is there, to restore first) or in Trash
+ * with any Folder above it (folderPlacementFact, as landingCheck reads it),
+ * a Space that is gone or archived, a List a doc lived on that is gone or
+ * archived, and a parent page that is gone or in Trash (docPlaceLive). One
+ * query per kind for the whole page.
+ */
+async function landingPlaceBlocks(organizationId: string, landed: ReadonlyArray<RawRow & { landing: TrashLanding }>): Promise<Map<string, string>> {
+  const ids = { folder: new Set<string>(), space: new Set<string>(), list: new Set<string>(), doc: new Set<string>() };
+  for (const r of landed) {
+    const p = r.landing.place;
+    if (!p) continue;
+    if (p.kind === "folder") ids.folder.add(p.id);
+    else if (p.kind === "space") ids.space.add(p.id);
+    else if (p.kind === "list" && r.landing.what === "doc") ids.list.add(p.id);
+    else if (p.kind === "doc") ids.doc.add(p.id);
+  }
+  const out = new Map<string, string>();
+  const [folders, spaces, lists, docs] = await Promise.all([
+    Promise.all([...ids.folder].map(async (id) => [id, await folderPlacementFact(organizationId, id)] as const)),
+    ids.space.size ? prisma.space.findMany({ where: { id: { in: [...ids.space] }, organizationId }, select: { id: true, archivedAt: true } }) : Promise.resolve([]),
+    ids.list.size ? prisma.board.findMany({ where: { id: { in: [...ids.list] }, organizationId }, select: { id: true, archivedAt: true } }) : Promise.resolve([]),
+    ids.doc.size ? prisma.doc.findMany({ where: { id: { in: [...ids.doc] }, organizationId }, select: { id: true, archivedAt: true } }) : Promise.resolve([]),
+  ]);
+  const goneFolders = folders.filter(([, f]) => !f).map(([id]) => id);
+  const trashedFolders = new Set(
+    goneFolders.length
+      ? (await prisma.trashItem.findMany({ where: { organizationId, entityType: "folder", entityId: { in: goneFolders } }, select: { entityId: true } })).map((t) => t.entityId)
+      : [],
+  );
+  for (const [id, f] of folders) {
+    if (!f) out.set(refKey({ kind: "folder", id }), trashedFolders.has(id) ? PARENT_IN_TRASH : FOLDER_GONE);
+    else if (f.inTrash) out.set(refKey({ kind: "folder", id }), PARENT_IN_TRASH);
+  }
+  const spaceById = new Map(spaces.map((s) => [s.id, s] as const));
+  for (const id of ids.space) {
+    const s = spaceById.get(id);
+    if (!s) out.set(refKey({ kind: "space", id }), SPACE_GONE);
+    else if (s.archivedAt) out.set(refKey({ kind: "space", id }), SPACE_ARCHIVED);
+  }
+  const listById = new Map(lists.map((l) => [l.id, l] as const));
+  for (const id of ids.list) {
+    const l = listById.get(id);
+    if (!l || l.archivedAt) out.set(refKey({ kind: "list", id }), LIST_GONE_FOR_DOC);
+  }
+  const docById = new Map(docs.map((d) => [d.id, d] as const));
+  for (const id of ids.doc) {
+    const d = docById.get(id);
+    if (!d || d.archivedAt) out.set(refKey({ kind: "doc", id }), PAGE_GONE);
+  }
+  return out;
 }
 
 /**
@@ -527,10 +744,10 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
   // 500 on the whole Trash page. So the read asks for the column, and on ANY
   // failure asks again without it. The fallback loses one column's
   // attribution, never the page.
-  const archivedBy = await archivedByColumnAvailable();
+  const [archivedBy, canvasFolders] = await Promise.all([archivedByColumnAvailable(), canvasesHaveFolders()]);
   const read = async (withActor: { archivedById: true } | Record<string, never>) => Promise.all([
     prisma.space.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, name: true, archivedAt: true, ownerId: true, ...withActor } }),
-    prisma.folder.findMany({ where: { archivedAt: { not: null }, space: { organizationId } }, select: { id: true, name: true, archivedAt: true, spaceId: true, ownerId: true, ...withActor } }),
+    prisma.folder.findMany({ where: { archivedAt: { not: null }, space: { organizationId } }, select: { id: true, name: true, archivedAt: true, spaceId: true, parentFolderId: true, ownerId: true, ...withActor } }),
     prisma.board.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, name: true, archivedAt: true, spaceId: true, folderId: true, ownerId: true, ...withActor } }),
     prisma.item.findMany({ where: { organizationId, archivedAt: { not: null } }, orderBy: { archivedAt: "desc" }, take: SOURCE_CAP + 1, select: { id: true, title: true, archivedAt: true, boardId: true, ownerId: true, ...withActor } }),
     // entityType/entityId is the Doc's anchor. Reading it lets inScope apply
@@ -540,8 +757,9 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
     // "rows you deleted yourself", which was narrower than the /docs/trash
     // page this replaced. A doc with no anchor still has none: there is no
     // per-doc ACL to widen it with, and org-wide would be wider than the rule.
-    prisma.doc.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, archivedAt: true, createdById: true, entityType: true, entityId: true, ...withActor } }),
-    prisma.whiteboard.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, name: true, archivedAt: true, spaceId: true, ownerId: true, ...withActor } }),
+    prisma.doc.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, archivedAt: true, createdById: true, entityType: true, entityId: true, parentId: true, ...withActor } }),
+    // A canvas comes back into its Folder when the column exists (node-placement canvasesHaveFolders).
+    prisma.whiteboard.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, name: true, archivedAt: true, spaceId: true, ownerId: true, ...(canvasFolders ? { folderId: true } : {}), ...withActor } }),
     prisma.agreement.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, isTemplate: true, archivedAt: true, ...withActor } }),
   ]);
 
@@ -593,14 +811,19 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
     }
     return docAnchor(d.entityType, d.entityId);
   };
+  const canvasFolderOf = (w: object): string | null => {
+    const v = (w as { folderId?: unknown }).folderId;
+    return typeof v === "string" && v ? v : null;
+  };
+  const inTree = (folder: string | null, space: string | null): Place => (folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null);
 
   const out: RawRow[] = [
-    ...spaces.map((s) => ({ id: archiveRowId("space", s.id), type: "space" as const, typeLabel: "space", name: s.name, anchor: none, ownId: s.id, deletedById: actor(s), deletedByName: null, scopeOwnerId: s.ownerId ?? null, deletedAt: s.archivedAt! })),
-    ...folders.map((f) => ({ id: archiveRowId("folder", f.id), type: "folder" as const, typeLabel: "folder", name: f.name, anchor: { spaceId: f.spaceId, folderId: null, boardId: null }, ownId: f.id, deletedById: actor(f), deletedByName: null, scopeOwnerId: f.ownerId ?? null, deletedAt: f.archivedAt! })),
-    ...boards.map((b) => ({ id: archiveRowId("board", b.id), type: "list" as const, typeLabel: "board", name: b.name, anchor: { spaceId: b.spaceId, folderId: b.folderId, boardId: null }, ownId: b.id, deletedById: actor(b), deletedByName: null, scopeOwnerId: b.ownerId ?? null, deletedAt: b.archivedAt! })),
-    ...items.slice(0, SOURCE_CAP).map((i) => ({ id: archiveRowId("item", i.id), type: "task" as const, typeLabel: "item", name: i.title, anchor: { spaceId: boardSpace.get(i.boardId) ?? null, folderId: null, boardId: i.boardId }, ownId: i.id, deletedById: actor(i), deletedByName: null, scopeOwnerId: i.ownerId ?? null, deletedAt: i.archivedAt! })),
-    ...docs.map((d) => ({ id: archiveRowId("doc", d.id), type: "doc" as const, typeLabel: "note", name: d.title || "Untitled doc", anchor: anchorOfDoc(d), ownId: d.id, deletedById: actor(d), deletedByName: null, scopeOwnerId: d.createdById ?? null, deletedAt: d.archivedAt! })),
-    ...canvases.map((w) => ({ id: archiveRowId("wb", w.id), type: "canvas" as const, typeLabel: "whiteboard", name: w.name || "Untitled canvas", anchor: { spaceId: w.spaceId, folderId: null, boardId: null }, ownId: w.id, deletedById: actor(w), deletedByName: null, scopeOwnerId: w.ownerId ?? null, deletedAt: w.archivedAt! })),
+    ...spaces.map((s) => ({ id: archiveRowId("space", s.id), type: "space" as const, typeLabel: "space", name: s.name, anchor: none, ownId: s.id, deletedById: actor(s), deletedByName: null, scopeOwnerId: s.ownerId ?? null, deletedAt: s.archivedAt!, landing: null })),
+    ...folders.map((f) => ({ id: archiveRowId("folder", f.id), type: "folder" as const, typeLabel: "folder", name: f.name, anchor: { spaceId: f.spaceId, folderId: null, boardId: null }, ownId: f.id, deletedById: actor(f), deletedByName: null, scopeOwnerId: f.ownerId ?? null, deletedAt: f.archivedAt!, landing: { place: inTree(f.parentFolderId, f.spaceId), what: "folder" as const } })),
+    ...boards.map((b) => ({ id: archiveRowId("board", b.id), type: "list" as const, typeLabel: "board", name: b.name, anchor: { spaceId: b.spaceId, folderId: b.folderId, boardId: null }, ownId: b.id, deletedById: actor(b), deletedByName: null, scopeOwnerId: b.ownerId ?? null, deletedAt: b.archivedAt!, landing: b.spaceId ? { place: inTree(b.folderId, b.spaceId), what: "list" as const } : null })),
+    ...items.slice(0, SOURCE_CAP).map((i) => ({ id: archiveRowId("item", i.id), type: "task" as const, typeLabel: "item", name: i.title, anchor: { spaceId: boardSpace.get(i.boardId) ?? null, folderId: null, boardId: i.boardId }, ownId: i.id, deletedById: actor(i), deletedByName: null, scopeOwnerId: i.ownerId ?? null, deletedAt: i.archivedAt!, landing: { place: { kind: "list" as const, id: i.boardId }, what: "task" as const } })),
+    ...docs.map((d) => ({ id: archiveRowId("doc", d.id), type: "doc" as const, typeLabel: "note", name: d.title || "Untitled doc", anchor: anchorOfDoc(d), ownId: d.id, deletedById: actor(d), deletedByName: null, scopeOwnerId: d.createdById ?? null, deletedAt: d.archivedAt!, landing: docLandingOf({ entityType: d.entityType, entityId: d.entityId, parentId: d.parentId, boardId: anchorOfDoc(d).boardId }) })),
+    ...canvases.map((w) => ({ id: archiveRowId("wb", w.id), type: "canvas" as const, typeLabel: "whiteboard", name: w.name || "Untitled canvas", anchor: { spaceId: w.spaceId, folderId: null, boardId: null }, ownId: w.id, deletedById: actor(w), deletedByName: null, scopeOwnerId: w.ownerId ?? null, deletedAt: w.archivedAt!, landing: { place: inTree(canvasFolderOf(w), w.spaceId), what: "canvas" as const } })),
     ...contracts.map((c) => ({
       id: archiveRowId("agr", c.id),
       type: (c.isTemplate ? "template" : "contract") as TrashTypeKey,
@@ -612,6 +835,7 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
       deletedByName: null,
       scopeOwnerId: null,
       deletedAt: c.archivedAt!,
+      landing: null,
     })),
   ];
   return { rows: out, capped: items.length > SOURCE_CAP };
@@ -625,18 +849,22 @@ export type TrashActionResult =
 
 /** Can this viewer act on this row id? Resolved against the same scope the read uses. */
 async function gateRow(viewer: Viewer, rowId: string): Promise<TrashActionResult> {
-  const scope = await trashScope(viewer);
-  if (scope.all) return { ok: true };
+  if (viewerIsOwnerOrAdmin(viewer)) return { ok: true };
 
   const parsed = parseRowId(rowId);
   if (parsed.archive) {
     const { type, id } = parsed.archive;
     const anchor = await archiveAnchor(type, id, viewer.organizationId);
     if (!anchor) return { ok: false, status: 404, message: "Not found" };
-    // The owner arrives in the owner slot: an archived row has no recorded
-    // actor unless archivedById holds one, and the gate must not read the
-    // owner as though they were the archiver.
-    return inScope(scope, { ...anchor.anchor, ownId: id, type }, null, anchor.ownerId)
+    const scope = await trashScope(viewer, candidatesOf([{ anchor: anchor.anchor, ownId: id, type }]));
+    // The recorded archiver arrives in the actor slot and the owner in the
+    // owner slot, exactly as readTrash hands them to inScope, so the gate
+    // and the listing agree on who may act on an archived row: you can
+    // always get back what you archived yourself. The gate once passed null
+    // for the actor, so the Archived tab listed a row as restorable for its
+    // archiver and the restore refused them (round four, break 3). The
+    // owner is never read as though they were the archiver.
+    return inScope(scope, { ...anchor.anchor, ownId: id, type }, anchor.archivedById, anchor.ownerId)
       ? { ok: true }
       : { ok: false, status: 403, message: "You need Full access on this to restore it." };
   }
@@ -647,48 +875,74 @@ async function gateRow(viewer: Viewer, rowId: string): Promise<TrashActionResult
   });
   if (!snap) return { ok: false, status: 404, message: "Not found" };
   const type = typeKeyFor(snap.entityType);
-  return inScope(scope, { ...snapshotAnchor(snap.snapshot), ownId: snap.entityId, type }, snap.deletedById)
+  const anchor = snapshotAnchor(snap.snapshot);
+  const scope = await trashScope(viewer, candidatesOf([{ anchor, ownId: snap.entityId, type }]));
+  return inScope(scope, { ...anchor, ownId: snap.entityId, type }, snap.deletedById)
     ? { ok: true }
     : { ok: false, status: 403, message: "You need Full access on this to restore it." };
 }
 
-async function archiveAnchor(
+type ArchiveAnchor = { anchor: { spaceId: string | null; folderId: string | null; boardId: string | null }; ownerId: string | null; archivedById: string | null };
+
+/**
+ * An archived row's anchor, owner and recorded archiver, for the gate. The
+ * archiver is read the way readArchived reads it: only when `archivedById`
+ * is there, and on a client that predates the column the read runs again
+ * without it, so the gate degrades to owner and Full access, never to a 500.
+ */
+async function archiveAnchor(type: TrashTypeKey, id: string, organizationId: string): Promise<ArchiveAnchor | null> {
+  if (await archivedByColumnAvailable()) {
+    try {
+      return await readArchiveAnchor(type, id, organizationId, { archivedById: true });
+    } catch {
+      archivedByColumn = false;
+    }
+  }
+  return readArchiveAnchor(type, id, organizationId, {});
+}
+
+async function readArchiveAnchor(
   type: TrashTypeKey,
   id: string,
   organizationId: string,
-): Promise<{ anchor: { spaceId: string | null; folderId: string | null; boardId: string | null }; ownerId: string | null } | null> {
+  withActor: { archivedById: true } | Record<string, never>,
+): Promise<ArchiveAnchor | null> {
   const none = { spaceId: null, folderId: null, boardId: null };
+  const actor = (row: object): string | null => {
+    const v = (row as { archivedById?: unknown }).archivedById;
+    return typeof v === "string" ? v : null;
+  };
   switch (type) {
     case "space": {
-      const r = await prisma.space.findFirst({ where: { id, organizationId }, select: { ownerId: true } });
-      return r ? { anchor: none, ownerId: r.ownerId ?? null } : null;
+      const r = await prisma.space.findFirst({ where: { id, organizationId }, select: { ownerId: true, ...withActor } });
+      return r ? { anchor: none, ownerId: r.ownerId ?? null, archivedById: actor(r) } : null;
     }
     case "folder": {
-      const r = await prisma.folder.findFirst({ where: { id, space: { organizationId } }, select: { spaceId: true, ownerId: true } });
-      return r ? { anchor: { spaceId: r.spaceId, folderId: null, boardId: null }, ownerId: r.ownerId ?? null } : null;
+      const r = await prisma.folder.findFirst({ where: { id, space: { organizationId } }, select: { spaceId: true, ownerId: true, ...withActor } });
+      return r ? { anchor: { spaceId: r.spaceId, folderId: null, boardId: null }, ownerId: r.ownerId ?? null, archivedById: actor(r) } : null;
     }
     case "list": {
-      const r = await prisma.board.findFirst({ where: { id, organizationId }, select: { spaceId: true, folderId: true, ownerId: true } });
-      return r ? { anchor: { spaceId: r.spaceId, folderId: r.folderId, boardId: null }, ownerId: r.ownerId ?? null } : null;
+      const r = await prisma.board.findFirst({ where: { id, organizationId }, select: { spaceId: true, folderId: true, ownerId: true, ...withActor } });
+      return r ? { anchor: { spaceId: r.spaceId, folderId: r.folderId, boardId: null }, ownerId: r.ownerId ?? null, archivedById: actor(r) } : null;
     }
     case "task": {
-      const r = await prisma.item.findFirst({ where: { id, organizationId }, select: { boardId: true, ownerId: true, board: { select: { spaceId: true } } } });
-      return r ? { anchor: { spaceId: r.board?.spaceId ?? null, folderId: null, boardId: r.boardId }, ownerId: r.ownerId ?? null } : null;
+      const r = await prisma.item.findFirst({ where: { id, organizationId }, select: { boardId: true, ownerId: true, board: { select: { spaceId: true } }, ...withActor } });
+      return r ? { anchor: { spaceId: r.board?.spaceId ?? null, folderId: null, boardId: r.boardId }, ownerId: r.ownerId ?? null, archivedById: actor(r) } : null;
     }
     case "doc": {
-      const r = await prisma.doc.findFirst({ where: { id, organizationId }, select: { createdById: true, entityType: true, entityId: true } });
+      const r = await prisma.doc.findFirst({ where: { id, organizationId }, select: { createdById: true, entityType: true, entityId: true, ...withActor } });
       // The same anchor the read uses, so the gate and the list agree on who
       // may restore an archived Doc.
-      return r ? { anchor: docAnchor(r.entityType, r.entityId), ownerId: r.createdById ?? null } : null;
+      return r ? { anchor: docAnchor(r.entityType, r.entityId), ownerId: r.createdById ?? null, archivedById: actor(r) } : null;
     }
     case "canvas": {
-      const r = await prisma.whiteboard.findFirst({ where: { id, organizationId }, select: { spaceId: true, ownerId: true } });
-      return r ? { anchor: { spaceId: r.spaceId, folderId: null, boardId: null }, ownerId: r.ownerId ?? null } : null;
+      const r = await prisma.whiteboard.findFirst({ where: { id, organizationId }, select: { spaceId: true, ownerId: true, ...withActor } });
+      return r ? { anchor: { spaceId: r.spaceId, folderId: null, boardId: null }, ownerId: r.ownerId ?? null, archivedById: actor(r) } : null;
     }
     case "contract":
     case "template": {
-      const r = await prisma.agreement.findFirst({ where: { id, organizationId }, select: { id: true } });
-      return r ? { anchor: none, ownerId: null } : null;
+      const r = await prisma.agreement.findFirst({ where: { id, organizationId }, select: { id: true, ...withActor } });
+      return r ? { anchor: none, ownerId: null, archivedById: actor(r) } : null;
     }
     default:
       return null;
@@ -714,6 +968,16 @@ export async function restoreTrashRow(
   if (parsed.archive) {
     const { type, id } = parsed.archive;
     const orgId = viewer.organizationId;
+    // An archived row comes back in place: it has no snapshot to point at
+    // another List, so a target is refused, not ignored (round seven, item 1).
+    if (target?.targetBoardId) {
+      return { ok: false, status: 409, message: "An archived task comes back into its own list. Only a task whose list is gone can be restored into another one." };
+    }
+    // A restore puts the row back INTO its container, so the placement rule
+    // holds (node-rules P1): Can edit there now, whoever deleted it or owns
+    // it. A grant revoked since never brings it back into the Space.
+    const landing = await archiveLanding(viewer, type, id);
+    if (!landing.ok) return landing;
     switch (type) {
       case "space": await prisma.space.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
       case "folder": await prisma.folder.updateMany({ where: { id, space: { organizationId: orgId } }, data: { archivedAt: null } }); return { ok: true };
@@ -734,14 +998,22 @@ export async function restoreTrashRow(
   if (!snap) return { ok: false, status: 404, message: "Not found" };
 
   const targetBoardId = target?.targetBoardId ?? null;
+  if (!targetBoardId) {
+    // The same rule for a row re-created from its snapshot (P1), and P3: a
+    // Folder, a List or a canvas comes back in its parent's Space as the
+    // parent is now (restoreFromTrash re-derives it).
+    const landing = await snapshotLanding(viewer, snap.entityType, snap.snapshot);
+    if (!landing.ok) return landing;
+  }
   if (targetBoardId) {
     if (snap.entityType !== "item") {
       return { ok: false, status: 409, message: "Only a task can be restored into a different list." };
     }
     // The target has to be a List this viewer may WRITE to, or "Restore to..."
     // would be a way to put a row somewhere you cannot reach.
-    const writable = await accessibleIds(viewer, "list", "EDIT");
-    if (!writable.readable.has(targetBoardId)) {
+    const targetList = await prisma.board.findFirst({ where: { id: targetBoardId, organizationId: viewer.organizationId, archivedAt: null }, select: { id: true } });
+    const writable = targetList ? roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: targetList.id })).role, "EDIT") : false;
+    if (!writable) {
       return { ok: false, status: 403, message: "You need edit access on that list." };
     }
   }
@@ -757,6 +1029,161 @@ export async function restoreTrashRow(
     // same sentence on the row so this is the stale-tab path, not the norm.
     return { ok: false, status: 409, message: "Couldn't restore. The list or folder it lived in may be gone." };
   }
+}
+
+const CANT_RESTORE_HERE = "You need Can edit where this lived to bring it back there.";
+const PARENT_IN_TRASH = "The folder it lived in is in Trash. Restore that folder first.";
+
+const PLACE_GONE = "Couldn't restore. The list or folder it lived in may be gone.";
+
+/** P1 for a restore into `place`: ok, or the refusal the Trash page shows. A container that is gone or in Trash is its own sentence. */
+async function landingCheck(viewer: Viewer, place: Place, what: PlaceKind): Promise<TrashActionResult> {
+  if (place?.kind === "folder") {
+    const f = await folderPlacementFact(viewer.organizationId, place.id);
+    // A Folder that is gone from the tree but sits in Trash is one to restore
+    // first (the listing says the same, landingPlaceBlocks); one that is
+    // nowhere is gone.
+    if (!f) return { ok: false, status: 409, message: (await folderTrashRow(viewer.organizationId, place.id)) ? PARENT_IN_TRASH : PLACE_GONE };
+    if (f.inTrash) return { ok: false, status: 409, message: PARENT_IN_TRASH };
+  }
+  if (place?.kind === "space") {
+    const space = await prisma.space.findFirst({ where: { id: place.id, organizationId: viewer.organizationId }, select: { archivedAt: true } });
+    if (!space) return { ok: false, status: 409, message: PLACE_GONE };
+    if (space.archivedAt) return { ok: false, status: 409, message: "The Space it lived in is archived. Restore that Space first." };
+  }
+  const gate = await checkCreate(nodeCtxFromViewer(viewer), place, what);
+  return gate.ok ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** Is a Folder that is gone from the tree sitting in Trash, as a snapshot the person can restore first? */
+async function folderTrashRow(organizationId: string, folderId: string): Promise<boolean> {
+  return !!(await prisma.trashItem.findFirst({ where: { organizationId, entityType: "folder", entityId: folderId }, select: { id: true } }));
+}
+
+const LIST_IN_TRASH_FOR_TASK = "Its list is in Trash. Restore that list first.";
+
+/** A task comes back into its List: the List live (one in Trash is its own 409), then Can edit on it, the rule every task write reads. A List that is gone is the restore's own 409 (or "Restore to..."). */
+async function listLanding(viewer: Viewer, boardId: string | null): Promise<TrashActionResult> {
+  if (!boardId) return { ok: true };
+  const list = await prisma.board.findFirst({ where: { id: boardId, organizationId: viewer.organizationId }, select: { id: true, archivedAt: true } });
+  if (!list) return { ok: true };
+  if (list.archivedAt) return { ok: false, status: 409, message: LIST_IN_TRASH_FOR_TASK };
+  const role = (await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: boardId })).role;
+  return roleAtLeast(role, "EDIT") ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** A doc comes back to its anchor and its parent page: they must be live, and the viewer able to add docs there. */
+async function docLanding(viewer: Viewer, doc: { entityType: string | null; entityId: string | null; parentId: string | null }): Promise<TrashActionResult> {
+  if (doc.entityType === "NOTEPAD") return { ok: true };
+  if (!(await docPlaceLive(viewer.organizationId, doc))) {
+    return { ok: false, status: 409, message: "The place this doc lived in is gone or in Trash, so it can't come back there." };
+  }
+  const ok = await canCreateDocAt(nodeCtxFromViewer(viewer), { entityType: doc.entityType, entityId: doc.entityId }, doc.parentId);
+  return ok ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
+}
+
+/** Where an archived row comes back to, in place, and P1 there. */
+async function archiveLanding(viewer: Viewer, type: TrashTypeKey, id: string): Promise<TrashActionResult> {
+  const org = viewer.organizationId;
+  switch (type) {
+    case "folder": {
+      const r = await prisma.folder.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, parentFolderId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return landingCheck(viewer, r.parentFolderId ? { kind: "folder", id: r.parentFolderId } : { kind: "space", id: r.spaceId }, "folder");
+    }
+    case "list": {
+      const r = await prisma.board.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, folderId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      if (!r.spaceId) return { ok: true };
+      return landingCheck(viewer, r.folderId ? { kind: "folder", id: r.folderId } : { kind: "space", id: r.spaceId }, "list");
+    }
+    case "task": {
+      const r = await prisma.item.findFirst({ where: { id, organizationId: org }, select: { boardId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return listLanding(viewer, r.boardId);
+    }
+    case "doc": {
+      const r = await prisma.doc.findFirst({ where: { id, organizationId: org }, select: { entityType: true, entityId: true, parentId: true } });
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      return docLanding(viewer, r);
+    }
+    case "canvas": {
+      const folders = await canvasesHaveFolders();
+      const r = folders
+        ? await prisma.whiteboard.findFirst({ where: { id, organizationId: org }, select: { spaceId: true, folderId: true } })
+        : await prisma.whiteboard.findFirst({ where: { id, organizationId: org }, select: { spaceId: true } }).then((w) => (w ? { ...w, folderId: null as string | null } : null));
+      if (!r) return { ok: false, status: 404, message: "Not found" };
+      const place: Place = r.folderId && r.spaceId ? { kind: "folder", id: r.folderId } : r.spaceId ? { kind: "space", id: r.spaceId } : null;
+      return landingCheck(viewer, place, "canvas");
+    }
+    default:
+      return { ok: true };
+  }
+}
+
+/** Where a snapshot row comes back to (its parent as it is now, P3), and P1 there. */
+async function snapshotLanding(viewer: Viewer, entityType: string, snapshot: unknown): Promise<TrashActionResult> {
+  const row = ((snapshot as SnapshotShape)?.row ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof row[k] === "string" && row[k] ? (row[k] as string) : null);
+  switch (entityType) {
+    case "folder": {
+      const parent = str("parentFolderId");
+      const space = str("spaceId");
+      if (!parent && !space) return { ok: true };
+      return landingCheck(viewer, parent ? { kind: "folder", id: parent } : { kind: "space", id: space as string }, "folder");
+    }
+    case "board": {
+      const folder = str("folderId");
+      const space = str("spaceId");
+      if (!folder && !space) return { ok: true };
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : { kind: "space", id: space as string }, "list");
+    }
+    case "whiteboard": {
+      const folder = str("folderId");
+      const space = str("spaceId");
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null, "canvas");
+    }
+    case "table": {
+      const space = str("spaceId");
+      return landingCheck(viewer, space ? { kind: "space", id: space } : null, "table");
+    }
+    case "item":
+      return listLanding(viewer, str("boardId"));
+    case "note":
+      return docLanding(viewer, { entityType: str("entityType"), entityId: str("entityId"), parentId: str("parentId") });
+    case "file": {
+      // A file comes back into its Space folder (the Space re-derived from
+      // the folder as it is now, restoreFromTrash) or its Space's root: Can
+      // edit there now, whoever uploaded or deleted it. A file of the org's
+      // keeps the org root's rule.
+      const folder = str("spaceFolderId");
+      const space = str("spaceId");
+      return landingCheck(viewer, folder ? { kind: "folder", id: folder } : space ? { kind: "space", id: space } : null, "file");
+    }
+    case "form":
+      return formLanding(viewer, { boardId: str("targetBoardId"), tableId: str("targetTableId") });
+    default:
+      return { ok: true };
+  }
+}
+
+/**
+ * A form comes back with its destination, and every response it takes then
+ * writes a task or a row there on the restorer's behalf: the same Can edit
+ * the form's create and change ask (node-placement checkFormDestination). A
+ * restorer lowered to Can view since never gets a form that writes into the
+ * List. A destination that is gone is no write at all, so it does not block.
+ */
+async function formLanding(viewer: Viewer, dest: { boardId: string | null; tableId: string | null }): Promise<TrashActionResult> {
+  if (!dest.boardId && !dest.tableId) return { ok: true };
+  const [board, table] = await Promise.all([
+    dest.boardId ? prisma.board.findFirst({ where: { id: dest.boardId, organizationId: viewer.organizationId, archivedAt: null }, select: { id: true } }) : Promise.resolve(null),
+    dest.tableId ? prisma.dataTable.findFirst({ where: { id: dest.tableId, organizationId: viewer.organizationId }, select: { id: true } }) : Promise.resolve(null),
+  ]);
+  if (!board && !table) return { ok: true };
+  const gate = await checkFormDestination(nodeCtxFromViewer(viewer), { boardId: board?.id ?? null, tableId: table?.id ?? null });
+  if (gate.ok) return { ok: true };
+  return { ok: false, status: 403, message: gate.status === 403 ? `${gate.error} Ask someone who can edit it to restore this form.` : CANT_RESTORE_HERE };
 }
 
 /**
@@ -816,16 +1243,29 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
  *
  * Only tasks can be orphaned this way today: a snapshot of a task carries its
  * boardId, and if that List is itself gone the insert would fail on the foreign
- * key. Containers restore into the Space root when their Folder is missing,
- * which the registry already handles.
+ * key. A container whose Folder, Space or parent page is gone or in Trash is
+ * landingRefusals' (landingPlaceBlocks): the restore refuses it until that
+ * place is back, and the row says so instead of offering a Restore.
  */
-async function missingParentIds(page: readonly RawRow[]): Promise<Set<string>> {
+/**
+ * The task rows on this page whose List is not there to take them back:
+ * gone (no row at all) or in Trash (archived). A task restored in place into
+ * an archived List was live inside a List nobody could open (round seven,
+ * item 1), so the archived List blocks the restore like a gone one does.
+ */
+async function missingParentIds(page: readonly RawRow[]): Promise<Map<string, "gone" | "archived">> {
+  const out = new Map<string, "gone" | "archived">();
   const taskRows = page.filter((r) => r.type === "task" && r.anchor.boardId);
-  if (!taskRows.length) return new Set();
+  if (!taskRows.length) return out;
   const boardIds = [...new Set(taskRows.map((r) => r.anchor.boardId!))];
-  const alive = await prisma.board.findMany({ where: { id: { in: boardIds } }, select: { id: true } });
-  const aliveIds = new Set(alive.map((b) => b.id));
-  return new Set(taskRows.filter((r) => !aliveIds.has(r.anchor.boardId!)).map((r) => r.id));
+  const lists = await prisma.board.findMany({ where: { id: { in: boardIds } }, select: { id: true, archivedAt: true } });
+  const byId = new Map(lists.map((l) => [l.id, l] as const));
+  for (const r of taskRows) {
+    const l = byId.get(r.anchor.boardId!);
+    if (!l) out.set(r.id, "gone");
+    else if (l.archivedAt) out.set(r.id, "archived");
+  }
+  return out;
 }
 
 /**
@@ -842,16 +1282,37 @@ async function liveChildrenOf(
   organizationId: string,
 ): Promise<string | null> {
   const parts: string[] = [];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  // A purge deletes the container row alone, and canvases, tables and files
+  // name their Space (and a canvas its Folder) with no foreign key, while a
+  // sub-folder and a file drop to the Space root when their Folder goes. So
+  // every one of them still live blocks the purge (the placement rule's P3:
+  // a delete never leaves an orphan).
+  const canvasFolders = await canvasesHaveFolders();
   if (type === "space") {
-    const [folders, lists] = await Promise.all([
+    const [folders, lists, canvases, tables, files] = await Promise.all([
       prisma.folder.count({ where: { spaceId: id, archivedAt: null } }),
       prisma.board.count({ where: { spaceId: id, organizationId, archivedAt: null } }),
+      prisma.whiteboard.count({ where: { spaceId: id, organizationId, archivedAt: null } }),
+      prisma.dataTable.count({ where: { spaceId: id, organizationId } }),
+      prisma.fileEntry.count({ where: { spaceId: id, organizationId } }),
     ]);
-    if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
-    if (lists) parts.push(`${lists} list${lists === 1 ? "" : "s"}`);
+    if (folders) parts.push(plural(folders, "folder", "folders"));
+    if (lists) parts.push(plural(lists, "list", "lists"));
+    if (canvases) parts.push(plural(canvases, "canvas", "canvases"));
+    if (tables) parts.push(plural(tables, "table", "tables"));
+    if (files) parts.push(plural(files, "file", "files"));
   } else if (type === "folder") {
-    const lists = await prisma.board.count({ where: { folderId: id, organizationId, archivedAt: null } });
-    if (lists) parts.push(`${lists} list${lists === 1 ? "" : "s"}`);
+    const [lists, folders, canvases, files] = await Promise.all([
+      prisma.board.count({ where: { folderId: id, organizationId, archivedAt: null } }),
+      prisma.folder.count({ where: { parentFolderId: id, organizationId, archivedAt: null } }),
+      canvasFolders ? prisma.whiteboard.count({ where: { folderId: id, organizationId, archivedAt: null } }) : Promise.resolve(0),
+      prisma.fileEntry.count({ where: { spaceFolderId: id, organizationId } }),
+    ]);
+    if (folders) parts.push(plural(folders, "folder", "folders"));
+    if (lists) parts.push(plural(lists, "list", "lists"));
+    if (canvases) parts.push(plural(canvases, "canvas", "canvases"));
+    if (files) parts.push(plural(files, "file", "files"));
   } else {
     const tasks = await prisma.item.count({ where: { boardId: id, organizationId, archivedAt: null } });
     if (tasks) parts.push(`${tasks} task${tasks === 1 ? "" : "s"}`);

@@ -42,6 +42,20 @@ import { SIDEBAR_DRAWER_ID } from "../skip-links";
 
 export const SETTINGS_FILTER_FOCUS_EVENT = "workwrk:settings-filter-focus";
 
+// Which crumbs give way as the bar narrows. Below lg only the last two show
+// (the ancestors are one tap away in the drawer). Below sm only the current
+// page shows: on a 390px phone the bar's fixed chrome (menu, search, "+",
+// Ask AI, bell, help, avatar) leaves the trail about 40px, and "AI › Ask AI"
+// in that room rendered as "AI › A", one bold letter that named nothing.
+// The hub is already lit on the rail beside it, so the current page is the
+// crumb worth every pixel. The separator before crumb i shares the fate of
+// crumb i-1: callers pass `index - 1` for it.
+export function crumbHideClass(index: number, count: number): string | undefined {
+  if (index < count - 2) return "max-lg:hidden";
+  if (index === count - 2) return "max-sm:hidden";
+  return undefined;
+}
+
 function Crumbs({ items }: { items: BreadcrumbItem[] }) {
   // Past 4 levels the middle crumbs collapse into one "…" crumb.
   type Crumb = BreadcrumbItem & { hidden?: BreadcrumbItem[] };
@@ -68,11 +82,11 @@ function Crumbs({ items }: { items: BreadcrumbItem[] }) {
               className={cn(
                 "flex items-center gap-1",
                 i === 0 ? "shrink-0" : "min-w-0",
-                i < collapsed.length - 2 && "max-lg:hidden",
+                crumbHideClass(i, collapsed.length),
               )}
             >
               {i > 0 ? (
-                <span className={cn("inline-block shrink-0 text-chrome-fg-2 opacity-50 rtl:rotate-180", i === collapsed.length - 2 && "max-lg:hidden")} aria-hidden>›</span>
+                <span className={cn("inline-block shrink-0 text-chrome-fg-2 opacity-50 rtl:rotate-180", crumbHideClass(i - 1, collapsed.length))} aria-hidden>›</span>
               ) : null}
               {hidden ? (
                 <span className="shrink-0 text-chrome-fg-2" title={hidden.map((h) => h.label).join(" › ")}>…</span>
@@ -107,9 +121,9 @@ function Crumbs({ items }: { items: BreadcrumbItem[] }) {
 
 export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: boolean }) {
   const pathname = usePathname() || "";
-  const { openPalette, hubHref, toggleSidekick, sidekickOpen, railApps } = useOsShell();
+  const { openPalette, hubHref, toggleSidekick, sidekickOpen, askAiVisible, memberTeamsHub } = useOsShell();
   const tools = usePersonalTools();
-  const aiVisible = railApps.some((a) => a.key === "ai");
+  const aiVisible = askAiVisible;
   const { canBack, canForward, back, forward } = useNavHistory();
   const declared = useDeclaredBreadcrumb();
   const [createOpen, setCreateOpen] = useState(false);
@@ -127,7 +141,11 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
   // static directories), minus a first crumb that would only repeat the hub.
   // On a hub the viewer cannot open, its ancestor crumbs are text, not links:
   // every one of them is a page behind the same gate.
-  const trail = resolveCrumbTrail(pathname).map((c) => (hubVisible ? c : { label: c.label }));
+  // A plain Member holds only the Teams hub's Member branch: its crumb links
+  // to their own career home, and the ancestor crumbs stay text (/people and
+  // most Teams pages are manager-gated).
+  const ancestorsLink = hubVisible && !(hub === "teams" && memberTeamsHub);
+  const trail = resolveCrumbTrail(pathname).map((c) => (ancestorsLink ? c : { label: c.label }));
   const fallback = trail.length > 0 && trail[0].label === HUB_LABELS[hub] ? trail.slice(1) : trail;
   // Inside the takeover SettingsShell declares the whole trail, including its
   // own root crumb: the workspace door is "Settings › Workspace settings ›
@@ -153,6 +171,12 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
       aria-label="Page bar"
       className={cn(
         "os-chrome flex h-[var(--os-top-h)] shrink-0 items-center gap-2 bg-chrome px-3 text-chrome-fg",
+        // Below sm the gutters and the gaps between the icon buttons close
+        // up (each button still carries 6px of its own padding around the
+        // glyph). Together with crumbHideClass that is what turns the
+        // current-page crumb's 8px into about 70px on a 390px phone: room
+        // for "Ask AI", "Agents" or "Members" in full.
+        "max-sm:gap-1 max-sm:px-2",
         "[html[data-chrome=light]_&]:border-b [html[data-chrome=light]_&]:border-line",
       )}
     >
@@ -168,7 +192,7 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
         <ChromeIconButton label="Forward" onClick={forward} aria-disabled={!canForward} className={cn("max-lg:hidden", !canForward && "opacity-40 hover:bg-transparent hover:text-chrome-fg-2")}>
           <ChevronRight className="h-5 w-5 rtl:rotate-180" strokeWidth={1.5} />
         </ChromeIconButton>
-        <div className="ms-1 min-w-0 flex-1">
+        <div className="ms-1 min-w-0 flex-1 max-sm:ms-0">
           <Crumbs items={items} />
         </div>
       </div>
@@ -189,7 +213,7 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
         <Search className="h-5 w-5" strokeWidth={1.5} />
       </ChromeIconButton>
 
-      <div className="flex flex-1 items-center justify-end gap-1">
+      <div className="flex flex-1 items-center justify-end gap-1 max-sm:gap-0">
         {/* The pinned tools: one click each, the person's own pick. Hidden
             under lg so the bar never wraps; the tools stay in "+" there. */}
         {!inSettings && tools.pinned.length > 0 ? (

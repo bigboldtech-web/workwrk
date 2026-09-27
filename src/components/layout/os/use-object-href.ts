@@ -1,7 +1,10 @@
 "use client";
 
 // The client call sites of src/lib/nav/object-href.ts. Client code never
-// hard-codes a hub: the section a link is opened from decides its form.
+// hard-codes a hub: the section a link is opened from decides its form. From
+// every hub but the Docs and Tables storage browsers that form is the item's
+// Work address (Space-scoped when its slug is known, else the Work door);
+// inside those two it is the canonical URL.
 //
 //   useObjectHref()     for RENDER-TIME hrefs (a Link's href): the hub from
 //                       usePathname(), the open object from the store.
@@ -9,10 +12,12 @@
 //   sectionHrefNow()    built it (a click handler, a toast's action, a timer,
 //                       a desktop notification): they read the location and
 //                       the open object at the moment they run, so a toast
-//                       raised in Work and clicked from Docs opens in Docs.
+//                       raised in Talk and clicked from Docs opens in Docs.
 //   copyObjectLink()    the absolute link Copy link puts on the clipboard:
-//   shareHrefNow()      the door from Work (never a Space's slug), the
-//                       canonical URL from every other hub.
+//   shareHrefNow()      the Work door from EVERY hub, the storage hubs
+//                       included, and never a Space's slug. A copied link is
+//                       for somebody else, and the door places it in the
+//                       recipient's own Space under their own access.
 //
 // Server components (the Space page, the Folder page) call objectHref(kind,
 // id, "home", slug) directly: they render only in Work.

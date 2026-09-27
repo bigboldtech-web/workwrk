@@ -22,6 +22,7 @@ import {
   CalendarCheck, GitPullRequest, Frame, Cable, FlipHorizontal2,
   type LucideIcon,
 } from "lucide-react";
+import { freeFieldKey } from "@/lib/field-keys";
 
 // Per-type icon colors — grouped into ClickUp's families so the Fields panel
 // reads as one system (blue = text, green = number/date/choice, pink = contact/
@@ -277,19 +278,13 @@ export function parseBoardSchema(raw: unknown): BoardSchema {
 
 // ── Field-key slug helper ──────────────────────────────────────
 
+/**
+ * A new field's key. The rule, and the built-in keys it skips (a field
+ * labelled "Owner" must never share the Assignee column's "owner"), live in
+ * field-keys.ts; this name stays for its existing callers.
+ */
 export function slugifyFieldKey(label: string, existing: string[]): string {
-  const base =
-    label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 40) || "field";
-  if (!existing.includes(base)) return base;
-  for (let i = 2; i < 200; i++) {
-    const candidate = `${base}_${i}`;
-    if (!existing.includes(candidate)) return candidate;
-  }
-  return `${base}_${Date.now()}`;
+  return freeFieldKey(label, existing);
 }
 
 // ── Default options per type ───────────────────────────────────

@@ -22,6 +22,7 @@ import { PRIORITY_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import { MAX_WIDGET_RULES, type WidgetFilter, type WidgetRule } from "@/lib/dashboards/widgets";
 import type { FilterOperatorName } from "@/lib/list-comfort";
 import type { FieldDef } from "@/lib/field-catalog";
+import { ruleFieldIdOf } from "@/lib/field-keys";
 import { PickerButton } from "./widget-registry";
 
 type Person = { id: string; firstName?: string | null; lastName?: string | null; email?: string | null };
@@ -123,7 +124,9 @@ export function WidgetFilterEditor({
   }, [needsTags, tags]);
 
   const customFields = useMemo(() => (listsSource ? fields.filter((f) => FILTERABLE_TYPES.has(String(f.type))) : []), [fields, listsSource]);
-  const fieldByKey = useMemo(() => new Map(fields.map((f) => [f.key, f] as const)), [fields]);
+  // By rule id, the value a rule stores: a field keyed like a built-in (an
+  // older List's "status") is "field:status" and never the built-in Status.
+  const fieldByKey = useMemo(() => new Map(fields.map((f) => [ruleFieldIdOf(f.key), f] as const)), [fields]);
 
   const fieldSections = [
     {
@@ -136,7 +139,7 @@ export function WidgetFilterEditor({
         ...(listsSource ? [{ value: "tags", label: BUILTIN_LABEL.tags }] : []),
       ],
     },
-    ...(customFields.length ? [{ label: "Fields", options: customFields.map((f) => ({ value: f.key, label: f.label })) }] : []),
+    ...(customFields.length ? [{ label: "Fields", options: customFields.map((f) => ({ value: ruleFieldIdOf(f.key), label: f.label })) }] : []),
   ];
 
   const labelOf = (field: string) => BUILTIN_LABEL[field] ?? fieldByKey.get(field)?.label ?? "A field";

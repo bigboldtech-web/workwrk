@@ -17,6 +17,7 @@ import { Dots } from "@/components/ui/dots";
 import { accessMessage } from "@/lib/access-message";
 import { PRIORITY_OPTIONS, type ItemTag, type StatusOption } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
+import { ruleFieldIdOf } from "@/lib/field-keys";
 import { MAX_ROW_COLOR_RULES, ROW_COLORS, type RowColor, type RowColorRule } from "@/lib/list-comfort";
 import { LIST_SETTINGS_CHANGED, ROW_COLOR_LABEL, ROW_COLOR_SWATCH, ROW_COLOR_TINT } from "@/lib/table-comfort";
 import { OPERATOR_LABEL, operatorsFor, type FilterOperator } from "../board-filter-bar";
@@ -86,8 +87,9 @@ export function RowColorRulesPanel({
     { key: "tags", label: "Tags" },
     { key: "title", label: "Title" },
     ...(itemTypes.length > 0 ? [{ key: "type", label: "Task Type" }] : []),
-    // Computed columns hold no stored value a rule could read.
-    ...fields.filter((f) => f.type !== "MIRROR").map((f) => ({ key: f.key, label: f.label })),
+    // Computed columns hold no stored value a rule could read. A field keyed
+    // like a built-in is offered by its own id, as the filter bar does.
+    ...fields.filter((f) => f.type !== "MIRROR").map((f) => ({ key: ruleFieldIdOf(f.key), label: f.label })),
   ], [fields, itemTypes.length]);
 
   const change = (next: RowColorRule[]) => {
@@ -189,7 +191,7 @@ export function RowColorRulesPanel({
       case "due":
         return <input type="date" value={r.value} onChange={(e) => set(e.target.value)} className={cls} aria-label="Date" />;
       default: {
-        const f = fields.find((x) => x.key === r.field);
+        const f = fields.find((x) => ruleFieldIdOf(x.key) === r.field);
         const choices = f?.options?.choices ?? [];
         if (choices.length > 0 && (r.operator === "is" || r.operator === "isNot")) {
           return (

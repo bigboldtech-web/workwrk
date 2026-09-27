@@ -1,4 +1,4 @@
-// GET /api/work/locate?folderId=&boardSlug=&boardId= — where in the tree is this?
+// GET /api/work/locate?folderId=&boardSlug=&boardId=: where in the tree is this?
 //
 // Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 1 (Tree data):
 // "/folders/[id] -> that Folder's row active; ancestors expanded", and the same
@@ -17,30 +17,27 @@
 //
 // THE FOLDERS IT RETURNS are the ones the viewer's own tree renders on the
 // way to the object (revealFolderIds, src/lib/work/placement-server.ts): the
-// tree's prune rule for a Space reader, the nearest grant for a folder-only
-// grantee, and the depth the tree loads. It used to return every ancestor it
-// could walk, so a private folder above a readable List was expanded, and
-// its id sent to the browser, for someone whose tree never shows it. A Doc,
-// Table or Canvas opened in Work needs no call here: its route's gate
-// computes the same ids and the page publishes them.
+// one resolver's walk, where a Folder shows when the viewer can open it or
+// passes through it on the way to what they were given (a path container),
+// to the depth the tree loads. A path Folder itself answers too: its page is
+// the path view, and the tree renders it at its real depth. A Doc, Table or
+// Canvas opened in Work needs no call here: its route's gate computes the
+// same ids and the page publishes them.
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { folderReadable } from "@/lib/folder";
-import { canRead, type ViewerContext } from "@/lib/access";
+import { nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { revealFolderIds } from "@/lib/work/placement-server";
 
 export const dynamic = "force-dynamic";
 
+const NOT_FOUND = () => NextResponse.json({ error: "Not found" }, { status: 404 });
+
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
-  const u = session?.user as { id?: string; accessLevel?: string; organizationId?: string } | undefined;
-  if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const organizationId = u.organizationId;
-  const viewer: ViewerContext = { userId: u.id, organizationId, accessLevel };
+  const ctx = await nodeCtxFromSession();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const organizationId = ctx.organizationId;
 
   const url = new URL(req.url);
   const folderId = url.searchParams.get("folderId");
@@ -48,15 +45,16 @@ export async function GET(req: Request) {
   const boardId = url.searchParams.get("boardId");
 
   if (folderId) {
-    if (!(await folderReadable(folderId, u.id, accessLevel))) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
     const folder = await prisma.folder.findFirst({
       where: { id: folderId, organizationId },
       select: { id: true, spaceId: true },
     });
-    if (!folder) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const ids = await revealFolderIds(folder.id, organizationId, folder.spaceId, u.id, accessLevel);
+    if (!folder) return NOT_FOUND();
+    // Readable, or a path container the viewer passes through: both have a
+    // row in their tree. Anything else is the same 404 as a wrong id.
+    const d = await nodeRole(ctx, { kind: "folder", id: folder.id });
+    if (!roleAtLeast(d.role, "VIEW") && !d.path) return NOT_FOUND();
+    const ids = await revealFolderIds(ctx, { kind: "folder", id: folder.id });
     return NextResponse.json({
       spaceId: folder.spaceId,
       // Nearest first, as this route has always answered.
@@ -70,13 +68,10 @@ export async function GET(req: Request) {
       where: boardSlug ? { slug: boardSlug, organizationId } : { id: boardId!, organizationId },
       select: { id: true, spaceId: true, folderId: true },
     });
-    if (!board) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (!(await canRead(viewer, { type: "board", id: board.id }))) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-    const ids = board.folderId && board.spaceId
-      ? await revealFolderIds(board.folderId, organizationId, board.spaceId, u.id, accessLevel)
-      : [];
+    if (!board) return NOT_FOUND();
+    const d = await nodeRole(ctx, { kind: "list", id: board.id });
+    if (!roleAtLeast(d.role, "VIEW")) return NOT_FOUND();
+    const ids = board.folderId && board.spaceId ? await revealFolderIds(ctx, { kind: "list", id: board.id }) : [];
     return NextResponse.json({
       spaceId: board.spaceId,
       folderIds: ids.reverse(),

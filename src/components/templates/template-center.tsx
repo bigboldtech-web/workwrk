@@ -112,12 +112,38 @@ interface KitRow {
   summary: { doc: string; form: string; table: string };
 }
 
-interface SpaceRef {
+/** One Space from GET /api/move/destinations?create=<kind>: its root is a place when `pickable`, and the Folders a template may land in. */
+interface DestSpaceRef {
   id: string;
-  slug: string;
   name: string;
-  icon?: string | null;
-  color?: string | null;
+  pickable: boolean;
+  folders?: Array<{ id: string; name: string; parentFolderId: string | null; pickable: boolean }>;
+}
+
+/** What each container kind of template makes, in the create rule's words. */
+const CREATE_KIND: Readonly<Partial<Record<string, "list" | "folder" | "doc" | "canvas">>> = {
+  LIST: "list", FOLDER: "folder", DOC: "doc", WHITEBOARD: "canvas",
+};
+
+/** The places a template may land in, as "spaceId|folderId" choices named by their path. */
+function placeOptions(spaces: DestSpaceRef[]): Array<{ value: string; label: string }> {
+  const out: Array<{ value: string; label: string }> = [];
+  for (const s of spaces) {
+    if (s.pickable) out.push({ value: `${s.id}|`, label: s.name });
+    const folders = s.folders ?? [];
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    for (const f of folders) {
+      if (!f.pickable) continue;
+      const names = [f.name];
+      let cursor = f.parentFolderId;
+      for (let hops = 0; cursor && byId.has(cursor) && hops < 8; hops += 1) {
+        names.unshift(byId.get(cursor)!.name);
+        cursor = byId.get(cursor)!.parentFolderId;
+      }
+      out.push({ value: `${s.id}|${f.id}`, label: `${s.name} / ${names.join(" / ")}` });
+    }
+  }
+  return out;
 }
 
 const SORTS = [
@@ -194,7 +220,6 @@ function TemplateCenterBody({
   const [detail, setDetail] = useState<TemplateDetailRow | null>(null);
   const [detailKit, setDetailKit] = useState<KitRow | null>(null);
   const [detailIntake, setDetailIntake] = useState<IntakeTemplate | null>(null);
-  const [spaces, setSpaces] = useState<SpaceRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
 
@@ -239,16 +264,6 @@ function TemplateCenterBody({
     });
     return () => { live = false; };
   }, []);
-
-  // Spaces are only needed when an apply has to ask where to put the thing.
-  useEffect(() => {
-    if (target?.spaceId) return;
-    let live = true;
-    void apiFetch<{ spaces: SpaceRef[] }>("/api/spaces", { cache: "no-store" }).then((res) => {
-      if (live && res.ok) setSpaces(res.data.spaces ?? []);
-    });
-    return () => { live = false; };
-  }, [target?.spaceId]);
 
   const persistDisplay = useCallback(
     (next: { showBuiltIn: boolean; layout: "grid" | "list" }) => {
@@ -689,7 +704,6 @@ function TemplateCenterBody({
           intake={detailIntake}
           busy={busy}
           target={target}
-          spaces={spaces}
           onClose={() => { setDetail(null); setDetailKit(null); setDetailIntake(null); }}
           onUse={applyTemplate}
           onUseKit={applyKit}
@@ -725,7 +739,6 @@ function TemplateCenterBody({
           intake={detailIntake}
           busy={busy}
           target={target}
-          spaces={spaces}
           onClose={() => { setDetail(null); setDetailKit(null); setDetailIntake(null); }}
           onUse={applyTemplate}
           onUseKit={applyKit}
@@ -956,7 +969,6 @@ function DetailModal({
   intake,
   busy,
   target,
-  spaces,
   onClose,
   onUse,
   onUseKit,
@@ -967,14 +979,29 @@ function DetailModal({
   intake?: IntakeTemplate | null;
   busy: boolean;
   target: TemplateCenterProps["target"];
-  spaces: SpaceRef[];
   onClose: () => void;
   onUse: (tpl: TemplateDetailRow, body: Record<string, unknown>) => void;
   onUseKit: (kit: KitRow) => void;
   onUseIntake?: (t: IntakeTemplate) => void;
 }) {
-  const [spaceId, setSpaceId] = useState<string>(target?.spaceId ?? "");
+  // "spaceId|folderId": the place picked when the opener named none.
+  const [place, setPlace] = useState<string>("");
   const [includeSamples, setIncludeSamples] = useState(false);
+  // THE PLACES THIS PERSON MAY APPLY IT IN (the placement rule, node-rules P1
+  // and P5): GET /api/move/destinations?create=<kind> asks the one create
+  // rule per place, the same rule the apply route asks. The picker used to
+  // offer every Space the person could read, Can view ones too, and no Folder
+  // at all, so a Folder grantee could not apply a template into their Folder.
+  const createKind = detail ? CREATE_KIND[detail.kind] : undefined;
+  const [places, setPlaces] = useState<Array<{ value: string; label: string }> | null>(null);
+  useEffect(() => {
+    if (!createKind || target?.spaceId || target?.folderId) return;
+    let live = true;
+    void apiFetch<{ spaces?: DestSpaceRef[] }>(`/api/move/destinations?create=${createKind}`, { cache: "no-store" }).then((res) => {
+      if (live) setPlaces(res.ok ? placeOptions(res.data.spaces ?? []) : []);
+    });
+    return () => { live = false; };
+  }, [createKind, target?.spaceId, target?.folderId]);
 
   if (intake) {
     return (
@@ -1049,13 +1076,14 @@ function DetailModal({
   // Which container the apply needs, and whether we already have it.
   const needsSpace = def.target === "space" || def.target === "space-or-folder";
   const needsBoard = def.target === "list";
-  const haveSpace = Boolean(target?.spaceId || spaceId);
+  const [pickedSpace, pickedFolder] = place ? place.split("|") : ["", ""];
+  const haveSpace = Boolean(target?.spaceId || target?.folderId || pickedSpace);
   const haveBoard = Boolean(target?.boardId);
   const blocked = (needsSpace && !haveSpace) || (needsBoard && !haveBoard);
 
   const body: Record<string, unknown> = {
-    ...(target?.spaceId || spaceId ? { spaceId: target?.spaceId ?? spaceId } : {}),
-    ...(target?.folderId ? { folderId: target.folderId } : {}),
+    ...(target?.spaceId ? { spaceId: target.spaceId } : !target?.folderId && pickedSpace ? { spaceId: pickedSpace } : {}),
+    ...(target?.folderId ? { folderId: target.folderId } : !target?.spaceId && pickedFolder ? { folderId: pickedFolder } : {}),
     ...(target?.boardId ? { boardId: target.boardId } : {}),
     ...(items.length ? { includeSamples } : {}),
   };
@@ -1108,17 +1136,20 @@ function DetailModal({
           </div>
         ) : null}
 
-        {needsSpace && !target?.spaceId ? (
+        {needsSpace && !target?.spaceId && !target?.folderId ? (
           <label className="mt-1 block">
             <span className="text-sm font-medium text-ink-2">Where should it go?</span>
             <select
-              value={spaceId}
-              onChange={(e) => setSpaceId(e.target.value)}
+              value={place}
+              onChange={(e) => setPlace(e.target.value)}
               className="mt-1 h-9 w-full rounded-lg border border-line bg-raised px-2 text-base text-ink"
             >
-              <option value="">Pick a Space</option>
-              {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value="">{places && places.length === 0 ? "Nowhere you can add this" : "Pick a Space or a folder"}</option>
+              {(places ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+            {places && places.length === 0 ? (
+              <span className="mt-1 block text-sm text-ink-2">Applying a template needs Can edit on a Space or a folder.</span>
+            ) : null}
           </label>
         ) : null}
 

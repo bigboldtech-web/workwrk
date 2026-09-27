@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { PROTECTED_ADMIN_ROLES, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
 
 // GET — return the full matrix (custom + defaults merged on the client)
@@ -60,18 +61,9 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // Merge into existing settings
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: { settings: true },
-  });
-  const currentSettings = (org?.settings as any) || {};
-  const newSettings = { ...currentSettings, permissions: sanitized };
-
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: { settings: newSettings },
-  });
+  // Only the `permissions` key of the shared settings column, in one
+  // statement, so no other writer's key is lost to a concurrent save.
+  await writeOrgSettingsKeys(orgId, { permissions: sanitized });
 
   return jsonSuccess({ matrix: sanitized });
 }

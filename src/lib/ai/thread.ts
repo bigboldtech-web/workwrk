@@ -1,0 +1,188 @@
+// The pure half of the one Ask AI session (src/lib/ai/session-store.ts): how
+// the chat stream's bytes become events, and how a persisted or streamed
+// turn becomes the rows the thread renders. No React, no fetch, so every
+// rule here is tested without a browser.
+
+import { toolOutcome, type ToolOutcome } from "@/lib/agents/tool-verbs";
+
+/** One event of POST /api/sidekick/chat/stream (see that route's header). */
+export type StreamEvent =
+  | { type: "user_message"; message: { id: string; content?: string; createdAt?: string } }
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use"; name: string; input?: Record<string, unknown> | null }
+  | { type: "tool_result"; name: string; isError?: boolean }
+  | { type: "done"; message: { id: string; content: string; toolCalls?: Array<{ name: string; input?: unknown }> | null; createdAt?: string } }
+  | { type: "error"; message?: string };
+
+/**
+ * Split an SSE buffer into complete events and the unfinished tail. Events
+ * are separated by a blank line; each carries one `data:` line of JSON. A
+ * malformed event is skipped rather than ending the stream.
+ */
+export function splitSse(buffer: string): { events: StreamEvent[]; rest: string } {
+  const parts = buffer.split(/\r?\n\r?\n/);
+  const rest = parts.pop() ?? "";
+  const events: StreamEvent[] = [];
+  for (const part of parts) {
+    const line = part.split(/\r?\n/).find((l) => l.startsWith("data:"));
+    if (!line) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) continue;
+    try {
+      const evt = JSON.parse(payload) as StreamEvent;
+      if (evt && typeof evt === "object" && typeof (evt as { type?: unknown }).type === "string") events.push(evt);
+    } catch {
+      /* a malformed event: skip it */
+    }
+  }
+  return { events, rest };
+}
+
+export interface AiToolCall {
+  name: string;
+  input: Record<string, unknown> | null;
+  /** Known once the turn is saved; null while it streams. */
+  outcome: ToolOutcome | null;
+  /** From the stream's tool_result, before the saved log arrives. */
+  failed: boolean;
+  /** Still running (tool_use seen, no tool_result yet). */
+  pending: boolean;
+  durationMs: number | null;
+}
+
+export interface AiMessage {
+  id: string;
+  role: "USER" | "ASSISTANT";
+  content: string;
+  toolCalls: AiToolCall[];
+  createdAt: string;
+  /** The answer is still arriving. */
+  streaming?: boolean;
+}
+
+function rec(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/** One saved call-log entry ({ name, input, result, errorText, durationMs }) as a row. */
+export function callFromLog(entry: unknown): AiToolCall | null {
+  const e = rec(entry);
+  if (!e || typeof e.name !== "string") return null;
+  const hasResult = "result" in e || "errorText" in e;
+  const outcome = hasResult ? toolOutcome(e.name, e.result, typeof e.errorText === "string" ? e.errorText : null) : null;
+  return {
+    name: e.name,
+    input: rec(e.input),
+    outcome,
+    failed: outcome?.failed ?? false,
+    pending: false,
+    durationMs: typeof e.durationMs === "number" ? e.durationMs : null,
+  };
+}
+
+/** A message from GET /api/sidekick/sessions/[id]; only user and assistant turns render. */
+export function messageFromApi(m: { id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }): AiMessage | null {
+  if (m.role !== "USER" && m.role !== "ASSISTANT") return null;
+  const calls = Array.isArray(m.toolCalls) ? m.toolCalls.map(callFromLog).filter((c): c is AiToolCall => c !== null) : [];
+  return { id: m.id, role: m.role, content: m.content ?? "", toolCalls: calls, createdAt: String(m.createdAt) };
+}
+
+/** tool_use: a new pending row. */
+export function withToolUse(calls: AiToolCall[], name: string, input: Record<string, unknown> | null | undefined): AiToolCall[] {
+  return [...calls, { name, input: input ?? null, outcome: null, failed: false, pending: true, durationMs: null }];
+}
+
+/** tool_result: settle the most recent pending row of that tool. */
+export function withToolResult(calls: AiToolCall[], name: string, isError: boolean): AiToolCall[] {
+  const next = [...calls];
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (next[i].name === name && next[i].pending) {
+      next[i] = { ...next[i], pending: false, failed: isError };
+      return next;
+    }
+  }
+  return next;
+}
+
+/**
+ * done: the saved turn replaces the streamed one. Its text is the saved text
+ * (the stream route keeps the final iteration's words), and its calls keep
+ * what the stream already learnt (which failed), since the done event names
+ * the calls without their results.
+ */
+export function settleDone(live: AiMessage, saved: { id: string; content: string; toolCalls?: Array<{ name: string; input?: unknown }> | null; createdAt?: string }): AiMessage {
+  const savedCalls = Array.isArray(saved.toolCalls) ? saved.toolCalls : [];
+  const calls: AiToolCall[] = savedCalls.length > 0
+    ? savedCalls.map((c, i) => {
+        const was = live.toolCalls[i];
+        const same = was && was.name === c.name;
+        return {
+          name: c.name,
+          input: rec(c.input),
+          outcome: same ? was.outcome : null,
+          failed: same ? was.failed : false,
+          pending: false,
+          durationMs: same ? was.durationMs : null,
+        };
+      })
+    : live.toolCalls.map((c) => ({ ...c, pending: false }));
+  return {
+    id: saved.id,
+    role: "ASSISTANT",
+    // An empty saved text (the model answered only with tools) keeps what
+    // streamed rather than blanking the turn.
+    content: saved.content || live.content,
+    toolCalls: calls,
+    createdAt: saved.createdAt ? String(saved.createdAt) : live.createdAt,
+    streaming: false,
+  };
+}
+
+/** The title the server gives an untitled chat from its first message. */
+export function titleFromFirstMessage(text: string): string {
+  const t = text.trim();
+  return t.length > 60 ? `${t.slice(0, 57)}…` : t;
+}
+
+/**
+ * The page context a chat carries (productContext / boardContext), from the
+ * first two segments of the page it was started on. /sidekick itself carries
+ * none: the page is the assistant, not a place in the workspace.
+ */
+export function contextFromPath(pathname: string | null | undefined): { productContext?: string; boardContext?: string } {
+  if (!pathname || pathname === "/") return {};
+  const parts = pathname.replace(/^\/+/, "").split("/").filter(Boolean);
+  if (parts[0] === "sidekick") return {};
+  const out: { productContext?: string; boardContext?: string } = {};
+  if (parts[0]) out.productContext = parts[0].slice(0, 80);
+  if (parts[1]) out.boardContext = parts[1].slice(0, 80);
+  return out;
+}
+
+/**
+ * Whether a saved assistant turn is the stream route's apology for a model
+ * error ("Sorry, I hit an error reaching the model." plus the raw error).
+ * The saved text is kept as it is; the thread reads it as a turn that
+ * stopped instead of printing a provider's error to the person.
+ */
+export function isStoppedAnswer(content: string): boolean {
+  return /^Sorry(,| \u2014) I hit an error reaching the model\./.test(content.trim());
+}
+
+/**
+ * A saved chat whose last turn is a question with no answer after it: the
+ * answer broke off before the server saved it, or (when the question is a
+ * couple of minutes old at most) is still being written. Null while an
+ * answer is arriving in this tab, or when the chat ends in an answer.
+ */
+export function unansweredQuestion(
+  messages: readonly AiMessage[],
+  opts: { streaming: boolean; now?: number },
+): { text: string; recent: boolean } | null {
+  if (opts.streaming || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  if (last.role !== "USER") return null;
+  const at = new Date(last.createdAt).getTime();
+  const now = opts.now ?? Date.now();
+  return { text: last.content, recent: Number.isFinite(at) && now - at < 2 * 60_000 };
+}

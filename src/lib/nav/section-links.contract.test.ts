@@ -1,8 +1,9 @@
 // A contract over the SOURCE of the link sites that open objects, so the
-// founder's rule (whatever you open something from, you stay in that
-// section) cannot quietly regress one call site at a time. Each check names
-// the file and the exact shape it must keep. The behaviour behind every
-// helper they call is unit-tested in object-href.test.ts.
+// founder's rule (an item opens in its Space from every section, and only
+// the Docs and Tables storage browsers keep canonical links) cannot quietly
+// regress one call site at a time. Each check names the file and the exact
+// shape it must keep. The behaviour behind every helper they call is
+// unit-tested in object-href.test.ts.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -89,6 +90,8 @@ describe("call sites that build or follow object links", () => {
     "src/components/docs/blocknote-blocks/subpage-block.tsx",
     "src/components/docs/blocknote-canvas.tsx",
     "src/components/tables/csv-import-dialog.tsx",
+    // The Settings takeover's CSV import: a new table opens at its Work door.
+    "src/app/(dashboard)/imports/page.tsx",
   ];
 
   it("never push, replace or open a literal canonical object URL", () => {
@@ -158,6 +161,46 @@ describe("the editors (problem 30)", () => {
   });
 });
 
+describe("the canonical object routes (decision B3)", () => {
+  const LAYOUTS: [kind: string, file: string][] = [
+    ["doc", "src/app/(dashboard)/docs/[id]/layout.tsx"],
+    ["table", "src/app/(dashboard)/tables/[id]/layout.tsx"],
+    ["canvas", "src/app/(dashboard)/canvas/[id]/layout.tsx"],
+    ["form", "src/app/(dashboard)/forms/[id]/layout.tsx"],
+    ["sop", "src/app/(dashboard)/sops/[id]/layout.tsx"],
+  ];
+
+  it("mount CanonicalHubGate with their own kind and id in every [id] layout", () => {
+    for (const [kind, file] of LAYOUTS) {
+      const src = code(file);
+      expect(src, file).toMatch(new RegExp(`<CanonicalHubGate kind="${kind}" id=\\{id\\}>`));
+      expect(src, file).toMatch(/params: Promise<\{ id: string \}>/);
+      expect(src, file).toMatch(/const \{ id \} = await params;/);
+      expect(src, file).toMatch(/export const dynamic = "force-dynamic";/);
+    }
+  });
+
+  it("keep FormGate outermost on a form, so the Guest rule answers before any move", () => {
+    const src = code("src/app/(dashboard)/forms/[id]/layout.tsx");
+    const open = src.indexOf("<FormGate formId={id}>");
+    expect(open).toBeGreaterThan(0);
+    expect(open).toBeLessThan(src.indexOf("<CanonicalHubGate"));
+    expect(src.indexOf("</CanonicalHubGate>")).toBeLessThan(src.indexOf("</FormGate>"));
+  });
+
+  it("keep the Tables module gate above the table's own layout", () => {
+    expect(code("src/app/(dashboard)/tables/layout.tsx")).toMatch(/<TablesModuleGate>\{children\}<\/TablesModuleGate>/);
+  });
+
+  it("move a viewer without the hub to the door once, keeping the query and hash, before any editor mounts", () => {
+    const gate = code("src/components/access/canonical-hub-gate.tsx");
+    expect(gate).toMatch(/canonicalRedirect\(\s*canonicalHref\(kind, id\)/);
+    expect(gate).toMatch(/router\.replace\(`\$\{to\}\$\{window\.location\.search\}\$\{window\.location\.hash\}`, \{ scroll: false \}\)/);
+    expect(gate).toMatch(/if \(to\) return <RouteLoadingView \/>;/);
+    expect(gate).toMatch(/sent\.current === to/);
+  });
+});
+
 describe("the shell", () => {
   it("mounts the one section link interceptor before the page frame", () => {
     const shell = read("src/components/layout/os/os-shell.tsx");
@@ -169,6 +212,20 @@ describe("the shell", () => {
     expect(interceptor).toMatch(/e\.preventDefault\(\)/);
     expect(interceptor).not.toMatch(/stopPropagation/);
     expect(interceptor).toMatch(/confirmLeave\(\)/);
+  });
+
+  it("gives new tabs and copied addresses the section form, in the capture phase", () => {
+    const interceptor = code("src/components/layout/os/section-link-interceptor.tsx");
+    for (const type of ["pointerdown", "auxclick", "contextmenu"]) {
+      expect(interceptor, type).toMatch(new RegExp(`document\\.addEventListener\\("${type}", \\w+, true\\)`));
+      expect(interceptor, type).toMatch(new RegExp(`document\\.removeEventListener\\("${type}", \\w+, true\\)`));
+    }
+    expect(interceptor).toMatch(/newTabHref\(\{/);
+    expect(interceptor).toMatch(/a\.setAttribute\("href", /);
+    // Every decision reads the href the page rendered, never one a gesture wrote.
+    expect(interceptor).toMatch(/interceptDecision\(\{\s*href: resolved\(renderedHref\(a\)\)/);
+    // Nothing is written inside an editor's DOM.
+    expect(interceptor).toMatch(/if \(a\.closest\("\[contenteditable\]"\)\) return;/);
   });
 
   it("registers the Work door with the proxy and the hub table", () => {

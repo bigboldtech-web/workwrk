@@ -21,6 +21,11 @@
 //
 // A viewer who cannot share opens the same dialog read-only ("who" mode): the
 // role chip on the title row opens it.
+//
+// PublicLinkSection, at the end of this file, is the public link on its own:
+// the one Manage access dialog composes it for a table and a form
+// (src/components/access/general-access.tsx). The dialog above is kept,
+// exported and working; nothing mounts it any more.
 
 import { useState } from "react";
 import { Check, Copy, Globe, Link2, Lock } from "lucide-react";
@@ -30,7 +35,9 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { objectHref } from "@/lib/nav/object-href";
-import { hubNow } from "@/components/layout/os/use-object-href";
+import { copyObjectLink, hubNow } from "@/components/layout/os/use-object-href";
+import { Dots } from "@/components/ui/dots";
+import { InlineRetry } from "@/components/layout/os/share-space-dialog";
 
 export interface ShareObject {
   kind: "table" | "form";
@@ -222,4 +229,142 @@ export function ObjectShareDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * A table's or a form's public link, from the Manage access panel
+ * (AccessPanel.general.publicLink). Exactly two values, Off and "Anyone with
+ * the link can view" (toggle 10), changed only by Full access, and turning it
+ * on asks first and names what becomes visible. Under it, when on: Copy
+ * public link, the embed code and Copy internal link. A form always keeps
+ * "Copy the form's link", the responder its people answer through.
+ *
+ * `publicLink` null means the workspace does not allow public links and this
+ * one is off: the row does not exist. A link left on after the workspace
+ * switched them off says so, and Full access can still turn it off.
+ */
+export function PublicLinkSection({
+  kind, id, name, publicLink, canChange, orgName, onChanged,
+}: {
+  kind: "table" | "form";
+  id: string;
+  name: string;
+  publicLink: { on: boolean; allowed: boolean; url: string | null } | null;
+  canChange: boolean;
+  orgName: string;
+  /** After the server agreed; the dialog refetches its panel. */
+  onChanged?: (isPublic: boolean) => void;
+}) {
+  const confirm = useConfirm();
+  const { toast } = useOsToast();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<{ message: string; next: boolean } | null>(null);
+  const noun = kind === "table" ? "table" : "form";
+  const title = name || (kind === "table" ? "Untitled table" : "Untitled form");
+  const on = !!publicLink?.on;
+
+  async function setPublic(next: boolean, confirmed = false) {
+    if (busy || next === on) return;
+    if (next && !confirmed) {
+      const ok = await confirm({
+        title: "Turn on the public link?",
+        description: kind === "table"
+          ? `Anyone with the link will be able to see every row and column of "${title}", without signing in. You can turn it off again at any time.`
+          : `Anyone with the link will be able to open and read "${title}". Only people at ${orgName} can send answers, after they sign in. You can turn it off again at any time.`,
+        confirmLabel: "Turn on",
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    setFailed(null);
+    const r = await apiFetch(`/api/${kind === "table" ? "tables" : "forms"}/${id}`, { method: "PATCH", json: { isPublic: next } });
+    setBusy(false);
+    if (!r.ok) {
+      setFailed({ message: r.status === 403 && r.error ? r.error : "Couldn't change the public link.", next });
+      return;
+    }
+    toast(next ? "Public link is on" : "Public link is off");
+    onChanged?.(next);
+  }
+
+  function copy(text: string, done: string) {
+    void navigator.clipboard?.writeText(text).then(() => toast(done), () => toast("Couldn't copy", { tone: "danger" }));
+  }
+
+  const formLink = kind === "form" ? (
+    <button type="button" onClick={() => copy(objectLink("form", id), "Link copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+      <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy the form&apos;s link
+    </button>
+  ) : null;
+
+  if (!publicLink) return formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null;
+
+  if (!publicLink.allowed) {
+    if (!on) return formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null;
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="m-0 text-sm text-ink-2">Public links are off for this workspace, so this {noun}&apos;s link does not open.</p>
+        {canChange ? (
+          <div>
+            <button type="button" onClick={() => void setPublic(false)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+              {busy ? <Dots variant="pending" /> : <Lock className="h-4 w-4" strokeWidth={1.5} aria-hidden />} Turn the link off
+            </button>
+          </div>
+        ) : null}
+        {failed ? <InlineRetry message={failed.message} onRetry={() => void setPublic(failed.next, true)} /> : null}
+        {formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-active text-ink-2">
+          {on ? <Globe className="h-4 w-4" strokeWidth={1.5} aria-hidden /> : <Lock className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
+        </span>
+        {canChange ? (
+          <select
+            aria-label="Public link"
+            value={on ? "view" : "off"}
+            onChange={(e) => void setPublic(e.target.value === "view")}
+            aria-busy={busy || undefined}
+            className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-base text-ink focus:outline-none focus-visible:border-brand"
+          >
+            <option value="off">Off</option>
+            <option value="view">Anyone with the link can view</option>
+          </select>
+        ) : (
+          <span className="text-base text-ink">{on ? "Anyone with the link can view" : "Off"}</span>
+        )}
+        {busy ? <Dots variant="pending" /> : null}
+      </div>
+      {kind === "form" ? <p className="m-0 text-sm text-ink-2">Only people at {orgName} can send answers, after they sign in.</p> : null}
+      {!canChange ? <p className="m-0 text-sm text-ink-2">Only people with Full access can change its public link.</p> : null}
+      {failed ? <InlineRetry message={failed.message} onRetry={() => void setPublic(failed.next, true)} /> : null}
+      {on ? (
+        <div className="flex min-w-0 flex-col gap-2 pt-1">
+          <div className="flex flex-wrap gap-1">
+            <button type="button" onClick={() => copy(publicLink.url ? absolute(publicLink.url) : objectLink(kind, id, true), "Public link copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover">
+              <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy public link
+            </button>
+            <button type="button" onClick={() => copy(embedSnippet(kind, id, title), "Embed code copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+              <Copy className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy embed code
+            </button>
+            <button type="button" onClick={() => copy(copyObjectLink(kind, id), "Internal link copied")} title={`Opens it for people signed in to ${orgName}`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+              <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy internal link
+            </button>
+          </div>
+          <code className="block overflow-x-auto whitespace-pre rounded-md border border-line bg-subtle px-3 py-2 font-mono text-xs text-ink-2">{embedSnippet(kind, id, title)}</code>
+        </div>
+      ) : null}
+      {formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null}
+    </div>
+  );
+}
+
+function absolute(url: string): string {
+  if (/^https?:\/\//.test(url)) return url;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
 }

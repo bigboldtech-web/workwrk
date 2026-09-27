@@ -4,10 +4,10 @@
 // current work summarized per person: status counts, open/done/overdue,
 // up to 3 "working on" items and 2 recent activity rows.
 //
-// Read-only. Item visibility composes through getBoardForReader exactly
-// like src/lib/everything.ts — boards are gated ONCE for the caller,
-// then a single Item query covers all members, so titles from boards
-// the viewer can't read never leak.
+// Read-only. Item visibility comes from the one node-access resolver, over
+// ONE world for every List (never a gate call per List): boards are gated
+// ONCE for the caller, then a single Item query covers all members, so
+// titles from boards the viewer can't read never leak.
 //
 // Caps: newest 2000 items / 300 activity rows across the whole member
 // set — very large orgs truncate oldest data and counts read low, which
@@ -17,8 +17,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getBoardForReader } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getTeamUserIds } from "@/lib/team";
+import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 
 function normalizeStatus(s?: string | null): "done" | "in-progress" | "todo" {
   const t = (s ?? "").toLowerCase();
@@ -102,10 +104,8 @@ export async function GET() {
     where: { organizationId: orgId, archivedAt: null },
     select: { id: true, slug: true, name: true },
   });
-  const readable = await Promise.all(
-    boards.map(async (b) => ((await getBoardForReader(b.id, userId, accessLevel)) ? b : null)),
-  );
-  const readableBoards = readable.filter((b): b is (typeof boards)[number] => b !== null);
+  const listRoles = await nodeRoleMap(nodeCtxFromLevel(userId, orgId, accessLevel), "list", boards.map((b) => b.id));
+  const readableBoards = boards.filter((b) => roleAtLeast(listRoles.get(b.id) ?? "none", "VIEW"));
   const boardById = new Map(readableBoards.map((b) => [b.id, b] as const));
 
   const [items, activity] = await Promise.all([
@@ -131,8 +131,10 @@ export async function GET() {
           take: 2000,
         })
       : Promise.resolve([] as ItemRow[]),
+    // Work, not access: a record of who was given access to what belongs to
+    // the audit surfaces and never to a team's activity strip.
     prisma.activityLog.findMany({
-      where: { organizationId: orgId, actorId: { in: memberIds } },
+      where: { organizationId: orgId, actorId: { in: memberIds }, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
       select: { id: true, actorId: true, type: true, description: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 300,

@@ -1,29 +1,50 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { resolveAssetReadScope } from "@/lib/assets/asset-query";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { Prisma } from "@/generated/prisma";
 
-// Enum allowlists — the register UI now writes these directly, so reject a
+// Enum allowlists, the register UI now writes these directly, so reject a
 // bad value with a 400 rather than letting Prisma throw a 500.
 const ASSET_TYPES = new Set(["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM", "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER"]);
 const ASSET_CONDITIONS = new Set(["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"]);
 const ASSET_STATUSES = new Set(["AVAILABLE", "ASSIGNED", "IN_REPAIR", "RETIRED", "LOST"]);
 
+// GET /api/assets/[id]: one asset, through the same scope as the list. A
+// person reads the kit they hold; anyone else needs the `assets` app key and
+// the row inside their chain (or the whole org for the People team and
+// Admin). Outside that, the row is a 404 exactly as the list would be: it
+// used to answer any signed-in Member for any id in the org, serial, IMEI,
+// notes and purchase cost included, while the list 404'd for them.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { id } = await params;
+  const orgId = getOrgId(session);
+  const callerId = getUserId(session);
   const asset = await prisma.asset.findFirst({
-    where: { id, organizationId: getOrgId(session) },
+    where: { id, organizationId: orgId },
     include: {
       assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
     },
   });
-
   if (!asset) return jsonError("Asset not found", 404);
+
+  // Own kit: the door every Member has (the profile's Assets tab).
+  if (asset.assignedToId === callerId) return jsonSuccess(asset);
+
+  const scope = await resolveAssetReadScope(session, { mine: false, requestedScope: "all", assignedToId: null });
+  if ("error" in scope) return scope.error;
+  if (!scope.canSeeAll) {
+    // A manager: the row must be held by someone in their chain. The list
+    // shows a manager no unassigned rows either, so neither does this.
+    const inChain = await prisma.asset.count({ where: { ...scope.where, id } });
+    if (inChain === 0) return jsonError("Asset not found", 404);
+  }
   return jsonSuccess(asset);
 }
 
@@ -46,6 +67,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.type !== undefined && !ASSET_TYPES.has(body.type)) return jsonError("Invalid asset type");
   if (body.condition !== undefined && !ASSET_CONDITIONS.has(body.condition)) return jsonError("Invalid condition");
   if (body.status !== undefined && body.status && !ASSET_STATUSES.has(body.status)) return jsonError("Invalid status");
+  // "Assigned" is what assigning does, never a word typed on its own: an
+  // asset nobody holds cannot be saved as Assigned.
+  if (body.status === "ASSIGNED" && !body.assignedToId && !(body.assignedToId === undefined && existing.assignedToId)) {
+    return jsonError("Assign it to someone to mark it Assigned. Use Assign to on the row.", 400);
+  }
 
   // Cross-org guard: a client-supplied assignee id must belong to THIS org,
   // or an attacker could point one org's asset at another org's user (and
@@ -147,6 +173,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (denied) return denied;
 
   const { id } = await params;
-  await prisma.asset.deleteMany({ where: { id, organizationId: getOrgId(session) } });
-  return jsonSuccess({ message: "Asset deleted" });
+  const orgId = getOrgId(session);
+  // To Trash, not out of the database (spec-tools-misc 2.12): restorable for
+  // the retention window. Another org's id is a 404, as before.
+  const asset = await prisma.asset.findFirst({ where: { id, organizationId: orgId }, select: { id: true } });
+  if (!asset) return jsonError("Asset not found", 404);
+  const u = session.user as { id?: string; name?: string | null };
+  await moveToTrash("asset", id, { organizationId: orgId, userId: u.id ?? null, userName: u.name ?? null });
+  return jsonSuccess({ message: "Asset moved to Trash", trashed: true });
 }

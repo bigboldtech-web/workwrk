@@ -10,7 +10,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
+import { readableFileRows } from "@/lib/file-access";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -26,16 +26,11 @@ export async function GET() {
 
   const rows = await prisma.fileEntry.findMany({
     where: { organizationId: u.organizationId, id: { in: ids } },
-    select: { id: true, name: true, mimeType: true, size: true, url: true, s3Key: true, spaceId: true },
+    select: { id: true, name: true, mimeType: true, size: true, url: true, s3Key: true, spaceId: true, spaceFolderId: true },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (f) => {
-      if (!f.spaceId) return f;
-      const space = await getSpaceForReader(f.spaceId, u.id!, accessLevel);
-      return space ? f : null;
-    }),
-  )).filter((f): f is NonNullable<typeof f> => f !== null);
+  // The file read rule (src/lib/file-access.ts): a Space folder's files by
+  // that Folder, a Space's files by that Space, one world for the batch.
+  const visible = await readableFileRows(rows, { organizationId: u.organizationId, userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE" });
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));

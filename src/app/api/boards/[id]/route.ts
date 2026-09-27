@@ -1,11 +1,15 @@
-// PATCH  /api/boards/[id] — rename / re-color / re-folder / re-visibility
-// DELETE /api/boards/[id] — archive (soft); ?hard=1 → recoverable Trash
+// PATCH  /api/boards/[id]: rename, re-color, re-folder (a move), re-visibility
+// DELETE /api/boards/[id]: archive (soft); ?hard=1 moves it to Trash
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoard, canEditBoard, getBoardForReader, updateBoard } from "@/lib/board";
+import { archiveBoard, boardRoleOf, updateBoard } from "@/lib/board";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { moveList } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { recordGeneralAccessChange } from "@/lib/access/grants";
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
 import { getBoardStatuses } from "@/lib/board-items-shared";
@@ -35,15 +39,15 @@ async function ctx() {
 }
 
 async function loadAndGate(boardId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
-  // Cross-tenant safety + read gate (composes Space + Board.visibility +
-  // BoardMember per Phase 23). Returns null when the viewer can't see
-  // the board OR when it's in a different org.
-  const board = await getBoardForReader(boardId, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
+  // Cross-tenant safety + the one resolver's role on the List: no role is the
+  // same 404 as a board in another org; below Full access is 403. Full access
+  // on a List (its own OWNER or ADMIN row, its owner, a Full holder of its
+  // Folder or Space) manages it (W3).
+  const { board, role } = await boardRoleOf(boardId, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId || role === "none") {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const canEdit = await canEditBoard(boardId, c.userId, c.accessLevel);
-  if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (!roleAtLeast(role, "FULL")) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { board };
 }
 
@@ -133,8 +137,29 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: "invalid_row_color_rules" }, { status: 400 });
     }
   }
+  // Re-foldering through PATCH is a move (the placement rule, node-rules P2
+  // and P3), through the one helper: Full access on the List and where it is
+  // now, Can edit where it goes, and the Space taken from the Folder it goes
+  // into. It used to write folderId alone, which left a List in one Space
+  // inside a Folder of another. The move runs before anything else is
+  // written, so a refused move writes nothing at all.
+  const { folderId: nextFolderId, ...edits } = parsed.data;
+  if (nextFolderId !== undefined && nextFolderId !== gate.board.folderId) {
+    const moved = await moveList(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), id, { folderId: nextFolderId });
+    if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: moved.status });
+  }
   try {
-    const updated = await updateBoard(id, parsed.data);
+    // A visibility change is an access change: the List's visibility and its
+    // activity row are one transaction (general access sends no notification,
+    // by decision). The rest of the patch goes through updateBoard as before.
+    const { visibility, ...rest } = edits;
+    if (visibility !== undefined && visibility !== gate.board.visibility) {
+      await prisma.$transaction(async (tx) => {
+        await tx.board.update({ where: { id }, data: { visibility } });
+        await recordGeneralAccessChange(tx, { userId: c.userId, organizationId: c.organizationId }, { kind: "list", id }, { visibility: { from: gate.board.visibility, to: visibility } });
+      });
+    }
+    const updated = Object.keys(rest).length > 0 ? await updateBoard(id, rest) : await updateBoard(id, {});
     // The schema goes back as this caller may see it: connect targets they
     // cannot read are not named.
     const fields = await redactFieldsForViewer(parseBoardSchema(updated.schema).fields, listReader(c));

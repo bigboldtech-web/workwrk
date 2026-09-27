@@ -1,62 +1,25 @@
-// GET/POST /api/marketing/events — event briefs (conferences, webinars, ...)
+// GET /api/marketing/events: the legacy EventBrief rows, read-only, for one
+// release (spec-tools-misc section 2.7 Data). Owner and Admin through the
+// Data gate. POST is gone with the pages that called it.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveSuiteContext } from "@/lib/suites/auth";
-import { z } from "zod";
+import { AccessError, requireCan } from "@/lib/access/gate";
+import { jsonError } from "@/lib/api-helpers";
 
-export async function GET(req: Request) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-  const workspaceId = new URL(req.url).searchParams.get("workspace");
-  const events = await prisma.eventBrief.findMany({
-    where: {
-      organizationId: ctx.orgId,
-      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
-    },
-    orderBy: [{ startDate: "asc" }, { createdAt: "desc" }],
-    take: 200,
-  });
-  return NextResponse.json({ events });
-}
+export const dynamic = "force-dynamic";
 
-const createSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().max(8000).optional(),
-  type: z.string().max(80).optional(),
-  format: z.string().max(40).optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  location: z.string().max(200).optional(),
-  capacity: z.number().int().nonnegative().optional(),
-  budget: z.number().nonnegative().optional(),
-  url: z.string().max(500).optional(),
-  workspaceId: z.string().optional(),
-});
-
-export async function POST(req: Request) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-  const body = await req.json().catch(() => null);
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
-
-  const event = await prisma.eventBrief.create({
-    data: {
-      organizationId: ctx.orgId,
-      workspaceId: parsed.data.workspaceId ?? null,
-      name: parsed.data.name,
-      description: parsed.data.description,
-      type: parsed.data.type,
-      format: parsed.data.format,
-      startDate: parsed.data.startDate ? new Date(parsed.data.startDate) : null,
-      endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
-      location: parsed.data.location,
-      capacity: parsed.data.capacity,
-      budget: parsed.data.budget,
-      url: parsed.data.url,
-      ownerId: ctx.userId,
-    },
-  });
-  return NextResponse.json({ event });
+export async function GET() {
+  try {
+    const { viewer } = await requireCan("manage", { type: "settings", page: "data" });
+    const events = await prisma.eventBrief.findMany({
+      where: { organizationId: viewer.organizationId },
+      orderBy: [{ startDate: "asc" }, { createdAt: "desc" }],
+      take: 200,
+    });
+    return NextResponse.json({ events });
+  } catch (e) {
+    if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);
+    throw e;
+  }
 }

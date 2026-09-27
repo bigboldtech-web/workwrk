@@ -90,6 +90,46 @@ describe("parseNotificationLink", () => {
   });
 });
 
+describe("every object address is its object", () => {
+  it("reads the Work door and the Space-scoped address as the object, never the Space", () => {
+    expect(parseNotificationLink("/work/docs/d1")).toMatchObject({ kind: "doc", id: "d1", href: "/work/docs/d1" });
+    expect(parseNotificationLink("/work/sops/s1")).toMatchObject({ kind: "sop", id: "s1" });
+    expect(parseNotificationLink("/spaces/design-team/docs/d1")).toMatchObject({ kind: "doc", id: "d1" });
+    expect(parseNotificationLink("/work/canvas/c1")).toMatchObject({ kind: "canvas", id: "c1" });
+    expect(parseNotificationLink("/work/tables/t1")).toMatchObject({ kind: "table", id: "t1" });
+    expect(parseNotificationLink("/work/forms/f1")).toMatchObject({ kind: "form", id: "f1" });
+  });
+
+  it("keeps a Space address a Space", () => {
+    expect(parseNotificationLink("/spaces/cmabc")).toMatchObject({ kind: "space", id: "cmabc" });
+    expect(parseNotificationLink("/spaces/design-team")).toMatchObject({ kind: "space", id: "design-team" });
+  });
+
+  it("reads the canonical table, canvas and form addresses", () => {
+    expect(parseNotificationLink("/tables/t1")).toMatchObject({ kind: "table", id: "t1" });
+    expect(parseNotificationLink("/canvas/c1")).toMatchObject({ kind: "canvas", id: "c1" });
+    expect(parseNotificationLink("/forms/f1?tab=responses")).toMatchObject({ kind: "form", id: "f1", href: "/forms/f1?tab=responses" });
+    expect(parseNotificationLink("/work/forms/f1?tab=responses")).toMatchObject({ kind: "form", id: "f1" });
+  });
+
+  it("leaves the public form responder external", () => {
+    expect(parseNotificationLink("/forms/f1/respond")).toMatchObject({ kind: "external", href: "/forms/f1/respond" });
+  });
+
+  it("keeps anchors and ?comment on the new forms", () => {
+    expect(parseNotificationLink("/work/docs/d1#b-block9")).toMatchObject({ kind: "doc", id: "d1", anchor: "block9", anchorIsComment: false });
+    expect(parseNotificationLink("/spaces/s/docs/d1#c-7")).toMatchObject({ kind: "doc", id: "d1", anchor: "7", anchorIsComment: true });
+    expect(parseNotificationLink("/work/docs/d1?comment=u9")).toMatchObject({ kind: "doc", id: "d1", anchor: "u9", anchorIsComment: true });
+    expect(parseNotificationLink("https://app.workwrk.com/work/docs/d1")).toMatchObject({ kind: "doc", id: "d1" });
+  });
+
+  it("has a noun for the new kinds", () => {
+    expect(TARGET_NOUN.table).toBe("table");
+    expect(TARGET_NOUN.canvas).toBe("canvas");
+    expect(TARGET_NOUN.form).toBe("form");
+  });
+});
+
 describe("resolveLegacyItemParam", () => {
   it("resolves the old ?item= drawer form to the one task URL", () => {
     expect(resolveLegacyItemParam("/boards/q4-leads?item=abc")).toMatchObject({

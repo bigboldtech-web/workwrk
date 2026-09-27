@@ -148,7 +148,7 @@ export default function NotetakerPage() {
   const { data: session } = useSession();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const viewer = useViewer();
-  const { rowVersion, railApps, prefs, patchPrefs } = useOsShell();
+  const { rowVersion, askAiVisible, prefs, patchPrefs } = useOsShell();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const fmt = useFormat();
@@ -156,7 +156,7 @@ export default function NotetakerPage() {
   // The AI gate (change request A2): the Extract action needs the AI hub the
   // way Ask AI does. With it hidden the page renders the denial, not a form
   // whose one button fails.
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
 
   const [transcript, setTranscript] = useState("");
   const [extracting, setExtracting] = useState(false);
