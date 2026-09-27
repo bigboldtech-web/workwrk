@@ -12,23 +12,31 @@ import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
+import { directoryList } from "@/lib/people/directory-list.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
+  // The Directory and the Org chart (Phase 6, spec-teams-people /people and
+  // /organization): every Member reads the whole org's directory cards, with
+  // server filters, sort and pagination, and people data only for the people
+  // the viewer may read. The other scopes below keep their callers' contract.
+  if (searchParams.get("scope") === "directory" || searchParams.get("fields") === "chart") {
+    return directoryList(req);
+  }
   const departmentId = searchParams.get("departmentId");
   const status = searchParams.get("status");
   const accessLevel = searchParams.get("accessLevel");
   // scope:
-  //   "team" — only the caller's reports + themselves
-  //   "all"  — every active user in the org (org-wide levels only)
+  //   "team": only the caller's reports + themselves
+  //   "all" : every active user in the org (org-wide levels only)
   // Default: org-wide levels get "all", everyone else gets "team".
-  // The door is ORG_WIDE_ALIGNMENT_LEVELS — the same ladder the rest of
-  // Teams uses — so a Director/VP/HR sees the same org here as elsewhere.
+  // The door is ORG_WIDE_ALIGNMENT_LEVELS: the same ladder the rest of
+  // Teams uses: so a Director/VP/HR sees the same org here as elsewhere.
   const requestedScope = searchParams.get("scope");
-  // ?tagIds=a,b — narrow to people carrying ANY of these person-tags. Resolved
+  // ?tagIds=a,b: narrow to people carrying ANY of these person-tags. Resolved
   // live from TagAssignment, ANDed with the scope/other filters below.
   const tagIdsParam = searchParams.get("tagIds");
   const tagIds = tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -81,7 +89,7 @@ export async function GET(req: NextRequest) {
     ];
   }
 
-  // Tag filter — ANDed with scope via `AND` so it composes with the existing
+  // Tag filter: ANDed with scope via `AND` so it composes with the existing
   // `where.id` (team scope) instead of clobbering it. An empty resolved set
   // (a tag nobody has) correctly yields no rows.
   if (tagIds.length > 0) {
@@ -115,7 +123,7 @@ export async function GET(req: NextRequest) {
         department: { select: { id: true, name: true } },
         role: { select: { id: true, title: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
-        // Filtered count — soft-deleted reports don't inflate "N reports".
+        // Filtered count: soft-deleted reports don't inflate "N reports".
         _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
       },
       orderBy,

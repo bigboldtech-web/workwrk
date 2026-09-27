@@ -1,22 +1,32 @@
 "use client";
 
-// RoleWorkspace — the interactive body of the Role Definition page. Overview
+// RoleWorkspace, the interactive body of the Role Definition page. Overview
 // (identity · ownership boundary · KRAs · KPIs · SOPs · thresholds) + Instances
 // (Role × Scope). All mutations hit the generic operating-core APIs and then
-// router.refresh() to re-pull the server bundle (config surface, low frequency —
+// router.refresh() to re-pull the server bundle (config surface, low frequency , 
 // correctness over optimism). Reuses the app's design-system primitives.
 
 import { Fragment, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { NEUTRAL_TILE } from "@/components/ui/entity-tile";
+import { Chip, StatusChip } from "@/components/ui/chip";
 import Link from "next/link";
 import {
-  LayoutDashboard, GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
-  Target, FileText, Gauge, Users as UsersIcon, Loader2, Sparkles,
-  MoreHorizontal, Star, TrendingUp, TrendingDown, MoveRight, Pencil, Unlink, ChevronDown,
+  GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
+  Target, FileText, Gauge, Users as UsersIcon, Sparkles, Link2,
+  MoreHorizontal, Star, TrendingUp, TrendingDown, MoveRight, Pencil, Unlink, ChevronDown, Briefcase,
   type LucideIcon,
 } from "lucide-react";
-import { ACCESS_LEVELS, labelForAccessLevel } from "@/lib/access-levels";
-import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { SENIORITY_OPTIONS, seniorityLabel } from "@/lib/people/seniority";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { Picker } from "@/components/ui/picker";
+import { ViewTab } from "@/components/ui/view-tabs";
 import { KraPicker } from "@/components/ui/kra-picker";
 import { useOsToast } from "@/components/layout/os/toast";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -61,33 +71,169 @@ export interface RoleBundle {
 const personName = (p: Person | null) => p ? ([p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email) : "Unassigned";
 const initials = (p: Person) => ([p.firstName?.[0], p.lastName?.[0]].filter(Boolean).join("") || p.email[0] || "?").toUpperCase();
 
-export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, view }: { bundle: RoleBundle; canEdit: boolean; canEditIdentity?: boolean; view: "overview" | "instances" }) {
+type RoleTab = "overview" | "people" | "instances";
+
+export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, tab }: { bundle: RoleBundle; canEdit: boolean; canEditIdentity?: boolean; tab: RoleTab }) {
   const roleId = bundle.role.id;
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const { boot } = useBoot();
+  // Instances is a word a small firm should never meet: the tab renders only
+  // when the org uses scopes or instances, or with Show upcoming features on.
+  const showUpcoming = boot.prefs?.home?.ui?.showUpcoming === true;
+  const instancesOn = bundle.instances.length > 0 || bundle.scopes.length > 0 || showUpcoming;
+  const active: RoleTab = tab === "instances" && !instancesOn ? "overview" : tab;
+  const deletable = bundle.people.length === 0 && bundle.kras.length === 0;
+
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(`${window.location.origin}/people/roles/${roleId}`); toast("Link copied"); }
+    catch { toast("Couldn't copy the link"); }
+  }
+  async function duplicate() {
+    const res = await fetch("/api/roles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: `${bundle.role.title} (copy)`, description: bundle.role.description, seniority: bundle.role.level, departmentId: bundle.role.department?.id ?? null }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(d?.error ?? "Couldn't duplicate the job title"); return; }
+    toast("Duplicated. KRAs stay on the original; attach the ones this title needs.");
+    router.push(`/people/roles/${(d?.data ?? d).id}`);
+  }
+  async function remove() {
+    const res = await fetch(`/api/roles/${roleId}`, { method: "DELETE" });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(d?.error ?? "Couldn't delete the job title"); return; }
+    toast("Job title deleted");
+    router.push("/people/roles");
+  }
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   return (
     <>
-      <ViewTabStrip className="px-6">
-        <ViewTab icon={LayoutDashboard} iconTileColor="#0073EA" label="Overview" active={view === "overview"} href={`/people/roles/${roleId}`} />
-        <ViewTab icon={UsersIcon} iconTileColor="#0073EA" label="Instances" trailing={bundle.instances.length ? <span className="text-xs text-zinc-400">{bundle.instances.length}</span> : undefined} active={view === "instances"} href={`/people/roles/${roleId}?view=instances`} />
-      </ViewTabStrip>
-
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        {view === "overview" ? (
-          <div className="max-w-5xl mx-auto space-y-4">
-            <IdentityCard bundle={bundle} canEdit={canEditIdentity} />
-            <AlignmentCard bundle={bundle} canEdit={canEdit} />
-            <BoundaryCard bundle={bundle} canEdit={canEdit} />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              <ThresholdsCard bundle={bundle} canEdit={canEdit} />
-              <SopCard bundle={bundle} />
-            </div>
+      <Breadcrumb items={[{ label: "Job titles", href: "/people/roles" }, { label: bundle.role.title }]} />
+      <OsPageHeader
+        title={bundle.role.title}
+        back={{ fallbackHref: "/people/roles", label: "Job titles" }}
+        tile={{ icon: Briefcase, ...NEUTRAL_TILE }}
+        titleSlot={
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="min-w-0 truncate text-title font-semibold text-ink" title={bundle.role.title}>{bundle.role.title}</h1>
+            <Chip>{seniorityLabel(bundle.role.level)}</Chip>
           </div>
-        ) : (
-          <div className="max-w-5xl mx-auto">
-            <InstancesPanel bundle={bundle} canEdit={canEdit} />
+        }
+        more={[
+          { label: "Copy link", icon: Link2, onClick: () => void copyLink() },
+          ...(canEditIdentity ? [{ label: "Duplicate as new job title", icon: Plus, onClick: () => void duplicate() }] : []),
+          ...(canEditIdentity && deletable ? [{ separator: true as const }, { label: "Delete job title", icon: Trash2, destructive: true, onClick: () => setConfirmDelete(true) }] : []),
+        ]}
+      />
+      <div className="flex-1 overflow-y-auto pb-10">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 sm:px-6">
+          {!canEditIdentity ? (
+            <p className="flex h-9 items-center rounded-md bg-surface-2 px-3 text-sm text-ink-2">View only. Job titles are managed by Admins and the People team.</p>
+          ) : null}
+          <div className="flex h-9 items-center gap-1" role="tablist" aria-label="Job title sections">
+            <ViewTab label="Overview" active={active === "overview"} href={`/people/roles/${roleId}`} />
+            <ViewTab label="People" active={active === "people"} href={`/people/roles/${roleId}?tab=people`} trailing={<span className="text-xs font-medium text-ink-2">{bundle.people.length}</span>} />
+            {instancesOn ? <ViewTab label="Instances" active={active === "instances"} href={`/people/roles/${roleId}?tab=instances`} trailing={bundle.instances.length ? <span className="text-xs font-medium text-ink-2">{bundle.instances.length}</span> : undefined} /> : null}
           </div>
-        )}
+          {active === "overview" ? (
+            <>
+              <IdentityCard bundle={bundle} canEdit={canEditIdentity} />
+              <BoundaryCard bundle={bundle} canEdit={canEdit} />
+              <AlignmentCard bundle={bundle} canEdit={canEdit} />
+              <SopCard bundle={bundle} canEdit={canEditIdentity} />
+              {/* Stored, never enforced yet (PO-11): hidden until the
+                  escalation job reads them, and captioned when shown. The rows
+                  are kept, never deleted. */}
+              <UpcomingOnly>
+                <ThresholdsCard bundle={bundle} canEdit={canEdit} />
+              </UpcomingOnly>
+            </>
+          ) : active === "people" ? (
+            <PeoplePanel bundle={bundle} canEdit={canEdit} />
+          ) : (
+            <>
+              <p className="text-sm text-ink-2">An instance is a copy of this job title for one region, team or product, with its own KRAs and KPIs.</p>
+              <InstancesPanel bundle={bundle} canEdit={canEdit} />
+            </>
+          )}
+        </div>
       </div>
+      {confirmDelete ? (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => { setConfirmDelete(false); void remove(); }}
+          title={`Delete ${bundle.role.title}?`}
+          description="Nobody holds this job title and it defines no KRAs, so nothing else changes."
+          confirmLabel="Delete job title"
+          destructive
+        />
+      ) : null}
     </>
+  );
+}
+
+/** People tab: who holds the title, and who is missing some of its KRAs. */
+function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const [seedingId, setSeedingId] = useState<string | null>(null);
+  const totalTemplates = bundle.kras.length;
+  // Backfill a drifted holder's assignments from this job title's templates.
+  // Same endpoint the Instances panel uses; idempotent (skipDuplicates).
+  const seedHolder = async (p: Holder) => {
+    setSeedingId(p.id);
+    try {
+      const res = await fetch(`/api/users/${p.id}/seed-alignment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roleId: bundle.role.id }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d?.error ?? "Couldn't seed assignments"); return; }
+      toast(`Seeded ${personName(p)} from ${bundle.role.title}`);
+      router.refresh();
+    } catch {
+      toast("Couldn't reach the server. Nothing changed.");
+    } finally { setSeedingId(null); }
+  };
+  if (bundle.people.length === 0) {
+    return <p className="rounded-lg border border-line bg-surface px-4 py-3 text-row text-ink-2">Nobody holds this job title yet.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <ul className="os-chrome divide-y divide-line-soft overflow-hidden rounded-lg border border-line bg-surface">
+        {bundle.people.map((p) => {
+          const missing = Math.min(Math.max(p.missingKras ?? 0, 0), totalTemplates);
+          return (
+            <li key={p.id} className="flex min-h-11 items-center gap-3 px-3">
+              <Link href={`/people/${p.id}`} className="flex min-w-0 flex-1 items-center gap-2 hover:underline">
+                <Avatar className="h-7 w-7">
+                  {p.avatar ? <AvatarImage src={p.avatar} alt="" /> : null}
+                  <AvatarFallback className="text-micro">{initials(p)}</AvatarFallback>
+                </Avatar>
+                <span className="truncate text-row text-ink">{personName(p)}</span>
+              </Link>
+              {/* Drift is people data: the server strips it for readers. */}
+              {canEdit ? (
+                missing > 0 ? (
+                  <>
+                    <StatusChip color="#B45309" label={`Missing ${missing} of ${totalTemplates} KRAs`} />
+                    <button type="button" disabled={seedingId === p.id} onClick={() => void seedHolder(p)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
+                      {seedingId === p.id ? "Seeding" : "Seed"}
+                    </button>
+                  </>
+                ) : totalTemplates > 0 ? <Chip>Up to date</Chip> : null
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-sm font-medium text-ink-2">Total people {bundle.people.length}</p>
+    </div>
   );
 }
 
@@ -136,7 +282,7 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
   const { toast } = useOsToast();
   const [title, setTitle] = useState(bundle.role.title);
   const [mission, setMission] = useState(bundle.role.description ?? "");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Autosave reads refs, not state: the debounce timer holds the closure from
   // the render BEFORE the last keystroke, so state reads would save one
@@ -145,29 +291,42 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
   const missionRef = useRef(bundle.role.description ?? "");
   const savedRef = useRef({ title: bundle.role.title, mission: bundle.role.description ?? "" });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retries = useRef(0);
 
-  const flush = async () => {
+  // A failed save stays visible ("Not saved, retrying") and retries with a
+  // backoff; the typed text is never dropped.
+  const flush = async (): Promise<void> => {
     const nextTitle = titleRef.current.trim();
     const nextMission = missionRef.current.trim();
     if (nextTitle === savedRef.current.title.trim() && nextMission === savedRef.current.mission.trim()) return;
-    if (!nextTitle) return; // never save a role into a blank title
+    if (!nextTitle) return; // never save a job title into a blank name
     setSaveState("saving");
+    let ok = false;
     try {
       const res = await fetch(`/api/roles/${bundle.role.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "content-type": "application/json" },
+        keepalive: true,
         body: JSON.stringify({ title: nextTitle, description: nextMission }),
       });
-      if (!res.ok) {
+      ok = res.ok;
+      if (!ok && res.status >= 400 && res.status < 500) {
         const d = await res.json().catch(() => ({}));
-        toast(d?.error ?? "Couldn't save the role");
-        setSaveState("idle");
+        toast(d?.error ?? "Couldn't save the job title");
+        setSaveState("error");
         return;
       }
-      savedRef.current = { title: nextTitle, mission: nextMission };
-      setSaveState("saved");
-      router.refresh();
-    } catch { toast("Network error — change not saved"); setSaveState("idle"); }
+    } catch { ok = false; }
+    if (!ok) {
+      setSaveState("error");
+      retries.current += 1;
+      if (retries.current <= 5) setTimeout(() => void flush(), Math.min(30000, 1000 * 2 ** retries.current));
+      return;
+    }
+    retries.current = 0;
+    savedRef.current = { title: nextTitle, mission: nextMission };
+    setSaveState("saved");
+    router.refresh();
   };
   const queueSave = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -178,34 +337,33 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
   async function deleteRole() {
     const res = await fetch(`/api/roles/${bundle.role.id}`, { method: "DELETE" });
     if (res.ok) {
-      toast("Role deleted");
+      toast("Job title deleted");
       router.push("/people/roles");
       router.refresh();
     } else {
       const d = await res.json().catch(() => ({}));
-      toast(d?.error ?? "Couldn't delete the role");
+      toast(d?.error ?? "Couldn't delete the job title");
     }
     setConfirmDelete(false);
   }
 
   return (
     <Card
-      title="Identity & scope"
+      title="Details"
       action={
         <div className="flex items-center gap-2">
           {canEdit && saveState !== "idle" ? (
-            <span className="text-xs text-zinc-400">{saveState === "saving" ? "Saving…" : "Saved"}</span>
+            <AutosaveIndicator status={saveState} lastSavedAt={null} onRetry={() => { retries.current = 0; void flush(); }} />
           ) : null}
-          {canEdit ? (
+          {/* Delete renders only when it can succeed: nobody holds the title
+              and it defines no KRAs (the route refuses anything else). */}
+          {canEdit && holders === 0 && bundle.kras.length === 0 ? (
             <button
               type="button"
-              onClick={() => {
-                if (holders > 0) { toast(`${holders} ${holders === 1 ? "person holds" : "people hold"} this role — reassign them first.`); return; }
-                setConfirmDelete(true);
-              }}
-              className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-sm text-zinc-400 hover:text-red-500 hover:bg-red-50"
+              onClick={() => setConfirmDelete(true)}
+              className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-sm text-danger-text hover:bg-danger-bg"
             >
-              <Trash2 className="w-3.5 h-3.5" /> Delete role
+              <Trash2 className="w-3.5 h-3.5" /> Delete job title
             </button>
           ) : null}
         </div>
@@ -216,9 +374,9 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
           open
           onClose={() => setConfirmDelete(false)}
           onConfirm={() => void deleteRole()}
-          title={`Delete role "${bundle.role.title}"?`}
-          description="Its KRA templates detach and stay in the library. Nobody holds this role, so no people are affected."
-          confirmLabel="Delete role"
+          title={`Delete ${bundle.role.title}?`}
+          description="Nobody holds this job title and it defines no KRAs, so nothing else changes."
+          confirmLabel="Delete job title"
           destructive
         />
       ) : null}
@@ -236,35 +394,35 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
             <span className="text-base text-zinc-700">{bundle.role.title}</span>
           )}
         </Field>
-        <Field label="Mission">
+        <Field label="Description">
           {canEdit ? (
             <textarea
               value={mission}
               onChange={(e) => { setMission(e.target.value); missionRef.current = e.target.value; queueSave(); }}
               onBlur={() => void flush()}
               rows={2}
-              placeholder="One line: what this role must ensure…"
+              placeholder="What this job title is for and what it must ensure"
               className="w-full text-base rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
           ) : (
             <span className="text-base text-zinc-700">{mission || <span className="text-zinc-400">Not set</span>}</span>
           )}
         </Field>
-        <Field label="Function">
+        <Field label="Department">
           {canEdit ? (
             <FunctionPicker roleId={bundle.role.id} current={bundle.role.department} />
           ) : (
-            <span className="text-base text-zinc-700">{bundle.role.department?.name ?? <span className="text-zinc-400">Unassigned</span>}</span>
+            <span className="text-base text-zinc-700">{bundle.role.department?.name ?? <span className="text-zinc-400">No department</span>}</span>
           )}
         </Field>
-        <Field label="Level">
+        <Field label="Seniority">
           {canEdit ? (
             <LevelSelect roleId={bundle.role.id} current={bundle.role.level} />
           ) : (
-            <span className="text-sm font-medium text-zinc-600 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{bundle.role.level}</span>
+            <span className="text-base text-zinc-700">{seniorityLabel(bundle.role.level)}</span>
           )}
         </Field>
-        <Field label="People"><span className="text-base text-zinc-700">{bundle.people.length} in this role</span></Field>
+        <Field label="People"><Link href={`/people/roles/${bundle.role.id}?tab=people`} className="text-base text-zinc-700 hover:underline">{bundle.people.length} {bundle.people.length === 1 ? "person holds" : "people hold"} this title</Link></Field>
       </div>
     </Card>
   );
@@ -279,7 +437,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// Inline picker assigning the role to a Function (Department). Same source
+// Inline picker assigning the job title to a Department. Same source
 // the rest of the app uses (GET /api/departments), fetched lazily on first
 // open. PUT { departmentId } on select; optimistic + router.refresh().
 type DeptOption = { id: string; name: string };
@@ -321,10 +479,10 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
         type="button"
         disabled={busy}
         onClick={toggle}
-        title="Assign this job title to a function (department)"
+        title="Pick the department this job title belongs to"
         className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-zinc-50 disabled:opacity-50"
       >
-        <span className={dept ? "text-zinc-700" : "text-zinc-400"}>{dept?.name ?? "Unassigned"}</span>
+        <span className={dept ? "text-zinc-700" : "text-zinc-400"}>{dept?.name ?? "No department"}</span>
         <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
       </button>
       {open ? (
@@ -333,28 +491,28 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
           <MorePortal anchorRef={anchorRef} width={230} open={open} placement="below">
             <MenuList>
               {depts === null ? (
-                <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+                <div className="px-3 py-2"><SkeletonLines lines={2} /></div>
               ) : loadFailed ? (
                 <div className="px-3 py-2 text-sm text-zinc-500">Couldn&rsquo;t load departments. Reopen to retry.</div>
               ) : depts.length === 0 ? (
                 <div className="px-3 py-2 text-sm leading-relaxed text-zinc-500">
                   No departments yet. Create one in{" "}
                   <Link href="/people/departments" className="text-[var(--os-brand)] hover:underline" onClick={() => setOpen(false)}>
-                    People → Departments
+                    Teams, Departments
                   </Link>
                   , then assign it here.
                 </div>
               ) : (
                 <>
-                  <MenuItem label={<span className="text-zinc-500">No function</span>} selected={!dept} onClick={() => void pick(null)} />
+                  <MenuItem label={<span className="text-zinc-500">No department</span>} selected={!dept} onClick={() => void pick(null)} />
                   <MenuSeparator />
                   {depts.map((d) => (
                     <MenuItem key={d.id} label={d.name} selected={dept?.id === d.id} onClick={() => void pick(d)} />
                   ))}
                   <MenuSeparator />
-                  {/* Discoverability: "how do I add a function?" — right here. */}
+                  {/* Discoverability: "how do I add a department?", right here. */}
                   <Link href="/people/departments" onClick={() => setOpen(false)}>
-                    <MenuItem label={<span className="text-[var(--os-brand)]">Manage functions…</span>} />
+                    <MenuItem label={<span className="text-[var(--os-brand)]">Manage departments</span>} />
                   </Link>
                 </>
               )}
@@ -371,7 +529,9 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
 // so an AGENT-level role would vanish from that page. Admin tiers stay out
 // by design (see access-levels.ts). PUT { level } on change; the refresh
 // also re-renders the server header, so the title chip updates in place.
-const ROLE_LEVEL_OPTIONS = ACCESS_LEVELS.filter((o) => o.value !== "AGENT");
+// Seniority is display only (access 2.1): the six labels, never an access
+// tier. A legacy stored value (HR, an admin tier) still shows its own label.
+const ROLE_LEVEL_OPTIONS = SENIORITY_OPTIONS;
 
 function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
   const { call, busy } = useApi();
@@ -388,7 +548,7 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
     if (!ok) setLevel(prev);
   };
 
-  // Same MenuList picker as Function above — a native <select> here rendered
+  // Same MenuList picker as Function above, a native <select> here rendered
   // as a visibly different control right next to it (the inconsistency the
   // user screenshotted), and its popup ignored the design system entirely.
   return (
@@ -398,10 +558,10 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
         type="button"
         disabled={busy}
         onClick={() => setOpen((v) => !v)}
-        aria-label="Access level"
+        aria-label="Seniority"
         className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-base hover:bg-zinc-50 disabled:opacity-50"
       >
-        <span className="text-zinc-700">{labelForAccessLevel(level)}</span>
+        <span className="text-zinc-700">{seniorityLabel(level)}</span>
         <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
       </button>
       {open ? (
@@ -412,7 +572,7 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
               {ROLE_LEVEL_OPTIONS.map((o) => (
                 <MenuItem
                   key={o.value}
-                  label={o.hint ? `${o.label} (${o.hint})` : o.label}
+                  label={o.label}
                   selected={level === o.value}
                   onClick={() => void pick(o.value)}
                 />
@@ -422,7 +582,7 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
         </>
       ) : null}
       <p className="text-xs text-zinc-400 mt-1">
-        Access tier: decides what holders of this title can see, from their own work up to team and org-wide surfaces.
+        Display only. Seniority never changes what someone can do.
       </p>
     </div>
   );
@@ -472,7 +632,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
       toast(
         d.notified > 0
           ? `Request sent to ${d.notified} ${d.ownerTitle}${d.notified === 1 ? "" : " holders"}`
-          : `Request logged — nobody currently holds ${d.ownerTitle}`,
+          : `Request logged. Nobody holds ${d.ownerTitle} yet`,
       );
       setRequestFor(null);
     } finally { setSendingRequest(false); }
@@ -538,14 +698,14 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
 
         {/* Can request */}
         <BoundaryColumn tone="#0073EA" icon={HandHelping} label="Can request" onAdd={canEdit ? () => setAddOpen("CAN_REQUEST") : undefined}>
-          {canRequest.length === 0 ? <Empty>None yet — link areas other roles own, so this role can raise requests to them.</Empty> : canRequest.map((b) => (
+          {canRequest.length === 0 ? <Empty>None yet. Link areas other roles own, so this role can raise requests to them.</Empty> : canRequest.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} onRequest={() => raiseRequest(b)} />
           ))}
         </BoundaryColumn>
 
         {/* Cannot touch */}
         <BoundaryColumn tone="#dc2626" icon={Ban} label="Cannot touch" onAdd={canEdit ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
-          {cannotTouch.length === 0 ? <Empty>None yet — mark areas explicitly off-limits for this role.</Empty> : cannotTouch.map((b) => (
+          {cannotTouch.length === 0 ? <Empty>None yet. Mark areas explicitly off-limits for this role.</Empty> : cannotTouch.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} />
           ))}
         </BoundaryColumn>
@@ -557,15 +717,13 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
       ) : null}
 
       {requestFor ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setRequestFor(null)}>
-          <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full max-w-sm bg-white rounded-xl border border-zinc-200 shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-xs font-semibold text-zinc-900">Request: {requestFor.area.name}</h3>
-              <button type="button" onClick={() => setRequestFor(null)} className="text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
-            </div>
+        <Dialog open onOpenChange={(v) => { if (!v) setRequestFor(null); }}>
+          <DialogContent className="max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Request: {requestFor.area.name}</DialogTitle>
+            </DialogHeader>
             <p className="text-xs text-zinc-500 mb-3">
-              Goes to everyone currently holding <span className="font-medium text-zinc-700">{requestFor.area.ownerRole?.title ?? "the owner role"}</span> — they decide and act; this role never edits the area directly.
+              Goes to everyone currently holding <span className="font-medium text-zinc-700">{requestFor.area.ownerRole?.title ?? "the owner role"}</span>. They decide and act; this job title never edits the area directly.
             </p>
             <textarea
               value={requestNote}
@@ -578,11 +736,11 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" onClick={() => setRequestFor(null)} className="h-8 px-3 rounded-md text-sm text-zinc-600 hover:bg-zinc-100">Cancel</button>
               <button type="button" disabled={sendingRequest || !requestNote.trim()} onClick={() => void sendRequest()} className="h-8 px-3.5 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50 inline-flex items-center gap-1.5">
-                {sendingRequest ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Send request
+                {sendingRequest ? "Sending" : "Send request"}
               </button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {deleteArea ? (
@@ -594,7 +752,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
           }}
           loading={busy}
           title={`Delete area "${deleteArea.name}"?`}
-          description="The area disappears everywhere — including other roles' Can-request and Cannot-touch lists. No SOPs, KRAs or people are affected."
+          description="The area disappears everywhere, including other roles' Can-request and Cannot-touch lists. No SOPs, KRAs or people are affected."
           confirmLabel="Delete area"
           destructive
         />
@@ -653,17 +811,15 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
   };
   const filtered = areas.filter((a) => !q.trim() || a.name.toLowerCase().includes(q.trim().toLowerCase()) || (a.ownerRole?.title ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30" />
-      <div className="relative w-full max-w-sm bg-white rounded-xl border border-zinc-200 shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-xs font-semibold text-zinc-900">{relation === "CAN_REQUEST" ? "Can request" : "Cannot touch"} — pick an area</h3>
-          <button type="button" onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{relation === "CAN_REQUEST" ? "Can request" : "Cannot touch"}: pick an area</DialogTitle>
+        </DialogHeader>
         <p className="text-xs text-zinc-500 mb-2">
           {relation === "CAN_REQUEST"
-            ? "This role will be able to raise requests to the area's owner — never edit it directly."
-            : "This role is explicitly barred from the area — even requests are off the table."}
+            ? "This role will be able to raise requests to the area's owner, never edit it directly."
+            : "This role is explicitly barred from the area, even requests are off the table."}
         </p>
         <input
           value={q}
@@ -673,7 +829,7 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
         />
         {areas.length === 0 ? (
           <p className="px-1 py-4 text-xs text-zinc-400">
-            No areas owned by other roles yet. Areas are defined on the owning role&apos;s page — open that role and add them under <span className="font-medium text-zinc-600">Owns</span>.
+            No areas owned by other roles yet. Areas are defined on the owning role&apos;s page: open that job title and add them under <span className="font-medium text-zinc-600">Owns</span>.
           </p>
         ) : filtered.length === 0 ? (
           <p className="px-1 py-4 text-xs text-zinc-400">Nothing matches.</p>
@@ -718,8 +874,8 @@ function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas:
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -731,7 +887,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 //
 // KRA = heading card (a container: name + description, no number, no
 // progress bar). KPI = gauge row underneath: direction of good, healthy
-// line (nullable — "no baseline yet", never invented), OWNED/SHARED,
+// line (nullable, "no baseline yet", never invented), OWNED/SHARED,
 // north-star first. OKRs never appear here: an OKR belongs to a person,
 // never to a role.
 
@@ -784,7 +940,7 @@ function resolvedDirection(p: Kpi): KpiDirection {
   return p.direction ?? (p.lowerIsBetter ? "LOWER" : "HIGHER");
 }
 
-/** The KPI's healthy line as copy — never invents a number. */
+/** The KPI's healthy line as copy, never invents a number. */
 function healthyLine(p: Kpi): string | null {
   if (p.targetValue == null) return null;
   const unit = p.unit ? ` ${p.unit}` : "";
@@ -811,28 +967,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
   const [kraDialog, setKraDialog] = useState<{ kra?: Kra } | null>(null);
   const [kpiDialog, setKpiDialog] = useState<{ kraId: string; kraName: string; kpi?: KpiDialogKpi } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
-  const [seedingId, setSeedingId] = useState<string | null>(null);
-
   const onSaved = (msg: string) => { toast(msg); router.refresh(); };
-
-  // Backfill a drifted holder's assignments from this job title's templates.
-  // Same endpoint the Instances panel uses; idempotent (skipDuplicates).
-  const seedHolder = async (p: Holder) => {
-    setSeedingId(p.id);
-    try {
-      const res = await fetch(`/api/users/${p.id}/seed-alignment`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ roleId: bundle.role.id }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) { toast(d?.error ?? "Couldn't seed assignments"); return; }
-      toast(`Seeded ${personName(p)} from ${bundle.role.title}`);
-      router.refresh();
-    } catch {
-      toast("Network error");
-    } finally { setSeedingId(null); }
-  };
 
   const runConfirm = async () => {
     if (!confirm) return;
@@ -867,7 +1002,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
     },
     "delete-kpi": {
       title: "Delete this KPI?",
-      description: "The gauge AND every recorded reading on it — for every person — are permanently deleted. Goal key results linked to it fall back to hand check-ins. This cannot be undone.",
+      description: "The gauge AND every recorded reading on it, for every person, are permanently deleted. Goal key results linked to it fall back to hand check-ins. This cannot be undone.",
       confirmLabel: "Delete KPI",
       destructive: true,
     },
@@ -921,7 +1056,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
         <div className="space-y-3">
           {bundle.kras.map((k) => (
             <section key={k.id} className="rounded-lg border border-zinc-200">
-              {/* KRA heading — a container: no number, no progress bar. */}
+              {/* KRA heading, a container: no number, no progress bar. */}
               <header className="flex items-start gap-2.5 px-3 pt-2.5 pb-2">
                 <Target className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
@@ -932,7 +1067,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                 </div>
                 <span
                   className={`text-sm font-mono tabular-nums shrink-0 mt-0.5 ${k.weight ? "text-zinc-700" : "text-zinc-400"}`}
-                  title="Role-level weight — every holder inherits this share as their starting weightage"
+                  title="Job title weight: every holder inherits this share as their starting weightage"
                 >
                   {k.weight || 0}%
                 </span>
@@ -978,14 +1113,14 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                         </span>
                         <DirIcon className="w-3.5 h-3.5 mt-0.5 text-zinc-400 shrink-0" aria-label={DIRECTION_META[dir].hint} />
                         {line ? (
-                          <span className="text-sm font-mono text-zinc-700 shrink-0" title={`Healthy line — ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
+                          <span className="text-sm font-mono text-zinc-700 shrink-0" title={`Healthy line: ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
                         ) : (
                           <span className="text-xs italic text-zinc-400 shrink-0">no baseline yet</span>
                         )}
                         <span
                           className="text-micro font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0"
                           style={shared ? { background: "#a78b6c22", color: "#8e7165" } : { background: "#0073EA1a", color: "#0073EA" }}
-                          title={shared ? "Influenced by this role — reviewed, not graded" : "Controlled by this role — graded"}
+                          title={shared ? "Influenced by this job title: reviewed, not graded" : "Controlled by this job title: graded"}
                         >
                           {shared ? "Shared" : "Owned"}
                         </span>
@@ -1003,7 +1138,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                 </ul>
               ) : (
                 <p className="border-t border-zinc-100 px-3 py-2 text-xs text-zinc-400">
-                  No gauges yet — how will this area be measured?
+                  No gauges yet. How will this area be measured?
                 </p>
               )}
 
@@ -1020,60 +1155,6 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
           ))}
         </div>
       )}
-
-      {/* People holding this job title — each inherits the template above. */}
-      {bundle.people.length > 0 ? (
-        <div className="mt-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">People with this job title</div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {bundle.people.map((p) => {
-              const totalTemplates = bundle.kras.length;
-              const missing = Math.min(Math.max(p.missingKras ?? 0, 0), totalTemplates);
-              const drifted = missing > 0;
-              return (
-                <span
-                  key={p.id}
-                  className={`inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border ${drifted ? "border-amber-300 bg-amber-50/50" : "border-zinc-200"}`}
-                >
-                  <Link
-                    href={`/people/${p.id}`}
-                    title={personName(p)}
-                    className="inline-flex items-center gap-1.5 hover:opacity-80"
-                  >
-                    <Avatar className="h-5 w-5">
-                      {p.avatar ? <AvatarImage src={p.avatar} alt="" /> : null}
-                      <AvatarFallback className="text-micro">{initials(p)}</AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm text-zinc-700">{personName(p)}</span>
-                  </Link>
-                  {drifted ? (
-                    <>
-                      <span
-                        className="text-xs font-medium text-amber-600 whitespace-nowrap"
-                        title={`Missing ${missing} of this job title's ${totalTemplates} template KRA assignment${totalTemplates === 1 ? "" : "s"}`}
-                      >
-                        missing {missing} of {totalTemplates}
-                      </span>
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          disabled={seedingId === p.id}
-                          onClick={() => void seedHolder(p)}
-                          title="Backfill the missing KRA assignments from this job title's templates"
-                          className="inline-flex items-center gap-0.5 text-xs font-medium text-[var(--os-brand)] hover:underline disabled:opacity-50"
-                        >
-                          {seedingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                          Seed
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
 
       <KraDialog
         open={kraDialog !== null}
@@ -1111,31 +1192,105 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
 }
 
 // ─────────────────────────── SOPs ───────────────────────────
-function SopCard({ bundle }: { bundle: RoleBundle }) {
-  const sops = bundle.kras.flatMap((k) => k.sops.map((s) => ({ ...s, kraName: k.name })));
+type SopOption = { id: string; title: string; kraId: string | null };
+
+function SopCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const sops = bundle.kras.flatMap((k) => k.sops.map((s) => ({ ...s, kraName: k.name, kraId: k.id })));
+  const [step, setStep] = useState<null | "sop" | "kra">(null);
+  const [options, setOptions] = useState<SopOption[] | null>(null);
+  const [picked, setPicked] = useState<SopOption | null>(null);
+  const [move, setMove] = useState<{ sop: SopOption; kraId: string; current: string } | null>(null);
+
+  const open = async () => {
+    setStep("sop");
+    if (options) return;
+    const res = await fetch("/api/sops?limit=500&status=PUBLISHED", { cache: "no-store" });
+    const d = await res.json().catch(() => null);
+    const rows = (Array.isArray(d) ? d : d?.data ?? d?.sops ?? []) as Array<{ id: string; title: string; kraId?: string | null }>;
+    setOptions(rows.map((r) => ({ id: r.id, title: r.title, kraId: r.kraId ?? null })));
+  };
+  const link = async (sop: SopOption, kraId: string, force = false) => {
+    setStep(null);
+    const res = await fetch(`/api/kras/${kraId}/sops`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sopId: sop.id, move: force }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.status === 409 && d?.code === "linked_elsewhere") { setMove({ sop, kraId, current: d.currentKra ?? "another KRA" }); return; }
+    if (!res.ok) { toast(d?.error ?? "Couldn't link the SOP"); return; }
+    toast(`Linked ${sop.title}`);
+    setPicked(null);
+    router.refresh();
+  };
+  const choose = (sopId: string) => {
+    const sop = options?.find((o) => o.id === sopId);
+    if (!sop) return;
+    // One KRA: link straight to it. Several: ask which.
+    if (bundle.kras.length === 1) void link(sop, bundle.kras[0].id);
+    else { setPicked(sop); setStep("kra"); }
+  };
+  const linked = new Set(sops.map((s) => s.id));
   return (
-    <Card title="SOPs" icon={FileText}>
+    <Card
+      title="SOPs"
+      icon={FileText}
+      action={canEdit && bundle.kras.length > 0 ? (
+        <div className="relative">
+          <button type="button" onClick={() => void open()} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><Link2 className="h-3.5 w-3.5" aria-hidden />Link SOP</button>
+          <Picker
+            open={step === "sop"}
+            onClose={() => setStep(null)}
+            align="end"
+            ariaLabel="Link SOP"
+            searchPlaceholder="Search published SOPs"
+            loading={options === null}
+            emptyLabel="No published SOPs yet"
+            sections={[{ options: (options ?? []).filter((o) => !linked.has(o.id)).map((o) => ({ value: o.id, label: o.title })) }]}
+            onSelect={choose}
+            className="absolute end-0 top-9 z-50"
+          />
+          <Picker
+            open={step === "kra"}
+            onClose={() => { setStep(null); setPicked(null); }}
+            align="end"
+            ariaLabel="Which KRA?"
+            searchPlaceholder="Which KRA?"
+            sections={[{ label: "Which KRA?", options: bundle.kras.map((k) => ({ value: k.id, label: k.name })) }]}
+            onSelect={(kraId) => { if (picked) void link(picked, kraId); }}
+            className="absolute end-0 top-9 z-50"
+          />
+        </div>
+      ) : undefined}
+    >
       {sops.length === 0 ? (
-        <p className="text-base text-zinc-400 py-2">No SOPs linked to this role&rsquo;s KRAs.</p>
+        <p className="text-base text-zinc-400 py-2">{bundle.kras.length === 0 ? "Add a KRA first: SOPs link to a KRA of this job title." : "No SOPs linked to this job title's KRAs."}</p>
       ) : (
         <ul className="space-y-0.5">
           {sops.map((s) => (
             <li key={s.id}>
-              <Link href={`/sops/${s.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-base">
-                <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <Link href={`/sops/${s.id}`} className="flex min-h-11 items-center gap-2 px-2 rounded-md hover:bg-zinc-50 text-base">
+                <FileText className="w-3.5 h-3.5 text-ink-2 shrink-0" />
                 <span className="flex-1 min-w-0 truncate text-zinc-800">{s.title}</span>
-                <span className="text-xs text-zinc-400 shrink-0">{s.kraName}</span>
-                <span className="text-micro uppercase tracking-wide text-zinc-400 shrink-0">{s.status.toLowerCase()}</span>
+                <span className="text-xs text-zinc-400 shrink-0">via {s.kraName}</span>
+                <Chip>{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Chip>
               </Link>
             </li>
           ))}
         </ul>
       )}
+      {move ? (
+        <ConfirmDialog
+          open
+          onClose={() => setMove(null)}
+          onConfirm={() => { const m = move; setMove(null); void link(m.sop, m.kraId, true); }}
+          title={`Move ${move.sop.title} here?`}
+          description={`It is linked to ${move.current} now. An SOP links to one KRA, so it leaves that one.`}
+          confirmLabel="Move it here"
+        />
+      ) : null}
     </Card>
   );
 }
 
-// ─────────────────────────── Thresholds ───────────────────────────
 function ThresholdsCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
   const { call, busy } = useApi();
   const [adding, setAdding] = useState(false);
@@ -1148,9 +1303,10 @@ function ThresholdsCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
     }
   };
   return (
-    <Card title="Escalation thresholds" icon={Gauge} action={canEdit && !adding ? <button type="button" onClick={() => setAdding(true)} className="text-zinc-400 hover:text-zinc-700"><Plus className="w-4 h-4" /></button> : undefined}>
+    <Card title="Escalation thresholds" icon={Gauge} action={canEdit && !adding ? <button type="button" aria-label="Add threshold" onClick={() => setAdding(true)} className="text-zinc-400 hover:text-zinc-700"><Plus className="w-4 h-4" /></button> : undefined}>
+      <p className="-mt-1 mb-2 text-sm text-ink-2">Not enforced yet. Nothing escalates from these until the escalation job reads them.</p>
       {bundle.thresholds.length === 0 && !adding ? (
-        <p className="text-base text-zinc-400 py-2">No thresholds. These drive automation (e.g. unclaimed → nudge @ 45 min).</p>
+        <p className="text-base text-zinc-400 py-2">No thresholds.</p>
       ) : (
         <ul className="space-y-1">
           {bundle.thresholds.map((t) => (
@@ -1230,13 +1386,13 @@ function InstancesPanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: bool
                 <span className="w-7 h-7 rounded-full bg-zinc-200 text-zinc-600 text-xs font-medium inline-flex items-center justify-center shrink-0">{initials(i.user)}</span>
               ) : <span className="w-7 h-7 rounded-full bg-zinc-100 text-zinc-400 inline-flex items-center justify-center shrink-0"><UsersIcon className="w-3.5 h-3.5" /></span>}
               <span className="flex-1 min-w-0">
-                <span className="block text-base text-zinc-800 truncate">{i.name || `${bundle.role.title}${i.scope ? ` — ${i.scope.name}` : ""}`}</span>
+                <span className="block text-base text-zinc-800 truncate">{i.name || `${bundle.role.title}${i.scope ? ` · ${i.scope.name}` : ""}`}</span>
                 <span className="block text-xs text-zinc-400 truncate">{i.scope ? `${i.scope.dimension}: ${i.scope.name}` : "no scope"} · {personName(i.user)}</span>
               </span>
               {canEdit ? (
                 <>
                   <button type="button" disabled={seedingId === i.id} onClick={() => applyDefinition(i)} className="inline-flex items-center gap-1 text-xs text-[var(--os-brand)] hover:underline shrink-0">
-                    {seedingId === i.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}Apply definition
+                    <Sparkles className="w-3 h-3" />Apply definition
                   </button>
                   <button type="button" disabled={busy} onClick={() => call(`/api/role-instances/${i.id}`, "DELETE")} className="opacity-0 group-hover/inst:opacity-100 text-zinc-400 hover:text-red-500 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                 </>

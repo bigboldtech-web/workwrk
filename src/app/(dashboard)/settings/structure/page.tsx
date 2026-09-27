@@ -1,5 +1,7 @@
-// Settings · Org structure — the Admin-door hub for how the company is
-// shaped: Functions (Departments), Roles, Offices, and the Levels ladder.
+// Settings · Org structure: the Admin-door hub for how the company is
+// shaped: Departments, Job titles, the Org chart link, Offices, and the
+// Levels ladder. ?tab=departments and ?tab=titles render the Teams hub's own
+// DepartmentsManager and JobTitlesList in this door.
 //
 // Server component: it resolves the session, gates to org admins, and runs
 // the real counts (one groupBy for level holders, plus cheap counts for the
@@ -7,7 +9,7 @@
 //
 // Levels are deliberately READ-ONLY here: AccessLevel is a fixed Prisma enum
 // that drives the permission matrix, so this page explains the ladder and
-// shows who sits on each rung — it does not pretend the rungs are editable.
+// shows who sits on each rung; it does not pretend the rungs are editable.
 
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -22,13 +24,17 @@ import { ACCESS_LEVELS } from "@/lib/access-levels";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { AdminOnly } from "@/components/access";
 import { SHELL_LABELS } from "@/lib/nav/labels";
+import { Suspense } from "react";
+import { BackButton } from "@/components/ui/back-button";
+import { DepartmentsManager } from "@/components/people/departments-manager";
+import { JobTitlesList } from "@/components/people/job-titles-list";
 
 export const dynamic = "force-dynamic";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
 /** The full ladder, seniority-first. The two admin rungs are granted
- *  manually (never via a Role dropdown) so access-levels.ts omits them —
+ *  manually (never via a Role dropdown) so access-levels.ts omits them;
  *  we prepend them here because they are the tiers that unlock the Admin
  *  door, which is exactly what this explainer is about. */
 type Tier = { value: string; label: string; adminDoor: boolean; sees: string };
@@ -45,7 +51,7 @@ const TIERS: Tier[] = [
   { value: "AGENT",         label: "Agent",         adminDoor: false, sees: "Limited frontline: assigned tasks and their own profile; the Personal door." },
 ];
 
-// Sanity guard: keep this explainer honest against the canonical ladder — if
+// Sanity guard: keep this explainer honest against the canonical ladder: if
 // access-levels.ts ever grows a rung we don't describe, surface it plainly
 // rather than silently dropping it.
 const KNOWN = new Set(TIERS.map((t) => t.value));
@@ -55,7 +61,8 @@ for (const lvl of ACCESS_LEVELS) {
   }
 }
 
-export default async function StructurePage() {
+export default async function StructurePage({ searchParams }: { searchParams?: Promise<{ tab?: string }> }) {
+  const tab = (await searchParams)?.tab;
   const session = await getServerSession(authOptions);
   const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
   if (!u?.id || !u.organizationId) redirect("/login");
@@ -66,6 +73,23 @@ export default async function StructurePage() {
   // at this URL gets the AdminOnly card with the rail and bar intact.
   if (!isAdmin) {
     return <AdminOnly page="Structure" back={{ fallbackHref: "/account/profile", label: SHELL_LABELS.mySettings }} />;
+  }
+
+  // The Structure tabs (spec-teams-people section 3): the same
+  // DepartmentsManager and JobTitlesList the Teams pages render, inside the
+  // settings door. The org chart is a link card, never embedded (one chart).
+  if (tab === "departments" || tab === "titles") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 px-6 pt-4">
+          <BackButton fallbackHref="/settings/structure" label="Org structure" />
+          <h1 className="text-title font-semibold text-ink">{tab === "departments" ? "Departments" : "Job titles"}</h1>
+        </div>
+        <Suspense>
+          {tab === "departments" ? <DepartmentsManager door="settings" /> : <JobTitlesList door="settings" />}
+        </Suspense>
+      </div>
+    );
   }
 
   // Live counts. One groupBy for the level holders; cheap counts for blocks.
@@ -98,7 +122,7 @@ export default async function StructurePage() {
           Org structure
         </h1>
         <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
-          How the company is shaped: the functions people belong to, the roles they hold, the
+          How the company is shaped: the departments people belong to, the job titles they hold, the
           offices they work from, and the access ladder that decides what each person can reach.
         </p>
       </header>
@@ -108,20 +132,28 @@ export default async function StructurePage() {
         <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">Building blocks</h2>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <BlockTile
-            href="/people/departments"
+            href="/settings/structure?tab=departments"
             Icon={Building2}
             grad="linear-gradient(135deg, var(--os-brand), var(--os-c-blue))"
-            title="Functions"
+            title="Departments"
             meta={`${deptCount} department${deptCount === 1 ? "" : "s"}`}
             desc="Departments people belong to. Route policies, announcements and ownership."
           />
           <BlockTile
-            href="/people/roles"
+            href="/settings/structure?tab=titles"
             Icon={Briefcase}
             grad="linear-gradient(135deg, var(--os-c-blue), var(--os-brand-deep))"
-            title="Roles"
-            meta={`${roleCount} role${roleCount === 1 ? "" : "s"}`}
-            desc="Job definitions with KRA/KPI templates that seed onto every holder."
+            title="Job titles"
+            meta={`${roleCount} job title${roleCount === 1 ? "" : "s"}`}
+            desc="Job definitions with KRA and KPI templates that seed onto every holder. Seniority on a title is display only."
+          />
+          <BlockTile
+            href="/organization"
+            Icon={Users}
+            grad="linear-gradient(135deg, var(--os-c-teal), var(--os-brand))"
+            title="Org chart"
+            meta="Open the org chart"
+            desc="Who reports to whom. Edit reporting lines there."
           />
           <BlockTile
             href="#levels"
@@ -129,7 +161,7 @@ export default async function StructurePage() {
             grad="linear-gradient(135deg, var(--os-c-teal), var(--os-c-green))"
             title="Access levels"
             meta={`${TIERS.length} tiers · ${totalPeople} people`}
-            desc="The fixed ladder that drives permissions. Read-only — see below."
+            desc="The fixed ladder that drives permissions. Read-only, see below."
           />
           {/* Offices: the model and API exist, the directory UI does not yet
               (spec-shell 1.15: absent, or a ComingSoonRow behind Show upcoming). */}

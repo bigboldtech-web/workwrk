@@ -1,17 +1,15 @@
-// Role Definition — the Block-B view of a role: identity/scope, ownership
-// boundary (owns / can-request / cannot-touch), KRAs, KPIs (owned vs shared,
-// baseline→target), SOPs, and escalation thresholds; plus the role's instances
-// (Role × Scope) held by people. Definition lives at the role (template) level
-// and is cloneable per scope. Mirrors the Space-detail chrome.
+/* eslint-disable workwrk-ds/dynamic-page-declares-breadcrumb --
+   The crumb IS declared, one component down: RoleWorkspace renders `<Breadcrumb items/>` ("Teams > Job titles > {Title}"). */
+// Teams > Job titles > {Title} (spec-teams-people /people/roles/[id]): what a
+// job title means (details, ownership boundary, KRAs and KPIs, SOPs), who
+// holds it (People), and its per-scope copies (Instances, shown only when the
+// org uses them). Every Member reads, with the View only line; the header,
+// tabs and cards live in RoleWorkspace.
 
 import { notFound, redirect } from "next/navigation";
-import { BackButton } from "@/components/ui/back-button";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import Link from "next/link";
-import { ChevronDown } from "lucide-react";
-import { EntityTile } from "@/components/ui/entity-tile";
 import { KPI_ORDER } from "@/lib/alignment";
 import { RoleWorkspace } from "./role-workspace";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
@@ -23,11 +21,13 @@ export const dynamic = "force-dynamic";
 
 export default async function RolePage(props: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; tab?: string }>;
 }) {
   const { id } = await props.params;
   const sp = await props.searchParams;
-  const view = sp.view === "instances" ? "instances" : "overview";
+  // ?tab= is the section; ?view=instances is the old address, accepted for
+  // one release.
+  const tab = sp.tab === "people" ? "people" : sp.tab === "instances" || sp.view === "instances" ? "instances" : "overview";
 
   // The Teams app gate every sibling route asks (Guests never see the
   // Teams hub: in-shell 404), before anything about the job title renders.
@@ -101,7 +101,7 @@ export default async function RolePage(props: {
 
   const stripEmail = <T extends { email: string }>(p: T): T => (canEdit ? p : { ...p, email: "" });
 
-  // Drift check — which holders are missing any of this job title's template
+  // Drift check: which holders are missing any of this job title's template
   // KRA assignments. Auto-seeding only fires on hire/role-change, so a KRA
   // attached later (or a legacy holder) silently drifts. One grouped count
   // query; the workspace renders an amber "missing N of M" note + a Seed
@@ -158,30 +158,8 @@ export default async function RolePage(props: {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Breadcrumb + title row */}
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <BackButton fallbackHref="/people/roles" label="Job titles" />
-          <Link href="/people/roles" className="hover:text-zinc-900">Roles</Link>
-          {role.department ? (
-            <>
-              <span className="text-zinc-300">/</span>
-              <span className="text-zinc-500">{role.department.name}</span>
-            </>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-3">
-          <EntityTile size="md" color="#0073EA" name={role.title} />
-          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
-            <span className="truncate" title={role.title}>{role.title}</span>
-            <span className="text-xs font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
-          </h1>
-        </div>
-      </div>
-
-      <RoleWorkspace bundle={bundle} canEdit={canEdit} canEditIdentity={canEditIdentity} view={view} />
+    <div className="flex h-full flex-col bg-surface">
+      <RoleWorkspace bundle={bundle} canEdit={canEdit} canEditIdentity={canEditIdentity} tab={tab} />
     </div>
   );
 }

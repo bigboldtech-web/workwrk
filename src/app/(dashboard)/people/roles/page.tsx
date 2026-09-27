@@ -1,8 +1,10 @@
-// Teams > Job titles: every Member reads the library (Phase 6); the create
-// and delete controls render only for the people POST /api/roles admits.
+// Teams > Job titles (spec-teams-people /people/roles): every Member reads
+// the list; Owner, Admin and the People team (and the tier that wrote job
+// titles yesterday) create, rename and delete. The same JobTitlesList
+// renders Settings > Structure > Job titles.
 
 import { Suspense } from "react";
-import RolesClient from "./roles-client";
+import { JobTitlesList } from "@/components/people/job-titles-list";
 import { gatePage } from "@/lib/access/gate";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +15,7 @@ export default async function RolesPage() {
   await gatePage("view", { type: "app", key: "teams" }, { callbackUrl: "/people/roles" });
   return (
     <Suspense>
-      <RolesClient />
+      <JobTitlesList door="teams" />
     </Suspense>
   );
 }

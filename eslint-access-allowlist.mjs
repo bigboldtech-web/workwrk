@@ -125,8 +125,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/okrs/\\[id\\]/page.tsx",
   "src/app/(dashboard)/organization/org-chart-client.tsx",
   "src/app/(dashboard)/people/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/people/\\[id\\]/profile-client.tsx",
-  "src/app/(dashboard)/people/departments/departments-client.tsx",
   "src/app/(dashboard)/people/directory-client.tsx",
   "src/app/(dashboard)/people/roles/\\[id\\]/page.tsx",
   "src/app/(dashboard)/reviews/\\[id\\]/review-detail-client.tsx",
@@ -532,6 +530,14 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/hr-segment.ts",
   "src/lib/itsm/auth.ts",
   "src/lib/page-gates.ts",
+  // Phase 6 Stage B: the Teams hub's people routes read the viewer's reach
+  // through these three files and nowhere else (the two deleted people
+  // clients above left this list the same day). They carry the legacy
+  // org-wide and manager-tier reach so nobody loses a record they could open
+  // yesterday, and leave this list at access step 6 with the rest.
+  "src/lib/people/person-access.server.ts",
+  "src/lib/people/directory-list.server.ts",
+  "src/lib/people/department-access.server.ts",
   "src/lib/permissions.ts",
   "src/lib/platform-admin.ts",
   "src/lib/item-gate.ts",

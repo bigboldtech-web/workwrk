@@ -1,8 +1,8 @@
 "use client";
 
-// ManageAlignmentDialog — manager-facing panel to edit one person's
+// ManageAlignmentDialog: manager-facing panel to edit one person's
 // alignment: add/remove KRAs (with weightage) and SOP assignments, plus a
-// one-click "Seed from role" that re-applies the role's templates. Wraps
+// one-click "Seed from job title" that re-applies the job title's templates. Wraps
 // the existing /api/kra-assignments + /api/sop-assignments + seed endpoints
 // so there's a single screen instead of editing each piece piecemeal.
 
@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { Target, ScrollText, Plus, X, Sparkles, Loader2 } from "lucide-react";
+import { Target, ScrollText, Plus, X, Sparkles } from "lucide-react";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface KraAssignment { id: string; kraId: string; weightage: number; kra?: { id: string; name: string; category?: string | null; role?: { id: string; title: string } | null } }
 interface SopAssignment { id: string; sopId: string; mandatory?: boolean; sop?: { id: string; title: string } }
@@ -22,7 +23,7 @@ interface KraOption { id: string; name: string; category?: string | null; role?:
 interface SopOption { id: string; title: string }
 
 // The list endpoints return a few different envelope shapes across the
-// codebase — normalize to a plain array.
+// codebase: normalize to a plain array.
 function asArray<T>(data: unknown, keys: string[]): T[] {
   if (Array.isArray(data)) return data as T[];
   const d = data as Record<string, unknown> | null;
@@ -102,7 +103,7 @@ export function ManageAlignmentDialog({
       const [kraRes, sopRes, krasRes, sopsRes] = await Promise.all([
         fetch(`/api/kra-assignments?userId=${userId}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/sop-assignments?userId=${userId}`).then((r) => r.json()).catch(() => null),
-        fetch(`/api/kras?limit=200`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/kras?limit=500`).then((r) => r.json()).catch(() => null),
         fetch(`/api/sops?limit=200&status=PUBLISHED`).then((r) => r.json()).catch(() => null),
       ]);
       setKraAssignments(asArray<KraAssignment>(kraRes, ["assignments", "data"]));
@@ -200,28 +201,28 @@ export function ManageAlignmentDialog({
     try {
       const res = await fetch(`/api/users/${userId}/seed-alignment`, { method: "POST" });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) { error("Couldn't seed from role", d.error ?? d?.data?.error); return; }
+      if (!res.ok) { error("Couldn't seed from the job title", d.error ?? d?.data?.error); return; }
       const r = d.data ?? d;
       await load(); fireChanged();
-      success("Seeded from role", `${r.krasSeeded ?? 0} KRA(s) · ${r.sopsSeeded ?? 0} SOP(s) added`);
+      success("Seeded from the job title", `${r.krasSeeded ?? 0} KRA(s) · ${r.sopsSeeded ?? 0} SOP(s) added`);
     } finally { setBusy(null); }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-[720px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-3">
             <span>Manage alignment · {userName}</span>
             <Button size="sm" variant="outline" onClick={() => void seedFromRole()} disabled={busy !== null}>
-              {busy === "seed" ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}
-              Seed from role
+              <Sparkles className="w-3.5 h-3.5 mr-1" />
+              Seed from job title
             </Button>
           </DialogTitle>
         </DialogHeader>
 
         {loading ? (
-          <div className="py-10 text-center text-xs text-zinc-500">Loading…</div>
+          <SkeletonRows rows={4} />
         ) : (
           <div className="space-y-6">
             {/* KRAs */}
@@ -238,7 +239,7 @@ export function ManageAlignmentDialog({
                 {kraAssignments.map((a) => (
                   <li key={a.id} className="flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5">
                     <span className="flex-1 min-w-0 text-xs truncate">{a.kra?.name ?? "KRA"}</span>
-                    {/* Which job title this KRA belongs to — an orphan KRA is
+                    {/* Which job title this KRA belongs to: an orphan KRA is
                         flagged so the manager spots it before assigning. */}
                     {a.kra?.role ? (
                       <span className="text-xs text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 truncate max-w-[120px]" title={a.kra.role.title}>{a.kra.role.title}</span>
@@ -249,7 +250,7 @@ export function ManageAlignmentDialog({
                     <WeightCell key={`w-${a.id}-${a.weightage}`} value={a.weightage} disabled={busy !== null} onSave={(w) => saveWeight(a.id, w)} />
                     <button type="button" onClick={() => void removeKra(a.id)} disabled={busy !== null}
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove KRA">
-                      {busy === `del-kra-${a.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </li>
                 ))}
@@ -269,7 +270,7 @@ export function ManageAlignmentDialog({
                   onChange={(e) => setNewKraWeight(Number(e.target.value))}
                   className="w-16 h-8 text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
                 <Button size="sm" onClick={() => void addKra()} disabled={!newKraId || busy !== null}>
-                  {busy === "add-kra" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <Plus className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </section>
@@ -286,7 +287,7 @@ export function ManageAlignmentDialog({
                     {a.mandatory ? <Badge variant="outline" className="text-micro">Mandatory</Badge> : null}
                     <button type="button" onClick={() => void removeSop(a.id)} disabled={busy !== null}
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove SOP">
-                      {busy === `del-sop-${a.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </li>
                 ))}
@@ -299,7 +300,7 @@ export function ManageAlignmentDialog({
                   {availableSops.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
                 </select>
                 <Button size="sm" onClick={() => void addSop()} disabled={!newSopId || busy !== null}>
-                  {busy === "add-sop" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <Plus className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </section>

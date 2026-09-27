@@ -1,338 +1,245 @@
 "use client";
 
-/* Organization — org chart page.
- *
- *  GET /api/users?scope=directory (every page, lib/fetch-all-pages.ts)
- *  GET /api/departments
- *  GET /api/offices
- *  GET /api/roles
- *
- * Layout:
- *   Breadcrumb header (Teams / Org chart) with icon tile + Directory/Settings links.
- *   TeamStatTile strip: People · Departments · Offices · Roles.
- *   Collapsible reporting-hierarchy tree (top levels) in a TeamCard.
- */
+// Teams > Org chart (spec-teams-people /organization): who reports to whom,
+// for the whole company, and for the people who keep it right, the place to
+// fix it. The ONE org chart (Settings > Hierarchy redirects here).
+//
+//   data     GET /api/users?fields=chart: every current person's id, name,
+//            manager, job title, department, office and dotted lines, for
+//            every Member (cursorless, capped at 5,000 with a warning line)
+//   toolbar  Filter (search, department, office, job title, Not linked to
+//            a manager, Only my chain), the one blue Edit reporting lines
+//            (Owner, Admin, People team and the org-wide levels; "Done"
+//            while editing), and "..." (Expand all, Collapse all, Display,
+//            Export CSV, Manage members)
+//   edit     each row gains Reports to and Dotted lines pickers that save
+//            on pick (PATCH /api/users/[id] { managerId } with the server's
+//            loop and Agent checks; PUT /api/users/[id]/dotted-lines)
+//
+// Gone: the four tiles and the three fetches that fed them, the eight-root
+// cap and "+N more", the "Loading hierarchy" text that never ended on a
+// failed read, the error text with no Retry, and the Org settings link to
+// the Settings root (it is Settings > Structure now, for Owner and Admin).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import {
-  Building2, Users, MapPin, Briefcase,
-  ChevronDown, ChevronRight, ArrowRight,
-  Settings as SettingsIcon,
-} from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Download, ExternalLink, Pencil, Check, Settings2 } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useViewerRole } from "@/components/layout/os/boot-context";
-import { TeamStatTile, TeamCard, TeamAvatar } from "@/components/team/ui";
-import { fetchAllPages } from "@/lib/fetch-all-pages";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { apiFetch } from "@/lib/api-fetch";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { buildOrgForest, filterForest, forestIds } from "@/lib/people/reporting-lines";
+import { toCsv } from "@/lib/people/people-csv";
+import { OrgTree, type ChartPerson } from "@/components/people/org-tree";
 
-type ApiUser = {
+interface ChartRow {
   id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  avatar?: string | null;
-  managerId?: string | null;
-  role?: { id: string; title: string } | null;
-  department?: { id: string; name: string } | null;
-};
-
-type ApiDept = { id: string; name: string; color?: string | null; _count?: { members?: number }; parentId?: string | null };
-type ApiOffice = { id: string; name?: string | null; city?: string | null; country?: string | null; isHeadquarters?: boolean };
-type ApiRole = { id: string; title: string; level?: string };
-
-type ApiOrg = {
-  name?: string;
-  legalName?: string | null;
-  plan?: string | null;
-  logoUrl?: string | null;
-  primaryColor?: string | null;
-  industry?: string | null;
-  size?: string | null;
-};
-
-type TreeNode = { user: ApiUser; reports: TreeNode[] };
-
-/** Roots + everyone unreachable from a root. A manager cycle (a→b→a)
- *  produces nodes that are neither roots nor inside any root's subtree —
- *  without the sweep they'd silently vanish from the chart. */
-function buildTree(users: ApiUser[]): { roots: TreeNode[]; unlinked: TreeNode[] } {
-  const byId = new Map<string, TreeNode>();
-  for (const u of users) byId.set(u.id, { user: u, reports: [] });
-  const roots: TreeNode[] = [];
-  for (const u of users) {
-    const node = byId.get(u.id)!;
-    if (u.managerId && byId.has(u.managerId)) byId.get(u.managerId)!.reports.push(node);
-    else roots.push(node);
-  }
-  const sortFn = (a: TreeNode, b: TreeNode) =>
-    b.reports.length - a.reports.length ||
-    (a.user.firstName ?? "").localeCompare(b.user.firstName ?? "");
-  function walk(n: TreeNode) { n.reports.sort(sortFn); n.reports.forEach(walk); }
-  roots.sort(sortFn);
-  roots.forEach(walk);
-
-  // Cycle safety — mark everything reachable from a root, then sweep the
-  // rest into a visible "Not linked to a manager" group. Sweep nodes are
-  // CLONED with already-visited reports pruned, so a reporting loop can
-  // never recurse forever at render time.
-  const visited = new Set<string>();
-  const mark = (n: TreeNode) => {
-    if (visited.has(n.user.id)) return;
-    visited.add(n.user.id);
-    n.reports.forEach(mark);
-  };
-  roots.forEach(mark);
-
-  const unlinked: TreeNode[] = [];
-  const cloneUnvisited = (src: TreeNode): TreeNode => {
-    visited.add(src.user.id);
-    return {
-      user: src.user,
-      reports: src.reports
-        .flatMap((r) => (visited.has(r.user.id) ? [] : [cloneUnvisited(r)]))
-        .sort(sortFn),
-    };
-  };
-  for (const u of users) {
-    if (!visited.has(u.id)) unlinked.push(cloneUnvisited(byId.get(u.id)!));
-  }
-  unlinked.sort(sortFn);
-
-  return { roots, unlinked };
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+  managerId: string | null;
+  isAgent: boolean;
+  roleId: string | null;
+  departmentId: string | null;
+  officeId: string | null;
+  jobTitle: string | null;
+  department: string | null;
+  dottedManagerIds: string[];
+  presenceStatus: string | null;
+  presenceUntil: string | null;
+}
+interface ChartResponse {
+  data: ChartRow[];
+  total: number;
+  truncated: boolean;
+  viewer: { canEditLines: boolean; canExport: boolean; isAdmin: boolean };
 }
 
-export default function OrganizationPage() {
-  const [users, setUsers] = useState<ApiUser[] | null>(null);
-  const [depts, setDepts] = useState<ApiDept[] | null>(null);
-  const [offices, setOffices] = useState<ApiOffice[] | null>(null);
-  const [roles, setRoles] = useState<ApiRole[] | null>(null);
-  const [org, setOrg] = useState<ApiOrg | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // Ids the user explicitly toggled; combined with the depth-seeded
-  // collapse set below (XOR) to get the effective collapsed set.
-  const [toggledNodes, setToggledNodes] = useState<Set<string>>(new Set());
+export default function OrgChartClient() {
+  const sp = useSearchParams();
   const { rowVersion } = useOsShell();
-  // Owner and Admin get the Structure link (spec-teams-people section 0).
-  const { isAdmin: canOpenStructure } = useViewerRole();
+  const { boot } = useBoot();
+  const { openSettings } = useSettingsNav();
+  const [data, setData] = useState<ChartResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [dept, setDept] = useState<string | null>(null);
+  const [office, setOffice] = useState<string | null>(null);
+  const [title, setTitle] = useState<string | null>(null);
+  const [onlyUnlinked, setOnlyUnlinked] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [offices, setOffices] = useState<Array<{ id: string; name: string }>>([]);
+  const [showTitle, setShowTitle] = useState(true);
+  const [showDepartment, setShowDepartment] = useState(true);
+  const [sortName, setSortName] = useState(false);
+  const [expandAll, setExpandAll] = useState(0);
+  const focusId = sp?.get("focus") ?? null;
 
-  // setState happens inside .then callbacks (async continuations), never
-  // synchronously inside the effect body — react-hooks/set-state-in-effect.
-  const load = useCallback(() => {
-    Promise.all([
-      // Every Member reads the whole tree (Phase 6): the directory card
-      // projection, never people data.
-      // Every page, never the first 500 (fetch-all-pages.ts): the tree
-      // renders every root.
-      fetchAllPages<ApiUser>("/api/users?scope=directory").then(
-        (r) => new Response(JSON.stringify({ data: r.items })),
-        () => new Response("", { status: 500 }),
-      ),
-      fetch("/api/departments"),
-      fetch("/api/offices"),
-      fetch("/api/roles"),
-      fetch("/api/organization/branding"),
-    ])
-      .then(async ([uRes, dRes, oRes, rRes, orgRes]) => {
-        if (uRes.ok) {
-          const u = await uRes.json();
-          setUsers(u?.data?.items ?? u?.data ?? (Array.isArray(u) ? u : []));
-        }
-        if (dRes.ok) {
-          const d = await dRes.json();
-          setDepts(d?.data ?? (Array.isArray(d) ? d : []));
-        }
-        if (oRes.ok) {
-          const o = await oRes.json();
-          setOffices(o?.data ?? (Array.isArray(o) ? o : []));
-        }
-        if (rRes.ok) {
-          const r = await rRes.json();
-          setRoles(r?.data ?? (Array.isArray(r) ? r : []));
-        }
-        if (orgRes.ok) {
-          const orgData = await orgRes.json();
-          setOrg(orgData?.data ?? orgData ?? null);
-        }
-        setLoadError(null);
-      })
-      .catch((e: unknown) => {
-        setLoadError(e instanceof Error ? e.message : "load failed");
-      });
+  const load = useCallback(async () => {
+    const r = await apiFetch<ChartResponse>("/api/users?fields=chart", { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load the org chart"); return; }
+    setError(null);
+    setData(r.data);
   }, []);
-  useEffect(() => { load(); }, [load]);
   const v = rowVersion("people");
-  useEffect(() => { if (v > 0) load(); }, [v, load]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load, v]);
+  useEffect(() => {
+    const onFocus = () => { if (!editing) void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load, editing]);
+  const loadedOffices = useRef(false);
+  useEffect(() => {
+    if (!filterOpen || loadedOffices.current) return;
+    loadedOffices.current = true;
+    void apiFetch<Array<{ id: string; name: string }> | { data: Array<{ id: string; name: string }> }>("/api/offices", { cache: "no-store" })
+      .then((r) => { if (r.ok) setOffices(Array.isArray(r.data) ? r.data : r.data.data ?? []); });
+  }, [filterOpen]);
 
-  // Deep levels start COLLAPSED but expand on click. The old renderer
-  // hard-capped at depth 2, so chevrons below that were permanently dead.
-  // The seed set is DERIVED with the tree (no state-sync effect); user
-  // clicks accumulate in `toggledNodes` and the effective collapsed set is
-  // seeded XOR toggled — toggling a seeded node expands it, toggling an
-  // expanded one collapses it.
-  const { roots: tree, unlinked, seededCollapsed } = useMemo(() => {
-    const built = buildTree(users ?? []);
-    const seeded = new Set<string>();
-    const seed = (n: TreeNode, depth: number) => {
-      if (depth >= 2 && n.reports.length > 0) seeded.add(n.user.id);
-      n.reports.forEach((r) => seed(r, depth + 1));
+  // E toggles edit mode for editors (never while typing).
+  const canEdit = data?.viewer.canEditLines ?? false;
+  useEffect(() => {
+    if (!canEdit) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "e" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input,textarea,select,[contenteditable='true'],[role='dialog']")) return;
+      setEditing((x) => !x);
     };
-    built.roots.forEach((n) => seed(n, 0));
-    built.unlinked.forEach((n) => seed(n, 0));
-    return { ...built, seededCollapsed: seeded };
-  }, [users]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canEdit]);
 
-  const collapsedNodes = useMemo(() => {
-    const effective = new Set(seededCollapsed);
-    for (const id of toggledNodes) {
-      if (effective.has(id)) effective.delete(id);
-      else effective.add(id);
+  const people = useMemo<ChartPerson[]>(() => (data?.data ?? []).map((u) => ({
+    ...u,
+    name: `${u.firstName} ${u.lastName}`.trim() || "Someone",
+  })), [data]);
+  const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const forest = useMemo(() => buildOrgForest(people, { sort: sortName ? "name" : "size" }), [people, sortName]);
+
+  const filters = (q.trim() ? 1 : 0) + (dept ? 1 : 0) + (office ? 1 : 0) + (title ? 1 : 0) + (onlyUnlinked ? 1 : 0) + (onlyMine ? 1 : 0);
+  const myChain = useMemo(() => {
+    const mine = forest.roots.flatMap(function find(n): typeof forest.roots { return n.person.id === boot.viewer.id ? [n] : n.children.flatMap(find); });
+    return new Set(forestIds(mine));
+  }, [forest, boot.viewer.id]);
+  const matches = useCallback((p: ChartPerson) => {
+    const needle = q.trim().toLowerCase();
+    return (!needle || p.name.toLowerCase().includes(needle))
+      && (!dept || p.departmentId === dept)
+      && (!office || p.officeId === office)
+      && (!title || p.roleId === title)
+      && (!onlyMine || myChain.has(p.id));
+  }, [q, dept, office, title, onlyMine, myChain]);
+  const roots = useMemo(() => {
+    if (onlyUnlinked) {
+      // Nobody reports to them and they report to nobody, plus the loops.
+      return forest.roots.filter((r) => r.children.length === 0 && !r.person.managerId && matches(r.person));
     }
-    return effective;
-  }, [seededCollapsed, toggledNodes]);
+    return filters ? filterForest(forest.roots, matches) : forest.roots;
+  }, [forest, filters, matches, onlyUnlinked]);
+  const unlinked = useMemo(() => forest.unlinked.filter((p) => !filters || matches(p)), [forest, filters, matches]);
 
-  function toggleNode(id: string) {
-    setToggledNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const deptOptions = useMemo(() => [...new Map(people.filter((p) => p.departmentId).map((p) => [p.departmentId!, p.department ?? ""])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [people]);
+  const titleOptions = useMemo(() => [...new Map(people.filter((p) => p.roleId).map((p) => [p.roleId!, p.jobTitle ?? ""])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [people]);
+  const clear = () => { setQ(""); setDept(null); setOffice(null); setTitle(null); setOnlyUnlinked(false); setOnlyMine(false); };
+
+  function exportCsv() {
+    const csv = toCsv(["Name", "Job title", "Department", "Reports to"],
+      people.map((p) => [p.name, p.jobTitle ?? "", p.department ?? "", p.managerId ? byId.get(p.managerId)?.name ?? "" : ""]));
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `org-chart-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  const stats = useMemo(() => {
-    return {
-      people: users?.length ?? 0,
-      depts: depts?.length ?? 0,
-      offices: offices?.length ?? 0,
-      roles: roles?.length ?? 0,
-      withManager: (users ?? []).filter((u) => u.managerId).length,
-      topLayer: tree.length,
-      hq: offices?.find((o) => o.isHeadquarters)?.name ?? offices?.[0]?.name ?? null,
-    };
-  }, [users, depts, offices, roles, tree]);
-
-  const orgName = org?.name || "Your organization";
+  const hasReports = boot.viewer.hasReports;
+  const isAdmin = data?.viewer.isAdmin ?? false;
+  const nobodyLinked = data && people.length > 0 && people.every((p) => !p.managerId);
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
-          <span className="text-zinc-300">/</span>
-          <span>Org chart</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
-            <Building2 className="h-5 w-5 text-[#0073EA]" />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900">Org chart</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">
-            {orgName ? `${orgName} · reporting hierarchy` : "Reporting hierarchy"}
-          </span>
-          <div className="flex-1" />
-          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-            <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
-          </Link>
-          {canOpenStructure ? (
-            <Link href="/settings/structure" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-base text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
-              <SettingsIcon className="w-3.5 h-3.5 text-zinc-400" /> Structure settings
-            </Link>
+    <>
+      <Breadcrumb items={[{ label: "Org chart" }]} />
+      <OsPageHeader
+        title="Org chart"
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filters },
+          primary: canEdit ? { label: editing ? "Done" : "Edit reporting lines", icon: editing ? Check : Pencil, onClick: () => setEditing((x) => !x) } : undefined,
+          menu: [
+            { label: "Expand all", onClick: () => setExpandAll((n) => Math.abs(n) + 1) },
+            { label: "Collapse all", onClick: () => setExpandAll((n) => -(Math.abs(n) + 1)) },
+            { separator: true as const },
+            { label: "Show job title", checked: showTitle, keepOpen: true, onClick: () => setShowTitle((x) => !x) },
+            { label: "Show department", checked: showDepartment, keepOpen: true, onClick: () => setShowDepartment((x) => !x) },
+            { label: "Sort A to Z", checked: sortName, keepOpen: true, onClick: () => setSortName((x) => !x) },
+            ...(data?.viewer.canExport ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
+            ...(isAdmin ? [
+              { label: "Manage members", icon: ExternalLink, onClick: () => openSettings("/settings/members") },
+              { label: "Org settings", icon: Settings2, onClick: () => openSettings("/settings/structure") },
+            ] : []),
+          ],
+        }}
+      />
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="people" activeCount={filters} onClearAll={clear}
+          search={{ value: q, onChange: setQ, placeholder: "Search by name" }}>
+          {deptOptions.length ? (
+            <FilterGroup label="Department">
+              {deptOptions.map(([id, name]) => <FilterRow key={id} label={name} checked={dept === id} onCheckedChange={(on) => setDept(on ? id : null)} />)}
+            </FilterGroup>
           ) : null}
+          {offices.length ? (
+            <FilterGroup label="Office">
+              {offices.map((o) => <FilterRow key={o.id} label={o.name} checked={office === o.id} onCheckedChange={(on) => setOffice(on ? o.id : null)} />)}
+            </FilterGroup>
+          ) : null}
+          {titleOptions.length ? (
+            <FilterGroup label="Job title">
+              {titleOptions.map(([id, name]) => <FilterRow key={id} label={name} checked={title === id} onCheckedChange={(on) => setTitle(on ? id : null)} />)}
+            </FilterGroup>
+          ) : null}
+          <FilterGroup label="Reporting">
+            <FilterRow label="Not linked to a manager" checked={onlyUnlinked} onCheckedChange={setOnlyUnlinked} />
+            {hasReports ? <FilterRow label="Only my chain" checked={onlyMine} onCheckedChange={setOnlyMine} /> : null}
+          </FilterGroup>
+        </FilterPanel>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {error && !data ? (
+            <OsEmptyView variant="error" title="Couldn't load the org chart" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : !data ? (
+            <div className="os-chrome overflow-hidden rounded-lg border border-line bg-raised"><SkeletonRows rows={10} /></div>
+          ) : people.length <= 1 && !filters ? (
+            <OsEmptyView title="No reporting lines yet" hint={canEdit ? undefined : "Ask an Admin to set reporting lines."} action={canEdit ? { label: "Edit reporting lines", onClick: () => setEditing(true) } : undefined} />
+          ) : roots.length === 0 && unlinked.length === 0 ? (
+            <p className="rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">
+              Nobody matches · <button type="button" className="text-brand-deep hover:underline" onClick={clear}>Clear filters</button>
+            </p>
+          ) : (
+            <>
+              {nobodyLinked && !editing ? <p className="text-sm text-ink-2">Nobody has a manager yet.{canEdit ? " Use Edit reporting lines to set them." : " Ask an Admin to set reporting lines."}</p> : null}
+              {data.truncated ? <p role="status" className="text-sm text-warning-text">Showing the first {data.data.length} of {data.total} people. Filter to find someone further down.</p> : null}
+              <OrgTree
+                roots={roots}
+                unlinked={onlyUnlinked ? unlinked : unlinked}
+                byId={byId}
+                editable={editing}
+                display={{ showTitle, showDepartment }}
+                focusId={focusId}
+                expandAll={filters ? Math.abs(expandAll) + 1 : expandAll}
+                onSaved={() => void load()}
+                canFixUnlinked={canEdit}
+              />
+              <p className="text-sm font-medium text-ink-2">Total people {data.total}{forest.unlinked.length ? ` · ${forest.unlinked.length} not linked` : ""}</p>
+            </>
+          )}
         </div>
       </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <TeamStatTile icon={Users} label="People" value={stats.people} accent="#0073EA" sub={`${stats.withManager} reporting`} />
-          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#71717A" sub="org units" />
-          <TeamStatTile icon={MapPin} label="Offices" value={stats.offices} accent="#f59e0b" sub={stats.hq ? `HQ: ${stats.hq}` : "no HQ set"} />
-          <TeamStatTile icon={Briefcase} label="Job titles" value={stats.roles} accent="#16a34a" sub="defined" />
-        </div>
-
-        {loadError ? (
-          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-xs text-zinc-500">Couldn&rsquo;t load org chart — {loadError}</div>
-        ) : users === null ? (
-          <div className="text-xs text-zinc-400 py-8 text-center">Loading hierarchy…</div>
-        ) : tree.length > 0 || unlinked.length > 0 ? (
-          <TeamCard
-            title="Reporting hierarchy"
-            subtitle={`${stats.topLayer} at the top · ${stats.people} total`}
-            action={<Link href="/people" className="inline-flex items-center gap-1 text-sm text-[var(--os-brand)] hover:underline">Directory <ArrowRight className="w-3 h-3" /></Link>}
-          >
-            <div className="space-y-0.5">
-              {tree.slice(0, 8).map((node) => (
-                <TreeNodeView key={node.user.id} node={node} depth={0} collapsed={collapsedNodes} toggle={toggleNode} />
-              ))}
-              {tree.length > 8 ? (
-                <div className="pt-1.5">
-                  <Link href="/people" className="text-sm text-zinc-500 hover:text-zinc-800">+ {tree.length - 8} more top-level → see all people</Link>
-                </div>
-              ) : null}
-            </div>
-            {unlinked.length > 0 ? (
-              <div className="mt-3 pt-3 border-t border-zinc-100">
-                <div className="flex items-center gap-2 mb-1 px-1">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500 font-semibold">Not linked to a manager</h3>
-                  <span className="text-xs text-zinc-400">reporting loop or broken chain — fix in <Link href="/settings/members" className="text-[var(--os-brand)] hover:underline">Members</Link></span>
-                </div>
-                <div className="space-y-0.5">
-                  {unlinked.map((node) => (
-                    <TreeNodeView key={node.user.id} node={node} depth={0} collapsed={collapsedNodes} toggle={toggleNode} />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </TeamCard>
-        ) : (
-          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-xs text-zinc-500">
-            No hierarchy yet — set reporting managers in <Link href="/settings/members" className="text-[var(--os-brand)] hover:underline">Members</Link>.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TreeNodeView({
-  node, depth, collapsed, toggle,
-}: {
-  node: TreeNode;
-  depth: number;
-  collapsed: Set<string>;
-  toggle: (id: string) => void;
-}) {
-  const id = node.user.id;
-  const isCollapsed = collapsed.has(id);
-  const hasReports = node.reports.length > 0;
-  const name = [node.user.firstName, node.user.lastName].filter(Boolean).join(" ") || "Unknown";
-  return (
-    <div>
-      <div className="flex items-center gap-1 rounded-lg hover:bg-zinc-50 pr-2" style={{ paddingLeft: depth * 20 }}>
-        <button
-          type="button"
-          onClick={() => hasReports && toggle(id)}
-          className="h-6 w-6 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 shrink-0"
-          aria-label={isCollapsed ? "Expand" : "Collapse"}
-        >
-          {hasReports ? (isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />) : <span className="w-1.5 h-1.5 rounded-full bg-zinc-200" />}
-        </button>
-        <Link href={`/people/${id}`} className="flex items-center gap-2.5 flex-1 min-w-0 py-1.5">
-          <TeamAvatar name={name} avatar={node.user.avatar} size={30} />
-          <div className="min-w-0">
-            <div className="text-base font-medium text-zinc-900 truncate">{name}</div>
-            <div className="text-xs text-zinc-500 truncate">
-              {node.user.role?.title ?? "—"}{node.user.department?.name ? ` · ${node.user.department.name}` : ""}
-            </div>
-          </div>
-        </Link>
-        {hasReports ? <span className="text-xs text-zinc-400 shrink-0 tabular-nums">{node.reports.length}</span> : null}
-      </div>
-      {hasReports && !isCollapsed ? (
-        <div>
-          {node.reports.map((r) => (
-            <TreeNodeView key={r.user.id} node={r} depth={depth + 1} collapsed={collapsed} toggle={toggle} />
-          ))}
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }

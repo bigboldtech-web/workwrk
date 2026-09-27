@@ -1,14 +1,13 @@
 // GET /api/people/[id]/alignment — one person's live alignment picture
 // (see src/lib/person-alignment.ts for what the payload derives).
 //
-// Three-door gate: a person's readings are theirs — visible to
-// themselves, their reporting line, and org-wide levels (admin / exec /
-// HR). Peers get a 404, not a peek.
+// A person's readings are theirs: visible to themselves, their reporting
+// line, the People team and org-wide levels. Peers get a 404, not a peek.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { buildPersonAlignment } from "@/lib/person-alignment";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -17,7 +16,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const orgId = getOrgId(session);
 
-  if (!(await canTouchUserAlignment(session, id))) {
+  // The one people-data rule (person-access.server.ts): self, the chain
+  // (solid or dotted, any depth), the People team, the org-wide levels and
+  // Admins. A dotted-line manager used to get a 404 here while the person
+  // page showed them the manage view.
+  const ctx = await peopleCtx();
+  if (!ctx || relationTo(ctx, id) === "none") {
     return jsonError("Not found", 404);
   }
 

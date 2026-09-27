@@ -1,394 +1,281 @@
 "use client";
 
-/* People · Skills — bespoke skill matrix.
- *
- *  GET /api/skills
- *
- * Layout:
- *   OsPageHeader with back + nav.
- *   4-tile KPI strip: Skills · Holders · Expert-level · Coverage gaps.
- *   Toolbar: search + sort (Holders / Rating / A-Z) + coverage filter.
- *   2-col body:
- *     Left: skill list with rating bar + holder count + tone badge.
- *     Right: selected skill detail — gauge ring + breakdown bars + top holders directory.
- */
+// Teams > Skills (spec-teams-people /people/skills): who knows what across
+// the company, and where the gaps are.
+//
+//   views    All · Gaps (nobody the viewer can see is rated 4 or more) ·
+//            Expert (someone the viewer can see is rated 4 or more)
+//   body     a TableCard: Skill, People (everyone), Who, Avg self and Avg
+//            manager (over the people whose ratings the viewer may read, a
+//            "·" when that is nobody), and the Gap or Expert chip
+//   drawer   the Skill drawer: every holder, their ratings where visible,
+//            Rate (the chain, the People team, Admins), Add to my skills
+//
+// The write path the page never had (PO-5): Add a skill, the one blue
+// button, writes the viewer's own record (POST /api/users/[me]/skills).
 
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Sparkles,
-  Search,
-  ChevronDown,
-  Star,
-  TrendingUp,
-  AlertOctagon,
-  Users,
-  Award,
-  Building2,
-  Briefcase,
-} from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download, MoreHorizontal, Plus, Star, X } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C } from "@/components/layout/os/catalog";
-import { useOsShell } from "@/components/layout/os/shell-context";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Picker } from "@/components/ui/picker";
+import { Drawer } from "@/components/ui/drawer";
+import { AvatarStack, Avatar } from "@/components/ui/avatar-stack";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { apiFetch } from "@/lib/api-fetch";
+import { ratingLabel } from "@/lib/people/skills-aggregate";
+import { ToneChip, personName } from "@/components/people/person-bits";
+import { AddSkillDialog, RateSkillDialog, SKILLS_CHANGED } from "@/components/people/skill-dialogs";
 
-type ApiSkill = {
+interface Holder {
+  userId: string;
+  skillId: string;
+  selfRating: number | null;
+  managerRating: number | null;
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+  department: { id: string; name: string } | null;
+  canRate: boolean;
+}
+interface SkillRow {
   name: string;
   holders: number;
-  avgSelf: number;
-  avgManager: number;
-  topHolders: { id: string; firstName: string; lastName: string; rating: number; department?: string | null }[];
-};
-
-const AV_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) {
-  const fa = (f ?? "")[0] ?? "";
-  const la = (l ?? "")[0] ?? "";
-  return ((fa + la) || "?").toUpperCase();
+  visibleRated: number;
+  avgSelf: number | null;
+  avgManager: number | null;
+  gap: boolean;
+  expert: boolean;
+  people: Holder[];
 }
-function ratingTone(r: number): "novice" | "regular" | "expert" {
-  if (r >= 4) return "expert";
-  if (r >= 2.5) return "regular";
-  return "novice";
-}
-function ratingToneColor(t: "novice" | "regular" | "expert"): string {
-  if (t === "expert") return C.green;
-  if (t === "regular") return C.blue;
-  return C.orange;
-}
+type SortKey = "people" | "rated" | "name";
+const SORTS: Array<{ value: SortKey; label: string }> = [
+  { value: "people", label: "Most people" },
+  { value: "rated", label: "Highest rated" },
+  { value: "name", label: "A to Z" },
+];
 
-type SortKey = "holders" | "rating" | "name";
+export default function SkillsClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const { boot } = useBoot();
+  const me = boot.viewer.id;
+  const [rows, setRows] = useState<SkillRow[] | null>(null);
+  const [canExport, setCanExport] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [dept, setDept] = useState<string | null>(null);
+  const [managerRated, setManagerRated] = useState(false);
+  const [sort, setSort] = useState<SortKey>("people");
+  const [adding, setAdding] = useState<string | null>(null);
+  const view = sp?.get("view") === "gaps" ? "gaps" : sp?.get("view") === "expert" ? "expert" : "all";
+  const openName = sp?.get("skill") ?? null;
 
-export default function SkillsPage() {
-  const [skills, setSkills] = useState<ApiSkill[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("holders");
-  const [filter, setFilter] = useState<"all" | "expert" | "gap">("all");
-  const { rowVersion } = useOsShell();
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    const s = next.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+  }, [sp, router, pathname]);
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/skills");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiSkill[] = data.data ?? (Array.isArray(data) ? data : []);
-      setSkills(list);
-      setSelected((cur) => cur ?? list[0]?.name ?? null);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+    const r = await apiFetch<{ data: SkillRow[]; viewer: { canExport: boolean } }>("/api/skills", { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load skills"); return; }
+    setError(null);
+    setRows(r.data.data);
+    setCanExport(r.data.viewer.canExport);
   }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("people");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  // ─── Filter + sort ──────────────────────────────────────
-  const filtered = useMemo(() => {
-    let list = skills ?? [];
-    if (filter === "expert") list = list.filter((s) => Math.max(s.avgManager, s.avgSelf) >= 4);
-    if (filter === "gap") list = list.filter((s) => s.holders < 3);
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((s) => s.name.toLowerCase().includes(q));
-    const sorted = list.slice();
-    if (sortKey === "holders") sorted.sort((a, b) => b.holders - a.holders);
-    else if (sortKey === "rating") sorted.sort((a, b) => Math.max(b.avgManager, b.avgSelf) - Math.max(a.avgManager, a.avgSelf));
-    else if (sortKey === "name") sorted.sort((a, b) => a.name.localeCompare(b.name));
-    return sorted;
-  }, [skills, search, sortKey, filter]);
-
-  const active = useMemo(() => (skills ?? []).find((s) => s.name === selected) ?? null, [skills, selected]);
-
-  // Auto-pick first filtered if current selection is filtered out
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
   useEffect(() => {
-    if (filtered.length === 0) return;
-    if (!selected || !filtered.find((s) => s.name === selected)) {
-      setSelected(filtered[0].name);
-    }
-  }, [filtered, selected]);
+    const onChange = () => { void load(); };
+    window.addEventListener("focus", onChange);
+    window.addEventListener(SKILLS_CHANGED, onChange);
+    return () => { window.removeEventListener("focus", onChange); window.removeEventListener(SKILLS_CHANGED, onChange); };
+  }, [load]);
 
-  // ─── KPIs ───────────────────────────────────────────────
-  const stats = useMemo(() => {
-    const list = skills ?? [];
-    const totalHolders = list.reduce((acc, s) => acc + s.holders, 0);
-    const expertSkills = list.filter((s) => Math.max(s.avgManager, s.avgSelf) >= 4).length;
-    const gapSkills = list.filter((s) => s.holders < 3).length;
-    return { total: list.length, totalHolders, expertSkills, gapSkills };
-  }, [skills]);
+  const depts = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of rows ?? []) for (const p of r.people) if (p.department) m.set(p.department.id, p.department.name);
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+  const filters = (q.trim() ? 1 : 0) + (dept ? 1 : 0) + (managerRated ? 1 : 0);
+  const shown = useMemo(() => {
+    if (!rows) return null;
+    const needle = q.trim().toLowerCase();
+    const list = rows.filter((r) =>
+      (view === "all" || (view === "gaps" ? r.gap : r.expert)) &&
+      (!needle || r.name.toLowerCase().includes(needle)) &&
+      (!dept || r.people.some((p) => p.department?.id === dept)) &&
+      (!managerRated || r.avgManager != null));
+    return [...list].sort((a, b) =>
+      sort === "name" ? a.name.localeCompare(b.name)
+        : sort === "rated" ? (b.avgManager ?? b.avgSelf ?? -1) - (a.avgManager ?? a.avgSelf ?? -1) || a.name.localeCompare(b.name)
+          : b.holders - a.holders || a.name.localeCompare(b.name));
+  }, [rows, q, dept, managerRated, view, sort]);
+  const clear = () => { setQ(""); setDept(null); setManagerRated(false); };
+
+  const columns = useMemo<TableColumn<SkillRow>[]>(() => [
+    { key: "name", label: "Skill", title: true, width: "minmax(200px,1.4fr)", render: (r) => <span className="truncate">{r.name}</span> },
+    { key: "people", label: "People", width: "90px", numeric: true, render: (r) => <span className="tabular-nums">{r.holders}</span> },
+    { key: "who", label: "Who", width: "110px", hideBelow: 620, render: (r) => (
+      <AvatarStack size={24} max={3} people={r.people.slice(0, 3).map((p) => ({ id: p.userId, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar }))} />
+    ) },
+    { key: "self", label: "Avg self rating", width: "130px", numeric: true, hideBelow: 720, render: (r) => <span className="tabular-nums">{r.avgSelf ?? "·"}</span> },
+    { key: "mgr", label: "Avg manager rating", width: "150px", numeric: true, hideBelow: 820, render: (r) => <span className="tabular-nums">{r.avgManager ?? "·"}</span> },
+    { key: "mark", label: "Gap", width: "100px", render: (r) => r.expert ? <ToneChip tone="success" label="Expert" /> : r.gap ? <ToneChip tone="neutral" label="Gap" /> : null },
+  ], []);
+
+  const open = openName ? rows?.find((r) => r.name === openName) ?? null : null;
+  const heldByMe = new Set((rows ?? []).filter((r) => r.people.some((p) => p.userId === me)).map((r) => r.name));
 
   return (
     <>
+      <Breadcrumb items={[{ label: "Skills" }]} />
       <OsPageHeader
         title="Skills"
-        actions={
-          <div className="skl__head-actions">
-            <Link href="/people/departments" className="os-head__link"><Building2 /> Departments</Link>
-            <Link href="/people/roles" className="os-head__link"><Briefcase /> Job titles</Link>
-          </div>
+        views={
+          <>
+            <ViewTab label="All" active={view === "all"} onClick={() => setParams({ view: null })} />
+            <ViewTab label="Gaps" active={view === "gaps"} onClick={() => setParams({ view: "gaps" })} />
+            <ViewTab label="Expert" active={view === "expert"} onClick={() => setParams({ view: "expert" })} />
+          </>
         }
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filters },
+          sort: { onClick: () => setSortOpen((x) => !x), label: sort === "people" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "people" },
+          primary: { label: "Add a skill", icon: Plus, onClick: () => setAdding("") },
+          menu: canExport ? [{ label: "Export CSV", icon: Download, onClick: () => { window.location.href = "/api/skills/export"; } }] : undefined,
+        }}
       />
-
-      <div className="skl">
-        {/* KPIs */}
-        <div className="skl__kpis">
-          <KpiTile accent="var(--os-c-teal)"   Icon={Sparkles}     label="Skills tracked" value={`${stats.total}`}         sub="in the taxonomy" />
-          <KpiTile accent="var(--os-c-blue)"   Icon={Users}        label="Total holders"  value={`${stats.totalHolders}`}  sub="ratings across org" />
-          <KpiTile accent="var(--os-c-green)"  Icon={Award}        label="Expert-level"   value={`${stats.expertSkills}`}  sub="avg ≥ 4/5" />
-          <KpiTile accent={stats.gapSkills > 0 ? "var(--os-c-orange)" : "var(--os-c-green)"}
-                   Icon={AlertOctagon} label="Coverage gaps" value={`${stats.gapSkills}`} sub={stats.gapSkills > 0 ? "< 3 holders, hire risk" : "well-covered"} />
-        </div>
-
-        {/* Toolbar */}
-        <div className="skl__toolbar">
-          <div className="skl__search">
-            <Search />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search skill name…"
-              aria-label="Search skills"
-            />
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort skills" selected={sort}
+              sections={[{ options: SORTS.map((s) => ({ value: s.value, label: s.label })) }]}
+              onSelect={(v) => { setSortOpen(false); setSort(v as SortKey); }} />
           </div>
-          <div className="skl__tabs">
-            <button type="button" className={filter === "all" ? "is-active" : ""} onClick={() => setFilter("all")}>
-              All <span>{stats.total}</span>
-            </button>
-            <button type="button" className={filter === "expert" ? "is-active" : ""} onClick={() => setFilter("expert")}>
-              Expert <span>{stats.expertSkills}</span>
-            </button>
-            <button type="button" className={`${filter === "gap" ? "is-active" : ""} ${stats.gapSkills > 0 ? "is-warn" : ""}`} onClick={() => setFilter("gap")}>
-              Gaps <span>{stats.gapSkills}</span>
-            </button>
-          </div>
-          <div className="skl__sort">
-            <span>Sort</span>
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="skl__sort-select">
-              <option value="holders">Most holders</option>
-              <option value="rating">Highest rated</option>
-              <option value="name">A–Z</option>
-            </select>
-            <ChevronDown />
-          </div>
-        </div>
-
-        {/* Body */}
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load skills" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
-        ) : skills === null ? (
-          <SkeletonRows />
-        ) : stats.total === 0 ? (
-          <OsEmptyView
-            context="list"
-            title="No skills tracked yet"
-            hint="Once people add skills to their profile and rate themselves, the org-wide taxonomy populates here automatically."
-          />
-        ) : filtered.length === 0 ? (
-          <div className="skl__empty">
-            <Search />
-            <div>No skills match these filters.</div>
-            <button type="button" className="skl__empty-reset" onClick={() => { setSearch(""); setFilter("all"); }}>Clear filters</button>
-          </div>
-        ) : (
-          <div className="skl__matrix">
-            {/* Left: skill list */}
-            <aside className="skl__list">
-              <header className="skl__list-head">
-                <span className="skl__list-label">Skill</span>
-                <span className="skl__list-label">Coverage</span>
-              </header>
-              <ul className="skl__list-items">
-                {filtered.map((s) => {
-                  const avg = Math.max(s.avgManager, s.avgSelf);
-                  const tone = ratingTone(avg);
-                  const toneColor = ratingToneColor(tone);
-                  const isGap = s.holders < 3;
-                  const fillPct = (avg / 5) * 100;
-                  return (
-                    <li key={s.name}>
-                      <button
-                        type="button"
-                        className={`skl__row${selected === s.name ? " is-active" : ""}${isGap ? " is-gap" : ""}`}
-                        onClick={() => setSelected(s.name)}
-                        style={{ ["--row-c" as unknown as string]: toneColor }}
-                      >
-                        <span className="skl__row-main">
-                          <span className="skl__row-name">{s.name}</span>
-                          <span className="skl__row-tone">
-                            <span className={`skl__row-tone-tag skl__row-tone-tag--${tone}`}>{tone}</span>
-                            {isGap && (
-                              <span className="skl__row-gap">
-                                <AlertOctagon /> gap
-                              </span>
-                            )}
-                          </span>
-                        </span>
-                        <span className="skl__row-bar-row">
-                          <span className="skl__row-bar">
-                            <span
-                              className="skl__row-bar-fill"
-                              style={{ width: `${fillPct}%`, background: toneColor }}
-                            />
-                          </span>
-                          <span className="skl__row-holders" title={`${s.holders} holders`}>
-                            <Users /> {s.holders}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </aside>
-
-            {/* Right: detail */}
-            <section className="skl__detail">
-              {active ? <SkillDetail skill={active} /> : (
-                <div className="skl__detail-empty">
-                  <Sparkles />
-                  <div>Pick a skill from the list to see its expert directory.</div>
-                </div>
-              )}
-            </section>
-          </div>
-        )}
+        ) : null}
       </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="skills" activeCount={filters} onClearAll={clear}
+          search={{ value: q, onChange: setQ, placeholder: "Search skills" }}>
+          {depts.length ? (
+            <FilterGroup label="Department">
+              {depts.map(([id, name]) => <FilterRow key={id} label={name} checked={dept === id} onCheckedChange={(on) => setDept(on ? id : null)} />)}
+            </FilterGroup>
+          ) : null}
+          <FilterGroup label="Ratings">
+            <FilterRow label="Rated by a manager" checked={managerRated} onCheckedChange={setManagerRated} />
+          </FilterGroup>
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
+          {error && !rows ? (
+            <OsEmptyView variant="error" title="Couldn't load skills" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : rows && rows.length === 0 ? (
+            <OsEmptyView title="No skills yet. Add yours to get started." action={{ label: "Add a skill", onClick: () => setAdding("") }} />
+          ) : (
+            <TableCard
+              ariaLabel="Skills"
+              columns={columns}
+              rows={shown}
+              rowKey={(r) => r.name}
+              onRowClick={(r) => setParams({ skill: r.name })}
+              highlightKey={openName}
+              footer={rows ? { total: rows.length, noun: "skills", from: shown?.length ? 1 : 0, to: shown?.length ?? 0 } : undefined}
+              empty={<span className="text-row text-ink-2">No skills match · <button type="button" className="text-brand-deep hover:underline" onClick={clear}>Clear filters</button></span>}
+            />
+          )}
+        </div>
+      </div>
+      {open ? (
+        <SkillDrawer
+          skill={open}
+          me={me}
+          heldByMe={heldByMe.has(open.name)}
+          onClose={() => setParams({ skill: null })}
+          onAddMine={() => setAdding(open.name)}
+          onChanged={() => void load()}
+        />
+      ) : null}
+      {adding !== null ? (
+        <AddSkillDialog userId={me} self held={[...heldByMe]} initialName={adding} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); void load(); }} />
+      ) : null}
     </>
   );
 }
 
-function SkillDetail({ skill: s }: { skill: ApiSkill }) {
-  const composite = Math.max(s.avgManager, s.avgSelf);
-  const tone = ratingTone(composite);
-  const toneColor = ratingToneColor(tone);
-  const isGap = s.holders < 3;
-  const selfPct = (s.avgSelf / 5) * 100;
-  const mgrPct = (s.avgManager / 5) * 100;
-
-  // Ring math
-  const R = 52;
-  const C2 = 2 * Math.PI * R;
-  const dash = (composite / 5) * C2;
-
+function SkillDrawer({ skill, me, heldByMe, onClose, onAddMine, onChanged }: {
+  skill: SkillRow; me: string; heldByMe: boolean; onClose: () => void; onAddMine: () => void; onChanged: () => void;
+}) {
+  const [menu, setMenu] = useState<{ holder: Holder; anchor: { current: HTMLElement | null } } | null>(null);
+  const [rate, setRate] = useState<Holder | null>(null);
   return (
-    <>
-      <header className="skl__head" style={{ ["--head-c" as unknown as string]: toneColor }}>
-        <div className="skl__head-info">
-          <h2 className="skl__head-name">{s.name}</h2>
-          <div className="skl__head-tags">
-            <span className={`skl__head-tone skl__head-tone--${tone}`}>{tone}</span>
-            {isGap && (
-              <span className="skl__head-gap">
-                <AlertOctagon /> coverage gap — fewer than 3 holders
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="skl__ring">
-          <svg viewBox="0 0 120 120" className="skl__ring-svg">
-            <circle cx="60" cy="60" r={R} fill="none" stroke="var(--os-surface-1)" strokeWidth="10" />
-            <circle
-              cx="60" cy="60" r={R}
-              fill="none"
-              stroke={toneColor}
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeDasharray={`${dash} ${C2 - dash}`}
-              transform="rotate(-90 60 60)"
-              style={{ transition: "stroke-dasharray 240ms ease" }}
-            />
-          </svg>
-          <div className="skl__ring-text">
-            <strong>{composite.toFixed(1)}</strong>
-            <span>/5</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="skl__breakdown">
-        <div className="skl__bar-row">
-          <span className="skl__bar-label">
-            <Star /> Avg self rating
-          </span>
-          <div className="skl__bar-track">
-            <div className="skl__bar-fill" style={{ width: `${selfPct}%`, background: "var(--os-c-blue)" }} />
-          </div>
-          <span className="skl__bar-val">{s.avgSelf.toFixed(1)} <small>/ 5</small></span>
-        </div>
-        <div className="skl__bar-row">
-          <span className="skl__bar-label">
-            <TrendingUp /> Avg manager rating
-          </span>
-          <div className="skl__bar-track">
-            <div
-              className="skl__bar-fill"
-              style={{ width: `${mgrPct}%`, background: s.avgManager > 0 ? "var(--os-brand)" : "transparent" }}
-            />
-          </div>
-          <span className="skl__bar-val">{s.avgManager > 0 ? `${s.avgManager.toFixed(1)}` : "—"} <small>/ 5</small></span>
-        </div>
-        <div className="skl__bar-row">
-          <span className="skl__bar-label">
-            <Users /> Holders
-          </span>
-          <div className="skl__bar-track">
-            <div
-              className="skl__bar-fill"
-              style={{ width: `${Math.min(100, (s.holders / 10) * 100)}%`, background: toneColor }}
-            />
-          </div>
-          <span className="skl__bar-val">{s.holders}</span>
-        </div>
-      </div>
-
-      <h3 className="skl__section-title">
-        <Award /> Top rated holders
-        <span className="skl__section-sub">{s.topHolders.length} shown</span>
-      </h3>
-
-      {s.topHolders.length === 0 ? (
-        <div className="skl__holders-empty">No ratings yet.</div>
-      ) : (
-        <div className="skl__holders">
-          {s.topHolders.map((h) => {
-            const tone_ = ratingTone(h.rating);
-            const toneC = ratingToneColor(tone_);
+    <Drawer
+      open
+      onClose={onClose}
+      ariaLabel="Skill"
+      layerId="skill-drawer"
+      header={
+        <>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-2">Skills › <span className="text-ink">{skill.name}</span></span>
+          {!heldByMe ? (
+            <button type="button" onClick={onAddMine} className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><Star className="h-4 w-4" aria-hidden />Add to my skills</button>
+          ) : null}
+          <button type="button" aria-label="Close" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><X className="h-4 w-4" /></button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 px-5 py-4">
+        <p className="text-sm text-ink-2">{skill.holders} {skill.holders === 1 ? "person has" : "people have"} this skill.</p>
+        <ul className="os-chrome divide-y divide-line-soft overflow-hidden rounded-lg border border-line bg-raised">
+          {skill.people.map((p) => {
+            const self = ratingLabel(p.selfRating);
+            const mgr = ratingLabel(p.managerRating);
             return (
-              <Link key={h.id} href={`/people/${h.id}`} className="skl__holder">
-                <span className="skl__holder-av" style={{ background: avColor(h.id) }}>
-                  {initials(h.firstName, h.lastName)}
+              <li key={p.skillId} className="flex min-h-11 items-center gap-3 px-3">
+                <Avatar person={{ id: p.userId, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar }} size={28} />
+                <span className="min-w-0 flex-1">
+                  <Link href={`/people/${p.userId}?tab=skills`} className="block truncate text-row text-ink hover:underline">{personName(p)}</Link>
+                  {p.department ? <span className="block truncate text-xs text-ink-2">{p.department.name}</span> : null}
                 </span>
-                <div className="skl__holder-info">
-                  <div className="skl__holder-name">{[h.firstName, h.lastName].filter(Boolean).join(" ")}</div>
-                  {h.department && <div className="skl__holder-dept">{h.department}</div>}
-                </div>
-                <div className="skl__holder-rating" style={{ ["--rate-c" as unknown as string]: toneC }}>
-                  {Array.from({ length: 5 }, (_, i) => (
-                    <span key={i} className={`skl__holder-dot${i < Math.round(h.rating) ? " is-on" : ""}`} />
-                  ))}
-                  <span className="skl__holder-rate-num">{h.rating.toFixed(1)}</span>
-                </div>
-              </Link>
+                {self || mgr ? <span className="shrink-0 text-sm tabular-nums text-ink-2">{[self ? `Self ${self}` : null, mgr ? `Manager ${mgr}` : null].filter(Boolean).join(" · ")}</span> : null}
+                {p.canRate && p.userId !== me ? (
+                  <button type="button" aria-label={`Actions for ${personName(p)}`} onClick={(e) => setMenu({ holder: p, anchor: { current: e.currentTarget } })} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </li>
             );
           })}
-        </div>
-      )}
-    </>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Sparkles; label: string; value: string; sub: string }) {
-  return (
-    <div className="skl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <div className="skl__kpi-row">
-        <div className="skl__kpi-icon"><Icon /></div>
-        <div className="skl__kpi-label">{label}</div>
+        </ul>
       </div>
-      <div className="skl__kpi-value">{value}</div>
-      <div className="skl__kpi-sub">{sub}</div>
-    </div>
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={180} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label="Holder actions">
+            <MenuItem label="Rate" onClick={() => { const h = menu.holder; setMenu(null); setRate(h); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
+      {rate ? (
+        <RateSkillDialog
+          userId={rate.userId}
+          skill={{ id: rate.skillId, name: skill.name, selfRating: rate.selfRating, managerRating: rate.managerRating }}
+          mode="manager"
+          onClose={() => setRate(null)}
+          onRated={() => { setRate(null); onChanged(); }}
+        />
+      ) : null}
+    </Drawer>
   );
 }
