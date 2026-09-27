@@ -82,6 +82,50 @@ export function mapHeaders(headers: readonly string[]): { mapping: Array<ImportF
   return { mapping, ignored };
 }
 
+/** The labels the Map columns step shows, in the template's order. */
+export const IMPORT_FIELD_LABEL: Record<ImportField, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  email: "Email",
+  jobTitle: "Job title",
+  department: "Department",
+  office: "Office",
+  reportsTo: "Reports to (email)",
+  phone: "Phone",
+};
+export const IMPORT_FIELDS = Object.keys(IMPORT_FIELD_LABEL) as ImportField[];
+export const REQUIRED_IMPORT_FIELDS: readonly ImportField[] = ["firstName", "lastName", "email"];
+
+/** Is this header one a file may never use (access, passwords)? */
+export function isIgnoredHeader(h: string): boolean {
+  return IGNORED.has(norm(h));
+}
+
+/**
+ * Rows from a parsed table and a column mapping the person confirmed in the
+ * Map columns step. A field mapped by two columns keeps the FIRST; an
+ * ignored header can never be mapped, whatever the mapping says.
+ */
+export function rowsFromTable(
+  table: readonly (readonly string[])[],
+  mapping: ReadonlyArray<ImportField | null>,
+): { rows: ImportRow[]; missing: ImportField[] } {
+  const headers = table[0] ?? [];
+  const seen = new Set<ImportField>();
+  const clean = mapping.map((f, i) => {
+    if (!f || seen.has(f) || isIgnoredHeader(headers[i] ?? "")) return null;
+    seen.add(f);
+    return f;
+  });
+  const missing = REQUIRED_IMPORT_FIELDS.filter((f) => !seen.has(f));
+  const rows = table.slice(1).map((cells) => {
+    const r: ImportRow = { firstName: "", lastName: "", email: "", jobTitle: "", department: "", office: "", reportsTo: "", phone: "" };
+    clean.forEach((f, i) => { if (f) r[f] = (cells[i] ?? "").trim(); });
+    return r;
+  });
+  return { rows, missing };
+}
+
 export function rowsFromCsv(text: string): { rows: ImportRow[]; ignoredColumns: string[]; missing: ImportField[] } {
   const table = parseCsv(text);
   if (table.length === 0) return { rows: [], ignoredColumns: [], missing: ["firstName", "lastName", "email"] };

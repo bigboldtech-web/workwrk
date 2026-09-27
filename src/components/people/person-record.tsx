@@ -63,6 +63,7 @@ import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { EditDetailsDialog } from "./edit-details-dialog";
 import { RemovePersonDialog } from "./remove-person-dialog";
 import { RecordAccessDialog } from "./record-access-dialog";
+import { WorkingOnSection } from "./working-on-section";
 import { AddSkillDialog, RateSkillDialog, SKILLS_CHANGED, emitSkillsChanged } from "./skill-dialogs";
 
 /* ─────────────────────────── payload ─────────────────────────── */
@@ -716,6 +717,9 @@ function OverviewTab({ person }: { person: Person }) {
         )}
         {person.role?.seniority ? <p className="text-sm text-ink-2">Seniority: {seniorityLabel(person.role.seniority)}</p> : null}
       </Section>
+      {/* The people who manage this person see what they are working on
+          (My team's "+2" lands here). Not on your own record: that is My Work. */}
+      {person.access.peopleData && person.access.relation !== "self" && !person.deletedAt ? <WorkingOnSection userId={person.id} /> : null}
       {person.access.peopleData && person.score ? (
         <Section title="Score">
           <div className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-4">
@@ -765,7 +769,9 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
   person: Person; alignment: Alignment | null; state: string; onRetry: () => void; onChanged: () => void; datePrefs: ReturnType<typeof useDatePrefs>;
 }) {
   const self = person.access.relation === "self";
-  const [recorder, setRecorder] = useState(false);
+  // ?record=1 (My team's row "..." > Record numbers) opens with the recorder showing.
+  const sp = useSearchParams();
+  const [recorder, setRecorder] = useState(() => sp?.get("record") === "1");
   const [manage, setManage] = useState(false);
   const kras = alignment?.kras ?? [];
   const total = kras.reduce((s, k) => s + (k.weightage || 0), 0);

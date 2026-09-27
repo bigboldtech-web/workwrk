@@ -61,6 +61,7 @@ export interface BootCounts {
    * the pages use.
    */
   weeklyReviews: TeamsCounts["weeklyReviews"];
+  weeklyReviewsChain: TeamsCounts["weeklyReviewsChain"];
   reviewForms: TeamsCounts["reviewForms"];
   candorOpen: TeamsCounts["candorOpen"];
   surveysOpen: TeamsCounts["surveysOpen"];

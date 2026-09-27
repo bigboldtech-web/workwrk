@@ -18,7 +18,7 @@
 import { currentKpiPeriod } from "@/lib/kpi-period";
 import { prisma } from "@/lib/prisma";
 import { countKpiReviewsForManager } from "@/lib/kpi-record";
-import { countReviewsAwaitingManager } from "@/lib/weekly-review";
+import { countChainReviewsAwaiting, countReviewsAwaitingManager } from "@/lib/weekly-review";
 import { getUserTagIds } from "@/lib/user-tags";
 import { inSurveyAudience, surveyOpenNow } from "./survey-audience";
 
@@ -32,8 +32,14 @@ export interface TeamsViewerFacts {
 }
 
 export interface TeamsCounts {
-  /** Weekly reviews awaiting the viewer's decision (/team/reviews). */
+  /** Weekly reviews awaiting the viewer's decision (/team/reviews, direct reports). */
   weeklyReviews: number;
+  /**
+   * The same over the viewer's whole chain (solid any depth plus dotted):
+   * My team's attention row and its sidebar badge (spec-teams-people /team,
+   * the PO-16 decision). Always at least weeklyReviews.
+   */
+  weeklyReviewsChain: number;
   /** Review forms awaiting the viewer: own self review plus manager reviews owed. */
   reviewForms: number;
   /** Open candor sessions in scope the viewer has not answered. */
@@ -48,6 +54,7 @@ export interface TeamsCounts {
 
 export const EMPTY_TEAMS_COUNTS: TeamsCounts = {
   weeklyReviews: 0,
+  weeklyReviewsChain: 0,
   reviewForms: 0,
   candorOpen: 0,
   surveysOpen: 0,
@@ -101,7 +108,7 @@ export async function teamsFactsAndCounts(
   me: { officeId: string | null; departmentId: string | null },
   now: Date = new Date(),
 ): Promise<{ facts: TeamsViewerFacts; counts: TeamsCounts }> {
-  const [hasReports, candorIds, answeredCandor, surveys, tagIds, weeklyReviews, kpiReviews, reviewForms, myKpisDue] =
+  const [hasReports, candorIds, answeredCandor, surveys, tagIds, weeklyReviews, kpiReviews, reviewForms, myKpisDue, weeklyReviewsChain] =
     await Promise.all([
       safe("hasReports", false, hasReportsFor(userId)),
       safe("candor", [] as string[], openCandorIds(userId, orgId, me.departmentId)),
@@ -143,6 +150,7 @@ export async function teamsFactsAndCounts(
         0,
         prisma.kPIRecord.count({ where: { userId, period: currentKpiPeriod(now), status: "PENDING", kpi: { organizationId: orgId } } }),
       ),
+      safe("weeklyReviewsChain", 0, countChainReviewsAwaiting(userId)),
     ]);
 
   const viewer = { userId, officeId: me.officeId, departmentId: me.departmentId, tagIds };
@@ -164,7 +172,7 @@ export async function teamsFactsAndCounts(
 
   return {
     facts: { hasReports, candorInvited, surveyTargeted },
-    counts: { weeklyReviews, reviewForms, candorOpen, surveysOpen, kpiReviews, myKpisDue },
+    counts: { weeklyReviews, weeklyReviewsChain: Math.max(weeklyReviewsChain, weeklyReviews), reviewForms, candorOpen, surveysOpen, kpiReviews, myKpisDue },
   };
 }
 

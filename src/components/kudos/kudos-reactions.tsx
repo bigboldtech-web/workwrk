@@ -95,8 +95,8 @@ export function KudosReactions({
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
               active
-                ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
-                : "border-border bg-surface-2 text-foreground hover:bg-surface-3",
+                ? "border-[var(--os-brand)] bg-brand-soft text-ink"
+                : "border-line bg-raised text-ink-2 hover:bg-hover hover:text-ink",
               busy && "opacity-60 cursor-not-allowed",
             )}
             aria-pressed={active}
@@ -114,7 +114,7 @@ export function KudosReactions({
           onClick={() => setPickerOpen((v) => !v)}
           disabled={busy}
           className={cn(
-            "inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted transition-colors hover:bg-surface-3 hover:text-foreground",
+            "inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2 py-0.5 text-xs text-ink-2 transition-colors hover:bg-hover hover:text-ink",
             busy && "opacity-60 cursor-not-allowed",
           )}
           aria-label="Add reaction"
@@ -124,7 +124,7 @@ export function KudosReactions({
         </button>
         {pickerOpen && (
           <div
-            className="absolute bottom-full right-0 mb-2 z-[60] w-[16rem] rounded-lg border border-border bg-background p-2 shadow-xl"
+            className="absolute bottom-full start-0 mb-2 z-[60] w-[16rem] rounded-lg border border-line bg-raised p-2 shadow-[var(--os-shadow-pop)]"
             role="dialog"
             aria-label="Pick a reaction"
           >

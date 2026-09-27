@@ -120,6 +120,11 @@ describe("row counts ride the boot counts", () => {
   it("My team is weekly reviews plus KPI sign-offs", () => {
     expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "team")!, counts)).toBe(5);
   });
+  it("My team counts the whole chain when the boot carries it, and Weekly reviews stays direct", () => {
+    const chain = { ...counts, weeklyReviewsChain: 6 };
+    expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "team")!, chain)).toBe(9);
+    expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "weekly-reviews")!, chain)).toBe(2);
+  });
   it("each badge reads its own key, and a row without one reads 0", () => {
     const byKey = Object.fromEntries(TEAMS_ROWS.map((r) => [r.key, teamsRowCount(r, counts)]));
     expect(byKey["weekly-reviews"]).toBe(2);

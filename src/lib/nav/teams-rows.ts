@@ -143,10 +143,12 @@ export function teamsActiveHref(
 /** Row counts from the boot counts; My team = weekly reviews + KPI sign-offs. */
 export function teamsRowCount(
   row: TeamsRow,
-  counts: Partial<Record<"weeklyReviews" | "reviewForms" | "candorOpen" | "surveysOpen" | "kpiReviews", number>>,
+  counts: Partial<Record<"weeklyReviews" | "weeklyReviewsChain" | "reviewForms" | "candorOpen" | "surveysOpen" | "kpiReviews", number>>,
 ): number {
   if (!row.count) return 0;
-  if (row.count === "myTeam") return (counts.weeklyReviews ?? 0) + (counts.kpiReviews ?? 0);
+  // My team counts the whole chain, the same number its attention card
+  // shows (GET /api/team/attention reads the same two helpers).
+  if (row.count === "myTeam") return (counts.weeklyReviewsChain ?? counts.weeklyReviews ?? 0) + (counts.kpiReviews ?? 0);
   return counts[row.count] ?? 0;
 }
 

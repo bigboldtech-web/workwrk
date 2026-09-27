@@ -117,9 +117,10 @@ const GOVERNANCE = [
     href: "/imports",
     icon: Upload,
     title: "Import data",
-    // People import is Phase 8 (Settings > Data > Import); until it lands
-    // /imports brings a CSV into a table and nothing else, so it says only that.
-    desc: "Bring a CSV file into a new table or one you already have.",
+    // /imports brings a CSV into a table, and its People card opens the
+    // Directory's Import people (Phase 6); the Settings > Data > Import tab
+    // that hosts the same flow inline is Phase 8.
+    desc: "Bring a CSV file into a table, or invite people from a CSV.",
   },
   {
     href: "/trash",

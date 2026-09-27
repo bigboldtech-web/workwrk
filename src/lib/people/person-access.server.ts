@@ -16,6 +16,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
+import type { Viewer } from "@/lib/access/types";
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
@@ -41,6 +42,8 @@ export interface PeopleCtx {
    * rights over a person never grow with a dotted line or a report.
    */
   writeChain: Set<string>;
+  /** The engine's viewer, for the node-access reads (readable Lists). */
+  viewer: Viewer;
 }
 
 /** Build the context once per request. Null when signed out. */
@@ -79,6 +82,7 @@ export async function peopleCtx(): Promise<PeopleCtx | null> {
     managerTier,
     chain,
     writeChain,
+    viewer,
   };
 }
 

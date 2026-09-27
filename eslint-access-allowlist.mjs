@@ -104,6 +104,13 @@
 //
 // Both leave together, with their siblings, when the access engine's step 6
 // turns these gates into can() / accessibleIds().
+// Phase 6 Stage C (2026-09-27) NET SHRINK of two. /team and /team/workload
+// became clients over three /api/team routes that read Lists through the
+// engine's Viewer (src/lib/people/team-boards.server.ts), so the two pages
+// and /api/team/members-work leave this list. One entry MOVED rather than
+// grew: the Unassigned bucket's "Lists the team belongs to" read of
+// BoardMember left team/workload/page.tsx for /api/team/workload unchanged,
+// so that route carries the entry now.
 export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/calls/status/route.ts",
   "src/app/api/people/pick/route.ts",
@@ -144,10 +151,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/tables/layout.tsx",
   "src/app/(dashboard)/team/alignment/page.tsx",
   "src/app/(dashboard)/team/kpi-reviews/page.tsx",
-  "src/app/(dashboard)/team/page.tsx",
   "src/app/(dashboard)/team/reviews/page.tsx",
   "src/app/(dashboard)/team/rollup/page.tsx",
-  "src/app/(dashboard)/team/workload/page.tsx",
   "src/app/(dashboard)/tlk/layout.tsx",
   "src/app/(dashboard)/today/page.tsx",
   "src/app/api/accounting-periods/\\[id\\]/route.ts",
@@ -440,8 +445,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/talent-assessment/route.ts",
   "src/app/api/tasks/route.ts",
   "src/app/api/tasks/workload/route.ts",
-  "src/app/api/team/members-work/route.ts",
   "src/app/api/team/weekly-reviews/route.ts",
+  "src/app/api/team/workload/route.ts",
   "src/app/api/template-center/\\[id\\]/apply/route.ts",
   "src/app/api/template-center/save-as/route.ts",
   "src/app/api/templates/\\[slug\\]/apply/route.ts",

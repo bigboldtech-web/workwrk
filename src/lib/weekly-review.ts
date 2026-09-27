@@ -8,6 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
+import { getEffectiveReportTree } from "@/lib/reporting-line";
 
 export interface KpiSnapshot {
   kpiId: string;
@@ -266,6 +267,27 @@ export function managerQueueWhere(managerId: string): Prisma.WeeklyReviewWhereIn
  */
 export async function countReviewsAwaitingManager(managerId: string): Promise<number> {
   return prisma.weeklyReview.count({ where: { AND: [managerQueueWhere(managerId), { status: "SUBMITTED" }] } });
+}
+
+/**
+ * The CHAIN queue (spec-teams-performance /team/reviews Data, PO-16): every
+ * weekly review whose subject is anywhere below `managerId` (solid lines any
+ * depth the effective tree walks, plus dotted reports), together with the
+ * direct queue above, so the chain count is always a superset of the direct
+ * one. The manager's own review never counts. My team's attention row and
+ * its sidebar badge read this; the queue's "Direct reports only" switch
+ * narrows to managerQueueWhere.
+ */
+export async function chainQueueWhere(managerId: string): Promise<Prisma.WeeklyReviewWhereInput> {
+  const tree = (await getEffectiveReportTree(managerId)).filter((id) => id !== managerId);
+  return tree.length
+    ? { OR: [managerQueueWhere(managerId), { userId: { in: tree }, user: { deletedAt: null } }] }
+    : managerQueueWhere(managerId);
+}
+
+/** How many weekly reviews in the viewer's chain await a decision (uncapped). */
+export async function countChainReviewsAwaiting(managerId: string): Promise<number> {
+  return prisma.weeklyReview.count({ where: { AND: [await chainQueueWhere(managerId), { status: "SUBMITTED" }] } });
 }
 
 /**

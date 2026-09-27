@@ -1,315 +1,471 @@
 "use client";
 
-/* Kudos — peer-recognition feed with KPI strip + reaction chips.
- *
- *  GET  /api/kudos
- *  POST /api/kudos
- */
+// Teams > Kudos (spec-teams-performance /kudos): thank a colleague by name,
+// and read what everyone else is thanking each other for.
+//
+//   views     All · Received · Given · Leaderboard (?view=)
+//   toolbar   Filter (search the message, Company value, Person, Department,
+//             Date range; Leaderboard: the period), Sort (Newest first, Most
+//             reactions), the ONE blue Give kudos, "..." (Display: Show the
+//             company value chip, Show reactions; Export CSV for the People
+//             team and Admin, never an Agent)
+//   body      a 720 feed of kudos cards grouped This week and Earlier, cursor
+//             paged with "Load more"; the footer total comes from the server.
+//             Leaderboard is a read-only TableCard.
+//
+// The give path (MA-1): Give kudos, the Teams "+" (?new=1) and a person's
+// Kudos tab (?new=1&to={id}) all open the one KudosModal. A sent kudos can
+// be undone for five seconds from its toast (the same DELETE the row "..."
+// offers the giver and an Admin).
+//
+// Display switches persist per viewer at home.teams.surface.kudos.viewOptions.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useCultureValues } from "@/lib/use-culture";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import {
-  Heart,
-  Hash,
-  ChevronRight,
-  Trophy,
-  Sparkles,
-  Users,
-  Calendar as CalendarIcon,
-  Search,
-  TrendingUp,
-} from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download, Heart, Link2, MoreHorizontal, Trash2 } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C } from "@/components/layout/os/catalog";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useRouter, useSearchParams } from "next/navigation";
-import { KudosModal } from "@/components/kudos/kudos-modal";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Picker } from "@/components/ui/picker";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { KudosModal, type GivenKudos } from "@/components/kudos/kudos-modal";
+import { KudosReactions } from "@/components/kudos/kudos-reactions";
+import { ValueChip } from "@/components/culture/value-chip";
+import { PeoplePickerField, PersonAvatar, personName, type PickPerson } from "@/components/people/person-bits";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, formatRelative } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { useCultureValues } from "@/lib/use-culture";
 
+type Person = { id: string; firstName: string | null; lastName: string | null; avatar: string | null };
 type ApiKudos = {
   id: string;
   message: string;
-  companyValue?: string | null;
+  companyValue: string | null;
   createdAt: string;
   totalReactions: number;
   reactionCounts: { emoji: string; count: number }[];
   myReactions: string[];
-  giver?: { id: string; firstName?: string | null; lastName?: string | null } | null;
-  receiver?: { id: string; firstName?: string | null; lastName?: string | null; department?: { name?: string | null } | null } | null;
+  giver: Person;
+  receiver: Person & { department?: { name?: string | null } | null };
+  canDelete: boolean;
 };
+type FeedResponse = { data: ApiKudos[]; pagination: { total: number; nextCursor: string | null }; groups: { thisWeek: number; earlier: number } };
+type LeaderRow = { userId: string; firstName: string | null; lastName: string | null; avatar: string | null; received: number; given: number; topValue: string | null; lastReceived: string | null };
 
-const AV = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV[h % AV.length]; }
-function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
-function fullName(u?: { firstName?: string | null; lastName?: string | null } | null) {
-  if (!u) return "Unknown";
-  return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unknown";
+type View = "all" | "received" | "given" | "leaderboard";
+const WEEK_MS = 7 * 86_400_000;
+
+function readView(v: string | null | undefined): View {
+  return v === "received" || v === "given" || v === "leaderboard" ? v : "all";
 }
 
-const MS_DAY = 86400_000;
-
-function relativeDate(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60 * 1000) return "just now";
-  if (ms < 60 * 60 * 1000) return `${Math.floor(ms / 60000)}m ago`;
-  if (ms < 24 * 60 * 60 * 1000) return `${Math.floor(ms / (60 * 60 * 1000))}h ago`;
-  if (ms < 7 * MS_DAY) return `${Math.floor(ms / MS_DAY)}d ago`;
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-const VALUE_HUE: Record<string, string> = {
-  "Customer First": C.pink,
-  "Ownership": C.indigo,
-  "Teamwork": C.green,
-  "Boldness": C.orange,
-  "Excellence": C.purple,
-  "Innovation": C.teal,
-};
-function valueColor(v: string): string {
-  if (VALUE_HUE[v]) return VALUE_HUE[v];
-  let h = 0; for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) >>> 0;
-  return AV[h % AV.length];
-}
-
-export default function KudosPage() {
-  const [rows, setRows] = useState<ApiKudos[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [activeValue, setActiveValue] = useState<string | null>(null);
-  const orgValues = useCultureValues();
-  const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
-  // The give path, connected (MA-1): the page's one primary "Give kudos",
-  // and the Teams "+" row, which lands here with ?new=1 (and ?to={userId}
-  // from a person's record). Closing clears the params so a refresh does not
-  // reopen the composer.
+export default function KudosClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const wantsNew = searchParams.get("new") === "1";
-  const toParam = searchParams.get("to") ?? undefined;
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const { toast } = useOsToast();
+  const { prefs, patchPrefs, rowVersion } = useOsShell();
+  const { boot } = useBoot();
+  const confirm = useConfirm();
+  const datePrefs = useDatePrefs();
+  const orgValues = useCultureValues();
+
+  const view = readView(sp?.get("view"));
+  const q = sp?.get("q") ?? "";
+  const value = sp?.get("value") ?? "";
+  const person = sp?.get("person") ?? "";
+  const dept = sp?.get("dept") ?? "";
+  // The date range is ?since=&until= in the page URL: ?to= is the Give
+  // kudos receiver (a person's Kudos tab links /kudos?new=1&to={id}).
+  const from = sp?.get("since") ?? "";
+  const to = sp?.get("until") ?? "";
+  const sort = sp?.get("sort") === "reactions" ? "reactions" : "recent";
+  const period = sp?.get("period") === "quarter" ? "quarter" : sp?.get("period") === "all" ? "all" : "month";
+  const filters = [q, value, person, dept, from, to].filter(Boolean).length;
+
+  const viewer = boot.viewer as { id: string; orgRole?: string; isAgent?: boolean; peopleTeam?: boolean };
+  const canExport = !viewer.isAgent && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
+
+  // Display (home.teams.surface.kudos.viewOptions), defaults on.
+  const stored = ((prefs.home as { teams?: { surface?: { kudos?: { viewOptions?: { showValueChip?: boolean; showReactions?: boolean } } } } } | undefined)?.teams?.surface?.kudos?.viewOptions) ?? {};
+  const [display, setDisplay] = useState<{ showValueChip?: boolean; showReactions?: boolean }>({});
+  const showValueChip = display.showValueChip ?? stored.showValueChip ?? true;
+  const showReactions = display.showReactions ?? stored.showReactions ?? true;
+  const displayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setDisplayOpt = (patch: { showValueChip?: boolean; showReactions?: boolean }) => {
+    setDisplay((d) => ({ ...d, ...patch }));
+    if (displayTimer.current) clearTimeout(displayTimer.current);
+    const next = { showValueChip, showReactions, ...patch };
+    displayTimer.current = setTimeout(() => {
+      void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: next } } } } }).then((ok) => {
+        if (!ok) toast("Couldn't save that setting", { tone: "danger" });
+      });
+    }, 400);
+  };
+
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    const s = next.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+  }, [sp, router, pathname]);
+
+  // ── The give path ─────────────────────────────────────────────────
+  const wantsNew = sp?.get("new") === "1";
+  const toParam = sp?.get("to") ?? undefined;
   const [giveOpen, setGiveOpen] = useState(false);
   const [giveTo, setGiveTo] = useState<string | undefined>(undefined);
   useEffect(() => {
     if (!wantsNew) return;
-    setGiveTo(toParam);
-    setGiveOpen(true);
+    const t = setTimeout(() => { setGiveTo(toParam); setGiveOpen(true); }, 0);
+    return () => clearTimeout(t);
   }, [wantsNew, toParam]);
+  const closeGive = () => {
+    setGiveOpen(false);
+    if (wantsNew || toParam) setParams({ new: null, to: null });
+  };
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/kudos?limit=50");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiKudos[] = data?.data ?? (Array.isArray(data) ? data : []);
-      setRows(list);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("kudos");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  // ── Feed ──────────────────────────────────────────────────────────
+  const [feed, setFeed] = useState<ApiKudos[] | null>(null);
+  const [meta, setMeta] = useState<{ total: number; nextCursor: string | null; groups: { thisWeek: number; earlier: number } } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [fresh, setFresh] = useState<string | null>(null);
+  // "This week" is measured from when the feed last loaded (a render never
+  // reads the clock).
+  const [now, setNow] = useState(() => Date.now());
+  const [draftQ, setDraftQ] = useState(q);
+  const [filterOpen, setFilterOpen] = useState(filters > 0);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [personPick, setPersonPick] = useState<PickPerson | null>(null);
+  const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
+  const [menu, setMenu] = useState<{ k: ApiKudos; anchor: RefObject<HTMLElement | null> } | null>(null);
 
-  const stats = useMemo(() => {
-    const list = rows ?? [];
-    const week = list.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 7 * MS_DAY).length;
-    const month = list.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 30 * MS_DAY).length;
-    const totalReactions = list.reduce((a, k) => a + k.totalReactions, 0);
-    const receiverCounts = new Map<string, { id: string; name: string; n: number }>();
-    for (const k of list) {
-      if (!k.receiver?.id) continue;
-      const cur = receiverCounts.get(k.receiver.id);
-      const name = fullName(k.receiver);
-      if (cur) cur.n += 1;
-      else receiverCounts.set(k.receiver.id, { id: k.receiver.id, name, n: 1 });
-    }
-    const topReceivers = Array.from(receiverCounts.values()).sort((a, b) => b.n - a.n).slice(0, 5);
-    return { total: list.length, week, month, totalReactions, topReceivers };
-  }, [rows]);
+  useEffect(() => {
+    if (draftQ === q) return;
+    const t = setTimeout(() => setParams({ q: draftQ.trim() || null }), 250);
+    return () => clearTimeout(t);
+  }, [draftQ, q, setParams]);
 
-  const values = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const k of rows ?? []) {
-      if (!k.companyValue) continue;
-      m.set(k.companyValue, (m.get(k.companyValue) ?? 0) + 1);
-    }
-    return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
-  }, [rows]);
+  const feedQs = useMemo(() => {
+    const p = new URLSearchParams({ limit: "20" });
+    if (view === "received" || view === "given") p.set("view", view);
+    if (q) p.set("q", q);
+    if (value) p.set("value", value);
+    if (person) p.set("person", person);
+    if (dept) p.set("dept", dept);
+    if (from) p.set("from", from);
+    if (to) p.set("to", to);
+    if (sort === "reactions") p.set("sort", "reactions");
+    return p.toString();
+  }, [view, q, value, person, dept, from, to, sort]);
 
-  const filtered = useMemo(() => {
-    let list = rows ?? [];
-    if (activeValue) list = list.filter((k) => k.companyValue === activeValue);
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((k) =>
-      k.message.toLowerCase().includes(q) ||
-      fullName(k.giver).toLowerCase().includes(q) ||
-      fullName(k.receiver).toLowerCase().includes(q) ||
-      (k.companyValue ?? "").toLowerCase().includes(q));
-    return list;
-  }, [rows, search, activeValue]);
+  const loadFeed = useCallback(async () => {
+    if (view === "leaderboard") return;
+    const r = await apiFetch<FeedResponse>(`/api/kudos?${feedQs}`, { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load kudos"); return; }
+    setError(null);
+    setNow(Date.now());
+    setFeed(r.data.data);
+    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups });
+  }, [feedQs, view]);
+  const loadMore = async () => {
+    if (!meta?.nextCursor) return;
+    setLoadingMore(true);
+    const r = await apiFetch<FeedResponse>(`/api/kudos?${feedQs}&cursor=${meta.nextCursor}`, { cache: "no-store" });
+    setLoadingMore(false);
+    if (!r.ok) { toast(r.error || "Couldn't load more kudos", { tone: "danger", action: { label: "Try again", onClick: () => void loadMore() } }); return; }
+    setFeed((f) => [...(f ?? []), ...r.data.data.filter((k) => !(f ?? []).some((x) => x.id === k.id))]);
+    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups });
+  };
 
-  const recent = filtered.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 7 * MS_DAY);
-  const older = filtered.filter((k) => Date.now() - new Date(k.createdAt).getTime() > 7 * MS_DAY);
+  // ── Leaderboard ───────────────────────────────────────────────────
+  const [board, setBoard] = useState<{ rows: LeaderRow[]; total: number } | null>(null);
+  const loadBoard = useCallback(async () => {
+    if (view !== "leaderboard") return;
+    const r = await apiFetch<{ leaderboard: LeaderRow[]; totalKudos: number }>(`/api/kudos/leaderboard?period=${period}&limit=100`, { cache: "no-store" });
+    if (!r.ok) { setError(r.error || "Couldn't load the leaderboard"); return; }
+    setError(null);
+    setBoard({ rows: r.data.leaderboard, total: r.data.totalKudos });
+  }, [view, period]);
+
+  const version = rowVersion("kudos");
+  useEffect(() => {
+    const t = setTimeout(() => { void loadFeed(); void loadBoard(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadFeed, loadBoard, version]);
+  useEffect(() => {
+    const again = () => { void loadFeed(); void loadBoard(); };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [loadFeed, loadBoard]);
+  useEffect(() => {
+    if (!filterOpen || depts.length) return;
+    void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((d) => { if (d.ok && Array.isArray(d.data)) setDepts(d.data); });
+  }, [filterOpen, depts.length]);
+
+  const onGiven = (k: GivenKudos) => {
+    const name = personName(k.receiver);
+    setFresh(k.id);
+    // The toast's Undo is the same DELETE the row "..." offers the giver.
+    toast(`Kudos sent to ${name}`, {
+      onUndo: () => {
+        void apiFetch(`/api/kudos/${k.id}`, { method: "DELETE" }).then((r) => {
+          if (!r.ok) toast(r.error || "Couldn't undo it", { tone: "danger" });
+          void loadFeed();
+        });
+      },
+    });
+    void loadFeed();
+  };
+
+  async function remove(k: ApiKudos) {
+    if (!(await confirm({ title: "Delete this kudos?", description: `${personName(k.receiver)} will no longer see it on the feed or their record.`, confirmLabel: "Delete", destructive: true }))) return;
+    const r = await apiFetch(`/api/kudos/${k.id}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete it", { tone: "danger" }); return; }
+    toast("Kudos deleted");
+    setFeed((f) => (f ?? []).filter((x) => x.id !== k.id));
+    setMeta((m) => (m ? { ...m, total: Math.max(0, m.total - 1) } : m));
+  }
+
+  const clearFilters = () => { setDraftQ(""); setPersonPick(null); setParams({ q: null, value: null, person: null, dept: null, since: null, until: null }); };
+  const exportHref = () => { const p = new URLSearchParams(feedQs); p.delete("limit"); p.set("format", "csv"); return `/api/kudos?${p}`; };
+
+  const thisWeek = sort === "recent" ? (feed ?? []).filter((k) => now - new Date(k.createdAt).getTime() <= WEEK_MS) : [];
+  const earlier = sort === "recent" ? (feed ?? []).filter((k) => now - new Date(k.createdAt).getTime() > WEEK_MS) : feed ?? [];
+
+  const valueOptions = useMemo(() => [...new Set([...orgValues, ...(value && value !== "none" ? [value] : [])])], [orgValues, value]);
+
+  const leaderColumns: TableColumn<LeaderRow>[] = [
+    { key: "person", label: "Person", title: true, width: "minmax(200px,1.6fr)", render: (r) => (
+      <span className="flex min-w-0 items-center gap-2"><PersonAvatar person={{ id: r.userId, firstName: r.firstName, lastName: r.lastName, avatar: r.avatar }} size={28} /><span className="truncate">{personName(r)}</span></span>
+    ) },
+    { key: "received", label: "Received", width: "96px", numeric: true, align: "end", render: (r) => <span className="tabular-nums">{r.received}</span> },
+    { key: "given", label: "Given", width: "80px", numeric: true, align: "end", render: (r) => <span className="tabular-nums">{r.given}</span> },
+    { key: "value", label: "Top value", width: "minmax(140px,1fr)", hideBelow: 720, render: (r) => (r.topValue ? <ValueChip value={r.topValue} /> : <span className="text-ink-3">None</span>) },
+    { key: "last", label: "Last received", width: "130px", hideBelow: 900, render: (r) => <span className="text-ink-2">{r.lastReceived ? formatDate(r.lastReceived, datePrefs, "date") : ""}</span> },
+  ];
+
+  const card = (k: ApiKudos) => (
+    <article key={k.id} id={`kudos-${k.id}`} className={`rounded-lg border border-line bg-raised p-4 transition-opacity duration-150 ${fresh === k.id ? "animate-in fade-in" : ""}`}>
+      <div className="flex items-start gap-2">
+        <PersonAvatar person={k.giver} size={28} />
+        <p className="m-0 min-w-0 flex-1 pt-1 text-row text-ink">
+          <Link href={`/people/${k.giver.id}`} className="font-medium hover:underline">{personName(k.giver)}</Link>
+          {" thanked "}
+          <Link href={`/people/${k.receiver.id}`} className="font-medium hover:underline">{personName(k.receiver)}</Link>
+        </p>
+        <span className="shrink-0 pt-1.5 text-xs font-medium text-ink-2" title={formatDate(k.createdAt, datePrefs, "datetime")}>{formatRelative(k.createdAt, datePrefs)}</span>
+        <button
+          type="button"
+          aria-label="Kudos actions"
+          aria-haspopup="menu"
+          onClick={(e) => setMenu({ k, anchor: { current: e.currentTarget } })}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </div>
+      <Message text={k.message} />
+      {(showValueChip && k.companyValue) || showReactions ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {showValueChip && k.companyValue ? <ValueChip value={k.companyValue} /> : null}
+          {showReactions ? <KudosReactions kudosId={k.id} initialCounts={k.reactionCounts} initialMine={k.myReactions} compact /> : null}
+        </div>
+      ) : null}
+    </article>
+  );
+
+  const group = (label: string, count: number, rows: ApiKudos[]) => rows.length ? (
+    <section className="flex flex-col gap-3">
+      <div className="flex h-11 items-center gap-2 rounded-md bg-subtle px-3 text-sm font-medium text-ink">
+        {label}<span className="text-xs font-medium tabular-nums text-ink-2">{count}</span>
+      </div>
+      {rows.map(card)}
+    </section>
+  ) : null;
+
+  const emptyFeed = view === "received"
+    ? <OsEmptyView title="Nobody has thanked you yet" />
+    : view === "given"
+      ? <OsEmptyView title="You have not given kudos yet" action={{ label: "Give kudos", onClick: () => { setGiveTo(undefined); setGiveOpen(true); } }} />
+      : <OsEmptyView title="No kudos yet" action={{ label: "Give the first kudos", onClick: () => { setGiveTo(undefined); setGiveOpen(true); } }} />;
 
   return (
     <>
+      <Breadcrumb items={[{ label: "Kudos" }]} />
       <OsPageHeader
         title="Kudos"
-        actions={
-          <div className="kud__head-actions">
-            <Link href="/people" className="os-head__link"><Users /> Directory</Link>
-          </div>
+        askAi
+        views={
+          <>
+            <ViewTab label="All" active={view === "all"} onClick={() => setParams({ view: null })} />
+            <ViewTab label="Received" active={view === "received"} onClick={() => setParams({ view: "received" })} />
+            <ViewTab label="Given" active={view === "given"} onClick={() => setParams({ view: "given" })} />
+            <ViewTab label="Leaderboard" active={view === "leaderboard"} onClick={() => setParams({ view: "leaderboard" })} />
+          </>
         }
-        primary={{ label: "Give kudos", onClick: () => { setGiveTo(undefined); setGiveOpen(true); } }}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: view === "leaderboard" ? (period !== "month" ? 1 : 0) : filters },
+          sort: view === "leaderboard" ? undefined : { onClick: () => setSortOpen((v) => !v), label: sort === "reactions" ? "Most reactions" : "Sort", active: sort === "reactions" },
+          primary: { label: "Give kudos", icon: Heart, onClick: () => { setGiveTo(undefined); setGiveOpen(true); } },
+          menu: [
+            { label: "Show the company value chip", checked: showValueChip, keepOpen: true, onClick: () => setDisplayOpt({ showValueChip: !showValueChip }) },
+            { label: "Show reactions", checked: showReactions, keepOpen: true, onClick: () => setDisplayOpt({ showReactions: !showReactions }) },
+            ...(canExport && view !== "leaderboard" ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref(); } }] : []),
+          ],
+        }}
       />
-      {giveOpen ? (
-        <KudosModal
-          open
-          preselectedUserId={giveTo}
-          onClose={() => {
-            setGiveOpen(false);
-            if (wantsNew) router.replace("/kudos", { scroll: false });
-            void load();
-          }}
-        />
-      ) : null}
-
-      <div className="kud">
-        <div className="kud__kpis">
-          <KpiTile accent="var(--os-c-red)"   Icon={Heart}      label="Kudos given"  value={`${stats.total}`}    sub="all time" />
-          <KpiTile accent="var(--os-c-orange)" Icon={Sparkles}   label="This week"    value={`${stats.week}`}      sub={`${stats.month} this month`} />
-          <KpiTile accent="var(--os-c-orange)" Icon={TrendingUp} label="Reactions"    value={`${stats.totalReactions}`} sub="cumulative" />
-          <KpiTile accent="var(--os-c-green)"  Icon={Trophy}     label="Top receiver" value={stats.topReceivers[0]?.name.split(" ")[0] ?? "—"} sub={`${stats.topReceivers[0]?.n ?? 0} kudos`} />
-        </div>
-
-        <div className="kud__toolbar">
-          <div className="kud__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search message, giver, receiver, value…" />
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort kudos" selected={sort}
+              sections={[{ options: [{ value: "recent", label: "Newest first" }, { value: "reactions", label: "Most reactions" }] }]}
+              onSelect={(v) => { setSortOpen(false); setParams({ sort: v === "reactions" ? "reactions" : null }); }} />
           </div>
-          {(search.trim() || activeValue) && (
-            <button type="button" className="kud__clear" onClick={() => { setSearch(""); setActiveValue(null); }}>Clear</button>
+        ) : null}
+      </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="kudos"
+          activeCount={view === "leaderboard" ? 0 : filters}
+          onClearAll={view === "leaderboard" ? () => setParams({ period: null }) : clearFilters}
+          search={view === "leaderboard" ? undefined : { value: draftQ, onChange: setDraftQ, placeholder: "Search messages" }}
+        >
+          {view === "leaderboard" ? (
+            <FilterGroup label="Period">
+              <FilterRow label="This month" checked={period === "month"} onCheckedChange={() => setParams({ period: null })} />
+              <FilterRow label="This quarter" checked={period === "quarter"} onCheckedChange={() => setParams({ period: "quarter" })} />
+              <FilterRow label="All time" checked={period === "all"} onCheckedChange={() => setParams({ period: "all" })} />
+            </FilterGroup>
+          ) : (
+            <>
+              <FilterGroup label="Company value">
+                {valueOptions.map((v) => <FilterRow key={v} label={v} checked={value === v} onCheckedChange={(on) => setParams({ value: on ? v : null })} />)}
+                <FilterRow label="No value" checked={value === "none"} onCheckedChange={(on) => setParams({ value: on ? "none" : null })} />
+              </FilterGroup>
+              <FilterGroup label="Person">
+                <li className="px-1 py-1">
+                  <PeoplePickerField
+                    ariaLabel="Person"
+                    value={person ? [person] : []}
+                    people={personPick ? [personPick] : []}
+                    placeholder="Anyone"
+                    onChange={(ids, picked) => { setPersonPick(picked[0] ?? null); setParams({ person: ids[0] ?? null }); }}
+                  />
+                </li>
+              </FilterGroup>
+              {depts.length ? (
+                <FilterGroup label="Department">
+                  {depts.map((d) => <FilterRow key={d.id} label={d.name} checked={dept === d.id} onCheckedChange={(on) => setParams({ dept: on ? d.id : null })} />)}
+                </FilterGroup>
+              ) : null}
+              <FilterGroup label="Date range">
+                <li className="flex items-center gap-2 px-2 py-1 text-sm text-ink-2">
+                  <input type="date" aria-label="From" value={from} onChange={(e) => setParams({ since: e.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-line bg-raised px-2 text-sm text-ink" />
+                  <span>to</span>
+                  <input type="date" aria-label="To" value={to} onChange={(e) => setParams({ until: e.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-line bg-raised px-2 text-sm text-ink" />
+                </li>
+              </FilterGroup>
+            </>
+          )}
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
+          {view === "leaderboard" ? (
+            error && !board ? (
+              <OsEmptyView variant="error" title="Couldn't load the leaderboard" hint={error} action={{ label: "Try again", onClick: () => void loadBoard() }} />
+            ) : (
+              <TableCard
+                ariaLabel="Kudos leaderboard"
+                columns={leaderColumns}
+                rows={board?.rows ?? null}
+                rowKey={(r) => r.userId}
+                rowHref={(r) => `/people/${r.userId}`}
+                empty={<span className="text-row text-ink-2">Nobody was thanked {period === "month" ? "this month" : period === "quarter" ? "this quarter" : "yet"}</span>}
+                footer={board ? { total: board.total, noun: "kudos", from: board.rows.length ? 1 : 0, to: board.rows.length } : undefined}
+              />
+            )
+          ) : (
+            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+              {error && !feed ? (
+                <OsEmptyView variant="error" title="Couldn't load kudos" hint={error} action={{ label: "Try again", onClick: () => void loadFeed() }} />
+              ) : feed === null ? (
+                <div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading kudos">
+                  {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[132px] w-full rounded-lg" />)}
+                </div>
+              ) : feed.length === 0 ? (
+                filters > 0 ? (
+                  <p className="text-row text-ink-2">No kudos match · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></p>
+                ) : emptyFeed
+              ) : (
+                <>
+                  {sort === "recent" ? (
+                    <>
+                      {group("This week", meta?.groups.thisWeek ?? thisWeek.length, thisWeek)}
+                      {group("Earlier", meta?.groups.earlier ?? earlier.length, earlier)}
+                    </>
+                  ) : (
+                    <div className="flex flex-col gap-3">{earlier.map(card)}</div>
+                  )}
+                  <div className="flex items-center justify-between text-sm text-ink-2">
+                    <span className="font-medium">Total kudos {meta?.total ?? feed.length}</span>
+                    {meta?.nextCursor ? (
+                      <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="inline-flex h-8 items-center rounded-md px-3 font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
+                        {loadingMore ? "Loading more" : "Load more"}
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
-
-        {values.length > 0 && (
-          <div className="kud__values">
-            <button type="button" className={`kud__value${activeValue === null ? " is-active" : ""}`} onClick={() => setActiveValue(null)}>
-              <Hash /> All values
-            </button>
-            {values.map(([v, n]) => (
-              <button
-                key={v}
-                type="button"
-                className={`kud__value${activeValue === v ? " is-active" : ""}`}
-                style={{ ["--v-c" as unknown as string]: valueColor(v) }}
-                onClick={() => setActiveValue(activeValue === v ? null : v)}
-              >
-                <span className="kud__value-dot" />
-                {v}
-                <span>{n}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load kudos" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
-        ) : rows === null ? (
-          <SkeletonRows />
-        ) : stats.total === 0 ? (
-          <OsEmptyView
-            context="list"
-            title="No kudos yet"
-            hint="Recognize a teammate and tie it to a company value."
-          />
-        ) : filtered.length === 0 ? (
-          <div className="kud__no-match"><Search /> No kudos match the current filter.</div>
-        ) : (
-          <>
-            {recent.length > 0 && (
-              <section className="kud__section">
-                <header className="kud__section-head">
-                  <span className="kud__section-tag"><Sparkles /> Recent (last 7 days)</span>
-                  <span className="kud__section-count">{recent.length}</span>
-                  <span className="kud__section-line" />
-                </header>
-                <div className="kud__feed">
-                  {recent.map((k) => <KudosCard key={k.id} k={k} />)}
-                </div>
-              </section>
-            )}
-            {older.length > 0 && (
-              <section className="kud__section">
-                <header className="kud__section-head">
-                  <span className="kud__section-tag"><CalendarIcon /> Earlier</span>
-                  <span className="kud__section-count">{older.length}</span>
-                  <span className="kud__section-line" />
-                </header>
-                <div className="kud__feed">
-                  {older.map((k) => <KudosCard key={k.id} k={k} />)}
-                </div>
-              </section>
-            )}
-          </>
-        )}
       </div>
+
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={200} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label="Kudos actions">
+            <MenuItem icon={Link2} label="Copy link" onClick={() => {
+              const id = menu.k.id; setMenu(null);
+              void navigator.clipboard.writeText(`${window.location.origin}/kudos#kudos-${id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
+            }} />
+            {menu.k.canDelete ? (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={Trash2} destructive label="Delete" onClick={() => { const k = menu.k; setMenu(null); void remove(k); }} />
+              </>
+            ) : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
+      {giveOpen ? <KudosModal open preselectedUserId={giveTo} onClose={closeGive} onGiven={onGiven} /> : null}
     </>
   );
 }
 
-function KudosCard({ k }: { k: ApiKudos }) {
-  const giverColor = k.giver ? avColor(k.giver.id) : "var(--os-ink-3)";
-  const receiverColor = k.receiver ? avColor(k.receiver.id) : "var(--os-ink-3)";
-  const vColor = k.companyValue ? valueColor(k.companyValue) : "var(--os-c-red)";
+/** The message, up to four lines, then "Show more". */
+function Message({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280 || text.split("\n").length > 4;
   return (
-    <article className="kud__card" style={{ ["--c-c" as unknown as string]: vColor }}>
-      <header className="kud__card-head">
-        <span className="kud__card-av" style={{ background: giverColor }}>{initials(k.giver?.firstName, k.giver?.lastName)}</span>
-        <div className="kud__card-flow">
-          <span className="kud__card-from">{fullName(k.giver)}</span>
-          <Heart />
-          <span className="kud__card-to">{fullName(k.receiver)}</span>
-          {k.receiver?.department?.name && <span className="kud__card-dept">· {k.receiver.department.name}</span>}
-        </div>
-        <span className="kud__card-av" style={{ background: receiverColor }}>{initials(k.receiver?.firstName, k.receiver?.lastName)}</span>
-      </header>
-      <p className="kud__card-msg">{k.message}</p>
-      <footer className="kud__card-foot">
-        {k.companyValue && (
-          <span className="kud__card-value"><Trophy /> {k.companyValue}</span>
-        )}
-        {k.reactionCounts.length > 0 && (
-          <div className="kud__card-reactions">
-            {k.reactionCounts.slice(0, 5).map((r) => (
-              <span key={r.emoji} className={`kud__card-reaction${k.myReactions.includes(r.emoji) ? " is-mine" : ""}`}>
-                {r.emoji} {r.count}
-              </span>
-            ))}
-            {k.reactionCounts.length > 5 && <span className="kud__card-reaction">+{k.reactionCounts.length - 5}</span>}
-          </div>
-        )}
-        <span className="kud__card-time">{relativeDate(k.createdAt)}</span>
-        <ChevronRight className="kud__card-arrow" />
-      </footer>
-    </article>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Heart; label: string; value: string; sub: string }) {
-  return (
-    <div className="kud__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="kud__kpi-accent" aria-hidden="true" />
-      <div className="kud__kpi-row">
-        <div className="kud__kpi-icon"><Icon /></div>
-        <div className="kud__kpi-label">{label}</div>
-      </div>
-      <div className="kud__kpi-value">{value}</div>
-      <div className="kud__kpi-sub">{sub}</div>
+    <div className="mt-2 ps-9">
+      <p className={`m-0 whitespace-pre-wrap text-row text-ink ${open || !long ? "" : "line-clamp-4"}`}>{text}</p>
+      {long ? (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-1 text-sm font-medium text-brand-deep hover:underline">{open ? "Show less" : "Show more"}</button>
+      ) : null}
     </div>
   );
 }
