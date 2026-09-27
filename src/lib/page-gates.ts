@@ -65,6 +65,23 @@ export function isManagerLevel(accessLevel: string): boolean {
 }
 
 /**
+ * Is this session on the legacy manager tier (HR included)? The one reader
+ * of that signal for the Phase 6 culture and review-cycle create rules
+ * (src/lib/people/culture-gate.ts, review-cycle-access.ts), which keep the
+ * tier that could create yesterday alongside the engine's facts (reports,
+ * People team, Admin), so nobody loses a create path they had. Pass the
+ * request's session when the caller already has it; with none it reads the
+ * current one.
+ */
+export async function sessionOnLegacyManagerTier(session?: unknown): Promise<boolean> {
+  const s = (session ?? (await getServerSession(authOptions))) as
+    | { user?: { accessLevel?: string | null } }
+    | null
+    | undefined;
+  return legacyIsManagerLevel(s?.user?.accessLevel ?? null);
+}
+
+/**
  * Goals LIST gate. Any signed-in member may open /okrs; the rows themselves
  * are filtered three-door by GET /api/okrs. The page gate's job is only
  * "signed in, org resolved".

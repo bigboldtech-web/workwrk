@@ -65,7 +65,7 @@ export default async function TeamKpiReviewsPage({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
-        {view === "record" ? <RecordNumbers embedded /> : <KpiReviewsClient pending={pending} acted={acted} />}
+        {view === "record" ? <RecordNumbers embedded period={typeof sp.period === "string" ? sp.period : undefined} /> : <KpiReviewsClient pending={pending} acted={acted} />}
       </div>
     </div>
   );

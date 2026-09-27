@@ -13,7 +13,7 @@
  *
  * Period toggle (top): week / month / quarter — the review CADENCE. The
  * KPIRecord.period storage key is always the canonical "YYYY-MM" month key
- * (see periodKey below): goals/KR derivation reads only canonical keys.
+ * (src/lib/kpi-period.ts): goals/KR derivation reads only canonical keys.
  *
  * Reads:
  *   GET /api/users?managerId=me
@@ -32,6 +32,7 @@ import { OsPageHeader } from "@/components/layout/os/page-header";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { getScoringBands, bandFor, DEFAULT_SCORING_BANDS, type ScoringBand } from "@/lib/review-cadence";
+import { kpiPeriodLabel, resolveKpiPeriod } from "@/lib/kpi-period";
 
 /* localStorage-backed drafts so unsaved manager edits survive a refresh.
  * Keyed per subject+period. Cleared once the draft is saved server-side. */
@@ -74,17 +75,8 @@ function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] 
  * now land on the month they fall in — a weekly review simply updates the
  * current month's reading in place (POST /api/kpi-records upserts on
  * kpiId+userId+period). Historical W/Q rows are left untouched; derivation
- * already ignores them.
+ * already ignores them. The key and its label come from src/lib/kpi-period.ts.
  */
-function periodKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-/** Human label for the current review month, e.g. "September 2026". */
-function monthLabel(): string {
-  return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
 
 // `score` here is already direction-adjusted (previewScore below), so a
 // high value is always good — no per-direction inversion.
@@ -141,7 +133,7 @@ type SubjectState = {
  * URL 308s there, spec-goals section 0). `embedded` drops the page header,
  * which the host page owns.
  */
-export default function ReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
+export default function ReviewPage({ embedded = false, period }: { embedded?: boolean; period?: string } = {}) {
   const [reports, setReports] = useState<ApiUser[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [subjectMap, setSubjectMap] = useState<Map<string, SubjectState>>(new Map());
@@ -151,8 +143,10 @@ export default function ReviewPage({ embedded = false }: { embedded?: boolean } 
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
-  const period$ = periodKey();
-  const monthLbl = monthLabel();
+  // The month this view records into: the one the URL carried (a valid,
+  // not-future month), else the current month (src/lib/kpi-period.ts).
+  const period$ = resolveKpiPeriod(period);
+  const monthLbl = kpiPeriodLabel(period$);
 
   // Org scoring bands drive the score-chip color + legend (set in
   // Settings → Scoring & reviews).

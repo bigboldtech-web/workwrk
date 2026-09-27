@@ -40,9 +40,10 @@ export async function chainOf(userId: string): Promise<string[]> {
  * that could start one yesterday (its cycle is clipped to its chain at
  * launch, so a tier with no reports launches for nobody).
  */
-export async function mayStartReviewCycles(session: { user?: { id?: string; accessLevel?: string | null } } | null): Promise<boolean> {
-  const { legacyIsManagerLevel } = await import("@/lib/access/legacy-levels");
-  if (legacyIsManagerLevel(session?.user?.accessLevel)) return true;
+export async function mayStartReviewCycles(session: { user?: Record<string, unknown> } | null): Promise<boolean> {
+  // The legacy tier through the one reader of it (page-gates).
+  const { sessionOnLegacyManagerTier } = await import("@/lib/page-gates");
+  if (session?.user && (await sessionOnLegacyManagerTier(session))) return true;
   const v = await viewerFromSession();
   if (!v) return false;
   if (v.orgRole === "GUEST") return false;

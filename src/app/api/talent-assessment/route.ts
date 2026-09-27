@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -76,8 +77,11 @@ async function autoPlaceFromScores(
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
   const isOrgWide = scope.ids === null;
-  const where: any = { organizationId: orgId, period };
-  where.userId = scope.ids === null ? { not: callerId } : { in: scope.ids };
+  const where: Prisma.TalentAssessmentWhereInput = {
+    organizationId: orgId,
+    period,
+    userId: scope.ids === null ? { not: callerId } : { in: scope.ids },
+  };
   const assessments = await prisma.talentAssessment.findMany({ where, select: { userId: true } });
   {
     const assessedUserIds = new Set(assessments.map((a) => a.userId));

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GoalAudiencePicker, type AudienceEntry } from "@/components/okrs/goal-audience-picker";
 import { GoalOwnerPicker } from "@/components/okrs/goal-owner-picker";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { PersonRef } from "@/components/board-view/assignee-picker";
 
 export type GoalLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
@@ -41,13 +42,6 @@ const CADENCE_OPTIONS: { value: Cadence; label: string }[] = [
   { value: "MONTHLY", label: "Monthly" },
   { value: "NONE", label: "None" },
 ];
-
-// Mirrors isManager() server-side (api-helpers): only these levels may
-// assign goals to other people or set non-INDIVIDUAL levels — the API
-// enforces it regardless, this just keeps the UI honest.
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
-]);
 
 /** Everything the modal needs to open pre-filled in edit mode. */
 export interface EditableGoal {
@@ -87,7 +81,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
   const isEdit = Boolean(goal);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isManagerViewer = MANAGER_LEVELS.has(accessLevel);
+  // The one shared ladder (Phase 6: this file carried its own MANAGER_LEVELS
+  // copy). It is exactly the isManager() tier POST and PATCH /api/okrs ask
+  // before they accept an owner or a non-INDIVIDUAL level, so the modal
+  // never offers a choice the save would silently drop.
+  const isManagerViewer = legacyIsManagerLevel(accessLevel);
 
   const [title, setTitle] = useState(goal?.title ?? "");
   const [description, setDescription] = useState(goal?.description ?? "");

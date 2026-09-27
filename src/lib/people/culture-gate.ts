@@ -18,7 +18,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
 import { candorInvitedFor, surveyTargetedFor } from "./teams-counts";
 
 export interface CultureGateResult {
@@ -28,19 +28,24 @@ export interface CultureGateResult {
   organiser: boolean;
 }
 
-/** The create rule, one place: the legacy manager tier, the People team, Owner or Admin. */
-export function isCultureOrganiser(v: { accessLevel: string | null | undefined; orgRole: string; peopleTeam?: boolean }): boolean {
-  return legacyIsManagerLevel(v.accessLevel) || v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true;
+/**
+ * The create rule, one place: the legacy manager tier (isManager, the same
+ * predicate POST /api/candor asks), the People team, Owner or Admin.
+ */
+export function isCultureOrganiser(v: { managerTier: boolean; orgRole: string; peopleTeam?: boolean }): boolean {
+  return v.managerTier || v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true;
 }
+
+type SessionLike = { user?: Record<string, unknown> } | null;
 
 export async function cultureGate(key: "kudos" | "candor" | "surveys", callbackUrl: string): Promise<CultureGateResult> {
   const viewer = await viewerFromSession();
   if (!viewer) redirect(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   // Guests never reach the Teams hub (access 2.3).
   if (viewer.orgRole === "GUEST") notFound();
-  const session = (await getServerSession(authOptions)) as { user?: { accessLevel?: string | null } } | null;
+  const session = (await getServerSession(authOptions)) as SessionLike;
   const organiser = isCultureOrganiser({
-    accessLevel: session?.user?.accessLevel,
+    managerTier: await sessionOnLegacyManagerTier(session),
     orgRole: viewer.orgRole,
     peopleTeam: viewer.peopleTeam,
   });
@@ -70,9 +75,9 @@ export async function cultureGate(key: "kudos" | "candor" | "surveys", callbackU
  * legacy manager tier first (no extra query), then the engine's Viewer for
  * the People team and Admin.
  */
-export async function cultureOrganiserFromSession(session: { user?: { accessLevel?: string | null } } | null): Promise<boolean> {
-  if (legacyIsManagerLevel(session?.user?.accessLevel)) return true;
+export async function cultureOrganiserFromSession(session: SessionLike): Promise<boolean> {
+  if (await sessionOnLegacyManagerTier(session)) return true;
   const v = await viewerFromSession();
   if (!v) return false;
-  return isCultureOrganiser({ accessLevel: session?.user?.accessLevel, orgRole: v.orgRole, peopleTeam: v.peopleTeam });
+  return isCultureOrganiser({ managerTier: false, orgRole: v.orgRole, peopleTeam: v.peopleTeam });
 }

@@ -57,6 +57,7 @@ import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { RemovePersonDialog } from "./remove-person-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import Link from "next/link";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
@@ -983,10 +984,18 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   };
   const role: AlignRole | null = alignment?.user.role ?? (user.role ? { ...user.role, description: null, level: null, department: null } : null);
 
+  // The top-bar crumb (spec-teams-people section 2): "Teams > My profile"
+  // for self, "Teams > Directory > {Name}" for anyone else, matching the
+  // sidebar row that lights for this URL (teamsActivePath).
+  const crumb = my
+    ? <Breadcrumb items={[{ label: "My profile" }]} />
+    : <Breadcrumb items={[{ label: "Directory", href: "/people" }, { label: fullName }]} />;
+
   /* ── peer: minimal directory card, nothing performance-shaped ──── */
   if (mode === "peer") {
     return (
       <div className="px-6 py-4 max-w-[720px] mx-auto">
+        {crumb}
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex items-start gap-4">
             <TeamAvatar name={fullName} avatar={user.avatar} size={64} />
@@ -1013,6 +1022,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
 
   return (
     <div className="px-6 py-4 space-y-5 max-w-[1100px] mx-auto">
+      {crumb}
       {/* ── identity header ──────────────────────────────────────── */}
       <div className="rounded-xl border border-zinc-200 bg-white p-5">
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-3">

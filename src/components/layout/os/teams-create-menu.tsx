@@ -25,7 +25,6 @@ import { MenuList, MenuItem, MenuSectionLabel } from "@/components/ui/menu";
 import { usePermission } from "@/hooks/use-permission";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useBoot } from "./boot-context";
-import { useRole } from "@/hooks/use-role";
 
 interface Row { label: string; description: string; icon: LucideIcon; href: string; settings?: boolean }
 
@@ -34,16 +33,16 @@ export function TeamsCreateMenu({ anchorRef, open, onClose }: { anchorRef: RefOb
   const panelRef = useRef<HTMLDivElement>(null);
   const { openSettings } = useSettingsNav();
   const { boot } = useBoot();
-  const { isManager: legacyManagerTier } = useRole();
   const canCreateKra = usePermission("kras", "create") === true;
 
   const v = boot.viewer;
   const isAdmin = v.orgRole === "OWNER" || v.orgRole === "ADMIN";
   const isGuest = v.orgRole === "GUEST";
-  // POST /api/reviews still asks the manager tier (isManager), so the row
-  // needs both the fact the page gate reads (reports) and that tier, or it
-  // would open a dialog whose submit 403s.
-  const canStartCycle = isAdmin || v.peopleTeam || (v.hasReports && legacyManagerTier);
+  // The create rule of Review cycles (spec-teams-people section 1): anyone
+  // with reports runs a cycle over their chain, the People team and Admin
+  // over the org. POST /api/reviews asks the same facts
+  // (mayStartReviewCycles), so the row never opens a dialog whose save 403s.
+  const canStartCycle = isAdmin || v.peopleTeam || v.hasReports;
 
   const sections = useMemo(() => {
     const out: { label: string; rows: Row[] }[] = [];
