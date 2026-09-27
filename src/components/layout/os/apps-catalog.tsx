@@ -24,13 +24,13 @@ import {
   Video, Trophy, Clock, Timer, AlarmClock, CircleUser, Frame, Mic,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
-  Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
+  Megaphone, Briefcase, Wrench, Building2, Hammer,
   Award, ThumbsUp, FileSpreadsheet, Star,
-  HardDrive, Boxes, Layers, Upload, ClipboardList, Import as ImportIcon,
+  Boxes, Layers, Upload, ClipboardList, Import as ImportIcon,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   ListChecks,
-  Activity, LayoutTemplate, Plug, LineChart,
+  Activity, LayoutTemplate, LineChart,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2, LayoutDashboard,
   Target, GaugeCircle, BookUser, Network, Heart,
@@ -44,6 +44,7 @@ import { NewSpaceDialog } from "./new-space-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { DocsSidebar } from "./docs-sidebar";
 import { TablesSidebar } from "./tables-sidebar";
+import { AiSidebar } from "./ai-sidebar";
 import { ShareDialog } from "@/components/access/share-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import {
@@ -55,6 +56,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { Dots } from "@/components/ui/dots";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useBoot, useViewerRole } from "./boot-context";
+import { appAudienceAllows } from "@/lib/nav/app-audience";
 import { useOsShell } from "./shell-context";
 import { readSidebarCards } from "@/lib/home-prefs";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
@@ -120,6 +122,14 @@ export interface CreateAction {
    * whose page would answer AppOff is a door locked from the inside.
    */
   requiredApps?: string[];
+  /**
+   * The row is an Ask AI entry point (spec-ai-automation 1.2 "gate: app ai"):
+   * it renders only while the shell's askAiVisible fact holds, which is the
+   * `ai` rail app on, AI features on for the workspace
+   * (settings.data.aiEnabled) and not a Guest. A hidden `ai` app alone is
+   * not enough here, since the hub survives AI off on its Automation rows.
+   */
+  requiresAskAi?: boolean;
   /**
    * Premium module app keys (lib/modules.ts) that must be ON for the org.
    * The Tables hub stays on the rail with the spreadsheets module off (Forms
@@ -870,7 +880,7 @@ function HomeSidebar() {
             </ul>
           ) : (
             <ul>
-              {/* Phase 85 — when the user has more than 6 favorites,
+              {/* Phase 85, when the user has more than 6 favorites,
                   group by kind with small uppercase sub-headers so the
                   list doesn't become a mystery soup. */}
               {/* ONE active row for the whole sidebar (sidebar-map section 0:
@@ -1410,72 +1420,10 @@ function CalendarSidebar() {
 
 /* ───────────────────────── AI sidebar ───────────────────────── */
 
-// sidebar-map section 3: the personal rows are Ask AI and Agents. History
-// and Prompts had no page behind them (/sidekick/history and
-// /sidekick/prompts 404), and a row with no destination is not a row.
-const AI_ROWS = [
-  { href: "/sidekick", label: "Ask AI", Icon: Sparkles },
-  { href: "/agents", label: "Agents", Icon: Bot },
-];
-const AI_AUTOMATION_ROWS = [
-  { href: "/automation/workflows", label: "Workflows", Icon: Workflow },
-  { href: "/automation/templates", label: "Templates", Icon: LayoutTemplate },
-  { href: "/automation/health", label: "Health", Icon: Activity },
-  { href: "/automation/usage", label: "Usage", Icon: GaugeCircle },
-  { href: "/automation/logs", label: "Logs", Icon: ScrollText },
-  { href: "/automation/connections", label: "Connections", Icon: Cable },
-];
-// APPS (sidebar-map section 3 rows 10 to 12): Marketplace and Build apps
-// re-parented from the Settings sidebar (ROUTE_HUB puts /build and /store in
-// this hub, and Settings is a takeover with no sidebar of its own, spec-shell
-// §1.2 rule 3), plus Integrations, whose only member-wide door used to be a
-// palette command. Icons per the map: Cable for Connections so it does not
-// share Plug with Integrations, Hammer for Build apps so it does not share
-// Wrench with the Teams Tools row.
-// The map says every Member browses Integrations, but /integrations/layout.tsx
-// still redirects below manager (requireManagerOrRedirect, a tools-misc gate
-// this phase does not touch), so the row renders for the viewers the route
-// serves and never lands anyone on a redirect.
-const AI_BUILD_ROWS: { href: string; label: string; Icon: LucideIcon; manager?: boolean }[] = [
-  { href: "/store", label: "Marketplace", Icon: ShoppingBag },
-  { href: "/integrations", label: "Integrations", Icon: Plug, manager: true },
-  { href: "/build", label: "Build apps", Icon: Hammer },
-];
-// One list across every section: the active row is resolved over every
-// candidate at once, so two sections can never both light up.
-const AI_ALL_ROWS = [...AI_ROWS, ...AI_AUTOMATION_ROWS, ...AI_BUILD_ROWS];
-
-function AiSidebar() {
-  const activeHref = useActiveRowHref(AI_ALL_ROWS);
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isManager = canAccessTier("manager", accessLevel);
-  return (
-    <>
-      <ul>
-        {AI_ROWS.map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-      {isManager ? (
-        <>
-          <SectionLabel>Automation</SectionLabel>
-          <ul>
-            {AI_AUTOMATION_ROWS.map((r) => (
-              <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-            ))}
-          </ul>
-        </>
-      ) : null}
-      <SectionLabel>Apps</SectionLabel>
-      <ul>
-        {AI_BUILD_ROWS.filter((r) => !r.manager || isManager).map((r) => (
-          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-        ))}
-      </ul>
-    </>
-  );
-}
+// The AI hub sidebar lives in ./ai-sidebar.tsx (spec-ai-automation 1.2): the
+// CHATS, AUTOMATION and APPS sections, gated on the APP_RULES audiences, with
+// the chat rows' "..." menu. The manager-tier AiSidebar that stood here is
+// retired with the tier.
 
 /* ───────────────────────── Teams sidebar ───────────────────────── */
 
@@ -1521,6 +1469,22 @@ function TeamsSidebar() {
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const isManagerTier = MANAGER_LEVELS.has(accessLevel);
   const isHrAdmin = canAccessTier("hr-admin", accessLevel);
+  // RESOURCING (sidebar-map section 5 rows 19 and 20), on the APP_RULES
+  // audiences rather than a tier: Tools for every Member, Assets for anyone
+  // with reports, the People team and Admin. A Member without reports reads
+  // their own kit on My profile > Assets.
+  const { boot } = useBoot();
+  const showTools = appAudienceAllows("tools", boot.viewer);
+  const showAssets = appAudienceAllows("assets", boot.viewer);
+  const resourcing = (showTools || showAssets) ? (
+    <>
+      <SectionLabel>Resourcing</SectionLabel>
+      <ul>
+        {showTools ? <NavItem href="/tools" Icon={Wrench} label="Tools" active={activeHref === "/tools"} /> : null}
+        {showAssets ? <NavItem href="/assets" Icon={Boxes} label="Assets" active={activeHref === "/assets"} /> : null}
+      </ul>
+    </>
+  ) : null;
 
   // THE MEMBER BRANCH IS ONE ROW, AND THAT IS THE PRODUCT'S OWN DOOR MODEL,
   // not an oversight. /people and /organization both call
@@ -1535,9 +1499,12 @@ function TeamsSidebar() {
   // reachable for everybody.
   if (!isManagerTier) {
     return (
-      <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
-      </ul>
+      <>
+        <ul>
+          <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
+        </ul>
+        {resourcing}
+      </>
     );
   }
 
@@ -1589,17 +1556,7 @@ function TeamsSidebar() {
           </ul>
         </>
       ) : null}
-      {isHrAdmin ? (
-        <>
-          {/* Re-parented from the Settings sidebar. Same hr-admin gate they
-              carried there. */}
-          <SectionLabel>Resourcing</SectionLabel>
-          <ul>
-            <NavItem href="/tools" Icon={Wrench} label="Tools" active={activeHref === "/tools"} />
-            <NavItem href="/assets" Icon={Boxes} label="Assets" active={activeHref === "/assets"} />
-          </ul>
-        </>
-      ) : null}
+      {resourcing}
     </>
   );
 }
@@ -1750,7 +1707,7 @@ export const APPS: AppEntry[] = [
     ] },
   { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick", Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
-    createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
+    createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1", requiredApps: ["ai"], requiresAskAi: true }] },
   { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk", Sidebar: TalkSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
@@ -1911,10 +1868,13 @@ export const APPS: AppEntry[] = [
   // Assets = physical equipment (laptops, monitors, keys, badges).
   // Both are per-employee provisioning surfaces: natural fit under
   // People. Tied to joiner (grant) and offboarding (revoke) flows.
-  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools", category: "People", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
-  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets", category: "People", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/assets", label: "Assets & equipment", Icon: Boxes }]) },
+  // Tools is every Member (APP_RULES.tools: the tools shared with them).
+  // Assets is anyone with reports, the People team and Admin; that audience
+  // is not a tier, so the rail config carries no tier here and the Teams
+  // sidebar row and the palette gate on appAudienceAllows instead. Both fold
+  // into the Teams hub, whose RESOURCING section renders their rows.
+  { key: "tools", label: "Tools", Icon: Wrench, defaultHref: "/tools", category: "People", Sidebar: TeamsSidebar },
+  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets", category: "People", Sidebar: TeamsSidebar },
 
   // ── Knowledge ───────────────────────────────────────────────
   //
@@ -1946,19 +1906,16 @@ export const APPS: AppEntry[] = [
   { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements",
     Sidebar: DocsSidebar, category: "Knowledge", requiredAccess: "hr-admin" },
   // ── Build & Extend ──────────────────────────────────────────
-  { key: "build", label: "Build apps", Icon: Hammer, defaultHref: "/build", category: "Build & Extend",
-    Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },
-  { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store", category: "Build & Extend",
-    Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },
-  { key: "automation", label: "Automation", Icon: Workflow, defaultHref: "/automation/workflows", category: "Build & Extend", requiredAccess: "manager",
-    Sidebar: linksSidebar([
-      { href: "/automation/workflows",   label: "Workflows",   Icon: Workflow },
-      { href: "/automation/templates",   label: "Templates",   Icon: LayoutTemplate },
-      { href: "/automation/health",      label: "Health",      Icon: Activity },
-      { href: "/automation/usage",       label: "Usage",       Icon: GaugeCircle },
-      { href: "/automation/logs",        label: "Logs",        Icon: ScrollText },
-      { href: "/automation/connections", label: "Connections", Icon: Plug },
-    ]) },
+  // Build apps is Owner and Admin (APP_RULES.build), so the tier keeps the
+  // palette from offering it to a Member who would get the in-shell 404.
+  // Both fold into the AI hub, whose sidebar renders their rows.
+  { key: "build", label: "Build apps", Icon: Hammer, defaultHref: "/build", category: "Build & Extend", requiredAccess: "org-admin", Sidebar: AiSidebar },
+  { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store", category: "Build & Extend", Sidebar: AiSidebar },
+  // The KEY stays (the Apps config hides and floors it, the palette prints
+  // it); its linksSidebar and its manager tier are gone. /automation/* folds
+  // into the AI hub, whose sidebar owns the six rows (spec-ai-automation
+  // 1.2), and APP_RULES.automation says every Member reads.
+  { key: "automation", label: "Automation", Icon: Workflow, defaultHref: "/automation/workflows", category: "Build & Extend", Sidebar: AiSidebar },
 
   // ── Workspace ───────────────────────────────────────────────
   // alwaysPinned: the escape hatch. If an admin could hide or floor

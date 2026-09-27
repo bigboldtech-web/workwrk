@@ -1,4 +1,4 @@
-// ENFORCED_AT — where each action, toggle, rule and cap is actually enforced.
+// ENFORCED_AT, where each action, toggle, rule and cap is actually enforced.
 //
 // Spec 1.1 principle 7 ("nothing is decorative") and invariant 21: every
 // member of the Action union, every OrgAction, every toggle key, every rule
@@ -155,7 +155,7 @@ const OBJECT_ENFORCEMENT: Record<`object.${ObjectType}`, string> = {
   "object.survey": "api/surveys/[id]",
   "object.announcement": "api/announcements/[id]",
   "object.review_cycle": "api/review-cycles/[id]",
-  "object.automation": "automation/hub-access.ts, api/automation/workflows/[id]",
+  "object.automation": "automation/gate.ts, api/automation/workflows/[id]",
   "object.form": "api/forms/[id]",
   "object.template": "api/template-center/[id]",
   "object.timesheet": "api/timesheets/[id] (resolves to person)",

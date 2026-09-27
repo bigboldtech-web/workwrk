@@ -171,6 +171,7 @@ export function Picker({
     }
   }
   const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
   const instanceId = useId();
 
@@ -283,16 +284,31 @@ export function Picker({
   // and a tab out of the popover lands somewhere sane.
   useEffect(() => {
     if (!open || autoFocusList === false) return;
-    if (showSearch) return; // the search input carries its own autoFocus
+    if (showSearch) return; // the search input takes focus below
     const el = listRef.current;
     if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
   }, [open, showSearch, autoFocusList]);
 
-  // Keep the active row on screen for a keyboard user.
+  // The search input takes focus without scrolling: the `autoFocus`
+  // attribute scrolls the page to the input, which nudged a page that fit
+  // its viewport by a few pixels every time a picker opened below the fold.
+  useEffect(() => {
+    if (!open || !showSearch) return;
+    searchRef.current?.focus({ preventScroll: true });
+  }, [open, showSearch]);
+
+  // Keep the active row on screen for a keyboard user. Only the listbox
+  // scrolls: scrollIntoView would also scroll every ancestor, so a popover
+  // that opened below the fold dragged the whole page up with it.
   useEffect(() => {
     if (!open) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-picker-idx="${activeIdx}"]`);
-    el?.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    const el = list?.querySelector<HTMLElement>(`[data-picker-idx="${activeIdx}"]`);
+    if (!list || !el) return;
+    const lb = list.getBoundingClientRect();
+    const eb = el.getBoundingClientRect();
+    if (eb.top < lb.top) list.scrollTop -= lb.top - eb.top;
+    else if (eb.bottom > lb.bottom) list.scrollTop += eb.bottom - lb.bottom;
   }, [activeIdx, open]);
 
   if (!open) return null;
@@ -328,7 +344,7 @@ export function Picker({
           <div className="mb-1 flex h-9 items-center gap-2 border-b border-line px-2">
             <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
             <input
-              autoFocus
+              ref={searchRef}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);

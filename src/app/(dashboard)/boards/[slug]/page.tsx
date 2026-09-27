@@ -41,6 +41,7 @@ import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { parseBoardSchema } from "@/lib/field-catalog";
+import { ArrivalNotice } from "@/components/layout/os/arrival-notice";
 import { canSaveView } from "@/lib/work/view-visibility";
 import { LIST_LINK_CANVAS_LIVE } from "@/lib/list-links";
 import { listReader } from "@/lib/list-links-server";
@@ -207,6 +208,9 @@ export default async function BoardPage(props: {
 
   return (
     <div className="flex flex-col h-full bg-app">
+      {/* A redirect that lands here with ?notice= (the legacy /marketing/{id}
+          resolver, for a campaign that was never moved) gets its one toast. */}
+      <ArrivalNotice />
       {/* Location lives in the navy bar and nowhere else (principle 3). The
           in-page Space / Folder / Board row is gone; the crumbs it printed are
           declared here instead, so the bar finally names the Space, the Folder

@@ -1,84 +1,83 @@
 // GET /api/automation/runs
 //
-// Execution log list, newest first. Filters: ?workflowId= &status=
-// (comma-separated AutomationRunStatus values) &from= &to= (ISO dates on
-// createdAt) &take= (default 50, hard cap 100). Payloads are omitted
-// here; the run detail endpoint returns them with steps.
+// The run log, one page at a time (spec-ai-automation /automation/logs).
+// Every parameter is optional and matches a Logs URL parameter:
+//   ?status=     view words or stored statuses, comma separated
+//   ?workflowId= ?severity= ?record= (task, kpi, kudos, schedule)
+//   ?days=7|30|90, or an exact ?from= ?to= (which wins)
+//   ?sort=newest|oldest  ?take= (default 50, at most 100)  ?cursor=<run id>
+// Returns { runs, total, nextCursor }. Each run carries its workflow's name,
+// the trigger as words (`triggerName`) and the record it happened to
+// (`record`, or null when it cannot be shown: see run-records-server).
+// Payloads are never in the list; the run detail route returns them.
 
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
-
-const RUN_STATUSES = ["RUNNING", "SUCCESS", "FAILED", "PARTIAL", "SKIPPED"] as const;
-type RunStatus = (typeof RUN_STATUSES)[number];
-
-const MAX_TAKE = 100;
-const DEFAULT_TAKE = 50;
-
-function parseDate(raw: string | null): Date | null | "invalid" {
-  if (!raw) return null;
-  const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? "invalid" : d;
-}
+import { requireAutomation } from "@/lib/automation/gate";
+import { parseRunQuery, runOrderBy, runWhere } from "@/lib/automation/run-query";
+import { resolveRunRecords } from "@/lib/automation/run-records-server";
+import { triggerDisplayName } from "@/lib/automation/registry-triggers";
 
 export async function GET(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
-  const sp = req.nextUrl.searchParams;
+  const parsed = parseRunQuery(req.nextUrl.searchParams);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const q = parsed.query;
+  const where = runWhere(ctx.orgId, q) as Prisma.AutomationRunWhereInput;
 
-  const statuses = (sp.get("status") ?? "")
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-  for (const s of statuses) {
-    if (!RUN_STATUSES.includes(s as RunStatus)) {
-      return NextResponse.json({ error: `Invalid status: ${s}` }, { status: 400 });
-    }
+  // A cursor from another workspace (or a deleted run) restarts at page one
+  // instead of erroring.
+  let cursor: string | null = null;
+  if (q.cursor) {
+    const hit = await prisma.automationRun.findFirst({ where: { id: q.cursor, organizationId: ctx.orgId }, select: { id: true } });
+    cursor = hit?.id ?? null;
   }
 
-  const from = parseDate(sp.get("from"));
-  if (from === "invalid") return NextResponse.json({ error: "Invalid from date" }, { status: 400 });
-  const to = parseDate(sp.get("to"));
-  if (to === "invalid") return NextResponse.json({ error: "Invalid to date" }, { status: 400 });
+  const [rows, total] = await Promise.all([
+    prisma.automationRun.findMany({
+      where,
+      orderBy: runOrderBy(q) as Prisma.AutomationRunOrderByWithRelationInput[],
+      take: q.take + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        workflowId: true,
+        workflow: { select: { id: true, name: true } },
+        workflowVersionId: true,
+        triggerEventKey: true,
+        status: true,
+        severity: true,
+        recordType: true,
+        recordId: true,
+        userId: true,
+        errorMessage: true,
+        startedAt: true,
+        completedAt: true,
+        durationMs: true,
+        createdAt: true,
+      },
+    }),
+    prisma.automationRun.count({ where }),
+  ]);
+  const page = rows.slice(0, q.take);
+  const nextCursor = rows.length > q.take ? page[page.length - 1]?.id ?? null : null;
+  const records = await resolveRunRecords(ctx.viewer, ctx.orgId, ctx.isAdmin, page);
 
-  const takeRaw = Number.parseInt(sp.get("take") ?? "", 10);
-  const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), MAX_TAKE) : DEFAULT_TAKE;
-
-  const workflowId = sp.get("workflowId")?.trim() || null;
-
-  const where: Prisma.AutomationRunWhereInput = {
-    organizationId: ctx.orgId,
-    ...(workflowId ? { workflowId } : {}),
-    ...(statuses.length ? { status: { in: statuses as RunStatus[] } } : {}),
-    ...(from || to
-      ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
-      : {}),
-  };
-
-  const runs = await prisma.automationRun.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take,
-    select: {
-      id: true,
-      workflowId: true,
-      workflow: { select: { id: true, name: true } },
-      workflowVersionId: true,
-      triggerEventKey: true,
-      status: true,
-      severity: true,
-      recordType: true,
-      recordId: true,
-      userId: true,
-      errorMessage: true,
-      startedAt: true,
-      completedAt: true,
-      durationMs: true,
-      createdAt: true,
+  return NextResponse.json(
+    {
+      runs: page.map((r) => ({
+        ...r,
+        triggerName: triggerDisplayName(r.triggerEventKey),
+        record: records.record(r.recordType, r.recordId),
+      })),
+      total,
+      nextCursor,
+      restarted: Boolean(q.cursor && !cursor),
+      take: q.take,
     },
-  });
-
-  return NextResponse.json({ runs, take });
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }

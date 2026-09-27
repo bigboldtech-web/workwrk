@@ -14,9 +14,15 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsShellContext } from "@/components/layout/os/shell-context";
 import { useHubBack } from "@/components/layout/os/use-hub-back";
 
-export function NotFoundView() {
+/**
+ * `back` names a nearer landing when the hub default would strand someone (a
+ * stale automation link goes back to Workflows, not to the hub's first page).
+ * It changes only where the back link goes, never what the page says.
+ */
+export function NotFoundView({ back: nearer }: { back?: { fallbackHref: string; label: string } } = {}) {
   const shell = useContext(OsShellContext);
-  const back = useHubBack();
+  const hubBack = useHubBack();
+  const back = nearer ?? hubBack;
   return (
     <>
       <Breadcrumb items={[{ label: "Not found" }]} />

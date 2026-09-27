@@ -54,7 +54,7 @@ export default function AuthLayout({
 
           <p className="text-slate-600 mt-5 leading-relaxed text-base">
             Forms feed Tables. Tables embed in Docs. Docs link to Tasks.
-            Sidekick AI spins up any of them in seconds. No more 14 disconnected SaaS tools.
+            Ask AI helps you start any of them. No more 14 disconnected SaaS tools.
           </p>
 
           {/* Primitives showcase — directly tied to what the app actually does */}

@@ -512,7 +512,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/talk-gate.ts",
   "src/lib/auth-helpers.ts",
   "src/lib/auth.ts",
-  "src/lib/automation/hub-access.ts",
   "src/lib/automation/registry-actions.ts",
   "src/lib/automation/usage.ts",
   "src/lib/board.ts",

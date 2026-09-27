@@ -20,7 +20,10 @@ export function useHubBack(): { fallbackHref: string; label: string; hub: Return
   // A hub this viewer does not have (a Member on a Teams URL) would send them
   // to a second 404, so the button falls back to Work instead.
   const resolved = resolveHub(pathname);
-  const visible = !shell || resolved === "settings" || shell.railApps.some((a) => a.key === resolved);
+  // A plain Member holds the Teams hub's Member branch (My profile, Tools)
+  // without its pill, and its landing is their own career home.
+  const visible = !shell || resolved === "settings" || shell.railApps.some((a) => a.key === resolved)
+    || (resolved === "teams" && shell.memberTeamsHub);
   const hub = visible ? resolved : "home";
   const fallbackHref = shell ? shell.hubHref(hub) : hubDefaultHref(hub);
   return { fallbackHref, label: HUB_LABELS[hub], hub };

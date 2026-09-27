@@ -9,6 +9,7 @@
 // the installations API authz; everyone else sees it read-only.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Boxes, Loader2 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -23,6 +24,26 @@ export default function ModulesSettingsPage() {
   // Active product slugs; null until the installations fetch answers.
   const [active, setActive] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  // What people here asked for (Request this, Request a connector, Suggest
+  // an app), as two real numbers. The list itself lives on Settings > Apps
+  // (/settings/apps#requests), which this page is an alias of; a count that
+  // did not load is not shown rather than shown as zero.
+  const [asked, setAsked] = useState<{ requests: number; suggestions: number } | null>(null);
+  useEffect(() => {
+    if (!canEdit) return;
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/integrations/requests", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/marketplace/requests", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([a, b]) => {
+        if (cancelled || !a || !b) return;
+        setAsked({ requests: typeof a.total === "number" ? a.total : 0, suggestions: typeof b.total === "number" ? b.total : 0 });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canEdit]);
 
   useEffect(() => {
     fetch("/api/products/installations")
@@ -83,6 +104,14 @@ export default function ModulesSettingsPage() {
         Premium modules extend your workspace. Turn one on to add it to every member&apos;s rail.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
+      {asked ? (
+        <p className="-mt-3 mb-5 max-w-2xl text-sm text-zinc-500">
+          {asked.requests + asked.suggestions === 0
+            ? "Nobody here has requested a connector or suggested an app yet."
+            : `People here have sent ${asked.requests} connector ${asked.requests === 1 ? "request" : "requests"} and ${asked.suggestions} app ${asked.suggestions === 1 ? "suggestion" : "suggestions"}.`}{" "}
+          <Link href="/settings/apps#requests" className="font-medium text-[#0073EA] hover:underline">Read them on Apps</Link>
+        </p>
+      ) : null}
 
       {active === null ? (
         <div className="flex items-center gap-2 text-base text-zinc-400">

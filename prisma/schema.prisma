@@ -117,6 +117,8 @@ model Organization {
   dashboards           Dashboard[]
   // Phase 5b: scheduled email reports of a dashboard or a saved view.
   reportSchedules      ReportSchedule[]
+  integrationRequests  IntegrationRequest[]
+  appSuggestions       AppSuggestion[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
   docs                 Doc[]
@@ -6726,6 +6728,56 @@ model AutomationTemplate {
   updatedAt    DateTime           @updatedAt
 
   @@index([isActive, category])
+}
+
+/// Phase 7 (spec-tools-misc 2.6). One person asking for one connector, so the
+/// "Request this" count on /integrations counts people, not clicks. `key` is a
+/// connector key from src/lib/integrations/registry.ts. userId has no
+/// relation on purpose, like addedById: offboarding a person must not erase
+/// the demand they registered.
+model IntegrationRequest {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String
+  userId         String
+  note           String?      @db.Text
+  notify         Boolean      @default(true)
+  /// "Request a connector" free text: the name the person typed, kept as
+  /// typed. `key` holds only its slug (custom:hub-spot), which is what the
+  /// count groups on; without this the catalogue and Settings could only
+  /// show the slug back. Null on a catalogue request, whose name is the
+  /// registry's. Written and read through raw SQL until the client is
+  /// regenerated, so a database without the column still answers.
+  name           String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, key, userId])
+  @@index([organizationId, key])
+}
+
+/// Phase 7 (spec-tools-misc 2.5). "Suggest an app" on Marketplace: what a
+/// person wants WorkwrK to do. Read as a count by Owners and Admins. userId
+/// has no relation for the same reason as IntegrationRequest.
+model AppSuggestion {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  text           String       @db.Text
+  notify         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+/// One row per cron endpoint, stamped on every tick. The automation trigger
+/// catalog reads the "automation-schedule" row to say whether the two time
+/// triggers (a task's date arrives, every time period) are actually firing,
+/// so a workspace never sees "Active" on an automation its host never runs.
+model AutomationCronTick {
+  name       String   @id
+  lastTickAt DateTime
 }
 
 /// A person's grant on one table, canvas or form: the three node kinds that

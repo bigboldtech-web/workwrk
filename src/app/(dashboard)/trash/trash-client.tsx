@@ -21,7 +21,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CircleAlert, RotateCcw, Search } from "lucide-react";
+import {
+  Box, Boxes, CircleAlert, ClipboardList, FileText, Files, FolderOpen, Hammer, LayoutList, Layers, ListChecks, PenTool, RotateCcw,
+  Search, ScrollText, ShieldCheck, Table2, Wrench, CalendarDays, type LucideIcon,
+} from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ViewTab } from "@/components/ui/view-tabs";
@@ -35,6 +38,8 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { useShortcut } from "@/lib/shortcuts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, type DateFormatPrefs } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 import {
   TRASH_SORTS,
@@ -45,6 +50,16 @@ import {
   type TrashTab,
   type TrashTypeKey,
 } from "@/lib/trash-view";
+
+// The glyph each type carries in the Type cell (spec-tools-misc 2.12 asks
+// for Wrench, Boxes and Hammer on Tool, Asset and App; the rest use the
+// same glyphs those objects wear everywhere else).
+const TYPE_GLYPH: Record<TrashTypeKey, LucideIcon> = {
+  space: Layers, folder: FolderOpen, list: LayoutList, task: ListChecks,
+  doc: FileText, canvas: PenTool, table: Table2, form: ClipboardList, file: Files,
+  sop: ScrollText, policy: ShieldCheck, contract: ScrollText, template: Box, meeting: CalendarDays,
+  tool: Wrench, asset: Boxes, app: Hammer,
+};
 
 interface TrashRow {
   id: string;
@@ -97,6 +112,7 @@ export function TrashClient({
   initialQuery: string;
   canPurge: boolean;
 }) {
+  const datePrefs = useDatePrefs();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const prompt = usePrompt();
@@ -587,7 +603,10 @@ export function TrashClient({
                       {/* Not a link: a deleted object has no page to open. */}
                       <span className="min-w-0 flex-1 truncate font-medium text-ink">{r.name}</span>
                       <span className="w-20 shrink-0">
-                        <span className="inline-flex h-[22px] items-center rounded-md bg-active px-1.5 text-xs font-medium text-ink-2">{r.typeLabel}</span>
+                        <span className="inline-flex h-[22px] items-center gap-1 rounded-md bg-active px-1.5 text-xs font-medium text-ink-2">
+                          {r.type ? (() => { const G = TYPE_GLYPH[r.type]; return <G className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />; })() : null}
+                          {r.typeLabel}
+                        </span>
                       </span>
                       <span className="w-44 shrink-0 truncate text-sm text-ink-2">{r.location}</span>
                       <span className="flex w-40 shrink-0 items-center gap-1.5 truncate text-sm text-ink-2">
@@ -598,7 +617,7 @@ export function TrashClient({
                           </>
                         ) : null}
                       </span>
-                      <span className="w-24 shrink-0 text-xs text-ink-2">{relativeDate(r.deletedAt)}</span>
+                      <span className="w-24 shrink-0 text-xs text-ink-2">{relativeDate(r.deletedAt, datePrefs)}</span>
                       {tab === "deleted" ? (
                         <span className={`inline-flex w-24 shrink-0 items-center gap-1 text-xs ${soon ? "text-danger-text" : "text-ink-2"}`}>
                           {soon ? <CircleAlert className="h-3 w-3 shrink-0" aria-hidden /> : null}
@@ -717,14 +736,14 @@ export function TrashClient({
 }
 
 /** Short and absolute past a week: "3 days ago" beats "on 12 Aug" and vice versa. */
-function relativeDate(iso: string): string {
+function relativeDate(iso: string, prefs: DateFormatPrefs): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
   const days = Math.floor((Date.now() - t) / 86_400_000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
-  return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return formatDate(t, prefs, "date");
 }
 
 function TableSkeleton() {

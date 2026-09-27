@@ -174,8 +174,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const confirm = useConfirm();
   const fmt = useFormat();
   const { boot } = useBoot();
-  const { prefs, patchPrefs, railApps, bumpRowVersion, layerCount } = useOsShell();
-  const aiEntitled = railApps.some((a) => a.key === "ai");
+  const { prefs, patchPrefs, askAiVisible, bumpRowVersion, layerCount } = useOsShell();
+  const aiEntitled = askAiVisible;
 
   /* ── identity ── */
   const [sopId, setSopId] = useState<string | null>(initialSopId);

@@ -1282,10 +1282,14 @@ function ListView({
   };
 
   return (
-    <div className="os-row overflow-hidden rounded-lg border border-line bg-raised">
+    // The title keeps at least 200px and the table scrolls sideways when the
+    // columns do not fit (the Ask AI panel open beside it, a narrow window),
+    // instead of squeezing every task to its first four letters.
+    <div className="os-row overflow-x-auto overflow-y-hidden rounded-lg border border-line bg-raised">
+      <div className="min-w-fit">
       <div className="flex h-9 items-center gap-3 border-b border-line bg-subtle px-4 text-xs font-medium uppercase tracking-wide text-ink-2">
         <span className="w-[18px] shrink-0" />
-        <span className="min-w-0 flex-1">Title</span>
+        <span className="min-w-[200px] flex-1">Title</span>
         {columns.map((c) => (
           <span
             key={c.key}
@@ -1358,7 +1362,7 @@ function ListView({
               <button
                 type="button"
                 onClick={() => openTask(router, r.id)}
-                className="min-w-0 flex-1 truncate text-start text-ink hover:underline"
+                className="min-w-[200px] flex-1 truncate text-start text-ink hover:underline"
                 style={{ fontWeight: r.priority === "URGENT" ? 500 : 400 }}
               >
                 {r.title}
@@ -1383,6 +1387,7 @@ function ListView({
           ) : null}
         </div>
       ))}
+      </div>
     </div>
   );
 }

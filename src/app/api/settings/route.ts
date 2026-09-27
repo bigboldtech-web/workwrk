@@ -14,6 +14,7 @@ import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
+import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
 /** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
@@ -75,7 +76,11 @@ export async function GET() {
         industry: settings.industry || "",
         teamSize: settings.teamSize || "",
         timezone: settings.timezone || "Asia/Kolkata",
-        currency: settings.currency || "INR",
+        // ONE fallback for an unset currency, shared with GET /api/boot (and
+        // through it Assets, the asset dialog and the marketing importer).
+        // This line used to say "INR" while boot said USD, so Settings >
+        // Locale showed rupees for an org whose register priced in dollars.
+        currency: orgCurrencyFromSettings(settings),
         fiscalYearStart: settings.fiscalYearStart || 4,
         language: settings.language || "en",
         reviewFrequency: settings.reviewFrequency || "QUARTERLY",

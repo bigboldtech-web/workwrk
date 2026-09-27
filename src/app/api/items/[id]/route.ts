@@ -64,6 +64,7 @@ import {
 import { decideContext, validateLinkedStatus } from "@/lib/list-links";
 import { linkedListsOf, listReader, readableItemsVia, type LinkRow, type ReadableList } from "@/lib/list-links-server";
 import { projectItemForViewer, redactFieldsForViewer } from "@/lib/board-items-view";
+import { BUILT_IN_FIELD_KEYS, fieldChanges } from "@/lib/automation/field-changes";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
 
@@ -749,6 +750,48 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           updatedAt: updated.updatedAt,
         },
       }).catch(() => {});
+    }
+
+    // "When a task field changes": one event per changed field (title,
+    // priority, dates, and the List's own fields), after the save landed.
+    // Built after the write so a refused save never fires it. Never throws.
+    try {
+      const listKeys = writer && !linkedCtx ? (await fieldsOf(currentBoardId)).map((f) => f.key) : [];
+      // Which fields the request touched, but the values the row now HOLDS
+      // (a recurrence re-time or a stripped field reports what was stored,
+      // not what was asked for).
+      const saved: Record<string, unknown> = { metadata: writer ? updated.metadata : undefined };
+      const stored = updated as unknown as Record<string, unknown>;
+      for (const key of BUILT_IN_FIELD_KEYS) if (key in parsed.data) saved[key] = stored[key];
+      const changes = fieldChanges(
+        { title: gate.item.title, priority: gate.item.priority, dueAt: gate.item.dueAt, startAt: gate.item.startAt, metadata: gate.item.metadata },
+        saved,
+        listKeys,
+      );
+      for (const ch of changes.slice(0, 20)) {
+        dispatchEvent({
+          organizationId: c.organizationId,
+          event: "task.field_changed",
+          payload: {
+            id: updated.id,
+            boardId: currentBoardId,
+            title: updated.title,
+            status: updated.status,
+            ownerId: updated.ownerId,
+            assigneeId: updated.ownerId,
+            priority: updated.priority,
+            dueAt: updated.dueAt,
+            startAt: updated.startAt,
+            field: ch.field,
+            value: ch.value,
+            previousValue: ch.previousValue,
+            actorId: c.userId,
+            updatedAt: updated.updatedAt,
+          },
+        }).catch(() => {});
+      }
+    } catch {
+      /* the save already landed; an event pipe never fails it */
     }
 
     // ── Inbox notifications ──────────────────────────────────────────

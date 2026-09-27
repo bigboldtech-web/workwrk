@@ -1,14 +1,24 @@
-// Shared asset types + display maps for the register page, form dialog,
-// assign dialog and row menu. Mirrors the Asset model enums in
-// prisma/schema.prisma (AssetType / AssetCondition / AssetStatus) and the
-// fields POST /api/assets + PATCH /api/assets/[id] accept.
+// The API row shape the register page, the drawer, the form dialog, the
+// assign dialog and the row menu share. The words (labels, tones, warranty
+// rule, sorts, scopes) live in src/lib/assets/asset-view.ts, pure and tested;
+// the old STATUS_HUE and CONDITION_HUE maps onto --os-c-* are gone (status is
+// a semantic StatusChip tone, condition a plain word).
 
-export type AssetCondition = "NEW" | "GOOD" | "FAIR" | "POOR" | "DAMAGED";
-export type AssetStatus = "AVAILABLE" | "ASSIGNED" | "IN_REPAIR" | "RETIRED" | "LOST";
-export type AssetType =
-  | "LAPTOP" | "DESKTOP" | "MONITOR" | "PHONE" | "TABLET"
-  | "KEYBOARD" | "MOUSE" | "HEADSET" | "WEBCAM"
-  | "CHAIR" | "DESK" | "ID_CARD" | "ACCESS_CARD" | "VEHICLE" | "OTHER";
+import type { AssetCondition, AssetStatus } from "@/lib/assets/asset-view";
+
+export type { AssetCondition, AssetStatus, AssetType, AssetSort, AssetGroup, AssetScope } from "@/lib/assets/asset-view";
+export {
+  ASSET_TYPES, ASSET_CONDITIONS, ASSET_STATUSES,
+  STATUS_LABEL, CONDITION_LABEL, typeLabel, personName, statusColor,
+} from "@/lib/assets/asset-view";
+
+export type ApiPerson = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  avatar?: string | null;
+  department?: { name?: string | null } | null;
+};
 
 export type ApiAsset = {
   id: string;
@@ -24,38 +34,26 @@ export type ApiAsset = {
   condition: AssetCondition;
   status: AssetStatus;
   notes?: string | null;
-  assignedTo?: { id: string; firstName?: string | null; lastName?: string | null } | null;
+  assignedAt?: string | null;
+  createdAt?: string;
+  assignedTo?: ApiPerson | null;
 };
 
-export const ASSET_TYPES: AssetType[] = [
-  "LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET",
-  "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM",
-  "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER",
-];
-
-export const ASSET_CONDITIONS: AssetCondition[] = ["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"];
-export const ASSET_STATUSES: AssetStatus[] = ["AVAILABLE", "ASSIGNED", "IN_REPAIR", "RETIRED", "LOST"];
-
-export const STATUS_HUE: Record<AssetStatus, string> = {
-  AVAILABLE: "var(--os-c-green)", ASSIGNED: "var(--os-c-blue)",
-  IN_REPAIR: "var(--os-c-orange)", RETIRED: "var(--os-c-darkgray)", LOST: "var(--os-c-red)",
-};
-export const STATUS_LABEL: Record<AssetStatus, string> = {
-  AVAILABLE: "Available", ASSIGNED: "Assigned", IN_REPAIR: "In repair", RETIRED: "Retired", LOST: "Lost",
-};
-export const CONDITION_HUE: Record<AssetCondition, string> = {
-  NEW: "var(--os-c-green)", GOOD: "var(--os-c-teal)",
-  FAIR: "var(--os-c-orange)", POOR: "var(--os-c-red)", DAMAGED: "var(--os-c-red)",
-};
-export const CONDITION_LABEL: Record<AssetCondition, string> = {
-  NEW: "New", GOOD: "Good", FAIR: "Fair", POOR: "Poor", DAMAGED: "Damaged",
+export type AssetsResponse = {
+  assets: ApiAsset[];
+  /** The server's count and sum over the whole filtered set, not the page. */
+  total: number;
+  totalValue: number;
+  page: number;
+  pageSize: number;
+  scope: "own" | "team" | "all";
+  scopes: string[];
+  scopeStripped: boolean;
+  canAdd: boolean;
+  canEdit: boolean;
+  canAssign: boolean;
+  canDelete: boolean;
 };
 
-export function typeLabel(t: string): string {
-  return t.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase());
-}
-
-export function personName(p?: { firstName?: string | null; lastName?: string | null } | null): string {
-  if (!p) return "";
-  return [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
-}
+/** The write rights the page threads into the row menu and the drawer. */
+export type AssetRights = Pick<AssetsResponse, "canEdit" | "canAssign" | "canDelete">;

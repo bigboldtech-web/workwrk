@@ -62,7 +62,7 @@ export default function ItemDetailPage() {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const { boot } = useBoot();
-  const { openSidekick } = useOsShell();
+  const { openSidekick, askAiVisible } = useOsShell();
   const { toast } = useOsToast();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
@@ -222,7 +222,9 @@ export default function ItemDetailPage() {
   }
 
   const statuses = board?.statuses?.length ? board.statuses : [...DEFAULT_STATUS_OPTIONS];
-  const aiOn = Boolean(boot.prefs?.modules?.activeAppKeys?.includes("ai"));
+  // "ai" was never a module key, so this read false for everyone and the
+  // task strip never offered Ask AI. The one shell fact decides now.
+  const aiOn = askAiVisible;
   const isWatching = Boolean(currentUserId && watcherIds.includes(currentUserId));
 
   // The menu's link flags come from the task's own Lists answer.

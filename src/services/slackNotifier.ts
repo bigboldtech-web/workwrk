@@ -123,6 +123,6 @@ export function notifySignalDigest(params: {
   const list = topTargets.slice(0, 3).map((t) => `• ${t}`).join("\n");
   return notifySlack({
     organizationId: params.organizationId,
-    text: `✦ *AI Engine · ${total} signal${total === 1 ? "" : "s"}* — ${counts.high} high / ${counts.med} med / ${counts.low} low\n${list}`,
+    text: `✦ *Ask AI · ${total} signal${total === 1 ? "" : "s"}*: ${counts.high} high / ${counts.med} med / ${counts.low} low\n${list}`,
   });
 }

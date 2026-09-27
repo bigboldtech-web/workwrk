@@ -97,7 +97,21 @@ function readWorkflow(settings: unknown): WorkflowConfig | null {
   if (!settings || typeof settings !== "object") return null;
   const w = (settings as Record<string, unknown>).workflow;
   if (!w || typeof w !== "object") return null;
-  return w as WorkflowConfig;
+  const raw = w as WorkflowConfig;
+  const rawStatuses = (raw as { statuses?: unknown }).statuses;
+  if (!Array.isArray(rawStatuses)) return raw;
+  // The wizard wrote each status as { key }, the seeded Space templates
+  // (prisma/seed-templates.ts) write the Board shape { value }. Read both:
+  // a status with neither is dropped, so a groupBy on the DONE keys never
+  // receives undefined (it threw for every Space made from a seeded
+  // template that has a DONE status).
+  const statuses = (rawStatuses as Array<Record<string, unknown>>)
+    .map((st) => {
+      const key = typeof st.key === "string" ? st.key : typeof st.value === "string" ? st.value : null;
+      return key ? ({ ...st, key } as WorkflowConfig["statuses"][number]) : null;
+    })
+    .filter((st): st is WorkflowConfig["statuses"][number] => st !== null);
+  return { ...raw, statuses };
 }
 
 /** Saved bookmarks off Space.settings.bookmarks (tolerant of any shape). */
@@ -316,7 +330,7 @@ export default async function SpacePage(props: {
           />
           <div className="flex-1" />
           <Link
-            href="/automation/workflows"
+            href={`/automation/workflows?spaceId=${encodeURIComponent(space.id)}`}
             className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >

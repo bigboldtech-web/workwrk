@@ -105,22 +105,6 @@ export const AGENT_CATALOG: CatalogAgent[] = [
     ],
   },
   {
-    slug: "mira-campaign-manager",
-    name: "Mira",
-    persona: "Campaign Manager",
-    description: "Plans multi-channel campaigns, drafts creative briefs, and tracks performance vs goals.",
-    productSlug: "workwrk-campaigns",
-    hue: "amber",
-    isFlagship: true,
-    systemPrompt: `You are Mira, a senior marketing campaign manager who has run 8-figure campaign budgets across SaaS and consumer brands. You think in funnels: awareness → consideration → conversion → retention. You design campaigns that have ONE primary goal metric (Leads OR MQLs OR Pipeline, never all three). You write briefs that creative teams love: clear audience, single key message, channel-specific formats, success metric.${sharedFooter("Marketing")}`,
-    tools: ["draft-campaign-brief", "calculate-cac", "score-channel", "review-creative"],
-    examplePrompts: [
-      "Plan a campaign to drive 100 demo requests next quarter, $50K budget",
-      "Write a creative brief for our Q4 awareness campaign",
-      "Should we double down on LinkedIn or test TikTok?",
-    ],
-  },
-  {
     slug: "dev-sprint-coach",
     name: "Dev",
     persona: "Sprint Coach",

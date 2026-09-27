@@ -1,13 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { createBoardItem, updateBoardItem, getBoardStatuses } from "@/lib/board-items";
+import { archiveBoardItem, createBoardItem, moveBoardItem, updateBoardItem, getBoardStatuses } from "@/lib/board-items";
 import { queueEmail } from "@/lib/email";
+import { parseBoardSchema } from "@/lib/field-catalog";
+import { remapStatusOnMove } from "@/lib/item-move";
+import { createUpdate } from "@/lib/item-thread";
 import { resolveField } from "./conditions";
+import { coerceSetFieldValue } from "./set-field";
+import { authorCanWrite, loadAuthor, type AutomationAuthor } from "./author-reach";
 
 /**
  * Action catalog + per-action execute() implementations.
  *
  * Every execute() runs inside the engine's step wrapper: throwing is
- * fine and expected on failure — the engine records the error on the
+ * fine and expected on failure: the engine records the error on the
  * AutomationRunStep and computes PARTIAL/FAILED. Actions must be
  * org-scoped (never touch a record outside ctx.organizationId) and
  * idempotent where `safeToRetry: true`.
@@ -24,14 +29,21 @@ export interface ActionContext {
   recordType: string | null;
   workflowId: string;
   runId: string;
-  /** Automation chain depth — re-dispatched events carry depth + 1. */
+  /** Automation chain depth: re-dispatched events carry depth + 1. */
   depth: number;
+  /** The workflow's creator: the author of a comment it adds, and whose reach caps every write. */
+  workflowCreatorId?: string | null;
+  /** The creator's reach, when the engine already loaded it (author-reach.ts). */
+  author?: AutomationAuthor | null;
+  /** This step's order in the run, so a delivery id is unique per step. */
+  stepOrder?: number;
 }
 
 export interface ActionParamField {
   key: string;
   label: string;
-  type: "string" | "text" | "user" | "board" | "status" | "number";
+  /** `board` is a List picker; `field` picks one of a List's own fields. */
+  type: "string" | "text" | "user" | "board" | "status" | "number" | "field";
   required: boolean;
   help?: string;
 }
@@ -46,7 +58,7 @@ export interface AutomationAction {
   /** True when the action executes for real today (honest catalog). */
   available: boolean;
   /** Requires a CONNECTED IntegrationConnection of this provider. */
-  requiresConnection?: "WHATSAPP" | "GMAIL" | "GOOGLE_CALENDAR" | "SLACK";
+  requiresConnection?: "WHATSAPP" | "GMAIL" | "GOOGLE_CALENDAR" | "SLACK" | "WEBHOOK";
   params: ActionParamField[];
   execute(ctx: ActionContext, params: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
@@ -109,13 +121,26 @@ async function resolveUser(
 /** Load an org-owned board item (the automation's target record). */
 async function resolveItem(ctx: ActionContext, params: Record<string, unknown>) {
   const itemId = paramString(params, "itemId", ctx.payload) ?? ctx.recordId;
-  if (!itemId) throw new Error("No target task — the trigger payload has no record id");
+  if (!itemId) throw new Error("No target task: the trigger payload has no record id");
   const item = await prisma.item.findFirst({
     where: { id: itemId, organizationId: ctx.organizationId },
-    select: { id: true, boardId: true, title: true, status: true, ownerId: true, priority: true, archivedAt: true },
+    select: { id: true, boardId: true, title: true, status: true, ownerId: true, priority: true, archivedAt: true, metadata: true },
   });
   if (!item) throw new Error("Task no longer exists (deleted or outside this workspace)");
   return item;
+}
+
+/**
+ * An automation never writes further than its creator can (author-reach.ts):
+ * the step fails with a sentence the run drawer shows. A workflow with no
+ * creator on record keeps the behaviour it always had.
+ */
+async function assertCanWrite(ctx: ActionContext, boardId: string): Promise<void> {
+  if (!ctx.workflowCreatorId) return;
+  const author = ctx.author !== undefined ? ctx.author : await loadAuthor(ctx.organizationId, ctx.workflowCreatorId);
+  if (!(await authorCanWrite(author, boardId))) {
+    throw new Error("The person who made this automation cannot make changes in that List, so it was left alone");
+  }
 }
 
 /**
@@ -132,8 +157,30 @@ async function emitChained(ctx: ActionContext, event: string, payload: Record<st
       payload: { ...payload, __automationDepth: ctx.depth + 1 },
     });
   } catch {
-    // Chained fan-out is best-effort — the action itself already succeeded.
+    // Chained fan-out is best-effort: the action itself already succeeded.
   }
+}
+
+/** The task.field_changed payload the items routes emit, for a change an automation made. */
+function fieldChangedPayload(
+  item: { id: string; boardId: string; title: string; status: string | null; ownerId: string | null; priority: string | null },
+  field: string,
+  value: unknown,
+  previousValue: unknown,
+): Record<string, unknown> {
+  return {
+    id: item.id,
+    boardId: item.boardId,
+    title: item.title,
+    status: item.status,
+    ownerId: item.ownerId,
+    assigneeId: item.ownerId,
+    priority: field === "priority" ? value : item.priority,
+    field,
+    value,
+    previousValue,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export const AUTOMATION_ACTIONS: AutomationAction[] = [
@@ -152,6 +199,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const raw = paramString(params, "userId", ctx.payload);
       if (!raw) throw new Error("assign_user requires a userId param");
       const item = await resolveItem(ctx, params);
+      await assertCanWrite(ctx, item.boardId);
       const user = await resolveUser(ctx, raw);
       if (item.ownerId === user.id) {
         return { itemId: item.id, assigneeId: user.id, changed: false };
@@ -185,6 +233,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const status = paramString(params, "status", ctx.payload);
       if (!status) throw new Error("update_status requires a status param");
       const item = await resolveItem(ctx, params);
+      await assertCanWrite(ctx, item.boardId);
       const board = await prisma.board.findFirst({
         where: { id: item.boardId, organizationId: ctx.organizationId },
         select: { statuses: true },
@@ -192,7 +241,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const palette = getBoardStatuses(board);
       const match = palette.find((s) => s.value.toLowerCase() === status.toLowerCase());
       if (!match) {
-        // Renamed/deleted status — fail loudly instead of writing junk.
+        // Renamed/deleted status: fail loudly instead of writing junk.
         throw new Error(`Status "${status}" does not exist on this board`);
       }
       if (item.status === match.value) {
@@ -216,13 +265,13 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     key: "create_task",
     name: "Create a task",
     category: "Tasks",
-    description: "Create a new task on a board.",
+    description: "Create a new task in a List.",
     // NOT retry-safe: a re-run after a mid-flight failure could create
     // a duplicate task (the plan's dup-task guard).
     safeToRetry: false,
     available: true,
     params: [
-      { key: "boardId", label: "Board", type: "board", required: true },
+      { key: "boardId", label: "List", type: "board", required: true },
       { key: "title", label: "Title", type: "string", required: true, help: "Supports {{field}} tokens from the trigger" },
       { key: "status", label: "Status", type: "status", required: false },
       { key: "ownerId", label: "Assignee", type: "user", required: false },
@@ -239,6 +288,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
         select: { id: true },
       });
       if (!board) throw new Error("Target board not found in this workspace");
+      await assertCanWrite(ctx, board.id);
       const ownerRaw = paramString(params, "ownerId", ctx.payload);
       const owner = ownerRaw ? await resolveUser(ctx, ownerRaw) : null;
       const dueInDays = typeof params.dueInDays === "number" && Number.isFinite(params.dueInDays) ? params.dueInDays : null;
@@ -292,7 +342,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
 
       // "admins" fans out to every active workspace admin (idempotent
       // enough for retry: the whole step either wrote or threw before
-      // createMany — the only write — so a re-run can't double-insert
+      // createMany, the only write, so a re-run can't double-insert
       // after success because succeeded steps are never re-run).
       if (raw === "admins" || raw === "org_admins") {
         const admins = await prisma.user.findMany({
@@ -370,12 +420,159 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     },
   },
   {
+    key: "move_to_list",
+    name: "Move to a List",
+    category: "Tasks",
+    description: "Move the task, with its subtasks, to another List. Its status carries over, or maps to the closest one there.",
+    safeToRetry: true, // a task already in the target List is left alone
+    available: true,
+    params: [
+      { key: "listId", label: "List", type: "board", required: true },
+      { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
+    ],
+    async execute(ctx, params) {
+      const listId = paramString(params, "listId", ctx.payload);
+      if (!listId) throw new Error("Pick the List to move the task to");
+      const item = await resolveItem(ctx, params);
+      if (item.boardId === listId) return { itemId: item.id, boardId: listId, changed: false };
+      await assertCanWrite(ctx, item.boardId);
+      const [from, to] = await Promise.all([
+        prisma.board.findFirst({ where: { id: item.boardId, organizationId: ctx.organizationId }, select: { statuses: true } }),
+        prisma.board.findFirst({ where: { id: listId, organizationId: ctx.organizationId, archivedAt: null }, select: { id: true, statuses: true } }),
+      ]);
+      if (!to) throw new Error("That List no longer exists (deleted, archived or outside this workspace)");
+      await assertCanWrite(ctx, to.id);
+      const fromStatuses = getBoardStatuses(from);
+      const toStatuses = getBoardStatuses(to);
+      const remap = remapStatusOnMove({ status: item.status, from: fromStatuses, to: toStatuses });
+      await moveBoardItem({ itemId: item.id, toBoardId: to.id, status: remap.status, actorId: null, fromStatuses, toStatuses });
+      return { itemId: item.id, fromBoardId: item.boardId, boardId: to.id, status: remap.status, changed: true };
+    },
+  },
+  {
+    key: "archive_task",
+    name: "Archive the task",
+    category: "Tasks",
+    description: "Archive the task. It can be restored from the task itself or from Trash.",
+    safeToRetry: true, // archiving an archived task changes nothing
+    available: true,
+    params: [
+      { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
+    ],
+    async execute(ctx, params) {
+      const item = await resolveItem(ctx, params);
+      if (item.archivedAt) return { itemId: item.id, changed: false };
+      await assertCanWrite(ctx, item.boardId);
+      await archiveBoardItem(item.id, null);
+      return { itemId: item.id, changed: true };
+    },
+  },
+  {
+    key: "add_comment",
+    name: "Add a comment",
+    category: "Tasks",
+    description: "Post a comment on the task, written as the person who made this automation.",
+    // NOT retry-safe: a re-run after a failure part way could post it twice.
+    safeToRetry: false,
+    available: true,
+    params: [
+      { key: "body", label: "Comment", type: "text", required: true, help: "Supports {{field}} tokens from the trigger" },
+      { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
+    ],
+    async execute(ctx, params) {
+      const body = paramString(params, "body", ctx.payload);
+      if (!body) throw new Error("Write the comment to add");
+      if (!ctx.workflowCreatorId) throw new Error("This automation has no creator to post the comment as");
+      const item = await resolveItem(ctx, params);
+      await assertCanWrite(ctx, item.boardId);
+      const author = await prisma.user.findFirst({
+        where: { id: ctx.workflowCreatorId, organizationId: ctx.organizationId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (!author) throw new Error("The person who made this automation is no longer active, so it cannot post as them");
+      const update = await createUpdate({ organizationId: ctx.organizationId, itemId: item.id, authorId: author.id, body });
+      return { itemId: item.id, commentId: update.id };
+    },
+  },
+  {
+    key: "set_field",
+    name: "Set a field",
+    category: "Tasks",
+    description: "Set one of the List's own fields, or the priority, on the task.",
+    safeToRetry: true, // an idempotent state-set
+    available: true,
+    params: [
+      { key: "field", label: "Field", type: "field", required: true },
+      { key: "value", label: "Value", type: "string", required: false, help: "Leave it empty to clear the field. Dates take YYYY-MM-DD, today, or +3 for three days from now" },
+      { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
+    ],
+    async execute(ctx, params) {
+      const key = paramString(params, "field", ctx.payload);
+      if (!key) throw new Error("Pick the field to set");
+      const raw = typeof params.value === "string" ? interpolate(params.value, ctx.payload) : params.value;
+      const item = await resolveItem(ctx, params);
+      await assertCanWrite(ctx, item.boardId);
+      if (key === "priority") {
+        const p = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+        const next = p === "" ? null : p;
+        if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) throw new Error(`"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
+        if (item.priority === next) return { itemId: item.id, field: key, changed: false };
+        await updateBoardItem(item.id, { priority: next }, null);
+        await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, next, item.priority));
+        return { itemId: item.id, field: key, value: next, changed: true };
+      }
+      const board = await prisma.board.findFirst({ where: { id: item.boardId, organizationId: ctx.organizationId }, select: { schema: true } });
+      const def = parseBoardSchema(board?.schema).fields.find((f) => f.key === key);
+      if (!def) throw new Error("That field is not on this task's List");
+      const choices = def.options?.choices?.map((c) => ({ value: String(c.value), label: String(c.label) }));
+      const coerced = coerceSetFieldValue({ key, type: def.type, choices }, raw);
+      if (!coerced.ok) throw new Error(coerced.error);
+      const previous = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? (item.metadata as Record<string, unknown>)[key] : undefined) ?? null;
+      await updateBoardItem(item.id, {}, null, {
+        metadataFn: (stored) => ({ ...stored, [key]: coerced.value }),
+      });
+      // A field an automation set is a field change like any other, so a
+      // second automation on that field runs (the depth cap stops loops).
+      await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, coerced.value, previous));
+      return { itemId: item.id, field: key, value: coerced.value, changed: true };
+    },
+  },
+  {
+    key: "send_webhook",
+    name: "Send to the webhook",
+    category: "Connections",
+    description: "POST what happened, signed with the workspace's secret, to the webhook an Owner or Admin connected.",
+    // A repeat carries the same delivery id, so the receiver can drop it.
+    safeToRetry: true,
+    available: true,
+    requiresConnection: "WEBHOOK",
+    params: [
+      { key: "note", label: "Label", type: "string", required: false, help: "Optional. Sent with each delivery, so the receiver can tell your automations apart" },
+    ],
+    async execute(ctx, params) {
+      const { sendThroughWebhook } = await import("./webhook-server");
+      const clean: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(ctx.payload)) if (!k.startsWith("__")) clean[k] = v;
+      const delivery = await sendThroughWebhook(ctx.organizationId, ctx.eventKey, {
+        event: ctx.eventKey,
+        label: paramString(params, "note", ctx.payload),
+        automationId: ctx.workflowId,
+        runId: ctx.runId,
+        record: ctx.recordId ? { type: ctx.recordType, id: ctx.recordId } : null,
+        data: clean,
+        sentAt: new Date().toISOString(),
+      }, `${ctx.runId}:${ctx.workflowId}:${ctx.stepOrder ?? 0}`);
+      if (!delivery.ok) throw new Error(delivery.message ?? `The webhook answered ${delivery.httpStatus}`);
+      return { httpStatus: delivery.httpStatus, durationMs: delivery.durationMs };
+    },
+  },
+  {
     key: "send_whatsapp",
     name: "Send a WhatsApp message",
     category: "Notify",
     description: "Message a customer or teammate on WhatsApp.",
     safeToRetry: false, // retrying an unconnected channel can never succeed
-    available: false, // catalog stub — no send channel yet
+    available: false, // catalog stub, no send channel yet
     requiresConnection: "WHATSAPP",
     params: [
       { key: "to", label: "To (phone)", type: "string", required: true },
@@ -390,8 +587,8 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
         throw new Error("WhatsApp is not connected for this workspace. Connect it under Automation → Connections.");
       }
       // Honest stub: the connection row exists but the send channel
-      // ships in a later wave — fail loudly rather than pretend.
-      throw new Error("WhatsApp sending is not available yet — the send channel ships in a later wave.");
+      // ships in a later wave: fail loudly rather than pretend.
+      throw new Error("WhatsApp sending is not available yet.");
     },
   },
 ];

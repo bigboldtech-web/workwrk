@@ -1,0 +1,57 @@
+// How far an automation reaches: never further than the person who made it
+// (spec-ai-automation 1.4, "a workflow therefore never reaches further than
+// its creator, and a demoted creator's workflows quietly stop being able to
+// write"). The answers are the List gates', for the creator, live
+// (access/legacy-reach.ts), which read the one node resolver.
+//
+//   READ   a trigger on a task in a List the creator cannot open does not run
+//          their automation at all, so no notification, email or webhook ever
+//          carries a private task's title to them or on their behalf.
+//   WRITE  every action that changes, moves, archives, comments on or creates
+//          a task checks the creator can make changes in that List (both ends
+//          of a move), and fails the step with a sentence when they cannot.
+//   PEOPLE a creator below manager (every Member may create since this stage)
+//          only runs on performance events about themself, so no Member can
+//          wire "when a review is completed, email me the score". The
+//          Cashkr-era sales events never run a Member's automation.
+//
+// Owners and Admins reach everything, as they do in the product. A workflow
+// with no creator on record (seeded before creators were stored) keeps the
+// behaviour it always had; a creator no longer in the workspace reaches no
+// List at all.
+
+import { legacyReachOf, type LegacyReach } from "@/lib/access/legacy-reach";
+
+export type AutomationAuthor = LegacyReach;
+
+/** Performance events whose subject is one person (payload.userId). */
+const PERSON_EVENTS: ReadonlySet<string> = new Set(["kpi.recorded", "review.completed"]);
+
+/** The Cashkr-era events: sales data a Member never had a surface for. */
+const LEGACY_PREFIXES = ["lead.", "quote.", "pickup.", "payment."];
+
+export function loadAuthor(organizationId: string, userId: string): Promise<AutomationAuthor | null> {
+  return legacyReachOf(organizationId, userId);
+}
+
+/** Pure: may this creator's automation run on this kind of event at all. */
+export function eventAllowedForAuthor(
+  event: string,
+  payload: Record<string, unknown>,
+  author: Pick<AutomationAuthor, "userId" | "admin" | "manager"> | null,
+): boolean {
+  if (author?.admin || author?.manager) return true;
+  if (LEGACY_PREFIXES.some((p) => event.startsWith(p))) return false;
+  if (PERSON_EVENTS.has(event)) return !!author && payload.userId === author.userId;
+  return true;
+}
+
+/** May the creator open this List. */
+export async function authorCanRead(author: AutomationAuthor | null, boardId: string): Promise<boolean> {
+  return author ? author.canRead(boardId) : false;
+}
+
+/** May the creator change tasks in this List. */
+export async function authorCanWrite(author: AutomationAuthor | null, boardId: string): Promise<boolean> {
+  return author ? author.canWrite(boardId) : false;
+}

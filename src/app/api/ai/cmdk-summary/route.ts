@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -35,9 +36,13 @@ export async function POST(req: NextRequest) {
   const planCheck = await checkPlanLimit(orgId, "ai");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
+  // AI features turned off for the workspace (settings.data.aiEnabled).
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
+
   if (rawHits.length === 0) {
     return jsonSuccess({
-      summary: "No matches yet — try a person's name, an SOP title, or an entity code.",
+      summary: "No matches yet. Try a person's name, an SOP title or an entity code.",
       suggestedHref: null,
     });
   }

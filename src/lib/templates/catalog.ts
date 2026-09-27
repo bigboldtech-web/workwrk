@@ -158,39 +158,6 @@ const itsmStarter: CatalogTemplate = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Marketing — Q4 campaign launch
-// ─────────────────────────────────────────────────────────
-
-const marketingQ4Launch: CatalogTemplate = {
-  slug: "marketing-q4-launch",
-  name: "Q4 campaign launch",
-  tagline: "2 campaigns · 3 content pieces · 1 event",
-  productSlug: "workwrk-campaigns",
-  apply: async (ctx) => {
-    const camp1 = await prisma.campaign.create({
-      data: { organizationId: ctx.orgId, name: "Q4 demand gen", description: "Drive demo requests for the new analytics suite.", channel: "Paid Search", budget: 50000, currency: "USD", goalMetric: "Leads", goalTarget: 200, ownerId: ctx.userId, startDate: new Date(), endDate: new Date(Date.now() + 90 * 86400000) },
-    });
-    await prisma.campaign.create({
-      data: { organizationId: ctx.orgId, name: "Customer expansion email series", description: "Re-engage power users with a 6-touch sequence.", channel: "Email", budget: 5000, currency: "USD", goalMetric: "Pipeline", goalTarget: 300000, ownerId: ctx.userId, startDate: new Date() },
-    });
-
-    await prisma.contentItem.createMany({
-      data: [
-        { organizationId: ctx.orgId, title: "How 3 Fortune-500s scaled HR with WorkwrK", type: "CASE_STUDY", channel: "Blog", status: "IN_DRAFT", ownerId: ctx.userId, authorId: ctx.userId, campaignId: camp1.id, scheduledFor: new Date(Date.now() + 7 * 86400000) },
-        { organizationId: ctx.orgId, title: "5 SOPs every new hire should read in week 1", type: "BLOG_POST", channel: "Blog", status: "BRIEFED", ownerId: ctx.userId, authorId: ctx.userId, scheduledFor: new Date(Date.now() + 14 * 86400000) },
-        { organizationId: ctx.orgId, title: "Webinar: Modular Work OS — the alternative to Workday", type: "WEBINAR", channel: "LinkedIn", status: "SCHEDULED", ownerId: ctx.userId, authorId: ctx.userId, campaignId: camp1.id, scheduledFor: new Date(Date.now() + 21 * 86400000) },
-      ],
-    });
-
-    await prisma.eventBrief.create({
-      data: { organizationId: ctx.orgId, name: "WorkwrK at SaaStr 2025", description: "Booth + 1 speaker session on AI agents in HR ops.", type: "Conference", format: "In-person", startDate: new Date(Date.now() + 75 * 86400000), endDate: new Date(Date.now() + 77 * 86400000), location: "San Francisco, CA", capacity: 5000, budget: 75000, status: "PROMOTING", ownerId: ctx.userId },
-    });
-
-    return { campaigns: 2, content: 3, events: 1 };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
 // Dev — Sprint planning starter
 // ─────────────────────────────────────────────────────────
 
@@ -211,7 +178,7 @@ const devSprintStarter: CatalogTemplate = {
 
     await prisma.roadmapItem.createMany({
       data: [
-        { organizationId: ctx.orgId, title: "AI-assisted onboarding (Maya handoff to Sidekick)", description: "Maya completes day-1 plan + escalates to Sidekick for ongoing questions.", theme: "AI", priority: "P1", status: "COMMITTED", quarter: "2026-Q2", impactScore: 8, effortPoints: 21, ownerId: ctx.userId, publicVisible: false },
+        { organizationId: ctx.orgId, title: "AI-assisted onboarding (Maya hands off to Ask AI)", description: "Maya completes the day-1 plan and hands ongoing questions to Ask AI.", theme: "AI", priority: "P1", status: "COMMITTED", quarter: "2026-Q2", impactScore: 8, effortPoints: 21, ownerId: ctx.userId, publicVisible: false },
         { organizationId: ctx.orgId, title: "Mobile push for approvals", description: "Native push when an approval lands in your queue.", theme: "Mobile", priority: "P2", status: "EXPLORING", quarter: "2026-Q3", impactScore: 6, effortPoints: 13, ownerId: ctx.userId, publicVisible: true },
         { organizationId: ctx.orgId, title: "Bulk CSV import for People + CRM", description: "First-class import path with field mapping + dry-run preview.", theme: "Performance", priority: "P2", status: "IN_PROGRESS", quarter: "2026-Q2", impactScore: 7, effortPoints: 8, ownerId: ctx.userId, publicVisible: false },
       ],
@@ -313,7 +280,7 @@ const personalTodoStarter: CatalogTemplate = {
     const inAWeek = new Date(today.getTime() + 7 * 86400000);
 
     const seed: Array<{ title: string; description: string; priority: string; dueAt: Date }> = [
-      { title: "Review pull request #421", description: "Review the new Sidekick agent persistence logic", priority: "HIGH", dueAt: today },
+      { title: "Review pull request #421", description: "Review the new Ask AI agent persistence logic", priority: "HIGH", dueAt: today },
       { title: "1:1 prep, agenda for Friday", description: "Pull last week's action items and draft this week's topics", priority: "NORMAL", dueAt: tomorrow },
       { title: "Write retrospective notes from last sprint", description: "What went well · What didn't · What we'll try next sprint", priority: "NORMAL", dueAt: tomorrow },
       { title: "Update OKR mid-quarter check-in", description: "Confidence scores and risks for each KR", priority: "NORMAL", dueAt: inAWeek },
@@ -348,7 +315,6 @@ export const TEMPLATE_CATALOG: CatalogTemplate[] = [
   personalTodoStarter,
   crmB2BPipeline,
   itsmStarter,
-  marketingQ4Launch,
   devSprintStarter,
   legalContractIntake,
   helpdeskSupportStarter,

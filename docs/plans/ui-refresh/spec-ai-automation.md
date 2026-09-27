@@ -281,7 +281,7 @@ Breakpoints: 1280, 1024, 900, 640.
 - The **builder**'s Details panel stops being `hidden lg:block`: under 1024 it stacks under the "Then" section as a normal section titled "Details", so Description, Alert level, Published, Last run, Versions and Recent runs are always reachable. This is audit issue 16 and critic #10.
 - Every list page's `TableCard` scrolls horizontally inside its own `overflow-x: auto`; the page body never scrolls sideways. Under 900 the card drops to the Name, Status and one contextual column; the rest move into the row's drawer or the "…".
 - The **templates** grid is 3 columns at 1280, 2 at 900, 1 below (the fixed `repeat(3, 1fr)` at `os.css:3038` goes).
-- The **logs drawer** is `min(520px, 100vw)`.
+- The **logs drawer** is 520px at 1024 and above; under 1024 it follows the shell Drawer's own rule (design-system 5, Drawer) and is a full-width sheet with no resize handle and no dim.
 - The Ask AI thread column is `min(720px, 100% - 32px)`; the composer is sticky to the bottom of the viewport on touch.
 - No hover-only affordance carries meaning: the row "…" is reachable by keyboard focus and, on touch, is always visible at the row's end.
 

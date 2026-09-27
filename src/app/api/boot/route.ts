@@ -15,6 +15,8 @@
 // apiFetch turns it into the Session-expired dialog); a failure is a 500 the
 // boot screen renders as ErrorState, never a trip to /onboard.
 
+import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
+import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
@@ -28,6 +30,7 @@ import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf } from "@/lib/access/org-role";
+import { parseAccessSettings } from "@/lib/access/settings";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import type { ActiveTimer } from "@/lib/realtime-events";
 
@@ -92,6 +95,14 @@ export interface BootPayload {
      * section 2, /docs and /canvas confirm copy).
      */
     trashDays: number;
+    /**
+     * settings.data.aiEnabled, "AI features for members" (default on). The
+     * shell's Ask AI entry points (panel, header slot, Cmd+J, palette row)
+     * render only when it is on; the page gate enforces it server side.
+     */
+    aiEnabled: boolean;
+    /** settings.currency (Settings > Locale and work week), USD when unset. */
+    currency: string;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -257,7 +268,7 @@ export async function GET(req: NextRequest) {
     const settings = (org.settings ?? {}) as {
       setupCompleted?: unknown;
       companyProfile?: { mission?: unknown; values?: unknown; splash?: unknown };
-      access?: { peopleTeam?: unknown };
+      access?: unknown;
     };
     const profile = settings.companyProfile ?? {};
     const mission = typeof profile.mission === "string" ? profile.mission.trim() : "";
@@ -266,7 +277,13 @@ export async function GET(req: NextRequest) {
       : [];
     const splash: SplashPolicy =
       typeof profile.splash === "string" && SPLASH_VALUES.has(profile.splash) ? (profile.splash as SplashPolicy) : "first-open-daily";
-    const peopleTeam = Array.isArray(settings.access?.peopleTeam) && (settings.access!.peopleTeam as unknown[]).includes(userId);
+    // The same People team the server gates resolve (src/lib/access/facts.ts
+    // loadOrgFacts): access.peopleTeamUserIds when configured, else every HR
+    // user. The viewer is in that seeded set exactly when they are at HR.
+    const configuredPeopleTeam = parseAccessSettings(settings.access).peopleTeamUserIds;
+    const peopleTeam = configuredPeopleTeam.length > 0
+      ? configuredPeopleTeam.includes(userId)
+      : user.accessLevel === "HR";
 
     const accessLevel = user.accessLevel ?? null;
     const activeModules = new Set(prefs.modules.activeAppKeys);
@@ -309,6 +326,8 @@ export async function GET(req: NextRequest) {
         plan: String(org.plan),
         culture: { mission, values, splash },
         trashDays: retentionDays((settings as { retention?: { trashDays?: unknown } }).retention?.trashDays),
+        aiEnabled: aiEnabledFromSettings(settings),
+        currency: orgCurrencyFromSettings(settings),
       },
       counts: c,
       timer,

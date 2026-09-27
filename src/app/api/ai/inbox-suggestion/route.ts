@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -79,6 +80,10 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const planCheck = await checkPlanLimit(orgId, "ai");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
+
+  // AI features turned off for the workspace (settings.data.aiEnabled).
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
 
   const resolved = await getAnthropicForOrg(orgId);
   const ai = resolved.client;

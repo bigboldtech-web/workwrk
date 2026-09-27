@@ -39,14 +39,19 @@ const ROWS: readonly Row[] = [
   { key: "announcements", label: "Announcements", defaultHref: "/announcements" },
   { key: "kudos", label: "Kudos", defaultHref: "/kudos", requiredAccess: "hr-admin" },
   { key: "surveys", label: "Surveys", defaultHref: "/surveys", requiredAccess: "hr-admin" },
-  { key: "tools", label: "Tools", defaultHref: "/tools", requiredAccess: "hr-admin" },
-  { key: "assets", label: "Assets", defaultHref: "/assets", requiredAccess: "hr-admin" },
+  // Tools: every Member. Assets: anyone with reports, the People team and
+  // Admin, which no tier can express, so the row and the palette gate on
+  // appAudienceAllows (src/lib/nav/app-audience.ts) and the page on gatePage.
+  { key: "tools", label: "Tools", defaultHref: "/tools" },
+  { key: "assets", label: "Assets", defaultHref: "/assets" },
   { key: "sops", label: "SOPs", defaultHref: "/sops" },
   { key: "policies", label: "Policies", defaultHref: "/policies", requiredAccess: "hr-admin" },
   { key: "agreements", label: "Contracts", defaultHref: "/agreements", requiredAccess: "hr-admin" },
-  { key: "build", label: "Build apps", defaultHref: "/build" },
+  // APP_RULES.build is Owner and Admin.
+  { key: "build", label: "Build apps", defaultHref: "/build", requiredAccess: "org-admin" },
   { key: "store", label: "Marketplace", defaultHref: "/store" },
-  { key: "automation", label: "Automation", defaultHref: "/automation/workflows", requiredAccess: "manager" },
+  // APP_RULES.automation: every Member reads (the manager tier is retired).
+  { key: "automation", label: "Automation", defaultHref: "/automation/workflows" },
   { key: "settings", label: "Settings", defaultHref: "/settings", alwaysPinned: true },
   // No tier: the manager gate came off when /api/trash moved onto the `trash`
   // app key and per-source accessibleIds(type, FULL) in Phase 2 stage E. Guests

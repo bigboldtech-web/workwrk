@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
@@ -39,6 +40,10 @@ export async function POST(req: NextRequest) {
   // Plan limit enforcement
   const planCheck = await checkPlanLimit(orgId, "ai");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
+
+  // AI features turned off for the workspace (settings.data.aiEnabled).
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
 
   // Gather comprehensive org context.
   // User list is capped at 100 — past that the LLM context wastes tokens on a

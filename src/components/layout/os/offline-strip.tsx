@@ -3,6 +3,10 @@
 // OfflineStrip (spec-shell 1.7): a 32px warning strip under the bar while
 // the browser is offline or apiFetch has seen a network failure. Not a
 // layer, so Esc never touches it; it hides itself on reconnect.
+//
+// A page that never autosaves (an explicit Save with a dirty guard, like the
+// automation builder) sets <html data-save-mode="explicit"> while it is
+// mounted, so the strip does not promise a save that will not happen.
 
 import { useEffect, useState } from "react";
 import { WifiOff } from "lucide-react";
@@ -28,10 +32,15 @@ export function OfflineStrip() {
     };
   }, []);
   if (!offline) return null;
+  const explicit = typeof document !== "undefined" && document.documentElement.dataset.saveMode === "explicit";
   return (
     <div role="status" className="os-chrome flex h-8 shrink-0 items-center gap-2 bg-warning-bg px-4 text-sm text-warning-text">
       <WifiOff className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-      <span>You&apos;re offline. Changes will save when you reconnect.</span>
+      <span>
+        {explicit
+          ? "You're offline. Your changes stay on this page; save them once you reconnect."
+          : "You're offline. Changes will save when you reconnect."}
+      </span>
     </div>
   );
 }

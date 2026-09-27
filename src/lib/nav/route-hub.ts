@@ -85,6 +85,12 @@ export const REDIRECT_ROUTES: readonly string[] = [
   "/dashboard",
   "/assigned-comments",
   "/tasks",
+  // Phase 7: the legacy Marketing resolver (`/marketing/[[...slug]]`) sends
+  // an Owner or Admin to the import row, a migrated org to its Space, List or
+  // task, and everyone else to the in-shell 404, all before any page code
+  // renders (spec-tools-misc section 1, "delete the /marketing prefix from
+  // the home row"; naming-canon retires "Marketing (as an app)").
+  "/marketing",
 ];
 
 /**
@@ -126,7 +132,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // under "ai" that row swapped the rail pill, replaced the sidebar and could
   // never go active, because the Work sidebar is not rendered on /favorites.
   "/favorites": "home",
-  "/marketing": "home",
   // The Work door for docs, tables, canvases, SOPs and forms: the id-only
   // Work address of an object opened from any hub but the Docs and Tables
   // storage browsers when no Space is known for it (a personal or NOTEPAD
@@ -150,10 +155,8 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
 
   // ── AI ────────────────────────────────────────────────────────────
   "/sidekick": "ai",
-  "/ai": "ai",
   "/agents": "ai",
   "/automation": "ai",
-  "/autopilot": "ai",
   "/build": "ai",
   "/store": "ai",
   "/integrations": "ai",
@@ -226,7 +229,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/me/weekly-review": "Weekly review",
   "/me/mentions": "Mentions",
   "/activity": "Activity",
-  "/marketing": "Marketing",
   // Equal to the hub label, so the top bar drops it as a repeat of the hub
   // crumb; an object at the door declares its own crumb anyway.
   "/work": "Work",
@@ -236,10 +238,8 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/meetings": "Meetings",
   "/clock": "Clock in/out",
   "/sidekick": "Ask AI",
-  "/ai": "Ask AI",
   "/agents": "Agents",
   "/automation": "Automation",
-  "/autopilot": "Workflows",
   "/build": "Build apps",
   "/store": "Marketplace",
   "/integrations": "Integrations",
@@ -277,9 +277,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   // ── Nested static directories (the hierarchy under a hub row) ──────
   //
   "/my-work/personal": "Personal list",
-  "/marketing/campaigns": "Campaigns",
-  "/marketing/events": "Events",
-  "/marketing/content": "Content library",
   // "/docs/trash" is gone: it 308s to /trash?tab=archived&type=doc, the one
   // Trash (spec-spaces-lists section 2). A ROUTE_TITLES row for a route with
   // no page fails the completeness test, which is the test doing its job.
@@ -456,6 +453,13 @@ export function resolveCrumbTrail(pathname: string): { label: string; href?: str
 /** What a hub's landing URL may depend on. The only two branches in the table. */
 export type HubHrefContext = {
   /**
+   * Whether Ask AI renders for the viewer (the ai app, AI features on for the
+   * workspace, not a Guest). With it off the AI hub's front door is its
+   * Workflows page, which still works, never an Ask AI page that answers
+   * "AI is off". Undefined is read as "on".
+   */
+  askAiOn?: boolean;
+  /**
    * Whether the org has the Talk premium module on. Talk is the one hub whose
    * landing is conditional, and it is conditional on module state alone:
    * Announcements is not module-gated, so the hub must stay reachable with the
@@ -484,7 +488,7 @@ export function hubDefaultHref(hub: HubKey, ctx: HubHrefContext = {}): string {
     case "planner":
       return "/planner";
     case "ai":
-      return "/sidekick";
+      return ctx.askAiOn === false ? "/automation/workflows" : "/sidekick";
     case "chat":
       // Module off: Announcements is the hub's only content, so it is the door.
       return ctx.talkModuleOn === false ? "/announcements" : "/tlk";

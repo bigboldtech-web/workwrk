@@ -22,13 +22,13 @@ import type { LucideIcon } from "lucide-react";
 import {
   TrendingUp, Users, Building2, Activity, BarChart3,
   Code, Rocket, Map,
-  Megaphone, FileText, Calendar,
+  FileText, Calendar,
   Ticket, AlertTriangle, BookOpen,
   MessageSquareQuote, Headphones,
   Scale, Shield, Award,
   Target,
   ShoppingCart, Receipt, Truck,
-  BookText, Layers, ClipboardList,
+  BookText, Layers,
 } from "lucide-react";
 
 export type BoardView = "table" | "kanban" | "gantt" | "calendar" | "chart";
@@ -55,7 +55,6 @@ export interface ProductBoard {
 export const CONVERTED_PRODUCTS = new Set<string>([
   "workwrk-crm",
   "workwrk-dev",
-  "workwrk-campaigns",
   "workwrk-itsm",
   "workwrk-help",
   "workwrk-contracts",
@@ -79,11 +78,6 @@ export const PRODUCT_BOARDS: Record<string, ProductBoard[]> = {
     { key: "sprints", name: "Sprints", Icon: Code, default: true, views: ["table"], tagline: "Active + planned" },
     { key: "releases", name: "Releases", Icon: Rocket, views: ["table"], tagline: "Shipped + scheduled" },
     { key: "roadmap", name: "Roadmap", Icon: Map, views: ["table", "gantt"], tagline: "Themes + outcomes" },
-  ],
-  "workwrk-campaigns": [
-    { key: "campaigns", name: "Campaigns", Icon: Megaphone, default: true, views: ["kanban", "table"], tagline: "Active + planned" },
-    { key: "content", name: "Content", Icon: FileText, views: ["kanban", "table"], tagline: "Editorial calendar" },
-    { key: "events", name: "Events", Icon: Calendar, views: ["table"], tagline: "Webinars + field" },
   ],
   "workwrk-itsm": [
     { key: "tickets", name: "Tickets", Icon: Ticket, default: true, views: ["kanban", "table"], tagline: "Open + assigned" },

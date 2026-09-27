@@ -3,14 +3,13 @@
 // Body: { prompt }
 //
 // Sends the prompt to Claude with a strict JSON-only schema-generator
-// prompt. Returns the generated app structure WITHOUT persisting it —
+// prompt. Returns the generated app structure WITHOUT persisting it:
 // the user reviews/edits + then POSTs to /api/build/apps to save.
 
 import { NextResponse } from "next/server";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { requireBuild } from "@/lib/build/gate";
 import { z } from "zod";
 
 const MODEL = "claude-sonnet-4-6";
@@ -19,7 +18,7 @@ const inputSchema = z.object({
   prompt: z.string().min(8).max(2000),
 });
 
-const SYSTEM_PROMPT = `You generate mini-app schemas for WorkwrK Build (a Vibe-style "describe an app, get an app" generator inside a Work OS).
+const SYSTEM_PROMPT = `You generate mini-app schemas for WorkwrK Build apps (describe an app, get an app, inside a work management workspace).
 
 Given a prompt, return STRICT JSON (no markdown, no commentary) with this shape:
 
@@ -27,7 +26,7 @@ Given a prompt, return STRICT JSON (no markdown, no commentary) with this shape:
   "name": "Short app name (≤ 40 chars)",
   "slug": "kebab-case-slug",
   "description": "1-sentence summary",
-  "iconKey": "Lucide icon name — pick one that fits (e.g. ClipboardList, Receipt, Map, TrendingUp, Bug, Sparkles)",
+  "iconKey": "Lucide icon name, pick one that fits (e.g. ClipboardList, Receipt, Map, TrendingUp, Bug, Sparkles)",
   "hue": "violet | blue | green | amber | pink | teal | sky | rose | lime | slate",
   "fields": [
     {
@@ -46,18 +45,19 @@ Given a prompt, return STRICT JSON (no markdown, no commentary) with this shape:
 Rules:
 - 4-8 fields is the sweet spot. Don't generate kitchen-sink schemas.
 - The first field should be a TEXT field that acts as the "title" of each row (name, subject, etc.).
-- Include at least one SELECT field (status, category, priority — whichever fits).
+- Include at least one SELECT field (status, category, priority, whichever fits).
 - sampleRows MUST use the field keys exactly. Don't invent extra keys.
 - iconKey must be a real Lucide React icon name.
 - Output ONLY the JSON, no surrounding text.`;
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const userId = (session.user as { id?: string }).id;
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
-  if (!user?.organizationId) return NextResponse.json({ error: "no organization" }, { status: 400 });
+  // Owner and Admin only: generating spends the workspace's AI allowance.
+  const c = await requireBuild();
+  if ("error" in c) return c.error;
+  const user = { organizationId: c.orgId };
+  // AI features turned off for the workspace (settings.data.aiEnabled).
+  const aiOff = await aiOffResponse(c.orgId);
+  if (aiOff) return aiOff;
 
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);

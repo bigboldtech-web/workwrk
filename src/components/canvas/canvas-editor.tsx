@@ -207,9 +207,9 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   const place = useWorkPlacement();
   const inWork = place?.kind === "canvas" && place.id === canvasId;
   const selfPath = inWork && place ? place.self : canonicalHref("canvas", canvasId);
-  const { railApps } = useOsShell();
+  const { askAiVisible } = useOsShell();
   const viewer = useViewer();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
   const [board, setBoard] = useState<Whiteboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
