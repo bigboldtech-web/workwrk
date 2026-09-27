@@ -106,6 +106,12 @@ export default function MembersPage() {
       .catch(() => setInvites([]));
   }, []);
   useEffect(() => { loadInvites(); }, [loadInvites]);
+  // #pending-invites (the People import's result step links here): the
+  // section renders after its fetch, so scroll once it exists.
+  useEffect(() => {
+    if (invites.length === 0 || window.location.hash !== "#pending-invites") return;
+    document.getElementById("pending-invites")?.scrollIntoView({ block: "start" });
+  }, [invites.length]);
 
   const revoke = async (inv: PendingInvite) => {
     setRevokingId(inv.id);
@@ -285,7 +291,7 @@ export default function MembersPage() {
       )}
 
       {invites.length > 0 ? (
-        <section className="mt-6">
+        <section id="pending-invites" className="mt-6">
           <h2 className="mb-2 text-base font-semibold text-zinc-900">
             Pending invites <span className="font-normal text-zinc-400">({invites.length})</span>
           </h2>

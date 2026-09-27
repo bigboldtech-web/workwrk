@@ -18,6 +18,14 @@
 // popover: that day's items, each opening the task drawer, with an Assign
 // picker on unassigned work for people who can edit its List.
 //
+// Overdue: open work due before today is listed per person under their load
+// summary ("3 overdue", danger text, opening the same popover), whatever the
+// window, and a person whose only work is late still gets a row: the worst
+// case is a manager reading a buried person as having room.
+//
+// Dates follow the viewer's date preferences (formatWallClockDate for the
+// grid's calendar days, formatDate for an item's due instant).
+//
 // Keyboard: with the grid focused, Left and Right move the window a week and
 // T returns to today; Esc closes the popover.
 
@@ -29,6 +37,8 @@ import { useWorkSchedule } from "@/lib/use-work-schedule";
 import { effectivePersonSchedule, holidayOn, type Holiday, type WorkSchedule } from "@/lib/work-schedule";
 import { capacityOn, computeWorkload, overBy, UNASSIGNED, type PersonLoad } from "@/lib/people/workload-count";
 import { Switch } from "@/components/ui/switch";
+import { formatDate, formatWallClockDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { Picker } from "@/components/ui/picker";
 import { PersonAvatar } from "./assignee-picker";
 import { StatusGlyph } from "./status-glyph";
@@ -124,6 +134,12 @@ interface WorkloadGridProps {
   onAssign?: (itemId: string, personId: string) => Promise<boolean>;
   /** Beside the empty sentence ("Show the next 28 days"). */
   emptyAction?: { label: string; onClick: () => void };
+  /**
+   * Everyone each item is split across, by item id, when `items` carry only
+   * the assignees in view (the cross-List page drops the ones outside the
+   * viewer's scope): Hours mode then shows each person's real share.
+   */
+  shareCounts?: Record<string, number>;
 }
 
 /** Monday-anchored week start. */
@@ -137,6 +153,10 @@ function parseDate(raw: Date | string | null | undefined): Date | null {
   if (!raw) return null;
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function ymdKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function personName(p: WorkloadPerson | null): string {
@@ -156,8 +176,9 @@ type Popover = { key: string; title: string; ids: string[] };
 
 export function WorkloadGrid({
   items, people, statuses, settings, canEdit, onSettingsChange, onOpenItem,
-  anchor: anchorProp, onAnchorChange, hideToolbar, orgSchedule, boardNames, statusesByBoard, canAssign, onAssign, emptyAction,
+  anchor: anchorProp, onAnchorChange, hideToolbar, orgSchedule, boardNames, statusesByBoard, canAssign, onAssign, emptyAction, shareCounts,
 }: WorkloadGridProps) {
+  const datePrefs = useDatePrefs();
   const { schedule: fetchedSchedule, configured: scheduleConfigured } = useWorkSchedule();
   const schedule = orgSchedule ?? fetchedSchedule;
 
@@ -185,7 +206,8 @@ export function WorkloadGrid({
   const todayTime = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const isCurrentWindow = anchor.getTime() === startOfWeek(today).getTime();
   const shift = (deltaDays: number) => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + deltaDays));
-  const rangeLabel = `${days[0].toLocaleString("default", { day: "numeric", month: "short" })} to ${days[days.length - 1].toLocaleString("default", { day: "numeric", month: "short" })}`;
+  const rangeLabel = `${formatWallClockDate(ymdKey(days[0]), datePrefs)} to ${formatWallClockDate(ymdKey(days[days.length - 1]), datePrefs)}`;
+  const dayLabel = (d: Date) => `${WEEKDAY[d.getDay()]}, ${formatWallClockDate(ymdKey(d), datePrefs)}`;
 
   // ── Load (src/lib/people/workload-count.ts) ───────────────────────
   const personById = useMemo(() => new Map(people.map((p) => [p.id, p] as const)), [people]);
@@ -211,12 +233,13 @@ export function WorkloadGrid({
         startAt: it.startAt ?? null,
         dueAt: it.dueAt ?? null,
         estimateMinutes: typeof est === "number" ? est : null,
+        shareCount: shareCounts?.[it.id] ?? null,
       };
     }),
     people.map((p) => p.id),
-    { from: anchor, days: s.windowDays, countWeekends: s.countWeekends },
+    { from: anchor, days: s.windowDays, countWeekends: s.countWeekends, today: new Date(todayTime) },
     scheduleFor,
-  ), [openItems, people, anchor, s.windowDays, s.countWeekends, scheduleFor]);
+  ), [openItems, people, anchor, s.windowDays, s.countWeekends, scheduleFor, shareCounts, todayTime]);
 
   const capFor = useCallback((key: string, day: Date): number => {
     const p = personById.get(key);
@@ -246,7 +269,7 @@ export function WorkloadGrid({
     return list;
   }, [loads, s.mode, personById]);
 
-  const hasWork = (r: PersonLoad) => r.totalTasks > 0 || r.unscheduled.length > 0;
+  const hasWork = (r: PersonLoad) => r.totalTasks > 0 || r.unscheduled.length > 0 || r.overdue.length > 0;
   const hiddenCount = rows.filter((r) => r.key !== UNASSIGNED && !hasWork(r)).length;
   const visible = rows.filter((r) => (r.key === UNASSIGNED ? hasWork(r) : s.showAllPeople || hasWork(r)));
 
@@ -432,7 +455,22 @@ export function WorkloadGrid({
                           names start alike must never read the same. */}
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className={`truncate text-row font-medium ${person ? "text-ink" : "text-ink-2"}`} title={personName(person)}>{personName(person)}</span>
-                        {r.key === UNASSIGNED ? null : <span className="truncate text-sm tabular-nums text-ink-2">{summary}</span>}
+                        {r.key === UNASSIGNED && r.overdue.length === 0 ? null : (
+                          <span className="flex min-w-0 items-center gap-1 truncate text-sm tabular-nums text-ink-2">
+                            {r.key === UNASSIGNED ? null : <span className="truncate">{summary}</span>}
+                            {r.overdue.length > 0 ? (
+                              <>
+                                {r.key === UNASSIGNED ? null : <span aria-hidden>·</span>}
+                                <button type="button"
+                                  onClick={(e) => openPopover(r.key, `${personName(person)} · Overdue`, r.overdue, e.currentTarget)}
+                                  className="shrink-0 font-medium text-danger-text hover:underline"
+                                  aria-label={`${r.overdue.length} overdue for ${personName(person)}`}>
+                                  {r.overdue.length} overdue
+                                </button>
+                              </>
+                            ) : null}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {isOpen ? (
@@ -446,7 +484,7 @@ export function WorkloadGrid({
                             <div key={id} className="flex h-8 items-center gap-2 border-b border-line-soft bg-subtle ps-10 pe-3">
                               <StatusGlyph current={current} statuses={statuses} />
                               <button type="button" onClick={() => onOpenItem?.(it.id)} className="min-w-0 flex-1 truncate text-start text-sm text-ink hover:underline" title={it.title}>{it.title}</button>
-                              <span className="text-xs tabular-nums text-ink-2">{due ? due.toLocaleString("default", { day: "numeric", month: "short" }) : ""}</span>
+                              <span className={`text-xs tabular-nums ${due && due.getTime() < todayTime ? "text-danger-text" : "text-ink-2"}`}>{due ? formatDate(due, datePrefs, "date") : ""}</span>
                             </div>
                           );
                         })}
@@ -488,12 +526,12 @@ export function WorkloadGrid({
                     {days.map((d, i) => (
                       <DayCell
                         key={i}
-                        day={d}
+                        dayLabel={dayLabel(d)}
                         load={r.days[i]}
                         cap={capFor(r.key, d)}
                         mode={s.mode}
                         holiday={holidayOn(schedule, d)}
-                        onOpen={(el) => openPopover(r.key, `${personName(personById.get(r.key) ?? null)} · ${d.toLocaleString("default", { weekday: "short", day: "numeric", month: "short" })}`, r.days[i].itemIds, el)}
+                        onOpen={(el) => openPopover(r.key, `${personName(personById.get(r.key) ?? null)} · ${dayLabel(d)}`, r.days[i].itemIds, el)}
                       />
                     ))}
                   </div>
@@ -582,8 +620,9 @@ export function WorkloadGrid({
 }
 
 // ── Day cell ───────────────────────────────────────────────────────
-function DayCell({ day, load, cap, mode, holiday, onOpen }: {
-  day: Date;
+function DayCell({ dayLabel, load, cap, mode, holiday, onOpen }: {
+  /** The day in the viewer's date format ("Mon, 21 Sep"). */
+  dayLabel: string;
   load: { tasks: number; hours: number; unestimated: number; itemIds: string[] };
   cap: number;
   mode: WorkloadSettings["mode"];
@@ -593,7 +632,6 @@ function DayCell({ day, load, cap, mode, holiday, onOpen }: {
   const loadVal = mode === "hours" ? load.hours : load.tasks;
   const over = overBy(loadVal, cap);
   const label = mode === "hours" ? `${fmtH(load.hours)}h` : String(load.tasks);
-  const dayLabel = day.toLocaleString("default", { weekday: "short", day: "numeric", month: "short" });
   const breakdown = mode === "hours"
     ? `${fmtH(load.hours)}h of ${fmtH(cap)}h · ${load.tasks} ${load.tasks === 1 ? "task" : "tasks"}`
     : `${load.tasks} of ${cap} ${cap === 1 ? "task" : "tasks"}`;

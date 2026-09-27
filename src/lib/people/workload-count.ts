@@ -18,6 +18,13 @@
 //               across the assignees (the founder-taken recommendation),
 //               then across the span's spread days. An item with no
 //               estimate counts 0 hours and is flagged as unestimated.
+//               "The assignees" is ALL of them (`shareCount` when the
+//               caller only passes the ones in view): a viewer who cannot
+//               see a co-assignee, or filtered them out, must still see
+//               each person's own share, never the whole estimate.
+//   Overdue     open work due before `today` (the viewer's local day) is
+//               listed per person whatever the window, so a person buried
+//               in late work never reads as having room.
 //   Capacity    per working day: weeklyCapacityHours / working days a week
 //               of the person's schedule when set, else the schedule's hours
 //               a day; 0 on a day off or a holiday (a holiday stays 0 even
@@ -39,6 +46,8 @@ export interface WorkloadItemInput {
   dueAt?: Date | string | null;
   /** Minutes (Item.metadata.timeEstimate), or null / 0 for none. */
   estimateMinutes?: number | null;
+  /** Everyone the item is split across, when more than the ids passed. */
+  shareCount?: number | null;
 }
 
 export interface DayCount {
@@ -56,6 +65,8 @@ export interface PersonLoad {
   unscheduled: string[];
   /** Dated items touching the window. */
   windowItems: string[];
+  /** Items due before `today` (open work already late), any window. */
+  overdue: string[];
   totalTasks: number;
   totalHours: number;
 }
@@ -65,6 +76,8 @@ export interface WorkloadWindow {
   from: Date;
   days: number;
   countWeekends: boolean;
+  /** Local midnight of the viewer's today; omitted = no overdue list. */
+  today?: Date | null;
 }
 
 function localDay(raw: Date | string | null | undefined): Date | null {
@@ -114,6 +127,7 @@ export function computeWorkload(
         days: Array.from({ length: win.days }, () => ({ tasks: 0, hours: 0, unestimated: 0, itemIds: [] })),
         unscheduled: [],
         windowItems: [],
+        overdue: [],
         totalTasks: 0,
         totalHours: 0,
       };
@@ -123,14 +137,20 @@ export function computeWorkload(
   };
   for (const id of personIds) ensure(id);
   const from = new Date(win.from.getFullYear(), win.from.getMonth(), win.from.getDate());
+  const today = win.today ? new Date(win.today.getFullYear(), win.today.getMonth(), win.today.getDate()) : null;
 
   for (const it of items) {
     const people = assigneesOf(it);
     const keys = people.length ? people : [UNASSIGNED];
     const est = typeof it.estimateMinutes === "number" && Number.isFinite(it.estimateMinutes) && it.estimateMinutes > 0 ? it.estimateMinutes : 0;
-    const hoursEach = est / 60 / keys.length;
+    const share = typeof it.shareCount === "number" && Number.isFinite(it.shareCount) ? Math.max(keys.length, Math.floor(it.shareCount)) : keys.length;
+    const hoursEach = est / 60 / share;
+    const due = localDay(it.dueAt);
+    if (today && due && due.getTime() < today.getTime()) {
+      for (const k of keys) ensure(k).overdue.push(it.id);
+    }
     let lo = localDay(it.startAt);
-    let hi = localDay(it.dueAt);
+    let hi = due;
     if (!lo && !hi) {
       for (const k of keys) ensure(k).unscheduled.push(it.id);
       continue;

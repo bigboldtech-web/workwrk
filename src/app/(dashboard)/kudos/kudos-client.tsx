@@ -16,9 +16,19 @@
 // The give path (MA-1): Give kudos, the Teams "+" (?new=1) and a person's
 // Kudos tab (?new=1&to={id}) all open the one KudosModal. A sent kudos can
 // be undone for five seconds from its toast (the same DELETE the row "..."
-// offers the giver and an Admin).
+// offers the giver and an Admin, so never offered to an Agent).
 //
-// Display switches persist per viewer at home.teams.surface.kudos.viewOptions.
+// Copy link is /kudos?kudos={id}: the page loads that one kudos by id and
+// shows it first, whatever page of the feed it sits on (the older
+// /kudos#kudos-{id} links land the same way).
+//
+// Keyboard: Up and Down move between cards, Enter on a card opens its
+// reaction picker.
+//
+// Display switches and the Leaderboard's columns persist per viewer at
+// home.teams.surface.kudos.viewOptions ({ showValueChip, showReactions,
+// columns }). The Leaderboard pages 50 people at a time over everyone who
+// gave or received, with the real totals.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
@@ -47,7 +57,7 @@ import { formatDate, formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { useCultureValues } from "@/lib/use-culture";
 
-type Person = { id: string; firstName: string | null; lastName: string | null; avatar: string | null };
+type Person = { id: string; firstName: string | null; lastName: string | null; avatar: string | null; presenceStatus?: string | null; presenceUntil?: string | null };
 type ApiKudos = {
   id: string;
   message: string;
@@ -60,7 +70,14 @@ type ApiKudos = {
   receiver: Person & { department?: { name?: string | null } | null };
   canDelete: boolean;
 };
-type FeedResponse = { data: ApiKudos[]; pagination: { total: number; nextCursor: string | null }; groups: { thisWeek: number; earlier: number } };
+type FeedResponse = { data: ApiKudos[]; pagination: { total: number; nextCursor: string | null }; groups: { thisWeek: number; earlier: number }; reactions?: number };
+type LeaderCol = "given" | "value" | "last";
+const LEADER_COLS: Array<{ key: LeaderCol; label: string }> = [
+  { key: "given", label: "Given" },
+  { key: "value", label: "Top value" },
+  { key: "last", label: "Last received" },
+];
+const BOARD_PAGE = 50;
 type LeaderRow = { userId: string; firstName: string | null; lastName: string | null; avatar: string | null; received: number; given: number; topValue: string | null; lastReceived: string | null };
 
 type View = "all" | "received" | "given" | "leaderboard";
@@ -98,7 +115,19 @@ export default function KudosClient() {
   const canExport = !viewer.isAgent && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
 
   // Display (home.teams.surface.kudos.viewOptions), defaults on.
-  const stored = ((prefs.home as { teams?: { surface?: { kudos?: { viewOptions?: { showValueChip?: boolean; showReactions?: boolean } } } } } | undefined)?.teams?.surface?.kudos?.viewOptions) ?? {};
+  const stored = ((prefs.home as { teams?: { surface?: { kudos?: { viewOptions?: { showValueChip?: boolean; showReactions?: boolean; columns?: Record<string, boolean> } } } } } | undefined)?.teams?.surface?.kudos?.viewOptions) ?? {};
+  const [colsLocal, setColsLocal] = useState<Partial<Record<LeaderCol, boolean>>>({});
+  const leaderCols: Record<LeaderCol, boolean> = {
+    given: colsLocal.given ?? stored.columns?.given ?? true,
+    value: colsLocal.value ?? stored.columns?.value ?? true,
+    last: colsLocal.last ?? stored.columns?.last ?? true,
+  };
+  const setLeaderCol = (k: LeaderCol, on: boolean) => {
+    setColsLocal((c) => ({ ...c, [k]: on }));
+    void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
+      if (!ok) toast("Couldn't save that setting", { tone: "danger" });
+    });
+  };
   const [display, setDisplay] = useState<{ showValueChip?: boolean; showReactions?: boolean }>({});
   const showValueChip = display.showValueChip ?? stored.showValueChip ?? true;
   const showReactions = display.showReactions ?? stored.showReactions ?? true;
@@ -138,7 +167,7 @@ export default function KudosClient() {
 
   // ── Feed ──────────────────────────────────────────────────────────
   const [feed, setFeed] = useState<ApiKudos[] | null>(null);
-  const [meta, setMeta] = useState<{ total: number; nextCursor: string | null; groups: { thisWeek: number; earlier: number } } | null>(null);
+  const [meta, setMeta] = useState<{ total: number; nextCursor: string | null; groups: { thisWeek: number; earlier: number }; reactions: number | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -178,7 +207,7 @@ export default function KudosClient() {
     setError(null);
     setNow(Date.now());
     setFeed(r.data.data);
-    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups });
+    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups, reactions: r.data.reactions ?? null });
   }, [feedQs, view]);
   const loadMore = async () => {
     if (!meta?.nextCursor) return;
@@ -187,18 +216,24 @@ export default function KudosClient() {
     setLoadingMore(false);
     if (!r.ok) { toast(r.error || "Couldn't load more kudos", { tone: "danger", action: { label: "Try again", onClick: () => void loadMore() } }); return; }
     setFeed((f) => [...(f ?? []), ...r.data.data.filter((k) => !(f ?? []).some((x) => x.id === k.id))]);
-    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups });
+    setMeta({ total: r.data.pagination.total, nextCursor: r.data.pagination.nextCursor, groups: r.data.groups, reactions: r.data.reactions ?? null });
   };
 
   // ── Leaderboard ───────────────────────────────────────────────────
-  const [board, setBoard] = useState<{ rows: LeaderRow[]; total: number } | null>(null);
+  const [board, setBoard] = useState<{ rows: LeaderRow[]; totalKudos: number; people: number; offset: number; nextCursor: string | null } | null>(null);
+  const [boardOffset, setBoardOffset] = useState(0);
+  const [boardFor, setBoardFor] = useState(period);
+  if (boardFor !== period) { setBoardFor(period); setBoardOffset(0); }
   const loadBoard = useCallback(async () => {
     if (view !== "leaderboard") return;
-    const r = await apiFetch<{ leaderboard: LeaderRow[]; totalKudos: number }>(`/api/kudos/leaderboard?period=${period}&limit=100`, { cache: "no-store" });
+    const r = await apiFetch<{ leaderboard: LeaderRow[]; totalKudos: number; people?: number; offset?: number; nextCursor?: string | null }>(
+      `/api/kudos/leaderboard?period=${period}&limit=${BOARD_PAGE}&cursor=${boardOffset}`,
+      { cache: "no-store" },
+    );
     if (!r.ok) { setError(r.error || "Couldn't load the leaderboard"); return; }
     setError(null);
-    setBoard({ rows: r.data.leaderboard, total: r.data.totalKudos });
-  }, [view, period]);
+    setBoard({ rows: r.data.leaderboard, totalKudos: r.data.totalKudos, people: r.data.people ?? r.data.leaderboard.length, offset: r.data.offset ?? boardOffset, nextCursor: r.data.nextCursor ?? null });
+  }, [view, period, boardOffset]);
 
   const version = rowVersion("kudos");
   useEffect(() => {
@@ -219,7 +254,9 @@ export default function KudosClient() {
     const name = personName(k.receiver);
     setFresh(k.id);
     // The toast's Undo is the same DELETE the row "..." offers the giver.
-    toast(`Kudos sent to ${name}`, {
+    // An Agent may never delete (access 3.3, cap.agent.delete), so an Agent
+    // is never offered the Undo the API would refuse.
+    toast(`Kudos sent to ${name}`, viewer.isAgent ? undefined : {
       onUndo: () => {
         void apiFetch(`/api/kudos/${k.id}`, { method: "DELETE" }).then((r) => {
           if (!r.ok) toast(r.error || "Couldn't undo it", { tone: "danger" });
@@ -252,13 +289,64 @@ export default function KudosClient() {
       <span className="flex min-w-0 items-center gap-2"><PersonAvatar person={{ id: r.userId, firstName: r.firstName, lastName: r.lastName, avatar: r.avatar }} size={28} /><span className="truncate">{personName(r)}</span></span>
     ) },
     { key: "received", label: "Received", width: "96px", numeric: true, align: "end", render: (r) => <span className="tabular-nums">{r.received}</span> },
-    { key: "given", label: "Given", width: "80px", numeric: true, align: "end", render: (r) => <span className="tabular-nums">{r.given}</span> },
-    { key: "value", label: "Top value", width: "minmax(140px,1fr)", hideBelow: 720, render: (r) => (r.topValue ? <ValueChip value={r.topValue} /> : <span className="text-ink-3">None</span>) },
-    { key: "last", label: "Last received", width: "130px", hideBelow: 900, render: (r) => <span className="text-ink-2">{r.lastReceived ? formatDate(r.lastReceived, datePrefs, "date") : ""}</span> },
+    ...(leaderCols.given ? [{ key: "given", label: "Given", width: "80px", numeric: true, align: "end" as const, render: (r: LeaderRow) => <span className="tabular-nums">{r.given}</span> }] : []),
+    ...(leaderCols.value ? [{ key: "value", label: "Top value", width: "minmax(140px,1fr)", hideBelow: 720, render: (r: LeaderRow) => (r.topValue ? <ValueChip value={r.topValue} /> : <span className="text-ink-3">None</span>) }] : []),
+    ...(leaderCols.last ? [{ key: "last", label: "Last received", width: "130px", hideBelow: 900, render: (r: LeaderRow) => <span className="text-ink-2">{r.lastReceived ? formatDate(r.lastReceived, datePrefs, "date") : ""}</span> }] : []),
   ];
 
-  const card = (k: ApiKudos) => (
-    <article key={k.id} id={`kudos-${k.id}`} className={`rounded-lg border border-line bg-raised p-4 transition-opacity duration-150 ${fresh === k.id ? "animate-in fade-in" : ""}`}>
+  // ── Linked kudos (Copy link: ?kudos={id}, or the older #kudos-{id}) ──
+  const linkedParam = sp?.get("kudos") ?? null;
+  const [linkedId, setLinkedId] = useState<string | null>(null);
+  useEffect(() => {
+    const fromHash = typeof window !== "undefined" ? /^#kudos-(.+)$/.exec(window.location.hash)?.[1] ?? null : null;
+    const t = setTimeout(() => setLinkedId(linkedParam ?? fromHash), 0);
+    return () => clearTimeout(t);
+  }, [linkedParam]);
+  const [linked, setLinked] = useState<ApiKudos | null | "missing">(null);
+  useEffect(() => {
+    if (!linkedId) return;
+    let live = true;
+    void apiFetch<FeedResponse>(`/api/kudos?id=${encodeURIComponent(linkedId)}&limit=1`, { cache: "no-store" }).then((r) => {
+      if (!live) return;
+      setLinked(r.ok && r.data.data[0] ? r.data.data[0] : "missing");
+    });
+    return () => { live = false; };
+  }, [linkedId, version]);
+  useEffect(() => {
+    if (!linked || linked === "missing") return;
+    document.getElementById(`kudos-link-${linked.id}`)?.scrollIntoView({ block: "center" });
+  }, [linked]);
+  const clearLinked = () => {
+    setLinkedId(null);
+    setLinked(null);
+    if (linkedParam) setParams({ kudos: null });
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#kudos-")) history.replaceState(null, "", window.location.pathname + window.location.search);
+  };
+
+  // Up and Down move between cards; Enter on a card opens its reactions.
+  const onFeedKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (!target.matches("article[data-kudos-card]")) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const cards = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("article[data-kudos-card]"));
+      const i = cards.indexOf(target);
+      const next = cards[e.key === "ArrowDown" ? i + 1 : i - 1];
+      if (next) { e.preventDefault(); next.focus(); }
+    } else if (e.key === "Enter") {
+      const add = target.querySelector<HTMLButtonElement>('button[aria-label="Add reaction"]');
+      if (add) { e.preventDefault(); add.click(); }
+    }
+  };
+
+  const card = (k: ApiKudos, linkedCard = false) => (
+    <article
+      key={linkedCard ? `linked-${k.id}` : k.id}
+      id={linkedCard ? `kudos-link-${k.id}` : `kudos-${k.id}`}
+      data-kudos-card=""
+      tabIndex={0}
+      aria-label={`${personName(k.giver)} thanked ${personName(k.receiver)}`}
+      className={`rounded-lg border bg-raised p-4 outline-none transition-opacity duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)] ${linkedCard ? "border-[var(--os-brand)]" : "border-line"} ${fresh === k.id ? "animate-in fade-in" : ""}`}
+    >
       <div className="flex items-start gap-2">
         <PersonAvatar person={k.giver} size={28} />
         <p className="m-0 min-w-0 flex-1 pt-1 text-row text-ink">
@@ -292,7 +380,7 @@ export default function KudosClient() {
       <div className="flex h-11 items-center gap-2 rounded-md bg-subtle px-3 text-sm font-medium text-ink">
         {label}<span className="text-xs font-medium tabular-nums text-ink-2">{count}</span>
       </div>
-      {rows.map(card)}
+      {rows.map((k) => card(k))}
     </section>
   ) : null;
 
@@ -321,9 +409,15 @@ export default function KudosClient() {
           sort: view === "leaderboard" ? undefined : { onClick: () => setSortOpen((v) => !v), label: sort === "reactions" ? "Most reactions" : "Sort", active: sort === "reactions" },
           primary: { label: "Give kudos", icon: Heart, onClick: () => { setGiveTo(undefined); setGiveOpen(true); } },
           menu: [
-            { label: "Show the company value chip", checked: showValueChip, keepOpen: true, onClick: () => setDisplayOpt({ showValueChip: !showValueChip }) },
-            { label: "Show reactions", checked: showReactions, keepOpen: true, onClick: () => setDisplayOpt({ showReactions: !showReactions }) },
-            ...(canExport && view !== "leaderboard" ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref(); } }] : []),
+            ...(view === "leaderboard"
+              ? LEADER_COLS.map((c) => ({ label: `Show ${c.label}`, checked: leaderCols[c.key], keepOpen: true, onClick: () => setLeaderCol(c.key, !leaderCols[c.key]) }))
+              : [
+                  { label: "Show the company value chip", checked: showValueChip, keepOpen: true, onClick: () => setDisplayOpt({ showValueChip: !showValueChip }) },
+                  { label: "Show reactions", checked: showReactions, keepOpen: true, onClick: () => setDisplayOpt({ showReactions: !showReactions }) },
+                ]),
+            ...(canExport
+              ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: () => { window.location.href = view === "leaderboard" ? `/api/kudos/leaderboard?period=${period}&format=csv` : exportHref(); } }]
+              : []),
           ],
         }}
       />
@@ -395,11 +489,30 @@ export default function KudosClient() {
                 rowKey={(r) => r.userId}
                 rowHref={(r) => `/people/${r.userId}`}
                 empty={<span className="text-row text-ink-2">Nobody was thanked {period === "month" ? "this month" : period === "quarter" ? "this quarter" : "yet"}</span>}
-                footer={board ? { total: board.total, noun: "kudos", from: board.rows.length ? 1 : 0, to: board.rows.length } : undefined}
+                footer={board ? {
+                  total: board.people,
+                  noun: "people",
+                  from: board.rows.length ? board.offset + 1 : 0,
+                  to: board.offset + board.rows.length,
+                  onPrev: board.offset > 0 ? () => setBoardOffset(Math.max(0, board.offset - BOARD_PAGE)) : undefined,
+                  onNext: board.nextCursor ? () => setBoardOffset(Number(board.nextCursor)) : undefined,
+                  extra: <span className="font-normal">· {board.totalKudos} kudos {period === "month" ? "this month" : period === "quarter" ? "this quarter" : "in all"}</span>,
+                } : undefined}
               />
             )
           ) : (
-            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4" onKeyDown={onFeedKey}>
+              {linked && linked !== "missing" ? (
+                <section className="flex flex-col gap-3" aria-label="Linked kudos">
+                  <div className="flex h-11 items-center gap-2 rounded-md bg-subtle px-3 text-sm font-medium text-ink">
+                    <span className="flex-1">Linked kudos</span>
+                    <button type="button" onClick={clearLinked} className="text-sm font-medium text-ink-2 hover:text-ink">Dismiss</button>
+                  </div>
+                  {card(linked, true)}
+                </section>
+              ) : linked === "missing" ? (
+                <p className="text-row text-ink-2">That kudos is no longer here. It may have been deleted. · <button type="button" className="text-brand-deep hover:underline" onClick={clearLinked}>Dismiss</button></p>
+              ) : null}
               {error && !feed ? (
                 <OsEmptyView variant="error" title="Couldn't load kudos" hint={error} action={{ label: "Try again", onClick: () => void loadFeed() }} />
               ) : feed === null ? (
@@ -418,10 +531,13 @@ export default function KudosClient() {
                       {group("Earlier", meta?.groups.earlier ?? earlier.length, earlier)}
                     </>
                   ) : (
-                    <div className="flex flex-col gap-3">{earlier.map(card)}</div>
+                    <div className="flex flex-col gap-3">{earlier.map((k) => card(k))}</div>
                   )}
                   <div className="flex items-center justify-between text-sm text-ink-2">
-                    <span className="font-medium">Total kudos {meta?.total ?? feed.length}</span>
+                    <span className="font-medium tabular-nums">
+                      Total kudos {meta?.total ?? feed.length}
+                      {meta?.reactions != null ? <span className="font-normal"> · {meta.reactions} {meta.reactions === 1 ? "reaction" : "reactions"}</span> : null}
+                    </span>
                     {meta?.nextCursor ? (
                       <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="inline-flex h-8 items-center rounded-md px-3 font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
                         {loadingMore ? "Loading more" : "Load more"}
@@ -440,7 +556,7 @@ export default function KudosClient() {
           <MenuList aria-label="Kudos actions">
             <MenuItem icon={Link2} label="Copy link" onClick={() => {
               const id = menu.k.id; setMenu(null);
-              void navigator.clipboard.writeText(`${window.location.origin}/kudos#kudos-${id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
+              void navigator.clipboard.writeText(`${window.location.origin}/kudos?kudos=${encodeURIComponent(id)}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
             }} />
             {menu.k.canDelete ? (
               <>

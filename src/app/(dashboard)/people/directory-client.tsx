@@ -192,6 +192,15 @@ export default function PeopleDirectoryClient() {
     if (Object.keys(strip).length) setParams(strip);
   }, [data, sp, setParams]);
 
+  // ?import=1 (the /imports People card, a shared link) opens Import people
+  // only for someone who may import (Owner and Admin, the same fact that
+  // shows the "..." entry). Anyone else never sees the dialog: the
+  // parameter is stripped once the viewer is known.
+  useEffect(() => {
+    if (!data || data.viewer.canImport || !sp?.get("import")) return;
+    setParams({ import: null }, true);
+  }, [data, sp, setParams]);
+
   // The filter pickers load when the panel first opens.
   const loadedOpts = useRef(false);
   useEffect(() => {
@@ -553,7 +562,7 @@ export default function PeopleDirectoryClient() {
           </MenuList>
         </MorePortal>
       ) : null}
-      {importOpen ? (
+      {importOpen && data?.viewer.canImport ? (
         <ImportPeopleModal
           onClose={() => { setImportOpen(false); if (sp?.get("import")) setParams({ import: null }, true); }}
           onImported={() => void load()}

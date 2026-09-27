@@ -15,7 +15,7 @@
 // as a full load instead of drawing a record for an id that is a page name.
 
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Copy, Maximize2, Minimize2, X } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { Drawer, DRAWER_DEFAULT_W, clampDrawerWidth } from "@/components/ui/drawer";
@@ -24,11 +24,15 @@ import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { PersonRecord } from "./person-record";
+import { personOrigin } from "@/lib/nav/teams-rows";
 
 const STATIC_SEGMENTS = new Set(["me", "departments", "roles", "skills"]);
 
 export function PersonDrawerHost({ personId }: { personId: string }) {
   const router = useRouter();
+  const sp = useSearchParams();
+  // Opened from My team (?from=team): My team is the page under the drawer.
+  const origin = personOrigin(sp?.toString() ?? "");
   const { boot } = useBoot();
   // A Guest never sees the Teams hub (access 2.3): the full page answers them
   // with the in-shell 404, so the drawer hands the URL over as a full load.
@@ -54,7 +58,7 @@ export function PersonDrawerHost({ personId }: { personId: string }) {
     if (reserved && typeof window !== "undefined") window.location.assign(`/people/${personId}${window.location.search}`);
   }, [reserved, personId]);
 
-  const close = useCallback(() => { goBackOr(router, "/people"); }, [router]);
+  const close = useCallback(() => { goBackOr(router, origin.href); }, [router, origin.href]);
 
   // A click on the dimmed list closes the drawer (a click on another row
   // navigates, which swaps the record, and never reaches here).
@@ -85,7 +89,7 @@ export function PersonDrawerHost({ personId }: { personId: string }) {
       header={
         <>
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
-            {meta?.self ? "My profile" : <>Directory › <span className="text-ink">{meta?.name ?? ""}</span></>}
+            {meta?.self ? "My profile" : <>{origin.label} › <span className="text-ink">{meta?.name ?? ""}</span></>}
           </span>
           <button type="button" aria-label={expanded ? "Collapse" : "Expand"} title={expanded ? "Collapse" : "Expand"} onClick={() => setExpanded((v) => !v)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}

@@ -89,7 +89,7 @@ function browserZone(): string {
 }
 
 function isData(i: WidgetInput): i is DataInput {
-  return i.kind === "stat" || i.kind === "chart" || i.kind === "list";
+  return i.kind === "stat" || i.kind === "chart" || i.kind === "list" || i.kind === "workload";
 }
 
 /** Each field's label, the first List to define a key naming it. */

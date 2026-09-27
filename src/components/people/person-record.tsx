@@ -26,10 +26,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ArrowDownRight, ArrowUpRight, CalendarCheck, ExternalLink, Eye, Gift, Link2, MessageCircle,
+  ArrowDownRight, ArrowUpRight, CalendarCheck, ExternalLink, Eye, Heart, Link2, MessageCircle,
   MoreHorizontal, MoveRight, Network, Pencil, Plus, RotateCcw, Star, Trophy, UserMinus, Users,
 } from "lucide-react";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/layout/os/top-bar/breadcrumb";
+import { personOrigin } from "@/lib/nav/teams-rows";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { NotFoundView } from "@/components/access/not-found-view";
@@ -371,7 +372,10 @@ export function PersonRecord({
 
   const name = person ? personName(person) : "";
   useEffect(() => { if (person) onMeta?.({ name: personName(person), self: person.access.relation === "self" }); }, [person, onMeta]);
-  const crumb: BreadcrumbItem[] = self ? [{ label: "My profile" }] : [{ label: "Directory", href: "/people" }, { label: name || "Person" }];
+  // Opened from My team (?from=team): the crumb and the back target name
+  // the page the viewer came from, not the Directory.
+  const origin = personOrigin(sp?.toString() ?? "");
+  const crumb: BreadcrumbItem[] = self ? [{ label: "My profile" }] : [{ label: origin.label, href: origin.href }, { label: name || "Person" }];
   const talkOn = boot.launcherApps.includes("chat");
 
   async function copyLink() {
@@ -543,7 +547,7 @@ export function PersonRecord({
       <EditShortcut enabled={editEnabled} onOpen={() => setEditOpen(true)} />
       {presentation === "page" ? (
         <>
-          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: "/people", label: "Directory" }} actions={actions} />
+          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: origin.href, label: origin.label }} actions={actions} />
           {body}
         </>
       ) : (
@@ -1059,7 +1063,7 @@ function KudosTab({ person, datePrefs }: { person: Person; datePrefs: ReturnType
     setPage(next);
   }
   return (
-    <Section title="Kudos" action={!self && !person.deletedAt ? <GhostButton icon={Gift} href={`/kudos?new=1&to=${person.id}`}>Give kudos</GhostButton> : undefined}>
+    <Section title="Kudos" action={!self && !person.deletedAt ? <GhostButton icon={Heart} href={`/kudos?new=1&to=${person.id}`}>Give kudos</GhostButton> : undefined}>
       {all.length === 0 ? (
         <p className="text-row text-ink-2">No kudos yet.</p>
       ) : (

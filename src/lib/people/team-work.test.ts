@@ -68,8 +68,8 @@ describe("attentionRows", () => {
     ]);
     expect(rows[2].href).toBe("/team?view=needs-attention&noKras=1");
   });
-  it("opens the chain scope when the count covers the chain", () => {
-    expect(attentionRows({ weeklyReviews: 3, kpiRecords: 0, noKras: 0 }, { chainWide: true })[0].href).toBe("/team/reviews?scope=chain");
+  it("links the weekly count to the queue that lists exactly those reviews", () => {
+    expect(attentionRows({ weeklyReviews: 3, kpiRecords: 0, noKras: 0 })[0].href).toBe("/team/reviews");
   });
 });
 

@@ -1,4 +1,4 @@
-// GET /api/team/workload?from=YYYY-MM-DD&to=YYYY-MM-DD&userIds=&boardIds=&priority=&dept=&includeDeactivated=1
+// GET /api/team/workload?from=YYYY-MM-DD&to=YYYY-MM-DD&today=YYYY-MM-DD&userIds=&boardIds=&priority=&dept=&includeDeactivated=1
 // The cross-List Workload grid's data (spec-teams-people /team/workload),
 // Items-based, replacing the server-only query the page used to run, so
 // moving the window is a client fetch and never a page reload.
@@ -11,9 +11,16 @@
 // Items: every OPEN item (not archived, not in a done status of its own
 // List) on a List the viewer can read, where a person in scope is the owner
 // or an assignee, that touches the window or has no dates at all (the
-// Unscheduled column). Plus the Unassigned bucket: open items with nobody on
-// them, on Lists the team belongs to or already works on. No newest-N cap.
-// The counting itself is src/lib/people/workload-count.ts, run by the grid.
+// Unscheduled column), or is already OVERDUE (due before `today`, the
+// viewer's local day, whatever the window: late work is load a manager must
+// see). Plus the Unassigned bucket: open items with nobody on them, on Lists
+// the team belongs to or already works on. No newest-N cap. The counting
+// itself is src/lib/people/workload-count.ts, run by the grid.
+//
+// Each item carries `assigneeCount`, everyone it is split across, while
+// `ownerId` and `assigneeIds` carry only the people in the viewer's scope:
+// Hours mode divides by the real count, so a co-assignee the viewer cannot
+// see never doubles a report's share.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -46,6 +53,11 @@ export async function GET(req: NextRequest) {
   if (to.getTime() - from.getTime() > 92 * 86_400_000) return err(400, "A window is at most 92 days");
   const lo = new Date(from.getTime() - 86_400_000);
   const hi = new Date(to.getTime() + 86_400_000);
+  // Overdue is due before the viewer's today; a day of padding, the grid
+  // decides in the viewer's own zone. A bad or missing value is the server's.
+  const todayRaw = sp.get("today") ?? "";
+  const todayAt = DATE_RE.test(todayRaw) ? new Date(`${todayRaw}T00:00:00.000Z`) : new Date();
+  const overdueBefore = new Date((Number.isNaN(todayAt.getTime()) ? Date.now() : todayAt.getTime()) + 86_400_000);
 
   const scope = await teamScopeFor(ctx, { includeDeactivated: sp.get("includeDeactivated") === "1" });
   if (!scope.orgWide && ctx.chain.size === 0) return err(403, "Workload shows the work of people who report to you. Nobody reports to you yet.");
@@ -77,6 +89,7 @@ export async function GET(req: NextRequest) {
     OR: [
       { startAt: null, dueAt: null },
       { AND: [{ OR: [{ startAt: null }, { startAt: { lte: hi } }] }, { OR: [{ dueAt: null }, { dueAt: { gte: lo } }] }] },
+      { dueAt: { lt: overdueBefore } },
     ],
   };
   const common = {
@@ -134,6 +147,9 @@ export async function GET(req: NextRequest) {
         // drawn (their row is not the viewer's to see).
         ownerId: r.ownerId && inScope.has(r.ownerId) ? r.ownerId : null,
         assigneeIds: r.assigneeIds.filter((a) => inScope.has(a)),
+        // Everyone the estimate is split across, seen or not (a count, no
+        // identity): the owner plus each assignee, once each.
+        assigneeCount: new Set([...(r.ownerId ? [r.ownerId] : []), ...r.assigneeIds]).size,
         unassigned: !r.ownerId && r.assigneeIds.length === 0,
         startAt: r.startAt ? r.startAt.toISOString() : null,
         dueAt: r.dueAt ? r.dueAt.toISOString() : null,

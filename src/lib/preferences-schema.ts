@@ -350,7 +350,8 @@ export const workPatchSchema = z.strictObject({
       windowDays: z.union([z.literal(7), z.literal(14), z.literal(28)]).optional(),
       countWeekends: z.boolean().optional(),
       showAllPeople: z.boolean().optional(),
-      dailyTasks: z.number().int().min(1).max(50).optional(),
+      // 1 to 99, the range the grid has always allowed (a List view's gear).
+      dailyTasks: z.number().int().min(1).max(99).optional(),
     })
     .optional(),
 });
@@ -398,6 +399,8 @@ export const TEAMS_SURFACE_KEYS = [
   "candor",
   "kudos",
   "surveys",
+  // My team's Display column toggles (spec-teams-people /team).
+  "my-team",
 ] as const;
 
 const teamsViewOptionsSchema = z.strictObject({

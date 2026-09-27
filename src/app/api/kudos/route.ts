@@ -17,11 +17,13 @@ import type { Prisma } from "@/generated/prisma";
 //   userId=&direction=received|given   one person's kudos (a record's tab)
 //   value=<word>|none, q=<text in the message>, person=<giver or receiver>
 //   from=&to= (YYYY-MM-DD), sort=recent|reactions
+//   id=<kudos id>   that one kudos (a Copy link lands on it), same payload
 //   cursor=<opaque> & limit (at most 50): cursor pagination for the feed;
 //   page & limit still work for the person record's "Show more".
 //
 // `pagination.total` is the server's count over the whole filtered set,
-// never the loaded page. Guests never read the feed (access 3.3 Kudos).
+// never the loaded page, and `reactions` the reactions on that same set.
+// Guests never read the feed (access 3.3 Kudos).
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -35,6 +37,7 @@ export async function GET(req: NextRequest) {
   const userId = url.searchParams.get("userId");
   const direction = url.searchParams.get("direction") === "given" ? "given" : "received";
   const givenBy = url.searchParams.get("givenBy");
+  const idParam = url.searchParams.get("id");
   const value = url.searchParams.get("value");
   const q = (url.searchParams.get("q") ?? "").trim();
   const person = url.searchParams.get("person");
@@ -55,6 +58,7 @@ export async function GET(req: NextRequest) {
     else where.receiverId = userId;
   }
   if (givenBy) where.giverId = givenBy;
+  if (idParam) where.id = idParam;
   if (value === "none") where.companyValue = null;
   else if (value) where.companyValue = value;
   if (q) where.message = { contains: q, mode: "insensitive" };
@@ -69,9 +73,27 @@ export async function GET(req: NextRequest) {
   }
   if (and.length) where.AND = and;
 
-  // Cursor: an offset the server hands back, so both sorts page the same
-  // way and a new kudos arriving never shows a row twice within a sort.
-  const offset = cursor && /^\d+$/.test(cursor) ? Number(cursor) : (page - 1) * limit;
+  // Cursor. Newest first pages by KEYSET ("k:{createdAt ms}:{id}", the last
+  // row's sort key), so a kudos arriving or deleted between two pages never
+  // repeats or skips a row. Most reactions pages by offset (a reaction
+  // count moves under the reader, so no key is stable); the client drops
+  // repeats by id. A bare number is an offset under either sort (the older
+  // clients' cursor).
+  const keyset = sort === "recent" && cursor ? /^k:(\d+):(.+)$/.exec(cursor) : null;
+  const offset = keyset ? 0 : cursor && /^\d+$/.test(cursor) ? Number(cursor) : (page - 1) * limit;
+  const pageWhere: Prisma.KudosWhereInput = keyset
+    ? {
+        AND: [
+          where,
+          {
+            OR: [
+              { createdAt: { lt: new Date(Number(keyset[1])) } },
+              { createdAt: new Date(Number(keyset[1])), id: { lt: keyset[2] } },
+            ],
+          },
+        ],
+      }
+    : where;
   const orderBy: Prisma.KudosOrderByWithRelationInput[] = sort === "reactions"
     ? [{ reactions: { _count: "desc" } }, { createdAt: "desc" }, { id: "desc" }]
     : [{ createdAt: "desc" }, { id: "desc" }];
@@ -106,9 +128,9 @@ export async function GET(req: NextRequest) {
   }
 
   const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-  const [kudos, total, thisWeek] = await Promise.all([
+  const [kudos, total, thisWeek, reactionsTotal] = await Promise.all([
     prisma.kudos.findMany({
-      where,
+      where: pageWhere,
       include: {
         giver: {
           select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true } } },
@@ -127,7 +149,21 @@ export async function GET(req: NextRequest) {
     prisma.kudos.count({ where }),
     // The feed's "This week" group count, over the whole filtered set.
     prisma.kudos.count({ where: { AND: [where, { createdAt: { gte: weekAgo } }] } }),
+    // The old tile strip's Reactions number, over the same filtered set.
+    prisma.kudosReaction.count({ where: { kudos: where } }),
   ]);
+  // The giver's presence dot. presenceStatus is additive (prisma/sql
+  // 2026-09-26-phase6-people.sql): a database without it shows no dot.
+  const presence = new Map<string, { presenceStatus: string | null; presenceUntil: string | null }>();
+  try {
+    const ids = [...new Set(kudos.map((k) => k.giverId))];
+    if (ids.length) {
+      const rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, presenceStatus: true, presenceUntil: true } });
+      for (const r of rows) presence.set(r.id, { presenceStatus: r.presenceStatus ?? null, presenceUntil: r.presenceUntil ? r.presenceUntil.toISOString() : null });
+    }
+  } catch {
+    // Column absent for one release: no dots.
+  }
   const shaped = kudos.map((k) => {
     const byEmoji = new Map<string, number>();
     const mine: string[] = [];
@@ -142,7 +178,7 @@ export async function GET(req: NextRequest) {
       id: k.id,
       message: k.message,
       companyValue: k.companyValue,
-      giver: k.giver,
+      giver: { ...k.giver, ...(presence.get(k.giverId) ?? {}) },
       receiver: k.receiver,
       createdAt: k.createdAt,
       reactionCounts,
@@ -153,7 +189,21 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const next = offset + kudos.length;
+  let nextCursor: string | null = null;
+  if (kudos.length === limit) {
+    if (sort === "recent" && (keyset || !url.searchParams.get("page"))) {
+      const last = kudos[kudos.length - 1];
+      // Only when rows remain past this key (a full page can be the last).
+      const more = await prisma.kudos.count({
+        where: { AND: [where, { OR: [{ createdAt: { lt: last.createdAt } }, { createdAt: last.createdAt, id: { lt: last.id } }] }] },
+        take: 1,
+      });
+      nextCursor = more > 0 ? `k:${last.createdAt.getTime()}:${last.id}` : null;
+    } else {
+      const next = offset + kudos.length;
+      nextCursor = next < total ? String(next) : null;
+    }
+  }
   return jsonSuccess({
     data: shaped,
     pagination: {
@@ -161,9 +211,10 @@ export async function GET(req: NextRequest) {
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      nextCursor: next < total ? String(next) : null,
+      nextCursor,
     },
     groups: { thisWeek, earlier: Math.max(0, total - thisWeek) },
+    reactions: reactionsTotal,
   });
 }
 
@@ -197,6 +248,24 @@ export async function POST(req: NextRequest) {
   });
   if (!receiver) return jsonError("User not found", 404);
 
+  // A resend of the SAME kudos (a retry after a response was lost: the
+  // first request may already have created it) answers with the one that
+  // exists, and never thanks, emails or posts to Slack twice. Same giver,
+  // receiver, message and value inside two minutes is that resend; a person
+  // meaning to say the same words twice waits two minutes.
+  const dupe = await prisma.kudos.findFirst({
+    where: {
+      organizationId: orgId, giverId, receiverId, message: message.trim(), companyValue,
+      createdAt: { gte: new Date(Date.now() - 2 * 60_000) },
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+      receiver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+    },
+  });
+  if (dupe) return jsonSuccess({ ...dupe, duplicate: true }, 200);
+
   const kudos = await prisma.kudos.create({
     data: {
       message: message.trim(),
@@ -214,8 +283,9 @@ export async function POST(req: NextRequest) {
   // Notify the receiver (honors the "Kudos & recognition" inbox toggle)
   if (await shouldNotify(receiverId, "kudos")) await prisma.notification.create({
     data: {
-      title: "You received kudos!",
-      message: `${kudos.giver.firstName} ${kudos.giver.lastName} recognized you: "${message.trim().slice(0, 80)}"`,
+      // spec-teams-performance /kudos: "{name} thanked you".
+      title: `${`${kudos.giver.firstName ?? ""} ${kudos.giver.lastName ?? ""}`.trim() || "Someone"} thanked you`,
+      message: `"${message.trim().slice(0, 80)}"`,
       type: "kudos_received",
       // Their Received view (spec-teams-performance /kudos Realtime).
       link: "/kudos?view=received",

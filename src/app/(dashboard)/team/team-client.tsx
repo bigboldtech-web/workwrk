@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ClipboardList, Download, ListChecks, Mail, MessageCircle, MoreHorizontal, Users } from "lucide-react";
+import { Activity, ClipboardList, Download, ListChecks, Mail, MessageCircle, MoreHorizontal, Users } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -75,16 +75,18 @@ const SORTS: Array<{ value: TeamSort; label: string }> = [
   { value: "active", label: "Last active" },
 ];
 type ColKey = "workingOn" | "lastActive" | "overdue";
-const DISPLAY_KEY = "workwrk:my-team:columns:v1";
+// Display columns are the viewer's preference (home.teams.surface["my-team"]
+// .viewOptions.columns), so they follow the person to another device. The
+// browser key this page shipped with first is read once and moved there.
+const LEGACY_DISPLAY_KEY = "workwrk:my-team:columns:v1";
 const COL_DEFAULT: Record<ColKey, boolean> = { workingOn: true, lastActive: true, overdue: true };
+const COL_KEYS: ColKey[] = ["workingOn", "lastActive", "overdue"];
 
-function readColumns(): Record<ColKey, boolean> {
-  try {
-    const raw = window.localStorage.getItem(DISPLAY_KEY);
-    return raw ? { ...COL_DEFAULT, ...(JSON.parse(raw) as Partial<Record<ColKey, boolean>>) } : COL_DEFAULT;
-  } catch {
-    return COL_DEFAULT;
-  }
+function storedColumns(home: unknown): Partial<Record<ColKey, boolean>> {
+  const cols = (home as { teams?: { surface?: Record<string, { viewOptions?: { columns?: Record<string, unknown> } }> } } | undefined)?.teams?.surface?.["my-team"]?.viewOptions?.columns ?? {};
+  const out: Partial<Record<ColKey, boolean>> = {};
+  for (const k of COL_KEYS) if (typeof cols[k] === "boolean") out[k] = cols[k] as boolean;
+  return out;
 }
 
 export default function TeamClient() {
@@ -92,8 +94,13 @@ export default function TeamClient() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const { toast } = useOsToast();
-  const { rowVersion } = useOsShell();
+  const { rowVersion, prefs, patchPrefs } = useOsShell();
   const { boot } = useBoot();
+  // The Activity scope that holds this viewer's people (activity-scope.ts):
+  // Owner, Admin and the People team read Everyone; a manager their team
+  // (the solid-line tree). Anyone else is never offered the link.
+  const bv = boot.viewer as { orgRole?: string; peopleTeam?: boolean; hasReports?: boolean };
+  const activityScope = bv.orgRole === "OWNER" || bv.orgRole === "ADMIN" || bv.peopleTeam ? "all" : bv.hasReports ? "team" : null;
   const datePrefs = useDatePrefs();
 
   const view = sp?.get("view") === "direct" ? "direct" : sp?.get("view") === "needs-attention" ? "needs-attention" : "all";
@@ -103,30 +110,50 @@ export default function TeamClient() {
   const manager = sp?.get("manager") ?? "";
   const noKras = sp?.get("noKras") === "1";
   const overdue = sp?.get("overdue") === "1";
+  const deactivated = sp?.get("deactivated") === "1";
   const sort = parseTeamSort(sp?.get("sort"));
   const page = Math.max(1, Number(sp?.get("page")) || 1);
-  const filters = [q, dept, title, manager].filter(Boolean).length + (noKras ? 1 : 0) + (overdue ? 1 : 0);
+  const filters = [q, dept, title, manager].filter(Boolean).length + (noKras ? 1 : 0) + (overdue ? 1 : 0) + (deactivated ? 1 : 0);
 
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [attention, setAttention] = useState<(AttentionCounts & { chainWide: boolean }) | null>(null);
+  const [attention, setAttention] = useState<AttentionCounts | null>(null);
   const [draftQ, setDraftQ] = useState(q);
   const [filterOpen, setFilterOpen] = useState(filters > 0);
   const [sortOpen, setSortOpen] = useState(false);
-  const [columns, setColumns] = useState<Record<ColKey, boolean>>(COL_DEFAULT);
+  const [columnsLocal, setColumnsLocal] = useState<Partial<Record<ColKey, boolean>>>({});
   const [menu, setMenu] = useState<{ row: Row; anchor: RefObject<HTMLElement | null> } | null>(null);
   const [depts, setDepts] = useState<Opt[]>([]);
   const [roles, setRoles] = useState<Opt[]>([]);
   const [managerPick, setManagerPick] = useState<PickPerson | null>(null);
 
-  useEffect(() => { const t = setTimeout(() => setColumns(readColumns()), 0); return () => clearTimeout(t); }, []);
+  const columns = useMemo<Record<ColKey, boolean>>(() => ({ ...COL_DEFAULT, ...storedColumns(prefs.home), ...columnsLocal }), [prefs.home, columnsLocal]);
   const setColumn = (k: ColKey, on: boolean) => {
-    setColumns((c) => {
-      const next = { ...c, [k]: on };
-      try { window.localStorage.setItem(DISPLAY_KEY, JSON.stringify(next)); } catch { /* kept for this visit */ }
-      return next;
+    setColumnsLocal((c) => ({ ...c, [k]: on }));
+    void patchPrefs({ home: { teams: { surface: { "my-team": { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
+      if (!ok) toast("Couldn't save that setting. It applies until you leave.", { tone: "danger" });
     });
   };
+  // One-time move of the browser-only store into the preference; the key is
+  // removed only once the preference write has answered.
+  const movedCols = useRef(false);
+  useEffect(() => {
+    if (movedCols.current) return;
+    movedCols.current = true;
+    let raw: string | null = null;
+    try { raw = window.localStorage.getItem(LEGACY_DISPLAY_KEY); } catch { return; }
+    if (!raw) return;
+    let parsed: Record<string, unknown> = {};
+    try { parsed = JSON.parse(raw) as Record<string, unknown>; } catch { /* unreadable: dropped below */ }
+    const already = storedColumns(prefs.home);
+    const patch: Partial<Record<ColKey, boolean>> = {};
+    for (const k of COL_KEYS) if (typeof parsed[k] === "boolean" && already[k] === undefined) patch[k] = parsed[k] as boolean;
+    const done = () => { try { window.localStorage.removeItem(LEGACY_DISPLAY_KEY); } catch { /* removed next visit */ } };
+    if (!Object.keys(patch).length) { done(); return; }
+    // patchPrefs applies the patch to prefs optimistically, so the columns
+    // follow at once; no local copy is needed here.
+    void patchPrefs({ home: { teams: { surface: { "my-team": { viewOptions: { columns: patch } } } } } }).then((ok) => { if (ok) done(); });
+  }, [prefs.home, patchPrefs]);
 
   const setParams = useCallback((patch: Record<string, string | null>, keepPage = false) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
@@ -151,16 +178,17 @@ export default function TeamClient() {
     if (manager) p.set("manager", manager);
     if (noKras) p.set("noKras", "1");
     if (overdue) p.set("overdue", "1");
+    if (deactivated) p.set("includeDeactivated", "1");
     if (sort !== "name") p.set("sort", sort);
     p.set("page", String(page));
     p.set("limit", "40");
     return p.toString();
-  }, [view, q, dept, title, manager, noKras, overdue, sort, page]);
+  }, [view, q, dept, title, manager, noKras, overdue, deactivated, sort, page]);
 
   const load = useCallback(async () => {
     const [r, a] = await Promise.all([
       apiFetch<ListResponse>(`/api/team/members-work?${apiQs}`, { cache: "no-store" }),
-      apiFetch<AttentionCounts & { chainWide: boolean }>("/api/team/attention", { cache: "no-store" }),
+      apiFetch<AttentionCounts>("/api/team/attention", { cache: "no-store" }),
     ]);
     if (!r.ok) { setError(r.error || "Couldn't load your team"); return; }
     setError(null);
@@ -205,11 +233,11 @@ export default function TeamClient() {
     setTimeout(() => document.querySelector<HTMLInputElement>("[data-filter-search]")?.focus(), 0);
   } });
 
-  const clearFilters = () => { setDraftQ(""); setManagerPick(null); setParams({ q: null, dept: null, title: null, manager: null, noKras: null, overdue: null }); };
+  const clearFilters = () => { setDraftQ(""); setManagerPick(null); setParams({ q: null, dept: null, title: null, manager: null, noKras: null, overdue: null, deactivated: null }); };
 
   const talkOn = boot.launcherApps.includes("chat");
   const rows = data?.rows ?? null;
-  const queue = attention ? attentionRows(attention, { chainWide: attention.chainWide }) : [];
+  const queue = attention ? attentionRows(attention) : [];
 
   const columnsDef = useMemo<TableColumn<Row>[]>(() => {
     const cols: TableColumn<Row>[] = [
@@ -231,7 +259,7 @@ export default function TeamClient() {
         {/* The row is a link to the person, so these go somewhere else as buttons. */}
         <button type="button" title={`${r.workingOn.title} · ${r.workingOn.board.name}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/item/${r.workingOn!.id}`); }} className="min-w-0 truncate text-start hover:underline">{r.workingOn.title}</button>
         {r.open > 1 ? (
-          <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/people/${r.id}#working-on`); }} className="shrink-0 rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink" aria-label={`${r.open - 1} more open items for ${personName(r)}`}>+{r.open - 1}</button>
+          <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/people/${r.id}?from=team#working-on`); }} className="shrink-0 rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink" aria-label={`${r.open - 1} more open items for ${personName(r)}`}>+{r.open - 1}</button>
         ) : null}
       </span>
     ) : <span className="text-ink-3">Nothing open</span> });
@@ -326,6 +354,12 @@ export default function TeamClient() {
               <Switch checked={overdue} onChange={(v) => setParams({ overdue: v ? "1" : null })} aria-label="Overdue work" />
             </li>
           </FilterGroup>
+          <FilterGroup label="Include">
+            <li className="flex h-9 items-center justify-between gap-3 px-2 text-sm text-ink">
+              <span>Deactivated people</span>
+              <Switch checked={deactivated} onChange={(v) => setParams({ deactivated: v ? "1" : null })} aria-label="Include deactivated people" />
+            </li>
+          </FilterGroup>
         </FilterPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <AttentionQueue rows={queue} />
@@ -356,7 +390,7 @@ export default function TeamClient() {
       {menu ? (
         <MorePortal anchorRef={menu.anchor} width={232} open placement="below" onClose={() => setMenu(null)}>
           <MenuList aria-label={`Actions for ${personName(menu.row)}`}>
-            <MenuItem icon={Users} label="Open profile" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}`); }} />
+            <MenuItem icon={Users} label="Open profile" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}?from=team`); }} />
             {talkOn && menu.row.id !== boot.viewer.id ? (
               <MenuItem icon={MessageCircle} label="Message" onClick={() => {
                 const id = menu.row.id; setMenu(null);
@@ -369,8 +403,14 @@ export default function TeamClient() {
             {menu.row.workingOn ? (
               <MenuItem icon={ListChecks} label="Open their latest task" onClick={() => { const id = menu.row.workingOn!.id; setMenu(null); router.push(`/item/${id}`); }} />
             ) : null}
+            {activityScope ? (
+              // What they did lately (the deleted TeamPulse card's "Recent
+              // activity" strip): the Activity feed filtered to this person,
+              // on the scope that includes them, so its access rules apply.
+              <MenuItem icon={Activity} label="Recent activity" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/activity?view=${activityScope}&person=${encodeURIComponent(id)}`); }} />
+            ) : null}
             {menu.row.canRecord ? (
-              <MenuItem icon={ClipboardList} label="Record numbers" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}?tab=kras&record=1`); }} />
+              <MenuItem icon={ClipboardList} label="Record numbers" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/people/${id}?tab=kras&record=1&from=team`); }} />
             ) : null}
           </MenuList>
         </MorePortal>
@@ -393,7 +433,7 @@ function TeamTable({ rows, columns, footer, onMenu, empty }: {
       columns={columns}
       rows={rows}
       rowKey={(r) => r.id}
-      rowHref={(r) => `/people/${r.id}`}
+      rowHref={(r) => `/people/${r.id}?from=team`}
       rowMenu={(r) => (
         <button
           type="button"

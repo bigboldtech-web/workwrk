@@ -50,6 +50,15 @@ export interface PeopleCtx {
 export async function peopleCtx(): Promise<PeopleCtx | null> {
   const viewer = await viewerFromSession();
   if (!viewer) return null;
+  return peopleCtxForViewer(viewer);
+}
+
+/**
+ * The same context for a Viewer the caller already holds (a dashboard card
+ * computed for a scheduled email has no session, only the recipient's
+ * Viewer), so every people rule reads one shape.
+ */
+export async function peopleCtxForViewer(viewer: Viewer): Promise<PeopleCtx> {
   const row = await prisma.user.findUnique({ where: { id: viewer.userId }, select: { accessLevel: true } });
   const accessLevel = row?.accessLevel ?? "EMPLOYEE";
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";

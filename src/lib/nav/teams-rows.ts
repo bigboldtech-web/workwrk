@@ -120,12 +120,27 @@ export function visibleTeamsRows(v: TeamsViewer): TeamsRow[] {
  */
 const PEOPLE_STATIC = new Set(["me", "departments", "roles", "skills"]);
 
-export function teamsActivePath(pathname: string, selfId: string | null | undefined): string {
+/**
+ * Where a person record was opened from, when that is not the Directory:
+ * `?from=team` (a My team row, its "+N" and its row menu) keeps My team lit
+ * and names it in the breadcrumbs, because My team is still the page under
+ * the drawer. Anything else is the Directory.
+ */
+export const PERSON_ORIGINS = { team: { label: "My team", href: "/team" } } as const;
+export type PersonOrigin = { label: string; href: string };
+export function personOrigin(search: string | URLSearchParams | null | undefined): PersonOrigin {
+  const sp = typeof search === "string" || search == null ? new URLSearchParams(search ?? "") : search;
+  const from = sp.get("from");
+  return from === "team" ? PERSON_ORIGINS.team : { label: "Directory", href: "/people" };
+}
+
+export function teamsActivePath(pathname: string, selfId: string | null | undefined, search = ""): string {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/team/rollup" || path.startsWith("/team/rollup/")) return "/team/alignment";
   const m = /^\/people\/([^/]+)(\/.*)?$/.exec(path);
   if (m && !PEOPLE_STATIC.has(m[1])) {
-    return selfId && m[1] === selfId ? "/people/me" : "/people";
+    if (selfId && m[1] === selfId) return "/people/me";
+    return personOrigin(search).href;
   }
   return path;
 }
@@ -137,7 +152,7 @@ export function teamsActiveHref(
   selfId: string | null | undefined,
   rows: readonly TeamsRow[] = TEAMS_ROWS,
 ): string | undefined {
-  return resolveActiveRow(rows, teamsActivePath(pathname, selfId), search)?.href;
+  return resolveActiveRow(rows, teamsActivePath(pathname, selfId, search), search)?.href;
 }
 
 /** Row counts from the boot counts; My team = weekly reviews + KPI sign-offs. */
@@ -146,9 +161,10 @@ export function teamsRowCount(
   counts: Partial<Record<"weeklyReviews" | "weeklyReviewsChain" | "reviewForms" | "candorOpen" | "surveysOpen" | "kpiReviews", number>>,
 ): number {
   if (!row.count) return 0;
-  // My team counts the whole chain, the same number its attention card
-  // shows (GET /api/team/attention reads the same two helpers).
-  if (row.count === "myTeam") return (counts.weeklyReviewsChain ?? counts.weeklyReviews ?? 0) + (counts.kpiReviews ?? 0);
+  // My team counts the weekly reviews the viewer decides (the same number
+  // the Weekly reviews row and /team/reviews show, and its attention card:
+  // GET /api/team/attention reads the same two helpers) plus KPI sign-offs.
+  if (row.count === "myTeam") return (counts.weeklyReviews ?? 0) + (counts.kpiReviews ?? 0);
   return counts[row.count] ?? 0;
 }
 

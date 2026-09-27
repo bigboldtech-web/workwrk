@@ -18,14 +18,30 @@ interface WorkRow { id: string; title: string; status: string | null; priority: 
 
 export function WorkingOnSection({ userId }: { userId: string }) {
   const datePrefs = useDatePrefs();
-  const [data, setData] = useState<{ items: WorkRow[]; total: number } | null>(null);
+  const [data, setData] = useState<{ items: WorkRow[]; total: number; nextCursor: string | null } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [more, setMore] = useState<"idle" | "loading" | "failed">("idle");
   const load = useCallback(async () => {
-    const r = await apiFetch<{ items: WorkRow[]; total: number }>(`/api/team/person-work?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+    const r = await apiFetch<{ items: WorkRow[]; total: number; nextCursor?: string | null }>(`/api/team/person-work?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
     if (!r.ok) { setFailed(true); return; }
     setFailed(false);
-    setData(r.data);
+    setData({ items: r.data.items, total: r.data.total, nextCursor: r.data.nextCursor ?? null });
   }, [userId]);
+  const loadMore = useCallback(async () => {
+    if (!data?.nextCursor) return;
+    setMore("loading");
+    const r = await apiFetch<{ items: WorkRow[]; total: number; nextCursor?: string | null }>(
+      `/api/team/person-work?userId=${encodeURIComponent(userId)}&cursor=${encodeURIComponent(data.nextCursor)}`,
+      { cache: "no-store" },
+    );
+    if (!r.ok) { setMore("failed"); return; }
+    setMore("idle");
+    setData((d) => {
+      if (!d) return d;
+      const seen = new Set(d.items.map((x) => x.id));
+      return { items: [...d.items, ...r.data.items.filter((x) => !seen.has(x.id))], total: r.data.total, nextCursor: r.data.nextCursor ?? null };
+    });
+  }, [data, userId]);
   useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
 
   return (
@@ -54,7 +70,14 @@ export function WorkingOnSection({ userId }: { userId: string }) {
           ))}
         </ul>
       )}
-      {data && data.total > data.items.length ? <p className="text-sm text-ink-2">Showing the first {data.items.length} of {data.total}, soonest due first.</p> : null}
+      {data && data.nextCursor ? (
+        <p className="flex items-center gap-2 text-sm text-ink-2">
+          <span className="tabular-nums">{data.items.length} of {data.total}, soonest due first.</span>
+          <button type="button" onClick={() => void loadMore()} disabled={more === "loading"} aria-busy={more === "loading"} className="font-medium text-brand-deep hover:underline disabled:opacity-60">
+            {more === "failed" ? "Couldn't load more. Try again" : "Show more"}
+          </button>
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -528,6 +528,14 @@ describe("Phase 6 people preference keys", () => {
     expect(ok({ home: { work: { workload: { mode: "points" } } } })).toBe(false);
     // Per-person hours are a column (User.weeklyCapacityHours), never a pref.
     expect(ok({ home: { work: { workload: { perPersonHours: { u1: 20 } } } } })).toBe(false);
+    // Tasks per day keeps the grid's 1 to 99 range, so no saved value is dropped.
+    expect(ok({ home: { work: { workload: { dailyTasks: 99 } } } })).toBe(true);
+    expect(ok({ home: { work: { workload: { dailyTasks: 100 } } } })).toBe(false);
+  });
+
+  it("My team's Display columns live under home.teams.surface.my-team", () => {
+    expect(ok({ home: { teams: { surface: { "my-team": { viewOptions: { columns: { workingOn: false } } } } } } })).toBe(true);
+    expect(ok({ home: { teams: { surface: { "my-team": { viewOptions: { density: "compact" } } } } } })).toBe(false);
   });
 
   it("the six goals-unit Display switches parse, and a stray key in any of them is a 400", () => {

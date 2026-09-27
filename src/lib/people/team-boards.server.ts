@@ -11,6 +11,7 @@ import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
 import type { Viewer } from "@/lib/access/types";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
+import type { Prisma } from "@/generated/prisma";
 
 export interface ReadableBoard {
   id: string;
@@ -43,5 +44,32 @@ export async function readableBoardsFor(viewer: Viewer): Promise<ReadableBoards>
     ids: [...byId.keys()],
     byId,
     isDone: (boardId, status) => isDoneStatus(byId.get(boardId)?.statuses ?? [], status),
+  };
+}
+
+/**
+ * A where clause that drops the items each List's OWN status set calls done,
+ * so a query can order and page over open work in SQL. Lists sharing a done
+ * set share one clause (most use the default trio), so the clause stays
+ * small. A status a List does not define is not excluded here: callers still
+ * run isDone over the rows, which applies the shared name fallback.
+ */
+export function openItemsWhere(boards: ReadableBoards, boardIds: readonly string[] = boards.ids): Prisma.ItemWhereInput {
+  const bySet = new Map<string, { statuses: string[]; boardIds: string[] }>();
+  for (const id of boardIds) {
+    const b = boards.byId.get(id);
+    if (!b) continue;
+    const done = b.statuses.filter((o) => o.group !== "ACTIVE").map((o) => o.value).sort();
+    if (!done.length) continue;
+    const key = done.join("\u0000");
+    const entry = bySet.get(key);
+    if (entry) entry.boardIds.push(id);
+    else bySet.set(key, { statuses: done, boardIds: [id] });
+  }
+  if (!bySet.size) return {};
+  return {
+    NOT: {
+      OR: [...bySet.values()].map((e) => ({ boardId: { in: e.boardIds }, status: { in: e.statuses } })),
+    },
   };
 }

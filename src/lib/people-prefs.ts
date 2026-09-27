@@ -51,7 +51,7 @@ export function workloadPrefs(home: unknown): WorkloadPrefs {
   const mode: WorkloadMode = w.mode === "hours" || w.mode === "tasks" ? w.mode : WORKLOAD_DEFAULTS.mode;
   const windowDays: WorkloadWindow =
     w.windowDays === 7 || w.windowDays === 14 || w.windowDays === 28 ? w.windowDays : WORKLOAD_DEFAULTS.windowDays;
-  const daily = typeof w.dailyTasks === "number" && Number.isInteger(w.dailyTasks) && w.dailyTasks >= 1 && w.dailyTasks <= 50
+  const daily = typeof w.dailyTasks === "number" && Number.isInteger(w.dailyTasks) && w.dailyTasks >= 1 && w.dailyTasks <= 99
     ? w.dailyTasks
     : WORKLOAD_DEFAULTS.dailyTasks;
   return {

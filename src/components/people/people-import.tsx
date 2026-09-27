@@ -22,6 +22,7 @@ import Link from "next/link";
 import { Upload } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { Picker } from "@/components/ui/picker";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { apiFetch } from "@/lib/api-fetch";
 import {
   IMPORT_FIELDS, IMPORT_FIELD_LABEL, isIgnoredHeader, mapHeaders, parseCsv, rowsFromTable,
@@ -121,14 +122,16 @@ export function PeopleImport({ flow, container = "modal" }: { flow: PeopleImport
       </div>
       {state.step === "upload" ? <UploadStep flow={flow} /> : null}
       {state.step === "map" ? <MapStep flow={flow} /> : null}
-      {state.step === "review" && state.staged ? <ReviewStep flow={flow} /> : null}
+      {state.step === "review" && state.staged ? <ReviewStep flow={flow} container={container} /> : null}
       {state.step === "done" && state.result ? (
         <div className="flex flex-col gap-2 py-2">
           <p className="text-row text-ink">
             Invited {state.result.created ?? state.result.ready} {(state.result.created ?? state.result.ready) === 1 ? "person" : "people"}. They join when they accept the email.
           </p>
           <p className="text-sm text-ink-2">{state.result.errors + state.result.members + state.result.invited} rows were skipped.</p>
-          <Link href="/settings/data?tab=import" className="text-sm text-brand-deep hover:underline">See import history</Link>
+          {/* The people invited wait under Members until they accept (an
+              import history page arrives with Settings > Data, Phase 8). */}
+          <Link href="/settings/members#pending-invites" className="text-sm text-brand-deep hover:underline">See pending invitations</Link>
         </div>
       ) : null}
       {state.error ? <p role="alert" className="text-sm text-danger-text">{state.error}</p> : null}
@@ -220,42 +223,59 @@ function MapStep({ flow }: { flow: PeopleImportFlow }) {
   );
 }
 
-function ReviewStep({ flow }: { flow: PeopleImportFlow }) {
+type StagedRow = RowOutcome;
+
+function ReviewStep({ flow, container }: { flow: PeopleImportFlow; container: "modal" | "page" }) {
   const staged = flow.state.staged!;
   const s = staged.summary;
+  const columns: TableColumn<StagedRow>[] = [
+    { key: "row", label: "Row", width: "64px", numeric: true, render: (o) => <span className="text-ink-2">{o.row}</span> },
+    {
+      key: "name",
+      label: "Name",
+      width: "minmax(160px,1fr)",
+      title: true,
+      render: (o) => { const src = flow.state.rows[o.row - 1]; return `${src?.firstName ?? ""} ${src?.lastName ?? ""}`.trim(); },
+    },
+    { key: "email", label: "Email", width: "minmax(200px,1.2fr)", render: (o) => o.email },
+    {
+      key: "status",
+      label: "Status",
+      width: "minmax(200px,1.2fr)",
+      render: (o) => {
+        const chip = STATUS_CHIP[o.status];
+        return (
+          <span className="flex min-w-0 items-center gap-2">
+            <ToneChip tone={chip.tone} label={chip.label} />
+            {o.message && o.status !== "ready" && o.message !== chip.label ? <span className="truncate text-ink-2" title={o.message}>{o.message}</span> : null}
+          </span>
+        );
+      },
+    },
+  ];
   return (
     <>
       <p className="text-row text-ink">{s.ready} ready · {s.errors} with errors · {s.members + s.invited} already members or invited</p>
-      <div className="max-h-[46vh] overflow-auto rounded-lg border border-line">
-        <table className="w-full min-w-[640px] text-sm">
-          <thead className="sticky top-0 bg-[var(--os-table-head-bg)] text-ink-2">
-            <tr className="h-9">
-              <th className="w-12 px-3 text-start font-medium">Row</th>
-              <th className="px-3 text-start font-medium">Name</th>
-              <th className="px-3 text-start font-medium">Email</th>
-              <th className="px-3 text-start font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line-soft">
-            {staged.rows.map((o) => {
-              const src = flow.state.rows[o.row - 1];
-              const chip = STATUS_CHIP[o.status];
-              return (
-                <tr key={o.row} className="h-11">
-                  <td className="px-3 tabular-nums text-ink-2">{o.row}</td>
-                  <td className="px-3 text-ink">{`${src?.firstName ?? ""} ${src?.lastName ?? ""}`.trim()}</td>
-                  <td className="px-3 text-ink">{o.email}</td>
-                  <td className="px-3"><span className="flex items-center gap-2"><ToneChip tone={chip.tone} label={chip.label} />{o.message && o.status !== "ready" && o.message !== chip.label ? <span className="text-ink-2">{o.message}</span> : null}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="max-h-[46vh] overflow-y-auto">
+        <TableCard
+          columns={columns}
+          rows={staged.rows}
+          rowKey={(o) => String(o.row)}
+          ariaLabel="Rows to import"
+          footer={{
+            total: s.total,
+            noun: "rows",
+            from: s.total ? 1 : 0,
+            to: staged.rows.length,
+            extra: <span>· {s.ready} {s.ready === 1 ? "row" : "rows"} will be invited, {s.total - s.ready} skipped</span>,
+          }}
+        />
       </div>
-      <p className="text-sm text-ink-2">
-        {s.ready} {s.ready === 1 ? "row" : "rows"} will be invited, {s.total - s.ready} skipped.{" "}
-        <button type="button" className="text-brand-deep hover:underline" onClick={flow.back}>Back to the columns</button>
-      </p>
+      {/* The dialog's footer carries Back; the inline page (Settings > Data,
+          Phase 8) has no footer, so it keeps its own way back. */}
+      {container === "page" ? (
+        <p className="text-sm text-ink-2"><button type="button" className="text-brand-deep hover:underline" onClick={flow.back}>Back to the columns</button></p>
+      ) : null}
     </>
   );
 }

@@ -5,6 +5,7 @@ import {
   TEAMS_SEARCH_THRESHOLD,
   teamsActiveHref,
   teamsActivePath,
+  personOrigin,
   teamsRowCount,
   visibleTeamsRows,
   type TeamsViewer,
@@ -94,6 +95,15 @@ describe("the active row follows the URL", () => {
     expect(teamsActiveHref("/people", "", "u1")).toBe("/people");
   });
 
+  it("a record opened from My team keeps My team lit", () => {
+    expect(teamsActiveHref("/people/u2", "from=team", "u1")).toBe("/team");
+    expect(teamsActiveHref("/people/u2", "from=team&tab=kras", "u1")).toBe("/team");
+    expect(teamsActiveHref("/people/u1", "from=team", "u1")).toBe("/people/me");
+    expect(teamsActiveHref("/people/u2", "from=elsewhere", "u1")).toBe("/people");
+    expect(personOrigin("from=team")).toEqual({ label: "My team", href: "/team" });
+    expect(personOrigin("")).toEqual({ label: "Directory", href: "/people" });
+  });
+
   it("the static /people children are never taken for an id", () => {
     expect(teamsActivePath("/people/departments", "u1")).toBe("/people/departments");
     expect(teamsActiveHref("/people/roles/r1", "", "u1")).toBe("/people/roles");
@@ -120,9 +130,9 @@ describe("row counts ride the boot counts", () => {
   it("My team is weekly reviews plus KPI sign-offs", () => {
     expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "team")!, counts)).toBe(5);
   });
-  it("My team counts the whole chain when the boot carries it, and Weekly reviews stays direct", () => {
+  it("My team and Weekly reviews count the same decision queue, never the wider chain", () => {
     const chain = { ...counts, weeklyReviewsChain: 6 };
-    expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "team")!, chain)).toBe(9);
+    expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "team")!, chain)).toBe(5);
     expect(teamsRowCount(TEAMS_ROWS.find((r) => r.key === "weekly-reviews")!, chain)).toBe(2);
   });
   it("each badge reads its own key, and a row without one reads 0", () => {

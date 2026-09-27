@@ -84,6 +84,34 @@ describe("computeWorkload: people", () => {
     expect(m.get("p")!.days.slice(0, 5).map((c) => c.hours)).toEqual([1, 0, 1, 0, 1]);
   });
 
+  it("splits over every assignee even when only some are in view", () => {
+    // The viewer sees p only; q is outside their scope. p's share is still half.
+    const m = computeWorkload([{ id: "a", ownerId: "p", assigneeIds: ["p"], shareCount: 2, dueAt: d(22), estimateMinutes: 480 }], ["p"], win, sched);
+    expect(m.get("p")!.days[1].hours).toBe(4);
+    expect(m.has("q")).toBe(false);
+  });
+
+  it("a shareCount below the ids passed never inflates a share", () => {
+    const m = computeWorkload([{ id: "a", ownerId: "p", assigneeIds: ["q"], shareCount: 1, dueAt: d(22), estimateMinutes: 240 }], ["p", "q"], win, sched);
+    expect(m.get("p")!.days[1].hours).toBe(2);
+  });
+
+  it("lists overdue open work per person whatever the window", () => {
+    const today = new Date(2026, 8, 23);
+    const items = [
+      { id: "late", ownerId: "p", dueAt: new Date(2026, 7, 3, 10) },
+      { id: "edge", ownerId: "p", dueAt: d(22) },
+      { id: "today", ownerId: "p", dueAt: d(23) },
+      { id: "undated", ownerId: "p" },
+      { id: "nobody", ownerId: null, dueAt: d(21) },
+    ];
+    const m = computeWorkload(items, ["p"], { ...win, today }, sched);
+    expect(m.get("p")!.overdue).toEqual(["late", "edge"]);
+    expect(m.get("p")!.totalTasks).toBe(2);
+    expect(m.get(UNASSIGNED)!.overdue).toEqual(["nobody"]);
+    expect(computeWorkload(items, ["p"], win, sched).get("p")!.overdue).toEqual([]);
+  });
+
   it("assigneesOf never repeats the owner", () => {
     expect(assigneesOf({ ownerId: "p", assigneeIds: ["p", "q", "q"] })).toEqual(["p", "q"]);
   });

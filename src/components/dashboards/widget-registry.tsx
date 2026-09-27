@@ -5,12 +5,12 @@
 // for it). The kinds, their labels, sizes and surfaces are the pure
 // src/lib/dashboards/widget-kinds.ts; this is their React half.
 //
-// Extending it: Phase 6's people widgets (workload by person, headcount)
-// add a row to WIDGET_KIND_META, an entry here, and their server shape.
-// Nothing else in the canvas, the grid or the editor needs to change.
+// Extending it: a kind adds a row to WIDGET_KIND_META, an entry here, and its
+// server shape. Phase 6's Workload by person (decision b) is the "workload"
+// entry. Nothing else in the canvas, the grid or the editor needs to change.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BarChart3, ChevronDown, Hash, ListChecks, Type, type LucideIcon } from "lucide-react";
+import { BarChart3, ChevronDown, Hash, ListChecks, Scale, Type, type LucideIcon } from "lucide-react";
 import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { WidgetResult } from "@/lib/dashboards/widget-data";
@@ -22,6 +22,7 @@ import { StatBody } from "./widgets/stat-widget";
 import { ChartBody } from "./widgets/chart-widget";
 import { ListBody } from "./widgets/list-widget";
 import { NotesBody } from "./widgets/notes-widget";
+import { WorkloadBody } from "./widgets/workload-widget";
 
 // ── Small shared controls for the editor's settings column ───────────
 
@@ -264,6 +265,38 @@ function ListSettings({ input, onChange }: SettingsFieldsProps<"list">) {
   );
 }
 
+function WorkloadSettings({ input, onChange }: SettingsFieldsProps<"workload">) {
+  return (
+    <>
+      <SettingsRow label="Count by" stacked hint={(input.mode ?? "tasks") === "hours" ? "Each task's estimate, split evenly between everyone on it." : "Each task counts on every day it spans, for everyone on it."}>
+        <SegmentedControl
+          size="sm"
+          label="Count by"
+          value={input.mode ?? "tasks"}
+          onChange={(v) => onChange({ ...input, mode: v })}
+          options={[
+            { value: "tasks", label: "Tasks" },
+            { value: "hours", label: "Hours" },
+          ]}
+        />
+      </SettingsRow>
+      <SettingsRow label="Window" stacked>
+        <SegmentedControl
+          size="sm"
+          label="Window"
+          value={String(input.windowDays ?? 14) as "7" | "14" | "28"}
+          onChange={(v) => onChange({ ...input, windowDays: Number(v) as 7 | 14 | 28 })}
+          options={[
+            { value: "7", label: "1 week" },
+            { value: "14", label: "2 weeks" },
+            { value: "28", label: "4 weeks" },
+          ]}
+        />
+      </SettingsRow>
+    </>
+  );
+}
+
 function NotesSettings({ input, onChange }: SettingsFieldsProps<"notes">) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -321,6 +354,12 @@ export const WIDGET_REGISTRY: Record<WidgetKind, WidgetKindEntry> = {
     Body: ({ result }) => (result.kind === "list" ? <ListBody result={result} /> : null),
     SettingsFields: ({ input, onChange, fields, sourceKind }) =>
       input.kind === "list" ? <ListSettings input={input} onChange={onChange} fields={fields} sourceKind={sourceKind} /> : null,
+  },
+  workload: {
+    icon: Scale,
+    Body: ({ result }) => (result.kind === "workload" ? <WorkloadBody result={result} /> : null),
+    SettingsFields: ({ input, onChange, fields, sourceKind }) =>
+      input.kind === "workload" ? <WorkloadSettings input={input} onChange={onChange} fields={fields} sourceKind={sourceKind} /> : null,
   },
   notes: {
     icon: Type,

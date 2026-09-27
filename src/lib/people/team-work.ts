@@ -108,18 +108,18 @@ export interface AttentionRow {
 /**
  * The Needs your attention card's rows, zero rows dropped. An empty result
  * means the card is not rendered at all (the absence is the message).
- * `chainWide` is true when the weekly count covers more than direct
- * reports, so the link opens the queue on its chain scope and the number
+ * The weekly count is the viewer's own decision queue (the reviews they are
+ * the recorded manager of), exactly what /team/reviews lists, so the number
  * the viewer clicked is the number they land on.
  */
-export function attentionRows(c: AttentionCounts, opts: { chainWide?: boolean } = {}): AttentionRow[] {
+export function attentionRows(c: AttentionCounts): AttentionRow[] {
   const rows: AttentionRow[] = [];
   if (c.weeklyReviews > 0) {
     rows.push({
       key: "weekly",
       count: c.weeklyReviews,
       sentence: `${c.weeklyReviews === 1 ? "weekly review" : "weekly reviews"} awaiting your approval`,
-      href: opts.chainWide ? "/team/reviews?scope=chain" : "/team/reviews",
+      href: "/team/reviews",
     });
   }
   if (c.kpiRecords > 0) {

@@ -100,6 +100,10 @@ export function KudosModal({
       json: { receiverId: to[0], message: message.trim(), companyValue: value },
     });
     if (!r.ok) {
+      // One quiet retry for a dropped connection. Status 0 can also mean the
+      // first request landed and only its answer was lost: POST /api/kudos
+      // answers a resend of the same kudos inside two minutes with the one
+      // it already made, so the retry never thanks or emails anyone twice.
       if (attempt === 0 && r.status === 0) { await send(1); return; }
       setSending(false);
       setError(r.error || "Couldn't send the kudos. Your message is still here.");

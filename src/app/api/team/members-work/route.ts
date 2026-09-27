@@ -8,8 +8,10 @@
 // work".
 //
 // Query: view=all|direct|needs-attention, q, dept, title, manager (org-wide
-// viewers), noKras=1, overdue=1, sort=name|open|overdue|active,
-// page (or cursor) and limit (default 40, at most 100).
+// viewers), noKras=1, overdue=1, includeDeactivated=1 (a deactivated
+// report's open work is still work someone must pick up),
+// sort=name|open|overdue|active, page (or cursor) and limit (default 40,
+// at most 100).
 //
 // Counting (src/lib/people/team-work.ts): EXACT over every live item on a
 // List the viewer can read, one aggregated SQL row per person, List and
@@ -26,7 +28,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { teamScopeFor } from "@/lib/people/team-scope.server";
-import { readableBoardsFor } from "@/lib/people/team-boards.server";
+import { openItemsWhere, readableBoardsFor } from "@/lib/people/team-boards.server";
 import { aggregateWork, parseTeamSort, sortTeam, weekStartLocal, NO_WORK, type WorkGroupRow } from "@/lib/people/team-work";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { toCsv } from "@/lib/people/people-csv";
@@ -55,10 +57,10 @@ export async function GET(req: NextRequest) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
-  const scope = await teamScopeFor(ctx);
+  const sp = req.nextUrl.searchParams;
+  const scope = await teamScopeFor(ctx, { includeDeactivated: sp.get("includeDeactivated") === "1" });
   if (!scope.orgWide && ctx.chain.size === 0) return err(403, "My team shows the people who report to you. Nobody reports to you yet.");
 
-  const sp = req.nextUrl.searchParams;
   const view = sp.get("view") === "direct" ? "direct" : sp.get("view") === "needs-attention" ? "needs-attention" : "all";
   const q = (sp.get("q") ?? "").trim();
   const dept = sp.get("dept") || null;
@@ -161,23 +163,29 @@ export async function GET(req: NextRequest) {
 
   // The page's own detail: job titles, departments, presence, and a
   // "Working on" sample (the soonest-due open item, else the most recently
-  // touched), all for at most `limit` people.
-  const [details, sample] = await Promise.all([
+  // touched), all for at most `limit` people. The sample is taken PER
+  // PERSON over OPEN items only (done filtered in SQL by each List's own
+  // status set), so a person whose open work is older than a pile of
+  // recently finished items still shows it, never "Nothing open" beside
+  // an Open count above zero.
+  const open = openItemsWhere(boards);
+  const [details, sampleLists] = await Promise.all([
     pageIds.length ? pageDetails(pageIds) : Promise.resolve([] as Detail[]),
     pageIds.length && boards.ids.length
-      ? prisma.item.findMany({
+      ? Promise.all(pageIds.map((pid) => prisma.item.findMany({
           where: {
-            organizationId: orgId,
-            archivedAt: null,
-            boardId: { in: boards.ids },
-            OR: [{ ownerId: { in: pageIds } }, { assigneeIds: { hasSome: pageIds } }],
+            AND: [
+              { organizationId: orgId, archivedAt: null, boardId: { in: boards.ids }, OR: [{ ownerId: pid }, { assigneeIds: { has: pid } }] },
+              open,
+            ],
           },
           select: { id: true, title: true, status: true, dueAt: true, updatedAt: true, boardId: true, ownerId: true, assigneeIds: true },
-          orderBy: { updatedAt: "desc" },
-          take: pageIds.length * 40,
-        })
-      : Promise.resolve([] as SampleRow[]),
+          orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { updatedAt: "desc" }],
+          take: 5,
+        })))
+      : Promise.resolve([] as SampleRow[][]),
   ]);
+  const sample: SampleRow[] = sampleLists.flat();
   const detailById = new Map(details.map((d) => [d.id, d] as const));
   const openByPerson = new Map<string, typeof sample>();
   const pageSet = new Set(pageIds);
