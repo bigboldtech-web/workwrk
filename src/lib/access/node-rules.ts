@@ -1482,6 +1482,28 @@ export function isDocAnchorKind(entityType: string | null | undefined): boolean 
 /** P6: the one sentence a doc made on an anchor outside DOC_ANCHOR_KINDS answers with. */
 export const DOC_ANCHOR_REFUSAL = "A doc can be added to a Space, a Folder, a List or a task.";
 
+/** P6: the sentence a half anchor (a kind with no id, or an id with no kind) answers with. */
+export const DOC_HALF_ANCHOR_REFUSAL = "A doc's place names both what it is on and which one, or neither.";
+
+/** P6: the sentence an empty parent page id answers with (it once reached the database and crashed the route). */
+export const DOC_PARENT_EMPTY_REFUSAL = "A parent page needs an id. Leave it out, or send null for no parent page.";
+
+export type DocAnchorInput = { ok: true; entityType: string | null; entityId: string | null } | { ok: false; error: string };
+
+/**
+ * P3 for the anchor a request names: both halves or neither. An empty string
+ * reads as nothing named, so `{ entityType: "BOARD", entityId: "" }` and
+ * `{ entityType: "", entityId: <a Folder> }` are half anchors and refused
+ * (400), never stored as a place that is neither a container nor the root
+ * (round seven, item 3). Both empty is the org root, as it was.
+ */
+export function docAnchorInput(entityType: string | null | undefined, entityId: string | null | undefined): DocAnchorInput {
+  const type = typeof entityType === "string" && entityType.trim() !== "" ? entityType : null;
+  const id = typeof entityId === "string" && entityId.trim() !== "" ? entityId : null;
+  if ((type === null) !== (id === null)) return { ok: false, error: DOC_HALF_ANCHOR_REFUSAL };
+  return { ok: true, entityType: type, entityId: id };
+}
+
 /**
  * The place a doc anchor names: a Space, a Folder, a List, or the List of a
  * task. Null for no anchor and for every other anchor type (today's open
@@ -1592,13 +1614,18 @@ function rowsWithNodeAt(rows: NodeRows, ref: NodeRef, dest: Place): NodeRows | n
 
 /**
  * P2 at the edge of every Space: does the viewer hold Full access on the node
- * where it would land, from the node itself (its owner, an org admin, or a
- * Full share on a doc) rather than from the Space it leaves? A canvas's or a
- * table's own grant never moves it (M3), here as everywhere.
+ * ITSELF, the Full access that goes with it wherever it lands: its owner, an
+ * org admin, or a Full share on a doc? It is read with the node set down at
+ * the org root, under no container at all, so nothing above it counts: not
+ * the Space it leaves, and not the page it goes under. Read where it lands,
+ * a page of the mover's own at the org root lent the doc its Full access,
+ * and a Folder grantee took another person's doc out of a private Space
+ * through it (round seven, break 1). A canvas's or a table's own grant never
+ * moves it (M3), here as everywhere.
  */
-export function fullWhereItLands(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, dest: Place): boolean {
+export function fullWhereItLands(rows: NodeRows, grants: ViewerGrants, ref: NodeRef): boolean {
   if (grants.viewer.denied) return false;
-  const moved = rowsWithNodeAt(rows, ref, dest);
+  const moved = rowsWithNodeAt(rows, ref, null);
   if (!moved) return false;
   let g = grants;
   if (ref.kind === "canvas" || ref.kind === "table") {
@@ -1626,7 +1653,8 @@ export type MoveVerdict =
  * the container it leaves, and Can edit or higher where it goes (P1's create
  * rule); a move out of every Space (dest null) also needs Full access on the
  * Space it leaves. Org admins pass on R1; a Space OWNER or ADMIN from before
- * the cutoff on P7.
+ * the cutoff on P7, and on P7 whoever manages a Space brings a node in from
+ * the org root with Can edit on it (the return trip of their own push).
  *
  * An Agent moves like anyone else, as every move gate before node-access did
  * (A8): the Agent clamp is Phase 8's to decide.
@@ -1645,7 +1673,15 @@ export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, 
       nodeEv = new NodeEvaluator(rows, { ...grants, object: new Map([...grants.object].filter(([k]) => k !== key)) });
     }
   }
-  if (!roleAtLeast(nodeEv.effective(ref).role, "FULL")) return { ok: false, failure: "node" };
+  // P7, the return trip: a node in no Space at all (the org root, where every
+  // Member holds Can edit on it) is brought into a Space by whoever manages
+  // that Space, with Can edit on the node, as a Space OWNER or ADMIN did
+  // before node-access (round seven, item 5). The org root is no container
+  // anyone holds a role on, so there is nothing to leave. Everywhere else
+  // Full access on the node is what moves it.
+  const destSpace = dest ? spaceOfPlace(rows, dest) : null;
+  const pullIn = from === null && destSpace !== null && managesPlace(ev, { kind: "space", id: destSpace });
+  if (!roleAtLeast(nodeEv.effective(ref).role, pullIn ? "EDIT" : "FULL")) return { ok: false, failure: "node" };
   // P4: the parent it already has.
   if (samePlace(from, dest)) {
     if (from && !managesPlace(ev, from)) return { ok: false, failure: "source" };
@@ -1662,7 +1698,7 @@ export function moveVerdict(rows: NodeRows, grants: ViewerGrants, ref: NodeRef, 
   // their push opens it to the org, where its owner or an org admin brings
   // it back. Anyone else (a Folder or List grantee moving a doc under a page
   // of the org's) needs Full access that goes with the node.
-  if (leavesEverySpace(rows, ref, dest) && !managesSpaceOf(ev, ref) && !fullWhereItLands(rows, grants, ref, dest)) {
+  if (leavesEverySpace(rows, ref, dest) && !managesSpaceOf(ev, ref) && !fullWhereItLands(rows, grants, ref)) {
     return { ok: false, failure: "landing" };
   }
   return { ok: true, same: false };
@@ -1735,7 +1771,7 @@ export function formDestinationVerdict(rows: NodeRows, grants: ViewerGrants, for
     const cur = formDestinationRef(f);
     const space = cur ? spaceOfPlace(rows, cur) : null;
     // As for every node (moveVerdict): a manager of the Space it leaves takes it out (P7).
-    if (space && !managesPlace(ev, { kind: "space", id: space }) && !fullWhereItLands(rows, grants, { kind: "form", id: formId }, null)) {
+    if (space && !managesPlace(ev, { kind: "space", id: space }) && !fullWhereItLands(rows, grants, { kind: "form", id: formId })) {
       return { ok: false, failure: "landing", slot: null };
     }
   }

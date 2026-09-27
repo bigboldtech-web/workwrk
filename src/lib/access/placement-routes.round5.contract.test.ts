@@ -90,7 +90,8 @@ describe("break 3: the Trash page offers Restore exactly where the route restore
     const server = read("src/lib/trash-server.ts");
     expect(server).toMatch(/const \[missingParents, landingBlocked\] = await Promise\.all\(\[missingParentIds\(page\), landingRefusals\(viewer, page\)\]\);/);
     expect(server).toMatch(/restorable: !parentGone && !blocked,/);
-    expect(server).toMatch(/blockedReason: parentGone \? "Its list is gone" : blocked,/);
+    // Round seven: a List in Trash blocks a task's restore like a gone one (its own sentence).
+    expect(server).toMatch(/blockedReason: listState === "gone" \? "Its list is gone" : listState === "archived" \? LIST_IN_TRASH_FOR_TASK : blocked,/);
     const fn = server.slice(server.indexOf("async function landingRefusals("), server.indexOf("async function readArchived("));
     expect(fn).toMatch(/if \(viewerIsOwnerOrAdmin\(viewer\)\) return out;/);
     expect(fn).toMatch(/const \{ rows, grants \} = await loadWorld\(nodeCtxFromViewer\(viewer\), \[\.\.\.places\.values\(\)\], \{ chain: true \}\);/);

@@ -14,7 +14,7 @@ import { z } from "zod";
 import { canCreateDocAt } from "@/lib/doc-access";
 import { getDocSharingMap } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
-import { DOC_ANCHOR_REFUSAL, anchorAgreesWithParent, applyDocLock, createRefusal, isDocAnchorKind, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
+import { DOC_ANCHOR_REFUSAL, DOC_PARENT_EMPTY_REFUSAL, anchorAgreesWithParent, applyDocLock, createRefusal, docAnchorInput, isDocAnchorKind, roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { docAnchorPlaceOf, docHomeOf, docPlaceLive } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilters, matchesView, parseDocsListQuery, slicePage, sortDocs, type DocsCandidate } from "@/lib/docs-list";
@@ -325,11 +325,21 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
-  // M2: a doc is made on an anchor the model knows (DOC_ANCHOR_KINDS, exact
-  // case) or as a note. Any other string is refused before anything is read:
-  // it once fell through R6's open fallback, so a Member anchored a doc to a
-  // Folder, a table or a canvas they could not see (round six, item 4).
-  if (parsed.data.entityType && parsed.data.entityType !== "NOTEPAD" && !isDocAnchorKind(parsed.data.entityType)) {
+  // P3: a parent page is an id or nothing; an empty string once reached the
+  // database as a foreign key and answered a bare 500 (round seven, item 4).
+  if (parsed.data.parentId === "") {
+    return NextResponse.json({ error: DOC_PARENT_EMPTY_REFUSAL, code: "invalid_parent", message: DOC_PARENT_EMPTY_REFUSAL }, { status: 400 });
+  }
+  // P3: both halves of the anchor or neither (docAnchorInput); a kind with an
+  // empty id, or an id with no kind, was once stored as-is (round seven,
+  // item 3). Then M2: a doc is made on an anchor the model knows
+  // (DOC_ANCHOR_KINDS, exact case) or as a note. Any other string is refused
+  // before anything is read: it once fell through R6's open fallback, so a
+  // Member anchored a doc to a Folder, a table or a canvas they could not see
+  // (round six, item 4).
+  const anchorIn = docAnchorInput(parsed.data.entityType, parsed.data.entityId);
+  if (!anchorIn.ok) return NextResponse.json({ error: anchorIn.error, code: "invalid_anchor", message: anchorIn.error }, { status: 400 });
+  if (anchorIn.entityType && anchorIn.entityType !== "NOTEPAD" && !isDocAnchorKind(anchorIn.entityType)) {
     return NextResponse.json({ error: DOC_ANCHOR_REFUSAL, code: "invalid_anchor", message: DOC_ANCHOR_REFUSAL }, { status: 400 });
   }
 
@@ -343,7 +353,7 @@ export async function POST(req: Request) {
   // where its parent page lives: an anchor that disagrees with the parent's
   // is refused (a page of a Folder in one Space anchored to another Space).
   const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel);
-  const anchor = { entityType: parsed.data.entityType ?? null, entityId: parsed.data.entityId ?? null };
+  const anchor = { entityType: anchorIn.entityType, entityId: anchorIn.entityId };
   const parentId = parsed.data.parentId ?? null;
   if (!(await canReadDocPlace(nodeCtx, anchor, parentId))) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (parentId && anchor.entityType && anchor.entityId) {
@@ -368,9 +378,9 @@ export async function POST(req: Request) {
       organizationId: ctx.orgId,
       title: parsed.data.title,
       content,
-      entityType: parsed.data.entityType ?? null,
-      entityId: parsed.data.entityId ?? null,
-      parentId: parsed.data.parentId ?? null,
+      entityType: anchor.entityType,
+      entityId: anchor.entityId,
+      parentId,
       isFolder: parsed.data.isFolder ?? false,
       // Default to a monotonically increasing position so new items land at
       // the bottom of their sibling list (sorted ascending in the tree).

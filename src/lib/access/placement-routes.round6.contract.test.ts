@@ -38,13 +38,13 @@ describe("breaks 5 and 6: the manager of the Space a node leaves is exempt from 
   it("moveVerdict asks managesSpaceOf before fullWhereItLands, and managesSpaceOf is Full access on the node's Space", () => {
     const rules = read("src/lib/access/node-rules.ts");
     const fn = between(rules, "export function moveVerdict(", "export function moveDecision(");
-    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !managesSpaceOf\(ev, ref\) && !fullWhereItLands\(rows, grants, ref, dest\)\) \{/);
+    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !managesSpaceOf\(ev, ref\) && !fullWhereItLands\(rows, grants, ref\)\) \{/);
     expect(fn).toMatch(/function managesSpaceOf\(ev: NodeEvaluator, ref: NodeRef\): boolean \{\n\s+const spaceId = spaceOfNode\(ev\.rows, ref\);\n\s+return !!spaceId && managesPlace\(ev, \{ kind: "space", id: spaceId \}\);/);
   });
   it("a form's emptied destinations and a file out of every Space ask the same of the Space they leave", () => {
     const rules = read("src/lib/access/node-rules.ts");
     const form = between(rules, "export function formDestinationVerdict(", "export function formDestinationChangeable(");
-    expect(form).toMatch(/if \(space && !managesPlace\(ev, \{ kind: "space", id: space \}\) && !fullWhereItLands\(rows, grants, \{ kind: "form", id: formId \}, null\)\) \{/);
+    expect(form).toMatch(/if \(space && !managesPlace\(ev, \{ kind: "space", id: space \}\) && !fullWhereItLands\(rows, grants, \{ kind: "form", id: formId \}\)\) \{/);
     const file = between(rules, "export function fileMoveVerdict(", "export function filePlace(");
     expect(file).not.toMatch(/failure: "landing"/);
     expect(file).toMatch(/if \(dest === null && source && from\.kind !== "space" && !managesPlace\(ev, \{ kind: "space", id: source \}\)\) \{/);
@@ -59,7 +59,8 @@ describe("breaks 5 and 6: the manager of the Space a node leaves is exempt from 
 describe("item 4: a doc is made on an anchor the model knows, on every create route, and moved onto the same set", () => {
   it("POST /api/docs refuses any other entityType before anything is read or written", () => {
     const route = read("src/app/api/docs/route.ts");
-    const check = route.indexOf('if (parsed.data.entityType && parsed.data.entityType !== "NOTEPAD" && !isDocAnchorKind(parsed.data.entityType)) {');
+    // Round seven: the anchor is read through docAnchorInput first (a half anchor is refused), then M2.
+    const check = route.indexOf('if (anchorIn.entityType && anchorIn.entityType !== "NOTEPAD" && !isDocAnchorKind(anchorIn.entityType)) {');
     expect(check).toBeGreaterThan(0);
     expect(check).toBeLessThan(route.indexOf("await canReadDocPlace(nodeCtx, anchor, parentId)"));
     expect(check).toBeLessThan(route.indexOf("prisma.doc.create("));

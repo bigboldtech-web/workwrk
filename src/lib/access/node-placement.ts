@@ -120,7 +120,10 @@ export async function checkCreate(ctx: NodeCtx, place: Place, what: PlaceKind): 
  * P2 and P4 for a route: may the viewer move `ref` to `dest` (null: the org
  * root)? `same` is a reorder under the parent it already has. A refusal is a
  * 403 with moveRefusal's sentence; a destination the viewer can neither open
- * nor pass through answers 404, so a guessed id confirms nothing.
+ * nor pass through answers 404 whatever else the rule found wrong, so a
+ * guessed id confirms nothing: the 403 for the place it leaves came first
+ * once, and told a Folder grantee which ids in a Space they cannot see were
+ * real (round seven, item 2).
  */
 export async function checkMove(ctx: NodeCtx, ref: NodeRef, dest: Place): Promise<{ ok: true; same: boolean } | PlaceRefusal> {
   const what = placeKindOf(ref);
@@ -128,7 +131,7 @@ export async function checkMove(ctx: NodeCtx, ref: NodeRef, dest: Place): Promis
   const { rows, grants } = await loadWorld(ctx, dest ? [ref, dest] : [ref], { chain: true });
   const verdict = moveVerdict(rows, grants, ref, dest);
   if (verdict.ok) return verdict;
-  if (verdict.failure === "destination" && dest && !(await seesPlace(ctx, new NodeEvaluator(rows, grants), dest))) {
+  if (dest && !(await seesPlace(ctx, new NodeEvaluator(rows, grants), dest))) {
     return fail(404, "That place no longer exists.");
   }
   return fail(403, moveRefusal(what, verdict.failure));

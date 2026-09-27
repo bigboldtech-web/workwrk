@@ -431,7 +431,8 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
 
   const rows: TrashRow[] = page.map((r) => {
     const actor = r.deletedById ? actorById.get(r.deletedById) : null;
-    const parentGone = missingParents.has(r.id);
+    const listState = missingParents.get(r.id) ?? null;
+    const parentGone = listState !== null;
     const blocked = landingBlocked.get(r.id) ?? null;
     return {
       id: r.id,
@@ -459,9 +460,11 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
       daysLeft: query.tab === "archived" ? null : daysLeft(r.deletedAt, days),
       restorable: !parentGone && !blocked,
       // A task is the one row that can be re-homed: its snapshot carries a
-      // boardId, and any List the viewer may write to will hold it.
-      needsTarget: parentGone && r.type === "task",
-      blockedReason: parentGone ? "Its list is gone" : blocked,
+      // boardId, and any List the viewer may write to will hold it. An
+      // archived task (no snapshot) comes back in place or not at all, so
+      // with its List in Trash it says so instead of offering a new home.
+      needsTarget: r.type === "task" && (listState === "gone" || (listState === "archived" && parseRowId(r.id).archive === null)),
+      blockedReason: listState === "gone" ? "Its list is gone" : listState === "archived" ? LIST_IN_TRASH_FOR_TASK : blocked,
     };
   });
 
@@ -965,6 +968,11 @@ export async function restoreTrashRow(
   if (parsed.archive) {
     const { type, id } = parsed.archive;
     const orgId = viewer.organizationId;
+    // An archived row comes back in place: it has no snapshot to point at
+    // another List, so a target is refused, not ignored (round seven, item 1).
+    if (target?.targetBoardId) {
+      return { ok: false, status: 409, message: "An archived task comes back into its own list. Only a task whose list is gone can be restored into another one." };
+    }
     // A restore puts the row back INTO its container, so the placement rule
     // holds (node-rules P1): Can edit there now, whoever deleted it or owns
     // it. A grant revoked since never brings it back into the Space.
@@ -1003,7 +1011,7 @@ export async function restoreTrashRow(
     }
     // The target has to be a List this viewer may WRITE to, or "Restore to..."
     // would be a way to put a row somewhere you cannot reach.
-    const targetList = await prisma.board.findFirst({ where: { id: targetBoardId, organizationId: viewer.organizationId }, select: { id: true } });
+    const targetList = await prisma.board.findFirst({ where: { id: targetBoardId, organizationId: viewer.organizationId, archivedAt: null }, select: { id: true } });
     const writable = targetList ? roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: targetList.id })).role, "EDIT") : false;
     if (!writable) {
       return { ok: false, status: 403, message: "You need edit access on that list." };
@@ -1052,11 +1060,14 @@ async function folderTrashRow(organizationId: string, folderId: string): Promise
   return !!(await prisma.trashItem.findFirst({ where: { organizationId, entityType: "folder", entityId: folderId }, select: { id: true } }));
 }
 
-/** A task comes back into its List: Can edit on it, the rule every task write reads. A List that is gone is the restore's own 409 (or "Restore to..."). */
+const LIST_IN_TRASH_FOR_TASK = "Its list is in Trash. Restore that list first.";
+
+/** A task comes back into its List: the List live (one in Trash is its own 409), then Can edit on it, the rule every task write reads. A List that is gone is the restore's own 409 (or "Restore to..."). */
 async function listLanding(viewer: Viewer, boardId: string | null): Promise<TrashActionResult> {
   if (!boardId) return { ok: true };
-  const list = await prisma.board.findFirst({ where: { id: boardId, organizationId: viewer.organizationId }, select: { id: true } });
+  const list = await prisma.board.findFirst({ where: { id: boardId, organizationId: viewer.organizationId }, select: { id: true, archivedAt: true } });
   if (!list) return { ok: true };
+  if (list.archivedAt) return { ok: false, status: 409, message: LIST_IN_TRASH_FOR_TASK };
   const role = (await nodeRole(nodeCtxFromViewer(viewer), { kind: "list", id: boardId })).role;
   return roleAtLeast(role, "EDIT") ? { ok: true } : { ok: false, status: 403, message: CANT_RESTORE_HERE };
 }
@@ -1236,13 +1247,25 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
  * landingRefusals' (landingPlaceBlocks): the restore refuses it until that
  * place is back, and the row says so instead of offering a Restore.
  */
-async function missingParentIds(page: readonly RawRow[]): Promise<Set<string>> {
+/**
+ * The task rows on this page whose List is not there to take them back:
+ * gone (no row at all) or in Trash (archived). A task restored in place into
+ * an archived List was live inside a List nobody could open (round seven,
+ * item 1), so the archived List blocks the restore like a gone one does.
+ */
+async function missingParentIds(page: readonly RawRow[]): Promise<Map<string, "gone" | "archived">> {
+  const out = new Map<string, "gone" | "archived">();
   const taskRows = page.filter((r) => r.type === "task" && r.anchor.boardId);
-  if (!taskRows.length) return new Set();
+  if (!taskRows.length) return out;
   const boardIds = [...new Set(taskRows.map((r) => r.anchor.boardId!))];
-  const alive = await prisma.board.findMany({ where: { id: { in: boardIds } }, select: { id: true } });
-  const aliveIds = new Set(alive.map((b) => b.id));
-  return new Set(taskRows.filter((r) => !aliveIds.has(r.anchor.boardId!)).map((r) => r.id));
+  const lists = await prisma.board.findMany({ where: { id: { in: boardIds } }, select: { id: true, archivedAt: true } });
+  const byId = new Map(lists.map((l) => [l.id, l] as const));
+  for (const r of taskRows) {
+    const l = byId.get(r.anchor.boardId!);
+    if (!l) out.set(r.id, "gone");
+    else if (l.archivedAt) out.set(r.id, "archived");
+  }
+  return out;
 }
 
 /**

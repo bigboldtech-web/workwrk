@@ -147,7 +147,8 @@ describe("break 9: every move out of every Space asks the landing rule", () => {
   it("moveVerdict refuses the push when Full access would not go with the node", () => {
     const fn = between(read("src/lib/access/node-rules.ts"), "export function moveVerdict(", "export function moveDecision(");
     // Round six: a manager of the Space it leaves is exempt (P7), everyone else needs Full access that goes with the node.
-    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !managesSpaceOf\(ev, ref\) && !fullWhereItLands\(rows, grants, ref, dest\)\) \{\n\s+return \{ ok: false, failure: "landing" \};/);
+    // Round seven: the Full access is read on the node itself, at the org root, never where it lands.
+    expect(fn).toMatch(/if \(leavesEverySpace\(rows, ref, dest\) && !managesSpaceOf\(ev, ref\) && !fullWhereItLands\(rows, grants, ref\)\) \{\n\s+return \{ ok: false, failure: "landing" \};/);
   });
   it("and the canvas, table and doc moves all go through checkMove", () => {
     const lib = read("src/lib/access/node-placement.ts");

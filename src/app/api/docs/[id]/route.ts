@@ -12,7 +12,7 @@ import { z } from "zod";
 import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { canReadDocPlace, nodeCtxFromLevel } from "@/lib/access/node-access";
-import { anchorAgreesWithParent, isDocAnchorKind, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
+import { DOC_PARENT_EMPTY_REFUSAL, anchorAgreesWithParent, docAnchorInput, isDocAnchorKind, roleAtLeast, type DocHome, type Place } from "@/lib/access/node-rules";
 import { checkMove, docAnchorPlaceOf, docHomeOf, docPlaceLive, moveDestinations, writeDocTreeMove } from "@/lib/access/node-placement";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
@@ -315,6 +315,11 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     if (parsed.data.parentId === id) {
       return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
     }
+    // P3: a parent page is an id or nothing; an empty string once reached the
+    // database as a foreign key and answered a bare 500 (round seven, item 4).
+    if (parsed.data.parentId === "") {
+      return NextResponse.json({ error: DOC_PARENT_EMPTY_REFUSAL, code: "invalid_parent", message: DOC_PARENT_EMPTY_REFUSAL }, { status: 400 });
+    }
     // NOTEPAD anchors are create-only and immutable: re-anchoring TO a
     // notepad would plant a doc in someone's private note list (or hide an
     // org doc as the caller's own note), and re-anchoring AWAY would leak a
@@ -331,9 +336,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     // anchor type the model knows (M2) and never under itself. A position or
     // folder-flag change under the same parent is a reorder and keeps the Can
     // edit gate above (P4).
-    const nextType = parsed.data.entityType !== undefined ? parsed.data.entityType : existing.entityType;
-    const nextId = parsed.data.entityId !== undefined ? parsed.data.entityId : existing.entityId;
     const anchorChanges = parsed.data.entityType !== undefined || parsed.data.entityId !== undefined;
+    // P3: both halves of the anchor or neither, once the patch is laid over
+    // the row (docAnchorInput): a kind with an empty id, or an id with no
+    // kind, was once stored as-is (round seven, item 3).
+    const anchorIn = docAnchorInput(
+      parsed.data.entityType !== undefined ? parsed.data.entityType : existing.entityType,
+      parsed.data.entityId !== undefined ? parsed.data.entityId : existing.entityId,
+    );
+    if (anchorChanges && !anchorIn.ok) {
+      return NextResponse.json({ error: anchorIn.error, code: "invalid_anchor", message: anchorIn.error }, { status: 400 });
+    }
+    const nextType = anchorIn.ok ? anchorIn.entityType : existing.entityType;
+    const nextId = anchorIn.ok ? anchorIn.entityId : existing.entityId;
     const parentChanges = parsed.data.parentId !== undefined && parsed.data.parentId !== existing.parentId;
     // M2: only onto an anchor the model knows (node-rules DOC_ANCHOR_KINDS, the set POST /api/docs makes docs on).
     if (anchorChanges && nextType && !isDocAnchorKind(nextType)) {
@@ -357,8 +372,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       ...(parsed.data.parentId !== undefined ? { parentId: parsed.data.parentId } : {}),
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
       ...(parsed.data.isFolder !== undefined ? { isFolder: parsed.data.isFolder } : {}),
-      ...(parsed.data.entityType !== undefined ? { entityType: parsed.data.entityType } : {}),
-      ...(parsed.data.entityId !== undefined ? { entityId: parsed.data.entityId } : {}),
+      ...(anchorChanges ? { entityType: nextType, entityId: nextId } : {}),
     }, placeChanges ? after : null);
     if (!written.ok) return NextResponse.json(refusal(written.status, written.status === 400 ? "cannot_nest" : "split_tree", written.error).body, { status: written.status });
     return NextResponse.json({ doc: written.doc, movedPages: written.rewritten });

@@ -174,9 +174,9 @@ describe("break 9: a push out of every Space needs Full access that goes with th
     const w = world();
     expect(leavesEverySpace(w.rows, cv("CA"), null)).toBe(true);
     expect(leavesEverySpace(w.rows, cv("CA"), sp("A"))).toBe(false);
-    expect(fullWhereItLands(w.rows, w.g, cv("CA"), null)).toBe(false);
+    expect(fullWhereItLands(w.rows, w.g, cv("CA"))).toBe(false);
     const mine = world(ME);
-    expect(fullWhereItLands(mine.rows, mine.g, cv("CA"), null)).toBe(true);
+    expect(fullWhereItLands(mine.rows, mine.g, cv("CA"))).toBe(true);
   });
 });
 

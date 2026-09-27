@@ -242,11 +242,11 @@ describe("breaks 5 and 6: a Space OWNER or ADMIN takes any node out of their Spa
     }
   });
 
-  it("the return trip is P2's: at the org root the node's owner or an org admin brings it back, a Space ADMIN cannot", () => {
+  it("the return trip: at the org root the node's owner or an org admin brings it back, and (round seven, P7) so does a Space ADMIN into the Space they manage", () => {
     const out = new W().space("A", "PRIVATE").canvas("CA", null).table("TA", null).doc("DR").on("space", "A", "ADMIN");
-    expect(out.move(cv("CA"), sp("A"))).toEqual({ ok: false, failure: "node" });
-    expect(out.move(tb("TA"), sp("A"))).toEqual({ ok: false, failure: "node" });
-    expect(out.move(dc("DR"), sp("A"))).toEqual({ ok: false, failure: "node" });
+    expect(out.move(cv("CA"), sp("A"))).toEqual({ ok: true, same: false });
+    expect(out.move(tb("TA"), sp("A"))).toEqual({ ok: true, same: false });
+    expect(out.move(dc("DR"), sp("A"))).toEqual({ ok: true, same: false });
     const mine = new W().space("A", "PRIVATE").canvas("CA", null, null, ME).table("TA", null, ME).doc("DR", { createdById: ME }).on("space", "A", "ADMIN");
     expect(mine.move(cv("CA"), sp("A"))).toEqual({ ok: true, same: false });
     expect(mine.move(tb("TA"), sp("A"))).toEqual({ ok: true, same: false });
