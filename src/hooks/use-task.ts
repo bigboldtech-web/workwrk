@@ -59,9 +59,27 @@ export interface TaskPerson {
   avatar?: string | null;
 }
 
+/**
+ * Phase 5b: which List the task body is for. `linked` means the task is open
+ * in a List it is shown in THROUGH A LINK (`?list=`): the body carries that
+ * List's fields and values, and every write names it.
+ */
+export interface TaskContext {
+  boardId: string;
+  kind: "home" | "linked";
+  home: { id: string; slug: string; name: string; readable: true } | { readable: false };
+  homeStatus: StatusOption | null;
+  homeStatuses?: StatusOption[];
+}
+
+/** What a write answered, for the one caller that must know (a Connect cell). */
+export type TaskPatchResult = { ok: true } | { ok: false; status: number; payload: unknown };
+
 export interface UseTask {
   item: BoardItemRow | null;
   board: TaskBoardCtx | null;
+  /** Phase 5b: the List this body is for; null on a server that predates it. */
+  context: TaskContext | null;
   decision: ItemDecision | null;
   breadcrumb: ItemBreadcrumb | null;
   parent: { id: string; title: string } | null;
@@ -100,7 +118,7 @@ export interface UseTask {
    * page merged them into one sentence that was wrong half the time.
    */
   denied: boolean;
-  patch: (body: DetailPatch, optimistic?: Partial<BoardItemRow>) => Promise<void>;
+  patch: (body: DetailPatch, optimistic?: Partial<BoardItemRow>) => Promise<TaskPatchResult>;
   /** What the hosts' AutosaveIndicator shows. Every write goes through patch. */
   saveStatus: "idle" | "saving" | "saved" | "error";
   lastSavedAt: Date | null;
@@ -112,6 +130,7 @@ export interface UseTask {
 interface TaskResponse {
   item: BoardItemRow;
   board: TaskBoardCtx | null;
+  context?: TaskContext | null;
   decision?: ItemDecision;
   breadcrumb?: ItemBreadcrumb;
   parent?: { id: string; title: string } | null;
@@ -124,7 +143,11 @@ interface TaskResponse {
 
 const PAGE_POLL_MS = 30_000;
 
-export function useTask(itemId: string | null | undefined, opts: { poll?: boolean } = {}): UseTask {
+export function useTask(itemId: string | null | undefined, opts: { poll?: boolean; listId?: string | null } = {}): UseTask {
+  // A task opened in a List it is shown in through a link (`?list=`): the
+  // read asks for that List's body. Absent: exactly today's read.
+  const listId = opts.listId ?? null;
+  const readUrl = itemId ? `/api/items/${itemId}${listId ? `?list=${encodeURIComponent(listId)}` : ""}` : null;
   const [data, setData] = useState<TaskResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -141,9 +164,9 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
   const writing = useRef(0);
 
   const reload = useCallback(async () => {
-    if (!itemId) return;
+    if (!itemId || !readUrl) return;
     try {
-      const res = await fetch(`/api/items/${itemId}`, { cache: "no-store" });
+      const res = await fetch(readUrl, { cache: "no-store" });
       if (!res.ok) {
         // The body is read on EVERY failure: a 404 may name itself (the
         // legacy-task case) and a 500 now carries the line that explains it.
@@ -176,7 +199,7 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     } finally {
       setLoading(false);
     }
-  }, [itemId]);
+  }, [itemId, readUrl]);
 
   useEffect(() => {
     if (!itemId) return;
@@ -190,9 +213,13 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     void reload();
   }, [itemId, reload]);
 
+  // The context the last read answered with, for the writes below.
+  const contextRef = useRef<TaskContext | null>(null);
+  useEffect(() => { contextRef.current = data?.context ?? null; }, [data?.context]);
+
   const patch = useCallback(
-    async (body: DetailPatch, optimistic?: Partial<BoardItemRow>) => {
-      if (!itemId) return;
+    async (body: DetailPatch, optimistic?: Partial<BoardItemRow>): Promise<TaskPatchResult> => {
+      if (!itemId) return { ok: false, status: 0, payload: null };
       // `metadataPatch` is a wire field, not a column: merged into the cached
       // `metadata` for the optimistic render and never pasted onto the row.
       setData((prev) => {
@@ -218,7 +245,11 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
       // keepalive lets the request outlive the page. Its payload cap is 64KB
       // and a request over it is REJECTED outright, which would be the same
       // data loss by another route, so a big body goes as an ordinary fetch.
-      const wire = JSON.stringify(body);
+      // In a List the task is only shown in, every write names that List, so
+      // its values land in that List's namespace (PATCH contextBoardId). In
+      // its home, the body is exactly today's.
+      const ctx = contextRef.current;
+      const wire = JSON.stringify(ctx?.kind === "linked" ? { ...body, contextBoardId: ctx.boardId } : body);
       try {
         const res = await fetch(`/api/items/${itemId}`, {
           method: "PATCH",
@@ -236,17 +267,26 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
           emitItemChanged(itemId, (payload.item?.boardId as string | undefined) ?? null);
         }
         if (res.ok && payload.item) {
-          // Merge: a lean response must never strip enriched fields.
-          setData((prev) => (prev ? { ...prev, item: { ...prev.item, ...payload.item } } : prev));
+          // Merge: a lean response must never strip enriched fields. In a
+          // linked context the answer's boardId may name the home, and its
+          // listLink is the row's in that List; the body keeps its own.
+          setData((prev) => {
+            if (!prev) return prev;
+            const merged = { ...prev.item, ...payload.item } as BoardItemRow;
+            if (ctx?.kind === "linked") merged.boardId = prev.item.boardId;
+            return { ...prev, item: merged };
+          });
           // A move or a watcher write changes the gate's answer and the
           // breadcrumb, so re-read those rather than inventing them.
           if (body.boardId || body.watcherIds) await reload();
         } else {
           await reload();
         }
+        return res.ok ? { ok: true } : { ok: false, status: res.status, payload };
       } catch {
         setSaveStatus("error");
         await reload();
+        return { ok: false, status: 0, payload: null };
       } finally {
         writing.current -= 1;
       }
@@ -293,6 +333,7 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
   return {
     item: data?.item ?? null,
     board: data?.board ?? null,
+    context: data?.context ?? null,
     decision: data?.decision ?? null,
     breadcrumb: data?.breadcrumb ?? null,
     parent: data?.parent ?? null,

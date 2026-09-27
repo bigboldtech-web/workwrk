@@ -21,6 +21,8 @@ export const WORK_ROWS = [
   { href: "/okrs" },
   { href: "/okrs?view=team" },
   { href: "/okrs?view=company" },
+  // Decision 1: lights on /dashboards and, by prefix, on /dashboards/[id].
+  { href: "/dashboards" },
   { href: "/templates" },
   { href: "/trash" },
 ];

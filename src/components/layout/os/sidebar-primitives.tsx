@@ -32,7 +32,7 @@ export interface SidebarRowProps {
   dot?: boolean;
   /** Findable object the viewer holds nothing on: grey label + lock glyph. */
   locked?: boolean;
-  /** Tree depth: 20px per level. */
+  /** Tree depth: 16px per level, the same step as the Work tree. */
   depth?: number;
   /** The one hover "..." (or any trailing control). Always in the tab order. */
   trailing?: ReactNode;
@@ -48,8 +48,14 @@ export interface SidebarRowProps {
 }
 
 // No transition: the chrome never animates a colour change (design-system 6).
+// ONE GRID FOR EVERY SIDEBAR ROW (founder, 2026-09-25: the top rows' icons
+// and text were bigger than the Space tree's, and Personal list sat outside
+// the line). Every row is 32px with a 16px glyph (icon or EntityTile xs), an
+// 8px gap and a 14px label, and each level indents 16px. So at any depth the
+// glyphs sit in one column and the labels in the next, in every hub
+// sidebar and in the Work tree (space-tree-row.tsx uses the same numbers).
 const ROW_BASE =
-  "group/row relative flex h-9 w-full min-w-0 items-center gap-3 rounded-lg px-3 text-ink";
+  "group/row relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-3 text-base text-ink";
 const ROW_REST = "hover:bg-hover";
 const ROW_ACTIVE = "bg-side-pill font-medium";
 
@@ -58,10 +64,10 @@ export function SidebarRow({
 }: SidebarRowProps) {
   const isActive = Boolean(active) && !jump;
   const glyph = tile ? (
-    <EntityTile size="sm" {...tile} />
+    <EntityTile size="xs" {...tile} />
   ) : icon ? (
     createElement(icon, {
-      className: cn("h-5 w-5 shrink-0", isActive ? "text-ink" : locked ? "text-ink-3" : "text-ink-2"),
+      className: cn("h-4 w-4 shrink-0", isActive ? "text-ink" : locked ? "text-ink-3" : "text-ink-2"),
       strokeWidth: 1.5,
       "aria-hidden": true,
     })
@@ -76,7 +82,7 @@ export function SidebarRow({
     <>
       {glyph}
       <span className={cn("min-w-0 flex-1 truncate", locked && "text-ink-3")}>{label}</span>
-      {locked ? <Lock className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden /> : null}
+      {locked ? <Lock className="h-3.5 w-3.5 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden /> : null}
       {typeof count === "number" && count > 0 ? (
         <span className={cn("shrink-0 text-xs font-medium tabular-nums", isActive ? "text-ink-strong" : "text-ink-2", endSwap)}>
           {count > 99 ? "99+" : count}
@@ -92,7 +98,7 @@ export function SidebarRow({
     trailing && "[@media(hover:hover)]:group-hover/row:pe-9 [@media(hover:hover)]:group-focus-within/row:pe-9 [@media(hover:none)]:pe-9",
     className,
   );
-  const style = depth > 0 ? { paddingInlineStart: 12 + depth * 20 } : undefined;
+  const style = depth > 0 ? { paddingInlineStart: 12 + depth * 16 } : undefined;
   return (
     <li className="group/row relative" onContextMenu={onContextMenu} {...{ [SIDEBAR_ROW_ATTR]: "" }}>
       {external ? (
@@ -137,9 +143,9 @@ export function SidebarButtonRow({
         aria-haspopup={ariaHasPopup}
         aria-expanded={ariaExpanded}
         className={cn(ROW_BASE, active ? ROW_ACTIVE : ROW_REST, "text-start", className)}
-        style={depth > 0 ? { paddingInlineStart: 12 + depth * 20 } : undefined}
+        style={depth > 0 ? { paddingInlineStart: 12 + depth * 16 } : undefined}
       >
-        {icon ? createElement(icon, { className: cn("h-5 w-5 shrink-0", active ? "text-ink" : "text-ink-2"), strokeWidth: 1.5, "aria-hidden": true }) : null}
+        {icon ? createElement(icon, { className: cn("h-4 w-4 shrink-0", active ? "text-ink" : "text-ink-2"), strokeWidth: 1.5, "aria-hidden": true }) : null}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {typeof count === "number" && count > 0 ? (
           <span className={cn("shrink-0 text-xs font-medium tabular-nums", active ? "text-ink-strong" : "text-ink-2")}>{count}</span>
@@ -158,7 +164,7 @@ export function SidebarGhostRow({
   icon?: LucideIcon;
   onClick?: () => void;
 }) {
-  const cls = "flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink";
+  const cls = "flex h-8 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink";
   const inner = (
     <>
       {icon ? createElement(icon, { className: "h-4 w-4 shrink-0", strokeWidth: 1.5, "aria-hidden": true }) : null}
@@ -252,15 +258,15 @@ export function SidebarSectionAction({
   );
 }
 
-/** One quiet 36px line for a loaded section with no rows (1.2 rule 6). */
+/** One quiet 32px line for a loaded section with no rows (1.2 rule 6). */
 export function SidebarEmptyLine({ children }: { children: ReactNode }) {
-  return <li className="flex h-9 items-center px-3 text-sm text-ink-2">{children}</li>;
+  return <li className="flex h-8 items-center px-3 text-sm text-ink-2">{children}</li>;
 }
 
-/** One 36px line for a failed section with the retry wired (1.2 rule 7). */
+/** One 32px line for a failed section with the retry wired (1.2 rule 7). */
 export function SidebarErrorLine({ what, onRetry }: { what: string; onRetry: () => void }) {
   return (
-    <li className="flex h-9 items-center gap-1 px-3 text-sm text-ink-2">
+    <li className="flex h-8 items-center gap-1 px-3 text-sm text-ink-2">
       <span className="truncate">Couldn&apos;t load {what}</span>
       <span aria-hidden>·</span>
       <button type="button" onClick={onRetry} className="shrink-0 font-medium text-brand-deep hover:underline">
@@ -270,14 +276,14 @@ export function SidebarErrorLine({ what, onRetry }: { what: string; onRetry: () 
   );
 }
 
-/** Three 36px skeleton rows (bars 60 / 40 / 80 percent) for a section's first load. */
+/** Three 32px skeleton rows (bars 60 / 40 / 80 percent) for a section's first load. */
 export function SidebarSkeletonRows({ rows = 3 }: { rows?: number }) {
   const widths = ["60%", "40%", "80%"];
   return (
     <>
       {Array.from({ length: rows }, (_, i) => (
-        <li key={i} className="flex h-9 items-center gap-3 px-3" aria-hidden>
-          <span className="h-5 w-5 shrink-0 rounded-md bg-skeleton os-skeleton-pulse" />
+        <li key={i} className="flex h-8 items-center gap-2 px-3" aria-hidden>
+          <span className="h-4 w-4 shrink-0 rounded bg-skeleton os-skeleton-pulse" />
           <span className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: widths[i % widths.length] }} />
         </li>
       ))}

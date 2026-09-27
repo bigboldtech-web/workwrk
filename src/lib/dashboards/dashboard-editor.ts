@@ -1,0 +1,487 @@
+// The dashboard editor's pure core: what the canvas holds, what a save sends,
+// where a new card goes, how a moved card is saved, and how an editor's
+// unsaved changes are merged onto a version someone else saved.
+//
+// The client (src/components/dashboards/use-dashboard.ts and save-queue.ts,
+// and the Space Overview) keeps three things per dashboard:
+//
+//   base       what the server last confirmed (its updatedAt, name and cards
+//              exactly as this editor was sent them)
+//   local      what is on screen
+//   removedIds cards removed since the last confirmed save
+//
+// A save is ONE PATCH of the whole card list at base's version. A card the
+// editor cannot read travels as { id, kind: "passthrough" } and becomes the
+// stored card on the server (widgets.ts resolvePassthrough), a partly readable
+// card is sent as the part the editor sees and the server appends the rest
+// (restoreHiddenParts), and a card that is no longer in the list must be named
+// in removedWidgetIds or the server refuses the save (checkWidgetRemovals).
+//
+// Pure: imports only widgets.ts.
+
+import {
+  GRID_COLS,
+  type EditorWidget,
+  type WidgetInput,
+  type WidgetLayout,
+} from "./widgets";
+
+export interface DashboardSnapshot {
+  name: string;
+  widgets: EditorWidget[];
+}
+
+const MAX_H = 60;
+const MAX_Y = 10000;
+
+// ── Canonical comparison ─────────────────────────────────────────────
+
+/** JSON with object keys sorted, so two equal values always compare equal. */
+export function stableStringify(v: unknown): string {
+  if (v === undefined) return "null";
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => stableStringify(x)).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  const keys = Object.keys(o).filter((k) => o[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`).join(",")}}`;
+}
+
+function same(a: unknown, b: unknown): boolean {
+  return stableStringify(a) === stableStringify(b);
+}
+
+function without<T extends object>(o: T, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) if (!keys.includes(k)) out[k] = v;
+  return out;
+}
+
+/**
+ * The part of a card that decides its DATA: everything but its id, title
+ * (with the flag that says who wrote it) and place. A save refetches a
+ * card's numbers only when this changed, and the editor's preview result is
+ * reused only when it matches.
+ */
+export function dataKey(w: EditorWidget | WidgetInput): string {
+  return stableStringify(without(w, ["id", "title", "titleEdited", "layout", "partial"]));
+}
+
+/** The same key for a write input, which is what the editor previews. */
+export function previewKey(input: WidgetInput): string {
+  return dataKey(input);
+}
+
+// ── Layout ───────────────────────────────────────────────────────────
+
+function clampInt(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(v)));
+}
+
+export function clampLayout(l: WidgetLayout): WidgetLayout {
+  const w = clampInt(l.w, 1, GRID_COLS);
+  return {
+    x: clampInt(l.x, 0, GRID_COLS - w),
+    y: clampInt(l.y, 0, MAX_Y),
+    w,
+    h: clampInt(l.h, 1, MAX_H),
+  };
+}
+
+function overlaps(a: WidgetLayout, b: WidgetLayout): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
+ * Where a new card of `size` goes: the first free spot scanning the grid top
+ * to bottom, left to right, so a small card fills the gap beside a row's
+ * last card, and otherwise the bottom.
+ */
+export function placeNewWidget(existing: readonly WidgetLayout[], size: { w: number; h: number }): WidgetLayout {
+  const w = clampInt(size.w, 1, GRID_COLS);
+  const h = clampInt(size.h, 1, MAX_H);
+  const bottom = existing.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+  for (let y = 0; y < bottom; y += 1) {
+    for (let x = 0; x + w <= GRID_COLS; x += 1) {
+      const spot = { x, y, w, h };
+      if (!existing.some((l) => overlaps(spot, l))) return spot;
+    }
+  }
+  return { x: 0, y: Math.min(bottom, MAX_Y), w, h };
+}
+
+/** A grid's items as card layouts, clamped to the 12-column model. */
+export function layoutsFromGrid(grid: ReadonlyArray<{ i: string; x: number; y: number; w: number; h: number }>): Record<string, WidgetLayout> {
+  const out: Record<string, WidgetLayout> = {};
+  for (const it of grid) {
+    if (![it.x, it.y, it.w, it.h].every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+    out[it.i] = clampLayout({ x: it.x, y: it.y, w: it.w, h: it.h });
+  }
+  return out;
+}
+
+/** The card ids whose layout in `next` differs from `stored` (or is new). */
+export function diffLayouts(stored: Readonly<Record<string, WidgetLayout>>, next: Readonly<Record<string, WidgetLayout>>): string[] {
+  const out: string[] = [];
+  for (const [id, l] of Object.entries(next)) {
+    const s = stored[id];
+    if (!s || s.x !== l.x || s.y !== l.y || s.w !== l.w || s.h !== l.h) out.push(id);
+  }
+  return out;
+}
+
+/** The stored layout of every card that has one. */
+export function layoutsOf(widgets: readonly EditorWidget[]): Record<string, WidgetLayout> {
+  const out: Record<string, WidgetLayout> = {};
+  for (const w of widgets) if (w.layout) out[w.id] = w.layout;
+  return out;
+}
+
+/**
+ * The cards with new layouts. A hidden or passthrough card is never moved:
+ * it is saved as the stored value, so a layout change to it would show on
+ * screen and silently revert on the next load.
+ */
+export function applyLayouts(widgets: readonly EditorWidget[], layouts: Readonly<Record<string, WidgetLayout>>): EditorWidget[] {
+  return widgets.map((w) => {
+    if (w.kind === "hidden" || w.kind === "passthrough") return w;
+    const l = layouts[w.id];
+    return l ? { ...w, layout: { ...l } } : w;
+  });
+}
+
+/** Top to bottom, left to right; cards with no layout keep their order at the end. */
+export function stackOrder(widgets: readonly EditorWidget[]): EditorWidget[] {
+  return widgets
+    .map((w, index) => ({ w, index }))
+    .sort((a, b) => {
+      const la = a.w.layout;
+      const lb = b.w.layout;
+      if (!la && !lb) return a.index - b.index;
+      if (!la) return 1;
+      if (!lb) return -1;
+      return la.y - lb.y || la.x - lb.x || a.index - b.index;
+    })
+    .map((x) => x.w);
+}
+
+/**
+ * The cards pulled up into every free row, as react-grid-layout's vertical
+ * compaction would pull them: top to bottom, left to right, each card rises
+ * until the card above it (or the top) stops it, and a card that starts on
+ * top of one already placed drops just below it. Returned in input order.
+ *
+ * The result is already compact and has no overlaps, so the grid's own
+ * compaction pass leaves it exactly where it is, even with some cards
+ * static. That is what makes the layout the same for every person: the grid
+ * never compacts a static card, so compacting here, before the grid sees the
+ * items, is the only way a viewer and an editor get one arrangement.
+ */
+export function compactVertical<T extends WidgetLayout>(items: readonly T[]): T[] {
+  const order = items
+    .map((l, index) => ({ l, index }))
+    .sort((a, b) => a.l.y - b.l.y || a.l.x - b.l.x || a.index - b.index);
+  const placed: WidgetLayout[] = [];
+  const out: T[] = new Array(items.length);
+  for (const { l, index } of order) {
+    const bottom = placed.reduce((m, p) => Math.max(m, p.y + p.h), 0);
+    const spot: WidgetLayout = { x: l.x, y: Math.min(Math.max(0, l.y), bottom), w: l.w, h: l.h };
+    for (let hit = placed.find((p) => overlaps(spot, p)); hit; hit = placed.find((p) => overlaps(spot, p))) {
+      spot.y = hit.y + hit.h;
+    }
+    while (spot.y > 0 && !placed.some((p) => overlaps({ ...spot, y: spot.y - 1 }, p))) spot.y -= 1;
+    placed.push(spot);
+    out[index] = { ...l, y: spot.y };
+  }
+  return out;
+}
+
+export type WidgetGridItem = {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  static: boolean;
+  isDraggable?: boolean;
+  isResizable?: boolean;
+};
+
+/**
+ * react-grid-layout items for the cards. On 12 columns an editor may move a
+ * card, never a hidden or passthrough one (static: its layout is saved as
+ * the stored value, so a move would silently revert). A viewer moves
+ * nothing, but their cards are NOT static: the grid never compacts a static
+ * card, so a viewer's cards would sit at their raw stored rows (with the
+ * hole a deleted card left) while the editor's grid pulled them up. They are
+ * locked per item (isDraggable and isResizable false) instead, and compact
+ * exactly as the editor's do.
+ *
+ * With `compact` (the dashboard canvas, where the widgets are the whole
+ * grid) the positions are compacted here first (compactVertical), so the
+ * hidden and passthrough cards an editor cannot move land where everyone
+ * else sees them too. The Space Overview leaves it off: its widgets share
+ * the grid with each person's own cards, and the grid compacts them
+ * together.
+ *
+ * On a narrower breakpoint (the Space Overview's xs and xxs) the cards are
+ * derived as a full-width stack in stackOrder, static, and never saved.
+ */
+export function widgetGridItems(
+  widgets: readonly EditorWidget[],
+  o: { canEdit: boolean; cols: number; prefix?: string; compact?: boolean },
+): WidgetGridItem[] {
+  const prefix = o.prefix ?? "";
+  if (o.cols < GRID_COLS) {
+    let y = 0;
+    return stackOrder(widgets).map((w) => {
+      const h = w.layout?.h ?? 4;
+      const item = { i: `${prefix}${w.id}`, x: 0, y, w: Math.max(1, o.cols), h, static: true };
+      y += h;
+      return item;
+    });
+  }
+  const placed: WidgetLayout[] = widgets.filter((w) => w.layout).map((w) => w.layout as WidgetLayout);
+  const items = widgets.map((w): WidgetGridItem => {
+    let l = w.layout;
+    if (!l) {
+      l = placeNewWidget(placed, { w: 4, h: 4 });
+      placed.push(l);
+    }
+    const base = { i: `${prefix}${w.id}`, x: l.x, y: l.y, w: l.w, h: l.h };
+    if (!o.canEdit) return { ...base, static: false, isDraggable: false, isResizable: false };
+    const locked = w.kind === "hidden" || w.kind === "passthrough";
+    return { ...base, static: locked };
+  });
+  return o.compact ? compactVertical(items) : items;
+}
+
+/** Every breakpoint's items minus the widget ones, so no card id enters a per-person preference. */
+export function withoutWidgetItems<T extends { i: string }>(layouts: Readonly<Record<string, T[]>>, prefix = "w:"): Record<string, T[]> {
+  const out: Record<string, T[]> = {};
+  for (const [bp, items] of Object.entries(layouts)) {
+    out[bp] = Array.isArray(items) ? items.filter((it) => !String(it.i).startsWith(prefix)) : items;
+  }
+  return out;
+}
+
+// ── The save body ────────────────────────────────────────────────────
+
+/** Local cards as the write shape. */
+export function toWidgetInputs(widgets: readonly EditorWidget[]): WidgetInput[] {
+  return widgets.map((w): WidgetInput => {
+    if (w.kind === "hidden" || w.kind === "passthrough") return { id: w.id, kind: "passthrough" };
+    const layout = clampLayout(w.layout);
+    if (w.kind === "notes") return { id: w.id, kind: "notes", title: w.title, text: w.text, layout };
+    const source = w.source.kind === "lists" ? { kind: "lists" as const, listIds: [...w.source.listIds] } : { ...w.source };
+    const filter = { connector: w.filter.connector, rules: w.filter.rules.map((r) => ({ field: r.field, operator: r.operator, value: r.value })), hideDone: w.filter.hideDone };
+    const flag = typeof w.titleEdited === "boolean" ? { titleEdited: w.titleEdited } : {};
+    if (w.kind === "stat") return { id: w.id, kind: "stat", title: w.title, ...flag, source, filter, metric: { ...w.metric }, scope: w.scope, layout };
+    if (w.kind === "chart") {
+      const groupBy = typeof w.groupBy === "object" ? { field: w.groupBy.field } : w.groupBy;
+      return { id: w.id, kind: "chart", title: w.title, ...flag, source, filter, groupBy, display: w.display, layout };
+    }
+    return { id: w.id, kind: "list", title: w.title, ...flag, source, filter, sort: w.sort, limit: w.limit, layout };
+  });
+}
+
+export function buildDashboardPatch(i: {
+  expectedUpdatedAt: string;
+  widgets: readonly EditorWidget[];
+  removedIds: readonly string[];
+  name?: string;
+}): { expectedUpdatedAt: string; widgets: WidgetInput[]; removedWidgetIds: string[]; name?: string } {
+  const kept = new Set(i.widgets.map((w) => w.id));
+  const removedWidgetIds = Array.from(new Set(i.removedIds)).filter((id) => !kept.has(id));
+  return {
+    expectedUpdatedAt: i.expectedUpdatedAt,
+    widgets: toWidgetInputs(i.widgets),
+    removedWidgetIds,
+    ...(i.name !== undefined ? { name: i.name } : {}),
+  };
+}
+
+// ── Local edits ──────────────────────────────────────────────────────
+
+/**
+ * A card taken off the canvas. It is named as removed only when the server
+ * has it (baseIds); a card added and removed before any save never existed.
+ */
+export function removeWidgetLocal(
+  state: { widgets: readonly EditorWidget[]; removedIds: readonly string[]; baseIds: ReadonlySet<string> },
+  id: string,
+): { widgets: EditorWidget[]; removedIds: string[] } {
+  const widgets = state.widgets.filter((w) => w.id !== id);
+  const removedIds = state.baseIds.has(id) && !state.removedIds.includes(id) ? [...state.removedIds, id] : [...state.removedIds];
+  return { widgets, removedIds };
+}
+
+/**
+ * A card renamed from its menu. That title is one the person typed, so a
+ * data card is flagged titleEdited and its settings never write over it.
+ */
+export function renameWidgetLocal(widgets: readonly EditorWidget[], id: string, title: string): EditorWidget[] {
+  return widgets.map((w) => {
+    if (w.id !== id || w.kind === "hidden" || w.kind === "passthrough") return w;
+    return w.kind === "notes" ? { ...w, title } : { ...w, title, titleEdited: true };
+  });
+}
+
+/** Undo of a removal: the same card back where it was, and no longer named as removed. */
+export function readdWidgetLocal(
+  state: { widgets: readonly EditorWidget[]; removedIds: readonly string[] },
+  card: EditorWidget,
+  index: number,
+): { widgets: EditorWidget[]; removedIds: string[] } {
+  const widgets = state.widgets.filter((w) => w.id !== card.id);
+  widgets.splice(Math.max(0, Math.min(index, widgets.length)), 0, card);
+  return { widgets, removedIds: state.removedIds.filter((id) => id !== card.id) };
+}
+
+/**
+ * The server said the save left cards out without naming them (a card added
+ * in another tab after this one's base, at the same version): put those back
+ * from the stored list, where the stored list has them, and send again.
+ */
+export function mergeMissingWidgets(local: readonly EditorWidget[], stored: readonly EditorWidget[], missingIds: readonly string[]): EditorWidget[] {
+  const have = new Set(local.map((w) => w.id));
+  const want = new Set(missingIds);
+  return [...local, ...stored.filter((w) => want.has(w.id) && !have.has(w.id))];
+}
+
+// ── Three-way rebase ─────────────────────────────────────────────────
+
+/** A card's titleEdited, or undefined for a notes card or one saved before the flag. */
+function titleFlag(w: EditorWidget): boolean | undefined {
+  return "titleEdited" in w && typeof w.titleEdited === "boolean" ? w.titleEdited : undefined;
+}
+
+function mergeCard(b: EditorWidget, l: EditorWidget, v: EditorWidget): EditorWidget {
+  if (l.kind === "hidden" || l.kind === "passthrough" || v.kind === "hidden" || v.kind === "passthrough" || b.kind === "hidden" || b.kind === "passthrough") {
+    return v;
+  }
+  // The title and the flag that says who wrote it travel as one part: my
+  // typed title must not land flagged as theirs to re-derive, nor theirs
+  // flagged as mine.
+  const titleMine = l.title !== b.title || titleFlag(l) !== titleFlag(b);
+  const layoutMine = !same(l.layout, b.layout);
+  const bodyMine = dataKey(l) !== dataKey(b) || l.kind !== b.kind;
+  const start: EditorWidget = bodyMine ? l : v;
+  const titleFrom = titleMine ? l : v;
+  const { titleEdited: _startFlag, ...rest } = start as EditorWidget & { titleEdited?: boolean };
+  void _startFlag;
+  const flag = start.kind === "notes" ? undefined : titleFlag(titleFrom);
+  return {
+    ...rest,
+    title: titleFrom.title,
+    ...(flag === undefined ? {} : { titleEdited: flag }),
+    layout: layoutMine ? { ...l.layout } : { ...v.layout },
+  } as EditorWidget;
+}
+
+/**
+ * My unsaved changes (`local` since `base`) applied onto the version someone
+ * else saved (`live`), card by card and part by part (title, place, the rest):
+ *
+ *   - a part I changed takes my value; a part I did not change takes theirs
+ *   - a card I added stays; a card they added stays
+ *   - a card they deleted stays deleted, unless I changed it since my base
+ *   - a card I deleted stays deleted, unless they changed it since my base
+ *     (deleting their fresh edit would overwrite it silently)
+ *   - a card I cannot read is always theirs
+ *
+ * removedIds names every live card the result leaves out, so the save at
+ * live's version is accepted and nothing of theirs is dropped by omission.
+ */
+export function rebaseDashboard(
+  base: DashboardSnapshot,
+  local: DashboardSnapshot,
+  live: DashboardSnapshot,
+): { name: string; widgets: EditorWidget[]; removedIds: string[] } {
+  const baseById = new Map(base.widgets.map((w) => [w.id, w] as const));
+  const liveById = new Map(live.widgets.map((w) => [w.id, w] as const));
+  const localIds = new Set(local.widgets.map((w) => w.id));
+  const out: EditorWidget[] = [];
+  const outIds = new Set<string>();
+  const push = (w: EditorWidget) => {
+    if (outIds.has(w.id)) return;
+    outIds.add(w.id);
+    out.push(w);
+  };
+
+  for (const l of local.widgets) {
+    const b = baseById.get(l.id);
+    const v = liveById.get(l.id);
+    if (!b) {
+      push(l);
+      continue;
+    }
+    if (l.kind === "hidden" || l.kind === "passthrough") {
+      if (v) push(v);
+      continue;
+    }
+    const mine = !same(l, b);
+    if (!v) {
+      if (mine) push(l);
+      continue;
+    }
+    push(mine ? mergeCard(b, l, v) : v);
+  }
+  for (const v of live.widgets) {
+    if (outIds.has(v.id) || localIds.has(v.id)) continue;
+    const b = baseById.get(v.id);
+    if (!b) {
+      push(v);
+      continue;
+    }
+    // I removed it. It stays removed unless they changed it since my base.
+    if (!same(v, b)) push(v);
+  }
+  const removedIds = live.widgets.map((w) => w.id).filter((id) => !outIds.has(id));
+  return { name: local.name !== base.name ? local.name : live.name, widgets: out, removedIds };
+}
+
+/**
+ * Does a local draft still hold edits the server does not have? Decided on
+ * the draft's own content, never on wall-clock order: a draft is written
+ * with the version it was built on (base) and what was on screen (local), so
+ * the question is whether rebasing those edits onto the server's copy would
+ * change it. A draft older than the row can still be unsaved (a save that
+ * was in flight landed later, or another editor saved after mine failed),
+ * and a draft newer than the row can already be merged (a keepalive save
+ * that landed after the tab closed).
+ */
+export function draftHasUnmergedEdits(
+  draft: { base: DashboardSnapshot; local: DashboardSnapshot; removedIds: readonly string[] },
+  live: DashboardSnapshot,
+): boolean {
+  const edited = draft.removedIds.length > 0 || draft.local.name !== draft.base.name || !same(draft.local.widgets, draft.base.widgets);
+  if (!edited) return false;
+  const r = rebaseDashboard(draft.base, draft.local, live);
+  if (r.name !== live.name || r.removedIds.length > 0) return true;
+  if (r.widgets.length !== live.widgets.length) return true;
+  const liveById = new Map(live.widgets.map((w) => [w.id, w] as const));
+  return r.widgets.some((w) => {
+    const v = liveById.get(w.id);
+    return !v || !same(w, v);
+  });
+}
+
+// ── Save outcomes ────────────────────────────────────────────────────
+
+export type SaveOutcome = "ok" | "conflict" | "widget_missing" | "invalid" | "forbidden" | "gone" | "unauthorized" | "retry";
+
+/**
+ * What a save's answer means for the queue. 0 is "the request never reached
+ * a server" (offline); it and every 5xx, 408 and 429 are retried with
+ * backoff, everything else stops and says why.
+ */
+export function classifySaveResponse(status: number, body: unknown): SaveOutcome {
+  if (status >= 200 && status < 300) return "ok";
+  const error = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  if (status === 409) return error === "widget_missing" ? "widget_missing" : "conflict";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404 || status === 410) return "gone";
+  if (status === 0 || status === 408 || status === 429 || status >= 500) return "retry";
+  return "invalid";
+}

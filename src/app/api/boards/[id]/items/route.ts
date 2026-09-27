@@ -54,7 +54,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 const createSchema = z.object({
   title: z.string().min(1).max(280),
-  status: z.string().max(40).optional(),
+  // 60, the limit the List's statuses schema allows (boards/[id]/route.ts).
+  // At 40 a status the editor can mint (up to 50 characters plus a suffix)
+  // could be declared and never set, and every create into it answered 400.
+  status: z.string().max(60).optional(),
   // Shape-checked here, existence-checked against the org below. These columns
   // carry no foreign key, so nothing else refuses a typo or a 5000-character
   // string. See the same pair in PATCH /api/items/[id].

@@ -24,17 +24,28 @@
 // therefore renders as a SINGLE row whose one switch writes BOTH stores in
 // lockstep, so the visible state always matches whether an email will send.
 //
+// Reports you receive (gap 16): every scheduled report the viewer is ON, from
+// GET /api/report-schedules?received=1, each with "Stop receiving". It lives
+// here and not only in the Schedule report dialog because that dialog sits on
+// the report's own page: a recipient who can no longer open the dashboard or
+// view could never reach it, and would start receiving again the moment their
+// access came back. The report email's manage link lands on #reports.
+//
 // Honest-Soon: a row whose producer doesn't exist yet renders disabled with a
 // "Soon" chip instead of a live toggle that would do nothing. Wave 1 made the
 // item producers real, so the Inbox rows (incl. task_assigned + status_changes,
 // via src/lib/notify-item.ts) are all live and NOT marked Soon.
 
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {  } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { cadenceLabel, formatRunTime } from "@/lib/reports/schedule-form";
+import type { ReportCadence } from "@/lib/reports/schedule";
+import { dashboardMessage } from "@/lib/dashboards/dashboard-messages";
 
 // ── Store 1: UserPreference.home.notifications (/api/preferences) ──────
 // Keys match NotifyType in src/lib/notify-prefs.ts — keep in sync.
@@ -130,6 +141,179 @@ function PrefRow({
   );
 }
 
+// ── Reports you receive (/api/report-schedules?received=1) ─────────────
+// The received=1 row: targetId and targetName are null when the viewer cannot
+// read the target now, so a row never names what it cannot open.
+interface ReceivedReport {
+  id: string;
+  targetKind: string;
+  targetId: string | null;
+  targetName: string | null;
+  cadence: string;
+  weekday: number | null;
+  monthDay: number | null;
+  timeOfDay: string;
+  timezone: string;
+  active?: boolean;
+  nextRunAt: string | null;
+  createdBy: { firstName: string; lastName: string } | null;
+}
+
+// "hidden": the reports surface does not apply to this viewer (a Guest is
+// answered 404 by requireWorkApp) or its table is not in this database yet
+// (503); either way there is nothing true to show, so the section is absent.
+type ReceivedState =
+  | { status: "loading" }
+  | { status: "hidden" }
+  | { status: "error"; message: string }
+  | { status: "ready"; rows: ReceivedReport[]; cronInstalled: boolean };
+
+function ReceivedReports() {
+  const { toast } = useOsToast();
+  const prefs = useDatePrefs();
+  const [state, setState] = useState<ReceivedState>({ status: "loading" });
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const scrolledRef = useRef(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/report-schedules?received=1", { cache: "no-store" });
+      const body: unknown = await res.json().catch(() => null);
+      if (res.status === 404 || res.status === 503) {
+        setState({ status: "hidden" });
+        return;
+      }
+      if (!res.ok) {
+        setState({ status: "error", message: dashboardMessage(body, "Couldn't load the reports you receive.") });
+        return;
+      }
+      const d = body as { schedules?: ReceivedReport[]; cronInstalled?: boolean } | null;
+      setState({ status: "ready", rows: d?.schedules ?? [], cronInstalled: d?.cronInstalled !== false });
+    } catch {
+      setState({ status: "error", message: "Couldn't reach the server. Check your connection and try again." });
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // The email's manage link is /settings/notifications#reports. The section
+  // renders after its fetch, so the browser's own jump to the hash has already
+  // found nothing; scroll once, when the rows arrive.
+  useEffect(() => {
+    if (scrolledRef.current || state.status !== "ready") return;
+    if (typeof window === "undefined" || window.location.hash !== "#reports") return;
+    scrolledRef.current = true;
+    document.getElementById("reports")?.scrollIntoView({ block: "start" });
+  }, [state.status]);
+
+  const stopReceiving = async (r: ReceivedReport) => {
+    if (busy.has(r.id)) return;
+    setBusy((prev) => new Set(prev).add(r.id));
+    try {
+      const res = await fetch(`/api/report-schedules/${encodeURIComponent(r.id)}/recipients/me`, { method: "DELETE" });
+      const body: unknown = await res.json().catch(() => null);
+      // 404 means this person is not on it any more (removed by the sender,
+      // or by their own click in another tab): the outcome they asked for.
+      if (!res.ok && res.status !== 404) {
+        toast(dashboardMessage(body, "Couldn't take you off this report."), {
+          tone: "danger",
+          action: { label: "Try again", onClick: () => void stopReceiving(r) },
+        });
+        return;
+      }
+      setState((prev) => (prev.status === "ready" ? { ...prev, rows: prev.rows.filter((x) => x.id !== r.id) } : prev));
+      toast("You no longer receive this report");
+    } catch {
+      toast("Couldn't reach the server.", {
+        tone: "danger",
+        action: { label: "Try again", onClick: () => void stopReceiving(r) },
+      });
+    } finally {
+      setBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(r.id);
+        return next;
+      });
+    }
+  };
+
+  if (state.status === "hidden") return null;
+
+  return (
+    <section id="reports" className="scroll-mt-4">
+      <div className="mb-1.5 text-sm font-medium uppercase tracking-wide text-zinc-400">Reports you receive</div>
+      <div className="mb-3 overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        {state.status === "loading" ? (
+          <div className="px-4 py-3">
+            <SkeletonRows rows={2} />
+          </div>
+        ) : state.status === "error" ? (
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="text-sm text-zinc-500">{state.message}</div>
+            <button
+              type="button"
+              onClick={() => {
+                setState({ status: "loading" });
+                void load();
+              }}
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              Retry
+            </button>
+          </div>
+        ) : state.rows.length === 0 ? (
+          <div className="px-4 py-3 text-sm text-zinc-500">You are not on any scheduled report.</div>
+        ) : (
+          state.rows.map((r) => {
+            const cadence: ReportCadence = r.cadence === "daily" || r.cadence === "monthly" ? r.cadence : "weekly";
+            const when = cadenceLabel({ cadence, weekday: r.weekday, monthDay: r.monthDay, timeOfDay: r.timeOfDay, timezone: r.timezone }, prefs);
+            const sender = r.createdBy ? `${r.createdBy.firstName} ${r.createdBy.lastName}`.trim() : "";
+            const readable = r.targetId !== null;
+            const paused = r.active === false || !r.nextRunAt;
+            return (
+              <div key={r.id} className="flex items-center justify-between gap-4 border-b border-zinc-100 px-4 py-3 last:border-0">
+                <div className="min-w-0">
+                  <div className="truncate text-base font-medium text-zinc-900">
+                    {readable ? r.targetName ?? "Untitled report" : "A report you can no longer open"}
+                  </div>
+                  <div className="truncate text-sm text-zinc-500">
+                    {[when, sender ? `from ${sender}` : "", paused ? "Paused" : `Next ${formatRunTime(r.nextRunAt!, r.timezone, prefs)}`]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                  {!readable ? (
+                    <div className="text-sm text-zinc-500">
+                      Nothing is sent to you while you can&apos;t open it. If your access comes back, it starts again.
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  disabled={busy.has(r.id)}
+                  onClick={() => void stopReceiving(r)}
+                  className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:text-zinc-300"
+                >
+                  Stop receiving
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+      {state.status === "ready" && state.rows.length > 0 && !state.cronInstalled ? (
+        <p className="mb-3 text-sm text-zinc-500">
+          Sending is not switched on for this workspace yet. You start receiving these once it is.
+        </p>
+      ) : null}
+      <p className="mb-6 text-sm text-zinc-500">
+        Each copy is worked out under your own access, so it only shows what you can open.
+      </p>
+    </section>
+  );
+}
+
 export default function NotificationSettingsPage() {
   const { toast } = useOsToast();
   const [json, setJson] = useState<JsonPrefs | null>(null);
@@ -209,18 +393,18 @@ export default function NotificationSettingsPage() {
   const setInbox = (key: NotifKey, value: boolean) => {
     if (!json) return;
     saveJson({ ...json, inbox: { ...json.inbox, [key]: value } }, json).catch(() =>
-      toast("Couldn't save — try again"),
+      toast("Couldn't save. Try again."),
     );
   };
   const setEmail = (key: string, value: boolean) => {
     if (!json) return;
     saveJson({ ...json, email: { ...json.email, [key]: value } }, json).catch(() =>
-      toast("Couldn't save — try again"),
+      toast("Couldn't save. Try again."),
     );
   };
   const setCat = (key: EmailCatKey, value: boolean) => {
     if (!cats) return;
-    saveCat({ ...cats, [key]: value }, cats, key).catch(() => toast("Couldn't save — try again"));
+    saveCat({ ...cats, [key]: value }, cats, key).catch(() => toast("Couldn't save. Try again."));
   };
   // Kudos email is double-gated — one switch, both stores, both must succeed.
   const setKudosEmail = (value: boolean) => {
@@ -228,7 +412,7 @@ export default function NotificationSettingsPage() {
     Promise.all([
       saveJson({ ...json, email: { ...json.email, kudos: value } }, json),
       saveCat({ ...cats, kudosNotifications: value }, cats, "kudosNotifications"),
-    ]).catch(() => toast("Couldn't save — try again"));
+    ]).catch(() => toast("Couldn't save. Try again."));
   };
 
   const loading = json === null || cats === null;
@@ -312,6 +496,9 @@ export default function NotificationSettingsPage() {
           <p className="mb-6 text-sm text-zinc-500">
             Workflow &amp; HR emails send independently of the master switch above.
           </p>
+
+          {/* ── Email · Reports you receive (scheduled reports, gap 16) ─ */}
+          <ReceivedReports />
         </div>
       )}
       <div className="h-10" />

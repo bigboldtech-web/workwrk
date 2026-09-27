@@ -31,6 +31,10 @@ const REASONS: Record<string, string> = {
   target_list_read_only: "You can't add tasks to that List.",
   personal_list_not_a_move_target: "A Personal List only holds its owner's own tasks.",
   unknown_assignee: "That person is no longer in this workspace. Refresh and pick again.",
+  // Phase 5b, tasks in more than one List.
+  home_list_read_only: "You need edit access to this task's home List to add it to another List.",
+  parent_home_list_read_only: "You need edit access to the parent task's List to add a subtask to it.",
+  personal_list_not_a_link_target: "A Personal List only holds its owner's own tasks, so tasks can't be added to it.",
 };
 
 /** The generic codes a route answers when it has no more specific reason. */
@@ -39,6 +43,27 @@ const CODES: Record<string, string> = {
   Forbidden: "You don't have permission to do that.",
   Unauthorized: "Your session has expired. Sign in again.",
   "Not found": "That's no longer there.",
+  // Phase 5b: the link, connect, List comfort and view routes. Each code is
+  // the route's refusal for one specific thing, so each gets its own words.
+  use_list_link: "This task is shown here from another List. Remove it from this List, or change it in its home List.",
+  use_metadata_patch: "That change can't be saved from this List. Refresh and try again.",
+  invalid_context: "This task is no longer in that List. Refresh and try again.",
+  invalid_status: "That status isn't one of the statuses of this task's home List.",
+  invalid_connection: "One of those tasks can't be connected here. Refresh and pick again.",
+  too_many_connections: "A cell holds up to 50 connected tasks.",
+  read_only_field: "That column is read only.",
+  reserved_key: "That change touched a reserved value. Refresh and try again.",
+  list_archived: "That List is archived.",
+  not_a_task_list: "Tasks can't be added to that List.",
+  already_home: "That's already this task's home List.",
+  home_changed: "This task just moved to another List. Try again.",
+  field_in_use: "Other columns read from this one. Remove those first.",
+  connect_mode_immutable: "A Connect column can't be turned into another kind of column, or back.",
+  invalid_options: "Those column settings aren't valid. Check them and try again.",
+  invalid_defaults: "Some of those default values don't fit this List any more.",
+  invalid_row_color_rules: "Those color rules aren't valid. Check each rule and try again.",
+  invalid_view_config: "Those view settings aren't valid. Refresh and try again.",
+  needs_database_update: "This needs a database update before it can be used. Ask your workspace admin.",
 };
 
 function asString(v: unknown): string | null {

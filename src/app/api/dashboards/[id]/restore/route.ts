@@ -1,7 +1,9 @@
 // POST /api/dashboards/[id]/restore: bring an archived dashboard back.
 //
-// Owner or org admin. Its report schedules resume at their next due instant
-// with no other step, because an archived target only ever recorded a skip.
+// Owner or org admin (canEditDashboard, awaited: it is async because a
+// Space's Overview asks the Space's managers). Its report schedules resume at
+// their next due instant with no other step, because an archived target only
+// ever recorded a skip. A Guest is answered 404 by requireWorkApp.
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
@@ -16,7 +18,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const found = await readDashboard(id, c, { archived: true });
   if (!found) return notFound();
-  if (!canEditDashboard(found.row, c)) {
+  if (!(await canEditDashboard(found.row, c, found.spaceMissing))) {
     return NextResponse.json({ error: "no_access", reason: "not_dashboard_owner" }, { status: 403 });
   }
   await prisma.dashboard.updateMany({ where: { id, organizationId: c.organizationId }, data: { archivedAt: null } });

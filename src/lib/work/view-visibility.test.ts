@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  viewMenuRows,
   viewVisibleTo, visibleViews, orderViews, viewsForViewer,
   canManageView, canDeleteView, canSaveView, togglePinned, type ViewLike,
 } from "./view-visibility";
@@ -38,14 +39,30 @@ describe("visibleViews", () => {
 });
 
 describe("orderViews", () => {
-  it("puts pinned first in pin order, then the default, then displayOrder", () => {
+  it("puts the resolved default first, then personal pins in pin order, then displayOrder", () => {
+    const rows = [
+      v({ id: "c", displayOrder: 3 }),
+      v({ id: "d", displayOrder: 9 }),
+      v({ id: "a", displayOrder: 1 }),
+      v({ id: "b", displayOrder: 2 }),
+    ];
+    expect(orderViews(rows, ["b", "c"], "d").map((r) => r.id)).toEqual(["d", "b", "c", "a"]);
+  });
+  it("no longer ranks the raw isDefault flag: first is whatever default-view.ts resolved (decision 9)", () => {
+    // The flag sat on the auto List view of almost every List, so ranking it
+    // put List first while the page opened Board.
     const rows = [
       v({ id: "c", displayOrder: 3 }),
       v({ id: "d", isDefault: true, displayOrder: 9 }),
       v({ id: "a", displayOrder: 1 }),
       v({ id: "b", displayOrder: 2 }),
     ];
-    expect(orderViews(rows, ["b", "c"]).map((r) => r.id)).toEqual(["b", "c", "d", "a"]);
+    expect(orderViews(rows, ["b", "c"]).map((r) => r.id)).toEqual(["b", "c", "a", "d"]);
+    expect(orderViews(rows, [], "a").map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("ignores a default id that is not in the set", () => {
+    const rows = [v({ id: "b", displayOrder: 2 }), v({ id: "a", displayOrder: 1 })];
+    expect(orderViews(rows, [], "gone").map((r) => r.id)).toEqual(["a", "b"]);
   });
   it("falls back to name, then to arrival order, so the sort is stable", () => {
     const rows = [
@@ -70,6 +87,14 @@ describe("viewsForViewer", () => {
       v({ id: "mine", isShared: false, ownerId: "u1", displayOrder: 1 }),
     ];
     expect(viewsForViewer(rows, "u1", ["shared"]).map((r) => r.id)).toEqual(["shared", "mine"]);
+  });
+  it("passes the resolved default through, ahead of the personal pins", () => {
+    const rows = [
+      v({ id: "theirs", isShared: false, ownerId: "u2", displayOrder: 0 }),
+      v({ id: "shared", displayOrder: 2 }),
+      v({ id: "mine", isShared: false, ownerId: "u1", displayOrder: 1 }),
+    ];
+    expect(viewsForViewer(rows, "u1", ["shared"], "mine").map((r) => r.id)).toEqual(["mine", "shared"]);
   });
 });
 
@@ -123,6 +148,31 @@ describe("canManageView / canDeleteView", () => {
   it("refuses to delete the last view even for Full access", () => {
     expect(canDeleteView(shared, [shared], "u1", true)).toBe(false);
     expect(canDeleteView(shared, [shared, mine], "u1", true)).toBe(true);
+  });
+});
+
+describe("viewMenuRows", () => {
+  const two = [{}, {}];
+  const shared = { ownerId: "owner", isDefault: false };
+
+  it("offers a reader who does not own the view no write row", () => {
+    expect(viewMenuRows(shared, two, { viewerId: "reader", canContribute: false, hasFullAccess: false })).toEqual({
+      rename: false,
+      setDefault: false,
+      duplicate: false,
+      delete: false,
+    });
+  });
+
+  it("lets a contributor save and duplicate, and delete only with full access", () => {
+    expect(viewMenuRows(shared, two, { viewerId: "m", canContribute: true, hasFullAccess: false })).toEqual({ rename: true, setDefault: true, duplicate: true, delete: false });
+    expect(viewMenuRows(shared, two, { viewerId: "m", canContribute: true, hasFullAccess: true }).delete).toBe(true);
+  });
+
+  it("lets an owner save and delete their own view, never the last one", () => {
+    const mine = { ownerId: "me", isDefault: true };
+    expect(viewMenuRows(mine, two, { viewerId: "me", canContribute: false, hasFullAccess: false })).toEqual({ rename: true, setDefault: false, duplicate: false, delete: true });
+    expect(viewMenuRows(mine, [{}], { viewerId: "me", canContribute: false, hasFullAccess: false }).delete).toBe(false);
   });
 });
 

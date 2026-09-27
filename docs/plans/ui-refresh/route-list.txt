@@ -41,6 +41,8 @@
 /(dashboard)/canvas/[id]
 /(dashboard)/clock
 /(dashboard)/dashboard
+/(dashboard)/dashboards
+/(dashboard)/dashboards/[id]
 /(dashboard)/docs
 /(dashboard)/docs/[id]
 /(dashboard)/docs/trash

@@ -131,4 +131,76 @@ describe("buildItemMenu", () => {
     expect(archive?.separatorBefore).toBe(true);
     expect(rows.find((r) => r.key === "delete")?.destructive).toBe(true);
   });
+
+  // Phase 5b, tasks in more than one List (decision 7).
+  describe("tasks in more than one List", () => {
+    it("puts Add to another List right after Move, only with canAddToList and at least Can edit", () => {
+      const got = keys(ctx({ canAddToList: true }));
+      expect(got.indexOf("add-to-list")).toBe(got.indexOf("move") + 1);
+      expect(buildItemMenu(ctx({ canAddToList: true })).find((r) => r.key === "add-to-list")?.label).toBe("Add to another List…");
+      expect(keys(ctx({ canAddToList: false }))).not.toContain("add-to-list");
+      expect(keys(ctx({ canAddToList: true, role: "VIEW" }))).not.toContain("add-to-list");
+      expect(keys(ctx({ canAddToList: true, role: "COMMENT" }))).not.toContain("add-to-list");
+    });
+
+    it("never offers Add to another List to an assignee-only viewer, a Personal List task or a linked subtask", () => {
+      expect(keys(ctx({ canAddToList: true, assigneeOnly: true }))).not.toContain("add-to-list");
+      expect(keys(ctx({ canAddToList: true, personalList: true }))).not.toContain("add-to-list");
+      expect(keys(ctx({ canAddToList: true, inSecondaryList: true, linkedSubtask: true }))).not.toContain("add-to-list");
+    });
+
+    it("offers Remove from this List only in a secondary List and only with canRemoveFromList", () => {
+      const got = keys(ctx({ inSecondaryList: true, canRemoveFromList: true }));
+      expect(got).toContain("remove-from-list");
+      expect(keys(ctx({ inSecondaryList: true, canRemoveFromList: false }))).not.toContain("remove-from-list");
+      expect(keys(ctx({ inSecondaryList: false, canRemoveFromList: true }))).not.toContain("remove-from-list");
+      expect(buildItemMenu(ctx({ inSecondaryList: true, canRemoveFromList: true })).find((r) => r.key === "remove-from-list")?.label).toBe("Remove from this List");
+    });
+
+    it("never offers Remove from this List for a linked subtask", () => {
+      expect(keys(ctx({ inSecondaryList: true, canRemoveFromList: true, linkedSubtask: true }))).not.toContain("remove-from-list");
+    });
+
+    it("gives a view-only reader without canRemoveFromList no Remove row at all", () => {
+      expect(keys(ctx({ role: "VIEW", inSecondaryList: true }))).not.toContain("remove-from-list");
+      expect(keys(ctx({ role: "VIEW", inSecondaryList: true }))).toEqual(["copy-link", "copy-id", "remind", "watch", "share"]);
+    });
+
+    it("lets a reader who may remove it do so whatever their role on the task", () => {
+      expect(keys(ctx({ role: "VIEW", inSecondaryList: true, canRemoveFromList: true }))).toContain("remove-from-list");
+    });
+
+    it("drops Archive in a secondary List and labels Delete as Delete everywhere", () => {
+      const rows = buildItemMenu(ctx({ role: "FULL", inSecondaryList: true, canRemoveFromList: true }));
+      expect(rows.map((r) => r.key)).not.toContain("archive");
+      expect(rows.find((r) => r.key === "delete")?.label).toBe("Delete everywhere");
+      // The tail starts with Remove from this List.
+      const remove = rows.find((r) => r.key === "remove-from-list");
+      expect(remove?.separatorBefore).toBe(true);
+      expect(rows.map((r) => r.key).slice(-2)).toEqual(["remove-from-list", "delete"]);
+      // A linked subtask is still deleted everywhere, never archived here.
+      const sub = buildItemMenu(ctx({ role: "FULL", inSecondaryList: true, linkedSubtask: true }));
+      expect(sub.find((r) => r.key === "delete")?.label).toBe("Delete everywhere");
+      expect(sub.map((r) => r.key)).not.toContain("archive");
+    });
+
+    it("hides Move for a linked subtask, and gates it on the link move flag in a secondary List", () => {
+      expect(keys(ctx({ inSecondaryList: true, linkedSubtask: true, canMoveElsewhere: true }))).not.toContain("move");
+      expect(keys(ctx({ inSecondaryList: true, canMoveElsewhere: false }))).not.toContain("move");
+      expect(keys(ctx({ inSecondaryList: true, canMoveElsewhere: true }))).toContain("move");
+    });
+
+    it("keeps the canon order with every new row present", () => {
+      const got = keys(ctx({ role: "FULL", host: "row", canAddToList: true, inSecondaryList: true, canRemoveFromList: true }));
+      expect(got).toEqual(ITEM_MENU_KEYS.filter((k) => got.includes(k)));
+    });
+
+    it("changes nothing at all while the new flags are absent", () => {
+      const base = ctx();
+      expect(keys(base)).toEqual(keys({ ...base, canAddToList: undefined, inSecondaryList: undefined, canRemoveFromList: undefined, linkedSubtask: undefined }));
+      expect(keys(base)).not.toContain("add-to-list");
+      expect(keys(base)).not.toContain("remove-from-list");
+      expect(buildItemMenu(ctx({ role: "FULL" })).find((r) => r.key === "delete")?.label).toBe("Delete");
+    });
+  });
 });

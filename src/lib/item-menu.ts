@@ -14,6 +14,11 @@
 //
 // A row the role cannot use is ABSENT, never disabled (access section 5.4).
 //
+// Phase 5b (tasks in more than one List) adds two rows to the canon: "Add to
+// another List…" right after Move, and "Remove from this List" at the head of
+// the tail. Inside a List the task is only shown in, Archive is absent and
+// Delete reads "Delete everywhere", because that is what it does.
+//
 // Pure module: no imports, so vitest loads it in the node environment and a
 // client component can import it without pulling the server in.
 
@@ -29,12 +34,14 @@ export const ITEM_MENU_KEYS = [
   "copy-id",
   "duplicate",
   "move",
+  "add-to-list",
   "type",
   "remind",
   "timer",
   "watch",
   "save-template",
   "share",
+  "remove-from-list",
   "archive",
   "delete",
 ] as const;
@@ -83,6 +90,17 @@ export interface ItemMenuContext {
   isGuest: boolean;
   /** An archived task is capped at Can view unless the viewer is Full. */
   archived: boolean;
+  // Phase 5b, tasks in more than one List. Every one of these is optional and
+  // absent means exactly the rows above, so a host that knows nothing about
+  // links renders today's menu.
+  /** May this task be added to another List from here (contribute on its home)? */
+  canAddToList?: boolean;
+  /** The menu is open in a List the task is shown in through a link. */
+  inSecondaryList?: boolean;
+  /** Contribute on that List or on the home: the server's removal rule. */
+  canRemoveFromList?: boolean;
+  /** A subtask shown through its linked parent: never removed, moved or linked alone. */
+  linkedSubtask?: boolean;
 }
 
 function rank(role: ItemRole): number {
@@ -117,7 +135,13 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   if (canView) rows.push({ key: "copy-link", label: "Copy link" });
   if (canView) rows.push({ key: "copy-id", label: "Copy task ID" });
   if (canEdit) rows.push({ key: "duplicate", label: "Duplicate" });
-  if (canEdit && !ctx.assigneeOnly && ctx.canMoveElsewhere) rows.push({ key: "move", label: "Move to list…" });
+  // In a List the task only appears in, Move moves the LINK (the host passes
+  // its link-move flag as canMoveElsewhere), and a subtask shown through its
+  // parent has no link of its own to move.
+  if (canEdit && !ctx.assigneeOnly && ctx.canMoveElsewhere && !ctx.linkedSubtask) rows.push({ key: "move", label: "Move to list…" });
+  if (canEdit && ctx.canAddToList && !ctx.assigneeOnly && !ctx.personalList && !ctx.linkedSubtask) {
+    rows.push({ key: "add-to-list", label: "Add to another List…" });
+  }
   if (canEdit && ctx.hasItemTypes) rows.push({ key: "type", label: "Task type", submenu: true });
   // A reminder is personal, so Can view is enough to set one.
   if (canView) rows.push({ key: "remind", label: "Set reminder", submenu: true });
@@ -132,13 +156,21 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   }
 
   const tail: ItemMenuRow[] = [];
+  // Taking the task out of THIS List is the link's own rule (contribute on
+  // this List or on the home), not a task role, so a reader who may remove it
+  // gets the row whatever they may do to the task itself.
+  if (ctx.inSecondaryList && ctx.canRemoveFromList && !ctx.linkedSubtask) {
+    tail.push({ key: "remove-from-list", label: "Remove from this List" });
+  }
   // An archived task caps everyone below Full at Can view, so Archive is gone
-  // and Delete stays only for the people rule 12 does not cap.
-  if (canEdit && !ctx.archived) tail.push({ key: "archive", label: "Archive" });
+  // and Delete stays only for the people rule 12 does not cap. Inside a List
+  // the task is only shown in, Archive is absent: archiving hides it from its
+  // home and every other List, which is not what a click here should mean.
+  if (canEdit && !ctx.archived && !ctx.inSecondaryList) tail.push({ key: "archive", label: "Archive" });
   // access section 9 tasks.delete: creator with Can edit, or Full access;
-  // never an Agent.
+  // never an Agent. From a secondary List it says what it does: everywhere.
   if (!ctx.isAgent && (isFull || (canEdit && ctx.isCreator))) {
-    tail.push({ key: "delete", label: "Delete", destructive: true });
+    tail.push({ key: "delete", label: ctx.inSecondaryList ? "Delete everywhere" : "Delete", destructive: true });
   }
   if (tail.length) {
     tail[0] = { ...tail[0], separatorBefore: rows.length > 0 };

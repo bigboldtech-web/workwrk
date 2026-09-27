@@ -1082,3 +1082,8 @@ npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule strict --wri
 npx tsx scripts/apply-private-rule.ts --org <organizationId> --rule clear --write       # undo: back to legacy
 #   --actor <email or id>     who the activity row names (default: the workspace's first active Owner, else Admin)
 ```
+
+## 2026-09-26: reserved field keys, a read-only report for the founder
+
+- **No schema change and no data script.** The field-keys fix (4c1c0c66) stops NEW custom fields from taking a built-in column's key and reads existing clashes safely, so nothing must run for the product to be correct.
+- **One read-only report to run on the box, once, after this deploys**: `npx tsx scripts/report-reserved-field-keys.ts`. It prints, per org, every custom field whose key is reserved and flags "SHARED SLOT" where a field shares the task's own metadata slot (for example a field keyed `description`, which is literally the task body). It writes nothing. Locally it found 1 harmless view-level clash in 258 Lists. If prod shows a SHARED SLOT row, bring it back for a human decision; do not script a rename.

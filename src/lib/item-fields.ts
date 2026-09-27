@@ -22,7 +22,10 @@
 // The order is fixed, not the order the viewer checked things in, so two
 // people looking at the same task see the same screen.
 //
-// Pure module: no imports, so vitest loads it in the node environment.
+// Pure module: its one import (field-keys.ts) is pure too, so vitest loads it
+// in the node environment.
+
+import { stripFieldIdOf } from "@/lib/field-keys";
 
 /** Every field the strip can render, in the one order it renders them. */
 export const ITEM_FIELD_ORDER = [
@@ -189,7 +192,10 @@ export interface ListFieldRow {
  * reveal row that appeared only while at least one of them carried a value,
  * so a List whose custom fields were all empty had no way to show them at
  * all. The visibility set is the same `home.work.itemFields[listId]` the
- * built-ins use: a custom field's key is stored beside them.
+ * built-ins use: a custom field's key is stored beside them. A field whose key
+ * a built-in also uses (an older List's "tags" field) is stored as
+ * "field:tags" (field-keys.ts stripFieldIdOf), so checking the built-in Tags
+ * never shows that field and checking the field never shows Tags.
  */
 export function listFieldRows(args: {
   fields: readonly { key: string; label: string }[];
@@ -200,7 +206,7 @@ export function listFieldRows(args: {
   if (!(args.gating ?? ALL_ON).customFields) return [];
   const stored = new Set(args.stored ?? []);
   return args.fields.map((f) => {
-    const checked = stored.has(f.key);
+    const checked = stored.has(stripFieldIdOf(f.key));
     return {
       key: f.key,
       label: f.label,
@@ -225,10 +231,11 @@ export function resolveVisibleListFields(args: {
   return listFieldRows(args).filter((r) => r.checked).map((r) => r.key);
 }
 
-/** Toggle one custom field key in a stored set, returning the set to persist. */
+/** Toggle one custom field (by its stored key) in a stored set, returning the set to persist. */
 export function toggleStoredListField(stored: readonly string[] | null | undefined, key: string): string[] {
   const set = new Set(stored ?? []);
-  if (set.has(key)) set.delete(key);
-  else set.add(key);
+  const id = stripFieldIdOf(key);
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
   return [...set];
 }

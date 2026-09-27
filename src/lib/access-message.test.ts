@@ -54,4 +54,38 @@ describe("accessMessage", () => {
     expect(canRequestAccess({ requestAccess: false })).toBe(false);
     expect(canRequestAccess(null)).toBe(false);
   });
+
+  // Phase 5b: the reasons and codes the link, connect, comfort and view
+  // routes answer. Each is a sentence, never the code.
+  it("turns every Phase 5b reason into a sentence", () => {
+    for (const reason of ["home_list_read_only", "parent_home_list_read_only", "personal_list_not_a_link_target"]) {
+      const out = accessMessage({ error: "no_access", reason }, "FALLBACK");
+      expect(out, reason).not.toBe("FALLBACK");
+      // Its own sentence, not the generic one every unknown reason gets.
+      expect(out, reason).not.toBe(accessMessage({ error: "no_access" }, "FALLBACK"));
+      expect(out).not.toBe(reason);
+      expect(out).not.toMatch(/^[a-z0-9_]+$/);
+      expect(out.endsWith(".")).toBe(true);
+    }
+  });
+
+  it("turns every Phase 5b error code into a sentence", () => {
+    const codes = [
+      "use_list_link", "use_metadata_patch", "invalid_context", "invalid_status", "invalid_connection",
+      "too_many_connections", "read_only_field", "reserved_key", "list_archived", "not_a_task_list",
+      "already_home", "home_changed", "field_in_use", "connect_mode_immutable", "invalid_options",
+      "invalid_defaults", "invalid_row_color_rules", "invalid_view_config", "needs_database_update",
+    ];
+    for (const error of codes) {
+      const out = accessMessage({ error }, "FALLBACK");
+      expect(out, error).not.toBe("FALLBACK");
+      expect(out).not.toBe(error);
+      expect(out).not.toContain("_");
+      expect(out.endsWith(".")).toBe(true);
+    }
+  });
+
+  it("still lets a call site's override win for the new reasons", () => {
+    expect(accessMessage({ error: "no_access", reason: "home_list_read_only" }, "x", { home_list_read_only: "Custom." })).toBe("Custom.");
+  });
 });

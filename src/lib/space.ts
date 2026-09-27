@@ -8,13 +8,15 @@
 // will fold these checks into a single canonical entrypoint.
 
 import { prisma } from "@/lib/prisma";
-import type { SpaceRole, Visibility } from "@/generated/prisma";
+import type { Prisma, Space, SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { type ContainerRole } from "@/lib/work/container-menu";
 import { withArchivedBy } from "@/lib/archived-by";
-import { decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility } from "@/lib/access/node-rules";
-import { listVisibleSpaces } from "@/lib/access/node-access";
+import { decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility, type TreeRole } from "@/lib/access/node-rules";
+import { listVisibleSpaces, spaceTree } from "@/lib/access/node-access";
+import { renderedCounts, type FolderNode, type ListNode, type SpaceTreeResult } from "@/lib/access/node-tree";
+import { mergeSpaceSettings, spaceModulesPatch } from "@/lib/work/space-default-view";
 
 /**
  * One row of the Space list. A PATH row (access "path": a Space the viewer
@@ -314,6 +316,165 @@ export async function spaceNestDestinations(
   return { top: { pickable: topPick, current: currentId === null }, spaces: listed, ...(refusal ? { refusal } : {}) };
 }
 
+// ── A viewer, whole ─────────────────────────────────────────────────
+//
+// The session unwrap (itemCtx) the Bird's eye routes hand in. The Space gates
+// themselves are Phase 5b's wrappers in list-links-server.ts (spaceForViewer,
+// canContributeSpaceFor); this file only reads the Lists.
+
+export interface SpaceViewer {
+  userId: string;
+  organizationId: string;
+  accessLevel: string | null | undefined;
+}
+
+// ── The Lists of a Space this viewer can read ───────────────────────
+
+/** One readable List of a Space, in Work tree order. */
+export interface SpaceListRow {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  visibility: Visibility;
+  ownerId: string | null;
+  folderId: string | null;
+  statuses: Prisma.JsonValue | null;
+  /** Present only when asked for (includeSettings). */
+  settings?: Prisma.JsonValue;
+  /** Present only when asked for (includeSchema). */
+  schema?: Prisma.JsonValue;
+  /** The viewer's role on it, from the one resolver: the Work tree's row role. */
+  role: TreeRole;
+  /** Can edit or higher: may this viewer create and change its tasks? */
+  canContribute: boolean;
+}
+
+/**
+ * Every List of one Space the viewer can read, in the Work sidebar's order,
+ * with the viewer's role on each and whether they may write in it, plus how
+ * many of the Space's folders they see.
+ *
+ * ONE answer, the resolver's. The tree is exactly what GET
+ * /api/spaces/[id]/children renders for this viewer (node-access spaceTree,
+ * assembled by node-tree.ts): every List they can open at every depth, a
+ * PRIVATE List or a PRIVATE Folder that does not name them left out, a Folder
+ * grant reaching the Lists inside it without any Space row, and nothing else.
+ * Bird's eye, every other Space tab, the header's count and the sidebar are
+ * therefore one walk and cannot disagree, and an unreadable List is never
+ * named or counted anywhere. `opts.tree` hands in a tree the caller already
+ * built (the Space page), so the world is loaded once per request.
+ *
+ * Before this the answer came from a second predicate (the frozen legacy
+ * transcriptions, four reads and an in-memory decision) that knew nothing of
+ * the Private cut or of a Folder grant's own role. The walk gives the
+ * readable set and each List's role; the columns the tabs need (statuses,
+ * and schema when asked) come from one org-scoped read of exactly those
+ * Lists. No member table is read here: a grant is only ever read through
+ * the resolver.
+ *
+ * The caller gates the Space first. A Space outside the viewer's org, or one
+ * that does not exist, answers no Lists.
+ */
+export async function readableListsInSpace(
+  spaceId: string,
+  viewer: SpaceViewer,
+  opts: { includeSchema?: boolean; includeSettings?: boolean; tree?: SpaceTreeResult | null } = {},
+): Promise<{ lists: SpaceListRow[]; folderCount: number }> {
+  const includeSettings = opts.includeSettings === true;
+  const includeSchema = opts.includeSchema === true;
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel);
+  const tree = opts.tree !== undefined ? opts.tree : await spaceTree(ctx, spaceId);
+  if (!tree) return { lists: [], folderCount: 0 };
+
+  // The sidebar's order: root folders by position, inside each folder its
+  // child folders first and then its Lists, and the Space's root Lists after
+  // every folder, at any depth.
+  const ordered: Array<{ node: ListNode; folderId: string | null }> = [];
+  const walk = (folders: FolderNode[]) => {
+    for (const f of folders) {
+      walk(f.childFolders);
+      for (const l of f.boards) ordered.push({ node: l, folderId: f.id });
+    }
+  };
+  walk(tree.folders);
+  for (const l of tree.boards) ordered.push({ node: l, folderId: null });
+  const folderCount = renderedCounts(tree).folders;
+  if (ordered.length === 0) return { lists: [], folderCount };
+
+  // The columns the walk does not carry, for exactly the readable Lists.
+  const rows = await prisma.board.findMany({
+    where: { id: { in: ordered.map((o) => o.node.id) }, organizationId: viewer.organizationId, archivedAt: null },
+    select: { id: true, statuses: true, schema: includeSchema },
+  });
+  const byId = new Map(rows.map((r) => [r.id, r] as const));
+  const lists: SpaceListRow[] = [];
+  for (const { node, folderId } of ordered) {
+    const row = byId.get(node.id);
+    if (!row) continue;
+    lists.push({
+      id: node.id,
+      slug: node.slug,
+      name: node.name,
+      icon: node.icon,
+      color: node.color,
+      visibility: node.visibility as Visibility,
+      ownerId: node.ownerId,
+      folderId,
+      statuses: row.statuses,
+      ...(includeSettings ? { settings: node.settings as Prisma.JsonValue } : {}),
+      ...(includeSchema ? { schema: row.schema } : {}),
+      role: node.role,
+      canContribute: node.role === "full" || node.role === "edit",
+    });
+  }
+  return { lists, folderCount };
+}
+
+// ── The one Space.settings writer ───────────────────────────────────
+
+/**
+ * Change Space.settings under a row lock.
+ *
+ * `fn` sees the settings as they are INSIDE the lock and answers the patch
+ * to merge (a key set to null is deleted, every other stored key is kept)
+ * plus a result for the caller; a decision like "is this view switched off"
+ * is therefore made on the row it writes. `data` rides along for the plain
+ * columns of the same update. Every writer of settings goes through here
+ * (bookmarks, the module toggle, the Space pin), so two of them can no longer
+ * erase each other's keys, and a module toggle can no longer drop a pin that
+ * was saved a moment earlier. createSpace and the Space duplicate write
+ * settings only on insert.
+ */
+export async function mutateSpaceSettings<T>(
+  spaceId: string,
+  fn: (settings: unknown) => { patch: Record<string, unknown> | null; result: T },
+  data?: Record<string, unknown>,
+): Promise<{ found: false } | { found: true; result: T; space: Space }> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ settings: unknown }>>`
+      SELECT "settings" FROM "Space" WHERE "id" = ${spaceId} FOR UPDATE
+    `;
+    if (rows.length === 0) return { found: false as const };
+    const locked = rows[0].settings;
+    const out = fn(locked);
+    const hasData = !!data && Object.keys(data).length > 0;
+    if (!out.patch && !hasData) {
+      const space = await tx.space.findUniqueOrThrow({ where: { id: spaceId } });
+      return { found: true as const, result: out.result, space };
+    }
+    const space = await tx.space.update({
+      where: { id: spaceId },
+      data: {
+        ...(data ?? {}),
+        ...(out.patch ? { settings: mergeSpaceSettings(locked, out.patch) as Prisma.InputJsonValue } : {}),
+      },
+    });
+    return { found: true as const, result: out.result, space };
+  });
+}
+
 export interface CreateSpaceInput {
   organizationId: string;
   userId: string;
@@ -459,14 +620,16 @@ export async function updateSpace(spaceId: string, patch: UpdateSpaceInput, db: 
   if (patch.displayOrder !== undefined) data.displayOrder = patch.displayOrder;
   if (patch.parentSpaceId !== undefined) data.parentSpaceId = patch.parentSpaceId;
 
-  // Modules live inside the settings JSON (settings.workflow.modules). Read the
-  // current blob and merge so we only touch the modules array — statuses,
-  // views, defaultView, etc. are preserved.
+  // Modules live inside the settings JSON (settings.workflow.modules). The
+  // merge happens on the LOCKED row, so only the modules array (and a pin the
+  // new modules hide, see spaceModulesPatch) changes; statuses, views,
+  // bookmarks and every other key are preserved, even against a writer that
+  // saved one of them a moment ago.
   if (patch.modules !== undefined) {
-    const current = await db.space.findUnique({ where: { id: spaceId }, select: { settings: true } });
-    const settings = (current?.settings && typeof current.settings === "object" ? current.settings : {}) as Record<string, unknown>;
-    const workflow = (settings.workflow && typeof settings.workflow === "object" ? settings.workflow : {}) as Record<string, unknown>;
-    data.settings = { ...settings, workflow: { ...workflow, modules: patch.modules } };
+    const modules = patch.modules;
+    const r = await mutateSpaceSettings(spaceId, (s) => ({ patch: spaceModulesPatch(s, modules), result: null }), data);
+    if (r.found) return r.space;
+    // No row: the same update as before answers the same not-found error.
   }
 
   return db.space.update({ where: { id: spaceId }, data });

@@ -15,7 +15,7 @@
 // (access section 5.4), and it is never rendered in `host="panel"`, because
 // the Inbox pane's actions belong to the notification.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
@@ -29,7 +29,10 @@ import { moveDestinations } from "@/lib/item-move";
 import type { ItemRole } from "@/lib/item-role";
 import type { StatusOption } from "@/lib/board-items-shared";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
+import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 import { useItemTypes } from "./use-item-types";
+import { AddToListPicker } from "./add-to-list-picker";
+import { distinctSectionLabels } from "@/lib/list-link-rows";
 
 export interface ItemMoreMenuItem {
   id: string;
@@ -38,6 +41,27 @@ export interface ItemMoreMenuItem {
   status?: string | null;
   assigneeIds?: string[];
   itemTypeId?: string | null;
+  /** Phase 5b: a subtask is shared with its parent, never on its own. */
+  parentItemId?: string | null;
+}
+
+/**
+ * Phase 5b: the List the menu is open in, when the host knows it. `linked`
+ * means the task is SHOWN there through a link (its home is another List):
+ * Move then moves the link, Archive is absent, Delete deletes everywhere and
+ * "Remove from this List" takes it out of this List only.
+ */
+export interface ItemMenuListContext {
+  boardId: string;
+  kind: "home" | "linked";
+  /** The task's home List, when the viewer can read it. */
+  homeBoardId?: string | null;
+  /** The home status set, when the viewer may see it; Mark complete needs it. */
+  homeStatuses?: StatusOption[];
+  canRemoveFromList?: boolean;
+  canLinkMove?: boolean;
+  canAddToList?: boolean;
+  linkedSubtask?: boolean;
 }
 
 export interface ItemMoreMenuProps {
@@ -69,6 +93,10 @@ export interface ItemMoreMenuProps {
   onRestored?: () => void;
   /** "Set reminder" > "Custom…" opens the host's DatePlanner Reminder tab. */
   onCustomReminder?: () => void;
+  /** Phase 5b: the List the menu is open in (see ItemMenuListContext). */
+  listContext?: ItemMenuListContext;
+  /** Phase 5b: the task just left the List the menu is open in. */
+  onRemovedFromList?: () => void;
   /** The trigger, when the host wants its own (a row's hover "…"). */
   className?: string;
   /**
@@ -108,8 +136,12 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     assigneeOnly = false, isCreator = false, isAgent = false, isGuest = false,
     archived = false, onPatch, onOpen, onRenameRequested, onArchived, onDeleted,
     onMoved, onDuplicated, onShare, onRestored, onCustomReminder,
-    className = "", triggerless = false,
+    className = "", triggerless = false, listContext, onRemovedFromList,
   } = props;
+  const linked = listContext?.kind === "linked";
+  // In a List the task is only shown in, the task's status is still its HOME
+  // status, so completing it needs the home set (absent: no Complete row).
+  const completionStatuses = linked ? listContext?.homeStatuses ?? [] : statuses;
 
   const confirm = useConfirm();
   const prompt = usePrompt();
@@ -117,6 +149,8 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   const types = useItemTypes();
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);
+  const [linkMovePicker, setLinkMovePicker] = useState(false);
+  const [addPicker, setAddPicker] = useState(false);
   const [lists, setLists] = useState<{ id: string; name: string; spaceName: string | null }[]>([]);
   // Three states, not two. "Still loading" and "the request failed" both used
   // to render as an empty list under the sentence "No other list you can write
@@ -134,7 +168,8 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   // PATCH /api/items/[id] answers 403 for that destination, and a picker must
   // never offer a row the server will refuse.
   useEffect(() => {
-    if (!open || lists.length) return;
+    // A link Move reads its own destinations; the home Move's list is not asked for.
+    if (!open || lists.length || linked) return;
     // No setState here: the state STARTS at "idle", which the picker already
     // reads as "still looking". Only the two outcomes are written.
     fetch("/api/boards?editable=1", { cache: "no-store" })
@@ -160,7 +195,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         setLists([]);
         setListsState("failed");
       });
-  }, [open, lists.length]);
+  }, [open, lists.length, linked]);
 
   // A right-click opens the same menu at the pointer. `pinned` is set by the
   // ref so the effect below does not immediately move it back to the button,
@@ -184,14 +219,55 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     // the last error sentence standing over a live retry.
     setListsState((prev) => (prev === "failed" ? "idle" : prev));
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 240) });
+    // Clamped on both sides: a card half scrolled out of a wide board still
+    // opens its whole menu on screen.
+    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.right - 240, window.innerWidth - 248)) });
     setOpen(true);
   }, []);
 
-  const isDone = Boolean(statuses.find((s) => s.value === item.status)?.group === "DONE");
+  // Every row must stay on screen, Delete included (the rule the shell's
+  // MorePortal follows). The panel opens where it always has; before paint it
+  // is measured, and only when it would run past the bottom edge is it opened
+  // upward from its anchor, or, taller than either side allows, pinned inside
+  // the viewport with its own scroll. A menu that fits never moves.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open || !pos) return;
+    const node = panelRef.current;
+    if (!node) return;
+    const fit = () => {
+      const margin = 8;
+      const vh = window.innerHeight;
+      node.style.maxHeight = "";
+      node.style.overflowY = "";
+      const h = node.offsetHeight;
+      let top = pos.top;
+      if (top + h + margin > vh) {
+        const anchorTop = pinned.current ? pos.top : (btnRef.current?.getBoundingClientRect().top ?? pos.top) - 4;
+        const flipped = anchorTop - h;
+        if (flipped >= margin) top = flipped;
+        else {
+          top = Math.max(margin, vh - h - margin);
+          if (h > vh - margin * 2) {
+            node.style.maxHeight = `${vh - margin * 2}px`;
+            node.style.overflowY = "auto";
+          }
+        }
+      }
+      node.style.top = `${top}px`;
+    };
+    fit();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    ro?.observe(node);
+    return () => ro?.disconnect();
+  }, [open, pos]);
+
+  const isDone = Boolean(completionStatuses.find((s) => s.value === item.status)?.group === "DONE");
   const isAssignee = Boolean(currentUserId && item.assigneeIds?.includes(currentUserId));
   const isWatching = Boolean(currentUserId && watcherIds.includes(currentUserId));
-  const canMoveElsewhere = lists.filter((l) => l.id !== item.boardId).length > 0 || lists.length === 0;
+  const canMoveElsewhere = linked
+    ? Boolean(listContext?.canLinkMove)
+    : lists.filter((l) => l.id !== item.boardId).length > 0 || lists.length === 0;
 
   const rows = buildItemMenu({
     host,
@@ -209,7 +285,13 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     isAgent,
     isGuest,
     archived,
-  });
+    // Absent without a list context, which keeps every host that knows
+    // nothing about links on exactly today's rows.
+    canAddToList: listContext ? Boolean(listContext.canAddToList && !item.parentItemId) : undefined,
+    inSecondaryList: linked ? true : undefined,
+    canRemoveFromList: linked ? Boolean(listContext?.canRemoveFromList) : undefined,
+    linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
+  }).filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0));
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -227,8 +309,8 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         case "complete": {
           close();
           const next = isDone
-            ? statuses.find((s) => s.group === "ACTIVE")?.value
-            : statuses.find((s) => s.group === "DONE")?.value;
+            ? completionStatuses.find((s) => s.group === "ACTIVE")?.value
+            : completionStatuses.find((s) => s.group === "DONE")?.value;
           if (next) onPatch({ status: next });
           return;
         }
@@ -264,8 +346,42 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         }
         case "move":
           setOpen(false);
-          setMovePicker(true);
+          if (linked) setLinkMovePicker(true);
+          else setMovePicker(true);
           return;
+        case "add-to-list":
+          setOpen(false);
+          setAddPicker(true);
+          return;
+        case "remove-from-list": {
+          close();
+          if (!listContext) return;
+          const ctx = listContext;
+          // The menu has closed, so a failure says so in danger tone and,
+          // when sending again can work (not reached, or a server failure),
+          // carries its own Try again.
+          const removeOnce = async (): Promise<void> => {
+            const res = await fetch(`/api/boards/${ctx.boardId}/links/${item.id}`, { method: "DELETE" }).catch(() => null);
+            if (!res || !res.ok) {
+              const data = res ? await res.json().catch(() => ({})) : {};
+              const retryable = !res || res.status >= 500 || res.status === 429;
+              toast(
+                res
+                  ? accessMessage(data, "Couldn't take this task out of this List.", {
+                      list_read_only: "You need edit access to this List or to the task's home List to take it out.",
+                    })
+                  : "Couldn't reach the server. Check your connection and try again.",
+                { tone: "danger", ...(retryable ? { action: { label: "Try again", onClick: () => void removeOnce() } } : {}) },
+              );
+              return;
+            }
+            toast("Removed from this List");
+            emitItemChanged(item.id, ctx.homeBoardId ?? null, false, { leftListIds: [ctx.boardId] });
+            onRemovedFromList?.();
+          };
+          await removeOnce();
+          return;
+        }
         case "watch":
           close();
           if (currentUserId) {
@@ -343,14 +459,32 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         }
         case "delete": {
           close();
-          const ok = await confirm({
-            title: "Delete task",
-            description: "Delete this task? It moves to Trash for 60 days.",
-            destructive: true,
-            confirmLabel: "Delete",
-          });
+          // Inside a List the task is only shown in, Delete says what it does:
+          // it goes from its home and from every List it is in. The request
+          // names this List and says everywhere, so the server can never read
+          // a stale click as "delete it here".
+          const ok = await confirm(
+            linked
+              ? {
+                  title: "Delete everywhere",
+                  description: "Delete this task everywhere? It leaves every List it is in and moves to Trash.",
+                  destructive: true,
+                  confirmLabel: "Delete everywhere",
+                }
+              : {
+                  title: "Delete task",
+                  description: "Delete this task? It moves to Trash for 60 days.",
+                  destructive: true,
+                  confirmLabel: "Delete",
+                },
+          );
           if (!ok) return;
-          const res = await fetch(`/api/items/${item.id}?hard=1`, { method: "DELETE" });
+          const res = await fetch(
+            linked && listContext
+              ? `/api/items/${item.id}?list=${encodeURIComponent(listContext.boardId)}&everywhere=1&hard=1`
+              : `/api/items/${item.id}?hard=1`,
+            { method: "DELETE" },
+          );
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             toast(
@@ -370,9 +504,9 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
       }
     },
     [
-      close, item, isDone, statuses, onPatch, currentUserId, onRenameRequested, toast, onOpen,
+      close, item, isDone, completionStatuses, onPatch, currentUserId, onRenameRequested, toast, onOpen,
       onDuplicated, isWatching, watcherIds, timerRunning, prompt, onShare, confirm, onArchived,
-      onDeleted, onRestored,
+      onDeleted, onRestored, linked, listContext, onRemovedFromList,
     ],
   );
 
@@ -415,6 +549,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
             <>
               <div className="fixed inset-0 z-[70]" onMouseDown={close} aria-hidden="true" />
               <div
+                ref={panelRef}
                 role="menu"
                 className="os-chrome fixed z-[71] w-[240px] rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop)]"
                 style={{ top: pos.top, left: pos.left }}
@@ -506,6 +641,26 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
           )
         : null}
 
+      {linked && listContext ? (
+        <LinkMovePicker
+          open={linkMovePicker}
+          onClose={() => setLinkMovePicker(false)}
+          itemId={item.id}
+          listContext={listContext}
+          anchorPoint={triggerless ? pos : null}
+          onMoved={(targetId) => onMoved?.(targetId)}
+        />
+      ) : null}
+      {listContext?.canAddToList ? (
+        <AddToListPicker
+          open={addPicker}
+          onClose={() => setAddPicker(false)}
+          itemId={item.id}
+          homeBoardId={linked ? listContext.homeBoardId ?? null : item.boardId ?? null}
+          anchorPoint={triggerless ? pos : null}
+        />
+      ) : null}
+
       <Picker
         open={movePicker}
         onClose={() => setMovePicker(false)}
@@ -537,3 +692,114 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     </span>
   );
 });
+
+/**
+ * "Move to list…" pressed INSIDE a List the task is only shown in: it moves
+ * the LINK (PATCH /api/boards/[B]/links/[id] { moveToBoardId }) and never
+ * touches the task's home. Offered Lists are the ones the viewer may add to,
+ * minus this one and the home; a move that races the task changing home
+ * (home_changed) is retried once.
+ */
+function LinkMovePicker({
+  open,
+  onClose,
+  itemId,
+  listContext,
+  anchorPoint,
+  onMoved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  itemId: string;
+  listContext: ItemMenuListContext;
+  anchorPoint: { top: number; left: number } | null;
+  onMoved: (targetId: string) => void;
+}) {
+  const { toast } = useOsToast();
+  const [query, setQuery] = useState("");
+  const [res, setRes] = useState<ReadableListsResponse | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+  const busy = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      fetch(readableListsUrl({ writable: true, targets: true, q: query }), { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d: ReadableListsResponse) => {
+          if (!alive) return;
+          setRes({ boards: Array.isArray(d?.boards) ? d.boards : [], spaces: Array.isArray(d?.spaces) ? d.spaces : [], truncated: !!d?.truncated });
+          setState("ready");
+        })
+        .catch(() => { if (alive) setState("failed"); });
+    }, query ? 200 : 0);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [open, query]);
+
+  const exclude = new Set([listContext.boardId, ...(listContext.homeBoardId ? [listContext.homeBoardId] : [])]);
+  const sections: PickerSectionDef[] = res
+    ? distinctSectionLabels(groupReadableLists({ ...res, boards: res.boards.filter((b) => !exclude.has(b.id)) }).map((g) => ({
+        label: g.label,
+        options: g.lists.map((l) => ({ value: l.id, label: l.name })),
+      })))
+    : [];
+
+  const move = async (targetId: string) => {
+    if (busy.current) return;
+    const target = res?.boards.find((b) => b.id === targetId);
+    busy.current = true;
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const r = await fetch(`/api/boards/${listContext.boardId}/links/${itemId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ moveToBoardId: targetId }),
+        }).catch(() => null);
+        if (!r) {
+          toast("Couldn't reach the server. Check your connection and try again.");
+          return;
+        }
+        const body = await r.json().catch(() => ({}));
+        if (r.status === 409 && body?.error === "home_changed" && attempt === 0) continue;
+        if (!r.ok) {
+          toast(accessMessage(body, "Couldn't move this task to that List."));
+          return;
+        }
+        toast(body?.alreadyLinked ? `It was already in ${target?.name ?? "that List"}` : `Moved to ${target?.name ?? "that List"}`);
+        // It left THIS List. `listIds` is not sent: it would have to name every
+        // List the task is in, and a partial set would pull the task out of a
+        // List it is still in.
+        emitItemChanged(itemId, listContext.homeBoardId ?? null, false, { leftListIds: [listContext.boardId] });
+        onMoved(targetId);
+        return;
+      }
+      toast(accessMessage({ error: "home_changed" }, "Couldn't move this task to that List."));
+    } finally {
+      busy.current = false;
+    }
+  };
+
+  return (
+    <Picker
+      open={open}
+      onClose={onClose}
+      sections={sections}
+      alwaysSearch
+      onSearchChange={setQuery}
+      align="end"
+      anchorPoint={anchorPoint}
+      ariaLabel="Move to list"
+      searchPlaceholder="Search Lists…"
+      loading={state === "loading" && !res}
+      emptyLabel={
+        state === "failed"
+          ? "Couldn't load your Lists. Check your connection and try again."
+          : state === "loading"
+            ? "Finding Lists…"
+            : "No other List you can move it to"
+      }
+      onSelect={(id) => void move(id)}
+      footer={<p className="px-2 py-1.5 text-xs text-ink-2">Moves it out of this List only. Its home List keeps it.</p>}
+    />
+  );
+}
