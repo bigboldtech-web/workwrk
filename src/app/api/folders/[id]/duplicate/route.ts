@@ -15,9 +15,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import { folderReadable, folderVisibleTo } from "@/lib/folder";
 import { duplicateBoard } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRoleMap, nodeRoles } from "@/lib/access/node-access";
+import { PlacementConflict, checkCreate, lockParentFolder } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -42,43 +43,66 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     },
   });
   if (!src) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // READ THE FOLDER, NOT ONLY ITS SPACE. Gated on the Space alone, a Space
-  // ADMIN who is denied a PRIVATE folder could copy its Lists (and, with
-  // includeTasks, its tasks) into a folder they own and read the lot, while
-  // /folders/[id] answered them with the in-shell 404. `folderReadable` is the
-  // same gate the page resolves through.
-  if (!(await folderReadable(id, u.id, accessLevel))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Full access on the folder itself (the one resolver, never the Space's
+  // rights alone: a Space ADMIN denied a PRIVATE folder cannot copy its Lists
+  // out), and the one create rule where the copy lands, beside the original
+  // (node-rules P1: Can edit or higher on the parent Folder, or on the Space
+  // at its root).
+  const ctx = nodeCtxFromLevel(u.id, organizationId, accessLevel);
+  const parentRef = src.parentFolderId ? { kind: "folder" as const, id: src.parentFolderId } : { kind: "space" as const, id: src.spaceId };
+  const gate = await nodeRoles(ctx, [{ kind: "folder", id }]);
+  const own = gate.get(`folder:${id}`)?.role ?? "none";
+  if (own === "none") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!roleAtLeast(own, "FULL")) {
+    return NextResponse.json({ error: "You need Full access to this folder to duplicate it." }, { status: 403 });
   }
-  if (!(await getSpaceForReader(src.spaceId, u.id, accessLevel))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (!(await canEditSpace(src.spaceId, u.id, accessLevel))) {
-    return NextResponse.json({ error: "You need edit access to duplicate this folder." }, { status: 403 });
-  }
+  const lands = await checkCreate(ctx, parentRef, "folder");
+  if (!lands.ok) return NextResponse.json({ error: lands.error }, { status: lands.status });
 
-  const root = await prisma.folder.create({
-    data: {
-      organizationId,
-      spaceId: src.spaceId,
-      parentFolderId: src.parentFolderId,
-      name: `${src.name} (copy)`,
-      description: src.description,
-      icon: src.icon,
-      color: src.color,
-      ownerId: u.id,
-      visibility: src.visibility,
-      position: src.position + 1,
-      settings: src.settings as object,
-    },
-    select: { id: true, name: true },
-  });
+  // THE CREATE HALF OF P3, for every row of the copy: each one is written in
+  // its own transaction that reads its new parent under a share lock
+  // (lockParentFolder) and takes the Space the parent has AT THAT MOMENT. The
+  // copy used to stamp every sub-folder and List with the source's Space, so
+  // a move of the copy (or of its parent) while the copy ran left copied
+  // Lists and sub-folders in the old Space under a parent in the new one
+  // (round two, break 2). A parent that moved away or went to Trash midway
+  // stops the copy where it is; what landed is consistent and counted.
+  let root: { id: string; name: string };
+  try {
+    root = await prisma.$transaction(async (tx) => {
+      let spaceId = src.spaceId;
+      if (src.parentFolderId) {
+        const parent = await lockParentFolder(tx, organizationId, src.parentFolderId);
+        if (!parent) throw new PlacementConflict("The folder above this one just moved or went to Trash. Try again.");
+        spaceId = parent.spaceId;
+      }
+      return tx.folder.create({
+        data: {
+          organizationId,
+          spaceId,
+          parentFolderId: src.parentFolderId,
+          name: `${src.name} (copy)`,
+          description: src.description,
+          icon: src.icon,
+          color: src.color,
+          ownerId: u.id,
+          visibility: src.visibility,
+          position: src.position + 1,
+          settings: src.settings as object,
+        },
+        select: { id: true, name: true },
+      });
+    });
+  } catch (err) {
+    if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });
+    throw err;
+  }
 
   // Breadth-first, so a sub-folder is always created after its new parent.
-  // A copy never widens access: a nested PRIVATE folder or List the actor
-  // cannot read is skipped rather than cloned into something they own, and the
-  // response says how many were left behind so the toast can too.
-  const isOrgAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
+  // A copy never widens access: a nested folder or List the actor cannot
+  // read (one world per level, the one resolver) is skipped rather than
+  // cloned into something they own, and the response says how many were
+  // left behind so the toast can too.
   let copiedFolders = 0;
   let copiedLists = 0;
   let skipped = 0;
@@ -94,8 +118,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       where: { organizationId, folderId: node.sourceId, archivedAt: null },
       select: { id: true, visibility: true, ownerId: true },
     });
+    const listRoles = await nodeRoleMap(ctx, "list", lists.map((l) => l.id));
     for (const list of lists) {
-      if (!isOrgAdmin && list.visibility === "PRIVATE" && list.ownerId !== u.id) { skipped += 1; continue; }
+      if (!roleAtLeast(listRoles.get(list.id) ?? "none", "VIEW")) { skipped += 1; continue; }
       let clone: { id: string } | null = null;
       try {
         clone = await duplicateBoard(list.id, u.id, organizationId, { includeTasks });
@@ -111,7 +136,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       // failure there left a stray "(copy)" List sitting in the real folder
       // with nothing counting it. Its own catch removes the orphan instead.
       try {
-        await prisma.board.update({ where: { id: clone.id }, data: { folderId: node.targetId } });
+        await prisma.$transaction(async (tx) => {
+          const parent = await lockParentFolder(tx, organizationId, node.targetId);
+          if (!parent) throw new PlacementConflict("The copy moved or went to Trash.");
+          await tx.board.update({ where: { id: clone.id }, data: { folderId: node.targetId, spaceId: parent.spaceId } });
+        });
         copiedLists += 1;
       } catch {
         await prisma.board.delete({ where: { id: clone.id } }).catch(() => {});
@@ -124,24 +153,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       where: { organizationId, parentFolderId: node.sourceId, archivedAt: null },
       select: { id: true, name: true, description: true, icon: true, color: true, visibility: true, ownerId: true, position: true, settings: true },
     });
+    const kidRoles = await nodeRoleMap(ctx, "folder", kids.map((k) => k.id));
     for (const kid of kids) {
-      if (!folderVisibleTo(kid, u.id, accessLevel)) { skipped += 1; continue; }
-      const created = await prisma.folder.create({
-        data: {
-          organizationId,
-          spaceId: src.spaceId,
-          parentFolderId: node.targetId,
-          name: kid.name,
-          description: kid.description,
-          icon: kid.icon,
-          color: kid.color,
-          ownerId: u.id,
-          visibility: kid.visibility,
-          position: kid.position,
-          settings: kid.settings as object,
-        },
-        select: { id: true },
+      if (!roleAtLeast(kidRoles.get(kid.id) ?? "none", "VIEW")) { skipped += 1; continue; }
+      const created = await prisma.$transaction(async (tx) => {
+        const parent = await lockParentFolder(tx, organizationId, node.targetId);
+        if (!parent) return null;
+        return tx.folder.create({
+          data: {
+            organizationId,
+            spaceId: parent.spaceId,
+            parentFolderId: node.targetId,
+            name: kid.name,
+            description: kid.description,
+            icon: kid.icon,
+            color: kid.color,
+            ownerId: u.id,
+            visibility: kid.visibility,
+            position: kid.position,
+            settings: kid.settings as object,
+          },
+          select: { id: true },
+        });
       });
+      if (!created) { failed += 1; continue; }
       copiedFolders += 1;
       queue.push({ sourceId: kid.id, targetId: created.id, depth: node.depth + 1 });
     }

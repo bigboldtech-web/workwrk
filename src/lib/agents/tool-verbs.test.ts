@@ -48,7 +48,9 @@ describe("toolSentence", () => {
 describe("toolOutcome", () => {
   it("links a created task and a created doc", () => {
     expect(toolOutcome("create_task", { ok: true, task: { id: "t1", title: "x" } }).href).toBe("/item/t1");
-    expect(toolOutcome("create_doc", { ok: true, doc: { id: "d1" } }).href).toBe("/docs/d1");
+    // Opened from the AI hub, a doc takes its Work door (main's open-in-place:
+    // every hub but the Docs and Tables browsers), placed for whoever opens it.
+    expect(toolOutcome("create_doc", { ok: true, doc: { id: "d1" } }).href).toBe("/work/docs/d1");
     expect(toolOutcome("send_kudos", { ok: true }).href).toBeNull();
   });
   it("reads a failure from the error text or the tool's own { error }", () => {

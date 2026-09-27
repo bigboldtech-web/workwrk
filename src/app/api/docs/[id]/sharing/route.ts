@@ -1,30 +1,34 @@
-// /api/docs/[id]/sharing — read + update a doc's sharing config.
+// /api/docs/[id]/sharing: read and change a doc's general access.
 //
-// The ONLY writer of settings.docSharing[docId] (Organization.settings
-// Json — same read-modify-write pattern as /api/permissions). No schema
-// change, no migration.
+// GET   { sharing: { restricted, members, publicUrl }, myRole, createdById }
+// PATCH the same shape back; body { restricted?, publicLink?, members? }
 //
-// GET   → { sharing: { restricted, members, publicUrl }, myRole, createdById }
-// PATCH → same shape; body { members?, restricted?, publicLink? }
-//   - members replaces the whole map (client sends the full record); the
-//     creator's own id is stripped server-side so the owner can never
-//     demote themselves.
-//   - publicLink true mints (or keeps) the public secret; false revokes it.
-//   - An entry with no members, no restricted flag and no public secret is
-//     deleted entirely — byte-identical pre-feature settings state.
+// Who can open a doc is decided by the one node-access resolver
+// (src/lib/access/node-access.ts), and the people on a doc are changed only
+// through the Manage access dialog (POST and DELETE
+// /api/access/doc/:id/grants, src/lib/access/grants.ts). This route keeps the
+// two general switches and the shape its older client reads:
+//   - restricted and publicLink go through grants.setDocGeneral: the
+//     Organization row is locked, exactly one doc's entry is rewritten, and
+//     the change is recorded as access activity in the same transaction;
+//   - members is the stored rollback projection, read only. A client that
+//     sends it back unchanged is fine; one that sends a different map is a
+//     page loaded before the dialog changed, and it is refused with 409
+//     stale_client instead of overwriting everyone else's grants.
+//   - publicUrl goes only to people who can change the doc's sharing (Can
+//     edit or higher); everyone else reads null.
+// Changing either switch needs Can edit or higher (today's doc sharing rule).
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { resolveSuiteContext } from "@/lib/suites/auth";
-import { docAccessible } from "@/lib/doc-access";
-import {
-  getDocSharingMap,
-  newPublicSecret,
-  resolveDocRole,
-  type DocSharingEntry,
-} from "@/lib/doc-sharing";
+import { docAccess } from "@/lib/doc-access";
+import { nodeCtxFromSession } from "@/lib/access/node-access";
+import { docSharingEntries } from "@/lib/access/access-grant-store";
+import { GrantError, setDocGeneral } from "@/lib/access/grants";
+import type { DocSharingFact } from "@/lib/access/node-rules";
+
+const NO_STORE = { "Cache-Control": "no-store" } as const;
 
 const patchSchema = z.object({
   members: z.record(z.string(), z.enum(["view", "edit"])).optional(),
@@ -32,129 +36,88 @@ const patchSchema = z.object({
   publicLink: z.boolean().optional(),
 });
 
-function sharingPayload(entry: DocSharingEntry | undefined, docId: string) {
+function sharingPayload(entry: DocSharingFact | undefined, docId: string, canShare: boolean) {
   return {
     restricted: !!entry?.restricted,
     members: entry?.members ?? {},
-    publicUrl: entry?.publicSecret ? `/share/doc/${docId}.${entry.publicSecret}` : null,
+    publicUrl: canShare && entry?.publicSecret ? `/share/doc/${docId}.${entry.publicSecret}` : null,
   };
 }
 
-async function loadDoc(id: string, orgId: string) {
-  return prisma.doc.findFirst({
-    where: { id, organizationId: orgId },
-    select: { id: true, createdById: true, entityType: true, entityId: true, archivedAt: true },
-  });
+/** Two members maps say the same thing, the creator's own row aside (the older server stripped it). */
+function sameMembers(a: Record<string, string>, b: Record<string, string>, creatorId: string | null): boolean {
+  const norm = (m: Record<string, string>) =>
+    Object.entries(m)
+      .filter(([k]) => k !== creatorId)
+      .sort(([x], [y]) => x.localeCompare(y));
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
+async function loadDoc(id: string, orgId: string) {
+  return prisma.doc.findFirst({ where: { id, organizationId: orgId }, select: { id: true, createdById: true } });
+}
+
+const notFound = () => NextResponse.json({ error: "not found" }, { status: 404, headers: NO_STORE });
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
+  const ctx = await nodeCtxFromSession();
+  if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  const doc = await loadDoc(id, ctx.orgId);
-  if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const doc = await loadDoc(id, ctx.organizationId);
+  if (!doc) return notFound();
+  const access = await docAccess(ctx, doc.id);
+  if (!access) return notFound();
+  const entry = (await docSharingEntries(ctx.organizationId, [doc.id])).get(doc.id);
 
-  const org = await prisma.organization.findUnique({
-    where: { id: ctx.orgId },
-    select: { settings: true },
-  });
-  const entry = getDocSharingMap(org?.settings)[id];
-  const role = resolveDocRole(entry, {
-    userId: ctx.userId,
-    accessLevel: ctx.accessLevel,
-    createdById: doc.createdById,
-  });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-
-  return NextResponse.json({
-    sharing: sharingPayload(entry, id),
-    myRole: role,
-    createdById: doc.createdById,
-  });
+  return NextResponse.json(
+    { sharing: sharingPayload(entry, doc.id, access.canShare), myRole: access.legacy, createdById: doc.createdById },
+    { headers: NO_STORE },
+  );
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
+  const ctx = await nodeCtxFromSession();
+  if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  const body = await req.json().catch(() => null);
-  const parsed = patchSchema.safeParse(body);
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  const doc = await loadDoc(id, ctx.orgId);
-  if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-
-  // Re-read settings fresh inside the handler (read-modify-write, the
-  // /api/permissions pattern) so we merge on top of the latest state.
-  const org = await prisma.organization.findUnique({
-    where: { id: ctx.orgId },
-    select: { settings: true },
-  });
-  const settings =
-    org?.settings && typeof org.settings === "object" && !Array.isArray(org.settings)
-      ? (org.settings as Record<string, unknown>)
-      : {};
-  const map = { ...getDocSharingMap(settings) };
-  const prev = map[id];
-
-  const role = resolveDocRole(prev, {
-    userId: ctx.userId,
-    accessLevel: ctx.accessLevel,
-    createdById: doc.createdById,
-  });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (role !== "edit") return NextResponse.json({ error: "read-only" }, { status: 403 });
-
-  const next: DocSharingEntry = { ...prev };
+  const doc = await loadDoc(id, ctx.organizationId);
+  if (!doc) return notFound();
+  const access = await docAccess(ctx, doc.id);
+  if (!access) return notFound();
+  // An Agent who can share shares, as this gate let them before node-access (A8).
+  if (!access.canShare) return NextResponse.json({ error: "read-only" }, { status: 403 });
 
   if (parsed.data.members !== undefined) {
-    const members = { ...parsed.data.members };
-    // The owner can never demote themselves — strip their id.
-    if (doc.createdById) delete members[doc.createdById];
-    next.members = members;
-  }
-  if (parsed.data.restricted !== undefined) {
-    if (parsed.data.restricted) next.restricted = true;
-    else delete next.restricted;
-  }
-  if (parsed.data.publicLink !== undefined) {
-    if (parsed.data.publicLink) {
-      if (!next.publicSecret) {
-        next.publicSecret = newPublicSecret();
-        next.publicCreatedAt = new Date().toISOString();
-      }
-    } else {
-      delete next.publicSecret;
-      delete next.publicCreatedAt;
+    const stored = (await docSharingEntries(ctx.organizationId, [doc.id])).get(doc.id)?.members ?? {};
+    if (!sameMembers(parsed.data.members, stored, doc.createdById)) {
+      return NextResponse.json(
+        { error: "stale_client", message: "Reload the page to change who has access." },
+        { status: 409, headers: NO_STORE },
+      );
     }
   }
 
-  const hasMembers = !!next.members && Object.keys(next.members).length > 0;
-  if (!hasMembers && !next.restricted && !next.publicSecret) {
-    // Fully unshared — remove the entry so settings stay lean and the
-    // doc returns to literal pre-feature semantics.
-    delete map[id];
-  } else {
-    if (next.members && Object.keys(next.members).length === 0) delete next.members;
-    map[id] = next;
+  const { restricted, publicLink } = parsed.data;
+  if (restricted !== undefined || publicLink !== undefined) {
+    try {
+      await setDocGeneral(ctx, doc.id, { restricted, publicLink });
+    } catch (err) {
+      if (err instanceof GrantError) {
+        return NextResponse.json({ error: err.code, message: err.message }, { status: err.status, headers: NO_STORE });
+      }
+      const raw = err instanceof Error ? err.message : String(err);
+      console.error(`[docs/sharing] PATCH ${doc.id} failed: ${raw}`);
+      return NextResponse.json({ error: "server_error", message: "Could not save. Your changes are kept." }, { status: 500, headers: NO_STORE });
+    }
   }
 
-  await prisma.organization.update({
-    where: { id: ctx.orgId },
-    data: { settings: { ...settings, docSharing: map } as unknown as Prisma.InputJsonValue },
-  });
-
-  return NextResponse.json({
-    sharing: sharingPayload(map[id], id),
-    myRole: role,
-    createdById: doc.createdById,
-  });
+  const entry = (await docSharingEntries(ctx.organizationId, [doc.id])).get(doc.id);
+  return NextResponse.json(
+    { sharing: sharingPayload(entry, doc.id, true), myRole: access.legacy, createdById: doc.createdById },
+    { headers: NO_STORE },
+  );
 }

@@ -11,8 +11,8 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { TABLE_EDIT_REFUSAL, tableRoleFor } from "@/lib/table-gate";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 async function resolveTable(id: string, orgId: string, userId: string, accessLevel: string | null | undefined) {
   const table = await prisma.dataTable.findFirst({
@@ -20,14 +20,13 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
     select: { id: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
-  if (table.spaceId) {
-    const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
-    if (!space) return null;
-  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
-    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
-    return null;
-  }
-  return table;
+  // The one resolver's table rule (R7): a Space member edits, a Space Full
+  // holder manages, an unscoped table is org-wide for Members and a Guest's
+  // own only, and a table grant opens it on its own. A Can view role reads
+  // the trash and never restores or purges from it (R7b).
+  const role = await tableRoleFor(table.id, orgId, userId, accessLevel);
+  if (!role) return null;
+  return { ...table, canEdit: roleAtLeast(role, "EDIT") };
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -56,6 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
+  if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const body = await req.json().catch(() => null);
   const action = body?.action;

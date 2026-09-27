@@ -32,12 +32,33 @@
 
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { findMigratedMarketing, migratedCampaignItem } from "@/lib/marketing/legacy-import";
-import { LEGACY_IMPORT_HREF, legacyMarketingTarget } from "@/lib/marketing/legacy-map";
+import { LEGACY_IMPORT_HREF, legacyMarketingTarget, type MarketingKind } from "@/lib/marketing/legacy-map";
 
 export const dynamic = "force-dynamic";
 
 const KNOWN = new Set(["campaigns", "content", "events"]);
+
+/**
+ * The node legacyMarketingTarget sends this path to when the URL names it (a
+ * Space or List slug), in the same branch order. Null for a task: /item/{id}
+ * names nothing, and the task page decides who opens it.
+ */
+function namedDestination(
+  segments: readonly string[],
+  migrated: { spaceId: string; listIds: Partial<Record<MarketingKind, string>> },
+  campaignItemId: string | null,
+): NodeRef | null {
+  const space: NodeRef = { kind: "space", id: migrated.spaceId };
+  const list = (kind: MarketingKind): NodeRef => (migrated.listIds[kind] ? { kind: "list", id: migrated.listIds[kind]! } : space);
+  const [head] = segments;
+  if (!head) return space;
+  if (head === "campaigns" || head === "content" || head === "events") return list(head);
+  if (campaignItemId) return null;
+  return list("campaigns");
+}
 
 export default async function LegacyMarketingResolver({ params }: { params: Promise<{ slug?: string[] }> }) {
   const { slug } = await params;
@@ -67,6 +88,11 @@ export default async function LegacyMarketingResolver({ params }: { params: Prom
       campaignItemId = campaign.itemId;
       campaignTrashed = campaign.trashed;
     }
+    // Node access: a Space or List the viewer cannot open is never named, and
+    // the redirect would name it by its slug. Such a viewer gets the same
+    // in-shell 404 as a misspelled URL (the Owner may have narrowed the Space).
+    const named = namedDestination(segments, migrated, campaignItemId);
+    if (named && !roleAtLeast((await nodeRole(nodeCtxFromViewer(viewer), named)).role, "VIEW")) notFound();
     permanentRedirect(legacyMarketingTarget(segments, migrated, campaignItemId, campaignTrashed));
   }
 

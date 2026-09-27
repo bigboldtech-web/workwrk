@@ -9,10 +9,22 @@
 // names it. A patch is partial and merged over what is stored. The people on
 // "Tell these people about each new response" must be in the form's org.
 //
-// Who may edit (interim, access engine inert): every Member of the org, as
-// before; a Guest only a form they made. GET answers `canEdit` so the builder
-// renders read-only for everyone else, and `canManage` (creator or admin) for
-// the public link, delete and deleting responses.
+// Who may edit: the one resolver's R9. A form inherits the role held where it
+// sends responses (Can edit on that List edits the questions, Full access
+// there manages the form), its creator holds Full access for life, a form
+// grant gives its role, and every Member opens it read-only; a form sending
+// nowhere yet is every Member's to edit, as anything at the org root. GET
+// answers `canEdit` so the builder renders read-only for everyone else,
+// `canManage` (Full access) for the public link, delete and deleting
+// responses, and `canChangeDestination` for the Goes to card.
+//
+// A change of destination is a MOVE under the placement rule (node-rules P2,
+// formDestinationVerdict): Full access on the form, Full access where it
+// sends responses now, Can edit where it will send them; emptying it takes
+// the form out of every Space, so the Full access must be the form's own.
+// Round four, breaks 2 and 4: every Member once held Can edit on every form,
+// and only the new List was asked, so a person with nothing on a private
+// Space redirected its form's responses and rewrote its questions.
 // DELETE /api/forms/[id]   move to the one Trash WITH its responses; only its creator or an admin
 //
 // Phase 5 gates (spec-tables-forms section 3 ask 1, section 4 step 1, with the
@@ -29,12 +41,14 @@ import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject, MANAGE_REFUSAL } from "@/lib/object-manage";
+import { MANAGE_REFUSAL } from "@/lib/object-manage";
+import { formResponsesAllowed, nodeCtxFromViewer, nodeRole } from "@/lib/access/node-access";
+import { checkFormDestinationChange, formDestinationChangeableFor } from "@/lib/access/node-placement";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { describeSettingsError, formSettingsPatchSchema, mergeFormSettings, readFormSettings } from "@/lib/forms/settings";
-import { canReadResponses } from "@/lib/forms/responses-server";
 import { viewerCanRespondAsMember } from "@/lib/forms/responder-access";
 import { validFieldMappingsInput, validFieldsInput } from "@/lib/forms/fields";
 import { dailySummaryInstalled } from "@/lib/forms/daily-summary";
@@ -44,12 +58,14 @@ import { formContentRev, patchAllowed, type FormContentKey } from "@/lib/forms/c
 
 type FormViewer = Awaited<ReturnType<typeof viewerFromSession>>;
 
-/** Every Member may edit; a Guest only a form they made (and never an
- *  unknown viewer). */
-function canEditForm(viewer: FormViewer | null, createdById: string): boolean {
-  if (!viewer) return false;
-  if (viewer.orgRole === "GUEST") return viewer.userId === createdById;
-  return true;
+/**
+ * The viewer's role on the form, from the one resolver (R9): every Member
+ * edits, its creator holds Full access for life, and a form grant gives its
+ * role (a Guest included). An unknown viewer holds nothing.
+ */
+async function formRoleOf(viewer: FormViewer | null, formId: string): Promise<NodeRole> {
+  if (!viewer) return "none";
+  return (await nodeRole(nodeCtxFromViewer(viewer), { kind: "form", id: formId })).role;
 }
 
 /** Both destinations a form can feed (a List and a table, either or both).
@@ -98,13 +114,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     destinationsOf(orgId, form.targetBoardId, form.targetTableId, getUserId(session), session),
     prisma.user.findUnique({ where: { id: form.createdById }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true } }),
   ]);
-  // A Guest who did not make the form and cannot reach its anchor has no
-  // business knowing it exists: the same 404 as a wrong id.
-  if (viewer?.orgRole === "GUEST" && viewer.userId !== form.createdById) {
-    const reach = await canReadResponses(form, { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent });
-    if (!reach) return jsonError("not found", 404);
-  }
-  const canEdit = canEditForm(viewer, form.createdById);
+  // Someone who holds no role on the form (a Guest who neither made it nor
+  // was given it) has no business knowing it exists: the same 404 as a wrong id.
+  const role = await formRoleOf(viewer, form.id);
+  if (!roleAtLeast(role, "VIEW")) return jsonError("not found", 404);
+  const canEdit = roleAtLeast(role, "EDIT");
+  const [canRead, canChangeDestination] = viewer
+    ? await Promise.all([formResponsesAllowed(nodeCtxFromViewer(viewer), form.id), formDestinationChangeableFor(nodeCtxFromViewer(viewer), form.id)])
+    : [false, false];
   const { _count, ...rest } = form;
   const settings = readFormSettings((form as { settings?: unknown }).settings);
   const responder = viewer ? { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent } : null;
@@ -130,9 +147,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     owner: owner ? { ...owner, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email || null } : null,
     canEdit,
     canRespond,
-    canManage: canManageObject(viewer, form.createdById),
-    // Reading responses is an editor's right; a Can view reader has no Responses tab.
-    canReadResponses: canEdit,
+    // Full access on the form: its public link, delete, deleting responses.
+    canManage: roleAtLeast(role, "FULL"),
+    // The placement rule's source half for a destination change (node-rules
+    // formDestinationChangeable): Full access on the form and where it sends
+    // responses now. The Goes to card offers Change only then (P5).
+    canChangeDestination,
+    // Reading responses needs the form AND where its answers land (R9); a
+    // form grant never bypasses the destination.
+    canReadResponses: canRead,
     isAgent: !!viewer?.isAgent,
     // Whether "Send a daily summary instead" has its reader (the cron row):
     // the builder renders the switch only then.
@@ -153,7 +176,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const existing = await prisma.formDefinition.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("not found", 404);
   const editor = await viewerFromSession().catch(() => null);
-  if (!canEditForm(editor, existing.createdById)) return jsonError("You can view this form but not change it.", 403);
+  const editorRole = await formRoleOf(editor, existing.id);
+  if (!roleAtLeast(editorRole, "VIEW")) return jsonError("not found", 404);
+  if (!roleAtLeast(editorRole, "EDIT")) return jsonError("You can view this form but not change it.", 403);
 
   const data: Record<string, unknown> = {};
   if ("settings" in body) {
@@ -184,22 +209,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // value is not a change and is never refused.
   let publicChange: boolean | null = null;
   if (typeof body.isPublic === "boolean" && body.isPublic !== existing.isPublic) {
-    if (!canManageObject(editor, existing.createdById)) return jsonError(MANAGE_REFUSAL.publish, 403);
+    if (!roleAtLeast(editorRole, "FULL")) return jsonError(MANAGE_REFUSAL.publish, 403);
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
   }
-  // A destination must be a List or a table in this org; a stale id from an
-  // old tab is refused rather than stored as a dead link.
-  if ("targetBoardId" in body) {
-    const v = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
-    if (v && v !== existing.targetBoardId && !(await prisma.board.findFirst({ where: { id: v, organizationId: orgId }, select: { id: true } }))) return jsonError("That List no longer exists", 400);
-    data.targetBoardId = v;
+  // A change of destination is a move (node-placement
+  // checkFormDestinationChange, the placement rule P2): Full access on the
+  // form and where it sends responses now, Can edit on the List or table in
+  // this org it will send them to; a stale id from an old tab is refused
+  // rather than stored as a dead link. The builder saves the whole form every
+  // time, so a destination it repeats unchanged is not a change and is never
+  // refused. Refused, nothing is written and the sentence names what is
+  // needed (P6).
+  const nextBoard = "targetBoardId" in body ? (typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null) : undefined;
+  const nextTable = "targetTableId" in body ? (typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null) : undefined;
+  const boardChanges = nextBoard !== undefined && nextBoard !== existing.targetBoardId;
+  const tableChanges = nextTable !== undefined && nextTable !== existing.targetTableId;
+  if ((boardChanges || tableChanges) && editor) {
+    const change = await checkFormDestinationChange(nodeCtxFromViewer(editor), existing.id, {
+      boardId: boardChanges ? nextBoard : undefined,
+      tableId: tableChanges ? nextTable : undefined,
+    });
+    if (!change.ok) return jsonError(change.error, change.status);
   }
-  if ("targetTableId" in body) {
-    const v = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
-    if (v && v !== existing.targetTableId && !(await prisma.dataTable.findFirst({ where: { id: v, organizationId: orgId }, select: { id: true } }))) return jsonError("That table no longer exists", 400);
-    data.targetTableId = v;
-  }
+  if (nextBoard !== undefined) data.targetBoardId = nextBoard;
+  if (nextTable !== undefined) data.targetTableId = nextTable;
   if ("fieldMappings" in body && body.fieldMappings !== null && body.fieldMappings !== undefined) {
     const fm = validFieldMappingsInput(body.fieldMappings);
     if (!fm) return jsonError("fieldMappings must be { board?: { fieldId: key }, table?: { fieldId: columnId } }");
@@ -259,7 +293,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!existing) return jsonError("not found", 404);
 
   const viewer = await viewerFromSession().catch(() => null);
-  if (!canManageObject(viewer, existing.createdById)) return jsonError(MANAGE_REFUSAL.delete, 403);
+  const role = await formRoleOf(viewer, existing.id);
+  if (!roleAtLeast(role, "VIEW")) return jsonError("not found", 404);
+  // Full access deletes, an Agent's own form included (canManageObject let
+  // the creator delete before node-access, A8).
+  if (!roleAtLeast(role, "FULL")) return jsonError(MANAGE_REFUSAL.delete, 403);
 
   await moveToTrash("form", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

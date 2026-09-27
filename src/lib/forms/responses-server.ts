@@ -4,22 +4,24 @@
 // links for uploaded files. Shared by GET /api/forms/[id]/responses, the
 // export, the two DELETE routes and the daily summary. Server only.
 //
-// The access engine stays inert this phase: reading responses is an editor's
-// right, resolved with the same helpers the responder uses (creator, Owner or
-// Admin, or reach on the form's anchor), and a Guest never reads responses to
-// a form they did not make. Deleting responses is Full access: the form's
-// creator or an Owner or Admin (lib/object-manage), never an Agent.
+// Reading responses is node-access R9 RESPONSES (formResponsesAllowed): the
+// form's creator, an org admin, or a reader of the form who ALSO reaches
+// where its answers land (a form grant never bypasses the destination; a
+// table grant counts as reach). Deleting responses stays the form's creator
+// or an Owner or Admin (lib/object-manage), never an Agent: it is a sync
+// check its callers read without awaiting, and that set is inside
+// "responses plus Full access" for every form.
 
 import { prisma } from "@/lib/prisma";
 import { isS3Configured, presignGetUrlStable } from "@/lib/s3";
-import { viewerCanRespondAsMember, type ResponderForm, type ResponderViewer } from "./responder-access";
+import { responderCtx, type ResponderForm, type ResponderViewer } from "./responder-access";
+import { formResponsesAllowed } from "@/lib/access/node-access";
 import { canManageObject } from "@/lib/object-manage";
 import { fileAnswerInOrg, readFileAnswer, readFormFields, readWentTo, WENT_KEY, type FormAnswers } from "./fields";
 
 export async function canReadResponses(form: ResponderForm, reader: ResponderViewer | null): Promise<boolean> {
   if (!reader || reader.organizationId !== form.organizationId) return false;
-  if (reader.orgRole === "GUEST" && form.createdById !== reader.userId) return false;
-  return viewerCanRespondAsMember(form, reader);
+  return formResponsesAllowed(responderCtx(reader), form.id);
 }
 
 export function canDeleteResponses(form: { createdById: string }, reader: ResponderViewer | null): boolean {

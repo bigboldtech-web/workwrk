@@ -14,11 +14,12 @@
 // users can drop to the UI for everything else.
 
 import { prisma } from "@/lib/prisma";
+import { addressHref } from "@/lib/nav/object-href";
+import { nodeCtxForUser, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
-import { accessibleIds } from "@/lib/access/ids";
-import { hydrate, viewerFromSessionObject } from "@/lib/access/viewer";
 import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
 import { legacyIsManagerLevel, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 
@@ -54,16 +55,6 @@ async function callerLevel(ctx: ToolContext): Promise<string | null> {
     select: { accessLevel: true },
   });
   return row?.accessLevel ?? null;
-}
-
-/** The Lists the caller can read, through the same set arithmetic Everything uses. */
-async function readableListIds(ctx: ToolContext): Promise<string[]> {
-  const level = await callerLevel(ctx);
-  const base = viewerFromSessionObject({ user: { id: ctx.userId, organizationId: ctx.orgId, accessLevel: level } });
-  if (!base) return [];
-  const viewer = await hydrate(base);
-  const ids = await accessibleIds(viewer, "list", "VIEW");
-  return [...ids.readable];
 }
 
 // ─────────────────────────────────────────────────────────
@@ -163,25 +154,29 @@ const searchTasks: ToolDefinition = {
     const limit = Math.min(50, Number(input.limit ?? 20));
     // Only the tasks the caller could open: a List they can read, or a task
     // they own or are assigned to. Before this the tool read every Item in
-    // the org, so a chat could list tasks from a private Space.
-    const listIds = await readableListIds(ctx);
-    const rows = await prisma.item.findMany({
+    // the org, so a chat could list tasks from a private Space. Phase 7 did
+    // this with the older id sets inside the query; the merge keeps the one
+    // node resolver's filter below, which is the answer /api/search gives.
+    const candidates = await prisma.item.findMany({
       where: {
         organizationId: ctx.orgId,
         archivedAt: null,
-        AND: [{ OR: [{ boardId: { in: listIds } }, { ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }],
         ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
         ...(input.assignedToMe
           ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
           : {}),
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
       },
-      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true },
+      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true },
       orderBy: { updatedAt: "desc" },
-      // Over-fetch only when the done filter has to be applied after the read:
-      // "done" is a status-name rule, not a column.
-      take: input.done === undefined ? limit : limit * 3,
+      // Over-fetched: the access filter and the done filter both run after
+      // the read ("done" is a status-name rule, not a column).
+      take: limit * 4,
     });
+    // A task answers only for a reader of its List, or the person it is
+    // assigned to or owned by, exactly as /api/search and the task page do.
+    const readable = await readableIds(ctx, candidates.map((r) => ({ kind: "list" as const, id: r.boardId })));
+    const rows = candidates.filter((r) => readable.has(refKey({ kind: "list", id: r.boardId })) || r.ownerId === ctx.userId || r.assigneeIds.includes(ctx.userId));
     const filtered =
       input.done === undefined
         ? rows
@@ -1069,21 +1064,36 @@ const createForm: ToolDefinition = {
       },
       select: { id: true, name: true },
     });
-    return { ok: true, form: { id: form.id, name: form.name, responderUrl: `/forms/${form.id}/respond`, editorUrl: `/forms/${form.id}` } };
+    return { ok: true, form: { id: form.id, name: form.name, responderUrl: `/forms/${form.id}/respond`, editorUrl: addressHref("form", form.id, { scope: "work" }) } };
   },
 };
+
+/**
+ * The refs this person may open (Can view or higher), as refKey strings: one
+ * world through the one resolver, so the Ask AI tools never name a node the
+ * product hides from the person anywhere else.
+ */
+async function readableIds(ctx: ToolContext, refs: NodeRef[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (refs.length === 0) return out;
+  const decisions = await nodeRoles(await nodeCtxForUser(ctx.userId, ctx.orgId), refs);
+  for (const [key, d] of decisions) if (roleAtLeast(d.role, "VIEW")) out.add(key);
+  return out;
+}
 
 const listForms: ToolDefinition = {
   name: "list_forms",
   description: "List Forms in the user's org with submission counts. Use this when the user asks about existing forms or wants to find one.",
   input_schema: { type: "object", properties: {} },
   handler: async (ctx) => {
-    const forms = await prisma.formDefinition.findMany({
+    const candidates = await prisma.formDefinition.findMany({
       where: { organizationId: ctx.orgId },
       orderBy: { updatedAt: "desc" },
-      take: 50,
+      take: 200,
       select: { id: true, name: true, isPublic: true, _count: { select: { submissions: true } } },
     });
+    const readable = await readableIds(ctx, candidates.map((f) => ({ kind: "form" as const, id: f.id })));
+    const forms = candidates.filter((f) => readable.has(refKey({ kind: "form", id: f.id }))).slice(0, 50);
     return { forms: forms.map((f: typeof forms[number]) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })) };
   },
 };
@@ -1137,7 +1147,7 @@ const createDataTable: ToolDefinition = {
       },
       select: { id: true, name: true },
     });
-    return { ok: true, table: { id: table.id, name: table.name, url: `/tables/${table.id}` } };
+    return { ok: true, table: { id: table.id, name: table.name, url: addressHref("table", table.id, { scope: "work" }) } };
   },
 };
 
@@ -1146,12 +1156,15 @@ const listDataTables: ToolDefinition = {
   description: "List the Tables in the user's org with row counts.",
   input_schema: { type: "object", properties: {} },
   handler: async (ctx) => {
-    const tables = await prisma.dataTable.findMany({
+    const candidates = await prisma.dataTable.findMany({
       where: { organizationId: ctx.orgId },
       orderBy: { updatedAt: "desc" },
-      take: 50,
+      take: 200,
       select: { id: true, name: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
     });
+    // Only the tables this person can open (their Space, their own, a grant).
+    const readable = await readableIds(ctx, candidates.map((t) => ({ kind: "table" as const, id: t.id })));
+    const tables = candidates.filter((t) => readable.has(refKey({ kind: "table", id: t.id }))).slice(0, 50);
     return { tables: tables.map((t: typeof tables[number]) => ({ id: t.id, name: t.name, rowCount: t._count.rows })) };
   },
 };
@@ -1202,7 +1215,7 @@ const createDocWithBlocks: ToolDefinition = {
       },
       select: { id: true, title: true },
     });
-    return { ok: true, doc: { id: doc.id, title: doc.title, url: `/docs/${doc.id}` } };
+    return { ok: true, doc: { id: doc.id, title: doc.title, url: addressHref("doc", doc.id, { scope: "work" }) } };
   },
 };
 

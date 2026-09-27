@@ -23,22 +23,24 @@
 // picker has to draw; an email is what tells two same-named people apart, and
 // you only need that when you can actually hand one of them the work.
 //
-// The union mirrors read access rather than inventing a new one:
-//   Board members + the board owner            (a direct grant on the list)
-//   Space members + the space owner            (unless the list is PRIVATE,
-//                                               which Space membership does
-//                                               not pierce)
-//   Folder members + folder owners, up the
-//   whole parent chain                         (the granular folder grant)
-//   Org admins                                 (they can reach every list)
-// and when the list or its Space is ORG-visible, the whole active org,
-// because everybody can already open it.
+// WHO IS ON IT. The people the one resolver (src/lib/access/node-access.ts)
+// lets open this List, restricted to the people the VIEWER may see:
+//   the List's own grants and its owner       (a direct grant on the list)
+//   people whose access comes through a Folder
+//   or Space the viewer can open              (never a container the viewer
+//                                              only passes through: its
+//                                              member list is exactly what a
+//                                              path must not show)
+//   org admins                                 (they can reach every list)
+//   the current owners and assignees of the
+//   List's tasks, and the viewer
+// The Private cut is honoured: a Space member who cannot open a PRIVATE List
+// is not offered on it. When the List is open to everyone at the org, the
+// whole active org is the candidate set, because everybody can already open it.
 
 import { prisma } from "@/lib/prisma";
-import { listOrgAdmins } from "@/lib/access/admins";
-import { listBoardMembers } from "@/lib/board";
-import { listSpaceMembers } from "@/lib/space";
-import { listFolderMembers } from "@/lib/folder";
+import { NodeEvaluator, emptyGrants, roleAtLeast, type NodeCtx, type NodeRef, type ViewerGrants } from "@/lib/access/node-rules";
+import { loadAllGrants, loadOrgAdmins, loadPeople, loadRows, loadViewerGrants, peopleNamedByRows } from "@/lib/access/node-world";
 
 export interface AssignableUser {
   id: string;
@@ -47,27 +49,6 @@ export interface AssignableUser {
   /** Present only when the caller asked for it AND may contribute here. */
   email?: string;
   avatar: string | null;
-}
-
-/** Deepest folder chain we will walk. Folders nest a handful deep in
- *  practice; the cap only stops a cycle from spinning forever. */
-const MAX_FOLDER_DEPTH = 12;
-
-/** Every folder from `folderId` up to the root, inclusive. */
-async function folderChain(folderId: string): Promise<string[]> {
-  const chain: string[] = [];
-  let cursor: string | null = folderId;
-  const seen = new Set<string>();
-  for (let i = 0; i < MAX_FOLDER_DEPTH && cursor && !seen.has(cursor); i++) {
-    seen.add(cursor);
-    chain.push(cursor);
-    const row: { parentFolderId: string | null } | null = await prisma.folder.findUnique({
-      where: { id: cursor },
-      select: { parentFolderId: true },
-    });
-    cursor = row?.parentFolderId ?? null;
-  }
-  return chain;
 }
 
 export interface AssignableQuery {
@@ -119,76 +100,78 @@ export async function unknownUserIds(
 }
 
 /**
+ * The ids a viewer may see on this List's roster, or null when the List is
+ * open to everyone at the org (every active person is a candidate).
+ */
+async function rosterIds(board: { id: string }, organizationId: string, viewer: NodeCtx | null): Promise<string[] | null> {
+  const ref: NodeRef = { kind: "list", id: board.id };
+  const rows = await loadRows(organizationId, { lists: [board.id] });
+  // Everyone at the org can open it: today's whole-org roster.
+  const anyone = emptyGrants({ userId: "\u0000everyone", orgAdmin: false, orgGuest: false, isAgent: false, denied: false });
+  const open = new NodeEvaluator(rows, anyone).effective(ref);
+  if (roleAtLeast(open.role, "VIEW") && open.via.type === "everyone") return null;
+
+  const [all, admins, tasks] = await Promise.all([
+    loadAllGrants(rows),
+    loadOrgAdmins(organizationId),
+    prisma.item.findMany({ where: { boardId: board.id, organizationId, archivedAt: null }, select: { ownerId: true, assigneeIds: true }, take: 5000 }),
+  ]);
+  rows.orgAdmins = admins;
+  const viewerGrants: ViewerGrants | null = viewer ? await loadViewerGrants(viewer, rows) : null;
+  const viewerEv = viewerGrants ? new NodeEvaluator(rows, viewerGrants) : null;
+  const viewerOpens = (r: NodeRef) => !viewerEv || roleAtLeast(viewerEv.effective(r).role, "VIEW");
+
+  const candidates = [...new Set([...all.keys(), ...peopleNamedByRows(rows), ...admins])];
+  const people = await loadPeople(organizationId, candidates);
+  const ids = new Set<string>();
+  for (const [id, p] of people) {
+    const g = all.get(id);
+    const grants: ViewerGrants = { viewer: p.viewer, space: g?.space ?? new Map(), folder: g?.folder ?? new Map(), list: g?.list ?? new Map(), object: g?.object ?? new Map(), since: g?.since };
+    const d = new NodeEvaluator(rows, grants).decision(ref);
+    if (!roleAtLeast(d.role, "VIEW")) continue;
+    const via = d.via;
+    const visible =
+      via.type === "own" || via.type === "owner" || via.type === "org_admin"
+        ? true
+        : via.type === "inherited" || via.type === "pierce" || via.type === "lift"
+          ? viewerOpens(via.node)
+          : via.type === "floor"
+            ? viewerOpens(rows.lists.get(board.id)?.spaceId ? { kind: "space", id: rows.lists.get(board.id)?.spaceId as string } : ref)
+            : false;
+    if (visible) ids.add(id);
+  }
+  // The people already on the List's tasks, and the viewer.
+  for (const t of tasks) {
+    if (t.ownerId) ids.add(t.ownerId);
+    for (const a of t.assigneeIds ?? []) ids.add(a);
+  }
+  if (viewer) ids.add(viewer.userId);
+  return [...ids];
+}
+
+/**
  * The assignable roster for one board. Returns [] when the board does not
- * exist; the CALLER is responsible for the read gate (the route runs
- * getBoardForReader first) so this helper never leaks a roster on its own.
+ * exist; the CALLER is responsible for the read gate (the route checks the
+ * viewer's role on the List first) so this helper never leaks a roster on
+ * its own. Pass the viewer so the roster names only the people they may see.
  */
 export async function listAssignableUsersForBoard(
   boardId: string,
   organizationId: string,
   query: AssignableQuery = {},
+  viewer: NodeCtx | null = null,
 ): Promise<AssignableUser[]> {
   const limit = Math.min(Math.max(query.limit ?? 100, 1), 200);
   const search = query.search?.trim() ?? "";
 
   const board = await prisma.board.findUnique({
     where: { id: boardId },
-    select: {
-      id: true,
-      organizationId: true,
-      spaceId: true,
-      folderId: true,
-      ownerId: true,
-      visibility: true,
-      space: { select: { id: true, ownerId: true, visibility: true } },
-    },
+    select: { id: true, organizationId: true },
   });
   if (!board || board.organizationId !== organizationId) return [];
 
-  // Everyone can already open an ORG-visible list, so everyone is a
-  // candidate. A PRIVATE list never inherits its Space's openness.
-  const orgWide =
-    board.visibility === "ORG" ||
-    (board.visibility !== "PRIVATE" && board.space?.visibility === "ORG");
-
-  let idFilter: string[] | null = null;
-  if (!orgWide) {
-    const ids = new Set<string>();
-    if (board.ownerId) ids.add(board.ownerId);
-
-    const folderIds = board.folderId ? await folderChain(board.folderId) : [];
-
-    // The member tables are read through the existing board / space / folder
-    // helpers, never directly: the access engine owns those rows.
-    const [boardMembers, spaceMembers, folderMemberLists, folderOwners, admins] = await Promise.all([
-      listBoardMembers(boardId),
-      // A PRIVATE board is reachable only through a board-level grant, the
-      // board owner, the Space OWNER or an org admin. Listing every Space
-      // member as assignable there would offer people who cannot open it.
-      board.visibility !== "PRIVATE" && board.spaceId
-        ? listSpaceMembers(board.spaceId)
-        : Promise.resolve([] as { userId: string }[]),
-      Promise.all(folderIds.map((fid) => listFolderMembers(fid))),
-      folderIds.length
-        ? prisma.folder.findMany({
-            where: { id: { in: folderIds } },
-            select: { ownerId: true },
-          })
-        : Promise.resolve([] as { ownerId: string | null }[]),
-      listOrgAdmins(organizationId, 500),
-    ]);
-
-    for (const m of boardMembers) ids.add(m.userId);
-    for (const m of spaceMembers) ids.add(m.userId);
-    for (const list of folderMemberLists) for (const m of list) ids.add(m.userId);
-    for (const f of folderOwners) if (f.ownerId) ids.add(f.ownerId);
-    // The Space owner reaches even a PRIVATE list inside their Space.
-    if (board.space?.ownerId) ids.add(board.space.ownerId);
-    for (const a of admins) ids.add(a.id);
-
-    idFilter = Array.from(ids);
-    if (idFilter.length === 0) return [];
-  }
+  const idFilter = await rosterIds(board, organizationId, viewer);
+  if (idFilter && idFilter.length === 0) return [];
 
   return prisma.user.findMany({
     where: {

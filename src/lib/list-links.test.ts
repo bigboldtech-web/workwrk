@@ -116,6 +116,8 @@ describe("decideAddLink", () => {
   it("refuses in the documented order after readability", () => {
     expect(decideAddLink({ ...base, item: { ...item, archivedAt: new Date(), parentItemId: "p" } })).toEqual({ ok: false, reason: "item_archived" });
     expect(decideAddLink({ ...base, item: { ...item, homeArchived: true } })).toEqual({ ok: false, reason: "item_archived" });
+    // A Personal List's task is private to its owner: never linked elsewhere.
+    expect(decideAddLink({ ...base, item: { ...item, homePersonal: true } })).toEqual({ ok: false, reason: "personal_list" });
     expect(decideAddLink({ ...base, item: { ...item, parentItemId: "p", boardId: "B" } })).toEqual({ ok: false, reason: "is_subtask" });
     expect(decideAddLink({ ...base, item: { ...item, boardId: "B" }, canContributeHome: false })).toEqual({ ok: false, reason: "already_home" });
     expect(decideAddLink({ ...base, canContributeHome: false, alreadyLinked: true })).toEqual({ ok: false, reason: "home_list_read_only" });

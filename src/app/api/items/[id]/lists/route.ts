@@ -1,6 +1,7 @@
 // GET    /api/items/[id]/lists: the Lists this task appears in, as THIS viewer
 //                              may see them (its home, and the secondary Lists
-//                              they can read)
+//                              they can read, each with `canRemove`: may this
+//                              viewer take the task out of that List)
 // DELETE /api/items/[id]/lists: take the task out of EVERY secondary List
 //
 // Phase 5b, tasks in more than one List (decision 7). Gated on the ITEM ref
@@ -49,11 +50,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const available = await listLinksAvailable();
     const { rootId, links } = available ? await linkedListsOf(item) : { rootId: item.id, links: [] };
     const reader = listReader(c);
-    const linked: Array<{ boardId: string; slug: string; name: string; position: number; addedAt: string }> = [];
+    // A task shown in those Lists THROUGH ITS PARENT has no link of its own:
+    // it leaves them with its parent, so no entry offers to remove it.
+    const viaParent = rootId !== item.id;
+    // Removal is the link route's own rule (decideLinkRemoval): contribute on
+    // that List OR on the task's home. The home half is read once.
+    let contributesHome: boolean | null = null;
+    const linked: Array<{ boardId: string; slug: string; name: string; position: number; addedAt: string; canRemove: boolean }> = [];
     for (const l of links) {
       const b = await reader.row(l.boardId);
       if (!b) continue;
-      linked.push({ boardId: b.id, slug: b.slug, name: b.name, position: l.position, addedAt: l.createdAt.toISOString() });
+      let canRemove = false;
+      if (!viaParent) {
+        if (contributesHome === null) contributesHome = await canContributeFor(c, item.boardId);
+        canRemove = contributesHome || (await canContributeFor(c, b.id));
+      }
+      linked.push({ boardId: b.id, slug: b.slug, name: b.name, position: l.position, addedAt: l.createdAt.toISOString(), canRemove });
     }
 
     const canShare =
@@ -68,7 +80,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         home,
         linked,
         // Only when the task really appears in those Lists through its parent.
-        viaParentId: rootId !== item.id && linked.length > 0 ? rootId : null,
+        viaParentId: viaParent && linked.length > 0 ? rootId : null,
         canShare,
         canUnshareAll: gate.decision.role === "FULL",
       },

@@ -68,7 +68,7 @@ interface Row {
   successRuns: number;
   terminalRuns: number;
   successRate: number | null;
-  where: { names: string[]; hidden: number; everywhere: boolean };
+  where: { names: string[]; everywhere: boolean };
   can: { edit: boolean; archive: boolean };
 }
 
@@ -104,14 +104,10 @@ type FilterKey = (typeof FILTER_KEYS)[number];
 
 function whereWords(w: Row["where"]): string {
   if (w.everywhere) return "Everywhere";
-  const parts = [...w.names];
-  if (w.hidden > 0) {
-    // With names before it, "2 more you can't open"; alone, it has to say what.
-    parts.push(parts.length
-      ? `${w.hidden} more you can't open`
-      : w.hidden === 1 ? "A place you can't open" : `${w.hidden} places you can't open`);
-  }
-  return parts.join(", ") || "Chosen Lists";
+  // Only the places the viewer can open are named, and the rest are not
+  // counted (node access): a scope of places they cannot open reads as the
+  // plain "Chosen Lists".
+  return w.names.join(", ") || "Chosen Lists";
 }
 
 /** The Where filter shows this many Lists until the viewer searches. */

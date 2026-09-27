@@ -15,6 +15,9 @@
  *   - The five competitor tiles are one line, and only under "Show upcoming
  *     features".
  *   - The "Database" wording is gone (naming canon: Table).
+ *   - A table the import creates opens at its Work address, never in the
+ *     Tables hub (src/lib/nav/object-href.ts): the importer may not have
+ *     that hub on their rail at all.
  */
 
 import { useState } from "react";
@@ -24,6 +27,7 @@ import { Table2, Upload } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 export default function ImportsPage() {
   const router = useRouter();
@@ -76,7 +80,9 @@ export default function ImportsPage() {
         <CsvImportDialog
           open={open}
           onClose={() => setOpen(false)}
-          onDone={({ tableId, created }) => { if (created) router.push(`/tables/${tableId}`); }}
+          // The new table opens at its Work address: from the Settings
+          // takeover that is the door, which places it for the importer.
+          onDone={({ tableId, created }) => { if (created) router.push(objectHrefNow("table", tableId)); }}
         />
       ) : null}
     </div>

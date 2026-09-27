@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canManageProcess } from "@/lib/process-scope";
 import { parseProcessSettings, renameListEntry } from "@/lib/process-settings";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -29,9 +30,12 @@ export async function POST(req: NextRequest) {
   const settings = (org?.settings as SettingsBlob | null) || {};
   const process = parseProcessSettings(settings.process).value;
   const next = renameListEntry(process.policyCategories, from, to);
-  const [moved] = await prisma.$transaction([
-    prisma.policy.updateMany({ where: { organizationId: orgId, category: from }, data: { category: to } }),
-    prisma.organization.update({ where: { id: orgId }, data: { settings: { ...settings, process: { ...process, policyCategories: next } } } }),
-  ]);
+  // The rows and the `process` key in one transaction; only that key of the
+  // shared settings column is written, so no other writer's key is lost.
+  const moved = await prisma.$transaction(async (tx) => {
+    const res = await tx.policy.updateMany({ where: { organizationId: orgId, category: from }, data: { category: to } });
+    await writeOrgSettingsKeys(orgId, { process: { ...process, policyCategories: next } }, tx);
+    return res;
+  });
   return jsonSuccess({ moved: moved.count, policyCategories: next });
 }

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
+import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 
 // GET: Load conversation history for persistent context
 export async function GET(req: NextRequest) {
@@ -125,11 +127,14 @@ export async function POST(req: NextRequest) {
       orderBy: { scheduledAt: "desc" },
       take: 10,
     }),
+    // The context never carries who was given access to what, and never a
+    // row about a node the asker cannot open (its description names it):
+    // over-fetched, then narrowed below.
     prisma.activityLog.findMany({
-      where: { organizationId: orgId },
-      select: { type: true, description: true, createdAt: true },
+      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
+      select: { type: true, description: true, createdAt: true, targetType: true, targetId: true },
       orderBy: { createdAt: "desc" },
-      take: 15,
+      take: 60,
     }),
     prisma.performanceScore.findMany({
       where: { organizationId: orgId, period: new Date().toISOString().slice(0, 7) },
@@ -138,6 +143,12 @@ export async function POST(req: NextRequest) {
       take: 50,
     }),
   ]);
+
+  const askerCtx = await nodeCtxFromSession().catch(() => null);
+  const activityFlags = askerCtx
+    ? await activityTargetsReadable(askerCtx, recentActivity).catch(() => recentActivity.map(() => false))
+    : recentActivity.map(() => false);
+  const readableActivity = recentActivity.filter((_, i) => activityFlags[i] !== false).slice(0, 15);
 
   // Build context for Claude
   const orgContext = `
@@ -170,7 +181,7 @@ RECENT MEETINGS:
 ${recentMeetings.length > 0 ? recentMeetings.map(m => `- "${m.title}" (${m.type}, ${m.scheduledAt.toISOString().split('T')[0]}, ${m._count.attendees} attendees, ${m._count.actionItems} action items)`).join('\n') : 'No meetings yet.'}
 
 RECENT ACTIVITY:
-${recentActivity.length > 0 ? recentActivity.map(a => `- [${a.createdAt.toISOString().split('T')[0]}] ${a.description}`).join('\n') : 'No recent activity.'}
+${readableActivity.length > 0 ? readableActivity.map(a => `- [${a.createdAt.toISOString().split('T')[0]}] ${a.description}`).join('\n') : 'No recent activity.'}
 `.trim();
 
   // Build conversation messages for multi-turn context

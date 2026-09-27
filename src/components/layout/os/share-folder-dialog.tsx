@@ -16,6 +16,11 @@
 // private forever, and the only way back was to make a new folder and move
 // everything. The switch is here because this is where a person looks when they
 // want to change who can see something.
+//
+// FolderRestrictedSwitch, at the end of this file, is that switch on its own:
+// the one Manage access dialog composes it (src/components/access/
+// general-access.tsx). The dialog above is kept, exported and working;
+// nothing mounts it any more.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,11 +29,14 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Search, X, Plus, FolderTree } from "lucide-react";
+import { Search, X, Plus, FolderTree, Lock } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
+import { Switch } from "@/components/ui/switch";
+import { InlineRetry } from "./share-space-dialog";
+import { FOLDER_RESTRICTED_BLURB, generalErrorText } from "@/components/access/manage-access-model";
 
 type FolderRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
 
@@ -59,9 +67,9 @@ interface Props {
 }
 
 const ROLE_OPTIONS: { value: FolderRole; label: string; blurb: string }[] = [
-  { value: "ADMIN", label: "Admin", blurb: "Can edit + manage access" },
+  { value: "ADMIN", label: "Full access", blurb: "Can edit and manage access" },
   { value: "MEMBER", label: "Can edit", blurb: "Can edit the contents" },
-  { value: "GUEST", label: "Can view", blurb: "Read-only" },
+  { value: "GUEST", label: "Can view", blurb: "Read only" },
 ];
 
 function displayName(u: UserOption): string {
@@ -394,5 +402,92 @@ export function ShareFolderDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The Restricted switch on its own (access-model Broken #10, both
+ * directions), written through PATCH /api/folders/[id] { visibility }. Not
+ * optimistic: the switch moves when the server agrees, and a failure keeps
+ * the person's choice on screen with a Retry that sends it again.
+ *
+ * Turning it ON cuts everyone who reaches the Folder through its parent, and
+ * can cut the person flipping it. With `restrictConfirm` (restrictConfirm in
+ * manage-access-model.ts) that is asked first; Cancel sends nothing. The
+ * Retry after a failed write does not ask again: the person already agreed.
+ */
+export function FolderRestrictedSwitch({
+  folderId, restricted, parentSpaceName, parentFolderName, readOnly = false, onChanged, restrictConfirm = null,
+}: {
+  folderId: string;
+  restricted: boolean;
+  /** The Space an unrestricted Folder inherits from, named in the sentence. */
+  parentSpaceName?: string | null;
+  /** A nested Folder inherits from its parent Folder, named instead of the Space. */
+  parentFolderName?: string | null;
+  readOnly?: boolean;
+  onChanged?: (restricted: boolean) => void;
+  /** Asked before Restricted goes on when that locks anyone out. Null: nobody loses it. */
+  restrictConfirm?: { title: string; description: string; confirmLabel: string } | null;
+}) {
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<{ message: string; next: boolean } | null>(null);
+
+  const set = async (next: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      const res = await fetch(`/api/folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: next ? "PRIVATE" : "WORKSPACE" }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setFailed({ message: generalErrorText(res.status, d, "folder", "Couldn't change who can open this Folder."), next });
+        return;
+      }
+      onChanged?.(next);
+    } catch {
+      setFailed({ message: "Couldn't change who can open this Folder. Check your connection.", next });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async (next: boolean) => {
+    if (busy) return;
+    if (next && restrictConfirm && !(await confirm({ ...restrictConfirm, destructive: true }))) return;
+    await set(next);
+  };
+
+  // A reader sees the state, never an instruction for a switch they do not have.
+  const parentName = parentFolderName || parentSpaceName;
+  const inherits = parentName ? `Inherits from ${parentName}.` : "Inherits from its Space.";
+  const blurb = restricted
+    ? FOLDER_RESTRICTED_BLURB
+    : readOnly
+      ? inherits
+      : `${inherits} Turn this on to keep it to the people listed here.`;
+
+  return (
+    <div className="rounded-lg border border-line bg-raised px-3 py-2.5">
+      <div className="flex items-start gap-3">
+        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-medium text-ink">{readOnly ? (restricted ? "Restricted" : "Not restricted") : "Restricted"}</span>
+          <span className="block text-sm text-ink-2">{blurb}</span>
+        </span>
+        {readOnly ? null : (
+          <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
+            {busy ? <Dots variant="pending" /> : null}
+            <Switch checked={restricted} disabled={busy} onChange={(next) => void toggle(next)} aria-label="Restricted" />
+          </span>
+        )}
+      </div>
+      {failed ? <InlineRetry message={failed.message} onRetry={() => void set(failed.next)} /> : null}
+    </div>
   );
 }

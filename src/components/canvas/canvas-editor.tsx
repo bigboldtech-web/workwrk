@@ -11,20 +11,20 @@
  *   body        the canvas fills the content area (the engine's own chrome
  *               is untouched); a read-only banner for Can view
  *
- * WHO CAN EDIT. GET /api/whiteboards/[id] answers `myRole`: a canvas has no
- * grant rows of its own yet, so the role is its anchor's. On a Space, Can
- * edit for anyone who can contribute and Can view for a Space guest (the
- * PATCH refuses them too); a standalone canvas is org-wide and everyone
- * edits; Full access = owner or org admin. Read-only = pan and zoom only, no
+ * WHO CAN EDIT. GET /api/whiteboards/[id] answers `myRole` and `canManage`
+ * from the one node resolver: the canvas's own grants, its Folder's and its
+ * Space's, the owner and the org admins. Read-only = pan and zoom only, no
  * tool strip, the ReadOnlyBanner and the role chip. Under 768 the canvas is
  * read-only for everyone with the banner "Open on a larger screen to edit"
  * (drawing needs a pointer; view-only is the honest state, never dead tools).
  *
- * THE SHARE DOOR. An anchored canvas's access IS its Space's, so Share (Space
- * managers) and the chip (everyone else) open the one ShareDialog on that
- * Space, write or read-only. A standalone canvas has no store to write, so
- * its chip opens the read-only "Who has access" sentence and never a Share
- * button whose dialog could not read grants.
+ * THE SHARE DOOR IS THE CANVAS'S OWN. Share (Full access on the canvas) and
+ * the chip (everyone else) open the one Manage access dialog on THIS canvas,
+ * write or read-only. It used to open the Space's dialog for every canvas in
+ * a Space, Folder canvases included, so sharing one canvas wrote a Space
+ * membership and handed out the whole Space: the reported over-grant, and
+ * the only write that climbed. This door never writes a Space membership. A
+ * standalone canvas uses the same dialog, which says who reaches it.
  *
  * AUTOSAVE IS UNCHANGED: the 3 s debounce, the 15 s retry, the keepalive
  * rules on unload and the unmount flush are exactly what they were. What is
@@ -52,14 +52,13 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, Globe, History, MoreHorizontal, Sparkles, Star } from "lucide-react";
+import { Download, History, MoreHorizontal, Sparkles, Star } from "lucide-react";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { MenuItem } from "@/components/ui/menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useBoot } from "@/components/layout/os/boot-context";
 import { WhiteboardCanvas, type TaskSummary, type WhiteboardCanvasHandle } from "@/components/canvas/whiteboard-canvas";
 import { CanvasAiPanel } from "@/components/canvas/canvas-ai-panel";
 import { CanvasRowMenu, dispatchCanvasesChanged } from "@/components/canvas/canvas-row-menu";
@@ -78,7 +77,6 @@ import { useLocalDraft } from "@/hooks/use-local-draft";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { ShareDialog } from "@/components/access/share-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { CanvasVersionsPanel } from "@/components/canvas/canvas-versions-panel";
 import { useViewer } from "@/lib/access/use-access";
 import { apiFetch } from "@/lib/api-fetch";
@@ -174,7 +172,6 @@ type Whiteboard = {
 };
 
 type CanvasRole = "full" | "edit" | "view";
-type SpaceInfo = { id: string; slug: string | null; name: string; visibility: "PRIVATE" | "WORKSPACE" | "ORG" };
 
 /**
  * matchMedia("(max-width: 768px)") as state, false during SSR. Inclusive of
@@ -211,7 +208,6 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   const inWork = place?.kind === "canvas" && place.id === canvasId;
   const selfPath = inWork && place ? place.self : canonicalHref("canvas", canvasId);
   const { askAiVisible } = useOsShell();
-  const { boot } = useBoot();
   const viewer = useViewer();
   const aiOn = askAiVisible;
   const [board, setBoard] = useState<Whiteboard | null>(null);
@@ -220,9 +216,10 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [spaceBack, setSpaceBack] = useState<{ fallbackHref: string; label: string } | null>(null);
-  const [spaceInfo, setSpaceInfo] = useState<SpaceInfo | null>(null);
   const [myRole, setMyRole] = useState<CanvasRole>("edit");
-  const [spaceManage, setSpaceManage] = useState(false);
+  // Full access on THIS canvas, from GET /api/whiteboards/[id].canManage (null
+  // while an older server omits it: then myRole full stands in).
+  const [serverCanManage, setServerCanManage] = useState<boolean | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const narrow = useNarrow();
   const [saving, setSaving] = useState(false);
@@ -252,7 +249,9 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   // The updatedAt this tab last observed, for the 409 precondition.
   const knownUpdatedAtRef = useRef<string | null>(null);
 
-  const canManage = myRole === "full";
+  // Full access on this canvas: Share, Save as template and Trash. The
+  // server's word, else myRole full on an older server.
+  const canManage = serverCanManage ?? myRole === "full";
   // Can view (a Space guest) or a narrow screen: pan and zoom only. There is
   // no Can comment on a canvas (change request A3), so a viewer is either
   // read-only or editing.
@@ -291,24 +290,22 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
         setRenameValue(wb.name);
         knownUpdatedAtRef.current = wb.updatedAt ?? null;
         setMyRole(data.myRole === "view" ? "view" : data.myRole === "full" ? "full" : "edit");
-        setSpaceManage(!!data.spaceManage);
+        setServerCanManage(typeof data.canManage === "boolean" ? data.canManage : null);
         setMissing(false);
         setLoadError(false);
         if (wb.spaceId) {
           try {
             const sr = await fetch(`/api/spaces/${wb.spaceId}`);
             const sd = sr.ok ? await sr.json() : null;
-            const s = sd?.space as { id?: string; slug?: string; name?: string; visibility?: string } | undefined;
+            const s = sd?.space as { id?: string; slug?: string; name?: string } | undefined;
             if (!cancelled) {
               setSpaceBack(s?.slug ? { fallbackHref: `/spaces/${s.slug}`, label: s.name || "Space" } : null);
-              setSpaceInfo(s?.id ? { id: s.id, slug: s.slug ?? null, name: s.name || "Space", visibility: s.visibility === "PRIVATE" || s.visibility === "ORG" ? s.visibility : "WORKSPACE" } : null);
             }
           } catch {
-            if (!cancelled) { setSpaceBack(null); setSpaceInfo(null); }
+            if (!cancelled) setSpaceBack(null);
           }
         } else {
           setSpaceBack(null);
-          setSpaceInfo(null);
         }
       } else if (res.status === 404) {
         setMissing(true);
@@ -549,10 +546,9 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
     : undefined;
 
   const ghost = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink";
-  // The chip's role: Full access on an anchored canvas means the Space's
-  // managers (that is where Share writes); a standalone canvas never shows
-  // Share, because there is no store for it to write.
-  const chipRole = spaceInfo ? (spaceManage ? "FULL" : myRole === "view" ? "VIEW" : "EDIT") : myRole === "view" ? "VIEW" : "EDIT";
+  // The chip's role is the viewer's role on THIS canvas: Share for Full access
+  // on it, the role chip for everyone else. Never the Space's role.
+  const chipRole = canManage ? "FULL" : myRole === "view" ? "VIEW" : "EDIT";
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-app">
@@ -600,6 +596,7 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
             context="editor"
             onClose={() => setMoreOpen(false)}
             onChanged={(kind) => { if (kind === "favorited") setFavorite((f) => !(f ?? false)); if (kind === "moved") setReloadKey((k) => k + 1); }}
+            onShare={() => setShareOpen(true)}
             onRenameInline={() => { titleRef.current?.focus(); titleRef.current?.select(); }}
             extraRows={
               <>
@@ -611,16 +608,15 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
         </MorePortal>
       </header>
 
-      {spaceInfo ? (
-        <ShareDialog
-          open={shareOpen}
-          onOpenChange={setShareOpen}
-          target={{ kind: "space", id: spaceInfo.id, name: spaceInfo.name, visibility: spaceInfo.visibility }}
-          readOnly={!spaceManage}
-        />
-      ) : (
-        <StandaloneCanvasAccess open={shareOpen} onOpenChange={setShareOpen} orgName={boot.org.name} ownerIsViewer={board.ownerId === boot.viewer.id} />
-      )}
+      {/* The canvas's own Manage access, never its Space's: this door writes
+          no Space membership (the reported climb). */}
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        target={{ kind: "canvas", id: board.id, name: board.name || "Untitled canvas" }}
+        readOnly={!canManage}
+        onChanged={(p) => { if (p) setServerCanManage(p.viewer.canManage); }}
+      />
 
       {readOnly ? (
         narrow
@@ -691,32 +687,6 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * "Who has access" for a standalone canvas: it has no grant rows, so the
- * honest body is the one sentence. Read-only, like WhoHasAccess for a Space.
- */
-function StandaloneCanvasAccess({ open, onOpenChange, orgName, ownerIsViewer }: { open: boolean; onOpenChange: (v: boolean) => void; orgName: string; ownerIsViewer: boolean }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[520px] p-0 gap-0">
-        <div className="px-6 pt-6 pb-3">
-          <DialogTitle className="text-lg font-semibold">Who has access</DialogTitle>
-          <DialogDescription className="mt-1">A canvas with no location follows the workspace.</DialogDescription>
-        </div>
-        <div className="px-6 pb-6">
-          <div className="flex items-start gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5">
-            <Globe className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
-            <div className="min-w-0 text-base text-ink">
-              <div>Everyone at {orgName} can edit this canvas.</div>
-              <div className="text-sm text-ink-2">{ownerIsViewer ? "You" : "The owner"} and Admins have Full access. Move it into a Space to limit who can open it.</div>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

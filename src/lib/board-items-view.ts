@@ -30,7 +30,19 @@ import {
   type MirrorOptions,
 } from "@/lib/list-connect";
 import { connectIdsOf, projectRowMetadata, readNamespace, stripForUnknownViewer, type ProjectionContext } from "@/lib/list-metadata";
-import { listLinksAvailable, listReader, readableItemsVia, withListLinks, type LinkViewer, type ListReader } from "@/lib/list-links-server";
+import {
+  canContributeFor,
+  canEditFor,
+  listLinksAvailable,
+  listReader,
+  readableItemsVia,
+  viewerIsOrgAdmin,
+  withListLinks,
+  type LinkViewer,
+  type ListReader,
+} from "@/lib/list-links-server";
+import { linkedRowAccess } from "@/lib/list-link-rows";
+import type { ItemRole } from "@/lib/item-role";
 
 export interface LinkedRowInfo {
   rootId: string;
@@ -200,6 +212,37 @@ export async function viewRows(
     });
   }
 
+  // The viewer's role on each task shown here THROUGH A LINK, by gateItem's
+  // own ladder (list-link-rows.ts linkedRowAccess): the home List's role, read
+  // once per distinct home, then assignment, creation and org admin, with
+  // this List granting VIEW. A List page edits a linked row only as far as
+  // this role goes, so a reader of List B is never handed editors on a task B
+  // only borrows. Home rows are untouched.
+  const orgAdmin = viewerIsOrgAdmin(viewer);
+  const homeRoles = new Map<string, Promise<ItemRole>>();
+  const homeRoleOf = (homeId: string): Promise<ItemRole> => {
+    let p = homeRoles.get(homeId);
+    if (!p) {
+      p = (async (): Promise<ItemRole> => {
+        // An org admin holds FULL on every task already; no query can add to it.
+        if (orgAdmin) return "FULL";
+        if (await canEditFor(viewer, homeId)) return "FULL";
+        if (await canContributeFor(viewer, homeId)) return "EDIT";
+        if (await reader.canRead(homeId)) return "VIEW";
+        return "none";
+      })().catch((): ItemRole => "none");
+      homeRoles.set(homeId, p);
+    }
+    return p;
+  };
+  let contextContribute: Promise<boolean> | null = null;
+  const contributesHere = (): Promise<boolean> => {
+    if (!contextContribute) {
+      contextContribute = opts.context ? canContributeFor(viewer, opts.context.id).catch(() => false) : Promise.resolve(false);
+    }
+    return contextContribute;
+  };
+
   const out: BoardItemRow[] = [];
   for (const p of plans) {
     const ctx: ProjectionContext = p.linked && opts.context
@@ -253,17 +296,30 @@ export async function viewRows(
         next.position = p.linked.position;
         next.groupKey = null;
       }
+      const root = p.linked.position !== null;
+      const access = linkedRowAccess({
+        orgAdmin,
+        homeRole: p.row.boardId ? await homeRoleOf(p.row.boardId) : "none",
+        assignee: p.row.ownerId === viewer.userId || (p.row.assigneeIds ?? []).includes(viewer.userId),
+        creator: p.row.createdBy?.id === viewer.userId,
+        archived: !!p.row.archivedAt,
+        contextContribute: root ? await contributesHere() : false,
+      });
       next.listLink = {
         boardId: opts.context.id,
         position: p.linked.position,
         rootId: p.linked.rootId,
-        ...(p.linked.position !== null
+        ...(root
           ? {
               homeList: p.homeReadable && home ? { id: home.id, slug: home.slug, name: home.name } : null,
               homeStatus,
               ...(p.homeReadable && home ? { homeStatuses: home.statuses } : {}),
             }
           : {}),
+        role: access.role,
+        // Only a root has a link of its own to remove or to share further; a
+        // subtask shown through its parent travels with it.
+        ...(root ? { canRemove: access.canRemove, canShare: access.canShare } : {}),
       };
     }
     out.push(next);

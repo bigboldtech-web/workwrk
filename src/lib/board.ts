@@ -16,11 +16,11 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
-import { legacyAllows } from "@/lib/access/parity";
-import { loadBoardInputs } from "@/lib/access/legacy-facts";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { withArchivedBy } from "@/lib/archived-by";
-import { accessibleFolderIds } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { lockParentFolder } from "@/lib/access/node-placement";
+import { roleAtLeast, type NodeRole } from "@/lib/access/node-rules";
 import { mergeJsonObject, type ListDefaultsInput, type RowColorRule } from "@/lib/list-comfort";
 import {
   parseSprintMeta,
@@ -29,6 +29,13 @@ import {
   SPRINT_POINTS_LABEL,
   type SprintMeta,
 } from "@/lib/sprint";
+import {
+  TASK_LIST_VIEW_TYPES,
+  coreListViewRows,
+  needsCoreListViews,
+  missingCoreListViews,
+} from "@/lib/work/list-view-seed";
+import { resolveDefaultView, visibleToEveryone, type DefaultViewCandidate } from "@/lib/work/default-view";
 
 // The org-admin ladder moved to src/lib/access/legacy-levels.ts with the
 // step-1 pivot; the three gates below read it through parity.ts.
@@ -79,7 +86,7 @@ export interface CreateBoardInput {
   icon?: string;
   color?: string;
   itemType?: string;             // default "studio-item"
-  defaultViewType?: ViewType;    // default TABLE
+  defaultViewType?: ViewType;    // default KANBAN, the Board
   visibility?: Visibility;
   /** Sprints (migration-free): when set, the board is created as a Sprint —
    *  settings.sprint written, Sprint Points NUMBER field seeded, and (when
@@ -87,75 +94,60 @@ export interface CreateBoardInput {
   sprint?: { startDate: string; endDate: string };
 }
 
-// The ClickUp-style view set every task List ships with: a grouped List, a
-// Board (kanban), a Calendar and a Gantt — all reading the SAME items, so a
-// task added in one shows in all. This is why "add in List → see in Board /
-// Gantt" just works. Non-task boards (Doc / Form / Whiteboard / Dashboard) are
-// single-view and are left alone.
-const CORE_LIST_VIEWS: { type: ViewType; name: string }[] = [
-  { type: "TABLE", name: "List" },
-  { type: "KANBAN", name: "Board" },
-  { type: "CALENDAR", name: "Calendar" },
-  { type: "GANTT", name: "Gantt" },
-];
-const TASK_LIST_VIEW_TYPES = new Set<ViewType>(["TABLE", "KANBAN", "CALENDAR", "GANTT", "TIMELINE"]);
-
+// Every task List ships with the same four views over the SAME tasks (Board,
+// List, Calendar, Gantt: CORE_LIST_VIEWS in src/lib/work/list-view-seed.ts),
+// so a task added in one shows in all. Board comes first and is the default by
+// rule (src/lib/work/default-view.ts), not by a flag. Non-task Lists (Doc,
+// Form, Canvas, Dashboard) are single-view and are left alone.
 function isTaskListBoard(itemType: string, viewType: ViewType): boolean {
   return itemType === "studio-item" && TASK_LIST_VIEW_TYPES.has(viewType);
 }
 
-// Build the create-data for a fresh task List's core views, default-view first.
-function coreViewCreateData(boardId: string, ownerId: string, defaultType: ViewType) {
-  const ordered = [
-    ...CORE_LIST_VIEWS.filter((v) => v.type === defaultType),
-    ...CORE_LIST_VIEWS.filter((v) => v.type !== defaultType),
-  ];
-  if (!ordered.some((v) => v.type === defaultType)) {
-    ordered.unshift({ type: defaultType, name: viewTypeDefaultLabel(defaultType) });
-  }
-  return ordered.map((v, i) => ({
+/** A seed row from list-view-seed.ts as a View create for this List. */
+function seedViewData(
+  boardId: string,
+  ownerId: string,
+  row: { name: string; type: ViewType; isDefault: boolean; config: Record<string, unknown>; displayOrder: number },
+) {
+  return {
     boardId,
-    name: v.name,
-    type: v.type,
-    isDefault: v.type === defaultType,
+    name: row.name,
+    type: row.type,
+    isDefault: row.isDefault,
     isShared: true,
     ownerId,
-    config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
-    displayOrder: i,
-  }));
+    config: row.config as Prisma.InputJsonValue,
+    displayOrder: row.displayOrder,
+  };
 }
 
 /**
  * Self-heal: ensure an existing task List has the full core view set. Only
- * touches boards that already have a TABLE view (i.e. real task Lists), and
- * only appends the missing core views (Board / Calendar / Gantt) — it never
- * changes the default or existing views. Idempotent + cheap after the first
- * run (returns 0 with no writes once all core views exist). Returns the number
- * of views created so the caller can decide whether to refetch.
+ * touches Lists that already have a TABLE view (real task Lists), and only
+ * appends the missing core views after the last one, never as the default:
+ * it changes no existing view. Returns the number of views created. A List
+ * with its full set costs one read and no write.
+ *
+ * The write takes a per-List advisory lock and re-reads inside it, so two
+ * first visits at the same moment cannot both seed a Board (the second waits,
+ * finds nothing missing, and writes nothing).
  */
 export async function ensureCoreListViews(boardId: string, ownerId: string): Promise<number> {
-  const views = await prisma.view.findMany({
-    where: { boardId },
-    select: { type: true, displayOrder: true },
+  const views = await prisma.view.findMany({ where: { boardId }, select: { type: true } });
+  if (!needsCoreListViews(views)) return 0;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`core-views:${boardId}`}))`;
+    const current = await tx.view.findMany({ where: { boardId }, select: { type: true, displayOrder: true } });
+    const missing = needsCoreListViews(current) ? missingCoreListViews(current) : [];
+    if (missing.length === 0) return 0;
+    let order = current.reduce((max, v) => Math.max(max, v.displayOrder), 0) + 1;
+    await tx.view.createMany({
+      data: missing.map((v) =>
+        seedViewData(boardId, ownerId, { ...v, isDefault: false, displayOrder: order++ }),
+      ),
+    });
+    return missing.length;
   });
-  if (!views.some((v) => v.type === "TABLE")) return 0; // not a task List — leave alone
-  const present = new Set(views.map((v) => v.type));
-  const missing = CORE_LIST_VIEWS.filter((v) => !present.has(v.type));
-  if (missing.length === 0) return 0;
-  let order = views.reduce((max, v) => Math.max(max, v.displayOrder), 0) + 1;
-  await prisma.view.createMany({
-    data: missing.map((v) => ({
-      boardId,
-      name: v.name,
-      type: v.type,
-      isDefault: false,
-      isShared: true,
-      ownerId,
-      config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
-      displayOrder: order++,
-    })),
-  });
-  return missing.length;
 }
 
 /**
@@ -213,9 +205,11 @@ export async function getOrCreatePersonalBoard(organizationId: string, userId: s
           settings: {},
         },
       });
-      // Personal List is "just a List that happens to be personal" — same full
-      // view set as any other List so its Board/Calendar/Gantt tabs match.
-      await tx.view.createMany({ data: coreViewCreateData(board.id, userId, "TABLE") });
+      // The Personal list is just a List that happens to be personal: the same
+      // four views as any other List, opening on Board like every List does.
+      await tx.view.createMany({
+        data: coreListViewRows(null, null).map((row) => seedViewData(board.id, userId, row)),
+      });
       return board;
     });
   } catch {
@@ -282,7 +276,10 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
 
   const slug = await uniqueBoardSlug(input.organizationId, toSlug(boardName));
   const itemType = input.itemType ?? "studio-item";
-  const viewType = input.defaultViewType ?? "TABLE";
+  // Board is every new List's default (decision 8). A caller that asks for
+  // another type (a template with a real preference) gets that view pinned
+  // by its creator, below.
+  const viewType = input.defaultViewType ?? "KANBAN";
 
   // Sprint task Lists ship with the Sprint Points NUMBER field pre-seeded —
   // exactly the FieldDef addBoardField would produce, so every existing
@@ -295,6 +292,13 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
       : {};
 
   const created = await prisma.$transaction(async (tx) => {
+    // The placement rule (node-rules P3): the List takes its Folder's Space,
+    // read under a share lock so a move of the Folder cannot split them.
+    if (input.folderId) {
+      const parent = await lockParentFolder(tx, input.organizationId, input.folderId);
+      if (!parent) throw new Error("That folder no longer exists or is in Trash.");
+      if (parent.spaceId !== input.spaceId) throw new Error("Folder not found in this Space");
+    }
     const board = await tx.board.create({
       data: {
         organizationId: input.organizationId,
@@ -313,12 +317,18 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         ...(seededStatuses ? { statuses: seededStatuses as unknown as Prisma.InputJsonValue } : {}),
       },
     });
-    // Task Lists ship with the full ClickUp view set (List/Board/Calendar/
-    // Gantt); non-task boards (Doc/Form/Whiteboard/…) get just their one view.
+    // Task Lists ship with the four core views, Board first; non-task Lists
+    // (Doc, Form, Canvas...) get just their one view. KANBAN writes no
+    // isDefault at all (Board is the default by rule, so there is no Pin
+    // glyph nobody set); any other type is written as the creator's pin.
     if (isTaskListBoard(itemType, viewType)) {
-      await tx.view.createMany({ data: coreViewCreateData(board.id, input.userId, viewType) });
+      const mark = viewType === "KANBAN" ? null : { byId: input.userId, at: new Date().toISOString() };
+      await tx.view.createMany({
+        data: coreListViewRows(viewType, mark).map((row) => seedViewData(board.id, input.userId, row)),
+      });
       const defaultView = await tx.view.findFirstOrThrow({
-        where: { boardId: board.id, isDefault: true },
+        where: { boardId: board.id, type: viewType },
+        orderBy: { displayOrder: "asc" },
         select: { id: true, type: true },
       });
       return { board, defaultView };
@@ -380,15 +390,70 @@ function viewTypeDefaultLabel(t: ViewType): string {
   }
 }
 
+/**
+ * Each List's resolved default view (decision 8), in ONE query for all of
+ * them. The id is the same for every reader of the List, so only views
+ * everyone can see take part (a private default is its owner's alone). Only
+ * the three config keys the resolver reads cross the wire (review #37), not
+ * whole configs: a List's view config can hold column widths, filters and a
+ * dozen more keys per view.
+ */
+async function resolvedDefaultViewIds(boardIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (boardIds.length === 0) return out;
+  const rows = await prisma.$queryRaw<
+    Array<{
+      boardId: string;
+      id: string;
+      name: string;
+      type: string;
+      isDefault: boolean;
+      isShared: boolean;
+      ownerId: string | null;
+      displayOrder: number;
+      pinned: unknown;
+      grid: unknown;
+      variant: unknown;
+    }>
+  >`
+    SELECT "boardId", id, name, type::text AS type, "isDefault", "isShared", "ownerId", "displayOrder",
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'pinned' END AS pinned,
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'grid' END AS grid,
+      CASE WHEN jsonb_typeof(config) = 'object' THEN config -> 'variant' END AS variant
+    FROM "View" WHERE "boardId" = ANY(${boardIds}::text[])`;
+  const byBoard = new Map<string, DefaultViewCandidate[]>();
+  for (const r of rows) {
+    if (!visibleToEveryone(r)) continue;
+    const list = byBoard.get(r.boardId) ?? [];
+    list.push({
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      isDefault: r.isDefault,
+      isShared: r.isShared,
+      ownerId: r.ownerId,
+      displayOrder: r.displayOrder,
+      config: { pinned: r.pinned, grid: r.grid, variant: r.variant },
+    });
+    byBoard.set(r.boardId, list);
+  }
+  for (const [boardId, views] of byBoard) {
+    views.sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name));
+    const resolved = resolveDefaultView(views);
+    if (resolved) out.set(boardId, resolved.view.id);
+  }
+  return out;
+}
+
 export async function listBoardsInSpace(spaceId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardSummary[]> {
   const rows = await prisma.board.findMany({
     where: { spaceId, ...(opts.includeArchived ? {} : { archivedAt: null }) },
     orderBy: { name: "asc" },
     include: {
-      views: { where: { isDefault: true }, take: 1, select: { id: true } },
       _count: { select: { views: true } },
     },
   });
+  const defaults = await resolvedDefaultViewIds(rows.map((b) => b.id));
   return rows.map((b) => ({
     id: b.id,
     slug: b.slug,
@@ -402,7 +467,7 @@ export async function listBoardsInSpace(spaceId: string, opts: { includeArchived
     productSlug: b.productSlug,
     visibility: b.visibility,
     archivedAt: b.archivedAt,
-    defaultViewId: b.views[0]?.id ?? null,
+    defaultViewId: defaults.get(b.id) ?? null,
     viewCount: b._count.views,
   }));
 }
@@ -419,10 +484,10 @@ export async function listBoardsInFolder(
     },
     orderBy: { name: "asc" },
     include: {
-      views: { where: { isDefault: true }, take: 1, select: { id: true } },
       _count: { select: { views: true } },
     },
   });
+  const defaults = await resolvedDefaultViewIds(rows.map((b) => b.id));
   return rows.map((b) => ({
     id: b.id,
     slug: b.slug,
@@ -436,7 +501,7 @@ export async function listBoardsInFolder(
     productSlug: b.productSlug,
     visibility: b.visibility,
     archivedAt: b.archivedAt,
-    defaultViewId: b.views[0]?.id ?? null,
+    defaultViewId: defaults.get(b.id) ?? null,
     viewCount: b._count.views,
   }));
 }
@@ -447,7 +512,6 @@ export interface UpdateBoardInput {
   icon?: string | null;
   color?: string | null;
   visibility?: Visibility;
-  folderId?: string | null;
   /** Per-List statuses (backbone #1). null = reset to the default trio. */
   statuses?: StatusOption[] | null;
   /** Sprint date edit — only valid on boards that already carry
@@ -473,7 +537,8 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
   if (patch.icon !== undefined) data.icon = patch.icon;
   if (patch.color !== undefined) data.color = patch.color;
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
-  if (patch.folderId !== undefined) data.folderId = patch.folderId;
+  // A List's Folder and Space are a move, never an edit: node-placement
+  // moveList takes the Space from the Folder (the placement rule, P3).
   // SQL NULL (DbNull) means "use the default set" — distinct from a
   // stored JSON null, which parseBoardStatuses would also reject.
   if (patch.statuses !== undefined) data.statuses = patch.statuses === null ? Prisma.DbNull : patch.statuses;
@@ -587,10 +652,19 @@ export async function duplicateBoard(
   });
 
   const created = await prisma.$transaction(async (tx) => {
+    // The create half of P3 (node-placement lockParentFolder): in a Folder,
+    // the copy takes the Folder's Space as it is under a share lock, never
+    // the source row's, so a move of that Folder meanwhile never splits them.
+    let spaceId = src.spaceId;
+    if (src.folderId) {
+      const parent = await lockParentFolder(tx, organizationId, src.folderId);
+      if (!parent) throw new Error("The folder this List is in just moved or went to Trash. Try again.");
+      spaceId = parent.spaceId;
+    }
     const board = await tx.board.create({
       data: {
         organizationId,
-        spaceId: src.spaceId,
+        spaceId,
         folderId: src.folderId,
         name,
         slug,
@@ -645,131 +719,93 @@ export async function duplicateBoard(
   return { id: created.id, slug: created.slug, name };
 }
 
+/** The row every List reader hands back: the same select board.ts always used. */
+export interface BoardReaderRow {
+  id: string;
+  spaceId: string | null;
+  visibility: Visibility;
+  ownerId: string | null;
+  organizationId: string;
+  folderId: string | null;
+}
+
 /**
- * Resolve board-level read access, composing Space + Board layers.
- *
- *   visibility = ORG       → any org member can read (overrides Space if Space is stricter)
- *   visibility = WORKSPACE → defer to Space access (the default; "inherit")
- *   visibility = PRIVATE   → BoardMember + Board.ownerId + Space OWNER + org admin only
- *
- * Returns the board row when readable, null otherwise.
+ * The viewer's role on one List, from the one resolver (node-access): the
+ * List's own grant, its owner, its Folder chain and its Space, with the
+ * PRIVATE cut and the legacy floor. No org filter is applied here today and
+ * none is added: the row's own org is the world's, and callers compare
+ * board.organizationId themselves.
+ */
+export async function boardRoleOf(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<{ board: BoardReaderRow | null; role: NodeRole }> {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
+  });
+  if (!board) return { board: null, role: "none" };
+  const decision = await nodeRole(nodeCtxFromLevel(userId, board.organizationId, accessLevel), { kind: "list", id: boardId });
+  return { board, role: decision.role };
+}
+
+/**
+ * Read access: Can view or higher on the List. A Folder grant reaches its
+ * Lists (W1), a List grant or the List's owner opens it under any Folder
+ * (W6), a PRIVATE List answers to its own grants, its owner and the Space
+ * OWNER's pierce. Returns the board row when readable, null otherwise.
  */
 export async function getBoardForReader(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ) {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts's
-  // seven branches (:614 through :664), including the two this file is known
-  // for: the direct BoardMember grant of ANY role, and the private-folder
-  // cascade that checks folder.ownerId and never FolderMember. Both stay
-  // exactly as they are; the engine's own answers for them differ and are
-  // recorded in EXPECTED_MISMATCHES as audit-1.6 rows a and c.
-  //
-  // The loader issues at most three queries where this body issued four, and
-  // returns the identical row shape ({ id, spaceId, visibility, ownerId,
-  // organizationId, folderId }) so boards/[id]/items:62's cross-org check and
-  // every other field read still compile and behave.
-  const { inputs, board } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "shallow" },
-  );
-  return legacyAllows(inputs, "getBoardForReader") ? board : null;
+  const { board, role } = await boardRoleOf(boardId, userId, accessLevel);
+  return board && roleAtLeast(role, "VIEW") ? board : null;
 }
 
 /**
- * getBoardForReader PLUS the one reader it deliberately does not know about:
- * a FOLDER GRANTEE.
- *
- * `getBoardForReader`'s folder branch consults `folder.ownerId` and never
- * `FolderMember` (its own comment says so), so a person holding a granular
- * folder grant and no Space membership fails it. Granular folder access is a
- * shipped feature that is ADDITIVE and INHERITED downward, and the rest of the
- * product honours it: `folderAccessForSpace` ships every board in a granted
- * folder to the sidebar tree, and the Folder page goes out of its way to keep
- * a grantee working. Reading the board through the strict predicate alone
- * therefore left the grantee with live links into a notFound() page: a dead
- * end with no explanation, on a destination that used to work.
- *
- * Kept as its own function rather than folded into `getBoardForReader`,
- * because that one is transcribed in the frozen parity engine and every API
- * route is pinned to its exact answers. Use this on SURFACES that a grantee is
- * linked to.
+ * The same read as getBoardForReader. It used to add the one reader the old
+ * predicate did not know about (a Folder grantee); the one resolver reads
+ * Folder grants on every List now, so the two are one answer. Kept under its
+ * name for its callers.
  */
 export async function getBoardForReaderOrFolderGrantee(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ) {
-  const board = await getBoardForReader(boardId, userId, accessLevel);
-  if (board) return board;
-  const row = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
-  });
-  if (!row?.folderId) return null;
-  // A grant cascades to sub-folders, which is why this is the descendant-aware
-  // set and not a single FolderMember lookup.
-  const granted = await accessibleFolderIds(userId);
-  return granted.has(row.folderId) ? row : null;
+  return getBoardForReader(boardId, userId, accessLevel);
 }
 
-/**
- * Edit access check. Org admins always edit. Otherwise:
- *   PRIVATE → BoardMember OWNER/ADMIN, Board.ownerId, or Space OWNER
- *   else    → defer to canEditSpace (Space OWNER/ADMIN)
- */
+/** Manage access (fields, settings, members, delete): Full access on the List. */
 export async function canEditBoard(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts:677-704.
-  // The asymmetry it preserves: a BoardMember ADMIN manages only a PRIVATE
-  // board, because on any other visibility this function falls through to
-  // canEditSpace and the board-level grant is never consulted.
-  const { inputs } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "none" },
-  );
-  return legacyAllows(inputs, "canEditBoard");
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "FULL");
 }
 
 /**
- * CONTENT-write access — create / edit / delete tasks and comment. This is the
- * "can a MEMBER make changes" gate, deliberately looser than canEditBoard
- * (which MANAGES the board: fields, settings, members, delete). A GUEST is
- * read-only; MEMBER / ADMIN / OWNER on the board OR the parent Space
- * contribute; org admins and the board owner always do. Additive: the most
- * permissive grant wins. A PRIVATE board is reachable only by an explicit
- * (non-guest) board grant — Space membership doesn't pierce it.
+ * CONTENT-write access (create, edit, delete tasks and comment): Can edit or
+ * higher on the List, looser than canEditBoard, which MANAGES it.
  */
 export async function canContributeBoard(
   boardId: string,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  // Delegate (migration step 1) to parity.ts's transcription of board.ts:721-746.
-  // A non-guest Space MEMBER still writes, which is the 2026-09-09 decision the
-  // schema comment at prisma/schema.prisma:4364-4365 still contradicts; that
-  // stale comment is a docs fix, not an access change, and is left alone here.
-  const { inputs } = await loadBoardInputs(
-    boardId,
-    { userId, accessLevel },
-    { folderDepth: "none" },
-  );
-  return legacyAllows(inputs, "canContributeBoard");
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "EDIT");
 }
 
-/**
- * Legacy thin wrapper. Kept so older call sites compile while we
- * migrate them to getBoardForReader. New code should use the resolver.
- */
+/** Can view or higher on the List. */
 export async function canReadBoard(boardId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  const board = await getBoardForReader(boardId, userId, accessLevel);
-  return Boolean(board);
+  const { role } = await boardRoleOf(boardId, userId, accessLevel);
+  return roleAtLeast(role, "VIEW");
 }
 
 export async function listBoardMembers(boardId: string) {

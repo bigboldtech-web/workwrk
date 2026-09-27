@@ -2,22 +2,28 @@
 // POST   /api/boards/[id]/members        — add/upsert member { userId, role }
 // DELETE /api/boards/[id]/members?userId — remove member
 //
-// Mirrors /api/spaces/[id]/members. Composes the same Phase 23 access
-// resolver (getBoardForReader + canEditBoard) so a PRIVATE Board with
-// a separate member list can be managed even when the viewer isn't an
-// admin of the parent Space (BoardMember role of OWNER/ADMIN is enough).
+// A BoardMember row is the List's own grant: it opens the List and its tasks
+// under any Folder (a List grant never cuts). Reading the list needs Can
+// view on the List; changing it needs Full access on the List.
+//
+// The URLs and shapes are kept for their callers (GET { members }, POST 201
+// { member }, DELETE { ok: true }). Every write goes through the one grant
+// writer, src/lib/access/grants.ts, so it is transactional, recorded as
+// access activity, notifies the person, refuses someone outside the org and
+// holds every role to the actor's own (a Full holder of this node gives at
+// most Full access here, and nothing on the node's Space or Folder: roles
+// never climb). The role is written through unchanged, so an OWNER row
+// still works.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import {
-  addBoardMember,
-  canEditBoard,
-  getBoardForReader,
-  listBoardMembers,
-  removeBoardMember,
-} from "@/lib/board";
+import { prisma } from "@/lib/prisma";
+import { listBoardMembers } from "@/lib/board";
+import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { GrantError, removeNodeGrant, setNodeGrant } from "@/lib/access/grants";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -28,17 +34,22 @@ async function ctx() {
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { node: nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel) };
+}
+
+function grantFailure(err: unknown): NextResponse {
+  if (err instanceof GrantError) return NextResponse.json({ error: err.code, message: err.message }, { status: err.status });
+  return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to change members" }, { status: 400 });
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
-  const board = await getBoardForReader(id, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  // Can view on the List itself: a path container is not a role, and its
+  // member list is exactly what a path must never show.
+  const d = await nodeRole(c.node, { kind: "list", id });
+  if (!roleAtLeast(d.role, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const members = await listBoardMembers(id);
   return NextResponse.json({ members });
 }
@@ -52,26 +63,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
-  const board = await getBoardForReader(id, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
   const body = await req.json().catch(() => null);
   const parsed = addSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
   try {
-    const member = await addBoardMember(id, parsed.data.userId, parsed.data.role, c.userId);
+    await setNodeGrant(c.node, { kind: "list", id }, { userId: parsed.data.userId, memberRole: parsed.data.role }, "members-route");
+    const member = await prisma.boardMember.findUnique({ where: { boardId_userId: { boardId: id, userId: parsed.data.userId } } });
     return NextResponse.json({ member }, { status: 201 });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to add member" },
-      { status: 400 },
-    );
+    return grantFailure(err);
   }
 }
 
@@ -79,22 +81,13 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
-  const board = await getBoardForReader(id, c.userId, c.accessLevel);
-  if (!board || board.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const url = new URL(req.url);
   const userId = url.searchParams.get("userId");
   if (!userId) return NextResponse.json({ error: "userId query param required" }, { status: 400 });
   try {
-    await removeBoardMember(id, userId);
+    await removeNodeGrant(c.node, { kind: "list", id }, { userId }, "members-route");
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to remove member" },
-      { status: 400 },
-    );
+    return grantFailure(err);
   }
 }

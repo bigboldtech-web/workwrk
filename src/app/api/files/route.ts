@@ -10,25 +10,25 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { visibleSpaceIds } from "@/lib/space";
-import { accessibleFolderIds } from "@/lib/folder";
 import { canReadBoard } from "@/lib/board";
+import { readableFileRows } from "@/lib/file-access";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { PlacementConflict, lockParentFolder, resolveCreate } from "@/lib/access/node-placement";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilesFilters, matchesFilesView, parseFilesListQuery, sortFiles, type FileCandidate } from "@/lib/files-list";
 import { sliceByCursor } from "@/lib/list-query";
 
 /**
- * Space-visibility gate over a set of files, one visibleSpaceIds call: a file
- * with no Space is org-wide; a Space file shows if the viewer reads the Space
- * or holds a grant on the Space folder it lives in (their own folder's files,
- * and ONLY those).
+ * The read gate over a set of files, one world for the whole batch
+ * (src/lib/file-access.ts, the one resolver): a file with no Space is
+ * org-wide; a file in a Space folder shows to whoever can view that Folder;
+ * a file tagged to a Space shows to whoever can view that Space.
  */
-async function gateFiles<T extends { spaceId: string | null; spaceFolderId: string | null }>(files: T[], userId: string, accessLevel: string): Promise<T[]> {
-  const scopedIds = [...new Set(files.map((f) => f.spaceId).filter((s): s is string => Boolean(s)))];
-  const [visible, accessibleFolders] = scopedIds.length > 0
-    ? await Promise.all([visibleSpaceIds(scopedIds, userId, accessLevel), accessibleFolderIds(userId)])
-    : [new Set<string>(), new Set<string>()];
-  return files.filter((f) => !f.spaceId || visible.has(f.spaceId) || (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)));
+async function gateFiles<T extends { id: string; spaceId: string | null; spaceFolderId: string | null }>(
+  files: T[],
+  viewer: { organizationId: string; userId: string; accessLevel: string },
+): Promise<T[]> {
+  return readableFileRows(files, viewer);
 }
 
 /**
@@ -54,7 +54,7 @@ async function pagedList(req: NextRequest, session: { user: unknown }, orgId: st
     }),
     getEffectivePreferences(userId, orgId),
   ]);
-  const gated = await gateFiles(rows, userId, accessLevel);
+  const gated = await gateFiles(rows, { organizationId: orgId, userId, accessLevel });
   const home = prefs.home as { favoriteFileIds?: string[] };
   const facts = { favoriteIds: new Set<string>(Array.isArray(home.favoriteFileIds) ? home.favoriteFileIds : []) };
 
@@ -143,7 +143,12 @@ export async function GET(req: NextRequest) {
     // Map each file back to one of its source items for "open task".
     const itemByFile = new Map<string, string>();
     for (const l of links) if (!itemByFile.has(l.targetId)) itemByFile.set(l.targetId, l.sourceId);
-    const fresh = await withFreshFileUrls(files);
+    // A link on a task never opens the file it names: each file answers to
+    // the file read rule, as it does everywhere else (gateFiles). A reader of
+    // the List saw every linked file with a fresh download URL, one in a
+    // Space they cannot open included.
+    const readable = await gateFiles(files, { organizationId: orgId, userId: getUserId(session), accessLevel: accessLevelB });
+    const fresh = await withFreshFileUrls(readable);
     return jsonSuccess(fresh.map((f) => ({ ...f, itemId: itemByFile.get(f.id) ?? null })));
   }
 
@@ -170,27 +175,12 @@ export async function GET(req: NextRequest) {
     take: 500,
   });
 
-  // Phase 22 — gate by Space visibility. Files with spaceId=null stay
-  // visible to everyone in the org (unscoped). Files tagged to a Space
-  // are returned only if the viewer can read that Space.
+  // The read gate: files with spaceId=null stay visible to everyone in the
+  // org (unscoped); a Space folder's files to whoever can view that Folder;
+  // a Space's own files to whoever can view that Space. One world per page.
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
   const userId = getUserId(session);
-  const scopedIds = files.map((f) => f.spaceId).filter((s): s is string => Boolean(s));
-  const [visible, accessibleFolders] = scopedIds.length > 0
-    ? await Promise.all([
-        visibleSpaceIds(scopedIds, userId, accessLevel),
-        accessibleFolderIds(userId),
-      ])
-    : [new Set<string>(), new Set<string>()];
-  // A space file shows if the viewer fully reads its Space OR holds a folder
-  // grant on the Space folder it lives in (their own folder's files, and ONLY
-  // those — never the rest of the space).
-  const gated = files.filter(
-    (f) =>
-      !f.spaceId ||
-      visible.has(f.spaceId) ||
-      (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)),
-  );
+  const gated = await gateFiles(files, { organizationId: orgId, userId, accessLevel });
 
   // Attach the Space-folder name so the Library drive can show where a
   // space-anchored file lives (chip linking back to the folder).
@@ -247,30 +237,45 @@ export async function POST(req: NextRequest) {
     if (!folder) return jsonError("folder not found", 404);
   }
 
-  // Cross-tenant safety: the spaceId must belong to the caller's org.
-  // No membership check here — uploading from a board the caller can
-  // see is already permission-gated by the surface that hosts the upload
-  // (e.g. BoardItemDrawer enforces canEdit before exposing the form).
-  if (spaceId) {
-    const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
-    if (!space) return jsonError("space not found", 404);
+  // THE PLACEMENT RULE (node-rules P1 and P3), one call for both places a
+  // file sits in the Space tree. A file in a Space folder is a node of that
+  // Folder; a file with a Space and no folder sits at the Space's root, which
+  // is what the Space page's Files card lists (every file tagged to the
+  // Space, a task attachment included). Either way it is content added in a
+  // container: Can edit or higher there, and Can view, Can comment or a path
+  // through the Space never add one. The Space comes from the folder, never
+  // from the request: a spaceId that disagrees with the folder is a 400, a
+  // folder in Trash a 400, a container in another org or out of the
+  // viewer's sight a 404. A file in no Space is the org's.
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+  const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
+  if (spaceFolderId || spaceId) {
+    const placed = await resolveCreate(nodeCtx, { spaceId, folderId: spaceFolderId }, "file");
+    if (!placed.ok) {
+      return jsonError(placed.status === 404 ? (spaceFolderId ? "space folder not found" : "space not found") : placed.error, placed.status);
+    }
+    spaceId = placed.spaceId;
   }
 
-  // Space-folder anchor: validate in-org and DERIVE spaceId from the folder,
-  // so Library space filters + Space visibility gating apply automatically.
-  if (spaceFolderId) {
-    const sf = await prisma.folder.findFirst({
-      where: { id: spaceFolderId, space: { organizationId: orgId } },
-      select: { id: true, spaceId: true },
+  try {
+    // The create half of P3: the folder's Space is read under a share lock
+    // inside the write, so a move of that folder can never leave this file in
+    // the Space the folder just left.
+    const entry = await prisma.$transaction(async (tx) => {
+      let landedSpaceId = spaceId;
+      if (spaceFolderId) {
+        const parent = await lockParentFolder(tx, orgId, spaceFolderId);
+        if (!parent) throw new PlacementConflict("That folder just moved or went to Trash. Pick the place again.");
+        landedSpaceId = parent.spaceId;
+      }
+      return tx.fileEntry.create({
+        data: { organizationId: orgId, name, mimeType, size, url,
+          s3Key, folderId, spaceId: landedSpaceId, spaceFolderId, uploadedById: userId, description },
+      });
     });
-    if (!sf) return jsonError("space folder not found", 404);
-    spaceId = sf.spaceId ?? spaceId;
+    return jsonSuccess(entry, 201);
+  } catch (err) {
+    if (err instanceof PlacementConflict) return jsonError(err.message, err.status);
+    throw err;
   }
-
-  const entry = await prisma.fileEntry.create({
-    data: { organizationId: orgId, name, mimeType, size, url,
-      s3Key, folderId, spaceId, spaceFolderId, uploadedById: userId, description },
-  });
-
-  return jsonSuccess(entry, 201);
 }

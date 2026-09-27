@@ -62,7 +62,9 @@ export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/im
  *   `/today`             -> `/home`. It was never a landing: it ran a query for
  *                           the viewer's first Space and sent them into
  *                           somebody else's project list.
- *   `/dashboard`         -> `/home`.
+ *   `/dashboard`         -> `/dashboards`, the dashboards list (decision 1).
+ *                           It pointed at `/home` while no dashboards page
+ *                           existed.
  *   `/assigned-comments` -> `/inbox?tab=primary&type=task_comment`. Its stub
  *                           page is deleted (spec-work-home.md line 24) and its
  *                           sidebar row with it; the only thing left is the
@@ -117,6 +119,9 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   "/folders": "home",
   "/boards": "home",
   "/okrs": "home",
+  // Decision 1: the dashboards list and, by prefix, /dashboards/[id]. Both
+  // stay in Work, so the rail pill and the sidebar hold still on the canvas.
+  "/dashboards": "home",
   "/trash": "home",
   "/templates": "home",
   "/me/weekly-review": "home",
@@ -127,14 +132,18 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // under "ai" that row swapped the rail pill, replaced the sidebar and could
   // never go active, because the Work sidebar is not rendered on /favorites.
   "/favorites": "home",
-  // The Work door for docs, tables, canvases, SOPs and forms opened from Work
-  // when the viewer can see no Space for them: a personal or NOTEPAD doc, an
-  // unscoped table, every SOP and form (src/lib/nav/object-href.ts). Its
-  // children are dynamic (/work/docs/[id] and friends), so like /item and
-  // /folders it is a hub row with no page of its own. A Space item opened
-  // from Work lives under "/spaces" above, which already owns
-  // /spaces/[slug]/docs/[id], /spaces/[slug]/tables/[id] and
-  // /spaces/[slug]/canvas/[id] by longest prefix.
+  // The Work door for docs, tables, canvases, SOPs and forms: the id-only
+  // Work address of an object opened from any hub but the Docs and Tables
+  // storage browsers when no Space is known for it (a personal or NOTEPAD
+  // doc, an unscoped table, every SOP and form), the form Copy link gives
+  // from every hub, and where a person without the Docs or Tables hub is
+  // moved from a canonical URL (src/lib/nav/object-href.ts). It places each
+  // item for whoever opens it, under their own access. Its children are
+  // dynamic (/work/docs/[id] and friends), so like /item and /folders it is
+  // a hub row with no page of its own. A Space item lives under "/spaces"
+  // above, which already owns /spaces/[slug]/docs/[id],
+  // /spaces/[slug]/tables/[id] and /spaces/[slug]/canvas/[id] by longest
+  // prefix.
   "/work": "home",
 
   // ── Planner ───────────────────────────────────────────────────────
@@ -214,6 +223,7 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/folders": "Folder",
   "/boards": "List",
   "/okrs": "Goals",
+  "/dashboards": "Dashboards",
   "/trash": "Trash",
   "/templates": "Templates",
   "/me/weekly-review": "Weekly review",
@@ -344,8 +354,8 @@ export const FOLDED_APP_HUB: Readonly<Record<string, HubKey>> = {
  * to somebody's project list", and a person with no Space landed on /spaces.
  *
  * This constant is the one every in-app href reads. `next.config.ts` carries
- * its ONE mirror (it runs before the "@/" alias exists), and both flip in the
- * same edit.
+ * its mirror in the `/today` and `/tasks` rows (it runs before the "@/" alias
+ * exists, so it cannot import this), and they flip together in one edit.
  *
  * Whatever it points at, it points at a path the table owns: a test asserts
  * `resolveHubPrefix(WORK_HOME_HREF)` matches a row, so the Work landing can

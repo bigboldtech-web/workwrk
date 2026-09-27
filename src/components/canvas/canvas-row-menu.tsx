@@ -5,9 +5,16 @@
 // (CanvasMoreTrigger delegates here) and the /canvas/[id] editor "...".
 //
 //   Open · Copy link · Add to / Remove from favorites · Rename (inline) ·
-//   Move to… (Space picker or No location; PATCH { spaceId }) · Share ·
-//   Duplicate · Save as template (Full access) · separator · Move to Trash
-//   (Full access; DELETE sets archivedAt, restorable from /trash?type=canvas)
+//   Move to… (Space picker or No location; PATCH { spaceId }) · Manage access
+//   (Who has access below Full access) · Duplicate · Save as template (Full
+//   access) · separator · Move to Trash (Full access; DELETE sets archivedAt,
+//   restorable from /trash?type=canvas)
+//
+// THE ACCESS ROW opens the canvas's OWN Manage access dialog, for every
+// reader (Agents excepted: they never share). The editor's Share chip used to
+// open its Space's dialog instead, so sharing a canvas added a Space member
+// and handed out the whole Space (the reported over-grant). CanvasRowMenuHost
+// mounts the dialog when its host passes none.
 //
 // WHERE ITS ROWS GO: the section the menu is used in (src/lib/nav/
 // object-href.ts). Open, Open in new tab and Duplicate build the address of
@@ -19,8 +26,9 @@
 
 import { useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, ExternalLink, FolderInput, Frame, LayoutTemplate, Link2, Pencil, Share2, Star, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, FolderInput, Frame, LayoutTemplate, Link2, Pencil, Star, Trash2, UserPlus, Users } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { Picker } from "@/components/ui/picker";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -45,7 +53,7 @@ export interface CanvasMenuTarget {
   canEdit?: boolean;
 }
 
-export type CanvasMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "moved" | "templated";
+export type CanvasMenuChange = "renamed" | "trashed" | "duplicated" | "favorited" | "moved" | "templated" | "shared";
 
 export function dispatchCanvasesChanged() {
   if (typeof window === "undefined") return;
@@ -53,7 +61,13 @@ export function dispatchCanvasesChanged() {
   refreshSidebar();
 }
 
-interface SpaceRow { id: string; name: string; icon?: string | null; color?: string | null }
+interface SpaceRow { id: string; name: string; icon?: string | null; color?: string | null; pickable?: boolean; folders?: Array<{ id: string; name: string }> }
+
+/** GET /api/move/destinations: the places the move rule accepts (node-placement moveDestinations). */
+interface MoveDestinationsReply {
+  root: { pickable: boolean; current: boolean } | null;
+  spaces: Array<{ id: string; name: string; icon: string | null; color: string | null; pickable: boolean; folders: Array<{ id: string; name: string; pickable: boolean }> }>;
+}
 
 export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onShare, onRenameInline, extraRows }: {
   canvas: CanvasMenuTarget;
@@ -61,7 +75,8 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   context?: "row" | "editor";
   onClose: () => void;
   onChanged?: (kind: CanvasMenuChange) => void;
-  onShare?: () => void;
+  /** Opens the canvas's Manage access dialog, read only below Full access (absent = no access row). */
+  onShare?: (readOnly: boolean) => void;
   /** The editor focuses its title field instead of the inline rename row. */
   onRenameInline?: () => void;
   extraRows?: React.ReactNode;
@@ -74,6 +89,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   const [draft, setDraft] = useState(canvas.name);
   const [fav, setFav] = useState(!!canvas.favorite);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  const [rootMove, setRootMove] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const canEdit = canvas.canEdit !== false;
   const canManage = canvas.canManage !== false;
@@ -108,18 +124,24 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
   async function openMove() {
     setMode("move");
     if (spaces === null) {
-      const r = await apiFetch<{ spaces?: SpaceRow[]; data?: SpaceRow[] } | SpaceRow[]>("/api/spaces", { cache: "no-store" });
-      const list = r.ok ? (Array.isArray(r.data) ? r.data : r.data.spaces ?? r.data.data ?? []) : [];
-      setSpaces(list.map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })));
+      // Exactly the places the move rule accepts for this person (the
+      // placement rule, P5): Space roots, Folders, and No location only when
+      // each would be taken.
+      const r = await apiFetch<MoveDestinationsReply>(`/api/move/destinations?kind=canvas&id=${encodeURIComponent(canvas.id)}`, { cache: "no-store" });
+      const d = r.ok ? r.data : null;
+      setRootMove(d?.root?.pickable === true);
+      setSpaces((d?.spaces ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null, pickable: s.pickable, folders: s.folders.filter((f) => f.pickable) })));
     }
   }
 
   async function moveTo(value: string) {
     setBusy("move");
-    const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "PATCH", json: { spaceId: value === "none" ? null : value } });
+    const json = value === "none" ? { spaceId: null } : value.startsWith("folder:") ? { folderId: value.slice(7) } : { spaceId: value, folderId: null };
+    const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "PATCH", json });
     setBusy(null);
-    if (r.ok) { toast(value === "none" ? "Moved to No location" : "Moved"); done("moved"); router.refresh(); }
-    else toast(r.error || "Couldn't move");
+    // A refusal keeps the picker open on the choice, with the server's sentence.
+    if (!r.ok) { toast(r.error || "Couldn't move"); return; }
+    toast(value === "none" ? "Moved to No location" : "Moved"); done("moved"); router.refresh();
     onClose();
   }
 
@@ -182,8 +204,9 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
           onSelect={(v) => void moveTo(v)}
           emptyLabel="No Spaces"
           sections={[
-            { options: [{ value: "none", label: "No location", description: "A standalone canvas" }] },
-            { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+            ...(rootMove ? [{ options: [{ value: "none", label: "No location", description: "A standalone canvas" }] }] : []),
+            { label: "Spaces", options: (spaces ?? []).filter((s) => s.pickable !== false).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+            { label: "Folders", options: (spaces ?? []).flatMap((s) => (s.folders ?? []).map((f) => ({ value: `folder:${f.id}`, label: f.name, description: s.name, glyph: <EntityTile size="xs" icon={null} color={null} name={f.name} fallback="folder" /> }))) },
           ]}
         />
       </div>
@@ -204,7 +227,19 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
         <>
           <MenuItem icon={Pencil} label="Rename" onClick={() => { if (onRenameInline) { onClose(); onRenameInline(); } else { setDraft(canvas.name); setMode("rename"); } }} />
           <MenuItem icon={FolderInput} label="Move to…" busy={busy === "move"} onClick={() => void openMove()} />
-          {onShare ? <MenuItem icon={Share2} label="Share" onClick={() => { onClose(); onShare(); }} /> : null}
+        </>
+      ) : null}
+      {/* Full access on the canvas changes who can open it (MANAGE_BAR.canvas);
+          everyone else may still read the list. */}
+      {onShare ? (
+        <MenuItem
+          icon={canManage ? UserPlus : Users}
+          label={canManage ? "Manage access" : "Who has access"}
+          onClick={() => { onClose(); onShare(!canManage); }}
+        />
+      ) : null}
+      {canEdit ? (
+        <>
           <MenuItem icon={Copy} label="Duplicate" busy={busy === "duplicate"} onClick={() => void duplicate()} />
           {canManage ? <MenuItem icon={LayoutTemplate} label="Save as template" busy={busy === "template"} onClick={() => void saveAsTemplate()} /> : null}
         </>
@@ -236,11 +271,53 @@ export function CanvasRowMenuHost({ menu, onChanged, onShare }: {
   onShare?: (canvas: CanvasMenuTarget) => void;
 }) {
   const dummy = useRef<HTMLElement | null>(null);
+  const [share, setShare] = useState<{ canvas: CanvasMenuTarget; readOnly: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const s = menu.state;
-  if (!s) return null;
   return (
-    <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
-      <CanvasRowMenu canvas={s.canvas} onClose={menu.close} onChanged={(k) => onChanged?.(k, s.canvas)} onShare={onShare ? () => onShare(s.canvas) : undefined} />
-    </MorePortal>
+    <>
+      {s ? (
+        <MorePortal anchorRef={s.anchor ?? dummy} width={240} open placement="below" point={s.point} onClose={menu.close}>
+          <CanvasRowMenu
+            canvas={s.canvas}
+            onClose={menu.close}
+            onChanged={(k) => onChanged?.(k, s.canvas)}
+            onShare={(readOnly) => {
+              if (onShare) { onShare(s.canvas); return; }
+              setShare({ canvas: s.canvas, readOnly });
+              setShareOpen(true);
+            }}
+          />
+        </MorePortal>
+      ) : null}
+      {!onShare && share ? (
+        <CanvasShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          canvas={share.canvas}
+          readOnly={share.readOnly}
+          onChanged={() => onChanged?.("shared", share.canvas)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The canvas's own Manage access dialog, for every canvas menu host. It never opens its Space's dialog. */
+export function CanvasShareDialog({ open, onOpenChange, canvas, readOnly, onChanged }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  canvas: Pick<CanvasMenuTarget, "id" | "name">;
+  readOnly: boolean;
+  onChanged?: () => void;
+}) {
+  return (
+    <ShareDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      target={{ kind: "canvas", id: canvas.id, name: canvas.name || "Untitled canvas" }}
+      readOnly={readOnly}
+      onChanged={() => { onChanged?.(); dispatchCanvasesChanged(); }}
+    />
   );
 }

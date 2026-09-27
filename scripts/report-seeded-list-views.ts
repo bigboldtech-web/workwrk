@@ -28,13 +28,17 @@
 //     width or date-field choice means a person configured it;
 //   * `updatedAt` equals `createdAt` to the second: any later write at all,
 //     including a reorder or a default flip, means it was handled;
-//   * it is not the List's default view and not its only view.
+//   * it is not the List's default view and not its only view. "Default" is
+//     BOTH the view the List resolves to today (src/lib/work/default-view.ts:
+//     an untouched Board with no flag is now what every List opens on) AND a
+//     view still carrying the legacy isDefault flag (somebody's old choice).
 // Anything that fails one rule is reported under `kept` with the reason, so the
 // founder can read what was spared as easily as what was found.
 //
 //   npx tsx scripts/report-seeded-list-views.ts --report /tmp/seeded-views.json
 
 import { scriptPrisma, databaseLabel } from "./lib/script-prisma";
+import { resolveDefaultView, visibleToEveryone } from "../src/lib/work/default-view";
 
 const SEEDED_NAMES = new Set(["Board", "Calendar", "Gantt"]);
 
@@ -42,7 +46,11 @@ interface ViewRow {
   id: string;
   boardId: string;
   name: string;
+  type: string;
   isDefault: boolean;
+  isShared: boolean;
+  ownerId: string | null;
+  displayOrder: number;
   config: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -120,7 +128,19 @@ async function main() {
 
     const views = (await prisma.view.findMany({
       where: { boardId: { in: lists.map((l) => l.id) } },
-      select: { id: true, boardId: true, name: true, isDefault: true, config: true, createdAt: true, updatedAt: true },
+      select: {
+        id: true,
+        boardId: true,
+        name: true,
+        type: true,
+        isDefault: true,
+        isShared: true,
+        ownerId: true,
+        displayOrder: true,
+        config: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [{ boardId: "asc" }, { displayOrder: "asc" }],
     })) as ViewRow[];
 
@@ -136,12 +156,19 @@ async function main() {
 
     for (const list of lists) {
       const own = byBoard.get(list.id) ?? [];
+      // The view this List opens on for everyone, by the same rule the List
+      // page applies. This report feeds a later seeded-view cleanup, so an
+      // untouched Board that is the default by rule must never be listed as
+      // removable.
+      const resolved = resolveDefaultView(
+        own.filter(visibleToEveryone).sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name)),
+      );
       for (const v of own) {
         const reasons: string[] = [];
         if (!SEEDED_NAMES.has(v.name)) reasons.push(`renamed or never seeded ("${v.name}")`);
         if (!configIsEmpty(v.config)) reasons.push("has a saved configuration");
         if (!neverUpdated(v)) reasons.push("was updated after it was created");
-        if (v.isDefault) reasons.push("is this List's default view");
+        if (v.isDefault || resolved?.view.id === v.id) reasons.push("is this List's default view");
         if (own.length <= 1) reasons.push("is this List's only view");
 
         if (reasons.length === 0) {

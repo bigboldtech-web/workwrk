@@ -10,7 +10,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -28,14 +29,10 @@ export async function GET() {
     where: { organizationId: u.organizationId, id: { in: ids } },
     select: { id: true, name: true, description: true, spaceId: true },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (w) => {
-      if (!w.spaceId) return w;
-      const space = await getSpaceForReader(w.spaceId, u.id!, accessLevel);
-      return space ? w : null;
-    }),
-  )).filter((w): w is NonNullable<typeof w> => w !== null);
+  // One world for every starred canvas (the one resolver, R8): its Folder
+  // or Space, the unscoped rule, its owner and a canvas grant.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "canvas", rows.map((w) => w.id));
+  const visible = rows.filter((w) => roleAtLeast(roles.get(w.id) ?? "none", "VIEW"));
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));

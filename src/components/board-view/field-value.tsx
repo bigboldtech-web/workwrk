@@ -17,6 +17,8 @@ import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker"
 import { useAnchorPos } from "./use-anchor-pos";
 import Link from "next/link";
 import { useObjectHref } from "@/components/layout/os/use-object-href";
+import { isConnectField, isMirrorField, type ConnectionRef, type MirrorValue as MirrorData } from "@/lib/list-connect";
+import { ConnectValue, MirrorValue, type CommitResult } from "./connect-field-value";
 
 // Cell-picker dropdown. Uses position:fixed (via useAnchorPos) so it escapes the
 // table's horizontal-scroll container — otherwise the menu is clipped at the
@@ -240,11 +242,64 @@ interface FieldValueProps {
    *  scope; without it these fields fall back to /api/users, which answers a
    *  non-exec caller with their own report tree and nobody else. */
   boardId?: string | null;
+  // ── Phase 5b, Connect and Mirror columns (list-connect.ts) ──────────
+  /** A Connect cell: the connected tasks THIS viewer can read. */
+  connections?: ConnectionRef[];
+  /** A Mirror cell: its computed values, or its roll-up. */
+  mirror?: MirrorData;
+  /** The List whose schema defines the field (a Connect cell's candidates route). */
+  fieldListId?: string | null;
+  /** The task the cell belongs to, never offered as its own connection. */
+  itemId?: string | null;
+  /**
+   * A Connect cell commits through this and hears the answer, so it can keep
+   * its selection and offer Retry. Every other type keeps onChange.
+   */
+  onCommit?: (next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Where a Connect cell's panel opens: over a table ("fixed") or inside the drawer ("absolute"). */
+  popover?: "fixed" | "absolute";
+  /**
+   * What an empty value reads as. Table cells and drawer rows keep the muted
+   * EMPTY glyph; a settings form passes words instead (the List's Default
+   * values panel passes "No default", the wording of its Status and Priority
+   * rows), because that glyph must never be visible copy on a form.
+   */
+  emptyLabel?: string;
 }
 
+/** The long-standing empty placeholder of table cells and drawer rows. */
+const EMPTY = "\u2014";
+
 export function FieldValue(props: FieldValueProps) {
-  const { field, value, mode, onChange, disabled, currentUserId, boardId = null } = props;
+  const { field, value, mode, onChange, disabled, currentUserId, boardId = null, emptyLabel } = props;
   const readOnly = mode === "display" || disabled || !onChange;
+
+  // Checked BEFORE the type switch: a Connect column is stored as a
+  // RELATIONSHIP (with target Lists) and a Mirror is computed, so neither may
+  // fall into the doc-link Relationship editor. A RELATIONSHIP without target
+  // Lists is not a connect field and renders exactly as it always has.
+  if (isConnectField(field)) {
+    return (
+      <ConnectValue
+        field={field}
+        connections={props.connections ?? []}
+        readOnly={readOnly || !props.onCommit}
+        fieldListId={props.fieldListId ?? boardId}
+        itemId={props.itemId ?? null}
+        onCommit={props.onCommit ? (next) => props.onCommit!(next) as Promise<CommitResult> : undefined}
+        popover={props.popover ?? "fixed"}
+      />
+    );
+  }
+  if (isMirrorField(field)) {
+    return (
+      <MirrorValue
+        field={field}
+        mirror={props.mirror}
+        renderField={(def, v, listId) => <FieldValue field={def} value={v} mode="display" boardId={listId || null} />}
+      />
+    );
+  }
 
   switch (field.type) {
     case "TEXT":
@@ -252,25 +307,25 @@ export function FieldValue(props: FieldValueProps) {
     case "URL":
     case "EMAIL":
     case "PHONE":
-      return <TextValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <TextValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "LONG_TEXT":
-      return <LongTextValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <LongTextValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "NUMBER":
     case "MONEY":
     case "PERCENT":
-      return <NumberValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <NumberValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "DATE":
     case "DATETIME":
-      return <DateValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <DateValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "CHECKBOX":
       return <CheckboxValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "DROPDOWN":
     case "CUSTOM_DROPDOWN":
     case "TSHIRT_SIZE":
-      return <DropdownValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <DropdownValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "MULTI_SELECT":
     case "LABELS":
-      return <MultiSelectValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+      return <MultiSelectValue field={field} value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "RATING":
       return <RatingValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
     case "KRA":
@@ -284,13 +339,13 @@ export function FieldValue(props: FieldValueProps) {
     case "RELATIONSHIP":
       return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":
-      return <UserValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
+      return <UserValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} emptyLabel={emptyLabel} />;
     case "PEOPLE":
-      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
+      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} emptyLabel={emptyLabel} />;
     case "PROGRESS_MANUAL":
-      return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "LOCATION":
-      return <LocationValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <LocationValue value={value} readOnly={readOnly} onChange={onChange} emptyLabel={emptyLabel} />;
     case "VOTING":
       return <VotingValue value={value} readOnly={readOnly} onChange={onChange} currentUserId={currentUserId ?? null} />;
     case "FILES":
@@ -307,18 +362,20 @@ function UserValue({
   readOnly,
   onChange,
   boardId = null,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
   boardId?: string | null;
+  emptyLabel?: string;
 }) {
   const userId = typeof value === "string" ? value : null;
   const users = useOrgUsers(boardId);
   const person = userId ? users.find((u) => u.id === userId) ?? null : null;
 
   if (readOnly) {
-    if (!userId) return <span className="text-xs text-zinc-500">—</span>;
+    if (!userId) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     if (!person) return <Dots variant="pending" label="Loading" className="text-ink-3" />;
     return (
       <span className="inline-flex items-center gap-1.5">
@@ -344,11 +401,13 @@ function PeopleValue({
   readOnly,
   onChange,
   boardId = null,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
   boardId?: string | null;
+  emptyLabel?: string;
 }) {
   const ids = Array.isArray(value) ? (value as string[]).filter((x) => typeof x === "string") : [];
   const users = useOrgUsers(boardId);
@@ -357,7 +416,7 @@ function PeopleValue({
   const selected = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is PersonRef => !!u);
 
   const stack = ids.length === 0 ? (
-    <span className="text-xs text-zinc-500">—</span>
+    <span className="text-xs text-zinc-500">{emptyLabel}</span>
   ) : (
     <span className="inline-flex items-center -space-x-1.5">
       {selected.slice(0, 4).map((p) => (
@@ -407,22 +466,33 @@ function PeopleValue({
 
 // ── Progress (manual 0–100) ───────────────────────────────────────
 
+// An unset value reads as `emptyLabel` when the host passes one (the List's
+// Default values panel says "No default", since an unset default is not 0%),
+// and otherwise as it always has: EMPTY on the bar, 0% beside the slider.
 function ProgressValue({
   value,
   readOnly,
   onChange,
+  emptyLabel,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  emptyLabel?: string;
 }) {
   const n = typeof value === "number" ? Math.max(0, Math.min(100, value)) : null;
+  const readout = (fallback: string) =>
+    n == null && emptyLabel !== undefined ? (
+      <span className="text-xs text-zinc-500 whitespace-nowrap">{emptyLabel}</span>
+    ) : (
+      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? fallback : `${n}%`}</span>
+    );
   const bar = (
     <span className="inline-flex items-center gap-2 min-w-[110px]">
       <span className="flex-1 h-1.5 rounded-full bg-zinc-100 overflow-hidden min-w-[64px]">
         <span className="block h-full rounded-full bg-[var(--os-brand)]" style={{ width: `${n ?? 0}%` }} />
       </span>
-      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? "—" : `${n}%`}</span>
+      {readout(EMPTY)}
     </span>
   );
   if (readOnly) return bar;
@@ -437,7 +507,7 @@ function ProgressValue({
         onChange={(e) => onChange?.(Number(e.target.value))}
         className="flex-1 min-w-0 accent-[var(--os-brand)]"
       />
-      <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? "0%" : `${n}%`}</span>
+      {readout("0%")}
     </span>
   );
 }
@@ -448,10 +518,12 @@ function LocationValue({
   value,
   readOnly,
   onChange,
+  emptyLabel,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -463,7 +535,7 @@ function LocationValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel ?? EMPTY}</span>;
     return (
       <a
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`}
@@ -484,7 +556,8 @@ function LocationValue({
       onBlur={() => { if (draft !== v) onChange?.(draft || null); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="Add a location…"
+      // Its own prompt in a cell or the drawer; a form's words when it passes them.
+      placeholder={emptyLabel ?? "Add a location…"}
     />
   );
 }
@@ -544,11 +617,13 @@ function TextValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -560,7 +635,7 @@ function TextValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     if (field.type === "URL" && /^https?:\/\//.test(v)) {
       return <a href={v} className="text-xs text-[var(--os-brand)] hover:underline truncate inline-block max-w-full" target="_blank" rel="noreferrer">{v}</a>;
     }
@@ -577,7 +652,7 @@ function TextValue({
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -586,10 +661,12 @@ function LongTextValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [draft, setDraft] = useState(v);
@@ -599,7 +676,7 @@ function LongTextValue({
     setDraft(v);
   }
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return <span className="text-xs whitespace-pre-wrap break-words">{v}</span>;
   }
   return (
@@ -609,7 +686,7 @@ function LongTextValue({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
       className="w-full px-2 py-1 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -621,11 +698,13 @@ function NumberValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: number | null) => void;
+  emptyLabel?: string;
 }) {
   const n = typeof value === "number" ? value : null;
   const [draft, setDraft] = useState<string>(n == null ? "" : String(n));
@@ -650,7 +729,7 @@ function NumberValue({
   };
 
   if (readOnly) {
-    if (n == null) return <span className="text-xs text-zinc-500">—</span>;
+    if (n == null) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return <span className="text-xs">{formatDisplay(n)}</span>;
   }
   return (
@@ -666,7 +745,7 @@ function NumberValue({
         if (parsed !== n) onChange?.(parsed);
       }}
       className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
-      placeholder="—"
+      placeholder={emptyLabel}
     />
   );
 }
@@ -678,15 +757,17 @@ function DateValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string | null) => void;
+  emptyLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   if (readOnly) {
-    if (!v) return <span className="text-xs text-zinc-500">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     // Invalid dates fall back to the raw string — no try/catch around
     // JSX (new Date never throws; it yields NaN time instead).
     const d = new Date(v);
@@ -756,11 +837,13 @@ function DropdownValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string | null) => void;
+  emptyLabel?: string;
 }) {
   const choices: FieldChoice[] = field.options?.choices ?? [];
   const v = typeof value === "string" ? value : "";
@@ -776,7 +859,7 @@ function DropdownValue({
       {current.label}
     </span>
   ) : (
-    <span className="text-xs text-zinc-500">—</span>
+    <span className="text-xs text-zinc-500">{emptyLabel}</span>
   );
 
   if (readOnly) return pill;
@@ -826,18 +909,20 @@ function MultiSelectValue({
   value,
   readOnly,
   onChange,
+  emptyLabel = EMPTY,
 }: {
   field: FieldDef;
   value: unknown;
   readOnly: boolean;
   onChange?: (v: string[]) => void;
+  emptyLabel?: string;
 }) {
   const choices: FieldChoice[] = field.options?.choices ?? [];
   const values = Array.isArray(value) ? (value as string[]) : [];
   const chips = values.map((v) => choices.find((c) => c.value === v)).filter((c): c is FieldChoice => !!c);
 
   if (readOnly) {
-    if (chips.length === 0) return <span className="text-xs text-zinc-500">—</span>;
+    if (chips.length === 0) return <span className="text-xs text-zinc-500">{emptyLabel}</span>;
     return (
       <span className="flex flex-wrap gap-1">
         {chips.map((c) => (

@@ -62,6 +62,28 @@ describe("groupCardsByStatus", () => {
   it("returns no buckets when the board declares no statuses", () => {
     expect(groupCardsByStatus([row("a", "TO_DO")], []).size).toBe(0);
   });
+
+  // Phase 5b: a card shown here through a link stores its HOME status, which
+  // this board may not declare ("Shipped"). The accessor names the column it
+  // belongs to HERE.
+  it("places a linked card in the B-side column its accessor names", () => {
+    const linked = row("linked", "SHIPPED");
+    const out = groupCardsByStatus([row("a", "TO_DO"), linked], ORDER, (r) => (r.id === "linked" ? "DONE" : r.status ?? null));
+    expect(idsIn(out, "DONE")).toEqual(["linked"]);
+    expect(idsIn(out, "TO_DO")).toEqual(["a"]);
+  });
+
+  it("groups exactly as before without the accessor", () => {
+    const items = [row("a", "TO_DO"), row("b", "DONE"), row("c", "SHIPPED"), row("d", "TO_DO", "a")];
+    const withDefault = groupCardsByStatus(items, ORDER, (r) => r.status ?? null);
+    const without = groupCardsByStatus(items, ORDER);
+    expect([...without.entries()].map(([k, v]) => [k, v.map((r) => r.id)])).toEqual([
+      ["TO_DO", ["a", "c"]],
+      ["IN_PROGRESS", []],
+      ["DONE", ["b"]],
+    ]);
+    expect([...withDefault.entries()]).toEqual([...without.entries()]);
+  });
 });
 
 describe("countSubtasksByParent", () => {

@@ -22,7 +22,19 @@
 // cannot rename, and every one of those rows answered 403. Offering a row that
 // cannot work is the read-only rule inverted. The default now errs the other
 // way: a host that passes no role gets the reader's menu, and a host that knows
-// better says so. Every host in this repo passes one.
+// better says so. Every host in this repo passes one. A null role (the Work
+// tree's server-decided role, absent for a row it did not decide) reads the
+// same way.
+//
+// ONE ACCESS ROW, "Manage access" OR "Who has access". It was "Share", and a
+// Can edit holder read "Share" under toggle 4. A person grant now needs Full
+// access on the node itself (roles never climb), so offering the write label
+// to anyone below Full would open a dialog whose every control answers 403.
+// `editorsCanShare` stays on the input type so no host breaks, and is ignored.
+//
+// A PATH CONTAINER (decision A3) is a Space or Folder the viewer sees only as
+// the named way to something shared with them. They hold no role on it, so the
+// menu is exactly Copy link, whatever role a host passes.
 //
 // Pure module: no React, no imports, so vitest loads it in node.
 
@@ -38,11 +50,13 @@ export type ContainerAction =
   | "copy-link"
   | "color"
   | "pin-top"
-  | "share"
+  | "manage-access"
   | "features"
   | "statuses"
   | "fields"
   | "default-type"
+  | "default-values"
+  | "row-colors"
   | "about"
   | "templates"
   | "automations"
@@ -56,7 +70,7 @@ export type ContainerAction =
 export interface ContainerMenuRow {
   kind: "row";
   action: ContainerAction;
-  /** The label as it reads for THIS viewer (Share vs Who has access, etc.). */
+  /** The label as it reads for THIS viewer (Manage access vs Who has access, etc.). */
   label: string;
   /** Opens a submenu rather than acting immediately. */
   submenu?: boolean;
@@ -71,8 +85,8 @@ export type ContainerMenuEntry = ContainerMenuRow | ContainerMenuSeparator;
 
 export interface ContainerMenuInput {
   kind: ContainerKind;
-  /** Defaults to "view": an unknown role renders the reader's menu, never more. */
-  role?: ContainerRole;
+  /** Defaults to "view": an unknown or null role renders the reader's menu, never more. */
+  role?: ContainerRole | null;
   /** Already a favorite, so the row reads "Remove from favorites". */
   isFavorite?: boolean;
   /** Already pinned to the bar's Top strip, so the row reads "Unpin from top". */
@@ -85,10 +99,15 @@ export interface ContainerMenuInput {
   /** Agents never delete and never share (access model section 9). */
   isAgent?: boolean;
   /**
-   * Toggle 4: Can edit holders may also share. Without it, a viewer below Full
-   * access sees "Who has access" instead of "Share".
+   * Kept so no host breaks, and IGNORED: the access row reads "Manage access"
+   * only at Full access, because a person grant needs Full on the node.
    */
   editorsCanShare?: boolean;
+  /**
+   * The viewer reaches this container only as the path to something shared
+   * with them inside it (decision A3). The menu is exactly Copy link.
+   */
+  pathOnly?: boolean;
 }
 
 const RANK: Record<ContainerRole, number> = { view: 0, comment: 1, edit: 2, full: 3 };
@@ -96,6 +115,23 @@ const RANK: Record<ContainerRole, number> = { view: 0, comment: 1, edit: 2, full
 /** True when `role` is at least `floor`. */
 export function roleAtLeast(role: ContainerRole, floor: ContainerRole): boolean {
   return RANK[role] >= RANK[floor];
+}
+
+/** What the "New" menus make inside a container. */
+export type NewItem = "list" | "sprint" | "folder" | "doc" | "canvas" | "table";
+
+/**
+ * What this viewer can make inside this container: the one create rule
+ * (node-rules P1, createDecision) as the menus read it, so a menu offers
+ * exactly what the server accepts. Can edit or higher makes every kind a
+ * container holds (a Sprint is a List); Can view and Can comment make
+ * nothing; a table sits only at a Space's root; a List holds no children,
+ * and a path container gives no role to make anything with.
+ * container-menu.placement.test.ts proves it matches createDecision.
+ */
+export function newItemsFor(kind: ContainerKind, role: ContainerRole | null | undefined, pathOnly = false): NewItem[] {
+  if (pathOnly || kind === "list" || !roleAtLeast(role ?? "view", "edit")) return [];
+  return kind === "space" ? ["list", "sprint", "folder", "doc", "canvas", "table"] : ["list", "sprint", "folder", "doc", "canvas"];
 }
 
 function row(
@@ -117,25 +153,30 @@ const SEP: ContainerMenuSeparator = { kind: "separator" };
 export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry[] {
   const {
     kind,
-    role = "view",
     isFavorite = false,
     isTopPinned = false,
     canDelete = true,
     isAgent = false,
-    editorsCanShare = false,
+    pathOnly = false,
   } = input;
+  const role: ContainerRole = input.role ?? "view";
+
+  // A path container names the way to a shared item and nothing else: no
+  // favourite (the item is the thing to star), no New, no access list (its
+  // members are not the viewer's to read), no destructive row.
+  if (pathOnly) return [row("copy-link", "Copy link")];
 
   const full = role === "full";
   const canEdit = roleAtLeast(role, "edit");
-  const shareIsWrite = full || (canEdit && editorsCanShare);
   const out: ContainerMenuEntry[] = [];
 
   out.push(row("favorite", isFavorite ? "Remove from favorites" : "Add to favorites"));
   // ClickUp's Favorite > Top: a chip row under the bar (top-pins-strip.tsx).
   out.push(row("pin-top", isTopPinned ? "Unpin from top" : "Pin to top"));
 
-  // A List has no children to create, so its New submenu does not exist.
-  if (kind !== "list" && canEdit) out.push(row("new", "New", { submenu: true }));
+  // The New submenu exists when the one create rule gives this viewer
+  // something to make here (newItemsFor). A List has no children to create.
+  if (newItemsFor(kind, role).length > 0) out.push(row("new", "New", { submenu: true }));
 
   out.push(SEP);
 
@@ -145,7 +186,7 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
 
   out.push(SEP);
 
-  if (!isAgent) out.push(row("share", shareIsWrite ? "Share" : "Who has access"));
+  if (!isAgent) out.push(row("manage-access", full ? "Manage access" : "Who has access"));
 
   // Spec row 9 is "Settings -> /spaces/[slug]?tab=settings". That tab is not
   // built, and the row this replaced pushed `/spaces/[slug]`: from the Space
@@ -161,6 +202,11 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
       out.push(row("statuses", "Statuses"));
       out.push(row("fields", "Fields"));
       out.push(row("default-type", "Default task type", { submenu: true }));
+      // Phase 5b, List comfort (gap 14): what a new task starts with, and
+      // which rows are coloured by which rule. Both write Board.settings, the
+      // same Full-access door as the rows above.
+      out.push(row("default-values", "Default values"));
+      out.push(row("row-colors", "Conditional colors"));
     }
     out.push(row("about", "About"));
   }

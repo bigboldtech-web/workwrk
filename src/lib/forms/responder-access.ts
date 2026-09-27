@@ -20,13 +20,12 @@
 // exactly one append; it never widens what they can open or read, and it is
 // never a third value on toggle 10.
 //
-// The access engine (src/lib/access) stays inert: this reads the existing
-// reader helpers, the same ones the anchors' own pages use. Server only.
+// The destination reach is the one node-access resolver's (the same answer
+// the anchors' own pages give): a form grant never bypasses it. Server only.
 
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
-import { getBoardForReader } from "@/lib/board";
-import { accessLevelMirror } from "@/lib/access/org-role";
+import { nodeRoles, type NodeCtx } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { OrgRole } from "@/lib/access/types";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { FORM_SELECT } from "./form-select";
@@ -71,34 +70,42 @@ export interface ResponderDecision {
 
 /** The anchor check for a signed-in person (branch 2), with the creator and
  *  org admins first so the person who built a form is never locked out. */
+/** The engine Viewer shape as a node-access context. */
+export function responderCtx(viewer: ResponderViewer): NodeCtx {
+  return {
+    userId: viewer.userId,
+    organizationId: viewer.organizationId,
+    orgAdmin: viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN",
+    orgGuest: viewer.orgRole === "GUEST",
+    isAgent: viewer.isAgent,
+    denied: false,
+  };
+}
+
 export async function viewerCanRespondAsMember(form: ResponderForm, viewer: ResponderViewer): Promise<boolean> {
   if (viewer.organizationId !== form.organizationId) return false;
   if (form.createdById === viewer.userId) return true;
   if (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN") return true;
   const guest = viewer.orgRole === "GUEST";
-  // The legacy reader helpers still take a level string; the engine's own
-  // inverse map states it for this viewer, so this module never reads one.
-  const level = accessLevelMirror(viewer.orgRole, viewer.isAgent);
-
-  if (form.targetBoardId) {
-    const board = await getBoardForReader(form.targetBoardId, viewer.userId, level);
-    return !!board && board.organizationId === form.organizationId;
+  // Destination reach through the one resolver: Can view on the List, or on
+  // the table (a table in no Space, or gone, is the org's), one world.
+  const refs: NodeRef[] = [];
+  if (form.targetBoardId) refs.push({ kind: "list", id: form.targetBoardId });
+  else if (form.targetTableId) refs.push({ kind: "table", id: form.targetTableId });
+  if (refs.length === 0) {
+    // No destination yet. Today any member of the org could open and answer
+    // such a form, and access change request T2 (the "no destination inherits
+    // nothing" clause) is the access unit's to land, so a Member keeps that
+    // reach here and a Guest never had it.
+    return !guest;
   }
-  if (form.targetTableId) {
-    const table = await prisma.dataTable.findFirst({
-      where: { id: form.targetTableId, organizationId: form.organizationId },
-      select: { spaceId: true },
-    });
-    if (!table) return !guest;
-    if (!table.spaceId) return !guest;
-    const space = await getSpaceForReader(table.spaceId, viewer.userId, level);
-    return !!space;
-  }
-  // No destination yet. Today any member of the org could open and answer
-  // such a form, and access change request T2 (the "no destination inherits
-  // nothing" clause) is the access unit's to land, so a Member keeps that
-  // reach here and a Guest never had it.
-  return !guest;
+  const decisions = await nodeRoles(responderCtx(viewer), refs);
+  if (form.targetBoardId) return roleAtLeast(decisions.get(`list:${form.targetBoardId}`)?.role ?? "none", "VIEW");
+  const tableRole = decisions.get(`table:${form.targetTableId}`)?.role ?? "none";
+  if (roleAtLeast(tableRole, "VIEW")) return true;
+  // A destination table that is gone gives what no destination gives.
+  const exists = await prisma.dataTable.findFirst({ where: { id: form.targetTableId as string, organizationId: form.organizationId }, select: { id: true } });
+  return exists ? false : !guest;
 }
 
 /**

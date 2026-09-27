@@ -7,10 +7,15 @@
 //   3. Full grid of supported ViewTypes
 //   4. Embed section (Any website / Google Sheets / Docs / Calendar / Maps / YouTube / Figma)
 //      (POSTs view with embed URL once supported; today stubbed via toast)
-//   5. Private view + Pin view checkboxes
+//   5. "Private view" and "Pin as default view" checkboxes. The pin was a
+//      checkbox wired to nothing; it now pins the new view as the List's
+//      default on create (POST isDefault). On a Space List a private view
+//      cannot be pinned (the rest of the List cannot see it), so checking
+//      Private unchecks and disables Pin; the Personal list has one reader
+//      and keeps both.
 //
-// Calls POST /api/boards/[id]/views { name, type, isShared? } and on success
-// router.refresh()es the board page so the new tab appears.
+// Calls POST /api/boards/[id]/views { name, type, isShared?, isDefault? } and
+// on success router.refresh()es the board page so the new tab appears.
 //
 // The panel is PORTALLED (MorePortal, position: fixed) rather than rendered
 // absolutely inside the tab strip: ViewTabStrip is `overflow-x-auto`, which
@@ -110,9 +115,11 @@ const EMBEDS: EmbedTile[] = [
 
 interface Props {
   boardId: string;
+  /** The Personal list: its owner is its only reader, so a private view can be pinned. */
+  personalList?: boolean;
 }
 
-export function NewViewTrigger({ boardId }: Props) {
+export function NewViewTrigger({ boardId, personalList = false }: Props) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -150,19 +157,31 @@ export function NewViewTrigger({ boardId }: Props) {
       </button>
 
       <MorePortal anchorRef={btnRef} panelRef={panelRef} width={560} open={open} placement="below">
-        <ViewCreatePanel boardId={boardId} onClose={() => setOpen(false)} />
+        <ViewCreatePanel boardId={boardId} personalList={personalList} onClose={() => setOpen(false)} />
       </MorePortal>
     </>
   );
 }
 
-function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () => void }) {
+function ViewCreatePanel({
+  boardId,
+  personalList = false,
+  onClose,
+}: {
+  boardId: string;
+  personalList?: boolean;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const { toast } = useOsToast();
   const [query, setQuery] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [pinView, setPinView] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // A private view can't be a Space List's default (the route answers 409),
+  // so the pin is unavailable while Private is on; the Personal list is exempt.
+  const pinBlocked = isPrivate && !personalList;
+  const pinOnCreate = pinView && !pinBlocked;
 
   const filter = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -181,8 +200,9 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
           type: tile.type,
           ...(tile.config ? { config: tile.config } : {}),
           // ShareSpaceDialog-style semantics: isShared=true is public/shared.
-          // The popover toggle is named "Private view" → invert.
+          // The popover toggle is named "Private view", so it is inverted.
           isShared: !isPrivate,
+          ...(pinOnCreate ? { isDefault: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -190,7 +210,7 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
         toast(data?.error ?? "Could not create view");
         return;
       }
-      toast(`${tile.label} view added`);
+      toast(pinOnCreate ? `${tile.label} view added and pinned as the default view` : `${tile.label} view added`);
       onClose();
       router.refresh();
     } finally {
@@ -253,19 +273,26 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
           <input
             type="checkbox"
             checked={isPrivate}
-            onChange={(e) => setIsPrivate(e.target.checked)}
+            onChange={(e) => {
+              setIsPrivate(e.target.checked);
+              if (e.target.checked && !personalList) setPinView(false);
+            }}
             className="h-3.5 w-3.5 accent-[var(--os-brand)]"
           />
           Private view
         </label>
-        <label className="inline-flex cursor-pointer items-center gap-1.5">
+        <label
+          className={`inline-flex items-center gap-1.5 ${pinBlocked ? "cursor-not-allowed text-ink-4" : "cursor-pointer"}`}
+          title={pinBlocked ? "A private view can't be the List's default" : undefined}
+        >
           <input
             type="checkbox"
-            checked={pinView}
+            checked={pinOnCreate}
+            disabled={pinBlocked}
             onChange={(e) => setPinView(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[var(--os-brand)]"
+            className="h-3.5 w-3.5 accent-[var(--os-brand)] disabled:cursor-not-allowed"
           />
-          Pin view
+          Pin as default view
         </label>
       </div>
     </div>

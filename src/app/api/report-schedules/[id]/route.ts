@@ -5,15 +5,17 @@
 // Its creator or an org admin; anyone else gets a 404, which never confirms
 // the schedule exists. A PATCH is a compare-and-swap on updatedAt
 // (expectedUpdatedAt is required), so a stale recipient list can never re-add
-// someone who just removed themselves. The target never changes.
+// someone who just removed themselves. The target never changes. Recipients
+// are re-validated as on POST (reportRecipientProblems over recipientRows). A
+// Guest caller is answered 404 by requireWorkApp.
 
 import { NextResponse } from "next/server";
 import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
 import { requireWorkApp } from "@/lib/dashboards/dashboard-server";
-import { nextReportRunAt, parseRunLog, recipientProblems, runLogForViewer, validateSchedulePatch } from "@/lib/reports/schedule";
-import { viewerIsOrgAdmin } from "@/lib/list-links-server";
-import { canEditSchedule, readableTarget, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
+import { nextReportRunAt, parseRunLog, reportRecipientProblems, runLogForViewer, validateSchedulePatch } from "@/lib/reports/schedule";
+import { recipientRows, viewerIsOrgAdmin } from "@/lib/list-links-server";
+import { canEditSchedule, privateViewOwner, specOf, toScheduleDTOs, withReportTable } from "@/lib/reports/report-server";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
 
@@ -58,18 +60,42 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: v.error, ...(v.issues ? { issues: v.issues } : {}) }, { status: 400 });
     }
     if (v.patch.recipientUserIds) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: v.recipientUserIds } },
-        select: { id: true, organizationId: true, deletedAt: true, status: true },
-      });
-      if (recipientProblems(v.recipientUserIds, users, c.organizationId).length) {
+      // Eligible members only (this org, live, not INACTIVE, not a Guest), one
+      // answer that echoes no id.
+      const users = await recipientRows(v.recipientUserIds, c.organizationId);
+      if (reportRecipientProblems(v.recipientUserIds, users, c.organizationId).length) {
         return NextResponse.json({ error: "invalid_recipients" }, { status: 400 });
       }
     }
-    // The private-view rule holds on every edit, whoever the editor is.
-    const target = await readableTarget(row.targetKind, row.targetId, c);
-    if (target?.privateOwnerId && v.recipientUserIds.some((uid) => uid !== target.privateOwnerId)) {
-      return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+    // A private view goes to its owner only, whoever the editor is. The rule
+    // is checked against what this edit SENDS, never against a stored list
+    // the edit leaves alone: a view made private after it was scheduled to
+    // colleagues keeps them on the stored list, and refusing every edit over
+    // that left the owner unable to pause, retime or fix the schedule, with a
+    // Retry that could never succeed (the cron already skips the colleagues).
+    //   - Recipients in the body are the person's own list: refused, as on
+    //     POST, if it names anyone but the owner.
+    //   - Left out, on a schedule that will send: trimmed to the owner, and
+    //     the answer carries the trimmed list. Refused only when that leaves
+    //     nobody, because a schedule cannot run with no one to send to.
+    //   - Left out, on a paused schedule: untouched. Pausing always works.
+    //   Privacy comes from the view row, never from who is editing: an org
+    //   admin who cannot read the owner's private view is held to the same
+    //   rule, so no colleague is ever stored on it.
+    const privateOwner = await privateViewOwner(row.targetKind, row.targetId, c.organizationId);
+    let recipientUserIds = v.recipientUserIds;
+    if (privateOwner) {
+      const owner = privateOwner;
+      if (v.patch.recipientUserIds) {
+        if (recipientUserIds.some((uid) => uid !== owner)) {
+          return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+        }
+      } else if (v.active) {
+        recipientUserIds = recipientUserIds.filter((uid) => uid === owner);
+        if (recipientUserIds.length === 0) {
+          return NextResponse.json({ error: "private_view_recipients" }, { status: 400 });
+        }
+      }
     }
     const reactivated = v.active && !row.active;
     const nextRunAt = !v.active ? null : v.timingChanged || reactivated ? nextReportRunAt(v.spec, new Date()) : row.nextRunAt;
@@ -81,7 +107,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         monthDay: v.spec.monthDay,
         timeOfDay: v.spec.timeOfDay,
         timezone: v.spec.timezone,
-        recipientUserIds: v.recipientUserIds,
+        recipientUserIds,
         active: v.active,
         nextRunAt,
       },

@@ -1,12 +1,24 @@
 "use client";
 
 // MoveTargetDialog: pick where to move a List, a Folder or a Space.
-//   kind="board"  -> choose a Space (space-direct) or one of its Folders.
-//   kind="folder" -> choose a Space (root) or one of its Folders, minus the
-//                    folder itself and everything beneath it.
-//   kind="space"  -> choose a new parent Space, or "Top level".
-// The server re-validates the destination and rejects cycles, depth and
-// permission gaps, so the UI can stay simple.
+//   kind="board"  -> a Space's root or one of its Folders.
+//   kind="folder" -> a Space's root or one of its Folders (never itself or
+//                    anything beneath it).
+//   kind="space"  -> a new parent Space, or "Top level".
+//
+// WHAT IT OFFERS IS WHAT THE MOVE ACCEPTS (the placement rule, node-rules P5).
+// For every kind the places come from GET /api/move/destinations (a Space's
+// parents and its Top level from the same verdict spaces/[id]/move applies),
+// which asks the one move rule per place (Full access on the node and where it
+// is now, Can edit where it goes). So a Folder grantee sees their Folder under
+// the Space they only pass through, and no Space is listed where the move
+// would be refused. It used to list every Space in the org, and the Folders
+// of a Space only through a read of that Space, so the one legitimate
+// destination of a Folder grantee showed as "No folders".
+//
+// A REFUSAL KEEPS THE CHOICE (P6). The server still decides; when it refuses,
+// its one sentence is shown under the place that was picked and the dialog
+// stays open with that place marked, so the person can pick another.
 //
 // WHY IT PORTALS TO document.body. Every sidebar tree row wraps its "…" in a
 // `-translate-y-1/2` span, and a transform makes that span the containing block
@@ -14,36 +26,38 @@
 // itself out inside a 22x16 hover pill: the person clicked Move and nothing
 // appeared. A portal to the body is the fix, and it is what every Radix dialog
 // in the app already does.
-//
-// WHY A FOLDER IS NOT MOVED WITH THE SPACE FLAVOUR. It used to be: the trigger
-// mounted `kind={kind === "list" ? "board" : "space"}`, so a Folder took the
-// Space branch and POSTed `/api/spaces/<folderId>/move`, which looks the id up
-// in `prisma.space` and 404s every time. The Folder flavour posts to
-// `/api/folders/[id]/move`, the route written for it.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, Folder as FolderIcon, Hash, ArrowUpToLine, X } from "lucide-react";
 import { useOsToast } from "./toast";
 import { SkeletonLines } from "@/components/ui/skeleton";
 
-type Space = { id: string; name: string };
-type FolderT = { id: string; name: string; parentFolderId?: string | null };
-
 export type MoveKind = "board" | "folder" | "space";
 
-/** The folder itself plus every folder beneath it, never a valid destination. */
-function subtreeOf(folders: FolderT[], rootId: string): Set<string> {
-  const out = new Set<string>([rootId]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const f of folders) {
-      if (f.parentFolderId && out.has(f.parentFolderId) && !out.has(f.id)) {
-        out.add(f.id);
-        grew = true;
-      }
+type DestFolder = { id: string; name: string; parentFolderId: string | null; pickable: boolean; current: boolean };
+type DestSpace = { id: string; name: string; pickable: boolean; current: boolean; folders: DestFolder[] };
+/** GET /api/move/destinations: the move shape, and for a Space its Top level choice. */
+type DestReply = {
+  spaces?: Array<Omit<DestSpace, "folders"> & { folders?: DestFolder[] }>;
+  top?: { pickable: boolean; current: boolean };
+  refusal?: string;
+};
+
+/** Depth of each listed Folder under its Space, for the indent. */
+function depthsOf(folders: DestFolder[]): Map<string, number> {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const out = new Map<string, number>();
+  for (const f of folders) {
+    let d = 0;
+    let cursor = f.parentFolderId;
+    const seen = new Set<string>([f.id]);
+    while (cursor && byId.has(cursor) && !seen.has(cursor) && d < 16) {
+      seen.add(cursor);
+      d += 1;
+      cursor = byId.get(cursor)?.parentFolderId ?? null;
     }
+    out.set(f.id, d);
   }
   return out;
 }
@@ -62,21 +76,38 @@ export function MoveTargetDialog({
   onMoved?: () => void;
 }) {
   const { toast } = useOsToast();
-  const [spaces, setSpaces] = useState<Space[] | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [folders, setFolders] = useState<Record<string, FolderT[] | "loading">>({});
+  const [spaces, setSpaces] = useState<DestSpace[] | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [refusal, setRefusal] = useState<{ key: string; message: string } | null>(null);
+  // A Space's Top level choice (null for every other kind), and why nothing can be picked when the node cannot move anywhere.
+  const [top, setTop] = useState<{ pickable: boolean; current: boolean } | null>(null);
+  const [nowhere, setNowhere] = useState<string | null>(null);
   const busyRef = useRef(false);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    fetch("/api/spaces", { cache: "no-store" })
+    let alive = true;
+    // Every kind asks the one endpoint the move routes answer to. A Space's
+    // parents come from the same verdict spaces/[id]/move applies (Full
+    // access on the Space, on the parent it leaves and on the one it goes
+    // under): the dialog used to build them here from every Space the viewer
+    // manages plus an always-present Top level, and each pick was refused.
+    const destKind = kind === "board" ? "list" : kind;
+    fetch(`/api/move/destinations?kind=${destKind}&id=${encodeURIComponent(entityId)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setSpaces(Array.isArray(d?.spaces) ? d.spaces : []))
-      .catch(() => setSpaces([]));
-  }, []);
+      .then((d: DestReply | null) => {
+        if (!alive) return;
+        const rows = Array.isArray(d?.spaces) ? d.spaces : [];
+        setSpaces(rows.map((s) => ({ ...s, folders: Array.isArray(s.folders) ? s.folders : [] })));
+        setTop(kind === "space" && d?.top ? d.top : null);
+        setNowhere(typeof d?.refusal === "string" && d.refusal ? d.refusal : null);
+      })
+      .catch(() => { if (alive) { setSpaces([]); setTop(null); } });
+    return () => { alive = false; };
+  }, [kind, entityId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -84,31 +115,11 @@ export function MoveTargetDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const loadFolders = useCallback(async (spaceId: string) => {
-    setFolders((prev) => (prev[spaceId] ? prev : { ...prev, [spaceId]: "loading" }));
-    try {
-      const r = await fetch(`/api/folders?spaceId=${spaceId}`, { cache: "no-store" });
-      const d = r.ok ? await r.json() : null;
-      setFolders((prev) => ({ ...prev, [spaceId]: Array.isArray(d?.folders) ? d.folders : [] }));
-    } catch {
-      setFolders((prev) => ({ ...prev, [spaceId]: [] }));
-    }
-  }, []);
-
-  const showsFolders = kind === "board" || kind === "folder";
-
-  const toggleExpand = (spaceId: string) => {
-    setExpanded((cur) => {
-      const next = cur === spaceId ? null : spaceId;
-      if (next && !folders[spaceId]) void loadFolders(spaceId);
-      return next;
-    });
-  };
-
-  const doMove = useCallback(async (url: string, body: Record<string, unknown>) => {
+  const doMove = useCallback(async (key: string, url: string, body: Record<string, unknown>) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    setRefusal(null);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -116,7 +127,14 @@ export function MoveTargetDialog({
         body: JSON.stringify(body),
       });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) { toast(d?.error ?? "Couldn't move it"); return; }
+      if (!res.ok) {
+        // The one sentence the server names what is needed with; the
+        // dialog stays open with the place still marked.
+        const message = typeof d?.error === "string" && d.error ? d.error : "Couldn't move it there.";
+        setRefusal({ key, message });
+        toast(message);
+        return;
+      }
       toast(`Moved “${entityName}”`);
       onMoved?.();
       onClose();
@@ -126,31 +144,36 @@ export function MoveTargetDialog({
     }
   }, [entityName, onMoved, onClose, toast]);
 
-  const moveBoard = (spaceId: string, folderId: string | null) =>
-    void doMove(`/api/boards/${entityId}/move`, { spaceId, folderId });
-  const moveFolder = (spaceId: string, parentFolderId: string | null) =>
-    void doMove(`/api/folders/${entityId}/move`, { spaceId, parentFolderId });
-  const moveSpace = (parentSpaceId: string | null) =>
-    void doMove(`/api/spaces/${entityId}/move`, { parentSpaceId });
-
   const pickSpace = (spaceId: string) => {
-    if (kind === "board") return moveBoard(spaceId, null);
-    if (kind === "folder") return moveFolder(spaceId, null);
-    return moveSpace(spaceId);
+    const key = `space:${spaceId}`;
+    if (kind === "board") return void doMove(key, `/api/boards/${entityId}/move`, { spaceId, folderId: null });
+    if (kind === "folder") return void doMove(key, `/api/folders/${entityId}/move`, { spaceId, parentFolderId: null });
+    return void doMove(key, `/api/spaces/${entityId}/move`, { parentSpaceId: spaceId });
   };
-  const pickFolder = (spaceId: string, folderId: string) =>
-    kind === "board" ? moveBoard(spaceId, folderId) : moveFolder(spaceId, folderId);
+  const pickFolder = (spaceId: string, folderId: string) => {
+    const key = `folder:${folderId}`;
+    if (kind === "board") return void doMove(key, `/api/boards/${entityId}/move`, { spaceId, folderId });
+    return void doMove(key, `/api/folders/${entityId}/move`, { parentFolderId: folderId });
+  };
 
-  // A Space is never a destination for itself; a Folder is never a destination
-  // for itself or for anything on its own branch.
-  const excludedFolders = useMemo(() => {
-    if (kind !== "folder") return new Set<string>();
-    const all = Object.values(folders).flatMap((f) => (f === "loading" ? [] : f));
-    return subtreeOf(all, entityId);
-  }, [folders, kind, entityId]);
+  const nothingPickable = spaces !== null
+    && !top?.pickable
+    && !spaces.some((s) => s.pickable || s.folders.some((f) => f.pickable));
+
+  const toggle = (spaceId: string) =>
+    setCollapsed((cur) => {
+      const next = new Set(cur);
+      if (next.has(spaceId)) next.delete(spaceId); else next.add(spaceId);
+      return next;
+    });
 
   const rowBtn =
     "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-base text-ink hover:bg-hover disabled:opacity-50";
+  const rowLabel = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-base text-ink-3";
+  const marked = "bg-selected";
+
+  const refusalLine = (key: string) =>
+    refusal?.key === key ? <p role="alert" className="ms-8 me-2 mb-1 text-sm text-danger-text">{refusal.message}</p> : null;
 
   const body = (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -174,60 +197,90 @@ export function MoveTargetDialog({
             <SkeletonLines lines={4} className="px-2" />
           ) : (
             <>
-              {kind === "space" ? (
-                <button type="button" className={rowBtn} disabled={busy} onClick={() => moveSpace(null)}>
-                  <ArrowUpToLine className="h-4 w-4 shrink-0 text-ink-3" />
-                  <span className="font-medium">Top level</span>
-                </button>
+              {kind === "space" && top?.pickable ? (
+                <>
+                  <button type="button" className={`${rowBtn} ${refusal?.key === "top" ? marked : ""}`} disabled={busy} onClick={() => void doMove("top", `/api/spaces/${entityId}/move`, { parentSpaceId: null })}>
+                    <ArrowUpToLine className="h-4 w-4 shrink-0 text-ink-3" />
+                    <span className="font-medium">Top level</span>
+                  </button>
+                  {refusalLine("top")}
+                </>
+              ) : kind === "space" && top?.current ? (
+                <div className={rowLabel}>
+                  <ArrowUpToLine className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 font-medium">Top level</span>
+                  <span className="shrink-0 text-xs">Here now</span>
+                </div>
               ) : null}
 
-              {spaces.filter((s) => !(kind === "space" && s.id === entityId)).map((s) => (
-                <div key={s.id}>
-                  <div className="flex items-center">
-                    {showsFolders ? (
-                      <button
-                        type="button"
-                        aria-label={expanded === s.id ? "Collapse" : "Expand folders"}
-                        className="shrink-0 rounded p-1 text-ink-3 hover:bg-hover hover:text-ink"
-                        onClick={() => toggleExpand(s.id)}
-                      >
-                        {expanded === s.id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className={rowBtn}
-                      disabled={busy}
-                      onClick={() => pickSpace(s.id)}
-                    >
-                      <Hash className="h-4 w-4 shrink-0 text-ink-3" />
-                      <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                    </button>
-                  </div>
-
-                  {showsFolders && expanded === s.id ? (
-                    <div className="ms-6 border-s border-line-soft ps-1">
-                      {folders[s.id] === "loading" ? (
-                        <SkeletonLines lines={2} className="px-2" />
-                      ) : (() => {
-                        const list = (folders[s.id] as FolderT[]).filter((f) => !excludedFolders.has(f.id));
-                        if (list.length === 0) {
-                          return <div className="px-2 py-1.5 text-xs text-ink-3">No folders</div>;
-                        }
-                        return list.map((f) => (
-                          <button key={f.id} type="button" className={rowBtn} disabled={busy} onClick={() => pickFolder(s.id, f.id)}>
-                            <FolderIcon className="h-4 w-4 shrink-0 text-ink-3" />
-                            <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                          </button>
-                        ));
-                      })()}
+              {spaces.map((s) => {
+                const open = !collapsed.has(s.id);
+                const depths = depthsOf(s.folders);
+                const spaceKey = `space:${s.id}`;
+                return (
+                  <div key={s.id}>
+                    <div className="flex items-center">
+                      {s.folders.length > 0 ? (
+                        <button
+                          type="button"
+                          aria-label={open ? "Collapse" : "Expand folders"}
+                          aria-expanded={open}
+                          className="shrink-0 rounded p-1 text-ink-3 hover:bg-hover hover:text-ink"
+                          onClick={() => toggle(s.id)}
+                        >
+                          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
+                        </button>
+                      ) : <span className="w-[22px] shrink-0" aria-hidden />}
+                      {s.pickable ? (
+                        <button type="button" className={`${rowBtn} ${refusal?.key === spaceKey ? marked : ""}`} disabled={busy} onClick={() => pickSpace(s.id)}>
+                          <Hash className="h-4 w-4 shrink-0 text-ink-3" />
+                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                        </button>
+                      ) : (
+                        <div className={rowLabel}>
+                          <Hash className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                          {s.current ? <span className="shrink-0 text-xs">Here now</span> : null}
+                        </div>
+                      )}
                     </div>
-                  ) : null}
-                </div>
-              ))}
+                    {refusalLine(spaceKey)}
 
-              {spaces.length === 0 ? (
-                <div className="px-2 py-6 text-sm text-ink-3">No Spaces available.</div>
+                    {open && s.folders.length > 0 ? (
+                      <div className="ms-6 border-s border-line-soft ps-1">
+                        {s.folders.map((f) => {
+                          const indent = { paddingInlineStart: `${(depths.get(f.id) ?? 0) * 12}px` };
+                          const folderKey = `folder:${f.id}`;
+                          return (
+                            <div key={f.id} style={indent}>
+                              {f.pickable ? (
+                                <button type="button" className={`${rowBtn} ${refusal?.key === folderKey ? marked : ""}`} disabled={busy} onClick={() => pickFolder(s.id, f.id)}>
+                                  <FolderIcon className="h-4 w-4 shrink-0 text-ink-3" />
+                                  <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                                </button>
+                              ) : (
+                                <div className={rowLabel}>
+                                  <FolderIcon className="h-4 w-4 shrink-0" />
+                                  <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                                  {f.current ? <span className="shrink-0 text-xs">Here now</span> : null}
+                                </div>
+                              )}
+                              {refusalLine(folderKey)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              {nothingPickable ? (
+                <div className="px-2 py-6 text-sm text-ink-3">
+                  {nowhere ?? (kind === "space"
+                    ? "There is nowhere you can move this Space. Moving it needs Full access on it, on the Space it sits in now and on the Space it goes into."
+                    : "There is nowhere you can move this. Moving needs Full access where it is now and Can edit where it goes.")}
+                </div>
               ) : null}
             </>
           )}

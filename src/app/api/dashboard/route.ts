@@ -2,6 +2,21 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
+import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
+import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
+
+/**
+ * The home feed's recent activity: never a record of who was given access
+ * to what (those rows are for the audit surfaces), and never a row about a
+ * Space, Folder, List, doc, table, canvas or form the viewer cannot open (its
+ * description names the thing). Rows about anything else pass as before.
+ */
+async function readableRecentActivity<T extends { targetType: string | null; targetId: string | null }>(rows: T[], take: number): Promise<T[]> {
+  const ctx = await nodeCtxFromSession().catch(() => null);
+  if (!ctx) return [];
+  const flags = await activityTargetsReadable(ctx, rows).catch(() => rows.map(() => false));
+  return rows.filter((_, i) => flags[i] !== false).slice(0, take);
+}
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -45,11 +60,12 @@ export async function GET() {
       _sum: { stepsTotal: true, stepsCompleted: true },
     }),
     prisma.user.count({ where: { organizationId: orgId, status: "PIP", deletedAt: null } }),
+    // Over-fetched, then narrowed to what this viewer may read (below).
     prisma.activityLog.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
       include: { actor: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
       orderBy: { createdAt: "desc" },
-      take: 8,
+      take: 40,
     }),
     prisma.kudos.findMany({
       where: { organizationId: orgId },
@@ -169,7 +185,7 @@ export async function GET() {
     })),
     departmentPerformance: deptPerformance,
     alerts,
-    recentActivity: recentActivity.map((a) => ({
+    recentActivity: (await readableRecentActivity(recentActivity, 8)).map((a) => ({
       id: a.id, type: a.type, description: a.description, actor: a.actor,
       createdAt: a.createdAt.toISOString(),
     })),

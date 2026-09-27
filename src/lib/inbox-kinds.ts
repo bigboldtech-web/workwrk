@@ -92,7 +92,10 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   action_item: k("action_item", "Action item from a meeting", "ListChecks", "primary", "tasks"),
   boundary_request: k("boundary_request", "Needs your approval", "ShieldCheck", "primary", "requests"),
   access_request: k("access_request", "Access request", "KeyRound", "primary", "requests"),
-  access_granted: k("access_granted", "Access granted", "KeyRound", "primary", "requests"),
+  // Written by src/lib/access/grants.ts when someone gives you a role on a
+  // Space, Folder, List, doc, table, canvas or form, or raises yours (never
+  // for a downgrade, a removal or a change you made yourself).
+  access_granted: k("access_granted", "Shared with you", "UserPlus", "primary", "requests"),
   access_expiring: k("access_expiring", "Access expiring", "KeyRound", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),

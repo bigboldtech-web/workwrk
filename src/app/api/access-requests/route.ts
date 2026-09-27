@@ -11,6 +11,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
+import { addressHref } from "@/lib/nav/object-href";
 
 const bodySchema = z.object({
   objectType: z.string().min(1).max(40),
@@ -62,7 +63,7 @@ async function targetFor(type: string, id: string, organizationId: string): Prom
     }
     if (model === "sop") {
       const s = await prisma.sOP.findFirst({ where, select: { createdById: true } });
-      return { ownerId: s?.createdById ?? null, link: s ? `/sops/${id}` : null };
+      return { ownerId: s?.createdById ?? null, link: s ? addressHref("sop", id, { scope: "work" }) : null };
     }
     if (model === "sop_folder") {
       const f = await prisma.sOPFolder.findFirst({ where, select: { id: true } });

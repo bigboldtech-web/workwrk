@@ -195,6 +195,12 @@ const CS_STATUSES: StatusDef[] = [
 
 interface PresetWorkflow {
   views: ViewKey[];
+  /**
+   * The wizard's "Default" marker, display only: nothing reads it to seed a
+   * List's views. Every List opens on Board (src/lib/work/default-view.ts),
+   * so every preset marks BOARD, and BOARD is switched on wherever it is
+   * marked, so the marker never sits on a view the Space turned off.
+   */
   defaultView: ViewKey;
   statuses: StatusDef[];
   modules: ModuleKey[];
@@ -203,13 +209,13 @@ interface PresetWorkflow {
 const PRESET_WORKFLOWS: Record<PresetId, PresetWorkflow> = {
   starter: {
     views: ["LIST", "BOARD"],
-    defaultView: "LIST",
+    defaultView: "BOARD",
     statuses: STARTER_STATUSES,
     modules: ["KRA", "KPI", "SOP", "NOTES", "WHITEBOARDS", "PRIORITY", "TAGS"],
   },
   "people-hr": {
     views: ["LIST", "BOARD"],
-    defaultView: "LIST",
+    defaultView: "BOARD",
     statuses: HR_STATUSES,
     modules: ["KRA", "KPI", "SOP", "REVIEWS", "KUDOS", "CANDOR", "NOTES", "WHITEBOARDS"],
   },
@@ -226,8 +232,8 @@ const PRESET_WORKFLOWS: Record<PresetId, PresetWorkflow> = {
     modules: ["KRA", "KPI", "TAGS", "TIME_ESTIMATES", "CUSTOM_FIELDS", "NOTES", "WHITEBOARDS", "CALENDAR_VIEW"],
   },
   operations: {
-    views: ["LIST", "GANTT", "TIMELINE"],
-    defaultView: "LIST",
+    views: ["BOARD", "LIST", "GANTT", "TIMELINE"],
+    defaultView: "BOARD",
     statuses: OPS_STATUSES,
     modules: ["KRA", "KPI", "SOP", "PRIORITY", "DEPENDENCIES", "TIME_TRACKING", "NOTES", "WHITEBOARDS"],
   },
@@ -261,7 +267,7 @@ const PRESET_WORKFLOWS: Record<PresetId, PresetWorkflow> = {
   // SOPs script handoff + escalation playbooks.
   "customer-success": {
     views: ["LIST", "BOARD", "CALENDAR"],
-    defaultView: "LIST",
+    defaultView: "BOARD",
     statuses: CS_STATUSES,
     modules: [
       "KRA", "KPI", "SOP", "NOTES",

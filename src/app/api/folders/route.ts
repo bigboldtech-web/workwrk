@@ -1,12 +1,19 @@
-// GET  /api/folders?spaceId=... — list folders in a Space (flat).
-// POST /api/folders — create a folder. Must have edit access on the Space.
+// GET  /api/folders?spaceId=...: list folders in a Space (flat), only the
+//      ones the viewer can open (the one resolver, one world for the list).
+// POST /api/folders: create a folder. The placement rule (node-rules P1, P3):
+//      Can edit or higher on the parent Folder, or on the Space at its root
+//      (a Folder grant never reads the Space); the Space is the parent's, and
+//      a parent in another Space, another org or Trash is refused.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createFolder, listFoldersInSpace } from "@/lib/folder";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { getSpaceForReader } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -31,7 +38,11 @@ export async function GET(req: Request) {
   if (!space || space.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const folders = await listFoldersInSpace(spaceId, { includeArchived });
+  const all = await listFoldersInSpace(spaceId, { includeArchived });
+  // One world for every row: a PRIVATE folder the viewer cannot open is never
+  // listed, named or counted here, exactly as the tree prunes it.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), "folder", all.map((f) => f.id));
+  const folders = all.filter((f) => roleAtLeast(roles.get(f.id) ?? "none", "VIEW"));
   return NextResponse.json({ folders });
 }
 
@@ -53,17 +64,20 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
-  const space = await getSpaceForReader(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!space || space.organizationId !== c.organizationId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const canEdit = await canEditSpace(parsed.data.spaceId, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Where it lands (P3: the parent Folder settles the Space) and whether the
+  // viewer may make a Folder there (P1: Can edit or higher, or, in a Folder
+  // under the legacy Private rule, today's canEditSpace on its Space, P7).
+  const placed = await resolveCreate(
+    nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel),
+    { spaceId: parsed.data.spaceId, folderId: parsed.data.parentFolderId ?? null },
+    "folder",
+  );
+  if (!placed.ok) return NextResponse.json({ error: placed.error }, { status: placed.status });
   try {
     const folder = await createFolder({
       organizationId: c.organizationId,
-      spaceId: parsed.data.spaceId,
-      parentFolderId: parsed.data.parentFolderId ?? undefined,
+      spaceId: placed.spaceId as string,
+      parentFolderId: placed.folderId ?? undefined,
       name: parsed.data.name,
       description: parsed.data.description,
       icon: parsed.data.icon,

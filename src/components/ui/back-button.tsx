@@ -21,6 +21,14 @@ interface BackButtonProps {
   fallbackHref: string;
   /** The parent's name ("Docs", "SOPs", "Job titles"). Icon-only when omitted. */
   label?: string;
+  /**
+   * Below md the label goes to the screen reader only and the arrow stays.
+   * The page header asks for this: on a 390px phone the label ("Dashboards",
+   * about 80px) was the widest fixed item in the title row and left the page
+   * name about 55px, so it read "W...". The aria-label and title still say
+   * "Back to <label>", so nothing is lost for a screen reader.
+   */
+  compactOnPhone?: boolean;
   className?: string;
 }
 
@@ -40,7 +48,7 @@ export function goBackOr(
   else router.replace(fallbackHref);
 }
 
-export function BackButton({ fallbackHref, label, className }: BackButtonProps) {
+export function BackButton({ fallbackHref, label, compactOnPhone, className }: BackButtonProps) {
   const router = useRouter();
   // A button, not a link, so no page's anchor-click leave guard sees it: it
   // asks the dirty registry itself. confirmLeave answers true at once when
@@ -65,7 +73,7 @@ export function BackButton({ fallbackHref, label, className }: BackButtonProps) 
       )}
     >
       <ArrowLeft className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
-      {label ? <span className="truncate">{label}</span> : null}
+      {label ? <span className={cn("truncate", compactOnPhone && "max-md:sr-only")}>{label}</span> : null}
     </button>
   );
 }

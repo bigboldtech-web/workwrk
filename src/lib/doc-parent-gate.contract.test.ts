@@ -1,9 +1,10 @@
 // A contract over the SOURCE of GET /api/docs/[id], because the route needs a
 // database the unit suite does not have. It pins one promise: the parent page
-// the response names (its crumb and Back link) is read through the SAME two
-// gates as the doc itself. A sub-page carries no anchor of its own, so it can
-// be readable while its parent is not, and the parent's title used to ride
-// back to a viewer whose own GET of that parent answers 404.
+// the response names (its crumb and Back link) is read through the SAME gate
+// as the doc itself, docAccess (the one node-access resolver). A sub-page
+// follows its parent (A6) but can carry a grant of its own, so it can be
+// readable while its parent is not, and the parent's title used to ride back
+// to a viewer whose own GET of that parent answers 404.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -26,11 +27,12 @@ function body(name: string): string {
 }
 
 describe("GET /api/docs/[id] names a parent page", () => {
-  it("only through the parent's own read gates", () => {
+  it("only through the parent's own read gate", () => {
     const fn = body("readableParent");
     expect(fn).toMatch(/organizationId:\s*ctx\.orgId/);
-    expect(fn).toMatch(/docAccessible\(p,/);
-    expect(fn).toMatch(/requireDocRole\(ctx,\s*\{\s*id:\s*p\.id,\s*createdById:\s*p\.createdById\s*\}\)/);
+    expect(fn).toMatch(/docAccess\(nodeCtxFromLevel\(ctx\.userId,\s*ctx\.orgId,\s*ctx\.accessLevel\),\s*p\.id\)/);
+    // The doc's own GET reads through the same gate.
+    expect(ROUTE).toMatch(/const access = await docAccess\(nodeCtxFromLevel\(ctx\.userId, ctx\.orgId, ctx\.accessLevel\), doc\.id\)/);
   });
 
   it("and the response's parent comes from that gate, never a bare lookup", () => {

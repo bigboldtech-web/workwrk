@@ -89,11 +89,15 @@ export async function GET(req: NextRequest) {
   if (containerKind && containerId) {
     const contents = await containerContents(ctx.orgId, containerKind, containerId);
     if (!contents) return NextResponse.json({ error: "That place is not in this workspace" }, { status: 404 });
-    // The name is shown only when the viewer can read the container.
+    // A container the viewer cannot open answers exactly as a missing one
+    // (node access: an unseen place is a 404, never a filter that reveals
+    // which workflows reach inside it).
     const own = readScope({ scope: { [`${containerKind}Ids`]: [containerId] } });
     const namer = await scopeNamer(ctx.viewer, ctx.orgId, [own]);
+    const name = namer(own).names[0] ?? null;
+    if (!name) return NextResponse.json({ error: "That place is not in this workspace" }, { status: 404 });
     container = { kind: containerKind, id: containerId, listIds: contents.listIds, folderIds: contents.folderIds };
-    containerOut = { kind: containerKind, id: containerId, name: namer(own).names[0] ?? null };
+    containerOut = { kind: containerKind, id: containerId, name };
   }
 
   const rows = await prisma.automationWorkflow.findMany({

@@ -1,9 +1,9 @@
 // The record a run happened to, resolved for ONE viewer (spec-ai-automation
 // /automation/logs, the Record column). A task shows its title and links to
-// it only when the viewer can open its List; otherwise the cell reads "Not
-// available" and the run drawer hides the payloads, so the Logs page cannot
-// be used to read a task in a List the viewer has no access to. An Owner or
-// Admin sees every record.
+// it only when the viewer can open it (its List through node access, or it
+// is theirs); otherwise the cell reads "Not available" and the run drawer
+// hides the payloads, so the Logs page cannot be used to read a task in a
+// List the viewer has no access to. An Owner or Admin sees every record.
 //
 // The payloads of every OTHER kind of run are people's data (a KPI reading
 // carries a userId, an actual, a target and a score; a review its outcome),
@@ -15,7 +15,8 @@
 // carry nothing to hide.
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access/index";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import type { Viewer } from "@/lib/access/types";
 import { recordHref } from "./run-query";
 
@@ -47,14 +48,21 @@ export async function resolveRunRecords(
 ): Promise<RecordResolver> {
   const taskIds = [...new Set(runs.filter((r) => r.recordType === "task" && r.recordId).map((r) => r.recordId as string))];
   const tasks = taskIds.length
-    ? await prisma.item.findMany({ where: { id: { in: taskIds }, organizationId: orgId }, select: { id: true, title: true, boardId: true } })
+    ? await prisma.item.findMany({ where: { id: { in: taskIds }, organizationId: orgId }, select: { id: true, title: true, boardId: true, ownerId: true, assigneeIds: true } })
     : [];
-  const readableLists = !isAdmin && tasks.length ? (await accessibleIds(viewer, "list", "VIEW")).readable : null;
+  // The one node resolver, over ONE world for every List the page names.
+  const listRoles = !isAdmin && tasks.length
+    ? await nodeRoleMap(nodeCtxFromViewer(viewer), "list", tasks.map((t) => t.boardId))
+    : null;
   const taskById = new Map(tasks.map((t) => [t.id, t]));
+  // A reader of the task's List, or the person it is owned by or assigned
+  // to: the same people the task page opens for.
   const readable = (id: string) => {
     const t = taskById.get(id);
     if (!t) return false;
-    return isAdmin || Boolean(readableLists?.has(t.boardId));
+    if (isAdmin) return true;
+    if (t.ownerId === viewer.userId || t.assigneeIds.includes(viewer.userId)) return true;
+    return roleAtLeast(listRoles?.get(t.boardId) ?? "none", "VIEW");
   };
   return {
     record(type, id) {

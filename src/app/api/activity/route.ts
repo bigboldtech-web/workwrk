@@ -27,8 +27,8 @@ import { parsePaginationParams, skipTake } from "@/lib/pagination";
 import { loadOrgFacts } from "@/lib/access/facts";
 import { getTeamUserIds } from "@/lib/team";
 import { parseActivityScope, scopeAllowed, viewerScopeFacts } from "@/lib/activity-scope";
-import { accessibleIds } from "@/lib/access/ids";
-import { normaliseTargetType } from "@/lib/activity-targets";
+import { activityTargets, nodeCtxFromViewer } from "@/lib/access/node-access";
+import type { Viewer } from "@/lib/access/types";
 import type { Prisma } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -99,9 +99,10 @@ export async function GET(req: NextRequest) {
     // documented it as the reason a chip can be plain text ("a link that 404s
     // is worse"), and the page called it with two arguments, so the flag was
     // always true and the guard never ran. The client cannot answer the
-    // question; the server can, for the container types `accessibleIds` knows.
-    // A type it does not know stays readable, which is the behaviour the page
-    // had before, so nothing that used to link stops linking.
+    // question; the server can, for every node the one access resolver knows
+    // (Spaces, Folders, Lists, docs, tables, canvases, forms). A type it does
+    // not know stays readable, which is the behaviour the page had before, so
+    // nothing that used to link stops linking.
     const data = await withReadability(viewer, activities);
 
     return jsonSuccess({
@@ -122,32 +123,29 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * Per-row `targetReadable`, for the container types the access engine answers
- * for. Every other type is left readable: this narrows links that would 404,
- * it is not a second access gate.
+ * Per-row `targetReadable`, for every node target the one resolver answers
+ * for, over ONE world for the whole page of rows. Every other type is left
+ * readable: this narrows links that would 404, it is not a second access
+ * gate.
+ *
+ * And per-row `targetName`: the node's name as it is now, for a node the
+ * viewer can open, null otherwise. The access rows (access.granted and the
+ * rest) are name-free by design, since the Everyone feed is read by people
+ * who may not open the node, so without this a row read "VerifyAdmin Bot
+ * granted" with no chip and no link. The name is resolved here, per viewer,
+ * and never stored. `targetHref` is the node's page for the same readers:
+ * a Space chip had no link at all, because its address takes a slug.
  */
 async function withReadability<T extends { targetType: string | null; targetId: string | null }>(
-  viewer: Parameters<typeof accessibleIds>[0],
+  viewer: Viewer,
   rows: T[],
-): Promise<Array<T & { targetReadable: boolean }>> {
-  const KNOWN = { list: "list", board: "list", folder: "folder", space: "space" } as const;
-  const wanted = new Set<"list" | "folder" | "space">();
-  for (const r of rows) {
-    const key = KNOWN[normaliseTargetType(r.targetType) as keyof typeof KNOWN];
-    if (key) wanted.add(key);
-  }
-  if (wanted.size === 0) return rows.map((r) => ({ ...r, targetReadable: true }));
-  const sets = new Map<string, Set<string>>();
-  await Promise.all(
-    [...wanted].map(async (type) => {
-      const ids = await accessibleIds(viewer, type, "VIEW").catch(() => null);
-      // A set we could not compute must not turn every chip into plain text.
-      if (ids) sets.set(type, new Set(ids.readable));
-    }),
-  );
-  return rows.map((r) => {
-    const key = KNOWN[normaliseTargetType(r.targetType) as keyof typeof KNOWN];
-    const set = key ? sets.get(key) : undefined;
-    return { ...r, targetReadable: !set || !r.targetId || set.has(r.targetId) };
-  });
+): Promise<Array<T & { targetReadable: boolean; targetName: string | null; targetHref: string | null }>> {
+  // An answer we could not compute must not turn every chip into plain text.
+  const targets = await activityTargets(nodeCtxFromViewer(viewer), rows).catch(() => rows.map(() => ({ readable: null, name: null, href: null })));
+  return rows.map((r, i) => ({
+    ...r,
+    targetReadable: targets[i]?.readable ?? true,
+    targetName: targets[i]?.name ?? null,
+    targetHref: targets[i]?.href ?? null,
+  }));
 }

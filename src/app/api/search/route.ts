@@ -1,12 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
-import { docAccessible } from "@/lib/doc-access";
-import { visibleSpaceIds, isOrgAdminAccessLevel } from "@/lib/space";
-import { accessibleFolderIds } from "@/lib/folder";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { isOrgAdminAccessLevel } from "@/lib/space";
 import { isModuleActive } from "@/lib/entitlements";
-import { viewerFromSession } from "@/lib/access/viewer";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
+import { addressHref } from "@/lib/nav/object-href";
 import { getUserTagIds } from "@/lib/user-tags";
 import { announcementInFeed } from "@/lib/announcement-view";
 import {
@@ -22,8 +21,14 @@ import {
  *
  * Scope policy:
  *   · Every query is org-scoped (no cross-tenant leaks).
- *   · Space / Board visibility is enforced so private work never bleeds
- *     into another viewer's palette (admins see everything).
+ *   · Every Space, Folder, List, task, doc, canvas, table and form is gated
+ *     through ONE node-access world (src/lib/access/node-access.ts), the
+ *     same answer each object's own page gives: a task by its List's role or
+ *     by being assigned to it, everything else by its own role. Nothing the
+ *     viewer cannot open is ever named here (admins see everything).
+ *   · Doc, canvas, table, form and SOP results link the Work door
+ *     (/work/<kind>/<id>), which places each one under the viewer's own
+ *     access (its Space when they can see its path).
  *   · Per-kind cap so a long-prefix query that matches 200 items and 0
  *     boards still feels instant. Defaults to 5 per kind.
  *   · Empty / too-short queries return an empty array (cheap).
@@ -64,14 +69,8 @@ export async function GET(req: NextRequest) {
   // searched, like every /api/tables* route. Forms are CORE (founder decision
   // D15: forms-gate.tsx and /api/forms* carry no module check), so they are
   // searched whether the module is on or off. A Guest finds only the forms
-  // they made, the one set the forms list gives them while the access engine
-  // is inert (api/forms GET), and only the unscoped tables they made
-  // (lib/table-visibility).
-  const [tablesOn, searchViewer] = await Promise.all([
-    isModuleActive(orgId, "workwrk-tables").catch(() => false),
-    viewerFromSession().catch(() => null),
-  ]);
-  const formScope = searchViewer?.orgRole === "GUEST" ? { createdById: me } : {};
+  // and tables they made or were given: the resolver's answer below.
+  const tablesOn = await isModuleActive(orgId, "workwrk-tables").catch(() => false);
 
   const [
     users,
@@ -104,36 +103,32 @@ export async function GET(req: NextRequest) {
     prisma.item.findMany({
       where: { organizationId: orgId, archivedAt: null, title: ci },
       select: {
-        id: true, title: true, status: true, dueAt: true,
-        board: { select: { id: true, slug: true, name: true, spaceId: true, folderId: true, visibility: true, ownerId: true } },
+        id: true, title: true, status: true, dueAt: true, boardId: true, ownerId: true, assigneeIds: true,
       },
       orderBy: { updatedAt: "desc" },
       take: take * 4,
     }),
     prisma.board.findMany({
       where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
-      select: { id: true, slug: true, name: true, spaceId: true, folderId: true, visibility: true, ownerId: true },
+      select: { id: true, slug: true, name: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
     prisma.space.findMany({
       where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
-      select: { id: true, slug: true, name: true, visibility: true },
+      select: { id: true, slug: true, name: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
     prisma.folder.findMany({
       where: { organizationId: orgId, archivedAt: null, name: ci },
-      select: {
-        id: true, name: true, spaceId: true, visibility: true, ownerId: true,
-        space: { select: { slug: true, visibility: true } },
-      },
+      select: { id: true, name: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
     prisma.whiteboard.findMany({
       where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
-      select: { id: true, name: true, spaceId: true },
+      select: { id: true, name: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
@@ -145,10 +140,7 @@ export async function GET(req: NextRequest) {
         archivedAt: null,
         OR: [{ title: ci }, { excerpt: ci }],
       },
-      select: {
-        id: true, title: true, excerpt: true, content: true,
-        entityType: true, entityId: true, updatedAt: true,
-      },
+      select: { id: true, title: true, excerpt: true, content: true, updatedAt: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
@@ -201,32 +193,35 @@ export async function GET(req: NextRequest) {
     tablesOn
       ? prisma.dataTable.findMany({
           where: { organizationId: orgId, OR: [{ name: ci }, { description: ci }] },
-          select: { id: true, name: true, spaceId: true, createdById: true },
+          select: { id: true, name: true },
           orderBy: { updatedAt: "desc" },
           take: take * 3,
         })
-      : Promise.resolve([] as { id: string; name: string; spaceId: string | null; createdById: string | null }[]),
+      : Promise.resolve([] as { id: string; name: string }[]),
     prisma.formDefinition.findMany({
-      where: { organizationId: orgId, ...formScope, OR: [{ name: ci }, { description: ci }] },
+      where: { organizationId: orgId, OR: [{ name: ci }, { description: ci }] },
       select: { id: true, name: true },
       orderBy: { updatedAt: "desc" },
-      take,
+      take: take * 3,
     }),
   ]);
 
   // ── Visibility gating ─────────────────────────────────────────────
-  // Compute the viewer's readable Space set once, then reuse it to gate
-  // every space-scoped kind. Admins read everything (visible = null,
-  // never dereferenced because the readable() helpers short-circuit).
-  const spaceIdSet = new Set<string>();
-  for (const s of spaces) spaceIdSet.add(s.id);
-  for (const b of boards) if (b.spaceId) spaceIdSet.add(b.spaceId);
-  for (const f of folders) if (f.spaceId) spaceIdSet.add(f.spaceId);
-  for (const it of items) if (it.board?.spaceId) spaceIdSet.add(it.board.spaceId);
-  for (const w of whiteboards) if (w.spaceId) spaceIdSet.add(w.spaceId);
-  for (const t of dataTables) if (t.spaceId) spaceIdSet.add(t.spaceId);
-
-  const visible = admin ? null : await visibleSpaceIds([...spaceIdSet], me, myAccess);
+  // ONE world for every candidate of every kind (never a gate call per row):
+  // the task's List, and each object itself.
+  const nodeCtx = nodeCtxFromLevel(me, orgId, myAccess);
+  const refs: NodeRef[] = [
+    ...items.map((it) => ({ kind: "list" as const, id: it.boardId })),
+    ...boards.map((b) => ({ kind: "list" as const, id: b.id })),
+    ...spaces.map((sp) => ({ kind: "space" as const, id: sp.id })),
+    ...folders.map((f) => ({ kind: "folder" as const, id: f.id })),
+    ...whiteboards.map((w) => ({ kind: "canvas" as const, id: w.id })),
+    ...docs.map((d) => ({ kind: "doc" as const, id: d.id })),
+    ...dataTables.map((t) => ({ kind: "table" as const, id: t.id })),
+    ...forms.map((f) => ({ kind: "form" as const, id: f.id })),
+  ];
+  const decisions = await nodeRoles(nodeCtx, refs);
+  const opens = (ref: NodeRef) => roleAtLeast(decisions.get(refKey(ref))?.role ?? "none", "VIEW");
 
   // ── Announcements: audience and lifecycle ─────────────────────────
   //
@@ -260,69 +255,19 @@ export async function GET(req: NextRequest) {
       now: annNow,
     }),
   );
-  // Folders the viewer reaches via a folder grant (granted + descendants). This
-  // admits their OWN folder's boards/subfolders WITHOUT treating them as a full
-  // space reader — the leak the security review flagged on visibleSpaceIds.
-  const accessibleFolders = admin ? new Set<string>() : await accessibleFolderIds(me);
-
-  // PRIVATE boards additionally require a BoardMember row (or ownership).
-  const privateBoardIds = new Set<string>();
-  for (const b of boards) if (b.visibility === "PRIVATE") privateBoardIds.add(b.id);
-  for (const it of items) if (it.board?.visibility === "PRIVATE") privateBoardIds.add(it.board.id);
-  const privMemberIds = new Set<string>();
-  if (!admin && privateBoardIds.size > 0) {
-    const rows = await prisma.boardMember.findMany({
-      where: { userId: me, boardId: { in: [...privateBoardIds] } },
-      select: { boardId: true },
-    });
-    for (const r of rows) privMemberIds.add(r.boardId);
-  }
-
-  type BoardGate = { id: string; spaceId: string | null; folderId: string | null; visibility: string; ownerId: string | null };
-  const boardReadable = (b: BoardGate | null | undefined): boolean => {
-    if (!b) return false;
-    if (admin) return true;
-    if (b.visibility === "ORG") return true;
-    if (b.visibility === "PRIVATE") return b.ownerId === me || privMemberIds.has(b.id);
-    // WORKSPACE — unscoped boards are org-wide; scoped defer to Space access,
-    // or to a folder grant when the board lives in a granted folder's subtree.
-    if (!b.spaceId) return true;
-    if (!!visible && visible.has(b.spaceId)) return true;
-    return !!b.folderId && accessibleFolders.has(b.folderId);
-  };
-  const spaceVisibleById = (spaceId: string | null | undefined, vis?: string): boolean => {
-    if (admin) return true;
-    if (vis === "ORG") return true;
-    return !!spaceId && !!visible && visible.has(spaceId);
-  };
-
-  // Drop notes the viewer can't read, then slice down to the per-kind cap.
-  const docFlags = await Promise.all(docs.map((d) => docAccessible(d, me, myAccess)));
-  const visibleDocs = docs.filter((_, i) => docFlags[i]).slice(0, take);
-
-  const folderReadable = (f: (typeof folders)[number]): boolean => {
-    if (admin) return true;
-    // A direct grant (or one inherited from an ancestor) wins over visibility.
-    if (accessibleFolders.has(f.id)) return true;
-    if (f.visibility === "ORG") return true;
-    if (f.visibility === "PRIVATE") return f.ownerId === me;
-    // WORKSPACE — inherit the Space's access.
-    return spaceVisibleById(f.spaceId, f.space?.visibility);
-  };
-
-  const visibleItems = items.filter((it) => boardReadable(it.board)).slice(0, take);
-  const visibleBoards = boards.filter((b) => boardReadable(b)).slice(0, take);
-  const visibleSpacesList = spaces.filter((s) => spaceVisibleById(s.id, s.visibility)).slice(0, take);
-  const visibleFolders = folders.filter(folderReadable).slice(0, take);
-  const visibleWhiteboards = whiteboards
-    .filter((w) => admin || !w.spaceId || (!!visible && visible.has(w.spaceId)))
+  // A task opens for a reader of its List, and for the person it is
+  // assigned to or owned by (the assignment grant), exactly as its page does.
+  const visibleItems = items
+    .filter((it) => opens({ kind: "list", id: it.boardId }) || it.ownerId === me || it.assigneeIds.includes(me))
     .slice(0, take);
-
-  // A table follows its Space, like a canvas (lib/table-gate readableTable);
-  // an unscoped table is org-wide for Members and a Guest's own only.
-  const visibleTables = dataTables
-    .filter((t) => admin || (t.spaceId ? !!visible && visible.has(t.spaceId) : unscopedTableReadable(t.createdById, me, myAccess)))
-    .slice(0, take);
+  const visibleBoards = boards.filter((b) => opens({ kind: "list", id: b.id })).slice(0, take);
+  const visibleSpacesList = spaces.filter((sp) => opens({ kind: "space", id: sp.id })).slice(0, take);
+  const visibleFolders = folders.filter((f) => opens({ kind: "folder", id: f.id })).slice(0, take);
+  const visibleWhiteboards = whiteboards.filter((w) => opens({ kind: "canvas", id: w.id })).slice(0, take);
+  const visibleDocs = docs.filter((d) => opens({ kind: "doc", id: d.id })).slice(0, take);
+  const visibleTables = dataTables.filter((t) => opens({ kind: "table", id: t.id })).slice(0, take);
+  const visibleForms = forms.filter((f) => opens({ kind: "form", id: f.id })).slice(0, take);
+  const door = (kind: "doc" | "canvas" | "table" | "form" | "sop", id: string) => addressHref(kind, id, { scope: "work" });
 
   const results = [
     ...visibleItems.map((it) => {
@@ -359,7 +304,7 @@ export async function GET(req: NextRequest) {
         id: d.id,
         title: d.title || "Untitled note",
         subtitle: d.excerpt ? d.excerpt.slice(0, 80) : (meta?.icon ? `${meta.icon} note` : "note"),
-        href: `/docs/${d.id}`,
+        href: door("doc", d.id),
       };
     }),
     ...visibleWhiteboards.map((w) => ({
@@ -367,21 +312,21 @@ export async function GET(req: NextRequest) {
       id: w.id,
       title: w.name,
       subtitle: "Canvas",
-      href: `/canvas/${w.id}`,
+      href: door("canvas", w.id),
     })),
     ...visibleTables.map((t) => ({
       type: "table" as const,
       id: t.id,
       title: t.name || "Untitled table",
       subtitle: "Table",
-      href: `/tables/${t.id}`,
+      href: door("table", t.id),
     })),
-    ...forms.map((f) => ({
+    ...visibleForms.map((f) => ({
       type: "form" as const,
       id: f.id,
       title: f.name || "Untitled form",
       subtitle: "Form",
-      href: `/forms/${f.id}`,
+      href: door("form", f.id),
     })),
     ...users.map((u) => ({
       type: "person" as const,
@@ -395,7 +340,7 @@ export async function GET(req: NextRequest) {
       id: s.id,
       title: s.title,
       subtitle: `${s.category || "Uncategorized"} · ${s.status}`,
-      href: `/sops/${s.id}`,
+      href: door("sop", s.id),
     })),
     ...okrs.map((o) => ({
       type: "okr" as const,

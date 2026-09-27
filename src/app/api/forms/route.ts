@@ -8,6 +8,7 @@
 //      responseCount and canManage. Without one, the bare array every older
 //      caller (the sidebar, the board Form view picker, the doc block) reads.
 // POST /api/forms              create a form { name?, fields?, targetBoardId?, targetTableId?, fieldMappings? }
+//      A destination needs Can edit on it (responses are written into it).
 //      A Guest lists only the forms they made (GET, both shapes).
 //      A blank or absent name is "Untitled form" (every create door is promptless).
 
@@ -18,7 +19,10 @@ import {
 } from "@/lib/api-helpers";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject } from "@/lib/object-manage";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { checkFormDestination } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import { viewerObjectGrants } from "@/lib/access/access-grant-store";
 import {
   countListViews, formGoesTo, formStatus, matchesListFilters, matchesListView, parseFormsListQuery, slicePage, sortListRows,
   type ListCandidate,
@@ -31,16 +35,21 @@ export async function GET(req: NextRequest) {
   if (error) return error;
   const orgId = getOrgId(session);
 
-  // A Guest has no share path to a form while the access engine is inert
-  // (forms app rule: Guests see shared forms only), so the one set of forms a
-  // Guest may list is the ones they made themselves (creator Full access,
-  // access 3.3). Everyone else lists the org, as before.
+  // Forms app rule: Guests see shared forms only, so a Guest lists the forms
+  // they made (creator Full access, access 3.3) and the ones a form grant
+  // gives them. Everyone else lists the org, as before.
   const viewer = await viewerFromSession().catch(() => null);
   const guestOnly = viewer?.orgRole === "GUEST" ? viewer.userId : null;
-  const scope = guestOnly ? { organizationId: orgId, createdById: guestOnly } : { organizationId: orgId };
+  const granted = guestOnly
+    ? (await viewerObjectGrants(orgId, guestOnly).catch(() => [])).filter((g) => g.objectType === "FORM").map((g) => g.objectId)
+    : [];
+  const scope = guestOnly
+    ? { organizationId: orgId, OR: [{ createdById: guestOnly }, ...(granted.length ? [{ id: { in: granted } }] : [])] }
+    : { organizationId: orgId };
+  const nodeCtx = viewer ? nodeCtxFromViewer(viewer) : null;
 
   const listQuery = parseFormsListQuery(new URL(req.url).searchParams);
-  if (listQuery.paged) return pagedList(listQuery, { orgId, userId: getUserId(session), session, scope });
+  if (listQuery.paged) return pagedList(listQuery, { orgId, userId: getUserId(session), session, scope, nodeCtx });
 
   const forms = await prisma.formDefinition.findMany({
     where: scope,
@@ -73,6 +82,15 @@ export async function POST(req: NextRequest) {
   const isPublic = false;
   const targetBoardId = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
   const targetTableId = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
+  // Every response is written INTO the destination, so choosing one needs
+  // Can edit there (the placement rule, node-rules P1), in this org. Without
+  // this a person with no access to a List made a form that fed it.
+  if (targetBoardId || targetTableId) {
+    const viewer = await viewerFromSession().catch(() => null);
+    if (!viewer) return jsonError("not found", 404);
+    const dest = await checkFormDestination(nodeCtxFromViewer(viewer), { boardId: targetBoardId, tableId: targetTableId });
+    if (!dest.ok) return jsonError(dest.error, dest.status);
+  }
   // "From a List..." sends the mapping of each mirrored field to its List
   // field; any other shape is refused rather than stored.
   let fieldMappings: { board?: Record<string, string>; table?: Record<string, string> } | undefined;
@@ -92,7 +110,10 @@ export async function POST(req: NextRequest) {
 type PersonOut = { id: string; firstName: string | null; lastName: string | null; avatar: string | null; email: string | null; name: string | null };
 
 /** The /forms list page: views, filters, sort and cursor pages. */
-async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId: string; userId: string; session: Parameters<typeof readableDestinationIds>[2]; scope: { organizationId: string; createdById?: string } }) {
+async function pagedList(
+  q: ReturnType<typeof parseFormsListQuery>,
+  ctx: { orgId: string; userId: string; session: Parameters<typeof readableDestinationIds>[2]; scope: Record<string, unknown>; nodeCtx: ReturnType<typeof nodeCtxFromViewer> | null },
+) {
   const [forms, prefs] = await Promise.all([
     prisma.formDefinition.findMany({
       where: ctx.scope,
@@ -164,7 +185,8 @@ async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId
   const filtered = candidates.filter((r) => matchesListView(r, q.view, facts) && matchesListFilters(r, q));
   const sorted = sortListRows(filtered, q.sort, q.dir);
   const { page, nextCursor } = slicePage(sorted, q.cursor, q.limit);
-  const viewer = await viewerFromSession().catch(() => null);
+  // canManage: Full access on the form (its creator, an org admin, a Full form grant).
+  const roles = ctx.nodeCtx ? await nodeRoleMap(ctx.nodeCtx, "form", page.map((r) => r.id)) : new Map();
 
   return jsonSuccess({
     data: page.map((r) => ({
@@ -178,7 +200,7 @@ async function pagedList(q: ReturnType<typeof parseFormsListQuery>, ctx: { orgId
       responseCount: r.count ?? 0,
       hasPublicLink: r.isPublic,
       isFavorite: favoriteIds.has(r.id),
-      canManage: canManageObject(viewer, r.createdById),
+      canManage: roleAtLeast(roles.get(r.id) ?? "none", "FULL"),
       updatedAt: r.raw.updatedAt,
       createdAt: r.raw.createdAt,
     })),

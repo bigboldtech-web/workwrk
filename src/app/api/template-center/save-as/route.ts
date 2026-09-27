@@ -5,9 +5,11 @@
 //   body { source: "DOC",        docId,        name?, ... }   (spec-docs-knowledge section 2, "Save as template")
 //   body { source: "WHITEBOARD", whiteboardId, name?, ... }
 //
-// DOC and WHITEBOARD need Full access on the source (the creator or an org
-// admin; the canvas owner or an admin): a template is published to everyone
-// in the org, so the bar is the management gate, as it is for Lists.
+// Every source needs Full access on itself, from the one resolver
+// (src/lib/access/node-access.ts): a template is published to everyone in the
+// org, so the bar is the management gate. On a doc or a canvas that is its
+// creator or owner, a Full holder of its Space or Folder, or an org admin; on
+// a Folder it is Full access on that Folder, never a role on its Space.
 //
 // FOLDER is here because the Folder "…" menu has always posted it: the schema
 // accepted LIST and SPACE only, so that menu row 400d on every click with the
@@ -21,11 +23,11 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import { folderReadable } from "@/lib/folder";
 import { snapshotBoard, snapshotFolder, snapshotSpace } from "@/lib/template-center";
 import { templatesAppGate } from "@/lib/templates/gate";
-import { docAccessible } from "@/lib/doc-access";
-import { isDocFull } from "@/lib/doc-sharing";
+import { docAccess } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRole, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 const COMPLEXITY = ["BEGINNER", "INTERMEDIATE", "ADVANCED"] as const;
 
@@ -57,6 +59,14 @@ export async function POST(req: NextRequest) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return jsonError("Invalid body", 400);
   const input = parsed.data;
+  const nodeCtx = nodeCtxFromLevel(userId, orgId, accessLevel);
+  // A Folder or Space template carries only the Lists the saver could save
+  // one by one (Full access on each, the LIST branch's gate below): a Private
+  // List they cannot open, or only read, never reaches the whole org.
+  const fullLists = async (boardIds: string[]): Promise<ReadonlySet<string>> => {
+    const roles = await nodeRoles(nodeCtx, boardIds.map((id) => ({ kind: "list" as const, id })));
+    return new Set(boardIds.filter((id) => roleAtLeast(roles.get(`list:${id}`)?.role ?? "none", "FULL")));
+  };
 
   let kind: "LIST" | "FOLDER" | "SPACE" | "DOC" | "WHITEBOARD";
   let snap: { name: string; payload: object } | null;
@@ -67,8 +77,9 @@ export async function POST(req: NextRequest) {
       where: { id: input.docId, organizationId: orgId, archivedAt: null },
       select: { id: true, title: true, content: true, entityType: true, entityId: true, createdById: true },
     });
-    if (!doc || !(await docAccessible(doc, userId, accessLevel))) return jsonError("Doc not found", 404);
-    if (!isDocFull({ userId, accessLevel }, { createdById: doc.createdById })) return jsonError("Forbidden", 403);
+    const access = doc ? await docAccess(nodeCtx, doc.id) : null;
+    if (!doc || !access) return jsonError("Doc not found", 404);
+    if (!access.canManage) return jsonError("Forbidden", 403);
     kind = "DOC";
     snap = { name: doc.title, payload: { title: doc.title, content: doc.content ?? {} } };
   } else if (input.source === "WHITEBOARD") {
@@ -78,9 +89,9 @@ export async function POST(req: NextRequest) {
       select: { id: true, name: true, description: true, scene: true, ownerId: true, spaceId: true },
     });
     if (!wb) return jsonError("Canvas not found", 404);
-    if (wb.spaceId && !(await getSpaceForReader(wb.spaceId, userId, accessLevel))) return jsonError("Canvas not found", 404);
-    const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
-    if (wb.ownerId !== userId && !isAdmin) return jsonError("Forbidden", 403);
+    const canvas = await nodeRole(nodeCtx, { kind: "canvas", id: wb.id });
+    if (!roleAtLeast(canvas.role, "VIEW")) return jsonError("Canvas not found", 404);
+    if (!roleAtLeast(canvas.role, "FULL")) return jsonError("Forbidden", 403);
     kind = "WHITEBOARD";
     snap = { name: wb.name, payload: { scene: wb.scene ?? {}, description: wb.description ?? undefined } };
   } else if (input.source === "LIST") {
@@ -95,24 +106,25 @@ export async function POST(req: NextRequest) {
     snap = await snapshotBoard(input.boardId);
   } else if (input.source === "FOLDER") {
     if (!input.folderId) return jsonError("folderId is required", 400);
-    // The same pair DELETE /api/folders/[id] uses: readable, then editable
-    // through the owning Space, which is how every Folder "…" management row
-    // is gated.
+    // The same pair DELETE /api/folders/[id] uses: Can view on the Folder,
+    // then Full access on the Folder itself (a Folder's Full holder manages
+    // it without any role on its Space).
     const folder = await prisma.folder.findFirst({
       where: { id: input.folderId, space: { organizationId: orgId } },
       select: { spaceId: true },
     });
-    if (!folder || !(await folderReadable(input.folderId, userId, accessLevel))) return jsonError("Folder not found", 404);
-    if (!(await canEditSpace(folder.spaceId, userId, accessLevel))) return jsonError("Forbidden", 403);
+    const folderRole = folder ? await nodeRole(nodeCtx, { kind: "folder", id: input.folderId }) : null;
+    if (!folder || !folderRole || !roleAtLeast(folderRole.role, "VIEW")) return jsonError("Folder not found", 404);
+    if (!roleAtLeast(folderRole.role, "FULL")) return jsonError("Forbidden", 403);
     kind = "FOLDER";
-    snap = await snapshotFolder(input.folderId);
+    snap = await snapshotFolder(input.folderId, { canSaveList: fullLists });
   } else {
     if (!input.spaceId) return jsonError("spaceId is required", 400);
     const space = await getSpaceForReader(input.spaceId, userId, accessLevel);
     if (!space) return jsonError("Space not found", 404);
     if (!(await canEditSpace(input.spaceId, userId, accessLevel))) return jsonError("Forbidden", 403);
     kind = "SPACE";
-    snap = await snapshotSpace(input.spaceId);
+    snap = await snapshotSpace(input.spaceId, { canSaveList: fullLists });
   }
 
   if (!snap) return jsonError("Source not found", 404);

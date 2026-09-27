@@ -1,11 +1,14 @@
 // Where an automation can run, as the viewer may see it: the Spaces, Folders
-// and Lists the viewer can read (accessibleIds, VIEW), with names. The
-// builder's "Where it runs" picker offers exactly these, and every place a
-// saved scope names that the viewer cannot read is COUNTED, never named, so
-// the Workflows list and the builder cannot leak a private List's name.
+// and Lists the viewer can read (Can view or higher from the one node
+// resolver, node-access), with names. The builder's "Where it runs" picker
+// offers exactly these, and a place a saved scope names that the viewer
+// cannot read is never named or counted (node-rules: "a node the viewer
+// cannot open is never listed, named or counted"), so neither the Workflows
+// list nor the builder can leak a private List's name or how many there are.
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access/index";
+import { nodeCtxFromViewer, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { Viewer } from "@/lib/access/types";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
@@ -27,26 +30,25 @@ export interface Places {
 export { SETTABLE_FIELD_TYPES };
 
 export async function loadPlaces(viewer: Viewer, orgId: string, opts: { withFields?: boolean } = {}): Promise<Places> {
-  const [spaceIds, folderIds, listIds] = await Promise.all([
-    accessibleIds(viewer, "space", "VIEW"),
-    accessibleIds(viewer, "folder", "VIEW"),
-    accessibleIds(viewer, "list", "VIEW"),
+  // Every live place of the workspace is a candidate, and ONE world decides
+  // them all (never a check per row), as /api/lists/pick does.
+  const [allSpaces, allFolders, allLists] = await Promise.all([
+    prisma.space.findMany({ where: { organizationId: orgId, archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.folder.findMany({ where: { organizationId: orgId, archivedAt: null }, select: { id: true, name: true, spaceId: true }, orderBy: { name: "asc" } }),
+    prisma.board.findMany({
+      where: { organizationId: orgId, archivedAt: null },
+      select: { id: true, name: true, spaceId: true, folderId: true, ...(opts.withFields ? { schema: true, statuses: true } : {}) },
+      orderBy: { name: "asc" },
+    }),
   ]);
-  const [spaces, folders, lists] = await Promise.all([
-    spaceIds.readable.size
-      ? prisma.space.findMany({ where: { id: { in: [...spaceIds.readable] }, organizationId: orgId, archivedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } })
-      : Promise.resolve([]),
-    folderIds.readable.size
-      ? prisma.folder.findMany({ where: { id: { in: [...folderIds.readable] }, organizationId: orgId, archivedAt: null }, select: { id: true, name: true, spaceId: true }, orderBy: { name: "asc" } })
-      : Promise.resolve([]),
-    listIds.readable.size
-      ? prisma.board.findMany({
-          where: { id: { in: [...listIds.readable] }, organizationId: orgId, archivedAt: null },
-          select: { id: true, name: true, spaceId: true, folderId: true, ...(opts.withFields ? { schema: true, statuses: true } : {}) },
-          orderBy: { name: "asc" },
-        })
-      : Promise.resolve([]),
+  const readable = await readableRefs(viewer, [
+    ...allSpaces.map((r) => ({ kind: "space" as const, id: r.id })),
+    ...allFolders.map((r) => ({ kind: "folder" as const, id: r.id })),
+    ...allLists.map((r) => ({ kind: "list" as const, id: r.id })),
   ]);
+  const spaces = allSpaces.filter((r) => readable.has(refKey({ kind: "space", id: r.id })));
+  const folders = allFolders.filter((r) => readable.has(refKey({ kind: "folder", id: r.id })));
+  const lists = allLists.filter((r) => readable.has(refKey({ kind: "list", id: r.id })));
   return {
     spaces,
     folders,
@@ -72,11 +74,18 @@ export async function loadPlaces(viewer: Viewer, orgId: string, opts: { withFiel
   };
 }
 
+/** The refs, as refKey strings, this viewer holds Can view or higher on. */
+async function readableRefs(viewer: Viewer, refs: NodeRef[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (refs.length === 0) return out;
+  const decisions = await nodeRoles(nodeCtxFromViewer(viewer), refs);
+  for (const [key, d] of decisions) if (roleAtLeast(d.role, "VIEW")) out.add(key);
+  return out;
+}
+
 export interface ScopeSummary {
   /** "Everywhere", or the readable names, in the order the scope lists them. */
   names: string[];
-  /** Places named by the scope the viewer cannot read. */
-  hidden: number;
   everywhere: boolean;
 }
 
@@ -92,14 +101,14 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
   }
   const names = new Map<string, string>();
   if (lists.size + folders.size + spaces.size > 0) {
-    const [rl, rf, rs] = await Promise.all([
-      lists.size ? accessibleIds(viewer, "list", "VIEW") : null,
-      folders.size ? accessibleIds(viewer, "folder", "VIEW") : null,
-      spaces.size ? accessibleIds(viewer, "space", "VIEW") : null,
+    const readable = await readableRefs(viewer, [
+      ...[...lists].map((id) => ({ kind: "list" as const, id })),
+      ...[...folders].map((id) => ({ kind: "folder" as const, id })),
+      ...[...spaces].map((id) => ({ kind: "space" as const, id })),
     ]);
-    const okLists = [...lists].filter((id) => rl?.readable.has(id));
-    const okFolders = [...folders].filter((id) => rf?.readable.has(id));
-    const okSpaces = [...spaces].filter((id) => rs?.readable.has(id));
+    const okLists = [...lists].filter((id) => readable.has(refKey({ kind: "list", id })));
+    const okFolders = [...folders].filter((id) => readable.has(refKey({ kind: "folder", id })));
+    const okSpaces = [...spaces].filter((id) => readable.has(refKey({ kind: "space", id })));
     const [bl, bf, bs] = await Promise.all([
       okLists.length ? prisma.board.findMany({ where: { id: { in: okLists }, organizationId: orgId }, select: { id: true, name: true } }) : [],
       okFolders.length ? prisma.folder.findMany({ where: { id: { in: okFolders }, organizationId: orgId }, select: { id: true, name: true } }) : [],
@@ -109,9 +118,11 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
   }
   return (s) => {
     const ids = [...s.spaceIds, ...s.folderIds, ...s.listIds];
-    if (ids.length === 0) return { names: [], hidden: 0, everywhere: true };
+    if (ids.length === 0) return { names: [], everywhere: true };
+    // A place the viewer cannot open is left out, not counted: there is no
+    // "2 more you can't open" (node-rules, never listed, named or counted).
     const shown = ids.map((id) => names.get(id)).filter((n): n is string => !!n);
-    return { names: shown, hidden: ids.length - shown.length, everywhere: false };
+    return { names: shown, everywhere: false };
   };
 }
 

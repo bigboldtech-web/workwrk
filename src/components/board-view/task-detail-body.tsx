@@ -28,8 +28,18 @@ export interface TaskDetailBodyProps {
   deepLinkCommentId?: string | null;
   onDeepLinkResolved?: () => void;
   onOpenItem?: (itemId: string) => void;
-  /** Opens the one share dialog at List scope, for the read-only banner. */
+  /**
+   * Opens the one share dialog at List scope, for the read-only banner. Never
+   * read in a linked context (the task is open in a List it is only shown in):
+   * that List cannot give edit on it, so its Share dialog is not the door.
+   */
   onRequestAccess?: () => void;
+  /**
+   * Linked context only, and only when the viewer may read the task's home
+   * List: reopens the task there, where its real access (and the Request
+   * access that can grant it) lives.
+   */
+  onOpenInHome?: () => void;
   /** Rendered in place of nothing when the task is gone (the host decides). */
   missingView: React.ReactNode;
 }
@@ -45,9 +55,10 @@ export function TaskDetailBody({
   onDeepLinkResolved,
   onOpenItem,
   onRequestAccess,
+  onOpenInHome,
   missingView,
 }: TaskDetailBodyProps) {
-  const { item, board, decision, breadcrumb, watcherIds, listOwner, loading, error, errorDetail, missing, patch, reload, refreshToken } = task;
+  const { item, board, decision, breadcrumb, watcherIds, listOwner, context, loading, error, errorDetail, missing, patch, reload, refreshToken } = task;
 
   // The three dirty fields, lifted here so one flush covers all of them.
   const [drafts, setDrafts] = useState<{ title?: string; description?: string; comment?: string }>({});
@@ -150,6 +161,22 @@ export function TaskDetailBody({
     [board?.statuses],
   );
 
+  // A Connect field's commit answers its cell, which keeps the person's
+  // selection and offers Retry when the write is refused.
+  const commitField = useCallback(
+    async (key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
+      const r = await patch({ metadataPatch: { [key]: next === undefined ? null : next } });
+      if (r.ok) return { ok: true };
+      return {
+        ok: false,
+        message: r.status === 0
+          ? "Couldn't reach the server. Your selection is kept; try again."
+          : accessMessage(r.payload, "Couldn't save those connected tasks."),
+      };
+    },
+    [patch],
+  );
+
   if (missing) return <>{missingView}</>;
 
   if (loading && !item) return <TaskSkeleton host={host} />;
@@ -182,6 +209,14 @@ export function TaskDetailBody({
   const readOnly = rankOf(decision.role) < rankOf("EDIT");
   const roleWord = decision.role === "COMMENT" ? "Can comment" : "View only";
   const ownerName = [listOwner?.firstName, listOwner?.lastName].filter(Boolean).join(" ").trim() || listOwner?.email || null;
+  // Open in a List the task is only SHOWN in (Phase 5b). A link grants Can
+  // view at most, whatever the viewer holds on that List, so nobody on it can
+  // give edit on this task: "Ask the list owner" and that List's Share dialog
+  // sent the person, its manager included, to someone who cannot help. Edit
+  // comes from the task's home List, so the banner says so, and it names that
+  // List only when the viewer may read it (a hidden home stays unnamed, and so
+  // does its owner).
+  const linkedHome = context?.kind === "linked" ? context.home : null;
   // The banners sit INSIDE the same column as the body, or on the page host
   // they run the full 1075px content width above a 760px column.
   const column = host === "page" ? "mx-auto w-full max-w-[760px]" : "w-full";
@@ -232,6 +267,24 @@ export function TaskDetailBody({
             </button>
           ) : null}
         </div>
+      ) : readOnly && linkedHome ? (
+        <div className="flex min-h-9 flex-wrap items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2" data-linked-readonly>
+          <Lock className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+          <span>
+            {linkedHome.readable
+              ? `${roleWord}. This task is shown here from ${linkedHome.name}, and edit access comes from there.`
+              : `${roleWord}. This task is shown here from another List, and it is edited where it lives.`}
+          </span>
+          {linkedHome.readable && onOpenInHome ? (
+            <button
+              type="button"
+              onClick={onOpenInHome}
+              className="font-medium text-ink underline-offset-2 hover:underline"
+            >
+              Open in {linkedHome.name}
+            </button>
+          ) : null}
+        </div>
       ) : readOnly ? (
         <div className="flex min-h-9 flex-wrap items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
           <Lock className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
@@ -276,6 +329,8 @@ export function TaskDetailBody({
         descriptionDraft={drafts.description ?? null}
         commentDraft={drafts.comment}
         onDraftChange={onDraftChange}
+        linkedContextBoardId={task.context?.kind === "linked" ? task.context.boardId : null}
+        onCommitField={commitField}
       />
     </div>
   );

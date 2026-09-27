@@ -35,6 +35,8 @@ type AuditRow = {
   id: string;
   type: string;
   description: string;
+  /** Access rows: who got or lost what, on which node (GET /api/audit writes it). */
+  summary?: string | null;
   targetType?: string | null;
   targetId?: string | null;
   severity: string;
@@ -217,6 +219,7 @@ export default function AuditLogPage() {
     return list.filter((r) =>
       r.type.toLowerCase().includes(q) ||
       (r.description ?? "").toLowerCase().includes(q) ||
+      (r.summary ?? "").toLowerCase().includes(q) ||
       (r.targetType ?? "").toLowerCase().includes(q) ||
       actorName(r).toLowerCase().includes(q));
   }, [rows, search]);
@@ -332,7 +335,7 @@ export default function AuditLogPage() {
                     <div className="adt__row-main">
                       <div className="adt__row-title">
                         <strong>{humanType(l.type)}</strong>
-                        {l.description && <span>· {l.description}</span>}
+                        {(l.summary || l.description) && <span>· {l.summary || l.description}</span>}
                       </div>
                       <div className="adt__row-meta">
                         <button

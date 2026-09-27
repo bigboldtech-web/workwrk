@@ -28,16 +28,26 @@ import { ShareButton } from "@/components/access/share-button";
 import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
 import { BackButton } from "@/components/ui/back-button";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { viewsForViewer } from "@/lib/work/view-visibility";
+import { listViewsForViewer } from "@/lib/work/default-view";
+import { needsCoreListViews } from "@/lib/work/list-view-seed";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
-import { canEditBoard, canContributeBoard, getBoardForReaderOrFolderGrantee, ensureCoreListViews } from "@/lib/board";
+import { ensureCoreListViews } from "@/lib/board";
+import { nodeCtxFromLevel, nodePathWorld } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import type { PlacementCrumb } from "@/lib/work/placement";
 import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { ArrivalNotice } from "@/components/layout/os/arrival-notice";
+import { canSaveView } from "@/lib/work/view-visibility";
+import { LIST_LINK_CANVAS_LIVE } from "@/lib/list-links";
+import { listReader } from "@/lib/list-links-server";
+import { redactFieldsForViewer } from "@/lib/board-items-view";
+import { parseRowColorRules } from "@/lib/list-comfort";
+import { orgRoleOf } from "@/lib/access/org-role";
 
 export const dynamic = "force-dynamic";
 
@@ -78,43 +88,63 @@ export default async function BoardPage(props: {
   }
   if (!board || !board.space) notFound();
 
-  // Self-heal: give every task List the full ClickUp view set (Board/Calendar/
-  // Gantt) so switching views on the list always shows the same tasks. No-op
-  // (no writes) once the views exist. Refetch the view set only if it grew.
+  // Self-heal: give every task List the full core view set (Board, List,
+  // Calendar, Gantt) so switching views always shows the same tasks. A List
+  // that already has its set issues no query here at all. One that lacks a
+  // view is topped up and its views read again, whether this request made the
+  // rows or waited on the lock while another request made them (review #36):
+  // either way this request's own snapshot is short a view.
   let allViews = board.views;
-  const createdViews = await ensureCoreListViews(board.id, u.id);
-  if (createdViews > 0) {
+  if (needsCoreListViews(allViews)) {
+    await ensureCoreListViews(board.id, u.id);
     allViews = await prisma.view.findMany({
       where: { boardId: board.id },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     });
   }
   // audit High #5: "Private view" was cosmetic here. The dialog wrote
-  // `isShared: false` and `ownerId`, and this page read every row anyway. The
-  // filter is `src/lib/work/view-visibility.ts`, the same function
-  // `GET /api/boards/[id]/views` applies, so the page and the API cannot
-  // disagree about what a person can see.
-  const views = viewsForViewer(allViews, u.id);
+  // `isShared: false` and `ownerId`, and this page read every row anyway.
+  // listViewsForViewer (src/lib/work/default-view.ts) filters with the same
+  // rule `GET /api/boards/[id]/views` applies, and resolves the default the
+  // same way (decision 8: a pinned view, else the Board), so the page, the
+  // API and the strip's first tab cannot disagree.
+  const { views, defaultView, pinned, pinnedById } = listViewsForViewer(allViews, u.id);
 
-  // READ GATE — the SAME predicate this page's own endpoints use.
-  //
-  // It was `canRead(viewer, { type: "board" })`, and that resolver does not
-  // consult BoardMember, while every `/api/boards/[id]/...` route this page
-  // calls loads the board through `getBoardForReader`, which does. So sharing
-  // a PRIVATE List straight to a person (the Share dialog's whole purpose on a
-  // List) produced a 404 page over APIs that would have answered 200. The page
-  // and the endpoints now agree, by construction: one function, both sides.
-  //
-  // With ONE addition, because swapping predicates lost a reader in the other
-  // direction: `canRead` reached FolderMember through its folder cascade and
-  // `getBoardForReader` does not, so a granular folder grantee kept the
-  // sidebar rows and the Folder page links into this List and got notFound()
-  // on every one of them. `getBoardForReaderOrFolderGrantee` is the strict
-  // predicate plus that one branch, so no destination a grant opened is closed.
-  const readable = await getBoardForReaderOrFolderGrantee(board.id, u.id, u.accessLevel ?? "EMPLOYEE");
-  if (!readable) notFound();
+  // READ GATE: the SAME resolver this page's own endpoints use
+  // (getBoardForReader and canContributeBoard delegate to it). One walk
+  // answers the role on this List (its own grant, its owner, its Folder chain,
+  // its Space, with the PRIVATE cut) and what the crumb may name above it.
+  const nodeCtx = nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel);
+  const { steps, self } = await nodePathWorld(nodeCtx, { kind: "list", id: board.id });
+  if (!roleAtLeast(self.role, "VIEW")) notFound();
 
-  const defaultView = views.find((v) => v.isDefault) ?? views[0];
+  // The crumb names the Space and the Folders above this List while the
+  // viewer can open each or passes through it on the way here (a path
+  // container opens its path view), and stops at the first they can do
+  // neither with: no gap, nothing hidden named.
+  const trail: PlacementCrumb[] = [];
+  for (const st of steps) {
+    if (!st.readable && !st.path) break;
+    trail.push(
+      st.kind === "space"
+        ? { label: st.name, href: `/spaces/${encodeURIComponent(st.slug ?? st.id)}`, tile: { icon: st.icon, color: st.color, name: st.name } }
+        : { label: st.name, href: `/folders/${encodeURIComponent(st.id)}` },
+    );
+  }
+  // The menu names the List's Folder only where the crumb does.
+  const folderHref = board.folder ? `/folders/${encodeURIComponent(board.folder.id)}` : null;
+  const namedFolder = folderHref && trail.some((c) => c.href === folderHref) ? board.folder : null;
+  const back = trail[trail.length - 1] ?? { label: "Work", href: "/home" };
+
+  // Who pinned the default, for the Unpin row's "Pinned by" line. Scoped to
+  // the organisation: a mark can only ever name a colleague.
+  const pinnedBy = pinnedById
+    ? await prisma.user.findFirst({
+        where: { id: pinnedById, organizationId: u.organizationId },
+        select: { firstName: true, lastName: true },
+      })
+    : null;
+  const pinnedByName = pinnedBy ? `${pinnedBy.firstName} ${pinnedBy.lastName}`.trim() || null : null;
   // Active view = ?view=<id> if it matches an existing view; else default.
   // Tab click is a Link that updates this param.
   const activeView =
@@ -135,13 +165,41 @@ export default async function BoardPage(props: {
   // The content flag is NOT called `canEdit` any more, on purpose. One name
   // covering "may write a task" and "may change the List" is what let the
   // management gate end up on the row controls in the first place.
-  const [items, canContribute, canManage] = await Promise.all([
-    listBoardItems(board.id),
-    canContributeBoard(board.id, u.id, u.accessLevel ?? "EMPLOYEE"),
-    canEditBoard(board.id, u.id, u.accessLevel ?? "EMPLOYEE"),
-  ]);
+  //
+  // THE FIRST PAINT IS PROJECTED FOR THIS VIEWER, and it is the same read the
+  // poll makes: the List's own rows plus the tasks linked into it (Phase 5b,
+  // while LIST_LINK_CANVAS_LIVE is on), each shown as this viewer may see it
+  // (their own connect values, no reserved key, a linked row in this List's
+  // namespace). A paint that differed from the poll would flicker rows in and
+  // out twelve seconds after load.
+  //
+  // The gates are read off `self`, the walk above: the same resolver
+  // canContributeBoard and canEditBoard delegate to, answered once for this
+  // request rather than three more times.
+  const accessLevel = u.accessLevel ?? "EMPLOYEE";
+  const viewer = { userId: u.id, organizationId: u.organizationId, accessLevel };
+  const items = await listBoardItems(board.id, { view: { viewer, contextBoardId: board.id }, includeLinked: LIST_LINK_CANVAS_LIVE });
+  const canContribute = roleAtLeast(self.role, "EDIT");
+  const canManage = roleAtLeast(self.role, "FULL");
   const canDeleteTasks = canManage;
-  const initialFields = parseBoardSchema(board.schema).fields;
+  // A connect column names only the Lists this viewer can read, a mirror only
+  // its lookups into them: the same redaction every fields read applies.
+  const initialFields = await redactFieldsForViewer(parseBoardSchema(board.schema).fields, listReader(viewer));
+  // Conditional row colours are display, so every reader of this page gets
+  // them on first paint; the canvas re-reads them when the List's settings
+  // change.
+  const settings = board.settings && typeof board.settings === "object" && !Array.isArray(board.settings)
+    ? (board.settings as Record<string, unknown>)
+    : {};
+  const initialRowColorRules = parseRowColorRules(settings.rowColorRules);
+  // Pin column and Row height write the view, so they render only where the
+  // PATCH would be accepted: the route's own gate, computed here.
+  const mayConfigureView = activeView ? canSaveView(activeView, u.id, canContribute) : false;
+  // Schedule report needs what the report route needs: Can view from the one
+  // resolver (boardForViewer, the same walk as `self` above: a Folder grantee
+  // is a reader like any other now, and opens the schedule dialog too) and a
+  // member, never a Guest.
+  const scheduleReports = roleAtLeast(self.role, "VIEW") && orgRoleOf({ accessLevel }) !== "GUEST";
   // Per-List statuses (backbone #1) — the board's own set, or the
   // canonical default trio when Board.statuses is null.
   const statuses = getBoardStatuses(board);
@@ -159,25 +217,13 @@ export default async function BoardPage(props: {
           and this board. The Space link's destination is that Space crumb (and
           the Work sidebar's Space row); the Folder segment was a span, never a
           link, so no destination is lost. */}
-      <Breadcrumb
-        items={[
-          { label: board.space.name, href: `/spaces/${board.space.slug}`, tile: { icon: board.space.icon, color: board.space.color, name: board.space.name } },
-          // The Folder crumb was a span with no href while the Folder had its
-          // own route all along (audit High #7's other half).
-          ...(board.folder ? [{ label: board.folder.name, href: `/folders/${board.folder.id}` }] : []),
-          { label: board.name },
-        ]}
-      />
+      <Breadcrumb items={[...trail, { label: board.name }]} />
       {/* Title row (40) per design-system section 4: back · tile · name · lock
           · Share · "…". The generic "Automate" link and the bare
           AskSidekickButton are gone: Automations is a menu row scoped to THIS
           List, and AI is the one slot the shell owns. */}
       <div className="flex h-[40px] items-center gap-2 px-6">
-        <BackButton
-          fallbackHref={board.folder ? `/folders/${board.folder.id}` : `/spaces/${board.space.slug}`}
-          label={board.folder?.name ?? board.space.name}
-          className="me-0.5"
-        />
+        <BackButton fallbackHref={back.href ?? "/home"} label={back.label} className="me-0.5" />
         <EntityTile
           size="md"
           icon={board.icon}
@@ -231,7 +277,7 @@ export default async function BoardPage(props: {
             spaceSlug: board.space.slug,
             spaceName: board.space.name,
             folderId: board.folder?.id ?? null,
-            folderName: board.folder?.name ?? null,
+            folderName: namedFolder?.name ?? null,
             contents: `${items.length} task${items.length === 1 ? "" : "s"}`,
           }}
           role={canManage ? "full" : canContribute ? "edit" : "view"}
@@ -249,14 +295,21 @@ export default async function BoardPage(props: {
           in risk terms and is exactly the founder's "if I give some access to
           someone they are also not able to make some changes". DELETING a
           shared view stays on the management ladder, in canManageView, because
-          that destroys other people's saved work. */}
+          that destroys other people's saved work, so the management answer
+          goes in as canDeleteShared. */}
       <BoardViewTabs
-        views={views}
+        views={views.map((v) => ({ id: v.id, name: v.name, type: v.type, isDefault: v.isDefault, config: v.config, isShared: v.isShared, ownerId: v.ownerId }))}
         boardId={board.id}
         boardSlug={board.slug}
+        boardName={board.name}
         activeViewId={activeView?.id ?? null}
         defaultViewId={defaultView?.id ?? null}
+        defaultPinned={pinned}
+        pinnedByName={pinnedByName}
         canManage={canContribute}
+        canDeleteShared={canManage}
+        currentUserId={u.id}
+        scheduleReports={scheduleReports}
       />
 
       {/* Renderer — its single toolbar row (filters + Statuses/Fields + the
@@ -269,10 +322,12 @@ export default async function BoardPage(props: {
           viewConfig={(activeView?.config as Record<string, unknown> | null) ?? {}}
           initialItems={items}
           initialFields={initialFields}
+          initialRowColorRules={initialRowColorRules}
           statuses={statuses}
           canContribute={canContribute}
           canManage={canManage}
           canDeleteTasks={canDeleteTasks}
+          canSaveView={mayConfigureView}
           currentUserId={u.id}
           sprint={sprint}
           addTaskSlot={

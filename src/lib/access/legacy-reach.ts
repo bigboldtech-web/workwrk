@@ -4,10 +4,11 @@
 // the reason legacy-session.ts does: this directory is the one place allowed
 // to read the access level, so callers get yes/no answers and never the level.
 //
-// It delegates to the same legacy gates every List route uses today
+// It delegates to the same gates every List route uses today
 // (getBoardForReaderOrFolderGrantee to read, canContributeBoard to write), so
-// it changes no answer. When the engine flips, this becomes viewerForCron()
-// with cap EDIT plus can().
+// it changes no answer. Since the node access merge those two answer from the
+// one node resolver (board.ts boardRoleOf, node-access): Can view to read,
+// Can edit to write, the PRIVATE cut and the legacy floor included.
 //
 // Server-only (prisma).
 

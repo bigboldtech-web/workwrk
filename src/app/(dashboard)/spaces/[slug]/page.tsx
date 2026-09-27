@@ -6,7 +6,7 @@
 // The "+ New Folder" and "+ New Board" buttons live in SpaceActions
 // (client island) on the right side.
 
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { SpaceFilesCard } from "@/components/spaces/space-files-card";
 import { SpaceBookmarks, type SpaceBookmark } from "@/components/spaces/space-bookmarks";
 import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
@@ -18,9 +18,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   Folder as FolderIcon, Lock,
-  Users as UsersIcon, User as UserIconSmall,
+  User as UserIconSmall,
   FileText,
-  LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
+  List as ListIcon, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, X,
   Zap,
 } from "lucide-react";
@@ -30,12 +30,19 @@ import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
 import { getEffectivePreferences } from "@/lib/preferences";
-import { folderVisibleTo } from "@/lib/folder";
 import { EntityTile } from "@/components/ui/entity-tile";
+import { PathContainerView } from "@/components/access/path-container-view";
+import { nodeCtxFromLevel, nodeRole, spaceTree } from "@/lib/access/node-access";
+import { pathViewRows, type FolderNode, type ListNode } from "@/lib/access/node-tree";
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 import { hasModule } from "@/lib/space-modules";
+import { readableListsInSpace } from "@/lib/space";
+import {
+  defaultSpaceView, hiddenSpaceViews, readSpaceDefaultView, resolveSpaceView, spaceTabHref,
+} from "@/lib/work/space-default-view";
+import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 // A Space page is Work, so its doc links are the docs' Work addresses:
@@ -118,16 +125,6 @@ function readBookmarks(settings: unknown): SpaceBookmark[] {
   );
 }
 
-type SpaceView = "overview" | "list" | "board" | "team" | "calendar" | "gantt";
-const VIEW_TABS: { key: SpaceView; label: string; Icon: typeof ListIcon; enabled: boolean }[] = [
-  { key: "overview", label: "Overview", Icon: LayoutDashboard, enabled: true },
-  { key: "list", label: "List", Icon: ListIcon, enabled: true },
-  { key: "board", label: "Board", Icon: Kanban, enabled: true },
-  { key: "team", label: "Team", Icon: UsersIcon, enabled: true },
-  { key: "calendar", label: "Calendar", Icon: CalendarIcon, enabled: true },
-  { key: "gantt", label: "Gantt", Icon: GanttChart, enabled: true },
-];
-
 type ListSort = "updated" | "title" | "status" | "board";
 const LIST_SORTS: { key: ListSort; label: string }[] = [
   { key: "updated", label: "Recently updated" },
@@ -163,12 +160,10 @@ interface ListUrlOpts {
 
 export default async function SpacePage(props: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ view?: string; month?: string; sort?: string; status?: string; owner?: string; groupBy?: string; due?: string }>;
+  searchParams: Promise<{ view?: string; focus?: string; month?: string; sort?: string; status?: string; owner?: string; groupBy?: string; due?: string }>;
 }) {
   const { slug } = await props.params;
   const sp = await props.searchParams;
-  const rawView = sp.view ?? "overview";
-  let view: SpaceView = (VIEW_TABS.find((t) => t.key === rawView && t.enabled)?.key ?? "overview") as SpaceView;
   const listSort: ListSort = (LIST_SORTS.find((s) => s.key === sp.sort)?.key ?? "updated") as ListSort;
   const listStatusFilter = sp.status
     ? new Set(sp.status.split(",").map((s) => s.trim()).filter(Boolean))
@@ -194,107 +189,199 @@ export default async function SpacePage(props: {
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
   if (!u.id || !u.organizationId) redirect("/login");
 
+  // The Lists are not read here: readableListsInSpace below is the one
+  // predicate for which of them this viewer reads. The root folders stay,
+  // for the Folders card.
   const space = await prisma.space.findFirst({
     where: { slug, organizationId: u.organizationId },
-    include: {
-      _count: { select: { members: true, folders: true, boards: true } },
-      folders: {
-        where: { archivedAt: null, parentFolderId: null },
-        orderBy: { position: "asc" },
-        include: {
-          _count: { select: { boards: true, childFolders: true } },
-          boards: {
-            where: { archivedAt: null },
-            orderBy: { name: "asc" },
-            select: {
-              id: true, slug: true, name: true, icon: true, color: true,
-              itemType: true, visibility: true, ownerId: true, schema: true,
-              views: { where: { isDefault: true }, take: 1, select: { type: true } },
-            },
-          },
-        },
-      },
-      boards: {
-        where: { archivedAt: null, folderId: null },
-        orderBy: { name: "asc" },
-        select: {
-          id: true, slug: true, name: true, icon: true, color: true,
-          itemType: true, visibility: true, ownerId: true, schema: true,
-          views: { where: { isDefault: true }, take: 1, select: { type: true } },
-        },
-      },
-    },
+    include: { _count: { select: { members: true } } },
   });
-  if (!space) notFound();
-
-  const isAdmin = u.accessLevel === "SUPER_ADMIN" || u.accessLevel === "COMPANY_ADMIN";
-  const membership = await prisma.spaceMember.findUnique({
-    where: { spaceId_userId: { spaceId: space.id, userId: u.id } },
-    select: { role: true },
-  });
-  if (!isAdmin && space.visibility !== "ORG" && !membership) {
-    // A folder-only grantee has no Space overview of their own — the Space is
-    // just a sidebar container for them, so send them to the folder they were
-    // actually granted (their earliest grant, matching sidebar order).
-    const grant = await prisma.folderMember.findFirst({
-      where: { userId: u.id, folder: { spaceId: space.id, archivedAt: null } },
-      orderBy: { createdAt: "asc" },
-      select: { folderId: true },
+  if (!space) {
+    // An id in the slug position (a grant notification links a Space by its
+    // id, the /boards precedent): send it on to the slug, the query kept.
+    const byId = await prisma.space.findFirst({
+      where: { id: slug, organizationId: u.organizationId },
+      select: { slug: true },
     });
-    if (grant) redirect(`/folders/${grant.folderId}`);
+    if (byId) {
+      const qs = new URLSearchParams(
+        Object.entries(sp).filter((e): e is [string, string] => typeof e[1] === "string"),
+      ).toString();
+      permanentRedirect(`/spaces/${encodeURIComponent(byId.slug)}${qs ? `?${qs}` : ""}`);
+    }
     notFound();
   }
-  const isSpaceOwner = membership?.role === "OWNER";
-  // Drop PRIVATE folders (and their boards) the viewer can't see.
-  const visibleFolders = space.folders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));
-  // Content write-rights for the in-place item popup and the Files card on
-  // this page. The item PATCH is still gated per-board on the server, so this
-  // only governs the editor UI.
-  //
-  // `|| !!membership` counted a GUEST as an editor. "View only" is exactly the
-  // grant a GUEST row records, so a person shared in as Can view was handed
-  // the editing controls on this page and every one of them answered 403. The
-  // contribute ladder is any NON-GUEST member (it matches canContributeSpace),
-  // which is the same ladder `spaceRole` below already used.
-  const spaceCanEdit =
-    isAdmin || isSpaceOwner || (!!membership && membership.role !== "GUEST");
-  // Bookmarks add/remove matches the API's canEditSpace (OWNER/ADMIN/org-admin),
-  // NOT the broader spaceCanEdit, so a plain member never sees a control the
-  // server would 403.
-  const bookmarksCanEdit = isAdmin || membership?.role === "OWNER" || membership?.role === "ADMIN";
-  // `POST /api/folders` and `POST /api/boards` both gate on canEditSpace, the
-  // same ladder bookmarks use, so the "+" on the Folders and Lists cards
-  // belongs to exactly these people. Both were rendered unconditionally, so a
-  // Can view member was handed two "+" controls that answer 403.
-  const spaceCanCreate = bookmarksCanEdit;
-  // The object role the container "…" and the Share button both read. Same
-  // ladder as canEditSpace (org admin / OWNER / ADMIN) and canContributeSpace
-  // (any non-GUEST member), so a row is never offered to someone the API
-  // answers 403.
+
+  // WHAT THIS VIEWER SEES OF THE SPACE, from the one resolver
+  // (src/lib/access/node-access.ts). The tree below is exactly the Work
+  // sidebar's (GET /api/spaces/[id]/children): every Folder, List, doc,
+  // table and canvas the viewer can open, and nothing else, so every card
+  // and every aggregate on this page is built from readable Lists only.
+  const nodeCtx = nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel);
+  const decision = await nodeRole(nodeCtx, { kind: "space", id: space.id });
+  const tree = decision.role !== "none" || decision.path ? await spaceTree(nodeCtx, space.id) : null;
+  if (!tree) notFound();
+  if (tree.access === "path") {
+    // Someone given a Folder, List, doc, table or canvas inside this Space
+    // passes through it: its name and the branches that lead to what they
+    // were given, and nothing else (decision A3).
+    return (
+      <PathContainerView
+        kind="space"
+        id={space.id}
+        name={space.name}
+        icon={space.icon}
+        color={space.color}
+        trail={[]}
+        rows={pathViewRows(tree, { kind: "space", id: space.id }, space.slug)}
+      />
+    );
+  }
+
+  // Every rendered Folder and List at every depth, with the viewer's own role
+  // on each (a row's menu offers what that row allows, never the Space's).
+  const treeLists: ListNode[] = [...tree.boards];
+  const walkTree = (nodes: FolderNode[]) => {
+    for (const n of nodes) {
+      treeLists.push(...n.boards);
+      walkTree(n.childFolders);
+    }
+  };
+  walkTree(tree.folders);
+  const listRoleById = new Map(treeLists.map((l) => [l.id, l.role] as const));
+  // The top-level Folder cards: the Folders the tree renders at the root.
+  const visibleFolders = tree.folders;
+  // The viewer's role on the Space itself: Full access manages it (members,
+  // bookmarks, create), Can edit contributes (the item popup, the Files
+  // card), Can view reads.
   const spaceRole: "full" | "edit" | "view" =
-    bookmarksCanEdit ? "full" : membership && membership.role !== "GUEST" ? "edit" : "view";
+    tree.spaceRole === "full" ? "full" : tree.spaceRole === "edit" ? "edit" : "view";
+  const spaceCanEdit = spaceRole === "full" || spaceRole === "edit";
+  const bookmarksCanEdit = spaceRole === "full";
+  // The placement rule's create half (node-rules P1): Can edit or higher on
+  // the Space makes Folders and Lists at its root, exactly what POST
+  // /api/folders and POST /api/boards accept, so the "+" on the Folders and
+  // Lists cards shows for Can edit too. Can view never creates.
+  const spaceCanCreate = spaceCanEdit;
   const spaceBookmarks = readBookmarks(space.settings);
 
   const workflow = readWorkflow(space.settings);
 
-  // Module gating: the Calendar view is available only when the CALENDAR_VIEW
-  // module is enabled for this Space. Backward-compatible — a Space with no
-  // modules config counts as "all on", so existing Spaces keep every tab.
-  const calendarModuleOn = hasModule(space.settings, "CALENDAR_VIEW");
-  const hiddenViews = calendarModuleOn ? [] : ["calendar"];
-  if (view === "calendar" && !calendarModuleOn) view = "overview";
+  // Which tab this request opens. Module gating: Calendar shows only when the
+  // CALENDAR_VIEW module is on (a Space with no modules config counts as "all
+  // on"). A pinned Space view (Space.settings.defaultView) is what the bare URL
+  // opens; a ?view= link always wins, and a hidden view opens Overview. One
+  // rule, shared with the tab strip (src/lib/work/space-default-view.ts).
+  const pinnedView = readSpaceDefaultView(space.settings);
+  const hiddenViews = hiddenSpaceViews(space.settings);
+  const view = resolveSpaceView({ requested: sp.view, pinned: pinnedView, hidden: hiddenViews });
 
-  // Collect every board under this Space (root + folder-nested) so the
-  // dashboard cards can scope their queries without an extra round
-  // trip. PRIVATE boards drop out of the aggregate cards for viewers
-  // who aren't admin/Space-OWNER/board-owner — leaking item titles or
-  // status counts from a board the viewer can't read is the same
-  // class of leak Phase 22b closed on the Library APIs.
-  const allBoards = [
-    ...space.boards,
-    ...visibleFolders.flatMap((f) => f.boards),
-  ];
+  // The Lists of this Space the viewer can read, in the Work tree's order:
+  // ONE predicate for every tab below, the header's count and Bird's eye,
+  // answered from the tree the resolver built above (the same walk the Work
+  // sidebar renders, so the page and the sidebar cannot disagree, and the
+  // world is loaded once). A PRIVATE List, or a List under a PRIVATE Folder,
+  // that the viewer cannot open never leaks an item title or a status count
+  // here. The old inline rule read only the root folders' Lists and never a
+  // grant, so a List in a sub-folder was missing from every cross-List tab
+  // and a PRIVATE List shared to someone never appeared for them.
+  const { lists: readableLists, folderCount } = await readableListsInSpace(
+    space.id,
+    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel },
+    { includeSchema: view === "calendar" || view === "gantt", tree },
+  );
 
+  // Location lives in the navy bar and nowhere else (principle 3). The
+  // Space's own name only reaches that bar if this page declares it, which is
+  // why the in-page "Spaces" link is gone and Breadcrumb is here: a dynamic
+  // route is the one place no static table knows the object's name.
+  const header = (
+    <>
+      <Breadcrumb items={[{ label: "Spaces", href: "/spaces" }, { label: space.name }]} />
+      {/* Title row: back-map line 38 and spec section 1 both say the Space page
+          carries a BackButton to /spaces, always rendered. /folders/[id] and
+          /boards/[slug] have had one since this stage; this page did not. */}
+      <div className="px-6">
+        <div className="flex h-[40px] items-center gap-2">
+          <BackButton fallbackHref="/spaces" label="Spaces" className="me-0.5" />
+          <EntityTile size="md" icon={space.icon} color={space.color} name={space.name} />
+          <h1 className="text-title font-semibold text-ink flex items-center gap-1.5 min-w-0">
+            <span className="truncate" title={space.description || space.name}>{space.name}</span>
+            {space.visibility === "PRIVATE" ? (
+              <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />
+            ) : null}
+            {/* Space-level filtering lives inside the List view's own toolbar
+                (sort / status / owner / due). The former title-row filter icon
+                had no handler, so it's removed rather than left inert. */}
+          </h1>
+          {/* Was a ChevronDown with no onClick and no menu. Same affordance,
+              now the real Space menu the sidebar row uses. It counts what the
+              viewer can open: it used to count every List and folder of the
+              Space, unreadable and archived ones included, on every tab. */}
+          <ContainerMenuTrigger
+            container={{
+              kind: "space", id: space.id, slug: space.slug, name: space.name,
+              icon: space.icon, color: space.color, visibility: space.visibility,
+              description: space.description, createdAt: space.createdAt.toISOString(),
+              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+              contents: `${readableLists.length} lists · ${folderCount} folders · ${space._count.members} members`,
+            }}
+            role={spaceRole}
+          />
+          <div className="flex-1" />
+          <Link
+            href={`/automation/workflows?spaceId=${encodeURIComponent(space.id)}`}
+            className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            title="Automations"
+          >
+            {/* Grey, not amber: yellow is reserved for warning, and Automate
+                is an action, not a caution state (principle 7). */}
+            <Zap className="w-3.5 h-3.5 text-zinc-500" />
+            Automate
+          </Link>
+          <AskSidekickButton prompt={`Help me with the ${space.name} space.`} />
+          <SpaceShareButton
+            spaceId={space.id}
+            spaceName={space.name}
+            initialVisibility={space.visibility}
+          />
+        </div>
+      </div>
+
+      {/* View tabs, the Space-level view switcher. A pinned view renders
+          first; right-click (or long-press, or the keyboard) pins one. */}
+      <SpaceViewTabs
+        view={view}
+        spaceSlug={space.slug}
+        spaceId={space.id}
+        hiddenViews={hiddenViews}
+        pinnedView={pinnedView}
+        canPin={spaceCanEdit}
+      />
+    </>
+  );
+
+  // Bird's eye loads its own data, one call per load, from the client: none
+  // of the Overview, List, Board, Team, Calendar or Gantt queries below runs
+  // for it.
+  if (view === "birdseye") {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-app">
+        {header}
+        <SpaceBirdseye
+          spaceId={space.id}
+          spaceSlug={space.slug}
+          overviewHref={spaceTabHref(space.slug, "birdseye", defaultSpaceView(pinnedView, hiddenViews))}
+          initialFocusId={sp.focus ?? null}
+          canCreateList={spaceCanCreate}
+        />
+      </div>
+    );
+  }
+
+  // Every List below is a readable one (readableListsInSpace above), so no
+  // aggregate card can leak a title or a status count from a List the viewer
+  // cannot open: the same class of leak Phase 22b closed on the Library APIs.
   // Build a boardId → date-field key map for the Calendar tab. Each
   // board's first DATE-typed field is the calendar-projection target,
   // matching how the per-board CalendarView picks `calendarField`
@@ -302,7 +389,7 @@ export default async function SpacePage(props: {
   // excluded from the calendar grid (no "fall back to createdAt"
   // mixing — that mixed surface was misleading).
   const dateKeyByBoard = new Map<string, string>();
-  for (const b of allBoards) {
+  for (const b of readableLists) {
     // Board.schema.fields store the field type under `type` (FieldDef), not
     // `fieldType` — the earlier `fieldType` read never matched, so the DATE
     // projection was dead on the Space Calendar + Gantt. Accept DATETIME too.
@@ -310,32 +397,23 @@ export default async function SpacePage(props: {
     const dateField = schema?.fields?.find((f) => f.type === "DATE" || f.type === "DATETIME");
     if (dateField?.key) dateKeyByBoard.set(b.id, dateField.key);
   }
-  const ownedPrivateIds = allBoards
-    .filter((b) => b.visibility === "PRIVATE" && b.ownerId === u.id)
-    .map((b) => b.id);
-  const boardIds = (isAdmin || isSpaceOwner)
-    ? allBoards.map((b) => b.id)
-    : [
-        ...allBoards.filter((b) => b.visibility !== "PRIVATE").map((b) => b.id),
-        ...ownedPrivateIds,
-      ];
+  const boardIds = readableLists.map((b) => b.id);
 
   // Recent Docs + tables + recent items + status counts + prefs in
   // parallel. All are read-only chrome; missing rows degrade gracefully.
   const [recentDocs, spaceTables, recentItems, statusGroups, prefs] = await Promise.all([
-    prisma.doc.findMany({
-      where: {
-        organizationId: u.organizationId,
-        entityType: "SPACE",
-        entityId: space.id,
-        archivedAt: null,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 5,
-      select: { id: true, title: true, excerpt: true, updatedAt: true },
-    }),
+    // The docs the tree places at the Space's root: the Space docs the viewer
+    // can open (a restricted one they are not on never shows here).
+    tree.docs.length
+      ? prisma.doc.findMany({
+          where: { organizationId: u.organizationId, id: { in: tree.docs.map((d) => d.id) }, archivedAt: null },
+          orderBy: { updatedAt: "desc" },
+          take: 5,
+          select: { id: true, title: true, excerpt: true, updatedAt: true },
+        })
+      : Promise.resolve([] as { id: string; title: string; excerpt: string | null; updatedAt: Date }[]),
     prisma.dataTable.findMany({
-      where: { organizationId: u.organizationId, spaceId: space.id },
+      where: { organizationId: u.organizationId, spaceId: space.id, id: { in: tree.tables.map((t) => t.id) } },
       orderBy: { updatedAt: "desc" },
       take: 6,
       select: {
@@ -383,7 +461,7 @@ export default async function SpacePage(props: {
         })
       : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
     (async () => {
-      const ids = Array.from(new Set(allBoards.map((b) => b.ownerId).filter((x): x is string => Boolean(x))));
+      const ids = Array.from(new Set(readableLists.map((b) => b.ownerId).filter((x): x is string => Boolean(x))));
       if (ids.length === 0) return [] as { id: string; firstName: string | null; lastName: string | null }[];
       return prisma.user.findMany({
         where: { id: { in: ids }, organizationId: u.organizationId },
@@ -393,15 +471,10 @@ export default async function SpacePage(props: {
   ]);
   // audit spaces-boards High #3: every cross-List tab on this page rendered
   // `Space.settings.workflow.statuses` for every row. Statuses belong to a
-  // List, so each List's own set travels with the rows, keyed by slug.
-  const listStatusRows = boardIds.length > 0
-    ? await prisma.board.findMany({
-        where: { id: { in: boardIds } },
-        select: { slug: true, statuses: true },
-      })
-    : [];
+  // List, so each List's own set travels with the rows, keyed by slug. The
+  // readable Lists already carry theirs.
   const statusesByList: Record<string, StatusOption[]> = Object.fromEntries(
-    listStatusRows.map((b) => [b.slug, getBoardStatuses(b)]),
+    readableLists.map((b) => [b.slug, getBoardStatuses(b)]),
   );
 
   const listTotalMap = new Map(listTotals.map((r) => [r.boardId, r._count._all]));
@@ -429,7 +502,7 @@ export default async function SpacePage(props: {
 
   const hasContent =
     visibleFolders.length > 0 ||
-    space.boards.length > 0 ||
+    readableLists.length > 0 ||
     recentDocs.length > 0 ||
     spaceTables.length > 0 ||
     recentItems.length > 0;
@@ -675,64 +748,7 @@ export default async function SpacePage(props: {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Location lives in the navy bar and nowhere else (principle 3). The
-          Space's own name only reaches that bar if this page declares it,
-          which is why the in-page "Spaces" link is gone and Breadcrumb is
-          here: a dynamic route is the one place no static table knows the
-          object's name. */}
-      <Breadcrumb items={[{ label: "Spaces", href: "/spaces" }, { label: space.name }]} />
-      {/* Title row: back-map line 38 and spec section 1 both say the Space page
-          carries a BackButton to /spaces, always rendered. /folders/[id] and
-          /boards/[slug] have had one since this stage; this page did not. */}
-      <div className="px-6">
-        <div className="flex h-[40px] items-center gap-2">
-          <BackButton fallbackHref="/spaces" label="Spaces" className="me-0.5" />
-          <EntityTile size="md" icon={space.icon} color={space.color} name={space.name} />
-          <h1 className="text-title font-semibold text-ink flex items-center gap-1.5 min-w-0">
-            <span className="truncate" title={space.description || space.name}>{space.name}</span>
-            {space.visibility === "PRIVATE" ? (
-              <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />
-            ) : null}
-            {/* Space-level filtering lives inside the List view's own toolbar
-                (sort / status / owner / due). The former title-row filter icon
-                had no handler, so it's removed rather than left inert. */}
-          </h1>
-          {/* Was a ChevronDown with no onClick and no menu. Same affordance,
-              now the real Space menu the sidebar row uses. */}
-          <ContainerMenuTrigger
-            container={{
-              kind: "space", id: space.id, slug: space.slug, name: space.name,
-              icon: space.icon, color: space.color, visibility: space.visibility,
-              description: space.description, createdAt: space.createdAt.toISOString(),
-              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
-              contents: `${space._count.boards} lists · ${space._count.folders} folders · ${space._count.members} members`,
-            }}
-            role={spaceRole}
-          />
-          <div className="flex-1" />
-          <Link
-            href={`/automation/workflows?spaceId=${encodeURIComponent(space.id)}`}
-            className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-            title="Automations"
-          >
-            {/* Grey, not amber: yellow is reserved for warning, and Automate
-                is an action, not a caution state (principle 7). */}
-            <Zap className="w-3.5 h-3.5 text-zinc-500" />
-            Automate
-          </Link>
-          <AskSidekickButton prompt={`Help me with the ${space.name} space.`} />
-          <SpaceShareButton
-            spaceId={space.id}
-            spaceName={space.name}
-            initialVisibility={space.visibility}
-          />
-        </div>
-      </div>
-
-      {/* View tabs — matches ClickUp's Space-level view switcher.
-          Overview + List are functional; others stub until the
-          cross-board renderers ship. */}
-      <SpaceViewTabs view={view} spaceSlug={space.slug} hiddenViews={hiddenViews} />
+      {header}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
@@ -803,6 +819,7 @@ export default async function SpacePage(props: {
             <SpaceOverviewGrid
               initialLayouts={(prefs?.home?.overviewCardLayout ?? null) as Parameters<typeof SpaceOverviewGrid>[0]["initialLayouts"]}
               initialHidden={prefs?.home?.overviewCardsHidden ?? null}
+              overview={{ spaceId: space.id, spaceName: space.name, canManage: bookmarksCanEdit }}
               cards={{
                 recent: (
                   <OverviewCard title="Recent">
@@ -862,7 +879,7 @@ export default async function SpacePage(props: {
                 folders: (
                   <OverviewCard title="Folders" action={spaceCanCreate ? <FolderCardCreate spaceId={space.id} /> : null}>
                     {visibleFolders.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No folders yet." : "No folders yet. Creating one needs Full access on this space."}</p>
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No folders yet." : "No folders yet. Creating one needs Can edit on this Space."}</p>
                     ) : (
                       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {visibleFolders.map((f) => (
@@ -874,16 +891,18 @@ export default async function SpacePage(props: {
                               <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" style={f.color ? { color: f.color } : undefined} />
                               <span className="text-xs text-zinc-900 truncate flex-1">{f.name}</span>
                             </Link>
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                              <ContainerMenuTrigger
-                                container={{
-                                  kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
-                                  visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
-                                  spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
-                                }}
-                                role={spaceRole}
-                              />
-                            </span>
+                            {f.path || !f.role || !f.visibility ? null : (
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                                <ContainerMenuTrigger
+                                  container={{
+                                    kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
+                                    visibility: f.visibility,
+                                    spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                                  }}
+                                  role={f.role}
+                                />
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -892,8 +911,8 @@ export default async function SpacePage(props: {
                 ),
                 lists: (
                   <OverviewCard title="Lists" action={spaceCanCreate ? <ListCardCreate spaceId={space.id} /> : null}>
-                    {allBoards.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Full access on this space."}</p>
+                    {readableLists.length === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Can edit on this Space."}</p>
                     ) : (
                       <div className="rounded-lg border border-line overflow-hidden">
                         <div className="grid grid-cols-[minmax(0,1fr)_64px_150px_88px_150px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
@@ -905,7 +924,7 @@ export default async function SpacePage(props: {
                           <span className="sr-only">Actions</span>
                         </div>
                         <ul>
-                          {allBoards.map((b) => {
+                          {readableLists.map((b) => {
                             const total = listTotalMap.get(b.id) ?? 0;
                             const done = listDoneMap.get(b.id) ?? 0;
                             const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -945,7 +964,7 @@ export default async function SpacePage(props: {
                                     icon: b.icon, color: b.color, visibility: b.visibility,
                                     spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
                                   }}
-                                  role={b.visibility === "PRIVATE" && b.ownerId !== u.id && !isAdmin ? "view" : spaceRole}
+                                  role={listRoleById.get(b.id) ?? "view"}
                                 />
                               </span>
                             </li>

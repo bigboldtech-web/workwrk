@@ -18,10 +18,9 @@ import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { visibleSpaceIds } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
-import { viewerFromSession } from "@/lib/access/viewer";
-import { canManageObject } from "@/lib/object-manage";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { resolveCreate } from "@/lib/access/node-placement";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { filledRowCounts } from "@/lib/table-counts";
 import {
@@ -52,29 +51,21 @@ export async function GET(req: NextRequest) {
     include: { _count: { select: { rows: { where: { deletedAt: null } } } } },
   });
 
-  // Phase 32, gate by Space visibility. Unscoped tables (spaceId=null)
-  // stay org-wide for Members (a Guest sees only their own); scoped ones return only if the viewer can read the
-  // parent Space. Mirrors the Files/Whiteboards gate from Phase 22.
-  const scopedIds = tables.map((t) => t.spaceId).filter((s): s is string => Boolean(s));
-  const visible = scopedIds.length > 0
-    ? await visibleSpaceIds(scopedIds, userId, accessLevel)
-    : new Set<string>();
-  // An unscoped table is org-wide for Members and never for a Guest who did
-  // not make it (lib/table-visibility).
-  const gated = tables.filter((t) =>
-    t.spaceId ? visible.has(t.spaceId) : unscopedTableReadable(t.createdById, userId, accessLevel));
+  // One world for every row (the one resolver's table rule, R7): a table in
+  // a Space follows the Space, an unscoped table is org-wide for Members and
+  // a Guest's own only, and a table grant opens its table.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(userId, orgId, accessLevel), "table", tables.map((t) => t.id));
+  const gated = tables.filter((t) => roleAtLeast(roles.get(t.id) ?? "none", "VIEW"));
 
-  // canManage: may this viewer delete the table or change its public link
-  // (its creator or an admin, lib/object-manage). Menus hide those rows
-  // for everyone else rather than letting the server refuse them.
-  const viewer = await viewerFromSession().catch(() => null);
-  // rowCount stays the raw live-row count every older caller reads;
-  // filledRowCount is the honest one (the seeded blank rows do not count),
-  // and it is what a person is shown.
+  // canManage: Full access on the table (delete it, change its public link),
+  // so menus hide those rows for everyone else rather than letting the server
+  // refuse them. rowCount stays the raw live-row count every older caller
+  // reads; filledRowCount is the honest one (the seeded blank rows do not
+  // count), and it is what a person is shown.
   const filled = await filledRowCounts(gated.map((t) => t.id));
   return jsonSuccess(gated.map((t) => ({
     ...t, rowCount: t._count.rows, filledRowCount: filled.get(t.id) ?? 0,
-    canManage: canManageObject(viewer, t.createdById),
+    canManage: roleAtLeast(roles.get(t.id) ?? "none", "FULL"),
   })));
 }
 
@@ -98,10 +89,15 @@ export async function POST(req: NextRequest) {
     ? Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: defaultId(), type: "short_text", label: "" }))
     : body.columns;
 
-  // Cross-tenant safety: spaceId must belong to the caller's org.
+  // The placement rule (node-rules P1 and P3): a table in a Space is made
+  // only by someone who can edit that Space (Can view and Can comment never
+  // create), in this org, never in an archived Space. A Space the caller
+  // cannot even open is the same 404 as one that does not exist. With no
+  // Space it is the org's, as today.
   if (spaceId) {
-    const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
-    if (!space) return jsonError("space not found", 404);
+    const level = (session.user as { accessLevel?: string }).accessLevel;
+    const placed = await resolveCreate(nodeCtxFromLevel(userId, orgId, level), { spaceId }, "table");
+    if (!placed.ok) return jsonError(placed.status === 404 ? "space not found" : placed.error, placed.status);
   }
 
   const table = await prisma.dataTable.create({
@@ -151,9 +147,9 @@ async function pagedList(
     }),
   ]);
   const scopedIds = [...new Set(tables.map((t) => t.spaceId).filter((s): s is string => Boolean(s)))];
-  const visible = scopedIds.length > 0 ? await visibleSpaceIds(scopedIds, ctx.userId, ctx.accessLevel) : new Set<string>();
-  const gated = tables.filter((t) =>
-    t.spaceId ? visible.has(t.spaceId) : unscopedTableReadable(t.createdById, ctx.userId, ctx.accessLevel));
+  // One world for every candidate, before any view, filter or page slice.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "table", tables.map((t) => t.id));
+  const gated = tables.filter((t) => roleAtLeast(roles.get(t.id) ?? "none", "VIEW"));
 
   const home = prefs.home as { favoriteTableIds?: unknown };
   const favoriteIds = new Set<string>(Array.isArray(home.favoriteTableIds) ? (home.favoriteTableIds as string[]) : []);
@@ -200,7 +196,6 @@ async function pagedList(
   const filtered = candidates.filter((r) => matchesListView(r, q.view, facts) && matchesListFilters(r, q));
   const sorted = sortListRows(filtered, q.sort, q.dir);
   const { page, nextCursor } = slicePage(sorted, q.cursor, q.limit);
-  const viewer = await viewerFromSession().catch(() => null);
 
   return jsonSuccess({
     data: page.map((r) => ({
@@ -216,7 +211,7 @@ async function pagedList(
       hasPublicLink: r.isPublic,
       hasForm: !!r.hasForm,
       isFavorite: favoriteIds.has(r.id),
-      canManage: canManageObject(viewer, r.createdById),
+      canManage: roleAtLeast(roles.get(r.id) ?? "none", "FULL"),
       updatedAt: r.raw.updatedAt,
       createdAt: r.raw.createdAt,
     })),

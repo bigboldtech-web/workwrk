@@ -30,10 +30,14 @@
 // Every host in this repo now passes the role it has already worked out.
 //
 // WHAT MOVED RATHER THAN DISAPPEARED, because the founder checks:
-//   * Space "Make Private" / "Make workspace-visible"  -> the Share dialog's
-//     visibility tri-state, which this menu can now open from EVERY host.
+//   * Space "Make Private" / "Make workspace-visible"  -> the Manage access
+//     dialog's visibility tri-state, which this menu opens from EVERY host.
 //   * Folder "Make private"                            -> the Restricted switch
 //     in the same dialog (it had no un-do at all before).
+//   * "Share" (and "Sharing & Permissions" before it)  -> "Manage access" at
+//     Full access, "Who has access" below it: the one dialog every node uses.
+//   * A path container (a Space or Folder seen only on the way to something
+//     shared inside it, decision A3)                   -> Copy link only.
 //   * List "List info" (a toast)                       -> About.
 //   * Space "Modules"                                  -> the "Features" row,
 //     which keeps the modal reachable until the Space page grows its Settings
@@ -48,10 +52,11 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Star, Pin, Plus, Edit2, Link as LinkIcon, Palette, Share2,
+  MoreHorizontal, Star, Pin, Plus, Edit2, Link as LinkIcon, Palette, UserPlus,
   Settings, CircleDot, Tag, Shapes, Info, Files, Save, Zap, BellOff, Bell,
   EyeOff, ArrowRightLeft, ArrowUp, ArrowDown, Copy, Archive, Trash2,
   ListChecks, FolderPlus, FileText, Brush, IterationCw, Blocks, Table2,
+  ListPlus, PaintBucket, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
@@ -65,14 +70,17 @@ import { MoveTargetDialog } from "./move-target-dialog";
 import { ContainerAboutModal, type AboutObject } from "./container-about-modal";
 import { DuplicateContainerDialog } from "./duplicate-container-dialog";
 import { ShareDialog } from "@/components/access/share-dialog";
+import { Drawer } from "@/components/ui/drawer";
+import { ListDefaultsPanel } from "@/components/board-view/list-settings/list-defaults-panel";
+import { RowColorRulesPanel } from "@/components/board-view/list-settings/row-color-rules-panel";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
-import { treeChanged, accessChanged } from "@/lib/work/container-events";
+import { treeChanged } from "@/lib/work/container-events";
 import { objectHrefNow } from "./use-object-href";
 import { hydrateSidebarState, setSpaceHidden } from "@/lib/work/sidebar-expand";
 import {
-  containerMenuRows, containerPath, containerNoun,
+  containerMenuRows, containerPath, containerNoun, newItemsFor,
   type ContainerAction, type ContainerKind, type ContainerRole,
 } from "@/lib/work/container-menu";
 
@@ -101,10 +109,17 @@ export interface ContainerObject {
 
 export interface ContainerMenuProps {
   container: ContainerObject;
-  role?: ContainerRole;
+  /** The viewer's role here. Absent or null (a row the server did not decide) renders the reader's menu. */
+  role?: ContainerRole | null;
   canDelete?: boolean;
   isAgent?: boolean;
+  /** Kept so no host breaks; ignored (the access row reads Manage access at Full access only). */
   editorsCanShare?: boolean;
+  /**
+   * The viewer sees this Space or Folder only as the way to something shared
+   * with them inside it (decision A3): the menu is exactly Copy link.
+   */
+  pathOnly?: boolean;
   onUpdated?: () => void;
   /** Keyboard alternatives to a drag (critic #10). Absent at the ends. */
   onMoveUp?: () => void;
@@ -148,11 +163,13 @@ const ROW_ICON: Record<ContainerAction, LucideIcon> = {
   rename: Edit2,
   "copy-link": LinkIcon,
   color: Palette,
-  share: Share2,
+  "manage-access": UserPlus,
   features: Blocks,
   statuses: CircleDot,
   fields: Tag,
   "default-type": Shapes,
+  "default-values": ListPlus,
+  "row-colors": PaintBucket,
   about: Info,
   templates: Files,
   automations: Zap,
@@ -175,6 +192,12 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
     const [modulesOpen, setModulesOpen] = useState(false);
     const [duplicateOpen, setDuplicateOpen] = useState(false);
     const [duplicating, setDuplicating] = useState(false);
+    // Phase 5b, List comfort: the List's own settings. They open in the Drawer
+    // primitive, never in ui/dialog: their field editors position their menus
+    // with position: fixed, which a dialog's transformed box would break.
+    const [settingsPanel, setSettingsPanel] = useState<"defaults" | "colors" | null>(null);
+    const [panelDirty, setPanelDirty] = useState(false);
+    const confirmClose = useConfirm();
     const btnRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
@@ -301,8 +324,51 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
             onRequestAbout={() => setAboutOpen(true)}
             onRequestModules={() => setModulesOpen(true)}
             onRequestDuplicate={() => setDuplicateOpen(true)}
+            onRequestSettings={(panel) => { setPanelDirty(false); setSettingsPanel(panel); }}
           />
         </MorePortal>
+
+        {settingsPanel && container.kind === "list" ? (
+          <Drawer
+            open
+            layerId={`list-settings-${container.id}`}
+            ariaLabel={settingsPanel === "defaults" ? "Default values" : "Conditional colors"}
+            // Esc never closes over unsaved changes; the X asks first.
+            canClose={() => !panelDirty}
+            onClose={() => setSettingsPanel(null)}
+            header={
+              <>
+                <span className="min-w-0 flex-1 truncate text-base font-semibold text-ink">
+                  {settingsPanel === "defaults" ? "Default values" : "Conditional colors"}
+                  <span className="ms-2 font-normal text-ink-2">{container.name}</span>
+                </span>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={async () => {
+                    if (panelDirty && !(await confirmClose({
+                      title: "Discard your changes?",
+                      description: "You have changes that are not saved yet.",
+                      confirmLabel: "Discard",
+                      destructive: true,
+                    }))) return;
+                    setSettingsPanel(null);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+                >
+                  <X className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+              </>
+            }
+          >
+            {settingsPanel === "defaults" ? (
+              <ListDefaultsPanel boardId={container.id} onDone={() => setSettingsPanel(null)} onDirtyChange={setPanelDirty} />
+            ) : (
+              <RowColorRulesPanel boardId={container.id} onDone={() => setSettingsPanel(null)} onDirtyChange={setPanelDirty} />
+            )}
+          </Drawer>
+        ) : null}
 
         {moveOpen ? (
           // A Folder is moved with the FOLDER flavour. It used to take the
@@ -317,13 +383,13 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
           />
         ) : null}
 
+        {/* The same decision the row's own label is made from
+            (containerMenuRows: "Manage access" at Full access only). The
+            dialog itself tells the tree and the sidebar about a change. */}
         <ShareDialog
           open={shareOpen}
           onOpenChange={setShareOpen}
-          // The same decision the row's own label is made from
-          // (containerMenuRows: Full access, or Can edit under toggle 4).
-          readOnly={!((props.role ?? "view") === "full"
-            || (props.editorsCanShare === true && (props.role ?? "view") === "edit"))}
+          readOnly={(props.role ?? "view") !== "full" || props.pathOnly === true}
           target={{
             kind: container.kind,
             id: container.id,
@@ -331,7 +397,7 @@ export const ContainerMenuTrigger = forwardRef<ContextMenuHandle, ContainerMenuP
             visibility: container.visibility,
             parentSpaceName: container.spaceName ?? null,
           }}
-          onChanged={() => { onUpdated?.(); accessChanged({ kind: container.kind, id: container.id }); }}
+          onChanged={() => onUpdated?.()}
         />
 
         <ContainerAboutModal
@@ -365,10 +431,10 @@ type Mode = "menu" | "rename" | "icon";
 
 function ContainerMenuBody({
   container,
-  role = "view",
+  role: roleProp,
   canDelete = true,
   isAgent = false,
-  editorsCanShare = false,
+  pathOnly = false,
   onUpdated,
   onMoveUp,
   onMoveDown,
@@ -378,6 +444,7 @@ function ContainerMenuBody({
   onRequestAbout,
   onRequestModules,
   onRequestDuplicate,
+  onRequestSettings,
 }: ContainerMenuProps & {
   onClose: () => void;
   onRequestMove: () => void;
@@ -385,11 +452,15 @@ function ContainerMenuBody({
   onRequestAbout: () => void;
   onRequestModules: () => void;
   onRequestDuplicate: () => void;
+  onRequestSettings: (panel: "defaults" | "colors") => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { openTemplateCenter, openCreateList, openCreateSprint } = useOsShell();
+  // A null role is the Work tree's "not decided here" (an older server, a
+  // path container): the reader's menu, never more.
+  const role: ContainerRole = roleProp ?? "view";
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(container.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -622,10 +693,32 @@ function ContainerMenuBody({
   // and restores them in place through POST /api/trash/bulk. Leaving the older
   // sentence in place talked people out of a shipped feature, which is the
   // same defect the other way round.
+  // Phase 5b: a List may show tasks from other Lists and have its own tasks
+  // shown in others. Archiving or deleting it takes those out of view too,
+  // so the confirm says how many (GET /api/boards/[id]/links counts only
+  // Lists the viewer can read) and that they come back with it.
+  const linkCountLine = useCallback(async (): Promise<string> => {
+    if (container.kind !== "list") return "";
+    try {
+      const r = await fetch(`/api/boards/${container.id}/links`, { cache: "no-store" });
+      if (!r.ok) return "";
+      const d = (await r.json()) as { sharedIn?: number; sharedOut?: number };
+      const inN = Number(d.sharedIn) || 0;
+      const outN = Number(d.sharedOut) || 0;
+      if (inN === 0 && outN === 0) return "";
+      const inPart = inN > 0 ? `${inN} task${inN === 1 ? "" : "s"} from other Lists ${inN === 1 ? "is" : "are"} shown here` : "";
+      const outPart = outN > 0 ? `${outN} of its tasks ${outN === 1 ? "is" : "are"} shown in other Lists` : "";
+      return ` ${[inPart, outPart].filter(Boolean).join(" and ")}; they come back when it is restored.`;
+    } catch {
+      return "";
+    }
+  }, [container.id, container.kind]);
+
   const archive = useCallback(async () => {
+    const links = await linkCountLine();
     if (!(await confirm({
       title: `Archive ${noun.toLowerCase()}`,
-      description: `Archive "${container.name}"? It leaves your sidebar, search and every list. Nothing is deleted: you can restore it from Trash, on the Archived tab.`,
+      description: `Archive "${container.name}"? It leaves your sidebar, search and every list. Nothing is deleted: you can restore it from Trash, on the Archived tab.${links}`,
       destructive: true, confirmLabel: "Archive",
     }))) return;
     setBusy("archive");
@@ -645,15 +738,16 @@ function ContainerMenuBody({
     } finally {
       setBusy(null);
     }
-  }, [base, confirm, container.id, container.kind, container.name, noun, onClose, onUpdated, router, toast]);
+  }, [base, confirm, container.id, container.kind, container.name, noun, onClose, onUpdated, router, toast, linkCountLine]);
 
   const del = useCallback(async () => {
+    const links = await linkCountLine();
     if (!(await confirm({
       title: `Move ${container.name} to Trash?`,
       // The retention window is org config this component does not read, and
       // /trash is manager-gated, so neither a day count nor a plain "you can
       // restore it" is honest here.
-      description: "Everything inside goes with it. It lands in Trash, which a manager can restore it from.",
+      description: `Everything inside goes with it. It lands in Trash, which a manager can restore it from.${links}`,
       destructive: true, confirmLabel: "Delete",
     }))) return;
     setBusy("delete");
@@ -674,7 +768,7 @@ function ContainerMenuBody({
     } finally {
       setBusy(null);
     }
-  }, [base, confirm, container.id, container.kind, container.name, onClose, onUpdated, router, toast]);
+  }, [base, confirm, container.id, container.kind, container.name, onClose, onUpdated, router, toast, linkCountLine]);
 
   // ── New submenu targets ───────────────────────────────────────────
   const createDoc = useCallback(async () => {
@@ -861,7 +955,7 @@ function ContainerMenuBody({
     isTopPinned: topPinned,
     canDelete,
     isAgent,
-    editorsCanShare,
+    pathOnly,
   });
 
   return (
@@ -877,25 +971,27 @@ function ContainerMenuBody({
           case "pin-top":
             return <MenuItem key={row.action} icon={Icon} label={row.label} iconFilled={topPinned} onClick={toggleTopPin} />;
 
-          case "new":
+          case "new": {
+            // Exactly what the one create rule lets this viewer make here
+            // (newItemsFor, node-rules P1): the server accepts every row shown.
+            const can = new Set(newItemsFor(container.kind, role, pathOnly));
             return (
               <MenuSubmenu key={row.action} icon={Icon} label="New">
-                <MenuItem icon={ListChecks} label="List" onClick={() => {
+                {can.has("list") ? <MenuItem icon={ListChecks} label="List" onClick={() => {
                   onClose();
                   openCreateList({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
+                }} /> : null}
+                {can.has("sprint") ? <MenuItem icon={IterationCw} label="Sprint" onClick={() => {
                   onClose();
                   openCreateSprint({ ...(spaceId ? { spaceId } : {}), ...(container.kind === "folder" ? { folderId: container.id } : {}) });
-                }} />
-                <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} />
-                <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} />
-                <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} />
-                {container.kind === "space" ? (
-                  <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} />
-                ) : null}
+                }} /> : null}
+                {can.has("folder") ? <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} /> : null}
+                {can.has("doc") ? <MenuItem icon={FileText} label="Doc" busy={busy === "doc"} onClick={createDoc} /> : null}
+                {can.has("canvas") ? <MenuItem icon={Brush} label="Canvas" busy={busy === "canvas"} onClick={createCanvas} /> : null}
+                {can.has("table") ? <MenuItem icon={Table2} label="Table" busy={busy === "table"} onClick={createTable} /> : null}
               </MenuSubmenu>
             );
+          }
 
           case "rename":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => setMode("rename")} />;
@@ -906,7 +1002,7 @@ function ContainerMenuBody({
           case "color":
             return <MenuItem key={row.action} icon={Icon} label={row.label} submenu onClick={() => setMode("icon")} />;
 
-          case "share":
+          case "manage-access":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestShare(); }} />;
 
           case "features":
@@ -949,6 +1045,12 @@ function ContainerMenuBody({
                 <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); router.push("/settings/task-types"); }} />
               </MenuSubmenu>
             );
+
+          case "default-values":
+            return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestSettings("defaults"); }} />;
+
+          case "row-colors":
+            return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestSettings("colors"); }} />;
 
           case "about":
             return <MenuItem key={row.action} icon={Icon} label={row.label} onClick={() => { onClose(); onRequestAbout(); }} />;

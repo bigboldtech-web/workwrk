@@ -564,6 +564,13 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/route-guard.ts",
   "src/lib/sop-access.ts",
   "src/lib/space.ts",
+  // Bird's eye (2026-09-24) had added src/lib/work/space-lists.ts and its
+  // test here: a pure second predicate over the frozen legacy transcriptions
+  // that readableListsInSpace decided through. The one access model merge
+  // (2026-09-27) retired both: readableListsInSpace answers from the one
+  // resolver's tree (node-access spaceTree), which knows the Private cut and
+  // a Folder grant's own role, so the module had no caller left and a second
+  // opinion on readability is exactly what this list exists to shrink.
   "src/lib/suites/auth.ts",
   "src/lib/trash.ts",
   "src/lib/types.ts",

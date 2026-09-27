@@ -1,8 +1,8 @@
 // How far an automation reaches: never further than the person who made it
 // (spec-ai-automation 1.4, "a workflow therefore never reaches further than
 // its creator, and a demoted creator's workflows quietly stop being able to
-// write"). The access engine is still inert, so the answers come from the
-// legacy List gates, for the creator, live (access/legacy-reach.ts).
+// write"). The answers are the List gates', for the creator, live
+// (access/legacy-reach.ts), which read the one node resolver.
 //
 //   READ   a trigger on a task in a List the creator cannot open does not run
 //          their automation at all, so no notification, email or webhook ever

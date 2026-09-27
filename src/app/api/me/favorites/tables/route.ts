@@ -12,8 +12,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -31,15 +31,11 @@ export async function GET() {
     where: { organizationId: u.organizationId, id: { in: ids } },
     select: { id: true, name: true, description: true, spaceId: true, createdById: true },
   });
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const visible = (await Promise.all(
-    rows.map(async (t) => {
-      // No Space: org-wide for Members, a Guest's own only.
-      if (!t.spaceId) return unscopedTableReadable(t.createdById, u.id!, accessLevel) ? t : null;
-      const space = await getSpaceForReader(t.spaceId, u.id!, accessLevel);
-      return space ? t : null;
-    }),
-  )).filter((t): t is NonNullable<typeof t> => t !== null);
+  // One world for every starred table (the one resolver, R7): a Space's
+  // readers, the unscoped rule (org-wide for Members, a Guest's own only),
+  // the creator and a table grant.
+  const roles = await nodeRoleMap(nodeCtxFromLevel(u.id, u.organizationId, u.accessLevel), "table", rows.map((t) => t.id));
+  const visible = rows.filter((t) => roleAtLeast(roles.get(t.id) ?? "none", "VIEW"));
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));

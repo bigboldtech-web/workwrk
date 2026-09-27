@@ -11,7 +11,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 // The scanner is shared with scripts/backfill-mentions.ts so the notifications
 // that backfill writes anchor at exactly the blocks this page links to.
 import { findMentionBlocks } from "@/lib/doc-mentions";
@@ -65,9 +66,13 @@ export async function GET() {
       : Promise.resolve([] as Array<{ id: string; title: string; content: unknown; updatedAt: Date }>),
   ]);
 
+  // The viewer's role on every mentioning doc, in ONE world: a mention in a
+  // doc they cannot open (restricted, a sub-page under a page they cannot
+  // read, someone else's note) is never listed.
+  const docRoles = await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "doc", docs.map((d) => d.id));
   const hits: Hit[] = [];
   for (const d of docs) {
-    if (!(await docAccessible(d, ctx.userId, ctx.accessLevel))) continue;
+    if (!roleAtLeast(docRoles.get(d.id) ?? "none", "VIEW")) continue;
     const meta = (d.content as { meta?: { icon?: string } } | null)?.meta;
     for (const { blockId, excerpt } of findMentionBlocks(d.content, me)) {
       hits.push({
