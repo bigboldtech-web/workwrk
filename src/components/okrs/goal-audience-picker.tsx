@@ -52,7 +52,7 @@ export function MemberAvatarStack({
       {members.map((m, i) => (
         <span
           key={m.id}
-          className="inline-flex rounded-full ring-2 ring-white dark:ring-zinc-900"
+          className="inline-flex rounded-full ring-2 ring-[var(--os-surface)]"
           style={{ marginLeft: i === 0 ? 0 : -Math.round(size * 0.3) }}
         >
           <PersonAvatar person={{ ...m, email: null }} size={size} />
@@ -60,7 +60,7 @@ export function MemberAvatarStack({
       ))}
       {overflow > 0 && (
         <span
-          className="inline-flex items-center justify-center rounded-full bg-zinc-100 text-zinc-500 font-semibold ring-2 ring-white dark:bg-zinc-800 dark:text-zinc-400 dark:ring-zinc-900"
+          className="inline-flex items-center justify-center rounded-full bg-subtle font-semibold text-ink-2 ring-2 ring-[var(--os-surface)]"
           style={{
             width: size,
             height: size,
@@ -76,6 +76,16 @@ export function MemberAvatarStack({
 }
 
 /* ─────────────────────────── the picker ───────────────────────── */
+
+/** Two skeleton rows while a section's list loads (no "Loading" text). */
+function PickerSkeleton() {
+  return (
+    <div className="flex flex-col gap-2 px-3 py-2" aria-busy="true" aria-label="Fetching">
+      <span className="os-skeleton-pulse h-3 w-3/5 rounded bg-skeleton" />
+      <span className="os-skeleton-pulse h-3 w-2/5 rounded bg-skeleton" />
+    </div>
+  );
+}
 
 interface UserRow {
   id: string;
@@ -182,7 +192,7 @@ export function GoalAudiencePicker({
       : value.map((e) => e.label).slice(0, 3).join(", ") + (value.length > 3 ? ` +${value.length - 3}` : "");
 
   if (!canEdit) {
-    return <span className="text-base text-zinc-500 truncate">{summary}</span>;
+    return <span className="truncate text-base text-ink-2">{summary}</span>;
   }
 
   return (
@@ -193,9 +203,9 @@ export function GoalAudiencePicker({
         className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-raised px-2.5 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand"
         aria-label="Edit goal audience"
       >
-        <UsersRound className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-        <span className={`flex-1 truncate ${value.length === 0 ? "text-zinc-400" : ""}`}>{summary}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" />
+        <UsersRound className="h-3.5 w-3.5 shrink-0 text-ink-2" />
+        <span className={`flex-1 truncate ${value.length === 0 ? "text-ink-2" : ""}`}>{summary}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 text-ink-2" />
       </button>
 
       {open ? (
@@ -207,20 +217,21 @@ export function GoalAudiencePicker({
         // goal-detail usage. Staying a DOM child also keeps the dialog's focus
         // trap + click-outside working (a body portal would break the search).
         <div
-          className="absolute left-0 top-full z-[200] mt-1 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          className="absolute start-0 top-full z-[200] mt-1 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-raised"
+          style={{ boxShadow: "var(--os-shadow-pop)" }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex h-9 items-center gap-2 border-b border-zinc-100 px-3 dark:border-zinc-800">
-            <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+          <div className="flex h-9 items-center gap-2 border-b border-line-soft px-3">
+            <Search className="h-3.5 w-3.5 shrink-0 text-ink-2" />
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search people, departments, roles…"
-              className="flex-1 bg-transparent text-base text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+              className="flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-3"
             />
             {query && (
-              <button type="button" onClick={() => setQuery("")} className="text-zinc-400 hover:text-zinc-600" aria-label="Clear search">
+              <button type="button" onClick={() => setQuery("")} className="text-ink-2 hover:text-ink" aria-label="Clear search">
                 <X className="h-3 w-3" />
               </button>
             )}
@@ -229,9 +240,9 @@ export function GoalAudiencePicker({
           <div className="max-h-[300px] overflow-y-auto py-1.5">
             <MenuSectionLabel>People</MenuSectionLabel>
             {users === null ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+              <PickerSkeleton />
             ) : users.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">No people found</div>
+              <div className="px-3 py-2 text-sm text-ink-2">No people found</div>
             ) : (
               users.map((u) => (
                 <MenuItem
@@ -247,15 +258,15 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Departments</MenuSectionLabel>
             {depts === null ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+              <PickerSkeleton />
             ) : filteredDepts.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">No departments found</div>
+              <div className="px-3 py-2 text-sm text-ink-2">No departments found</div>
             ) : (
               filteredDepts.map((d) => (
                 <MenuItem
                   key={d.id}
                   icon={Building2}
-                  iconClassName="text-zinc-400"
+                  iconClassName="text-ink-2"
                   label={d.name}
                   selected={isSelected("DEPARTMENT", d.id)}
                   onClick={() => toggle({ type: "DEPARTMENT", id: d.id, label: d.name })}
@@ -266,15 +277,15 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Roles</MenuSectionLabel>
             {roles === null ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+              <PickerSkeleton />
             ) : filteredRoles.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">No roles found</div>
+              <div className="px-3 py-2 text-sm text-ink-2">No roles found</div>
             ) : (
               filteredRoles.map((r) => (
                 <MenuItem
                   key={r.id}
                   icon={Briefcase}
-                  iconClassName="text-zinc-400"
+                  iconClassName="text-ink-2"
                   label={r.title}
                   selected={isSelected("ROLE", r.id)}
                   onClick={() => toggle({ type: "ROLE", id: r.id, label: r.title })}
@@ -285,9 +296,9 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Tags</MenuSectionLabel>
             {tags === null ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+              <PickerSkeleton />
             ) : filteredTags.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">No tags found</div>
+              <div className="px-3 py-2 text-sm text-ink-2">No tags found</div>
             ) : (
               filteredTags.map((t) => (
                 <MenuItem

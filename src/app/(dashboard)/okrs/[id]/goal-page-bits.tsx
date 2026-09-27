@@ -22,6 +22,28 @@ import { GoalEffort } from "./goal-effort";
 import { GoalActivity } from "./goal-activity";
 import { GoalAssessment } from "./goal-assessment";
 import type { GoalVerdict } from "@/lib/goal-verdict";
+import { useFormat } from "@/lib/format/use-date-prefs";
+
+/**
+ * The Details strip's Dates line. A goal's dates are calendar days (stored
+ * as UTC midnight), so they render through the wall-clock formatter in the
+ * viewer's own date order, the same as the /okrs Due column: never shifted
+ * a day by a timezone, and overdue only once the due day has ended for the
+ * viewer.
+ */
+export function GoalDates({ startDate, endDate, quarter, completed }: { startDate?: string | null; endDate?: string | null; quarter: string | null; completed: boolean }) {
+  const fmt = useFormat();
+  const startKey = startDate ? startDate.slice(0, 10) : null;
+  const endKey = endDate ? endDate.slice(0, 10) : null;
+  const start = startKey ? fmt.wallDate(startKey) : null;
+  const end = endKey ? fmt.wallDate(endKey) : null;
+  const overdue = !completed && endKey != null && fmt.today() > endKey;
+  return (
+    <span className={overdue ? "text-danger-text" : ""} suppressHydrationWarning>
+      {!start && !end ? "No dates" : `${start ?? "No start"} to ${end ?? "no due date"}`}{quarter ? ` · ${quarter}` : ""}{overdue ? " · overdue" : ""}
+    </span>
+  );
+}
 
 export function GoalReadOnlyStrip({ okrId, ownerFirstName }: { okrId: string; ownerFirstName: string | null }) {
   const [state, setState] = useState<"idle" | "busy" | "sent">("idle");

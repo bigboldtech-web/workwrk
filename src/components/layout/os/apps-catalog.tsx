@@ -74,6 +74,7 @@ import {
   TEAMS_SECTION_LABELS, teamsActiveHref, teamsRowCount, visibleTeamsRows, type TeamsRow,
 } from "@/lib/nav/teams-rows";
 import { useFormat } from "@/lib/format/use-date-prefs";
+import { useDeclaredBreadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import {
@@ -358,6 +359,14 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   const v = boot.viewer;
   const seesTeam = v.hasReports || v.peopleTeam || v.orgRole === "OWNER" || v.orgRole === "ADMIN";
   const expanded = goalsGroupExpanded(prefs.sidebar, pathname);
+  // On a goal page the active row is the view that goal belongs to for this
+  // viewer, which only the page knows: it declares it as the Goals crumb's
+  // href (okrs/[id]/page.tsx). Until the crumb lands, My goals lights.
+  const crumbs = useDeclaredBreadcrumb();
+  const goalPageView = /^\/okrs\/[^/]+/.test(pathname)
+    ? crumbs?.find((c) => c.href === "/okrs" || c.href?.startsWith("/okrs?view="))?.href ?? "/okrs"
+    : null;
+  const active = (href: string) => (goalPageView ? goalPageView === href && (href !== "/okrs?view=team" || seesTeam) : activeHref === href);
   const onToggle = () => {
     void patchPrefs({ sidebar: { groups: { goals: !expanded } } });
   };
@@ -366,9 +375,9 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
       <GroupRow href="/okrs" label="Goals" Icon={Target} active={false} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <>
-          <SidebarRow depth={1} href="/okrs" icon={Trophy} label="My goals" active={activeHref === "/okrs"} />
-          {seesTeam ? <SidebarRow depth={1} href="/okrs?view=team" icon={Users} label="Team goals" active={activeHref === "/okrs?view=team"} /> : null}
-          <SidebarRow depth={1} href="/okrs?view=company" icon={Building2} label="Company goals" active={activeHref === "/okrs?view=company"} />
+          <SidebarRow depth={1} href="/okrs" icon={Trophy} label="My goals" active={active("/okrs")} />
+          {seesTeam ? <SidebarRow depth={1} href="/okrs?view=team" icon={Users} label="Team goals" active={active("/okrs?view=team")} /> : null}
+          <SidebarRow depth={1} href="/okrs?view=company" icon={Building2} label="Company goals" active={active("/okrs?view=company")} />
           {/* A jump out of the hub: it opens a Teams route, so it never
               carries an active state and shows the ArrowUpRight so the jump
               is visible before the click (spec-goals section 1 row 1d). */}

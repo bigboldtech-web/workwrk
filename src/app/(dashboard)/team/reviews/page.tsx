@@ -17,7 +17,7 @@ import { ClipboardCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamReviewsPage() {
+export default async function TeamReviewsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
@@ -32,10 +32,20 @@ export default async function TeamReviewsPage() {
   // clause as the sidebar badge, so the two never disagree). Acted is the
   // last 30 days of decisions on their reports, plus the ones they made
   // themselves elsewhere (a skip-level Approve on the Alignment board).
-  const [pending, acted] = await Promise.all([
+  const [allPending, allActed] = await Promise.all([
     listReviewsForManager(u.id, { status: "SUBMITTED" }),
     listReviewsForManager(u.id, { status: "ACKNOWLEDGED", sinceDays: 30, alsoDecidedBy: true }),
   ]);
+  // ?person= (Alignment's row menu, Open weekly review): that person's
+  // reviews only, from the same queue, so it never reveals anyone the queue
+  // would not list. Unknown ids simply show nobody.
+  const sp = await searchParams;
+  const person = typeof sp.person === "string" && sp.person ? sp.person : null;
+  const pending = person ? allPending.filter((r) => r.userId === person) : allPending;
+  const acted = person ? allActed.filter((r) => r.userId === person) : allActed;
+  const focusName = person
+    ? (() => { const s = [...allPending, ...allActed].find((r) => r.userId === person)?.subject; return s ? `${s.firstName ?? ""} ${s.lastName ?? ""}`.trim() || s.email : null; })()
+    : null;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -54,6 +64,12 @@ export default async function TeamReviewsPage() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
+        {person ? (
+          <p className="mb-3 text-sm text-ink-2">
+            {focusName ? `Showing ${focusName}'s weekly reviews.` : "Nothing from this person is waiting for you or was decided in the last 30 days."}{" "}
+            <Link href="/team/reviews" className="text-brand-deep hover:underline">Show everyone</Link>
+          </p>
+        ) : null}
         <TeamReviewsClient pending={pending} acted={acted} />
       </div>
     </div>

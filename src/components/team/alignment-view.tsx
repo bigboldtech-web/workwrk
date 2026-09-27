@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { useRouter } from "next/navigation";
 import { ClipboardCheck, ExternalLink, Gauge, MessageCircle, MoreHorizontal } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -253,6 +254,7 @@ export function AlignmentTable({ people, showKraNames, ariaLabel, empty, classNa
         className={className}
         ariaLabel={ariaLabel}
         columns={columns}
+        columnSettings={{ storageKey: "alignment" }}
         rows={rows}
         rowKey={(p) => p.id}
         rowHref={(p) => `/people/${p.id}?tab=kras`}
@@ -309,6 +311,7 @@ export function AlignmentView({ people, hasSubTeams, drill }: {
 
   return (
     <>
+      {drill ? <Breadcrumb items={[{ label: "Alignment", href: "/team/alignment" }, { label: drill.name }]} /> : null}
       <OsPageHeader
         title={drill ? `${drill.name}'s team` : "Alignment"}
         back={drill ? { fallbackHref: "/team/rollup", label: "Sub-teams" } : undefined}

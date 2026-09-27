@@ -151,6 +151,7 @@ export function SubTeamsView({ subTeams, directIcs, totals }: {
                   className="shrink-0"
                   ariaLabel="Sub-teams"
                   columns={columns}
+                  columnSettings={{ storageKey: "sub-teams" }}
                   rows={shownTeams}
                   rowKey={(t) => t.id}
                   rowHref={(t) => `/team/alignment?manager=${t.id}`}

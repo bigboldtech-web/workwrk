@@ -23,7 +23,29 @@ const LEGACY_LABELS: Record<string, string> = {
   AGENT: "Agent",
 };
 
+/**
+ * What a person reads. A legacy value is an old ACCESS level stored in the
+ * seniority column ("HR", "Agent"): it says nothing about seniority, and
+ * the product never shows an access word as one (spec-goals), so it reads
+ * "Not set" until someone picks one of the six.
+ */
 export function seniorityLabel(level: string | null | undefined): string {
+  if (!level) return "Employee";
+  return SENIORITY_OPTIONS.find((o) => o.value === level)?.label ?? NOT_SET;
+}
+
+export const NOT_SET = "Not set";
+
+/** True for one of the six values; false for a legacy or empty one. */
+export function isSetSeniority(level: string | null | undefined): boolean {
+  return !!level && SENIORITY_OPTIONS.some((o) => o.value === level);
+}
+
+/**
+ * The stored value spelled out, legacy values included: for the People CSV
+ * export, whose job is to carry exactly what is stored.
+ */
+export function seniorityStoredLabel(level: string | null | undefined): string {
   if (!level) return "Employee";
   return SENIORITY_OPTIONS.find((o) => o.value === level)?.label ?? LEGACY_LABELS[level] ?? level;
 }

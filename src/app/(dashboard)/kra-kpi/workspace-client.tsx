@@ -45,7 +45,7 @@ import { KpiDialog } from "@/components/alignment/kpi-dialog";
 import { usePermission } from "@/hooks/use-permission";
 import { useRole } from "@/hooks/use-role";
 import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
-import { SENIORITY_OPTIONS, seniorityLabel } from "@/lib/people/seniority";
+import { NOT_SET, SENIORITY_OPTIONS, isSetSeniority, seniorityLabel } from "@/lib/people/seniority";
 import { kraKpiSurfacePrefs, type KraKpiSurfacePrefs } from "@/lib/people-prefs";
 import { apiFetch } from "@/lib/api-fetch";
 
@@ -232,7 +232,11 @@ export default function KraKpiPage() {
       const kraCount = r._count?.kraTemplates ?? 0;
       if (!display.showEmptyTitles && kraCount === 0 && !noKras) return false;
       if (depts.length && !depts.includes(r.department?.id ?? NO_DEPT)) return false;
-      if (seniority.length && !seniority.includes(r.seniority ?? r.level ?? "")) return false;
+      // "Not set" matches an empty or legacy value, which no other row covers.
+      if (seniority.length) {
+        const lv = r.seniority ?? r.level ?? "";
+        if (!(isSetSeniority(lv) ? seniority.includes(lv) : seniority.includes("__notset"))) return false;
+      }
       if (noKras && kraCount > 0) return false;
       if (weightsOff && (kraCount === 0 || (r.weightTotal ?? 0) === 100 || (r.weightTotal ?? 0) === 0)) return false;
       if (needle && !(r.title.toLowerCase().includes(needle) || matchesByRole.has(r.id))) return false;
@@ -259,7 +263,7 @@ export default function KraKpiPage() {
         {matchesByRole.has(r.id) && !r.title.toLowerCase().includes(needle) ? <span className="truncate text-sm font-normal text-ink-2">· matched {matchesByRole.get(r.id)}</span> : null}
       </span>
     ) },
-    { key: "seniority", label: "Seniority", width: "130px", hideBelow: 720, render: (r) => <span className="text-sm text-ink-2">{r.seniority || r.level ? seniorityLabel(r.seniority ?? r.level) : "None"}</span> },
+    { key: "seniority", label: "Seniority", width: "130px", hideBelow: 720, render: (r) => <span className="text-sm text-ink-2">{r.seniority || r.level ? seniorityLabel(r.seniority ?? r.level) : NOT_SET}</span> },
     { key: "people", label: "People", width: "90px", numeric: true, render: (r) => <span className="tabular-nums">{r._count?.users ?? 0}</span> },
     { key: "kras", label: "KRAs", width: "150px", render: (r) => {
       const k = r._count?.kraTemplates ?? 0;
@@ -286,6 +290,14 @@ export default function KraKpiPage() {
   ], [roles, toast, load]);
 
   const filterCount = (needle ? 1 : 0) + depts.length + seniority.length + (noKras ? 1 : 0) + (weightsOff ? 1 : 0);
+  // The one search reaches KRAs with no job title too (the old "Inside job
+  // titles" search matched them): the orphans view filters by it, and the
+  // Job titles view says how many orphans match with a way to show them.
+  const orphanMatches = useMemo(() => {
+    if (!orphans) return null;
+    if (!needle) return orphans;
+    return orphans.filter((o) => o.name.toLowerCase().includes(needle) || o.kpis.some((k) => k.name.toLowerCase().includes(needle)));
+  }, [orphans, needle]);
   const clearFilters = () => { setQ(""); setDepts([]); setSeniority([]); setNoKras(false); setWeightsOff(false); };
   const toggle = (list: string[], val: string, on: boolean) => (on ? [...list, val] : list.filter((x) => x !== val));
   const showViews = orphans !== null;
@@ -302,13 +314,19 @@ export default function KraKpiPage() {
           </>
         ) : undefined}
         toolbar={{
-          filter: view === "titles" ? { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filterCount } : undefined,
+          filter: view === "titles" ? { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filterCount } : { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: needle ? 1 : 0 },
           sort: view === "titles" ? { onClick: () => setSortOpen((x) => !x), label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title" } : undefined,
           primary: canCreate ? { label: "New KRA", onClick: () => setNewOpen({}), split: { label: "New KPI", onClick: () => setKraPickOpen(true) } } : undefined,
           menu: [{ label: "Show job titles with no KRAs", checked: display.showEmptyTitles, keepOpen: true, onClick: () => setDisplay({ showEmptyTitles: !display.showEmptyTitles }) }],
         }}
       />
       {notice ? <p className="os-chrome px-6 pb-1 text-sm text-ink-2">{notice}</p> : null}
+      {view === "titles" && needle && orphanMatches && orphanMatches.length ? (
+        <p className="os-chrome m-0 px-6 pb-1 text-sm text-ink-2">
+          {orphanMatches.length} {orphanMatches.length === 1 ? "KRA with no job title matches" : "KRAs with no job title match"} ·{" "}
+          <button type="button" className="text-brand-deep hover:underline" onClick={() => setParams({ view: "orphans" })}>Show {orphanMatches.length === 1 ? "it" : "them"}</button>
+        </p>
+      ) : null}
       <div className="relative">
         {sortOpen ? (
           <div className="absolute start-[110px] top-0 z-40">
@@ -342,21 +360,26 @@ export default function KraKpiPage() {
               </FilterGroup>
             ) : null}
             <FilterGroup label="Seniority">
-              {SENIORITY_OPTIONS.map((s) => <FilterRow key={s.value} label={s.label} checked={seniority.includes(s.value)} onCheckedChange={(on) => setSeniority((c) => toggle(c, s.value, on))} />)}
+              {[...SENIORITY_OPTIONS, { value: "__notset", label: NOT_SET }].map((s) => <FilterRow key={s.value} label={s.label} checked={seniority.includes(s.value)} onCheckedChange={(on) => setSeniority((c) => toggle(c, s.value, on))} />)}
             </FilterGroup>
             <FilterGroup label="KRAs">
               <FilterRow label="Has no KRAs yet" checked={noKras} onCheckedChange={setNoKras} />
               <FilterRow label="Weights not 100%" checked={weightsOff} onCheckedChange={setWeightsOff} />
             </FilterGroup>
           </FilterPanel>
+        ) : view === "orphans" && orphans !== null ? (
+          <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="KRAs" activeCount={needle ? 1 : 0} onClearAll={() => setQ("")}
+            search={{ value: q, onChange: setQ, placeholder: "KRAs, KPIs" }}>{null}</FilterPanel>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           {loadError && !roles ? (
             <OsEmptyView variant="error" title="Couldn't load job titles" hint={loadError} action={{ label: "Retry", onClick: () => void load() }} />
           ) : view === "orphans" && orphans !== null ? (
-            <TableCard ariaLabel="KRAs that need a job title" columns={orphanColumns} rows={orphans} rowKey={(o) => o.id}
-              empty={<span className="text-row text-ink-2">Every KRA has a job title</span>}
-              footer={{ total: orphans.length, noun: "KRAs", from: orphans.length ? 1 : 0, to: orphans.length }} />
+            <TableCard ariaLabel="KRAs that need a job title" columns={orphanColumns} rows={orphanMatches ?? orphans} rowKey={(o) => o.id}
+              empty={needle && orphans.length
+                ? <span className="text-row text-ink-2">No KRAs match · <button type="button" className="text-brand-deep hover:underline" onClick={() => setQ("")}>Clear search</button></span>
+                : <span className="text-row text-ink-2">Every KRA has a job title</span>}
+              footer={{ total: (orphanMatches ?? orphans).length, noun: "KRAs", from: (orphanMatches ?? orphans).length ? 1 : 0, to: (orphanMatches ?? orphans).length }} />
           ) : roles && roles.length === 0 ? (
             <OsEmptyView context="goals" title="No job titles yet"
               action={canCreateTitle ? { label: "Create job titles", onClick: () => router.push("/people/roles?new=1") } : undefined} />

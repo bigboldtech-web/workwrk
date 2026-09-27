@@ -64,7 +64,7 @@ export function Avatar({
     <span
       title={personLabel(person)}
       aria-label={personLabel(person)}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--os-n200)] font-medium text-[var(--os-n700)] ${ringCls} ${className}`}
+      className={`os-avatar inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--os-n200)] font-medium text-[var(--os-n700)] ${ringCls} ${className}`}
       style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.42)) }}
     >
       {personInitials(person)}

@@ -18,7 +18,7 @@ function weightSignal(weightTotal: number): { weightTotal: number; weightWarning
     weightTotal,
     weightWarning:
       weightTotal > 100
-        ? `KRA weights now total ${weightTotal}% for this person — over the 100% budget. Saved; trim another KRA to rebalance.`
+        ? `KRA weights now total ${weightTotal}% for this person, over the 100% budget. Saved; trim another KRA to rebalance.`
         : null,
   };
 }

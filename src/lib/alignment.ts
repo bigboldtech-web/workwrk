@@ -559,7 +559,7 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
   const okrs = await prisma.oKR.findMany({
     where: { organizationId: orgId },
     select: {
-      id: true, parentId: true, ownerId: true, progress: true, status: true,
+      id: true, parentId: true, ownerId: true, progress: true, status: true, completedAt: true,
       keyResults: {
         select: {
           id: true, startValue: true, targetValue: true, currentValue: true,
@@ -606,7 +606,7 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
     visiting.delete(id);
 
     const rolled = rollUpOkrProgress(contributions);
-    const rollup: GoalRollup =
+    const derived: GoalRollup =
       rolled == null
         ? {
             progress: clampPct(node.progress),
@@ -614,6 +614,11 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
             source: node.progress > 0 ? "MANUAL" : "NONE",
           }
         : { progress: rolled, status: okrStatusFor(rolled), source: "ROLLUP" };
+    // Mark complete is a person's decision (OKR.completedAt): the status
+    // column reads COMPLETED while it stands, whatever the targets say, so
+    // every reader of status (Home, the PATCH response, reports) agrees
+    // with the /okrs verdict. The progress number stays the measured one.
+    const rollup: GoalRollup = node.completedAt ? { ...derived, status: "COMPLETED" } : derived;
     rollups.set(id, rollup);
     return rollup;
   };
@@ -665,7 +670,10 @@ export async function persistGoalRollupChain(okrId: string): Promise<GoalRollup 
     const roll = ctx.rollups.get(cursor);
     const before = ctx.stored.get(cursor);
     if (
-      roll && before && roll.source === "ROLLUP" &&
+      roll && before &&
+      // A rolled-up goal stores its derived numbers; any goal stores a
+      // status change (Mark complete, or reopening one).
+      (roll.source === "ROLLUP" || roll.status !== before.status) &&
       (roll.progress !== before.progress || roll.status !== before.status)
     ) {
       writes.push(

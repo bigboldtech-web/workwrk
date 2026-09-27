@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { presenceDot } from "./presence";
-import { isAssignableSeniority, seniorityLabel } from "./seniority";
+import { isAssignableSeniority, isSetSeniority, seniorityLabel, seniorityStoredLabel } from "./seniority";
 
 describe("presenceDot", () => {
   const now = new Date("2026-09-27T10:00:00Z");
@@ -16,10 +16,15 @@ describe("presenceDot", () => {
 });
 
 describe("seniority", () => {
-  it("labels the six and keeps a legacy value readable", () => {
+  it("labels the six, never shows an access word as seniority, and exports the stored value", () => {
     expect(seniorityLabel("TEAM_LEAD")).toBe("Team lead");
-    expect(seniorityLabel("COMPANY_ADMIN")).toBe("Company admin");
+    // spec-goals: display-only seniority never reads "Admin", "Super" or "HR".
+    expect(seniorityLabel("COMPANY_ADMIN")).toBe("Not set");
+    expect(seniorityLabel("HR")).toBe("Not set");
     expect(seniorityLabel(null)).toBe("Employee");
+    expect(seniorityStoredLabel("COMPANY_ADMIN")).toBe("Company admin");
+    expect(isSetSeniority("HR")).toBe(false);
+    expect(isSetSeniority("VP")).toBe(true);
   });
   it("never lets a picker write an admin level onto a job title", () => {
     expect(isAssignableSeniority("COMPANY_ADMIN")).toBe(false);

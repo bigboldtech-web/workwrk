@@ -19,9 +19,18 @@
 // goal page disagreed. Both now read this one module.
 //
 // Never self-reported. Server only.
+//
+// Computed under the VIEWER's access: a goal is visible to people who cannot
+// open every List linked to it (every employee reads a Company goal), so
+// tasks, hours and the people working in a List the viewer cannot open never
+// reach the counts or the contributor list. A task tagged with a KRA but
+// living in no List counts only for its owner or an assignee.
 
 import { prisma } from "@/lib/prisma";
 import { isDoneStatusName } from "@/lib/board-items-shared";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import type { Viewer } from "@/lib/access/types";
 
 export interface GoalEffortContributor {
   id: string;
@@ -79,7 +88,7 @@ export async function goalsWithLinkedWork(orgId: string, okrIds: string[]): Prom
 }
 
 /** Effort for many goals in a fixed number of queries. */
-export async function computeGoalEffortBatch(orgId: string, okrIds: string[], now: Date = new Date()): Promise<Map<string, GoalEffort>> {
+export async function computeGoalEffortBatch(orgId: string, okrIds: string[], now: Date = new Date(), viewer: Viewer | null = null): Promise<Map<string, GoalEffort>> {
   const out = new Map<string, GoalEffort>();
   if (okrIds.length === 0) return out;
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -115,7 +124,10 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
     }
   }
   const allKras = [...new Set([...goalKras.values()].flatMap((s) => [...s]))];
-  const allBoards = [...new Set([...goalBoards.values()].flatMap((s) => [...s]))];
+  const linkedBoards = [...new Set([...goalBoards.values()].flatMap((s) => [...s]))];
+  // The Lists this viewer can open; with no viewer, none (fail closed).
+  const readable = await readableBoardIds(viewer, linkedBoards);
+  const allBoards = linkedBoards.filter((b) => readable.has(b));
 
   // Tasks behind those links, once.
   const itemSelect = { id: true, status: true, updatedAt: true, boardId: true, metadata: true, ownerId: true, assigneeIds: true } as const;
@@ -132,7 +144,15 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
   ]);
   type ItemRow = (typeof boardItems)[number];
   const items = new Map<string, ItemRow>();
-  for (const it of [...boardItems, ...kraItems]) items.set(it.id, it);
+  // KRA-tagged tasks can live anywhere: keep the ones in a List the viewer
+  // can open, and a List-less task only for its owner or an assignee.
+  const kraReadable = kraItems.length
+    ? await readableBoardIds(viewer, [...new Set(kraItems.map((it) => it.boardId).filter((b): b is string => !!b))])
+    : new Set<string>();
+  const mayRead = (it: ItemRow) => (it.boardId
+    ? kraReadable.has(it.boardId) || readable.has(it.boardId)
+    : !!viewer && (it.ownerId === viewer.userId || (it.assigneeIds ?? []).includes(viewer.userId)));
+  for (const it of [...boardItems, ...kraItems.filter(mayRead)]) items.set(it.id, it);
   const migratedLegacy = new Set<string>();
   for (const it of items.values()) {
     const lid = (it.metadata as { legacyTaskId?: unknown } | null)?.legacyTaskId;
@@ -219,7 +239,8 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
     out.set(okrId, {
       hasLinkedWork: true,
       linkedKras: kras.size,
-      linkedBoards: boards.size,
+      // Only the Lists this viewer can open are counted as linked for them.
+      linkedBoards: [...boards].filter((b) => readable.has(b)).length,
       totalHours: round1(totalHours),
       hoursThisMonth: round1(hoursThisMonth),
       tasksDone,
@@ -231,6 +252,13 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
   return out;
 }
 
-export async function computeGoalEffort(orgId: string, okrId: string): Promise<GoalEffort> {
-  return (await computeGoalEffortBatch(orgId, [okrId])).get(okrId) ?? empty();
+export async function computeGoalEffort(orgId: string, okrId: string, viewer: Viewer | null): Promise<GoalEffort> {
+  return (await computeGoalEffortBatch(orgId, [okrId], new Date(), viewer)).get(okrId) ?? empty();
+}
+
+/** Of `boardIds`, the Lists `viewer` can open (Can view or more). */
+async function readableBoardIds(viewer: Viewer | null, boardIds: string[]): Promise<Set<string>> {
+  if (!viewer || boardIds.length === 0) return new Set();
+  const roles = await nodeRoleMap(nodeCtxFromViewer(viewer), "list", boardIds);
+  return new Set(boardIds.filter((id) => roleAtLeast(roles.get(id) ?? "none", "VIEW")));
 }

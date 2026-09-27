@@ -60,7 +60,7 @@ export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: 
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col gap-0.5">
                 <dt className="text-xs font-medium text-ink-2">{k}</dt>
-                <dd className="m-0 text-title tabular-nums text-ink">{v}</dd>
+                <dd className="m-0 text-title font-semibold tabular-nums text-ink">{v}</dd>
               </div>
             ))}
           </dl>

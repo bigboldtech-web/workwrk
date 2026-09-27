@@ -4,6 +4,7 @@
 // Spaces; src/lib/goal-effort.ts). Contributors carry their avatar.
 // Visibility mirrors the goal itself (canSeeGoal). Reads only.
 
+import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -22,5 +23,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   // KRA tasks + linked-board/space item time — the join point between a goal
   // and the real work moving it.
-  return jsonSuccess(await computeGoalEffort(orgId, id));
+  // Under the viewer's access: a List they cannot open never counts here.
+  return jsonSuccess(await computeGoalEffort(orgId, id, await viewerFromSession()));
 }

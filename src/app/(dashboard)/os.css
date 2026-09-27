@@ -25692,3 +25692,15 @@ body:has([role="dialog"][data-state="open"]) .rmc { z-index: 40; }
 .workwrk-os:has(.sheet-root--full) { --os-top-h: 0px; --os-rail-w: 0px; --os-side-w: 0px; }
 .workwrk-os:has(.sheet-root--full) > .row-start-1,
 .workwrk-os:has(.sheet-root--full) > #hub-sidebar { display: none; }
+
+/* Dark mode for two shared marks (Stage D review): the TableCard
+   checkboxes are native inputs, which paint a white square unless the
+   element's color-scheme is dark; the initials avatar reads primitive
+   greys, which layer 1 never rebinds. Both follow the dark tokens here,
+   in the same two places every dark rule lives. */
+:root.dark .os-tc__check { color-scheme: dark; }
+:root.dark .os-avatar { background: var(--os-surface-2); color: var(--os-ink-2); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .os-tc__check { color-scheme: dark; }
+  :root:not([data-theme="light"]) .os-avatar { background: var(--os-surface-2); color: var(--os-ink-2); }
+}

@@ -1,3 +1,4 @@
+import { canSeeGoal } from "@/lib/goal-audience";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -31,9 +32,11 @@ export async function POST(
   // owner, or org-wide level only (a peer can't move someone else's goal).
   const okrRef = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: getOrgId(session) },
-    select: { ownerId: true },
   });
   if (!okrRef) return jsonError("OKR not found", 404);
+  // A goal the caller cannot see answers exactly like a missing one (the
+  // read routes do the same), so a check-in never confirms that it exists.
+  if (!(await canSeeGoal(session, okrRef))) return jsonError("OKR not found", 404);
   // Contributors check in too (spec-goals access: Can edit = check in).
   if (!(await canEditOkrOwner(session, okrRef.ownerId)) && !(await isGoalContributor(session, okrId))) {
     return jsonError("You need Can edit on this goal to check in.", 403);
@@ -91,7 +94,7 @@ export async function POST(
     type: "okr_check_in",
     actorId: userId,
     organizationId: orgId,
-    description: `Updated OKR progress to ${avgProgress}% — "${okr?.title}"`,
+    description: `Updated goal progress to ${avgProgress}%: "${okr?.title}"`,
     targetId: okrId,
     targetType: "okr",
   });

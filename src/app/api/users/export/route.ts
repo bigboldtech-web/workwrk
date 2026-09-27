@@ -11,7 +11,7 @@ import { orderFor, prismaWhere } from "@/lib/people/directory-list.server";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { toCsv } from "@/lib/people/people-csv";
-import { seniorityLabel } from "@/lib/people/seniority";
+import { seniorityStoredLabel } from "@/lib/people/seniority";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     for (const u of batch) {
       lines.push([
         u.firstName, u.lastName, u.email, u.phone ?? "",
-        u.role?.title ?? "", u.role ? seniorityLabel(u.role.level) : "",
+        u.role?.title ?? "", u.role ? seniorityStoredLabel(u.role.level) : "",
         u.department?.name ?? "", u.office?.name ?? "",
         u.manager ? `${u.manager.firstName} ${u.manager.lastName}`.trim() : "", u.manager?.email ?? "",
         u.joinDate.toISOString().slice(0, 10),

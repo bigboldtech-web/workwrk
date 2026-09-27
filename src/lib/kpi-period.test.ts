@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentKpiPeriod, isKpiPeriodOpen, isKpiPeriodWritable, kpiPeriodLabel, resolveKpiPeriod, shiftKpiPeriod } from "./kpi-period";
+import { currentKpiPeriod, isKpiPeriodOpen, isKpiPeriodWritable, isKpiPeriodWritableAnyZone, kpiPeriodLabel, resolveKpiPeriod, shiftKpiPeriod } from "./kpi-period";
 
 const now = new Date(Date.UTC(2026, 8, 27, 12, 0, 0)); // 27 Sep 2026, UTC
 
@@ -52,5 +52,25 @@ describe("shiftKpiPeriod and isKpiPeriodWritable", () => {
     expect(isKpiPeriodWritable("2026-09", now)).toBe(true);
     expect(isKpiPeriodWritable("2026-08", now)).toBe(true);
     expect(isKpiPeriodWritable("2026-07", now)).toBe(false);
+  });
+});
+
+describe("isKpiPeriodWritableAnyZone", () => {
+  const now = new Date("2026-09-15T12:00:00Z");
+  it("takes this month and last month", () => {
+    expect(isKpiPeriodWritableAnyZone("2026-09", now)).toBe(true);
+    expect(isKpiPeriodWritableAnyZone("2026-08", now)).toBe(true);
+  });
+  it("refuses a closed month, a future month and junk", () => {
+    expect(isKpiPeriodWritableAnyZone("2026-07", now)).toBe(false);
+    expect(isKpiPeriodWritableAnyZone("2026-10", now)).toBe(false);
+    expect(isKpiPeriodWritableAnyZone("zzz", now)).toBe(false);
+    expect(isKpiPeriodWritableAnyZone(undefined, now)).toBe(false);
+  });
+  it("allows the local month either side of a UTC month boundary", () => {
+    const edge = new Date("2026-09-30T20:00:00Z");
+    expect(isKpiPeriodWritableAnyZone("2026-10", edge)).toBe(true);
+    const start = new Date("2026-10-01T03:00:00Z");
+    expect(isKpiPeriodWritableAnyZone("2026-08", start)).toBe(true);
   });
 });

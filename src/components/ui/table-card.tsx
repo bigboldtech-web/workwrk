@@ -32,8 +32,9 @@
 // and always at Compact density on touch devices (os.css `.os-tc__more`).
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useElementWidth } from "@/hooks/use-element-width";
 
@@ -86,6 +87,8 @@ export interface TableFooter {
   onPageSize?: (n: number) => void;
   /** Extra text after the total ("· 3.4 GB"). */
   extra?: ReactNode;
+  /** A list that never pages (a person's KPIs): no range and no arrows. */
+  hidePaging?: boolean;
 }
 
 export interface TableCardProps<T> {
@@ -128,6 +131,59 @@ export interface TableCardProps<T> {
   groupOf?: (row: T) => { key: string; label: ReactNode; count?: number | null };
   collapsedGroups?: ReadonlySet<string>;
   onToggleGroup?: (key: string) => void;
+  /**
+   * The column settings control at the end of the header row (design-system
+   * 5.1). Every column except the title column can be shown or hidden;
+   * a column `hideBelow` dropped for width comes back here, and the card
+   * then scrolls sideways inside itself. `storageKey` remembers the choice
+   * on this device (a per-viewer convenience, never shared state).
+   */
+  columnSettings?: boolean | { storageKey?: string };
+}
+
+type ColumnChoice = { shown: string[]; hidden: string[] };
+const COL_NS = "workwrk:table-columns";
+function readChoice(key: string | undefined): ColumnChoice {
+  if (!key) return { shown: [], hidden: [] };
+  try {
+    const raw = window.localStorage.getItem(`${COL_NS}:${key}`);
+    const v = raw ? (JSON.parse(raw) as Partial<ColumnChoice>) : null;
+    return { shown: Array.isArray(v?.shown) ? v!.shown : [], hidden: Array.isArray(v?.hidden) ? v!.hidden : [] };
+  } catch { return { shown: [], hidden: [] }; }
+}
+function writeChoice(key: string | undefined, c: ColumnChoice) {
+  if (!key) return;
+  try {
+    if (!c.shown.length && !c.hidden.length) window.localStorage.removeItem(`${COL_NS}:${key}`);
+    else window.localStorage.setItem(`${COL_NS}:${key}`, JSON.stringify(c));
+  } catch { /* private mode: the choice lasts until the page closes */ }
+}
+
+/**
+ * Which columns render: the viewer's hidden ones never, the ones they chose
+ * to show always, and the rest by the card-width priority rule. Pure, so
+ * the rule is tested without a DOM.
+ */
+export function visibleTableColumns<T>(
+  all: TableColumn<T>[],
+  cardWidth: number,
+  fixed: number,
+  choice: ColumnChoice = { shown: [], hidden: [] },
+): TableColumn<T>[] {
+  const hidden = new Set(choice.hidden);
+  const forced = new Set(choice.shown);
+  const base = all.filter((c) => c.title || !hidden.has(c.key));
+  if (cardWidth === 0) return base;
+  let cols = base.filter((c) => forced.has(c.key) || !c.hideBelow || cardWidth >= c.hideBelow);
+  const minOf = (c: TableColumn<T>) => { const m = /(\d+)px/.exec(c.width ?? ""); return m ? Number(m[1]) : 120; };
+  const total = () => cols.reduce((w, c) => w + minOf(c), fixed);
+  while (total() > cardWidth) {
+    const droppable = cols.filter((c) => c.hideBelow && !forced.has(c.key));
+    if (droppable.length === 0) break;
+    const drop = droppable.reduce((a, b) => ((b.hideBelow ?? 0) > (a.hideBelow ?? 0) ? b : a));
+    cols = cols.filter((c) => c !== drop);
+  }
+  return cols;
 }
 
 const CELL = "flex min-w-0 items-center px-3";
@@ -163,6 +219,7 @@ export function TableCard<T>({
   groupOf,
   collapsedGroups,
   onToggleGroup,
+  columnSettings,
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -174,20 +231,36 @@ export function TableCard<T>({
   // the row's minimum is wider than the card: otherwise the pinned "..."
   // cell sits over the last visible column and cuts it mid-word (a date
   // reading "17 S" with the Filter panel open).
-  const columns = useMemo(() => {
-    if (cardWidth === 0) return allColumns;
-    let cols = allColumns.filter((c) => !c.hideBelow || cardWidth >= c.hideBelow);
-    const fixed = (selectable ? 44 : 0) + (rowMenu ? 44 : 0);
-    const minOf = (c: TableColumn<T>) => { const m = /(\d+)px/.exec(c.width ?? ""); return m ? Number(m[1]) : 120; };
-    const total = () => cols.reduce((w, c) => w + minOf(c), fixed);
-    while (total() > cardWidth) {
-      const droppable = cols.filter((c) => c.hideBelow);
-      if (droppable.length === 0) break;
-      const drop = droppable.reduce((a, b) => ((b.hideBelow ?? 0) > (a.hideBelow ?? 0) ? b : a));
-      cols = cols.filter((c) => c !== drop);
-    }
-    return cols;
-  }, [allColumns, cardWidth, selectable, rowMenu]);
+  const settingsKey = typeof columnSettings === "object" ? columnSettings.storageKey : undefined;
+  const [choice, setChoice] = useState<ColumnChoice>({ shown: [], hidden: [] });
+  // Read after mount, so server render and hydration agree.
+  // The setState runs in a timer (the bulk bar's pattern), after the first paint.
+  useEffect(() => {
+    if (!settingsKey) return;
+    const t = setTimeout(() => setChoice(readChoice(settingsKey)), 0);
+    return () => clearTimeout(t);
+  }, [settingsKey]);
+  const updateChoice = useCallback((next: ColumnChoice) => { setChoice(next); writeChoice(settingsKey, next); }, [settingsKey]);
+  const columns = useMemo(
+    () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? 44 : 0), choice),
+    [allColumns, cardWidth, selectable, rowMenu, choice],
+  );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const settingsButton = columnSettings ? (
+    <button
+      ref={settingsBtnRef}
+      type="button"
+      onClick={(e) => { e.stopPropagation(); setSettingsOpen((x) => !x); }}
+      aria-label="Column settings"
+      aria-haspopup="dialog"
+      aria-expanded={settingsOpen}
+      title="Column settings"
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+    >
+      <Settings2 className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+    </button>
+  ) : null;
   const sel = selected ?? new Set<string>();
   const anySelected = sel.size > 0;
 
@@ -299,8 +372,11 @@ export function TableCard<T>({
                 />
               </div>
             ) : null}
-            {columns.map((c) => {
+            {columns.map((c, ci) => {
               const sorted = sort?.key === c.key ? sort.dir : null;
+              // Without a row menu the settings control is pinned over the end
+              // of the header (below), so the last header cell leaves it room.
+              const endRoom = !rowMenu && settingsButton && ci === columns.length - 1;
               const inner = (
                 <>
                   <span className="truncate">{c.label}</span>
@@ -308,7 +384,7 @@ export function TableCard<T>({
                 </>
               );
               return (
-                <div key={c.key} role="columnheader" aria-sort={sorted ? (sorted === "asc" ? "ascending" : "descending") : undefined} className={cn(CELL, "gap-1", alignClass(c.align, c.numeric), c.className)}>
+                <div key={c.key} role="columnheader" aria-sort={sorted ? (sorted === "asc" ? "ascending" : "descending") : undefined} className={cn(CELL, "gap-1", alignClass(c.align, c.numeric), c.className, endRoom ? "pe-11" : "")}>
                   {c.sortable && onSort ? (
                     <button type="button" onClick={() => onSort(c.key)} className="inline-flex min-w-0 items-center gap-1 rounded px-0.5 hover:text-ink">
                       {inner}
@@ -320,7 +396,11 @@ export function TableCard<T>({
                 </div>
               );
             })}
-            {rowMenu ? <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden /> : null}
+            {rowMenu ? (
+              settingsButton
+                ? <div className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
+                : <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden />
+            ) : null}
           </div>
 
           {/* Body */}
@@ -459,7 +539,23 @@ export function TableCard<T>({
         </div>
       </div>
 
+      {/* Pinned to the card's top end, outside the sideways scroll, so it is
+          reachable (to put columns back) however far the table scrolls. */}
+      {settingsButton && !rowMenu ? (
+        <div className="absolute end-0 top-0 z-[2] flex h-11 items-center border-b border-line bg-[var(--os-table-head-bg)] px-2">{settingsButton}</div>
+      ) : null}
       {footer ? <TableCardFooter {...footer} /> : null}
+
+      {settingsOpen && columnSettings ? (
+        <ColumnSettingsPopover
+          anchorRef={settingsBtnRef}
+          columns={allColumns}
+          visible={new Set(columns.map((c) => c.key))}
+          choice={choice}
+          onChange={updateChoice}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
 
       {barShown && bulkActions ? (
         <div className="fixed bottom-6 start-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-1 rounded-lg border border-line bg-raised px-3 shadow-[var(--os-shadow-pop)] rtl:translate-x-1/2" role="toolbar" aria-label="Selected rows">
@@ -498,7 +594,7 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, hidePaging }: TableFooter) {
   const hasRows = total > 0;
   return (
     <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
@@ -517,6 +613,7 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
           </select>
         </label>
       ) : null}
+      {hidePaging ? null : <>
       <span className="tabular-nums text-ink-2">{hasRows ? `${from} to ${to}` : "0 to 0"}</span>
       <span className="inline-flex items-center">
         <button type="button" onClick={onPrev} disabled={!onPrev} aria-label="Previous page" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent">
@@ -526,7 +623,88 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
           <ChevronRight className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
         </button>
       </span>
+      </>}
     </div>
+  );
+}
+
+/**
+ * The column settings popover: one switch row per column (the title column
+ * always shows). Portaled to <body> with fixed coordinates, because the
+ * card clips its own overflow. Esc and an outside click close it.
+ */
+function ColumnSettingsPopover<T>({ anchorRef, columns, visible, choice, onChange, onClose }: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  columns: TableColumn<T>[];
+  visible: Set<string>;
+  choice: ColumnChoice;
+  onChange: (next: ColumnChoice) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    const place = () => {
+      if (!anchor) return;
+      const r = anchor.getBoundingClientRect();
+      const w = 240;
+      setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [anchorRef]);
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); anchor?.focus(); } };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || anchor?.contains(t)) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", onDown);
+    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("mousedown", onDown); };
+  }, [anchorRef, onClose]);
+  if (typeof document === "undefined" || !pos) return null;
+  const toggle = (key: string, on: boolean) => {
+    const shown = new Set(choice.shown);
+    const hidden = new Set(choice.hidden);
+    if (on) { hidden.delete(key); shown.add(key); } else { shown.delete(key); hidden.add(key); }
+    onChange({ shown: [...shown], hidden: [...hidden] });
+  };
+  const changed = choice.shown.length > 0 || choice.hidden.length > 0;
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Column settings"
+      className="workwrk-os fixed z-[80] w-[240px] rounded-lg border border-line bg-raised py-1 text-row text-ink"
+      style={{ top: pos.top, left: pos.left, boxShadow: "var(--os-shadow-pop)" }}
+    >
+      <p className="m-0 px-3 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-ink-2">Columns</p>
+      {columns.filter((c) => c.label !== "" && c.label != null).map((c) => (
+        <label key={c.key} className={cn("flex h-8 items-center gap-2 px-3", c.title ? "text-ink-2" : "cursor-pointer hover:bg-hover")}>
+          <input
+            type="checkbox"
+            className="os-tc__check h-4 w-4 accent-[var(--os-brand)]"
+            checked={c.title ? true : visible.has(c.key)}
+            disabled={c.title}
+            onChange={(e) => toggle(c.key, e.target.checked)}
+          />
+          <span className="min-w-0 flex-1 truncate">{c.label}</span>
+        </label>
+      ))}
+      <p className="m-0 border-t border-line-soft px-3 pb-1 pt-1.5 text-xs text-ink-2">Columns that do not fit scroll sideways inside the table.</p>
+      {changed ? (
+        <button type="button" onClick={() => onChange({ shown: [], hidden: [] })} className="mx-1 mb-1 flex h-8 w-[calc(100%-8px)] items-center rounded-md px-2 text-start text-sm text-ink-2 hover:bg-hover hover:text-ink">
+          Reset to fit the width
+        </button>
+      ) : null}
+    </div>,
+    document.body,
   );
 }
 

@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { notifyKpiSubmitted } from "@/lib/kpi-review.server";
 import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 
 export async function POST(req: NextRequest) {
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest) {
 
   if (!period || !Array.isArray(records) || records.length === 0) {
     return jsonError("period and records[] are required");
+  }
+  if (!isKpiPeriodWritableAnyZone(period)) {
+    return jsonError("Numbers can only be recorded for this month or last month.", 400);
   }
 
   // Verify KPIs belong to this user's KRA assignments
@@ -54,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   const before = await prisma.kPIRecord.findMany({
     where: { userId, period, kpiId: { in: rows.map((r) => r.kpiId) } },
-    select: { kpiId: true, status: true },
+    select: { kpiId: true, status: true, reviewedById: true, actualValue: true, notes: true, evidence: true },
   });
   const wasSubmitted = new Set(before.filter((b) => b.status === "SUBMITTED").map((b) => b.kpiId));
   const beforeBy = new Map(before.map((b) => [b.kpiId, b]));
@@ -66,11 +70,18 @@ export async function POST(req: NextRequest) {
       if (!kpi) return null;
 
       const actual = r.actualValue != null ? Number(r.actualValue) : null;
-      // A blank on a row a manager already decided is not a change: skip it
-      // rather than wipe the approved number.
-      const prior = beforeBy.get(r.kpiId);
-      if (actual == null && (prior?.status === "APPROVED" || prior?.status === "REJECTED")) return null;
-      // Direction-aware, null-target-safe. Score null when no line exists —
+      const prior = beforeBy.get(r.kpiId) ?? null;
+      const noteText = r.notes || null;
+      const evidenceText = r.evidence || null;
+      const noteChanged = (prior?.notes ?? null) !== noteText || (prior?.evidence ?? null) !== evidenceText;
+      // src/lib/kpi-record-status.ts: the recorder resends the whole month,
+      // so an unchanged number keeps the manager's decision, a blank on a
+      // decided row keeps the number, and only a changed number is a new
+      // submission.
+      const decision = kpiWriteStatus({ actorId: userId, subjectId: userId, actual, existing: prior, noteChanged });
+      // Nothing changed on this row: do not touch it at all.
+      if (prior && decision.keepValue && !noteChanged && decision.status === prior.status) return null;
+      // Direction-aware, null-target-safe. Score null when no line exists,
       // except a QUALITATIVE KPI, whose rubric rating scores against the
       // scale ceiling resolveKpiLine supplies.
       const target = resolveKpiLine(kpi.type, kpi.targetValue);
@@ -89,22 +100,17 @@ export async function POST(req: NextRequest) {
           targetValue: target ?? 0,
           actualValue: actual,
           score,
-          notes: r.notes || null,
-          evidence: r.evidence || null,
-          status: actual != null ? "SUBMITTED" : "PENDING",
+          notes: noteText,
+          evidence: evidenceText,
+          status: decision.status,
           reviewedById: null,
         },
         update: {
-          actualValue: actual,
-          targetValue: target ?? 0,
-          score,
-          notes: r.notes || null,
-          evidence: r.evidence || null,
-          // src/lib/kpi-record-status.ts: SUBMITTED with a number; a blank
-          // save never undoes a manager's decision.
-          status: kpiWriteStatus({ actorId: userId, subjectId: userId, actual, existing: beforeBy.get(r.kpiId) ?? null }).status,
-          // The person's own number: no manager has decided on it yet.
-          ...(actual != null ? { reviewedById: null } : {}),
+          ...(decision.keepValue ? {} : { actualValue: actual, targetValue: target ?? 0, score }),
+          notes: noteText,
+          evidence: evidenceText,
+          status: decision.status,
+          ...(decision.reviewedById !== undefined ? { reviewedById: decision.reviewedById } : {}),
         },
       });
     })
@@ -115,5 +121,6 @@ export async function POST(req: NextRequest) {
   const fresh = results.filter((r) => r.status === "SUBMITTED" && !wasSubmitted.has(r.kpiId)).length;
   void notifyKpiSubmitted({ userId, organizationId: getOrgId(session), period, count: fresh });
 
+  // `saved` counts the rows this save changed; an unchanged resend is 0.
   return jsonSuccess({ saved: results.length, period, status: "SUBMITTED" });
 }

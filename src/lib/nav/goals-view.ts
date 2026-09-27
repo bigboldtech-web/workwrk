@@ -36,7 +36,7 @@ export const GOALS_VIEW_HREF: Record<Exclude<GoalsView, "level">, string> = {
   company: "/okrs?view=company",
 };
 
-export const TEAM_GOALS_NOTICE = "Team goals shows the goals of people who report to you.";
+export const TEAM_GOALS_NOTICE = "Team goals are for people who manage someone.";
 
 export function canonicalGoalsView(q: GoalsQuery, opts: { canTeam: boolean }): ResolvedGoalsView {
   const level = q.level?.toLowerCase();

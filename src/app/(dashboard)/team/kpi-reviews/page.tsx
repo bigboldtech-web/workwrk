@@ -15,9 +15,8 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { gatePage } from "@/lib/access/gate";
-import { listKpiReviewsForManager } from "@/lib/kpi-record";
 import { currentKpiPeriod, resolveKpiPeriod } from "@/lib/kpi-period";
-import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
+import { kpiActorCtx, listAwaitingKpiNumbers, mayActOnKpisOf, listRecentKpiDecisions } from "@/lib/kpi-review.server";
 import { KpiReviewsView } from "@/components/team/kpi-reviews-view";
 
 export const dynamic = "force-dynamic";
@@ -36,9 +35,10 @@ export default async function TeamKpiReviewsPage({ searchParams }: { searchParam
   if (!ctx) redirect("/login");
   if (person && (person === u.id || !mayActOnKpisOf(ctx, person))) notFound();
 
-  // Submitted numbers from any month (the sidebar badge's own rule), so a
-  // number sent in for last month is never hidden behind the month control.
-  const waiting = await listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED" });
+  // Submitted numbers from any month for the people this page lists (the
+  // sidebar badge's own list), so a number sent in for last month is never
+  // hidden behind the month control.
+  const [waiting, recent] = await Promise.all([listAwaitingKpiNumbers(ctx), listRecentKpiDecisions(ctx)]);
   const byMonth = new Map<string, number>();
   for (const w of waiting) byMonth.set(w.period, (byMonth.get(w.period) ?? 0) + 1);
 
@@ -50,6 +50,7 @@ export default async function TeamKpiReviewsPage({ searchParams }: { searchParam
         initialPerson={person}
         otherMonths={[...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([p, count]) => ({ period: p, count }))}
         viewerId={u.id}
+        recentDecisions={recent}
       />
     </div>
   );

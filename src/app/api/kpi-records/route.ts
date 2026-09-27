@@ -5,6 +5,7 @@ import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { kpiActorCtx, mayActOnKpisOf, notifyKpiRecordedForYou, notifyKpiSubmitted } from "@/lib/kpi-review.server";
 
 export async function GET(req: NextRequest) {
@@ -70,6 +71,11 @@ export async function POST(req: NextRequest) {
   if (!kpiId || !userId || !period) {
     return jsonError("kpiId, userId, and period are required");
   }
+  // The current and previous month take numbers; a closed month is never
+  // rescored (src/lib/kpi-period.ts).
+  if (!isKpiPeriodWritableAnyZone(period)) {
+    return jsonError("Numbers can only be recorded for this month or last month.", 400);
+  }
 
   // Write gate: self-report, manager-in-report-tree, or org-wide level.
   // Peers can no longer overwrite each other's submitted numbers.
@@ -124,9 +130,10 @@ export async function POST(req: NextRequest) {
   // decided row.
   const existing = await prisma.kPIRecord.findUnique({
     where: { kpiId_userId_period: { kpiId, userId, period } },
-    select: { status: true, reviewedById: true },
+    select: { status: true, reviewedById: true, actualValue: true, notes: true, evidence: true },
   });
-  const decision = kpiWriteStatus({ actorId: callerId, subjectId: userId, actual, existing });
+  const noteChanged = isSelf && existing != null && ((existing.notes ?? null) !== (notes || null) || (existing.evidence ?? null) !== (evidence || null));
+  const decision = kpiWriteStatus({ actorId: callerId, subjectId: userId, actual, existing, noteChanged });
 
   const record = await prisma.kPIRecord.upsert({
     where: { kpiId_userId_period: { kpiId, userId, period } },
@@ -144,9 +151,8 @@ export async function POST(req: NextRequest) {
       reviewedById: decision.reviewedById ?? null,
     },
     update: {
-      actualValue: actual,
-      targetValue: target ?? 0,
-      score,
+      // A blank or an unchanged number leaves the stored number alone.
+      ...(decision.keepValue ? {} : { actualValue: actual, targetValue: target ?? 0, score }),
       // A manager's save never overwrites the person's own note or evidence.
       ...(isSelf ? { notes, evidence } : {}),
       ...(reviewNotes !== undefined && { managerNotes: reviewNotes }),
@@ -155,7 +161,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  if (!isSelf && decision.status === "APPROVED" && existing?.status !== "APPROVED") {
+  if (!isSelf && decision.status === "APPROVED" && decision.valueChanged) {
     void notifyKpiRecordedForYou({ userId, actorId: callerId, period, count: 1 });
   }
   if (isSelf && decision.status === "SUBMITTED" && existing?.status !== "SUBMITTED") {

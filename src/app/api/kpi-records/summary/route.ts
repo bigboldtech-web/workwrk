@@ -49,9 +49,17 @@ export async function GET(req: NextRequest) {
     for (const k of a.kra.kpis) s.add(k.id);
     kpisOf.set(a.userId, s);
   }
+  // One pass over the month's records, grouped by person (never a filter
+  // per person, which is people x records for an org-wide viewer).
+  const recordsOf = new Map<string, typeof records>();
+  for (const r of records) {
+    const list = recordsOf.get(r.userId);
+    if (list) list.push(r);
+    else recordsOf.set(r.userId, [r]);
+  }
   const people = ids.map((userId) => {
     const kpis = kpisOf.get(userId) ?? new Set<string>();
-    const mine = records.filter((r) => r.userId === userId && kpis.has(r.kpiId));
+    const mine = (recordsOf.get(userId) ?? []).filter((r) => kpis.has(r.kpiId));
     const u = userById.get(userId);
     const c = {
       userId,

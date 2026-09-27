@@ -7,6 +7,7 @@
 // The AI, when configured, writes only the explanation; it can never change
 // the verdict. Visibility mirrors the goal (canSeeGoal). Reads only.
 
+import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -56,7 +57,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [keyResults, rollupCtx, effort] = await Promise.all([
     enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
     computeGoalRollups(orgId),
-    computeGoalEffort(orgId, id),
+    computeGoalEffort(orgId, id, await viewerFromSession()),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
   const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;

@@ -69,3 +69,23 @@ export function isKpiPeriodWritable(period: string, now: Date = new Date()): boo
   const current = currentKpiPeriod(now);
   return period === current || period === shiftKpiPeriod(current, -1);
 }
+
+const ZONE_SPREAD_MS = 14 * 60 * 60 * 1000;
+
+/**
+ * The server's write gate for KPI numbers (POST /api/kpi-records, /batch,
+ * /self-report): a well formed month key that is the current or previous
+ * month in SOME timezone. The recorders name the month in the viewer's
+ * local time, so the gate allows the fourteen hours either side of UTC and
+ * nothing more: a direct call can never rescore a closed month or write a
+ * row keyed to something that is not a month.
+ */
+export function isKpiPeriodWritableAnyZone(period: unknown, now: Date = new Date()): boolean {
+  if (typeof period !== "string" || !MONTH_KEY.test(period)) return false;
+  const t = now.getTime();
+  return (
+    isKpiPeriodWritable(period, now) ||
+    isKpiPeriodWritable(period, new Date(t - ZONE_SPREAD_MS)) ||
+    isKpiPeriodWritable(period, new Date(t + ZONE_SPREAD_MS))
+  );
+}

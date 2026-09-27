@@ -4,7 +4,7 @@
 //
 // Every query is the SAME clause as the page the badge points at, through a
 // shared helper where one exists (countReviewsAwaitingManager for
-// /team/reviews, countKpiReviewsForManager for /team/kpi-reviews), so a
+// /team/reviews, listAwaitingKpiNumbers for /team/kpi-reviews), so a
 // badge and its page can never disagree.
 //
 // Every read is wrapped: a badge is chrome, and a boot payload that will not
@@ -17,7 +17,7 @@
 
 import { currentKpiPeriod } from "@/lib/kpi-period";
 import { prisma } from "@/lib/prisma";
-import { countKpiReviewsForManager } from "@/lib/kpi-record";
+import { countAwaitingKpiNumbers } from "@/lib/kpi-review.server";
 import { countChainReviewsAwaiting, countReviewsAwaitingManager } from "@/lib/weekly-review";
 import { getUserTagIds } from "@/lib/user-tags";
 import { inSurveyAudience, surveyOpenNow } from "./survey-audience";
@@ -131,7 +131,7 @@ export async function teamsFactsAndCounts(
       ),
       safe("tags", [] as string[], getUserTagIds(orgId, userId)),
       safe("weeklyReviews", 0, countReviewsAwaitingManager(userId)),
-      safe("kpiReviews", 0, countKpiReviewsForManager(userId, orgId)),
+      safe("kpiReviews", 0, countAwaitingKpiNumbers(userId)),
       safe(
         "reviewForms",
         0,

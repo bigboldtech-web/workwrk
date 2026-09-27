@@ -120,8 +120,11 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory }: {
   return (
     <li className="os-row group flex h-9 min-w-0 items-center gap-3 border-b border-line last:border-b-0">
       <span className="min-w-0 flex-1 truncate text-row text-ink" title={t.title}>{t.title}</span>
+      {/* "6 of 20 people", plus where it started when that was not zero; the
+          full Start, Now and Target sentence is the tooltip. The longer
+          three-word line cut the target's own name to two letters at 720. */}
       <span className="shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
-        {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}
+        {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
       </span>
       <span className="flex shrink-0 items-center gap-2">
         <span className="h-1 w-[72px] overflow-hidden rounded-full bg-surface-2" aria-hidden>

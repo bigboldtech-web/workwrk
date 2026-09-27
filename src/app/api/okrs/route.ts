@@ -1,3 +1,4 @@
+import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -9,6 +10,7 @@ import {
   enrichKeyResults,
   goalRollupFor,
   KR_KPI_SELECT,
+  okrStatusFor,
   persistGoalRollupChain,
 } from "@/lib/alignment";
 import {
@@ -214,7 +216,7 @@ export async function GET(req: NextRequest) {
   // Team goals group headers, computed over every filtered row (not the
   // page), so a header's numbers are the person's real totals.
   const effortAll = teamOnly || withEffort
-    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now)
+    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now, await viewerFromSession())
     : new Map<string, GoalEffort>();
   const groupVerdict = new Map<string, GoalVerdict | null>();
   const groups: Array<{
@@ -662,6 +664,11 @@ export async function PATCH(req: NextRequest) {
   if (completedFlag === true && !existing.completedAt) updates.completedAt = new Date();
   if (completedFlag === false && existing.completedAt) updates.completedAt = null;
   if (completedFlag === true) updates.status = "COMPLETED";
+  // Reopening: the stored status goes back to what the progress says (the
+  // rollup below re-derives it again for a measured goal).
+  if (completedFlag === false && existing.status === "COMPLETED" && !("status" in updates)) {
+    updates.status = okrStatusFor(Math.min(99, existing.progress));
+  }
 
   // Audience full-replacement: `assignees: [{type, id}]` becomes the
   // goal's exact audience (validated, de-duped, org-checked; diff-synced

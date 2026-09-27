@@ -299,8 +299,12 @@ export default function OkrsClient({ initialNew = false, view, legacyLevel, cano
       );
     const dueCell = (r: GoalRow) => {
       if (!r.endDate) return <span className="text-ink-2">No due date</span>;
-      const overdue = r.verdict !== "completed" && new Date(r.endDate).getTime() < Date.now();
-      return <span className={overdue ? "text-danger-text" : ""}>{fmt.date(r.endDate, "date")}{overdue ? " · overdue" : ""}</span>;
+      // A due date is a calendar day stored as UTC midnight: the wall-clock
+      // formatter never shows it a day early west of UTC, and it is overdue
+      // only once that day has ended for the viewer.
+      const dueKey = r.endDate.slice(0, 10);
+      const overdue = r.verdict !== "completed" && fmt.today() > dueKey;
+      return <span className={overdue ? "text-danger-text" : ""}>{fmt.wallDate(dueKey)}{overdue ? " · overdue" : ""}</span>;
     };
     const base: TableColumn<GoalRow>[] = [
       { key: "title", label: "Goal", title: true, width: "minmax(240px,2fr)", render: (r) => <span className="truncate">{r.title}</span> },
@@ -349,7 +353,10 @@ export default function OkrsClient({ initialNew = false, view, legacyLevel, cano
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(total, page * PAGE_SIZE);
   const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
-  const canTeam = (data?.canTeam ?? isTeam) || boot.viewer.peopleTeam === true || isAdmin;
+  // The same facts the sidebar's Team goals row reads (hasReports, the
+  // People team, Admin), so the pill renders on first paint, not after the
+  // fetch.
+  const canTeam = (data?.canTeam ?? isTeam) || boot.viewer.hasReports === true || boot.viewer.peopleTeam === true || isAdmin;
 
   const views = (
     <>

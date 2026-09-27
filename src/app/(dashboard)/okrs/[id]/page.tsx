@@ -28,14 +28,14 @@ import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } fr
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
 import { verdictForGoal } from "@/lib/goal-verdict";
 import { goalQuarterLabel } from "@/lib/fiscal-quarter";
-import { formatDate, formatRelative } from "@/lib/format/date";
+import { formatRelative } from "@/lib/format/date";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { getTeamUserIds } from "@/lib/team";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
-import { CopyLinkButton, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
+import { CopyLinkButton, GoalDates, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
 import type { TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { OsPageHeader } from "@/components/layout/os/page-header";
@@ -116,6 +116,12 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
     back = { fallbackHref: "/okrs?view=team", label: "Team goals" };
   }
 
+  // The Work sidebar's active row (spec-goals section 1): My goals when the
+  // viewer owns or contributes, else Company goals for a COMPANY goal, else
+  // Team goals. The sidebar reads it from the Goals crumb's href, the one
+  // declaration a page makes to the shell.
+  const sidebarView = isOwner || contributor ? "/okrs" : okr.level === "COMPANY" ? "/okrs?view=company" : "/okrs?view=team";
+
   const editable: EditableGoal = {
     id: okr.id,
     title: okr.title,
@@ -144,15 +150,10 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   }));
 
   const ownerName = owner ? `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email : null;
-  const overdue = verdict !== "completed" && isPast(okr.endDate);
-  const dates = [
-    okr.startDate ? formatDate(okr.startDate, null, "date") : null,
-    okr.endDate ? formatDate(okr.endDate, null, "date") : null,
-  ];
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface">
-      <Breadcrumb items={[{ label: "Goals", href: back.fallbackHref }, { label: okr.title }]} />
+      <Breadcrumb items={[{ label: "Goals", href: sidebarView }, { label: okr.title }]} />
       <OsPageHeader
         title={okr.title}
         back={back}
@@ -199,9 +200,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
             ) : canEditGoal && !okr.parentId ? <GoalEditLink goal={editable} label="Add" focusParent /> : <span className="text-ink-2">{okr.parentId ? "A goal you can't see" : "None"}</span>}
           </DetailRow>
           <DetailRow label="Dates">
-            <span className={overdue ? "text-danger-text" : ""}>
-              {!dates[0] && !dates[1] ? "No dates" : `${dates[0] ?? "No start"} to ${dates[1] ?? "no due date"}`}{quarter ? ` · ${quarter}` : ""}{overdue ? " · overdue" : ""}
-            </span>
+            <GoalDates startDate={editable.startDate} endDate={editable.endDate} quarter={quarter} completed={verdict === "completed"} />
           </DetailRow>
           <DetailRow label="Check-ins"><span>{CADENCE_WORD[okr.checkInCadence] ?? okr.checkInCadence}</span></DetailRow>
         </dl>
@@ -243,11 +242,6 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
       </div>
     </div>
   );
-}
-
-/** Server clock, read outside render so the page body stays pure. */
-function isPast(d: Date | null): boolean {
-  return d != null && d.getTime() < Date.now();
 }
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {

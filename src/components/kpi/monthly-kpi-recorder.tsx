@@ -184,7 +184,10 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
       }
       if (!silent) {
         const result = await res.json();
-        toastSuccess(`Saved ${(result.data || result).saved} KPI records for ${formatPeriodLabel(selectedPeriod)}`);
+        // The routes count only the rows a save changed (an unchanged number
+        // keeps its status and is not rewritten).
+        const saved = Number((result.data || result).saved ?? 0);
+        toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : "Nothing changed, your numbers are already saved");
         fetchKpis(selectedPeriod);
       }
     },

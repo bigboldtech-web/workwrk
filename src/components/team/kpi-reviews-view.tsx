@@ -129,13 +129,28 @@ const parseActual = (s: string | undefined): number | null => {
 
 type StatusFilter = "awaiting" | "notRecorded" | "approved" | "changes";
 
-export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, otherMonths, viewerId }: {
+export interface RecentDecisionRow {
+  id: string;
+  userId: string;
+  personName: string;
+  kpiName: string;
+  unit: string | null;
+  period: string;
+  status: "APPROVED" | "REJECTED";
+  actualValue: number | null;
+  byYou: boolean;
+  updatedAt: string;
+}
+
+export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, otherMonths, viewerId, recentDecisions = [] }: {
   initialPeriod: string;
   currentPeriod: string;
   initialPerson: string | null;
   /** SUBMITTED numbers waiting in months other than the one shown. */
   otherMonths: Array<{ period: string; count: number }>;
   viewerId: string;
+  /** The last 30 days of decisions (the old approval tab's Recently acted). */
+  recentDecisions?: RecentDecisionRow[];
 }) {
   const pathname = usePathname();
   const fmt = useFormat();
@@ -163,6 +178,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const [sort, setSort] = useState<"attention" | "name">("attention");
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [changesFor, setChangesFor] = useState<string[] | null>(null);
+  const [showRecent, setShowRecent] = useState(false);
   const actualRefs = useRef(new Map<string, HTMLInputElement | null>());
 
   const stored = kpiReviewsSurfacePrefs(prefs.home);
@@ -253,12 +269,24 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
 
   const person = summary?.people.find((p) => p.userId === personId) ?? null;
 
-  // Drafts that will save: a number typed on a row that takes one.
+  // Drafts that will save: a number typed on a row that takes one, and a
+  // manager note typed on a row that takes one or on a submitted number
+  // (saved on its own, it keeps the row's status: src/lib/kpi-record-status.ts).
   const takesInput = useCallback((kpiId: string) => {
     const r = records.get(kpiId);
     return writable && (!r || r.status === "PENDING" || r.status === "REJECTED");
   }, [records, writable]);
-  const pendingSaves = useMemo(() => Object.entries(drafts).filter(([kpiId, d]) => takesInput(kpiId) && parseActual(d.actual) != null), [drafts, takesInput]);
+  const pendingSaves = useMemo(() => Object.entries(drafts).filter(([kpiId, d]) => {
+    const hasNote = !!d.notes?.trim();
+    if (takesInput(kpiId)) return parseActual(d.actual) != null || hasNote;
+    return hasNote && writable && records.get(kpiId)?.status === "SUBMITTED";
+  }), [drafts, takesInput, writable, records]);
+  const pendingNumbers = pendingSaves.filter(([, d]) => parseActual(d.actual) != null).length;
+  const pendingNotes = pendingSaves.length - pendingNumbers;
+  const pendingLabel = [
+    pendingNumbers ? `${pendingNumbers} ${pendingNumbers === 1 ? "number" : "numbers"}` : null,
+    pendingNotes ? `${pendingNotes} ${pendingNotes === 1 ? "note" : "notes"}` : null,
+  ].filter(Boolean).join(" and ");
   const dirty = pendingSaves.length > 0;
 
   const setDraft = (kpiId: string, patch: Draft) => {
@@ -275,6 +303,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     if (!personId) return false;
     const r = await apiFetch<KpiRecordRow>("/api/kpi-records", {
       method: "POST",
+      // A note-only save sends no number, so the stored one stays as it is.
       json: { kpiId, userId: personId, period, actualValue: parseActual(d.actual), ...(d.notes?.trim() ? { managerNotes: d.notes.trim() } : {}) },
     });
     if (!r.ok) return false;
@@ -299,8 +328,8 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     }
     setSaving(false);
     const done = pendingSaves.length - failed;
-    if (done) toast(`Saved ${done} ${done === 1 ? "number" : "numbers"}`);
-    if (failed) toast(`${failed} ${failed === 1 ? "number wasn't" : "numbers weren't"} saved. They are kept here; use Retry on the row.`, { tone: "danger" });
+    if (done) toast(`Saved ${done} ${done === 1 ? "change" : "changes"}`);
+    if (failed) toast(`${failed} ${failed === 1 ? "change wasn't" : "changes weren't"} saved. They are kept here; use Retry on the row.`, { tone: "danger" });
     void loadSummary();
     return failed === 0;
   }, [saving, pendingSaves, saveOne, toast, loadSummary]);
@@ -318,7 +347,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   });
 
   const discard = async () => {
-    const ok = await confirm({ title: `Discard ${pendingSaves.length} unsaved ${pendingSaves.length === 1 ? "number" : "numbers"}?`, confirmLabel: "Discard", destructive: true });
+    const ok = await confirm({ title: `Discard ${pendingLabel}?`, confirmLabel: "Discard", destructive: true });
     if (!ok || !personId) return;
     setDrafts({});
     persistDraft(personId, period, {});
@@ -328,7 +357,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const guardSwitch = async (): Promise<boolean> => {
     if (!dirty) return true;
     return confirm({
-      title: `${pendingSaves.length} ${pendingSaves.length === 1 ? "number is" : "numbers are"} not saved`,
+      title: `${pendingLabel} not saved`,
       description: "They stay as a draft on this device, but nobody sees them until you save.",
       confirmLabel: "Leave them unsaved",
     });
@@ -363,20 +392,20 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   };
 
   const columns = useMemo<TableColumn<KpiLine>[]>(() => [
-    { key: "kpi", label: "KPI", title: true, width: "minmax(130px,1.6fr)", render: (l) => (
+    { key: "kpi", label: "KPI", title: true, width: "minmax(130px,1.2fr)", render: (l) => (
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="truncate">{l.name}</span>
         {display.showDescriptions && l.description ? <span className="truncate text-sm font-normal text-ink-2">{l.description}</span> : null}
       </span>
     ) },
-    { key: "target", label: "Target", width: "84px", numeric: true, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
-    { key: "actual", label: "Actual", width: "108px", render: (l) => {
+    { key: "target", label: "Target", width: "104px", numeric: true, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
+    { key: "actual", label: "Actual", width: "124px", render: (l) => {
       const r = records.get(l.kpiId);
       if (takesInput(l.kpiId)) {
         const st = rowState[l.kpiId];
         return (
-          <span className="flex min-w-0 flex-col" onClick={(e) => e.stopPropagation()}>
-            <span className="flex items-center gap-1">
+          <span className="flex min-w-0 items-center" onClick={(e) => e.stopPropagation()}>
+            <span className="flex min-w-0 items-center gap-1">
               <input
                 ref={(el) => { actualRefs.current.set(l.kpiId, el); }}
                 aria-label={`Actual for ${l.name}`}
@@ -386,27 +415,27 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                 placeholder={r?.actualValue != null ? num(r.actualValue) : "Record"}
                 value={drafts[l.kpiId]?.actual ?? ""}
                 onChange={(e) => setDraft(l.kpiId, { actual: e.target.value })}
-                className={cn("h-8 w-16 min-w-0 rounded-md border bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none", st ? "border-danger-text" : "border-line")}
+                aria-invalid={st ? true : undefined}
+                className={cn("w-14 min-w-0 rounded-md border bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none", st ? "border-danger-text" : "border-line")}
+                style={{ height: "calc(var(--os-row-h) - 12px)" }}
               />
-              {l.unit ? <span className="max-w-[36px] truncate text-xs text-ink-2" title={l.unit}>{l.unit}</span> : null}
+              {l.unit ? <span className="min-w-0 max-w-[48px] truncate text-xs text-ink-2" title={l.unit}>{l.unit}</span> : null}
             </span>
-            {st ? (
-              <span className="text-xs text-danger-text">
-                {st.message}{st.kind === "failed" ? <> · <button type="button" className="underline" onClick={() => void saveOne(l.kpiId, drafts[l.kpiId] ?? {}).then((ok) => { if (!ok) toast("Still not saved. Check your connection.", { tone: "danger" }); else void loadSummary(); })}>Retry</button></> : null}
-              </span>
-            ) : null}
           </span>
         );
       }
       return r?.actualValue != null ? <span className="tabular-nums">{num(r.actualValue)}{l.unit ? ` ${l.unit}` : ""}</span> : <span className="text-ink-2">None</span>;
     } },
-    { key: "recorded", label: "Recorded", width: "150px", hideBelow: 1100, render: (l) => {
+    // Column priority at a laptop width: Recorded leaves first, then Score;
+    // Note never leaves (the employee's explanation must be in front of the
+    // manager who approves). Both come back through the column settings.
+    { key: "recorded", label: "Recorded", width: "140px", hideBelow: 1100, render: (l) => {
       const r = records.get(l.kpiId);
       if (!r || r.actualValue == null) return <span className="text-sm text-ink-2">Not recorded</span>;
       const who = r.reviewedById === viewerId ? (r.status === "APPROVED" ? "Approved by you" : "By you") : r.status === "SUBMITTED" || r.status === "REJECTED" ? (person?.firstName || "Them") : "Approved";
       return <span className="truncate text-sm text-ink-2">{who} · {fmt.date(r.updatedAt, "date")}</span>;
     } },
-    { key: "score", label: "Score", width: "124px", render: (l) => {
+    { key: "score", label: "Score", width: "112px", hideBelow: 900, render: (l) => {
       const r = records.get(l.kpiId);
       const typed = parseActual(drafts[l.kpiId]?.actual);
       const score = typed != null ? previewKpiScore({ type: l.type, target: l.target, direction: l.direction, lowerIsBetter: l.lowerIsBetter }, typed) : r?.score ?? null;
@@ -416,7 +445,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       const cls = band?.tone === "success" ? "text-success-text" : band?.tone === "warning" ? "text-warning-text" : band?.tone === "danger" ? "text-danger-text" : "text-ink";
       return <span className="truncate tabular-nums" title={band ? `${Math.round(score)}% · ${band.label}` : undefined}><span className={cls}>{Math.round(score)}%</span>{band ? <span className="text-ink-2"> · {band.label}</span> : null}</span>;
     } },
-    { key: "note", label: "Note", width: "minmax(120px,1fr)", hideBelow: 900, render: (l) => {
+    { key: "note", label: "Note", width: "minmax(120px,1.2fr)", render: (l) => {
       const r = records.get(l.kpiId);
       const canNote = takesInput(l.kpiId) || r?.status === "SUBMITTED";
       const draftNote = drafts[l.kpiId]?.notes;
@@ -426,8 +455,10 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
             {draftNote ? `You: ${draftNote}` : r?.notes ?? (r?.managerNotes ? `You: ${r.managerNotes}` : "")}
           </span>
           {canNote ? (
-            <button type="button" onClick={() => setNoteFor(l.kpiId)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm text-ink-2 hover:bg-hover hover:text-ink" aria-label={`Note on ${l.name}`}>
-              <MessageSquare className="h-4 w-4" aria-hidden /> Note
+            // With a note already showing, the control shrinks to its icon so
+            // the note itself gets the room.
+            <button type="button" onClick={() => setNoteFor(l.kpiId)} title="Your note" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm text-ink-2 hover:bg-hover hover:text-ink" aria-label={`Note on ${l.name}`}>
+              <MessageSquare className="h-4 w-4" aria-hidden />{draftNote || r?.notes || r?.managerNotes ? null : " Note"}
             </button>
           ) : null}
           {noteFor === l.kpiId ? <NotePopover initial={draftNote ?? ""} onClose={() => setNoteFor(null)} onDone={(text) => { setDraft(l.kpiId, { notes: text }); setNoteFor(null); }} /> : null}
@@ -440,14 +471,26 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     // for both without dropping Target or Score, which the old page had.
     { key: "status", label: "Status", width: "204px", render: (l) => {
       const r = records.get(l.kpiId);
+      // An unsaved row says so here, where there is room for the Retry.
+      const st = rowState[l.kpiId];
+      if (st) {
+        return (
+          <span className="flex min-w-0 items-center gap-1 text-sm text-danger-text" role="status" onClick={(e) => e.stopPropagation()}>
+            <span className="truncate">{st.kind === "retrying" ? "Not saved, retrying" : "Not saved"}</span>
+            {st.kind === "failed" ? (
+              <button type="button" className="shrink-0 rounded px-1 font-medium underline hover:bg-hover" onClick={() => void saveOne(l.kpiId, drafts[l.kpiId] ?? {}).then((ok) => { if (!ok) toast("Still not saved. Check your connection.", { tone: "danger" }); else void loadSummary(); })}>Retry</button>
+            ) : null}
+          </span>
+        );
+      }
       if (r?.status !== "SUBMITTED") {
         const st = r?.status ?? "PENDING";
         return <ToneChip tone={kpiStatusTone(st)} label={kpiStatusLabel(st, { forManager: true })} />;
       }
       return (
         <span className="relative flex items-center gap-1" title="Awaiting you" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-          <button type="button" onClick={() => void approve([r.id])} className="inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-md border border-line bg-raised px-2 text-sm font-medium text-ink hover:bg-hover">Approve</button>
-          <button type="button" onClick={() => setChangesFor([r.id])} className="inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Request changes</button>
+          <button type="button" onClick={() => void approve([r.id])} style={{ height: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-line bg-raised px-2 text-sm font-medium text-ink hover:bg-hover">Approve</button>
+          <button type="button" onClick={() => setChangesFor([r.id])} style={{ height: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Request changes</button>
           {changesFor?.length === 1 && changesFor[0] === r.id ? (
             <div className="absolute end-0 top-8 z-50">
               <RequestChangesPopover personFirstName={person?.firstName || "them"} align="end" onCancel={() => setChangesFor(null)}
@@ -504,11 +547,20 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
           menu: [{ label: "Show KPI descriptions", checked: display.showDescriptions, keepOpen: true, onClick: () => setDisplay({ showDescriptions: !display.showDescriptions }) }],
         }}
       />
-      {others.length ? (
-        <p className="os-chrome m-0 px-6 pb-1 text-sm text-ink-2">
-          Also awaiting you: {others.map((o, i) => (
-            <span key={o.period}>{i ? ", " : ""}<button type="button" className="text-brand-deep hover:underline" onClick={async () => { if (await guardSwitch()) setPeriod(o.period); }}>{kpiPeriodLabel(o.period)} ({o.count})</button></span>
-          ))}
+      {others.length || recentDecisions.length ? (
+        <p className="os-chrome m-0 flex flex-wrap items-center gap-x-4 px-6 pb-1 text-sm text-ink-2">
+          {others.length ? (
+            <span>
+              Also awaiting you: {others.map((o, i) => (
+                <span key={o.period}>{i ? ", " : ""}<button type="button" className="text-brand-deep hover:underline" onClick={async () => { if (await guardSwitch()) { setShowRecent(false); setPeriod(o.period); } }}>{kpiPeriodLabel(o.period)} ({o.count})</button></span>
+              ))}
+            </span>
+          ) : null}
+          {recentDecisions.length ? (
+            <button type="button" className="text-brand-deep hover:underline" aria-pressed={showRecent} onClick={() => setShowRecent((x) => !x)}>
+              {showRecent ? "Back to people" : `Recently decided (${recentDecisions.length})`}
+            </button>
+          ) : null}
         </p>
       ) : null}
       <div className="relative">
@@ -553,7 +605,14 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
               )}
             </aside>
             <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto" aria-label="Their numbers">
-              {person ? (
+              {showRecent ? (
+                <RecentDecisions rows={recentDecisions} fmt={fmt} onOpen={async (row) => {
+                  if (!(await guardSwitch())) return;
+                  setShowRecent(false);
+                  setPeriod(row.period);
+                  setPersonId(row.userId);
+                }} />
+              ) : person ? (
                 <>
                   <header className="flex h-14 shrink-0 items-center gap-3">
                     <button type="button" className="hidden text-sm text-brand-deep max-lg:inline" onClick={async () => { if (await guardSwitch()) setPersonId(null); }}>People</button>
@@ -591,7 +650,8 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                           ) : null}
                         </span>
                       )}
-                      footer={lines ? { total: lines.length, noun: "KPIs", from: lines.length ? 1 : 0, to: lines.length, extra: <>· {footerCounts.approved} approved · {footerCounts.awaiting} awaiting you · {footerCounts.notRecorded} not recorded{footerCounts.changes ? ` · ${footerCounts.changes} changes requested` : ""}</> } : undefined}
+                      columnSettings={{ storageKey: "kpi-reviews" }}
+                      footer={lines ? { total: lines.length, noun: "KPIs", from: lines.length ? 1 : 0, to: lines.length, hidePaging: true, extra: <>· {footerCounts.approved} approved · {footerCounts.awaiting} awaiting you · {footerCounts.notRecorded} not recorded{footerCounts.changes ? ` · ${footerCounts.changes} changes requested` : ""}</> } : undefined}
                     />
                   )}
                   <p className="m-0 text-sm text-ink-2">
@@ -608,12 +668,41 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       </div>
       {dirty ? (
         <div className="os-chrome sticky bottom-0 z-30 flex h-14 shrink-0 items-center gap-3 border-t border-line bg-surface px-6" role="region" aria-label="Unsaved numbers">
-          <span className="flex-1 text-row text-ink">{pendingSaves.length} {pendingSaves.length === 1 ? "number" : "numbers"} to save</span>
+          <span className="flex-1 text-row text-ink">{pendingLabel} to save</span>
           <Button variant="ghost" onClick={() => void discard()} disabled={saving}>Discard</Button>
-          <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving" : "Save numbers"}</Button>
+          <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving" : pendingNumbers ? "Save numbers" : "Save notes"}</Button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The old approval tab's "Recently acted": 30 days of decisions, newest first. */
+function RecentDecisions({ rows, fmt, onOpen }: { rows: RecentDecisionRow[]; fmt: ReturnType<typeof useFormat>; onOpen: (row: RecentDecisionRow) => void }) {
+  const columns: TableColumn<RecentDecisionRow>[] = [
+    { key: "person", label: "Person", title: true, width: "minmax(140px,1fr)", render: (r) => <span className="truncate">{r.personName}</span> },
+    { key: "kpi", label: "KPI", width: "minmax(140px,1.4fr)", render: (r) => <span className="truncate">{r.kpiName}</span> },
+    { key: "month", label: "Month", width: "160px", render: (r) => <span className="truncate text-ink-2">{kpiPeriodLabel(r.period)}</span> },
+    { key: "actual", label: "Actual", width: "96px", numeric: true, render: (r) => (r.actualValue == null ? <span className="text-ink-2">None</span> : <span className="truncate">{num(r.actualValue)}{r.unit ? ` ${r.unit}` : ""}</span>) },
+    { key: "status", label: "Decision", width: "180px", render: (r) => <ToneChip tone={kpiStatusTone(r.status)} label={`${kpiStatusLabel(r.status, { forManager: true })}${r.byYou ? " by you" : ""}`} /> },
+    { key: "when", label: "When", width: "96px", hideBelow: 760, render: (r) => <span className="text-sm text-ink-2">{fmt.date(r.updatedAt, "date")}</span> },
+  ];
+  return (
+    <>
+      <header className="flex h-14 shrink-0 items-center">
+        <p className="m-0 text-base font-semibold text-ink">Recently decided</p>
+        <span className="ms-2 text-sm text-ink-2">The last 30 days</span>
+      </header>
+      <TableCard
+        ariaLabel="Recently decided KPI numbers"
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        onRowClick={(r) => onOpen(r)}
+        columnSettings={{ storageKey: "kpi-reviews-recent" }}
+        footer={{ total: rows.length, noun: "decisions", from: rows.length ? 1 : 0, to: rows.length, hidePaging: true }}
+      />
+    </>
   );
 }
 

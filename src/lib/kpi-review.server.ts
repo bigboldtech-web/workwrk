@@ -19,6 +19,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
 import { kpiPeriodLabel } from "@/lib/kpi-period";
+import { teamScopeFor } from "@/lib/people/team-scope.server";
 
 export async function kpiActorCtx(): Promise<PeopleCtx | null> {
   return peopleCtx();
@@ -29,6 +30,97 @@ export function mayActOnKpisOf(ctx: PeopleCtx, subjectId: string): boolean {
   if (ctx.isAgent && !ctx.chain.has(subjectId)) return false;
   const rel = relationTo(ctx, subjectId);
   return rel === "admin" || rel === "people-team" || rel === "org-wide" || rel === "chain" || rel === "chain-view";
+}
+
+/**
+ * The KPI numbers awaiting `ctx` on /team/kpi-reviews: SUBMITTED rows, any
+ * month, for exactly the people that page lists (teamScopeFor: the chain,
+ * or the org for Admin and the People team, filtered by mayActOnKpisOf),
+ * and only on KPIs the person still carries through an ACTIVE KRA, since
+ * the page can only show those. The sidebar badge, My team's attention
+ * card and the page's "Also awaiting you" line all read this one list, so
+ * the three never disagree.
+ */
+export async function listAwaitingKpiNumbers(ctx: PeopleCtx): Promise<Array<{ userId: string; kpiId: string; period: string }>> {
+  const scope = await teamScopeFor(ctx);
+  const ids = scope.ids.filter((id) => id !== ctx.userId && mayActOnKpisOf(ctx, id));
+  if (ids.length === 0) return [];
+  const rows = await prisma.kPIRecord.findMany({
+    where: { userId: { in: ids }, status: "SUBMITTED", kpi: { organizationId: ctx.organizationId } },
+    select: { userId: true, kpiId: true, period: true },
+  });
+  if (rows.length === 0) return [];
+  const assignments = await prisma.kRAAssignment.findMany({
+    where: { userId: { in: [...new Set(rows.map((r) => r.userId))] }, status: "ACTIVE" },
+    select: { userId: true, kra: { select: { kpis: { select: { id: true } } } } },
+  });
+  const carried = new Set<string>();
+  for (const a of assignments) for (const k of a.kra.kpis) carried.add(`${a.userId}:${k.id}`);
+  return rows.filter((r) => carried.has(`${r.userId}:${r.kpiId}`));
+}
+
+export interface RecentKpiDecision {
+  id: string;
+  userId: string;
+  personName: string;
+  kpiName: string;
+  unit: string | null;
+  period: string;
+  status: "APPROVED" | "REJECTED";
+  actualValue: number | null;
+  byYou: boolean;
+  updatedAt: string;
+}
+
+/**
+ * The last 30 days of decisions on the people this page lists (the old
+ * approval tab's "Recently acted" list, kept when the two pages merged).
+ * A manager sees every decision in their chain; Admin and the People team,
+ * whose page covers the whole org, see the decisions they made themselves.
+ */
+export async function listRecentKpiDecisions(ctx: PeopleCtx, days = 30): Promise<RecentKpiDecision[]> {
+  const scope = await teamScopeFor(ctx);
+  const ids = scope.ids.filter((id) => id !== ctx.userId && mayActOnKpisOf(ctx, id));
+  if (ids.length === 0) return [];
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const rows = await prisma.kPIRecord.findMany({
+    where: {
+      userId: { in: ids },
+      status: { in: ["APPROVED", "REJECTED"] },
+      updatedAt: { gte: since },
+      kpi: { organizationId: ctx.organizationId },
+      ...(scope.orgWide ? { reviewedById: ctx.userId } : {}),
+    },
+    select: {
+      id: true, userId: true, period: true, status: true, actualValue: true, reviewedById: true, updatedAt: true,
+      kpi: { select: { name: true, unit: true } },
+      user: { select: { firstName: true, lastName: true, email: true } },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    personName: nameOf(r.user),
+    kpiName: r.kpi.name,
+    unit: r.kpi.unit,
+    period: r.period,
+    status: r.status as "APPROVED" | "REJECTED",
+    actualValue: r.actualValue,
+    byYou: r.reviewedById === ctx.userId,
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+}
+
+/**
+ * The badge count for the signed-in viewer (the boot pass and My team).
+ * Falls back to 0 rather than a wrong number when there is no session for
+ * `userId` (a cron or a test).
+ */
+export async function countAwaitingKpiNumbers(userId: string): Promise<number> {
+  const ctx = await peopleCtx();
+  if (!ctx || ctx.userId !== userId) return 0;
+  return (await listAwaitingKpiNumbers(ctx)).length;
 }
 
 function nameOf(u: { firstName: string | null; lastName: string | null; email?: string | null } | null | undefined): string {

@@ -128,11 +128,22 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, on
   useEffect(() => {
     if (!open) return;
     let live = true;
-    const qs = new URLSearchParams({ page: "1", pageSize: "100", level: parentLevels.join(","), sort: "name" });
-    void apiFetch<{ data: ParentOption[] }>(`/api/okrs?${qs}`, { cache: "no-store" }).then((r) => {
+    // Every page, not the first 100: in a large org a later parent must
+    // still be choosable, and the current parent must still read by name.
+    void (async () => {
+      const all: ParentOption[] = [];
+      for (let page = 1; page <= 200; page += 1) {
+        const qs = new URLSearchParams({ page: String(page), pageSize: "100", level: parentLevels.join(","), sort: "name" });
+        const r = await apiFetch<{ data: ParentOption[]; pagination?: { total: number } }>(`/api/okrs?${qs}`, { cache: "no-store" });
+        if (!live) return;
+        if (!r.ok) break;
+        all.push(...(r.data.data ?? []));
+        const total = r.data.pagination?.total ?? all.length;
+        if ((r.data.data ?? []).length === 0 || all.length >= total) break;
+      }
       if (!live) return;
-      setParents(r.ok ? (r.data.data ?? []).filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level })) : []);
-    });
+      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level })));
+    })();
     return () => { live = false; };
   }, [open, parentLevels, goal?.id]);
   const parentTitle = parents?.find((p) => p.id === parentId)?.title ?? (parentId ? "The current goal" : null);
