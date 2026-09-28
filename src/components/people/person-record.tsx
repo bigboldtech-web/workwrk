@@ -134,7 +134,9 @@ interface Person {
 interface AlignKpi {
   id: string; name: string; unit: string | null; targetValue: number | null; direction: "HIGHER" | "LOWER" | "MAINTAIN";
   ownership: "OWNED" | "SHARED"; isNorthStar: boolean; latestValue: number | null; latestPeriod: string | null;
-  currentRecord: { status: string } | null;
+  currentRecord: { status: string; actualValue: number | null; managerNotes: string | null } | null;
+  /** A number the manager sent back (this month or last) with their note. */
+  sentBack?: { period: string; actualValue: number | null; managerNotes: string | null } | null;
 }
 interface AlignKra { assignmentId: string; weightage: number; id: string; name: string; description: string | null; role: { id: string; title: string } | null; kpis: AlignKpi[] }
 interface AlignOkr { id: string; title: string; status: string; progress: number; progressSource?: string; quarter: string | null; verdict?: GoalVerdict; quarterLabel?: string | null }
@@ -272,10 +274,13 @@ export function PersonRecord({
     setState("ready");
   }, [id]);
 
-  const loadAlignment = useCallback(async () => {
-    setAlignState("loading");
+  // soft: a refresh after a save under the list (the recorder). The rows
+  // stay on screen instead of flashing to skeletons, and a failed refresh
+  // keeps them rather than replacing a saved page with an error.
+  const loadAlignment = useCallback(async (opts?: { soft?: boolean }) => {
+    if (!opts?.soft) setAlignState("loading");
     const r = await apiFetch<Alignment | { data: Alignment }>(`/api/people/${id}/alignment`, { cache: "no-store" });
-    if (!r.ok) { setAlignState("error"); return; }
+    if (!r.ok) { if (!opts?.soft) setAlignState("error"); return; }
     setAlignment("data" in r.data ? r.data.data : r.data);
     setAlignState("ready");
   }, [id]);
@@ -343,9 +348,16 @@ export function PersonRecord({
     router.replace(`/people/${id}${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
   }, [editKey, editHandled, sp, router, id]);
   const setTab = (next: TabKey) => {
+    // The open tab is a no-op. On the full page a router.replace to the URL
+    // already showing turns into a whole document reload (the shell and
+    // every fetch start again, the scroll is lost), so it is never sent.
+    if (next === tab) return;
     const qs = new URLSearchParams(sp?.toString() ?? "");
     if (next === "overview") qs.delete("tab"); else qs.set("tab", next);
-    router.replace(`/people/${id}${qs.toString() ? `?${qs}` : ""}`, { scroll: false });
+    const target = `/people/${id}${qs.toString() ? `?${qs}` : ""}`;
+    const here = `/people/${id}${sp?.toString() ? `?${sp.toString()}` : ""}`;
+    if (target === here) return;
+    router.replace(target, { scroll: false });
   };
   // The tab strip keeps to one line: tabs that do not fit (the 520 drawer
   // holds about six) go into a "More" menu, and the active tab is always in
@@ -524,7 +536,7 @@ export function PersonRecord({
           ) : null}
           <div role="tabpanel" aria-label={TAB_LABEL[tab]}>
             {tab === "overview" ? <OverviewTab person={person} /> : null}
-            {tab === "kras" ? <KrasTab person={person} alignment={alignment} state={alignState} onRetry={() => void loadAlignment()} onChanged={() => { void loadAlignment(); void load(); }} datePrefs={datePrefs} /> : null}
+            {tab === "kras" ? <KrasTab person={person} alignment={alignment} state={alignState} onRetry={() => void loadAlignment()} onChanged={() => { void loadAlignment(); void load(); }} onRecorded={() => { void loadAlignment({ soft: true }); void load(); }} datePrefs={datePrefs} /> : null}
             {tab === "goals" ? <GoalsTab person={person} alignment={alignment} state={alignState} onRetry={() => void loadAlignment()} /> : null}
             {tab === "reviews" ? <ReviewsTab person={person} /> : null}
             {tab === "skills" ? <SkillsTab person={person} onChanged={() => void load()} /> : null}
@@ -789,13 +801,29 @@ function OverviewTab({ person }: { person: Person }) {
   );
 }
 
-function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
-  person: Person; alignment: Alignment | null; state: string; onRetry: () => void; onChanged: () => void; datePrefs: ReturnType<typeof useDatePrefs>;
+function KrasTab({ person, alignment, state, onRetry, onChanged, onRecorded, datePrefs }: {
+  person: Person; alignment: Alignment | null; state: string; onRetry: () => void; onChanged: () => void;
+  /** A save in the recorder landed: the rows and History below reload. */
+  onRecorded: () => void;
+  datePrefs: ReturnType<typeof useDatePrefs>;
 }) {
   const self = person.access.relation === "self";
   // ?record=1 (My team's row "..." > Record numbers) opens with the recorder showing.
   const sp = useSearchParams();
   const [recorder, setRecorder] = useState(() => sp?.get("record") === "1");
+  // The month the recorder opens on when "Update my number" opened it (the
+  // month the number was sent back for); null shows the month picker.
+  const [recorderPeriod, setRecorderPeriod] = useState<string | null>(null);
+  const recorderRef = useRef<HTMLDivElement>(null);
+  const answerSentBack = (period: string) => {
+    if (recorder) {
+      // Already open (maybe mid-edit): never remount it, bring it into view.
+      recorderRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    setRecorderPeriod(period);
+    setRecorder(true);
+  };
   const [manage, setManage] = useState(false);
   const kras = alignment?.kras ?? [];
   const total = kras.reduce((s, k) => s + (k.weightage || 0), 0);
@@ -812,11 +840,15 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
           <span className="flex items-center gap-1">
             {kras.length > 0 && total !== 100 ? <ToneChip tone="warning" label={`Weights total ${total}%`} /> : null}
             {person.access.manageAlignment && !person.deletedAt ? <GhostButton onClick={() => setManage(true)}>Manage alignment</GhostButton> : null}
-            {kras.length > 0 && !person.deletedAt ? <GhostButton onClick={() => setRecorder((v) => !v)}>{recorder ? "Hide recorder" : self ? "Record my numbers" : "Record numbers"}</GhostButton> : null}
+            {kras.length > 0 && !person.deletedAt ? <GhostButton onClick={() => { setRecorderPeriod(null); setRecorder((v) => !v); }}>{recorder ? "Hide recorder" : self ? "Record my numbers" : "Record numbers"}</GhostButton> : null}
           </span>
         }
       >
-        {recorder ? <MonthlyKpiRecorder userId={person.id} self={self} /> : null}
+        {recorder ? (
+          <div ref={recorderRef} className="scroll-mt-4">
+            <MonthlyKpiRecorder userId={person.id} self={self} initialPeriod={recorderPeriod} onSaved={onRecorded} />
+          </div>
+        ) : null}
         {state === "error" ? (
           <OsEmptyView variant="error" title="Couldn't load the KRAs" action={{ label: "Try again", onClick: onRetry }} compact />
         ) : state !== "ready" ? (
@@ -841,18 +873,45 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
                   <ul className="divide-y divide-line-soft border-t border-line-soft">
                     {k.kpis.map((kpi) => {
                       const rec = RECORD_STATUS[kpi.currentRecord?.status ?? "PENDING"] ?? RECORD_STATUS.PENDING;
+                      // latestValue leaves out a sent-back number (it must not
+                      // drive a goal), but it is still the number this person
+                      // stored for the month: show it beside Changes requested
+                      // rather than "No reading".
+                      const back = kpi.sentBack ?? null;
+                      // Periods are "YYYY-MM", so a string compare orders them.
+                      const heldBack = back && back.actualValue != null && (!kpi.latestPeriod || back.period >= kpi.latestPeriod);
+                      const shownValue = heldBack ? back.actualValue : kpi.latestValue;
+                      const shownPeriod = heldBack ? back.period : kpi.latestPeriod;
                       return (
-                        <li key={kpi.id} className="flex min-h-11 items-center gap-2 px-3 text-sm">
+                        <li key={kpi.id} className="px-3 text-sm">
+                        <div className="flex min-h-11 items-center gap-2">
                           {kpi.isNorthStar ? <Star className="h-3.5 w-3.5 shrink-0 text-ink" aria-label="North-star KPI" fill="currentColor" /> : <span className="w-3.5 shrink-0" />}
                           <span className="min-w-0 flex-1 truncate text-row text-ink">{kpi.name}</span>
                           <DirectionGlyph direction={kpi.direction} />
                           {kpi.ownership === "SHARED" ? <Chip>Shared</Chip> : null}
                           <span className="shrink-0 tabular-nums text-ink">
-                            {kpi.latestValue != null ? `${kpi.latestValue}${kpi.unit ? ` ${kpi.unit}` : ""}` : "No reading"}
-                            {kpi.latestPeriod ? <span className="text-ink-2"> · {formatPeriodLabel(kpi.latestPeriod)}</span> : null}
+                            {shownValue != null ? `${shownValue}${kpi.unit ? ` ${kpi.unit}` : ""}` : "No reading"}
+                            {shownPeriod ? <span className="text-ink-2"> · {formatPeriodLabel(shownPeriod)}</span> : null}
                           </span>
                           <span className="hidden shrink-0 tabular-nums text-ink-2 sm:inline">{kpi.targetValue != null ? `target ${kpi.targetValue}` : "No baseline yet"}</span>
                           <ToneChip tone={rec.tone} label={rec.label} />
+                        </div>
+                        {back && (self || back.managerNotes) ? (
+                          // The manager's Request changes note lives on the
+                          // record; the notification links here, so this is
+                          // where the person reads it once that is cleared.
+                          <div className="mb-2 flex items-start gap-2 rounded-md border border-line-soft bg-subtle px-3 py-2">
+                            <p className="min-w-0 flex-1 text-sm text-ink">
+                              <span className="font-medium">
+                                {self ? "Your manager asked for a change" : "Changes requested"}
+                                {back.period !== alignment?.currentPeriod ? ` on ${formatPeriodLabel(back.period)}` : ""}
+                                {back.managerNotes ? ": " : "."}
+                              </span>
+                              {back.managerNotes ? <span className="whitespace-pre-wrap break-words">{back.managerNotes}</span> : null}
+                            </p>
+                            {self && !person.deletedAt ? <GhostButton onClick={() => answerSentBack(back.period)}>Update my number</GhostButton> : null}
+                          </div>
+                        ) : null}
                         </li>
                       );
                     })}

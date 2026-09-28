@@ -89,6 +89,17 @@ interface Props {
    * a manager writes `managerNotes`.
    */
   self?: boolean;
+  /**
+   * Open straight on this "YYYY-MM" month instead of the month picker (the
+   * KRAs tab's "Update my number" on a number the manager sent back).
+   */
+  initialPeriod?: string | null;
+  /**
+   * A save landed (Save all or an autosave). The page around the recorder
+   * reloads what it shows from the same records, so its rows and History do
+   * not keep saying "No reading" for a number just saved.
+   */
+  onSaved?: () => void;
 }
 
 /** Where an unsaved edit for this person and month is kept on this device. */
@@ -96,8 +107,8 @@ function recorderBackupKey(userId: string, period: string, self: boolean): strin
   return `workwrk:kpi-recorder:${self ? "self" : "mgr"}:${userId}:${period}`;
 }
 
-export function MonthlyKpiRecorder({ userId, self = false }: Props) {
-  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+export function MonthlyKpiRecorder({ userId, self = false, initialPeriod = null, onSaved }: Props) {
+  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(initialPeriod);
   const [kras, setKras] = useState<KraGroup[]>([]);
   const [totalKpis, setTotalKpis] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -143,6 +154,14 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
       // Auto-expand all KRAs
       setExpandedKras(new Set((result.kras || []).map((k: KraGroup) => k.kraId)));
+      // A number the manager sent back opens with its notes showing, so the
+      // person reads what was asked right where they answer it.
+      if (self) {
+        const sentBack = (result.kras || []).flatMap((k: KraGroup) => k.kpis)
+          .filter((k: KpiEntry) => k.existingRecord?.status === "REJECTED" && k.existingRecord.managerNotes?.trim())
+          .map((k: KpiEntry) => k.kpiId);
+        if (sentBack.length) setShowNotes((prev) => new Set([...prev, ...sentBack]));
+      }
     } catch {
       toastError("Failed to load KPIs");
     } finally {
@@ -204,17 +223,19 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
         // keeps its status and is not rewritten).
         const saved = Number((result.data || result).saved ?? 0);
         const skipped = Number((result.data || result).skipped ?? 0);
+        const typed = Object.values(snapshot).some((d) => d.actualValue !== "" || d.managerNotes.trim() !== "");
         if (skipped > 0) {
           // A KPI that left this person's assignments (a job title change
           // mid-month) takes no number: say so rather than "already saved".
           toastError(`${skipped} ${skipped === 1 ? "number was" : "numbers were"} not saved: ${skipped === 1 ? "that KPI is" : "those KPIs are"} no longer assigned.`);
         } else {
-          toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : "Nothing changed, your numbers are already saved");
+          toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : typed ? "Nothing changed, your numbers are already saved" : "Nothing to save yet, enter a number first");
         }
         fetchKpis(selectedPeriod);
       }
+      onSaved?.();
     },
-    [selectedPeriod, userId, self, toastError, toastSuccess, fetchKpis],
+    [selectedPeriod, userId, self, toastError, toastSuccess, fetchKpis, onSaved],
   );
 
   const handleSaveAll = async () => {
@@ -565,6 +586,15 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                       {/* Manager Notes (expandable) */}
                       {isNoteOpen && (
                         <div className="mt-2 pl-0">
+                          {/* Self only: what the manager asked when they sent
+                              this number back, read-only above the person's
+                              own note (the box below edits `notes`). */}
+                          {self && kpi.existingRecord?.status === "REJECTED" && kpi.existingRecord.managerNotes?.trim() ? (
+                            <div className="mb-2 rounded-md border border-line-soft bg-subtle px-3 py-2 text-xs text-ink">
+                              <span className="font-medium">Your manager asked: </span>
+                              <span className="whitespace-pre-wrap break-words">{kpi.existingRecord.managerNotes}</span>
+                            </div>
+                          ) : null}
                           <Textarea
                             value={fd.managerNotes}
                             onChange={(e) => updateField(kpi.kpiId, "managerNotes", e.target.value)}

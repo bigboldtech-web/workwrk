@@ -7,8 +7,10 @@
 //    from their role's templates by src/lib/alignment-assign.ts). Each KPI
 //    carries THIS PERSON's latest usable reading (their own KPIRecords,
 //    a gauge is read per-person), its health against the healthy line,
-//    and their current-period record with its approval status. A KPI with
-//    no targetValue reports "no_target": no line is invented.
+//    and their current-period record with its approval status, plus
+//    `sentBack`, a number the manager asked them to change (this month or
+//    last) with the manager's note. A KPI with no targetValue reports
+//    "no_target": no line is invented.
 //  - okrs: the person's current goals, goals they OWN plus goals whose
 //    audience resolves to them (assigned directly, or through their
 //    department / role; GoalAssignee resolution happens at read time, so
@@ -58,6 +60,40 @@ export function currentQuarterLabel(): string {
 export function currentPeriodKey(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The "YYYY-MM" month before a "YYYY-MM" key. Pure. */
+export function previousPeriodKey(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  return m <= 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+}
+
+/**
+ * The number a manager sent back and still waits on this person, per KPI.
+ * Pure.
+ *
+ * Request changes stores the note on the record (managerNotes) and the
+ * notification links to the KRAs tab, so that tab is where the note has to
+ * be readable once the notification is gone. The two writable months count
+ * (this month and last, isKpiPeriodWritableAnyZone): a manager reviewing on
+ * the 1st sends back last month's number, and the person can still answer
+ * it. This month wins when both were sent back. A resubmitted number is
+ * SUBMITTED again and drops out on its own.
+ */
+export function sentBackByKpi<R extends { kpiId: string; period: string; status: string; actualValue: number | null; managerNotes: string | null }>(
+  records: readonly R[],
+  currentPeriod: string,
+): Map<string, { period: string; actualValue: number | null; managerNotes: string | null }> {
+  const lastPeriod = previousPeriodKey(currentPeriod);
+  const out = new Map<string, { period: string; actualValue: number | null; managerNotes: string | null }>();
+  for (const r of records) {
+    if (r.status !== "REJECTED") continue;
+    if (r.period !== currentPeriod && r.period !== lastPeriod) continue;
+    const had = out.get(r.kpiId);
+    if (had && had.period === currentPeriod) continue;
+    out.set(r.kpiId, { period: r.period, actualValue: r.actualValue, managerNotes: r.managerNotes?.trim() || null });
+  }
+  return out;
 }
 
 const ms = (v: Date | string | null | undefined) => (v == null ? null : new Date(v).getTime());
@@ -168,11 +204,13 @@ export async function buildPersonAlignment(
   // plus their current-period record, "what have I achieved, what still
   // needs my number this month, where is it in the approval loop."
   const kpiIds = assignments.flatMap((a) => a.kra.kpis.map((k) => k.id));
-  const [latest, currentRecords] = await Promise.all([
+  const [latest, recentRecords] = await Promise.all([
     latestKpiValues(kpiIds, { userId }),
     kpiIds.length > 0
       ? prisma.kPIRecord.findMany({
-          where: { userId, period: currentPeriod, kpiId: { in: kpiIds } },
+          // Last month too, for a number sent back after the month closed
+          // (sentBackByKpi); currentRecord stays this month's row.
+          where: { userId, period: { in: [currentPeriod, previousPeriodKey(currentPeriod)] }, kpiId: { in: kpiIds } },
           select: {
             id: true, kpiId: true, period: true, actualValue: true,
             targetValue: true, score: true, status: true, notes: true, managerNotes: true,
@@ -180,7 +218,8 @@ export async function buildPersonAlignment(
         })
       : Promise.resolve([]),
   ]);
-  const currentByKpi = new Map(currentRecords.map((r) => [r.kpiId, r]));
+  const currentByKpi = new Map(recentRecords.filter((r) => r.period === currentPeriod).map((r) => [r.kpiId, r]));
+  const sentBack = sentBackByKpi(recentRecords, currentPeriod);
 
   const kras = assignments.map((a) => ({
     assignmentId: a.id,
@@ -202,6 +241,9 @@ export async function buildPersonAlignment(
         latestPeriod: reading?.period ?? null,
         health: kpiHealth(kpi, reading?.value ?? null),
         currentRecord: currentByKpi.get(kpi.id) ?? null,
+        // A number the manager sent back, with their note, this month or
+        // last (sentBackByKpi); null when nothing waits on the person.
+        sentBack: sentBack.get(kpi.id) ?? null,
       };
     }),
   }));

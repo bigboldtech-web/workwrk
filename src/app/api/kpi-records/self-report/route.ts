@@ -77,6 +77,11 @@ export async function POST(req: NextRequest) {
       const prior = beforeBy.get(r.kpiId) ?? null;
       const noteText = r.notes || null;
       const evidenceText = r.evidence || null;
+      // A KPI left blank that has no row yet stays without one. The recorder
+      // sends every KPI of the month, and a blank with no row used to be
+      // created as a PENDING row with no value: History gained "Not
+      // recorded" rows the person never touched and `saved` counted them.
+      if (!prior && actual == null && !noteText && !evidenceText) return null;
       const noteChanged = (prior?.notes ?? null) !== noteText || (prior?.evidence ?? null) !== evidenceText;
       // src/lib/kpi-record-status.ts: the recorder resends the whole month,
       // so an unchanged number keeps the manager's decision, a blank on a
