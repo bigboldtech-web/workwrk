@@ -26,13 +26,15 @@ export interface GoalRightsActor {
   callerId: string;
   /** Owner or Admin (SUPER_ADMIN, COMPANY_ADMIN). */
   admin: boolean;
-  /** The People team (seeded from the HR level). */
+  /** The People team: HR level, or on the configured list (access.peopleTeamUserIds). */
   peopleTeam: boolean;
   /** The manager tier of the access ladder: the only tier the chain grants to. */
   manager: boolean;
   /** An Agent account. */
   agent: boolean;
-  /** The caller's reporting chain (getTeamUserIds), or null when not loaded. */
+  /** The caller's reporting chain (getTeamUserIds), or null when not loaded.
+   *  Loaded for every manager-tier caller but Owner/Admin, People team included,
+   *  because delete reads it even where edit is already settled. */
   chain: ReadonlySet<string> | null;
 }
 

@@ -6,7 +6,12 @@ import { mayDeleteGoal, mayEditGoal, type GoalRightsActor, type GoalRightsTarget
 const base: GoalRightsActor = { callerId: "me", admin: false, peopleTeam: false, manager: false, agent: false, chain: null };
 const PEOPLE: Record<string, GoalRightsActor> = {
   admin: { ...base, admin: true, manager: true },
-  peopleTeam: { ...base, peopleTeam: true, manager: true },
+  // HR-level People team with no reports: the chain loads, and holds only them.
+  peopleTeam: { ...base, peopleTeam: true, manager: true, chain: new Set(["me"]) },
+  // A People team member who also manages "report" (HR is a manager tier).
+  peopleTeamManager: { ...base, peopleTeam: true, manager: true, chain: new Set(["me", "report"]) },
+  // On the configured People team list at the Member level: no manager tier.
+  peopleTeamMember: { ...base, peopleTeam: true },
   manager: { ...base, manager: true, chain: new Set(["me", "report"]) },
   managerNoReports: { ...base, manager: true, chain: new Set(["me"]) },
   // A plain Member with a report on the org chart: a report is not an edit grant.
@@ -46,6 +51,17 @@ const TABLE: Array<[keyof typeof PEOPLE, keyof typeof GOALS, boolean, boolean]> 
   ["peopleTeam", "teamUnowned", true, false],
   ["peopleTeam", "companyOwnedByMe", true, true],
   ["peopleTeam", "teamUnownedCreatedByMe", true, true],
+  ["peopleTeam", "individualOfReport", true, false],
+  // ...and, as a manager, deletes their own report's Team and Individual goals.
+  ["peopleTeamManager", "individualOfReport", true, true],
+  ["peopleTeamManager", "teamOfReport", true, true],
+  ["peopleTeamManager", "individualOfPeer", true, false],
+  ["peopleTeamManager", "companyOwnedByReport", true, false],
+  ["peopleTeamManager", "companyUnowned", true, false],
+  // A listed People team member edits every goal, deletes only their own.
+  ["peopleTeamMember", "companyUnowned", true, false],
+  ["peopleTeamMember", "individualOfReport", true, false],
+  ["peopleTeamMember", "individualMine", true, true],
   // A plain manager: never a Company goal they do not own.
   ["manager", "companyUnowned", false, false],
   ["manager", "companyByPeer", false, false],

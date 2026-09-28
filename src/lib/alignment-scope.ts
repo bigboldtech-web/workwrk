@@ -13,6 +13,7 @@ import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import { parseAccessSettings } from "@/lib/access/settings";
 import {
   mayDeleteGoal,
   mayEditGoal,
@@ -79,19 +80,43 @@ export interface GoalRef {
 }
 
 /**
- * The caller as the goal rules see them. The reporting chain is only walked
- * for the manager tier, the one tier it grants to, and only when the answer
- * is not already settled by admin or People team.
+ * Is the caller on the People team, as the access engine counts it
+ * (src/lib/access/resolve.ts isPeopleTeam, and /api/boot the same way): an
+ * HR-level user (viewer.ts hydrate always counts them, spec 10 step 0), OR
+ * anyone on the configured list (access.peopleTeamUserIds). The org row is
+ * only read when the level has not already settled it.
+ */
+async function isGoalPeopleTeam(session: unknown, level: string, admin: boolean): Promise<boolean> {
+  if (isSeededPeopleTeam(level)) return true;
+  if (admin) return false; // Owner/Admin already has every right the People team does.
+  const org = await prisma.organization.findUnique({
+    where: { id: getOrgId(session) },
+    select: { settings: true },
+  });
+  const settings = (org?.settings ?? {}) as { access?: unknown };
+  return parseAccessSettings(settings.access).peopleTeamUserIds.includes(getUserId(session));
+}
+
+/**
+ * The caller as the goal rules see them. The reporting chain is walked for
+ * every manager-tier caller who is not Owner/Admin, People team included: the
+ * People team's org-wide reach is Can edit, not delete, so a People team
+ * manager deletes their own reports' goals through the chain like any other
+ * manager (mayDeleteGoal).
  */
 export async function goalRightsActor(session: unknown, chainIds?: readonly string[]): Promise<GoalRightsActor> {
   const callerId = getUserId(session);
   const level = sessionAccessLevel(session);
   const admin = isOrgAdminLevel(session);
-  const peopleTeam = isSeededPeopleTeam(level);
   const manager = isManager(session);
-  const chain = !manager || admin || peopleTeam
-    ? null
-    : new Set(chainIds ?? (await getTeamUserIds(getOrgId(session), callerId)));
+  const [peopleTeam, chain] = await Promise.all([
+    isGoalPeopleTeam(session, level, admin),
+    !manager || admin
+      ? Promise.resolve(null)
+      : chainIds
+        ? Promise.resolve(new Set(chainIds))
+        : getTeamUserIds(getOrgId(session), callerId).then((ids) => new Set(ids)),
+  ]);
   return { callerId, admin, peopleTeam, manager, agent: isAgentOf(level), chain };
 }
 
