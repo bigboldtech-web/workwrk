@@ -18,7 +18,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
-import { audienceLabel, audienceUserWhere, notifySurveyAudience, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
+import { audienceLabel, notifySurveyAudience, surveyAudienceStats, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
 import { cleanSurveyQuestions } from "@/lib/performance/survey";
 import { surveyOpenNow } from "@/lib/people/survey-audience";
 
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   };
   const all = await prisma.pulseSurvey.findMany({
     where,
-    include: { responses: { where: { userId: ctx.userId }, select: { id: true } }, _count: { select: { responses: true } } },
+    include: { responses: { where: { userId: ctx.userId }, select: { id: true } } },
     orderBy: view === "closed" ? { closedAt: "desc" } : { createdAt: "desc" },
   });
   const now = new Date();
@@ -70,14 +70,14 @@ export async function GET(req: NextRequest) {
       hasResponded: s.responses.length > 0,
     };
     if (view === "answer") return base;
-    const size = await prisma.user.count({ where: await audienceUserWhere(orgId, s) });
+    // The same numbers as the survey's own page (surveyAudienceStats): a
+    // respondent who has since left the audience still counts as reached.
+    const stats = await surveyAudienceStats(orgId, s);
     return {
       ...base,
       audienceType: s.audienceType,
       audience: await audienceLabel(orgId, s),
-      audienceSize: size,
-      totalResponses: s._count.responses,
-      responseRate: size > 0 ? Math.round((s._count.responses / size) * 100) : 0,
+      ...stats,
     };
   }));
 

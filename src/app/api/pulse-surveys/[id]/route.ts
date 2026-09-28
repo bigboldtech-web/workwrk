@@ -21,7 +21,7 @@ import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { surveyQuestionsLocked } from "@/lib/people/survey-audience";
-import { audienceLabel, audienceUserWhere, notifySurveyAudience, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
+import { audienceLabel, notifySurveyAudience, surveyAudienceStats, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
 import { cleanSurveyQuestions, surveyTransitionBlocked } from "@/lib/performance/survey";
 import { logActivity } from "@/lib/activity";
 
@@ -43,7 +43,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!faces.visible || (survey.status === "DRAFT" && !faces.canManage)) return jsonError("Not found", 404);
 
   const totalResponses = await prisma.surveyResponse.count({ where: { surveyId: id } });
-  const audienceSize = faces.canManage ? await prisma.user.count({ where: await audienceUserWhere(orgId, survey) }) : null;
+  // Runners only. The shared helper counts a respondent who has since left
+  // the audience as reached, so the header never reads "1 of 0 answered".
+  const stats = faces.canManage ? await surveyAudienceStats(orgId, survey) : null;
 
   return jsonSuccess({
     survey: {
@@ -77,9 +79,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
     myAnswers: myResponse ? myResponse.answers : null,
     answeredAt: myResponse?.createdAt ?? null,
-    stats: faces.canManage
-      ? { audienceSize, totalResponses, responseRate: audienceSize && audienceSize > 0 ? Math.round((totalResponses / audienceSize) * 100) : 0 }
-      : null,
+    stats,
   });
 }
 

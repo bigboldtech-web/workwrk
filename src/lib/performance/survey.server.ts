@@ -69,6 +69,47 @@ export async function audienceUserWhere(organizationId: string, s: Pick<SurveyRo
   return where;
 }
 
+/**
+ * The numbers a survey's results header and the survey list print: "N of M
+ * answered, R% response rate". Pure, so the rule is tested without a
+ * database.
+ *
+ * The audience is counted from membership NOW, but answers are kept for
+ * good. Someone who answered and then changed department, lost a tag or left
+ * the company drops out of the live count while their answer stays, which
+ * printed "1 of 0 answered, 0% response rate". So M is everyone the survey
+ * reached: the current audience plus every respondent who is no longer in
+ * it. N can never pass M, and the rate is N over that same M, capped at 100.
+ * M is 0 only when nobody answered either, and then "0 of 0, 0%" is true.
+ */
+export function surveyAudienceStatsFrom(counts: { currentAudience: number; responses: number; respondersStillInAudience: number }): { audienceSize: number; totalResponses: number; responseRate: number } {
+  const responses = Math.max(0, counts.responses);
+  const stillIn = Math.min(Math.max(0, counts.respondersStillInAudience), responses);
+  const audienceSize = Math.max(0, counts.currentAudience) + (responses - stillIn);
+  const responseRate = audienceSize > 0 ? Math.min(100, Math.round((responses / audienceSize) * 100)) : 0;
+  return { audienceSize, totalResponses: responses, responseRate };
+}
+
+/**
+ * surveyAudienceStatsFrom read from the database: the one door both
+ * /api/pulse-surveys (All, Closed) and /api/pulse-surveys/[id] use, so the
+ * list and the survey page never disagree.
+ */
+export async function surveyAudienceStats(organizationId: string, s: { id: string } & Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">) {
+  const where = await audienceUserWhere(organizationId, s);
+  const [currentAudience, responders] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.surveyResponse.findMany({ where: { surveyId: s.id }, select: { userId: true } }),
+  ]);
+  const responderIds = [...new Set(responders.map((r) => r.userId))];
+  // A respondent whose user row is gone entirely is not in the audience
+  // now, so they count once as someone the survey reached.
+  const respondersStillInAudience = responderIds.length
+    ? await prisma.user.count({ where: { AND: [where, { id: { in: responderIds } }] } })
+    : 0;
+  return surveyAudienceStatsFrom({ currentAudience, responses: responderIds.length, respondersStillInAudience });
+}
+
 /** "Everyone", "Engineering", "12 people" for a survey's audience. */
 export async function audienceLabel(organizationId: string, s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">): Promise<string> {
   if (s.audienceType === "ALL") return "Everyone";
