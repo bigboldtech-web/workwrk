@@ -22,12 +22,28 @@ import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
 import { candorInvitedFor, surveyTargetedFor } from "./teams-counts";
+import { candorCtx, candorHasAnyScope, candorScopesFor } from "@/lib/performance/candor.server";
 
 export interface CultureGateResult {
   userId: string;
   organizationId: string;
-  /** May create sessions or surveys (and sees the organiser face). */
+  /** Runs sessions or surveys: sees the organiser face (Sessions, Closed). */
   organiser: boolean;
+}
+
+/**
+ * May start a new Candor session: the organiser face AND a scope to ask
+ * (candorScopesFor). A manager by reporting line whose chain covers no
+ * department (they head none, and none is all their reports) keeps the
+ * organiser face for any session they already run, but is offered no New
+ * session, since every create would be refused. The list page and GET
+ * /api/candor both read this, so the button and the save never disagree.
+ */
+export async function candorMayCreate(organiser: boolean): Promise<boolean> {
+  if (!organiser) return false;
+  const ctx = await candorCtx();
+  if (!ctx) return false;
+  return candorHasAnyScope(await candorScopesFor(ctx));
 }
 
 /**

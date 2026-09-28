@@ -67,7 +67,7 @@ export type CycleData = {
   createdById?: string | null;
   reviews: ReviewRow[];
   stats: { total: number; selfDone: number; managerDone: number; calibrated: number; completed: number };
-  viewer: { canManage: boolean; peopleTeamOrAdmin: boolean; isSubject: boolean; isReviewer: boolean; isPeer: boolean; inChain: boolean };
+  viewer: { canManage: boolean; canDelete?: boolean; peopleTeamOrAdmin: boolean; isSubject: boolean; isReviewer: boolean; isPeer: boolean; inChain: boolean };
   scale: { words: string[]; fromSettings: boolean };
   bands: Band[];
   createdBy: { id: string; name: string } | null;

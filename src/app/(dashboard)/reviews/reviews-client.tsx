@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Ban, Bell, Download, ExternalLink, Link2, Play, Plus, Scale, Settings2 } from "lucide-react";
+import { Ban, Bell, Download, ExternalLink, Link2, Play, Plus, Scale, Settings2, Trash2 } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -61,6 +61,8 @@ type CycleRow = {
   createdBy: { id: string; name: string } | null;
   counts: { total: number; selfDone: number; managerDone: number; calibrated: number; completed: number };
   canManage: boolean;
+  /** A Draft nobody has a review in, and the viewer started it or is the People team or Admin. */
+  canDelete?: boolean;
 };
 type ListResponse = { data: CycleRow[]; pagination: { total: number; page: number; limit: number; hasMore: boolean } };
 type OptionalCol = "type" | "period" | "covers" | "progress" | "by";
@@ -238,6 +240,14 @@ export default function ReviewsClient() {
     toast("Cycle cancelled");
     void load();
   };
+  const removeDraft = async (c: CycleRow) => {
+    const ok = await confirm({ title: `Delete ${c.name}?`, description: "It is a draft and nobody has been asked for anything, so nothing else is lost.", confirmLabel: "Delete draft", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void removeDraft(c) } }); return; }
+    toast("Draft deleted");
+    void load();
+  };
   const copyLink = (id: string) => {
     void navigator.clipboard.writeText(`${window.location.origin}/reviews/${id}`)
       .then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
@@ -412,6 +422,9 @@ export default function ReviewsClient() {
             ) : null}
             {menu.row.canManage && !viewer.isAgent && (menu.row.status === "DRAFT" || menu.row.status === "ACTIVE") ? (
               <><MenuSeparator /><MenuItem icon={Ban} label="Cancel cycle" destructive onClick={() => { const r = menu.row; setMenu(null); void cancel(r); }} /></>
+            ) : null}
+            {menu.row.canDelete && menu.row.status === "DRAFT" ? (
+              <MenuItem icon={Trash2} label="Delete draft" destructive onClick={() => { const r = menu.row; setMenu(null); void removeDraft(r); }} />
             ) : null}
           </MenuList>
         </MorePortal>

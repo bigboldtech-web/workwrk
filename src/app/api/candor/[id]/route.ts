@@ -14,7 +14,8 @@
 //         changes and again on every move to Open, so a Draft saved before
 //         the rule, or by someone whose reports have since moved, cannot
 //         launch beyond their chain. GET sends `scopes` to the editor so the
-//         picker offers only those.
+//         picker offers only those, and with a Closed session so Reopen is
+//         offered only when it can succeed.
 // DELETE  a Draft only (nothing has been answered), never by an Agent.
 
 import { NextRequest } from "next/server";
@@ -41,8 +42,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [responseCount, dept, scopes] = await Promise.all([
     faces.canManage ? prisma.candorResponse.count({ where: { sessionId: id } }) : Promise.resolve(null),
     s.departmentId ? prisma.department.findFirst({ where: { id: s.departmentId, organizationId: ctx.organizationId }, select: { id: true, name: true } }) : Promise.resolve(null),
-    // Only the editor needs it (a Draft someone may manage).
-    faces.canManage && s.status === "DRAFT" ? candorScopesFor(ctx) : Promise.resolve(null),
+    // The editor needs it (a Draft someone may manage), and so does Reopen
+    // on a Closed one (a scope this person may no longer ask cannot reopen).
+    faces.canManage && (s.status === "DRAFT" || s.status === "CLOSED") ? candorScopesFor(ctx) : Promise.resolve(null),
   ]);
   return jsonSuccess({
     id: s.id,

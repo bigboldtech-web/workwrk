@@ -20,6 +20,11 @@
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
+import { candorScopeAllowed, type CandorScopes } from "./candor";
+
+// The pure scope rule lives in candor.ts (pages read it too); re-exported so
+// the routes keep one import.
+export { candorHasAnyScope, candorScopeAllowed, candorScopeRefusal, type CandorScopes } from "./candor";
 
 export interface CandorCtx {
   userId: string;
@@ -62,8 +67,6 @@ export function candorFaces(ctx: CandorCtx, s: { createdBy: string; status: stri
  *              when the whole company does. A chain that covers no scope
  *              yet leaves nothing to pick, and the routes say so plainly.
  */
-export type CandorScopes = { everyone: boolean; departmentIds: string[] | null };
-
 export const CANDOR_ORG_WIDE: CandorScopes = { everyone: true, departmentIds: null };
 
 /** Pure: the scopes a chain-only organiser covers. `members` is every active member of the org. */
@@ -90,23 +93,6 @@ export function candorChainScopes(input: {
     everyone: covered(others.map((m) => m.id)),
     departmentIds: input.departments.filter((d) => d.headId === input.userId || covered(byDept.get(d.id) ?? [])).map((d) => d.id),
   };
-}
-
-export function candorScopeAllowed(scopes: CandorScopes, departmentId: string | null): boolean {
-  if (departmentId === null) return scopes.everyone;
-  return scopes.departmentIds === null || scopes.departmentIds.includes(departmentId);
-}
-
-/** Pure: why this scope is refused (null when allowed), in words the organiser can act on. */
-export function candorScopeRefusal(scopes: CandorScopes, departmentId: string | null): string | null {
-  if (candorScopeAllowed(scopes, departmentId)) return null;
-  const which = "a department you head, or one where everyone in it reports to you";
-  if (scopes.departmentIds !== null && !scopes.departmentIds.length && !scopes.everyone) {
-    return `You can run a Candor session for ${which}. None fits yet, so ask the People team to run this one.`;
-  }
-  return departmentId === null
-    ? `Only the People team and Admins can ask everyone. Pick ${which}.`
-    : `You can only ask ${which}.`;
 }
 
 /** The first scope to give a new draft that names none: the organiser's own department when allowed. */

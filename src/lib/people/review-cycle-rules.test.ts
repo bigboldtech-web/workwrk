@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canManageCycle, launchAudience } from "./review-cycle-rules";
+import { canManageCycle, cycleDeleteBlocked, launchAudience } from "./review-cycle-rules";
 
 describe("canManageCycle", () => {
   it("the People team and Admin manage every cycle, legacy ones included", () => {
@@ -34,5 +34,30 @@ describe("launchAudience", () => {
     expect(launchAudience({ ...base, audienceType: "DEPARTMENTS" })).toEqual(["p2"]);
     expect(launchAudience({ ...base, audienceType: "USERS" })).toEqual(["p2"]);
     expect(launchAudience({ ...base, chainIds: [], audienceType: "ALL" })).toEqual([]);
+  });
+});
+
+describe("cycleDeleteBlocked", () => {
+  const draft = { status: "DRAFT", reviewCount: 0, isAgent: false };
+  it("the starter deletes their own empty Draft", () => {
+    expect(cycleDeleteBlocked({ ...draft, callerId: "m", peopleTeamOrAdmin: false, createdById: "m" })).toBeNull();
+  });
+  it("the People team and Admin delete any empty Draft, legacy ones included", () => {
+    expect(cycleDeleteBlocked({ ...draft, callerId: "a", peopleTeamOrAdmin: true, createdById: "m" })).toBeNull();
+    expect(cycleDeleteBlocked({ ...draft, callerId: "a", peopleTeamOrAdmin: true, createdById: null })).toBeNull();
+  });
+  it("nobody else, and never an Agent", () => {
+    expect(cycleDeleteBlocked({ ...draft, callerId: "x", peopleTeamOrAdmin: false, createdById: "m" })).toBe("who");
+    expect(cycleDeleteBlocked({ ...draft, callerId: "m", peopleTeamOrAdmin: false, createdById: null })).toBe("who");
+    expect(cycleDeleteBlocked({ ...draft, isAgent: true, callerId: "m", peopleTeamOrAdmin: false, createdById: "m" })).toBe("who");
+    expect(cycleDeleteBlocked({ ...draft, isAgent: true, callerId: "a", peopleTeamOrAdmin: true, createdById: "m" })).toBe("who");
+  });
+  it("past Draft, or with any review, is Cancel's (state), for the starter and the People team alike", () => {
+    for (const peopleTeamOrAdmin of [false, true]) {
+      const who = { callerId: "m", peopleTeamOrAdmin, createdById: "m", isAgent: false };
+      expect(cycleDeleteBlocked({ ...who, status: "ACTIVE", reviewCount: 0 })).toBe("state");
+      expect(cycleDeleteBlocked({ ...who, status: "CANCELLED", reviewCount: 0 })).toBe("state");
+      expect(cycleDeleteBlocked({ ...who, status: "DRAFT", reviewCount: 1 })).toBe("state");
+    }
   });
 });

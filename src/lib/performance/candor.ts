@@ -96,3 +96,50 @@ export function candorStatusOf(s: string): { label: string; tone: "neutral" | "i
   if (s === "CLOSED") return { label: "Closed", tone: "neutral" };
   return { label: "Draft", tone: "neutral" };
 }
+
+// ── Who a session may ask ─────────────────────────────────────────────
+// The scope rule, pure, so the server (candor.server.ts candorScopesFor
+// builds the scopes) and every page that offers Launch, Reopen or New
+// session read the same words and never offer what the server refuses.
+
+/** The scopes a person may ask. `departmentIds: null` means any department. */
+export type CandorScopes = { everyone: boolean; departmentIds: string[] | null };
+
+export function candorScopeAllowed(scopes: CandorScopes, departmentId: string | null): boolean {
+  if (departmentId === null) return scopes.everyone;
+  return scopes.departmentIds === null || scopes.departmentIds.includes(departmentId);
+}
+
+/** Pure: may this person run any session at all (a scope to ask exists). */
+export function candorHasAnyScope(scopes: CandorScopes): boolean {
+  return scopes.everyone || scopes.departmentIds === null || scopes.departmentIds.length > 0;
+}
+
+const CANDOR_CHAIN_WHICH = "a department you head, or one where everyone in it reports to you";
+
+/**
+ * The one line a person who runs sessions only through their reports reads
+ * when no scope fits them yet: who can run one instead.
+ */
+export const CANDOR_NO_SCOPE_NOTE = `The People team and Admins run Candor sessions. You can run one for ${CANDOR_CHAIN_WHICH}; none fits yet.`;
+
+/** Pure: why this scope is refused (null when allowed), in words the organiser can act on. */
+export function candorScopeRefusal(scopes: CandorScopes, departmentId: string | null): string | null {
+  if (candorScopeAllowed(scopes, departmentId)) return null;
+  if (!candorHasAnyScope(scopes)) {
+    return `You can run a Candor session for ${CANDOR_CHAIN_WHICH}. None fits yet, so ask the People team to run this one.`;
+  }
+  return departmentId === null
+    ? `Only the People team and Admins can ask everyone. Pick ${CANDOR_CHAIN_WHICH}.`
+    : `You can only ask ${CANDOR_CHAIN_WHICH}.`;
+}
+
+/**
+ * Who a session asks, in the words the Launch and Reopen confirms use: the
+ * department, or the whole company by name (never "Everyone in everyone").
+ */
+export function candorAudienceOf(departmentName: string | null | undefined, orgName: string | null | undefined): string {
+  if (departmentName) return `Everyone in ${departmentName}`;
+  const org = orgName?.trim();
+  return org ? `Everyone at ${org}` : "Everyone in the company";
+}

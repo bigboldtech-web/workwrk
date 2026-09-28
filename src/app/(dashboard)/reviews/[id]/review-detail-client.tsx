@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Ban, Bell, Download, FileText, Link2, Scale } from "lucide-react";
+import { Ban, Bell, Download, FileText, Link2, Scale, Trash2 } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader, OsPageHeaderSkeleton } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -185,6 +185,17 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
     toast("Cycle cancelled");
     void load();
   };
+  // Delete draft: a Draft nobody has a review in, by its starter, the People
+  // team or Admin (viewer.canDelete, the DELETE route's own rule).
+  const removeDraft = async () => {
+    if (!cycle) return;
+    const ok = await confirm({ title: `Delete ${cycle.name}?`, description: "It is a draft and nobody has been asked for anything, so nothing else is lost.", confirmLabel: "Delete draft", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews?id=${encodeURIComponent(cycleId)}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void removeDraft() } }); return; }
+    toast("Draft deleted");
+    router.push("/reviews?view=draft");
+  };
   const startCalibration = async () => {
     if (!cycle) return;
     const ok = await confirm({ title: `Start calibration for ${cycle.name}?`, description: calibrationConfirmText(cycle.stats), confirmLabel: "Start calibration", destructive: false });
@@ -222,6 +233,7 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
     ...(v?.peopleTeamOrAdmin && !viewer.isAgent ? [{ label: "Export cycle CSV", icon: Download, onClick: () => { window.location.href = `/api/export/reviews/${cycleId}`; } }] : []),
     ...(canManage && status === "ACTIVE" ? [{ label: "Start calibration", icon: Scale, onClick: () => void startCalibration() }] : []),
     ...(canManage && !viewer.isAgent && (status === "DRAFT" || status === "ACTIVE") ? [{ separator: true as const }, { label: "Cancel cycle", icon: Ban, destructive: true, onClick: () => void cancel() }] : []),
+    ...(v?.canDelete && status === "DRAFT" ? [{ label: "Delete draft", icon: Trash2, destructive: true, onClick: () => void removeDraft() }] : []),
   ] : [];
 
   if (error && !cycle) {

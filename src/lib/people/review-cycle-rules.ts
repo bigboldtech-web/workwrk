@@ -48,3 +48,18 @@ export function launchAudience(input: {
   }
   return ids;
 }
+
+/**
+ * Who may delete a review cycle, and when. Deleting a cycle deletes every
+ * review in it, so appraisal history is never destroyed: only a Draft with
+ * no reviews can go (anything else is Cancel, which keeps every row). Who:
+ * the People team and Admin, or the person who started it (a mistaken
+ * draft must never sit in its starter's list forever), never an Agent.
+ *   "who"   the caller may never delete this cycle (403)
+ *   "state" the caller may, but not in this state (409, Cancel instead)
+ */
+export function cycleDeleteBlocked(i: CycleManageInput & { isAgent: boolean; status: string; reviewCount: number }): "who" | "state" | null {
+  if (i.isAgent || !canManageCycle(i)) return "who";
+  if (i.status !== "DRAFT" || i.reviewCount > 0) return "state";
+  return null;
+}

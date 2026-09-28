@@ -6,7 +6,8 @@ import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people
 import { effectiveReviewerId } from "@/lib/performance/review-cycle";
 import { peerAggregate } from "@/lib/people/anonymity";
 import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
-import { orgScoring } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, orgScoring } from "@/lib/performance/review-cycle.server";
+import { cycleDeleteBlocked } from "@/lib/people/review-cycle-rules";
 
 export async function GET(
   _req: NextRequest,
@@ -150,10 +151,17 @@ export async function GET(
   // What the page needs to decide its sections without guessing from a
   // role: whether the caller runs the cycle, the org's scale words and
   // bands (Settings > Scoring and reviews), and who started it.
-  const [canManage, scoring, starter] = await Promise.all([
+  const [canManage, scoring, starter, canDelete] = await Promise.all([
     canManageReviewCycle(session, cycle),
     orgScoring(orgId),
     cycle.createdById ? prisma.user.findUnique({ where: { id: cycle.createdById }, select: { id: true, firstName: true, lastName: true } }) : Promise.resolve(null),
+    // Delete draft: the same rule DELETE /api/reviews answers with, asked
+    // only of a Draft (nothing else can ever be deleted).
+    cycle.status === "DRAFT"
+      ? Promise.all([cycleViewerCtx(), prisma.review.count({ where: { cycleId: cycle.id } })]).then(([v, n]) => !!v && cycleDeleteBlocked({
+        callerId: v.userId, peopleTeamOrAdmin: v.peopleTeamOrAdmin, createdById: cycle.createdById, isAgent: v.isAgent, status: cycle.status, reviewCount: n,
+      }) === null)
+      : Promise.resolve(false),
   ]);
 
   // Who the cycle covers is the runner's to read (the People team, Admin
@@ -169,6 +177,7 @@ export async function GET(
     stats: { total, selfDone, managerDone, calibrated, completed },
     viewer: {
       canManage,
+      canDelete,
       peopleTeamOrAdmin: hrAdmin,
       isSubject: cycle.reviews.some((r) => r.subjectId === callerId),
       isReviewer: cycle.reviews.some((r) => r.reviewerId === callerId && r.subjectId !== callerId),

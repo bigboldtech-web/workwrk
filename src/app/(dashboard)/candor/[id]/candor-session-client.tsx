@@ -42,7 +42,7 @@ import { useAutosave } from "@/hooks/use-autosave";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
-import { CANDOR_PROMPT_TYPES, candorStatusOf, type CandorPrompt, type CandorPromptType } from "@/lib/performance/candor";
+import { CANDOR_PROMPT_TYPES, candorAudienceOf, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorPrompt, type CandorPromptType, type CandorScopes } from "@/lib/performance/candor";
 import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
 import { draftKey as scopedDraftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
 import { useBoot } from "@/components/layout/os/boot-context";
@@ -59,32 +59,21 @@ type Session = {
   launchedAt: string | null;
   closedAt: string | null;
   responseCount?: number | null;
-  /** Who this viewer may ask, sent with a Draft they may edit (null departmentIds: any department). */
+  /** Who this viewer may ask, sent with a Draft they may edit or a Closed one they run (null departmentIds: any department). */
   scopes?: Scopes;
   faces: Faces;
 };
-type Scopes = { everyone: boolean; departmentIds: string[] | null };
+type Scopes = CandorScopes;
 
-// The scope rule of lib/performance/candor.server.ts (candorScopeAllowed and
-// candorScopeRefusal; that module is server only), repeated here so the
-// picker and the Launch confirm never offer what the server refuses. The
-// server stays the authority: a refused launch still toasts its message.
+// The scope rule and the audience words of lib/performance/candor.ts, the
+// same ones the server and the list page read, so the picker and the Launch
+// confirm never offer what the server refuses. The server stays the
+// authority: a refused launch still toasts its message.
 function scopeOk(sc: Scopes | undefined, departmentId: string | null): boolean {
-  if (!sc) return true;
-  if (departmentId === null) return sc.everyone;
-  return sc.departmentIds === null || sc.departmentIds.includes(departmentId);
+  return !sc || candorScopeAllowed(sc, departmentId);
 }
-function scopeNote(sc: Scopes, departmentId: string | null): string {
-  const which = "a department you head, or one where everyone in it reports to you";
-  if (sc.departmentIds !== null && !sc.departmentIds.length && !sc.everyone) return `You can run a Candor session for ${which}. None fits yet, so ask the People team to run this one.`;
-  return departmentId === null ? `Only the People team and Admins can ask everyone. Pick ${which}.` : `You can only ask ${which}.`;
-}
-// Who a session asks, in the words the Launch and Reopen confirms use: the
-// department, or the whole company by name (never "Everyone in everyone").
-function audienceOf(departmentName: string | null | undefined, orgName: string | null): string {
-  if (departmentName) return `Everyone in ${departmentName}`;
-  return orgName ? `Everyone at ${orgName}` : "Everyone in the company";
-}
+const scopeNote = (sc: Scopes, departmentId: string | null): string => candorScopeRefusal(sc, departmentId) ?? "";
+const audienceOf = candorAudienceOf;
 type Results = {
   totalResponses: number;
   belowFloor: boolean;
@@ -246,7 +235,9 @@ export default function CandorSessionClient({ id }: { id: string }) {
   const more = faces.canManage ? [
     { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/candor/${s.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
     ...(s.status === "ACTIVE" ? [{ label: "Close session", icon: Ban, onClick: () => void move("CLOSED") }] : []),
-    ...(s.status === "CLOSED" ? [{ label: "Reopen", icon: RotateCcw, onClick: () => void move("ACTIVE", true) }] : []),
+    ...(s.status === "CLOSED" ? [scopeOk(s.scopes, s.departmentId)
+      ? { label: "Reopen", icon: RotateCcw, onClick: () => void move("ACTIVE", true) }
+      : { label: "Reopen", icon: RotateCcw, disabled: true, title: "It asks people outside your reporting line now: ask the People team or an Admin to reopen it", onClick: () => {} }] : []),
     ...(faces.canDelete ? [{ separator: true as const }, { label: "Delete draft", icon: Trash2, destructive: true, onClick: () => void remove() }] : []),
   ] : undefined;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candorStatusOf, candorTransitionBlocked, cleanCandorAnswers, normalizeCandorPrompts } from "./candor";
+import { CANDOR_NO_SCOPE_NOTE, candorAudienceOf, candorHasAnyScope, candorStatusOf, candorTransitionBlocked, cleanCandorAnswers, normalizeCandorPrompts } from "./candor";
 
 describe("normalizeCandorPrompts", () => {
   it("gives string prompts stable ids that survive a second read", () => {
@@ -46,5 +46,27 @@ describe("candor moves", () => {
   });
   it("reads Open for an active session", () => {
     expect(candorStatusOf("ACTIVE").label).toBe("Open");
+  });
+});
+
+describe("candorAudienceOf", () => {
+  it("names the department, or the company by name, never \"Everyone in everyone\"", () => {
+    expect(candorAudienceOf("Design", "Acme Corp")).toBe("Everyone in Design");
+    expect(candorAudienceOf(null, "Acme Corp")).toBe("Everyone at Acme Corp");
+    expect(candorAudienceOf(undefined, "  ")).toBe("Everyone in the company");
+    expect(candorAudienceOf(null, null)).toBe("Everyone in the company");
+  });
+});
+
+describe("candorHasAnyScope", () => {
+  it("is false only when nothing can be asked", () => {
+    expect(candorHasAnyScope({ everyone: false, departmentIds: [] })).toBe(false);
+    expect(candorHasAnyScope({ everyone: false, departmentIds: ["d"] })).toBe(true);
+    expect(candorHasAnyScope({ everyone: true, departmentIds: [] })).toBe(true);
+    expect(candorHasAnyScope({ everyone: true, departmentIds: null })).toBe(true);
+  });
+  it("the no-scope line says who can run one, without dashes", () => {
+    expect(CANDOR_NO_SCOPE_NOTE).toMatch(/People team and Admins run Candor sessions/);
+    expect(CANDOR_NO_SCOPE_NOTE).not.toMatch(/-{2}|\u2014|\u2013/);
   });
 });

@@ -17,9 +17,11 @@
 // PATCH { id, name?, type?, startDate?, endDate?, status? }: edit, or the
 //      named moves (Start calibration). Completed is reached only by
 //      finalize, Active only by launch (review-cycle.ts transitions).
-// DELETE ?id=: the People team and Admin only (Cancel is everyone else's).
+// DELETE ?id=: a Draft with no reviews, by the People team, Admin or the
+//      person who started it (anything past Draft is Cancel's).
 
 import { canManageReviewCycle, chainOf, isPeopleTeamOrAdmin, mayStartReviewCycles } from "@/lib/people/review-cycle-access";
+import { cycleDeleteBlocked } from "@/lib/people/review-cycle-rules";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -169,6 +171,10 @@ export async function GET(req: NextRequest) {
       createdBy: creator ? { id: creator.id, name: `${creator.firstName} ${creator.lastName}`.trim() } : null,
       counts: counts.get(c.id) ?? { total: 0, selfDone: 0, managerDone: 0, calibrated: 0, completed: 0 },
       canManage: ctx.peopleTeamOrAdmin || (!!c.createdById && c.createdById === ctx.userId),
+      canDelete: cycleDeleteBlocked({
+        callerId: ctx.userId, peopleTeamOrAdmin: ctx.peopleTeamOrAdmin, createdById: c.createdById, isAgent: ctx.isAgent,
+        status: c.status, reviewCount: (counts.get(c.id)?.total ?? 0),
+      }) === null,
     };
   });
 
@@ -316,20 +322,28 @@ export async function DELETE(req: NextRequest) {
     where: { id, organizationId: getOrgId(session) },
   });
   if (!existing) return jsonError("Review cycle not found", 404);
-  // Deleting a cycle deletes every review in it: the People team and Admin
-  // only, never the manager who started it (Cancel is theirs), never an
-  // Agent (cap.agent.delete).
+  // Deleting a cycle deletes every review in it, so appraisal history is
+  // never destroyed: only a Draft nobody has a review in can go, and once
+  // reviews exist Cancel is the path (it keeps every row). Who: the People
+  // team and Admin, or the person who started it (their own mistaken draft
+  // must not sit in their list forever), never an Agent (cap.agent.delete).
+  // Rule: lib/people/review-cycle-rules.ts cycleDeleteBlocked.
   const ctx = await cycleViewerCtx();
-  if (!(await isPeopleTeamOrAdmin(session)) || ctx?.isAgent) {
-    return jsonError("Only the People team or an Admin can delete a review cycle", 403);
-  }
-
-  // Appraisal history is never destroyed: only a cycle nobody has a review
-  // in yet (a Draft, or one that never launched) can go. Once reviews exist,
-  // Cancel is the path, and it keeps every row.
+  if (!ctx) return jsonError("Review cycle not found", 404);
   const written = await prisma.review.count({ where: { cycleId: id } });
-  if (existing.status !== "DRAFT" || written > 0) {
-    return jsonError("Only a draft cycle with no reviews can be deleted. Cancel this cycle instead: it keeps every review.", 409);
+  const blocked = cycleDeleteBlocked({
+    callerId: ctx.userId,
+    peopleTeamOrAdmin: ctx.peopleTeamOrAdmin,
+    createdById: existing.createdById,
+    isAgent: ctx.isAgent,
+    status: existing.status,
+    reviewCount: written,
+  });
+  if (blocked === "who") return jsonError("Only the person who started this cycle, the People team or an Admin can delete it", 403);
+  if (blocked === "state") {
+    return jsonError(existing.status === "CANCELLED" || existing.status === "COMPLETED"
+      ? "Only a draft cycle with no reviews can be deleted. This one has ended, so it stays with every review it holds."
+      : "Only a draft cycle with no reviews can be deleted. Cancel this cycle instead: it keeps every review.", 409);
   }
 
   await prisma.reviewCycle.delete({ where: { id } });

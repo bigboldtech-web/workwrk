@@ -9,6 +9,10 @@
 //        closed    the same for Closed sessions
 //      A viewer who runs no sessions asking for sessions or closed gets the
 //      answer view back, flagged `downgraded`, so the page can say why.
+//      `canRun` is the organiser face; `canCreate` adds a scope to ask
+//      (candorScopesFor), so New session never shows to someone every create
+//      would refuse; `scopes` (to an organiser) lets the row menu name the
+//      real audience of Launch and Reopen, or say why they cannot.
 // POST { title, description?, prompts, departmentId?, status? }: a new
 //      session, a Draft unless status is ACTIVE (launch at once). Every
 //      prompt gets a stable id here (lib/performance/candor.ts). The scope
@@ -24,7 +28,7 @@ import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
-import { candorCtx, candorDefaultScope, candorScopeRefusal, candorScopesFor, notifyCandorOpen } from "@/lib/performance/candor.server";
+import { candorCtx, candorDefaultScope, candorHasAnyScope, candorScopeRefusal, candorScopesFor, notifyCandorOpen } from "@/lib/performance/candor.server";
 import { normalizeCandorPrompts } from "@/lib/performance/candor";
 import { PATCH as patchOne } from "./[id]/route";
 
@@ -84,7 +88,14 @@ export async function GET(req: NextRequest) {
       ...(view === "answer" ? {} : { responseCount: _count.responses }),
     };
   });
-  return jsonSuccess({ data, view, downgraded, canRun: runs, total: data.length });
+  const scopes = runs ? await candorScopesFor(ctx) : null;
+  return jsonSuccess({
+    data, view, downgraded,
+    canRun: runs,
+    canCreate: !!scopes && candorHasAnyScope(scopes),
+    ...(scopes ? { scopes } : {}),
+    total: data.length,
+  });
 }
 
 export async function POST(req: NextRequest) {

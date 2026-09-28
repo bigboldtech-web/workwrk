@@ -16,6 +16,14 @@
 // sessions shows To answer with one notice line (a view of a page you hold,
 // not a denial). "Already answered" is the server's record
 // (CandorRespondent), never a browser flag.
+//
+// Running sessions and starting one are two facts: `organiser` holds the
+// Sessions and Closed views (a session already run stays manageable), and
+// `canCreate` adds a scope to ask (lib/people/culture-gate.ts
+// candorMayCreate). A manager by reporting line whose chain covers no
+// department sees no New session, only one quiet line saying who can run
+// one. The row menu checks the scope before Launch and Reopen, and names
+// the real audience (candorAudienceOf) or says why it cannot.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
@@ -40,7 +48,7 @@ import { AnonymityNote } from "@/components/culture/anonymity-note";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
-import { candorStatusOf } from "@/lib/performance/candor";
+import { CANDOR_NO_SCOPE_NOTE, candorAudienceOf, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorScopes } from "@/lib/performance/candor";
 import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
 
 type Row = {
@@ -56,7 +64,7 @@ type Row = {
   hasResponded: boolean;
   responseCount?: number;
 };
-type ListResponse = { data: Row[]; view: "answer" | "sessions" | "closed"; downgraded: boolean; canRun: boolean; total: number };
+type ListResponse = { data: Row[]; view: "answer" | "sessions" | "closed"; downgraded: boolean; canRun: boolean; canCreate?: boolean; scopes?: CandorScopes; total: number };
 type OptionalCol = "scope" | "prompts" | "answers" | "opened";
 const OPTIONAL_COLS: Array<{ key: OptionalCol; label: string }> = [
   { key: "scope", label: "Scope" },
@@ -65,7 +73,7 @@ const OPTIONAL_COLS: Array<{ key: OptionalCol; label: string }> = [
   { key: "opened", label: "Opened" },
 ];
 
-export default function CandorClient({ canCreate }: { canCreate: boolean }) {
+export default function CandorClient({ organiser, canCreate: canCreateAtLoad }: { organiser: boolean; canCreate: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -75,9 +83,10 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
   const isAgent = !!(boot.viewer as { isAgent?: boolean }).isAgent;
+  const orgName = boot?.org?.name?.trim() || null;
 
   const asked = sp?.get("view");
-  const view: "answer" | "sessions" | "closed" = canCreate && (asked === "sessions" || asked === "closed") ? asked : "answer";
+  const view: "answer" | "sessions" | "closed" = organiser && (asked === "sessions" || asked === "closed") ? asked : "answer";
   const q = sp?.get("q") ?? "";
   const statusF = sp?.get("status") ?? "";
   const scopeF = sp?.get("scope") ?? "";
@@ -95,13 +104,13 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
   // the parameter stripped, one notice line (access 5.5 rule 4).
   // The notice is decided once, from the URL the page opened with, so
   // stripping the parameter does not take the line away with it.
-  const [notice] = useState<string | null>(() => (!canCreate && (asked === "sessions" || asked === "closed") ? "Only people who run candor sessions can see that view." : null));
+  const [notice] = useState<string | null>(() => (!organiser && (asked === "sessions" || asked === "closed") ? "Only people who run candor sessions can see that view." : null));
   const stripped = useRef(false);
   useEffect(() => {
-    if (stripped.current || canCreate || !(asked === "sessions" || asked === "closed")) return;
+    if (stripped.current || organiser || !(asked === "sessions" || asked === "closed")) return;
     stripped.current = true;
     setParams({ view: null });
-  }, [asked, canCreate, setParams]);
+  }, [asked, organiser, setParams]);
 
   const [list, setList] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +127,10 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
     return () => window.removeEventListener("focus", again);
   }, [load]);
   const loading = !list || list.view !== view;
+  // The server's answer once the list is in (reports can move while the page
+  // is open); the page gate's until then.
+  const canCreate = organiser && (list ? list.canCreate ?? canCreateAtLoad : canCreateAtLoad);
+  const noScopeNote = organiser && !canCreate ? CANDOR_NO_SCOPE_NOTE : null;
 
   // Display columns (home.teams.surface.candor.viewOptions.columns).
   const stored = ((prefs.home as { teams?: { surface?: Record<string, { viewOptions?: { columns?: Record<string, boolean> } }> } } | undefined)
@@ -158,14 +171,31 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
     if (!r.ok) { toast(r.error || "Couldn't start a session", { tone: "danger" }); return; }
     router.push(`/candor/${r.data.id}`);
   };
+  // Launch and Reopen ask the session's scope, checked here against what
+  // this person may ask before any confirm (the server checks again): the
+  // confirm names the real audience, and a scope they may not ask is told
+  // plainly, with the way forward (a Draft's scope is changed in its editor).
+  const scopes = list?.scopes;
+  const rowScopeOk = (row: Row) => !scopes || candorScopeAllowed(scopes, row.department?.id ?? null);
   const move = async (row: Row, status: "ACTIVE" | "CLOSED", reopen = false) => {
-    const scope = row.department ? row.department.name : "everyone";
+    const deptId = row.department?.id ?? null;
+    if (status === "ACTIVE" && !reopen && (!rowScopeOk(row) || !row.prompts.length)) {
+      const why = !rowScopeOk(row) && scopes ? candorScopeRefusal(scopes, deptId) : "Add at least one question before you launch.";
+      const go = await confirm({ title: `${row.title} cannot launch yet`, description: `${why} Open the session to change it.`, confirmLabel: "Open session", destructive: false });
+      if (go) router.push(`/candor/${row.id}`);
+      return;
+    }
+    if (status === "ACTIVE" && reopen && !rowScopeOk(row)) {
+      toast(`Only the People team or an Admin can reopen ${row.title} now: it asks people outside your reporting line.`, { tone: "danger" });
+      return;
+    }
+    const audience = candorAudienceOf(row.department?.name, orgName);
     const ok = await confirm(
       status === "CLOSED"
         ? { title: `Close ${row.title}?`, description: "Nobody can answer after this. You can reopen it later.", confirmLabel: "Close session", destructive: false }
         : reopen
-          ? { title: `Reopen ${row.title}?`, description: `Everyone in ${scope} who has not answered can answer again.`, confirmLabel: "Reopen", destructive: false }
-          : { title: `Launch ${row.title}?`, description: `Everyone in ${scope} can answer from now on, and is told so.`, confirmLabel: "Launch session", destructive: false },
+          ? { title: `Reopen ${row.title}?`, description: `${audience} who has not answered can answer again.`, confirmLabel: "Reopen", destructive: false }
+          : { title: `Launch ${row.title}?`, description: `${audience} can answer from now on, and is told so.`, confirmLabel: "Launch session", destructive: false },
     );
     if (!ok) return;
     const r = await apiFetch(`/api/candor/${row.id}`, { method: "PATCH", json: { status } });
@@ -213,24 +243,25 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
       <OsPageHeader
         title="Candor"
         askAi
-        views={canCreate ? (
+        views={organiser ? (
           <>
             <ViewTab label="To answer" active={view === "answer"} onClick={() => setParams({ view: null, status: null })} />
             <ViewTab label="Sessions" active={view === "sessions"} onClick={() => setParams({ view: "sessions", status: null })} />
             <ViewTab label="Closed" active={view === "closed"} onClick={() => setParams({ view: "closed", status: null })} />
           </>
         ) : undefined}
-        toolbar={canCreate ? {
+        toolbar={organiser && (tableView || canCreate) ? {
           ...(tableView ? {
             filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: filters },
             sort: { onClick: () => setSortOpen((v) => !v), label: sort === "answers" ? "Most answers" : "Sort", active: sort === "answers" },
           } : {}),
-          primary: { label: "New session", icon: Plus, busy: creating, onClick: () => void newSession() },
+          ...(canCreate ? { primary: { label: "New session", icon: Plus, busy: creating, onClick: () => void newSession() } } : {}),
           ...(tableView ? { menu: OPTIONAL_COLS.map((c) => ({ label: `Show ${c.label}`, checked: cols[c.key], keepOpen: true, onClick: () => setCol(c.key, !cols[c.key]) })) } : {}),
         } : undefined}
       />
       {/* The notice sits in the same column as the body under it. */}
       {notice ? <p className={`m-0 w-full px-6 pt-2 text-sm text-ink-2 ${tableView ? "" : "mx-auto max-w-[720px]"}`}>{notice}</p> : null}
+      {noScopeNote ? <p className={`m-0 w-full px-6 pt-2 text-sm text-ink-2 ${tableView ? "" : "mx-auto max-w-[720px]"}`}>{noScopeNote}</p> : null}
       <div className="relative">
         {sortOpen ? (
           <div className="absolute start-[110px] top-0 z-40">
@@ -269,7 +300,7 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
               rowMenu={(r) => <RowMoreButton label={`Actions for ${r.title}`} open={menu?.row.id === r.id} onClick={(e) => setMenu({ row: r, anchor: { current: e.currentTarget } })} />}
               empty={filters ? (
                 <span className="text-row text-ink-2">No sessions match · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>
-              ) : view === "closed" ? <span className="text-row text-ink-2">No closed sessions yet</span> : (
+              ) : view === "closed" ? <span className="text-row text-ink-2">No closed sessions yet</span> : !canCreate ? <span className="text-row text-ink-2">No sessions yet</span> : (
                 <span className="text-row text-ink-2">No sessions yet · <button type="button" className="text-brand-deep hover:underline" onClick={() => void newSession()}>Start your first session</button></span>
               )}
               footer={loading ? undefined : { total: rows.length, noun: "sessions", from: rows.length ? 1 : 0, to: rows.length, hidePaging: true }}
@@ -316,7 +347,11 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
             <MenuItem icon={Link2} label="Copy link" onClick={() => { const id = menu.row.id; setMenu(null); copyLink(id); }} />
             {menu.row.status === "DRAFT" ? <><MenuSeparator /><MenuItem icon={Play} label="Launch session" onClick={() => { const r = menu.row; setMenu(null); void move(r, "ACTIVE"); }} /></> : null}
             {menu.row.status === "ACTIVE" ? <><MenuSeparator /><MenuItem icon={Ban} label="Close session" onClick={() => { const r = menu.row; setMenu(null); void move(r, "CLOSED"); }} /></> : null}
-            {menu.row.status === "CLOSED" ? <><MenuSeparator /><MenuItem icon={RotateCcw} label="Reopen" onClick={() => { const r = menu.row; setMenu(null); void move(r, "ACTIVE", true); }} /></> : null}
+            {menu.row.status === "CLOSED" ? (
+              <><MenuSeparator />{rowScopeOk(menu.row)
+                ? <MenuItem icon={RotateCcw} label="Reopen" onClick={() => { const r = menu.row; setMenu(null); void move(r, "ACTIVE", true); }} />
+                : <MenuItem icon={RotateCcw} label="Reopen" disabled description="Ask the People team" />}</>
+            ) : null}
             {menu.row.status === "DRAFT" && !isAgent ? <MenuItem icon={Trash2} label="Delete draft" destructive onClick={() => { const r = menu.row; setMenu(null); void remove(r); }} /> : null}
           </MenuList>
         </MorePortal>
