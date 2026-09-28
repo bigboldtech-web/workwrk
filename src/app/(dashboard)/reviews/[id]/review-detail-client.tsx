@@ -191,8 +191,13 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
     if (!cycle) return;
     const ok = await confirm({ title: `Delete ${cycle.name}?`, description: "It is a draft and nobody has been asked for anything, so nothing else is lost.", confirmLabel: "Delete draft", destructive: true });
     if (!ok) return;
+    await sendDeleteDraft();
+  };
+  // The DELETE itself, apart from the confirm: Try again resends it at once
+  // (the person already confirmed), never asks again.
+  const sendDeleteDraft = async () => {
     const r = await apiFetch(`/api/reviews?id=${encodeURIComponent(cycleId)}`, { method: "DELETE" });
-    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void removeDraft() } }); return; }
+    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void sendDeleteDraft() } }); return; }
     toast("Draft deleted");
     router.push("/reviews?view=draft");
   };

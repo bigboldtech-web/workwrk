@@ -137,6 +137,17 @@ export async function GET(req: NextRequest) {
     orderBy: { startDate: "desc" },
   });
   const counts = await cycleCounts(cycles.map((c) => c.id), reviewsWhere);
+  // Delete draft asks whether the cycle holds ANY review, not only the ones
+  // this viewer may see: below the People team, the counts above are cut to
+  // the viewer's own chain, so a starter's Draft is counted in full here
+  // (the DELETE route's own rule), or the menu would offer a delete the
+  // server then refuses with 409.
+  const ownDraftIds = reviewsWhere ? cycles.filter((c) => c.status === "DRAFT" && c.createdById === ctx.userId).map((c) => c.id) : [];
+  const fullDraftTotals = new Map<string, number>();
+  if (ownDraftIds.length) {
+    const rows = await prisma.review.groupBy({ by: ["cycleId"], where: { cycleId: { in: ownDraftIds } }, _count: { _all: true } });
+    for (const r of rows) fullDraftTotals.set(r.cycleId, r._count._all);
+  }
 
   // Least complete sorts on the server's own counts, so it is computed over
   // every matching cycle before paging (an org holds dozens, not thousands).
@@ -173,7 +184,7 @@ export async function GET(req: NextRequest) {
       canManage: ctx.peopleTeamOrAdmin || (!!c.createdById && c.createdById === ctx.userId),
       canDelete: cycleDeleteBlocked({
         callerId: ctx.userId, peopleTeamOrAdmin: ctx.peopleTeamOrAdmin, createdById: c.createdById, isAgent: ctx.isAgent,
-        status: c.status, reviewCount: (counts.get(c.id)?.total ?? 0),
+        status: c.status, reviewCount: ownDraftIds.includes(c.id) ? (fullDraftTotals.get(c.id) ?? 0) : (counts.get(c.id)?.total ?? 0),
       }) === null,
     };
   });

@@ -48,7 +48,7 @@ import { AnonymityNote } from "@/components/culture/anonymity-note";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
-import { CANDOR_NO_SCOPE_NOTE, candorAudienceOf, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorScopes } from "@/lib/performance/candor";
+import { CANDOR_NO_SCOPE_NOTE, candorAudienceOf, candorHasAnyScope, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorScopes } from "@/lib/performance/candor";
 import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
 
 type Row = {
@@ -180,7 +180,15 @@ export default function CandorClient({ organiser, canCreate: canCreateAtLoad }: 
   const move = async (row: Row, status: "ACTIVE" | "CLOSED", reopen = false) => {
     const deptId = row.department?.id ?? null;
     if (status === "ACTIVE" && !reopen && (!rowScopeOk(row) || !row.prompts.length)) {
-      const why = !rowScopeOk(row) && scopes ? candorScopeRefusal(scopes, deptId) : "Add at least one question before you launch.";
+      const scopeBlocked = !rowScopeOk(row) && !!scopes;
+      const why = scopeBlocked ? candorScopeRefusal(scopes!, deptId) : "Add at least one question before you launch.";
+      // A person with no scope at all cannot fix this in the editor (no
+      // scope there fits either), so the dialog only acknowledges: one OK,
+      // no Open session that leads to a page with the same dead end.
+      if (scopeBlocked && !candorHasAnyScope(scopes!)) {
+        await confirm({ title: `${row.title} cannot launch yet`, description: why ?? "", confirmLabel: "OK", cancelLabel: "", destructive: false });
+        return;
+      }
       const go = await confirm({ title: `${row.title} cannot launch yet`, description: `${why} Open the session to change it.`, confirmLabel: "Open session", destructive: false });
       if (go) router.push(`/candor/${row.id}`);
       return;

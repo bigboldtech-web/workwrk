@@ -243,8 +243,13 @@ export default function ReviewsClient() {
   const removeDraft = async (c: CycleRow) => {
     const ok = await confirm({ title: `Delete ${c.name}?`, description: "It is a draft and nobody has been asked for anything, so nothing else is lost.", confirmLabel: "Delete draft", destructive: true });
     if (!ok) return;
+    await sendDeleteDraft(c);
+  };
+  // The DELETE itself, apart from the confirm: Try again resends it at once
+  // (the person already confirmed), never asks again.
+  const sendDeleteDraft = async (c: CycleRow) => {
     const r = await apiFetch(`/api/reviews?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
-    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void removeDraft(c) } }); return; }
+    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void sendDeleteDraft(c) } }); return; }
     toast("Draft deleted");
     void load();
   };

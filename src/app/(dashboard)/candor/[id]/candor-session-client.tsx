@@ -42,7 +42,7 @@ import { useAutosave } from "@/hooks/use-autosave";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
-import { CANDOR_PROMPT_TYPES, candorAudienceOf, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorPrompt, type CandorPromptType, type CandorScopes } from "@/lib/performance/candor";
+import { CANDOR_PROMPT_TYPES, candorAudienceOf, candorHasAnyScope, candorScopeAllowed, candorScopeRefusal, candorStatusOf, type CandorPrompt, type CandorPromptType, type CandorScopes } from "@/lib/performance/candor";
 import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
 import { draftKey as scopedDraftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
 import { useBoot } from "@/components/layout/os/boot-context";
@@ -229,8 +229,13 @@ export default function CandorSessionClient({ id }: { id: string }) {
   }
 
   const st = candorStatusOf(s.status);
+  // A draft's owner with no scope at all (a manager by reporting line whose
+  // chain covers no department) can never launch it: no blue Launch, the
+  // Who can answer note already says who can run it. Editing and Delete
+  // draft stay.
+  const canEverLaunch = !s.scopes || candorHasAnyScope(s.scopes);
   const primary = face === "editor"
-    ? { label: "Launch session", onClick: () => void move("ACTIVE") }
+    ? (canEverLaunch ? { label: "Launch session", onClick: () => void move("ACTIVE") } : null)
     : face === "respond" && !thanks ? { label: submitting ? "Sending" : "Submit anonymously", onClick: () => void submit(), busy: submitting } : null;
   const more = faces.canManage ? [
     { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/candor/${s.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
