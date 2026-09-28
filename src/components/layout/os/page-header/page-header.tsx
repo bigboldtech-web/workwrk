@@ -423,7 +423,16 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
     // header may grow, it may never overlap itself (spec 1, Mobile / narrow).
     <div className={cn("os-toolbar flex h-11 min-w-0 items-center gap-2 px-6 max-md:h-auto max-md:min-h-11 max-md:flex-wrap max-md:py-1", className)}>
       {hasLeft ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        // Under 768 the left cluster is as wide as its chips (min-w-fit), not
+        // squeezable to zero. With min-w-0 it shrank to whatever the right
+        // cluster left, so the row never wrapped and the Table and Cards
+        // switch spilled out under "..." on a 390 phone: a tap on Cards
+        // opened the menu. Sized to its content, the row's flex-wrap sends
+        // the right cluster to its own line instead. The cluster also wraps
+        // its own chips, so one wider than the phone still stays inside it
+        // (fit-content never grows past the row). Desktop keeps min-w-0 so
+        // a search field in `left` still narrows beside the primary.
+        <div className="flex min-w-0 flex-1 items-center gap-2 max-md:min-w-fit max-md:flex-wrap">
           {filter ? (
             <button
               type="button"
@@ -480,7 +489,12 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
         <div className="min-w-0 flex-1" />
       )}
       {right || shownPrimary || menu ? (
-        <div className="flex shrink-0 items-center gap-2 max-md:ms-auto">
+        // On its own line under 768 the right cluster is still capped at the
+        // row (max-w-full) and wraps its own controls from the right. Files
+        // passes a search, a split Upload and "...", 336px against a 278px
+        // row on a 390 phone, and "..." was painted past the screen edge
+        // where nobody could reach it.
+        <div className="flex shrink-0 items-center gap-2 max-md:ms-auto max-md:max-w-full max-md:flex-wrap max-md:justify-end">
           {right}
           {shownPrimary ? <PrimaryButton action={shownPrimary} /> : null}
           {menu && menu.length > 0 ? <HeaderMenu entries={menu} /> : null}
