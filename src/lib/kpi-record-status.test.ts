@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kpiStatusLabel, kpiWriteStatus, personKpiChip } from "./kpi-record-status";
+import { kpiStatusLabel, kpiWriteStatus, parseKpiNumber, personKpiChip } from "./kpi-record-status";
 
 // The golden cases (spec-goals section 4 step 5).
 describe("kpiWriteStatus golden cases", () => {
@@ -73,5 +73,28 @@ describe("labels and the people chip", () => {
     expect(personKpiChip({ pending: 0, submitted: 0, approved: 1, rejected: 0, total: 4 }).key).toBe("notRecorded");
     expect(personKpiChip({ pending: 0, submitted: 0, approved: 4, rejected: 0, total: 4 }).key).toBe("approved");
     expect(personKpiChip({ pending: 0, submitted: 0, approved: 0, rejected: 0, total: 0 }).key).toBe("noKpis");
+  });
+});
+
+describe("parseKpiNumber", () => {
+  it("reads blanks as no number, never as zero", () => {
+    expect(parseKpiNumber(null)).toEqual({ ok: true, value: null });
+    expect(parseKpiNumber(undefined)).toEqual({ ok: true, value: null });
+    expect(parseKpiNumber("")).toEqual({ ok: true, value: null });
+    expect(parseKpiNumber("   ")).toEqual({ ok: true, value: null });
+  });
+  it("reads finite numbers and numeric strings", () => {
+    expect(parseKpiNumber(12)).toEqual({ ok: true, value: 12 });
+    expect(parseKpiNumber(0)).toEqual({ ok: true, value: 0 });
+    expect(parseKpiNumber(" 12.5 ")).toEqual({ ok: true, value: 12.5 });
+    expect(parseKpiNumber("-3")).toEqual({ ok: true, value: -3 });
+  });
+  it("rejects anything that would store NaN or Infinity", () => {
+    expect(parseKpiNumber("abc")).toEqual({ ok: false });
+    expect(parseKpiNumber(Number.NaN)).toEqual({ ok: false });
+    expect(parseKpiNumber(Number.POSITIVE_INFINITY)).toEqual({ ok: false });
+    expect(parseKpiNumber("Infinity")).toEqual({ ok: false });
+    expect(parseKpiNumber({})).toEqual({ ok: false });
+    expect(parseKpiNumber(true)).toEqual({ ok: false });
   });
 });

@@ -183,6 +183,16 @@ export function cleanSelfRatings(input: unknown): { kraRatings: Array<{ kraId: s
   };
 }
 
+/**
+ * True when a review save carries a draft to store: a plain object. A body
+ * that did not parse, or one without the draft, used to clean down to empty
+ * strings and answer 200, silently erasing the person's whole draft. The
+ * routes now answer 400 and leave the stored draft alone.
+ */
+export function isReviewDraft(input: unknown): input is Record<string, unknown> {
+  return !!input && typeof input === "object" && !Array.isArray(input);
+}
+
 /** What a submitted self review is missing (every KRA rated), or null. */
 export function selfReviewGap(clean: ReturnType<typeof cleanSelfRatings>, kraIds: readonly string[]): string | null {
   const rated = new Set(clean.kraRatings.filter((k) => k.rating != null).map((k) => k.kraId));

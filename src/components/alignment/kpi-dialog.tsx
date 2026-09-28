@@ -346,7 +346,6 @@ export function KpiDialog({
             Cancel
           </Button>
           <Button size="sm" onClick={() => void submit()} disabled={busy || !name.trim()}>
-            
             {busy ? "Saving" : editing ? "Save changes" : "Create KPI"}
           </Button>
         </div>

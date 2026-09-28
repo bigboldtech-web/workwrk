@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
 import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { kpiActorCtx, mayActOnKpisOf, notifyKpiRecordedForYou } from "@/lib/kpi-review.server";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
@@ -53,6 +53,10 @@ export async function POST(req: NextRequest) {
     managerNotes?: string | null;
   }
   const rows = records as BatchRecordInput[];
+  // Every number is checked before any row is touched: a non-numeric value
+  // used to store NaN over an approved number (src/lib/kpi-record-status.ts).
+  const badRow = rows.find((r) => !parseKpiNumber(r.actualValue).ok || !parseKpiNumber(r.targetValue).ok);
+  if (badRow) return jsonError(`KPI numbers must be numbers (KPI ${String(badRow.kpiId)}).`, 400);
 
   // Fetch all KPIs in one query
   const kpiIds = rows.map((r) => r.kpiId);
@@ -82,9 +86,9 @@ export async function POST(req: NextRequest) {
     // ceiling, so resolveKpiLine hands back a real line.
     const target = resolveKpiLine(
       kpi.type,
-      kpi.targetValue ?? (r.targetValue != null ? Number(r.targetValue) : null),
+      kpi.targetValue ?? numberOrNull(r.targetValue),
     );
-    const actual = r.actualValue != null ? Number(r.actualValue) : null;
+    const actual = numberOrNull(r.actualValue);
     const score = scoreKpiRecord(
       { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
       actual,
@@ -132,4 +136,10 @@ export async function POST(req: NextRequest) {
   if (!isSelf) void notifyKpiRecordedForYou({ userId, actorId, period, count: newlyApproved });
 
   return jsonSuccess({ saved: results.length, period });
+}
+
+/** The value parseKpiNumber already accepted above; a blank is null. */
+function numberOrNull(raw: unknown): number | null {
+  const p = parseKpiNumber(raw);
+  return p.ok ? p.value : null;
 }

@@ -66,7 +66,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: "Only the person who decided can undo it." }, { status: 403 });
     }
   } else if (row.status !== "SUBMITTED") {
-    return NextResponse.json({ error: `Can't act on a ${row.status.toLowerCase()} KPI number.` }, { status: 400 });
+    const word = row.status === "APPROVED" ? "approved" : row.status === "REJECTED" ? "sent back" : "not yet submitted";
+    return NextResponse.json({ error: `This KPI number is ${word}, so there is nothing to decide.` }, { status: 400 });
   }
 
   const result = await actOnKpiRecord(id, { action, notes: parsed.data.notes, actorId: u.id });

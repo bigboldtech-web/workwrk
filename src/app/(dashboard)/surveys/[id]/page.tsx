@@ -1,3 +1,6 @@
+/* eslint-disable workwrk-ds/dynamic-page-declares-breadcrumb */
+// The crumb is declared one component down: SurveyDetailClient renders
+// <Breadcrumb items/> with the survey's title, which the rule cannot see from here.
 // A pulse survey (spec-teams-performance /surveys/[id]). The hub gate first
 // (runs surveys, or is targeted by one), then the survey itself: its
 // runners at any time, its audience while it is Open, and anyone who has

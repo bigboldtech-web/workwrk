@@ -19,7 +19,7 @@
 import { gatePage } from "@/lib/access/gate";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getOrCreateWeeklyReview } from "@/lib/weekly-review";
+import { findWeeklyReview } from "@/lib/weekly-review";
 import { isCurrentWeek, parseWeekKey, weekKey, weekOptions, weekStartOf } from "@/lib/weeks";
 import { WeeklyReviewClient } from "./weekly-review-client";
 
@@ -50,7 +50,7 @@ export default async function WeeklyReviewPage({
   const current = isCurrentWeek(askedKey);
 
   const review = current
-    ? await getOrCreateWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId })
+    ? await findWeeklyReview({ userId: viewer.userId }).catch(() => null)
     : await prisma.weeklyReview
         .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: linked?.periodStart ?? asked } } })
         .then((row) => (row ? JSON.parse(JSON.stringify(row)) : null))

@@ -21,7 +21,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, orgScoring, reviewMetrics } from "@/lib/performance/review-cycle.server";
-import { cleanManagerAssessment, isOutcome, managerMayWrite, managerRatingFrom } from "@/lib/performance/review-cycle";
+import { cleanManagerAssessment, isOutcome, isReviewDraft, managerMayWrite, managerRatingFrom } from "@/lib/performance/review-cycle";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -144,6 +144,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     );
   }
 
+  // Never overwrite a stored manager draft with nothing (review-cycle.ts isReviewDraft).
+  if (!isReviewDraft(body.managerAssessment)) return jsonError("Nothing to save: the review did not arrive. Your draft is unchanged.", 400);
   const assessment = cleanManagerAssessment(body.managerAssessment);
   const outcome = isOutcome(body.outcome) ? (body.outcome as string) : assessment.recommendation || null;
   if (submit && !outcome) return jsonError("Pick an outcome before you submit", 400);

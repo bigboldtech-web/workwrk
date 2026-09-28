@@ -147,7 +147,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/people/roles/\\[id\\]/page.tsx",
   "src/app/(dashboard)/settings/api/page.tsx",
   "src/app/(dashboard)/settings/billing/page.tsx",
-  "src/app/(dashboard)/settings/hierarchy/page.tsx",
   "src/app/(dashboard)/settings/identity/page.tsx",
   "src/app/(dashboard)/settings/locale/page.tsx",
   "src/app/(dashboard)/settings/members/page.tsx",

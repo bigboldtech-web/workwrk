@@ -106,8 +106,24 @@ function shapeFromRow(row: {
 }
 
 /**
+ * Read the user's review for the given week, or null. Never writes: every
+ * GET and page render uses this, and the row is created by the first save
+ * (POST /api/me/weekly-review), so opening the page leaves no empty DRAFT.
+ */
+export async function findWeeklyReview(args: {
+  userId: string;
+  periodStart?: Date;
+}): Promise<WeeklyReviewDoc | null> {
+  const periodStart = args.periodStart ?? weekStartFor();
+  const row = await prisma.weeklyReview.findUnique({
+    where: { userId_periodStart: { userId: args.userId, periodStart } },
+  });
+  return row ? shapeFromRow(row) : null;
+}
+
+/**
  * Get the user's review for the given week, creating a DRAFT if none
- * exists yet. The manager fk is inferred from the user's solid manager
+ * exists yet. Only a write path calls this (the POST behind the first save). The manager fk is inferred from the user's solid manager
  * at create time so the manager surface can scope on it.
  */
 export async function getOrCreateWeeklyReview(args: {
@@ -130,15 +146,26 @@ export async function getOrCreateWeeklyReview(args: {
     select: { managerId: true },
   });
 
-  const created = await prisma.weeklyReview.create({
-    data: {
-      organizationId: args.organizationId,
-      userId: args.userId,
-      periodStart,
-      managerId: user?.managerId ?? null,
-    },
-  });
-  return shapeFromRow(created);
+  try {
+    const created = await prisma.weeklyReview.create({
+      data: {
+        organizationId: args.organizationId,
+        userId: args.userId,
+        periodStart,
+        managerId: user?.managerId ?? null,
+      },
+    });
+    return shapeFromRow(created);
+  } catch (err) {
+    // Two first saves raced (two tabs): the other one created the row, so
+    // answer with it instead of a 500.
+    if ((err as { code?: string })?.code !== "P2002") throw err;
+    const row = await prisma.weeklyReview.findUnique({
+      where: { userId_periodStart: { userId: args.userId, periodStart } },
+    });
+    if (!row) throw err;
+    return shapeFromRow(row);
+  }
 }
 
 export interface UpdateWeeklyReviewInput {
@@ -287,9 +314,19 @@ export async function countChainReviewsAwaiting(managerId: string): Promise<numb
  * `since` bounds a history list by time rather than by a row cap.
  * Includes the subject so the queue can render who-and-when at a glance.
  */
+/** How many reviews the direct manager queue holds, for a server total. */
+export async function countReviewsForManager(
+  managerId: string,
+  opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED" } = {},
+): Promise<number> {
+  return prisma.weeklyReview.count({
+    where: { AND: [managerQueueWhere(managerId), opts.status ? { status: opts.status } : {}] },
+  });
+}
+
 export async function listReviewsForManager(
   managerId: string,
-  opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED"; take?: number; since?: Date; sinceDays?: number; alsoDecidedBy?: boolean } = {},
+  opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED"; take?: number; skip?: number; since?: Date; sinceDays?: number; alsoDecidedBy?: boolean } = {},
 ): Promise<ManagerReviewQueueItem[]> {
   if (opts.sinceDays && !opts.since) opts = { ...opts, since: new Date(Date.now() - opts.sinceDays * 24 * 60 * 60 * 1000) };
   let decidedIds: string[] = [];
@@ -316,8 +353,9 @@ export async function listReviewsForManager(
         opts.since ? { OR: [{ reviewedAt: { gte: opts.since } }, { reviewedAt: null, updatedAt: { gte: opts.since } }] } : {},
       ],
     },
-    orderBy: [{ submittedAt: "desc" }, { periodStart: "desc" }],
+    orderBy: [{ submittedAt: "desc" }, { periodStart: "desc" }, { id: "desc" }],
     ...(opts.take ? { take: opts.take } : {}),
+    ...(opts.skip ? { skip: opts.skip } : {}),
   });
 
   const subjectIds = Array.from(new Set(rows.map((r) => r.userId)));

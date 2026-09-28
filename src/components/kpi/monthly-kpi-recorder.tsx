@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,8 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
-import { useAutosave } from "@/hooks/use-autosave";
+import { readAutosaveBackup, useAutosave } from "@/hooks/use-autosave";
+import { keepaliveFits } from "@/lib/api-fetch";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 import {
   getCurrentPeriod,
@@ -90,14 +91,19 @@ interface Props {
   self?: boolean;
 }
 
+/** Where an unsaved edit for this person and month is kept on this device. */
+function recorderBackupKey(userId: string, period: string, self: boolean): string {
+  return `workwrk:kpi-recorder:${self ? "self" : "mgr"}:${userId}:${period}`;
+}
+
 export function MonthlyKpiRecorder({ userId, self = false }: Props) {
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [kras, setKras] = useState<KraGroup[]>([]);
   const [totalKpis, setTotalKpis] = useState(0);
-  const [recordedKpis, setRecordedKpis] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<RecordFormData>({});
+  const pendingRestoreRef = useRef<RecordFormData | null>(null);
   const [expandedKras, setExpandedKras] = useState<Set<string>>(new Set());
   const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
   const { success: toastSuccess, error: toastError } = useToast();
@@ -114,7 +120,6 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
       const result = data.data || data;
       setKras(result.kras || []);
       setTotalKpis(result.totalKpis || 0);
-      setRecordedKpis(result.recordedKpis || 0);
 
       // Initialize form data from existing records
       const fd: RecordFormData = {};
@@ -128,6 +133,12 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           };
         }
       }
+      // An edit that never reached the server (the tab closed mid-save, or
+      // every retry failed) is kept locally under this person and month. It
+      // is applied once the server's values are the autosave baseline (the
+      // effect below useAutosave), so it reads as unsaved and is sent.
+      const backup = readAutosaveBackup<RecordFormData>(recorderBackupKey(userId, period, self));
+      pendingRestoreRef.current = backup?.data && typeof backup.data === "object" ? backup.data : null;
       setFormData(fd);
 
       // Auto-expand all KRAs
@@ -152,7 +163,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     }));
   };
 
-  // Shared save core, called both by the explicit "Save All" button
+  // Shared save core, called both by the explicit "Save all" button
   // and by the debounced autosave. `silent=true` skips the success toast
   // (autosave fires often; the indicator next to the button is feedback
   // enough) and skips the post-save refetch since the user is likely
@@ -167,14 +178,18 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           ? { notes: data.managerNotes || null }
           : { managerNotes: data.managerNotes || null }),
       }));
+      const body = JSON.stringify(
+        self
+          ? { period: selectedPeriod, records }
+          : { userId, period: selectedPeriod, records },
+      );
+      // keepalive so a save begun as the tab closes still lands, when the
+      // body fits the browser's keepalive budget.
       const res = await fetch(self ? "/api/kpi-records/self-report" : "/api/kpi-records/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          self
-            ? { period: selectedPeriod, records }
-            : { userId, period: selectedPeriod, records },
-        ),
+        body,
+        keepalive: keepaliveFits(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -188,7 +203,14 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
         // The routes count only the rows a save changed (an unchanged number
         // keeps its status and is not rewritten).
         const saved = Number((result.data || result).saved ?? 0);
-        toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : "Nothing changed, your numbers are already saved");
+        const skipped = Number((result.data || result).skipped ?? 0);
+        if (skipped > 0) {
+          // A KPI that left this person's assignments (a job title change
+          // mid-month) takes no number: say so rather than "already saved".
+          toastError(`${skipped} ${skipped === 1 ? "number was" : "numbers were"} not saved: ${skipped === 1 ? "that KPI is" : "those KPIs are"} no longer assigned.`);
+        } else {
+          toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : "Nothing changed, your numbers are already saved");
+        }
         fetchKpis(selectedPeriod);
       }
     },
@@ -216,7 +238,31 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     enabled: autosaveEnabled,
     delay: 2000,
     save: (snapshot) => saveCore(snapshot, true),
+    // A local copy of an unsaved edit, restored by fetchKpis above; the hook
+    // clears it on a successful save.
+    localKey: selectedPeriod ? recorderBackupKey(userId, selectedPeriod, self) : undefined,
   });
+
+  // Declared after useAutosave on purpose: its baseline effect has already
+  // taken the server's values in this commit, so the restored edit is a real
+  // change that autosaves. Only KPIs still on the form take a value.
+  useEffect(() => {
+    if (loading || !autosaveEnabled) return;
+    const restore = pendingRestoreRef.current;
+    if (!restore) return;
+    pendingRestoreRef.current = null;
+    setFormData((prev) => {
+      const next = { ...prev };
+      for (const [kpiId, v] of Object.entries(restore)) {
+        if (!next[kpiId] || !v || typeof v !== "object") continue;
+        next[kpiId] = {
+          actualValue: typeof v.actualValue === "string" ? v.actualValue : next[kpiId].actualValue,
+          managerNotes: typeof v.managerNotes === "string" ? v.managerNotes : next[kpiId].managerNotes,
+        };
+      }
+      return next;
+    });
+  }, [loading, autosaveEnabled]);
 
   const toggleKra = (kraId: string) => {
     setExpandedKras((prev) => {
@@ -280,12 +326,12 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
       <Card>
         <CardContent className="p-8 text-center">
           <Target size={40} className="mx-auto text-ink-2 mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No KPIs Assigned</h3>
+          <h3 className="text-lg font-semibold mb-2">No KPIs assigned</h3>
           <p className="text-xs text-ink-2">
             Assign KRAs with KPIs to this person first, then come back to record scores.
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => setSelectedPeriod(null)}>
-            Go Back
+            Go back
           </Button>
         </CardContent>
       </Card>
@@ -304,7 +350,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="sm" onClick={() => setSelectedPeriod(null)} className="text-xs">
-                Change Period
+                Change period
               </Button>
               <div>
                 <h3 className="text-xs font-semibold">{formatPeriodLabel(selectedPeriod)}</h3>
@@ -322,7 +368,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                 <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} />
               )}
               <Button onClick={handleSaveAll} disabled={saving} className="gap-1.5">
-                <Save size={14} /> {saving ? "Saving..." : "Save All"}
+                <Save size={14} /> {saving ? "Saving" : "Save all"}
               </Button>
             </div>
           </div>
@@ -467,7 +513,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                             <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
                               <p className="text-micro text-ink-3 uppercase">Target / month</p>
                               <p className="text-xs font-mono font-semibold">
-                                {adjTarget != null ? adjTarget : "None"}
+                                {adjTarget != null ? adjTarget : <span className="font-sans font-normal text-ink-3">No target</span>}
                               </p>
                               {targetHint && (
                                 <p className="text-micro text-ink-3 leading-tight">
@@ -500,7 +546,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                             : score >= 50 ? "text-warning-text"
                             : "text-danger-text"
                           }`}>
-                            {score != null ? `${score}%` : "None"}
+                            {score != null ? `${score}%` : <span className="font-sans font-normal">Not scored</span>}
                           </p>
                         </div>
 

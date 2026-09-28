@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, getUserId } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
@@ -45,7 +46,19 @@ interface Answer {
   value: string | number | string[];
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+interface Respondent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  office: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+}
+
+interface AnswerWithMeta {
+  value: string | number | string[];
+  createdAt: Date;
+  user: Respondent | null;
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -84,45 +97,55 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // "anonymous" responses become attributable). So the segment filters are
   // honored ONLY on non-anonymous surveys; on anonymous ones they are
   // ignored entirely, no matter what the caller passes.
+  //
+  // SurveyResponse has no relation to User (only userId), so the segment is
+  // resolved to user ids first and the respondents are read in a second
+  // query. The old code selected and filtered on a `user` relation that does
+  // not exist, which made every named survey's results a 500.
   const allowSegmentFilter = survey.anonymous === false;
-  const responseWhere: any = { surveyId: id };
+  const responseWhere: Prisma.SurveyResponseWhereInput = { surveyId: id };
   if (allowSegmentFilter && (officeId || departmentId)) {
-    const userFilter: any = { organizationId: orgId, deletedAt: null };
+    const userFilter: Prisma.UserWhereInput = { organizationId: orgId, deletedAt: null };
     if (officeId) userFilter.officeId = officeId;
     if (departmentId) userFilter.departmentId = departmentId;
-    responseWhere.user = userFilter;
+    const segment = await prisma.user.findMany({ where: userFilter, select: { id: true } });
+    responseWhere.userId = { in: segment.map((u) => u.id) };
   }
 
   const includeUser = survey.anonymous === false;
-  const responses = await prisma.surveyResponse.findMany({
+  const rows = await prisma.surveyResponse.findMany({
     where: responseWhere,
-    select: {
-      answers: true,
-      createdAt: true,
-      ...(includeUser
-        ? {
-            user: {
-              select: {
-                id: true, firstName: true, lastName: true,
-                office: { select: { id: true, name: true } },
-                department: { select: { id: true, name: true } },
-              },
-            },
-          }
-        : {}),
-    },
+    // userId is read only to attribute a named survey; an anonymous one never
+    // carries it past this query.
+    select: { answers: true, createdAt: true, userId: true },
     orderBy: { createdAt: "desc" },
   });
+  const respondents = includeUser && rows.length
+    ? await prisma.user.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.userId))] }, organizationId: orgId },
+        select: {
+          id: true, firstName: true, lastName: true,
+          office: { select: { id: true, name: true } },
+          department: { select: { id: true, name: true } },
+        },
+      })
+    : [];
+  const respondentById = new Map<string, Respondent>(respondents.map((u) => [u.id, u]));
+  const responses = rows.map((r) => ({
+    answers: r.answers,
+    createdAt: r.createdAt,
+    user: includeUser ? respondentById.get(r.userId) ?? null : null,
+  }));
 
-  const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as any as Question[]) : [];
+  const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as unknown as Question[]) : [];
 
   const anonymous = survey.anonymous !== false;
   const surveyBelowFloor = anonymous && !meetsAnonymityFloor(responses.length);
 
   const perQuestion = questions.map((q) => {
-    const valuesWithMeta: { value: string | number | string[]; createdAt: Date; user: any | null }[] = [];
+    const valuesWithMeta: AnswerWithMeta[] = [];
     for (const r of responses) {
-      const answers = Array.isArray(r.answers) ? (r.answers as any as Answer[]) : [];
+      const answers = Array.isArray(r.answers) ? (r.answers as unknown as Answer[]) : [];
       const match = answers.find((a) => a.questionId === q.id);
       const isEmpty =
         match === undefined ||
@@ -134,7 +157,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         valuesWithMeta.push({
           value: match!.value,
           createdAt: r.createdAt,
-          user: (r as any).user ?? null,
+          user: r.user,
         });
       }
     }
@@ -143,11 +166,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return hiddenBelowFloor(q, valuesWithMeta.length, surveyBelowFloor);
     }
     if (anonymous) {
-      if (q.type === "rating") return { ...ratingSummary(q, valuesWithMeta as any, 1, 5), trend: [] };
-      if (q.type === "nps") return { ...ratingSummary(q, valuesWithMeta as any, 0, 10), trend: [] };
+      if (q.type === "rating") return { ...ratingSummary(q, valuesWithMeta, 1, 5), trend: [] };
+      if (q.type === "nps") return { ...ratingSummary(q, valuesWithMeta, 0, 10), trend: [] };
     }
-    if (q.type === "rating") return ratingSummary(q, valuesWithMeta as any, 1, 5);
-    if (q.type === "nps") return ratingSummary(q, valuesWithMeta as any, 0, 10);
+    if (q.type === "rating") return ratingSummary(q, valuesWithMeta, 1, 5);
+    if (q.type === "nps") return ratingSummary(q, valuesWithMeta, 0, 10);
     if (q.type === "single_choice") return choiceSummary(q, valuesWithMeta, "single_choice", q.options || []);
     if (q.type === "multi_choice") return choiceSummary(q, valuesWithMeta, "multi_choice", q.options || []);
     if (q.type === "yes_no") return choiceSummary(q, valuesWithMeta, "yes_no", ["Yes", "No"]);
@@ -170,9 +193,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Top-line summary the UI can render without re-computing. npsScore is
   // standard: % promoters (9-10) minus % detractors (0-6), computed over
   // the first NPS question if the survey has one.
-  const firstNps = perQuestion.find((p: any) => p.kind === "nps");
-  const npsScore = firstNps && (firstNps as any).distribution
-    ? computeNps((firstNps as any).distribution, (firstNps as any).totalAnswered)
+  const firstNps = perQuestion.find((p) => p.kind === "nps");
+  const npsScore = firstNps && "distribution" in firstNps && Array.isArray(firstNps.distribution)
+    ? computeNps(firstNps.distribution, firstNps.totalAnswered)
     : null;
 
   return jsonSuccess({
@@ -263,7 +286,7 @@ function choiceSummary(
 
 function ratingSummary(
   q: Question,
-  valuesWithMeta: { value: string | number; createdAt: Date }[],
+  valuesWithMeta: { value: string | number | string[]; createdAt: Date }[],
   min: number,
   max: number,
 ) {

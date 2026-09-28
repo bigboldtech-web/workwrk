@@ -144,3 +144,28 @@ export function personKpiChip(c: { pending: number; submitted: number; approved:
   if (c.pending > 0 || c.approved < c.total) return { key: "notRecorded", label: "Not recorded", tone: "neutral", needsYou: true };
   return { key: "approved", label: "Approved", tone: "success", needsYou: false };
 }
+
+/**
+ * Read a KPI number from a request body. Every KPI writer runs its
+ * actualValue (and a manual targetValue) through this before touching a row.
+ *
+ * `Number("abc")` is NaN, which Postgres stores and reads back as nothing, so
+ * a stray string once wiped a manager-APPROVED number and flipped the row back
+ * to SUBMITTED; `Number("")` is 0, which recorded a zero nobody typed. Now a
+ * blank (null, undefined, an empty or all-space string) is "no number", a
+ * finite number or numeric string is the number, and anything else is
+ * rejected so the route answers 400 and writes nothing.
+ */
+export function parseKpiNumber(
+  raw: unknown,
+): { ok: true; value: number | null } | { ok: false } {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  if (typeof raw === "number") return Number.isFinite(raw) ? { ok: true, value: raw } : { ok: false };
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (t === "") return { ok: true, value: null };
+    const n = Number(t);
+    return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
+  }
+  return { ok: false };
+}

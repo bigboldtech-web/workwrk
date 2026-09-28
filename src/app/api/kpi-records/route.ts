@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-scope";
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
-import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
 import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { kpiActorCtx, mayActOnKpisOf, notifyKpiRecordedForYou, notifyKpiSubmitted } from "@/lib/kpi-review.server";
 
@@ -71,6 +71,11 @@ export async function POST(req: NextRequest) {
   if (!kpiId || !userId || !period) {
     return jsonError("kpiId, userId, and period are required");
   }
+  // A non-numeric value used to store NaN over an approved number
+  // (src/lib/kpi-record-status.ts); nothing is written when either is bad.
+  const parsedActual = parseKpiNumber(actualValue);
+  const parsedTarget = parseKpiNumber(manualTarget);
+  if (!parsedActual.ok || !parsedTarget.ok) return jsonError("KPI numbers must be numbers.", 400);
   // The current and previous month take numbers; a closed month is never
   // rescored (src/lib/kpi-period.ts).
   if (!isKpiPeriodWritableAnyZone(period)) {
@@ -113,9 +118,9 @@ export async function POST(req: NextRequest) {
   // scores (rating / ceiling · 100).
   const target = resolveKpiLine(
     kpi.type,
-    kpi.targetValue ?? (manualTarget != null ? Number(manualTarget) : null),
+    kpi.targetValue ?? parsedTarget.value,
   );
-  const actual = actualValue != null ? Number(actualValue) : null;
+  const actual = parsedActual.value;
   const score = scoreKpiRecord(
     { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
     actual,

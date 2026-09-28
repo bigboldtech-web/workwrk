@@ -55,6 +55,16 @@ describe("wouldHaveEscalated", () => {
   it("never counts a done item", () => {
     expect(wouldHaveEscalated(item({ status: "Done" }), holders, DAY, since, now)).toBe(false);
   });
+  it("reads a custom closed status by its List's group, not its name", () => {
+    const statuses = [
+      { value: "BUILDING", label: "Building", color: "#000", group: "ACTIVE" as const },
+      { value: "SHIPPED", label: "Shipped", color: "#000", group: "CLOSED" as const },
+    ];
+    expect(wouldHaveEscalated(item({ status: "SHIPPED", statuses }), holders, DAY, since, now)).toBe(false);
+    expect(wouldHaveEscalated(item({ status: "BUILDING", statuses }), holders, DAY, since, now)).toBe(true);
+    // A value the List no longer lists falls back to the name rule.
+    expect(wouldHaveEscalated(item({ status: "Completed", statuses }), holders, DAY, since, now)).toBe(false);
+  });
   it("never counts someone else's item", () => {
     expect(wouldHaveEscalated(item({ ownerId: "x", assigneeIds: ["y"] }), holders, DAY, since, now)).toBe(false);
   });

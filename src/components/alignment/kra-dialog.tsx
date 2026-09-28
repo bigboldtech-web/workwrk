@@ -191,7 +191,6 @@ export function KraDialog({
             Cancel
           </Button>
           <Button size="sm" onClick={() => void submit()} disabled={busy || !name.trim() || !roleId}>
-            
             {busy ? "Saving" : editing ? "Save changes" : "Create KRA"}
           </Button>
         </div>

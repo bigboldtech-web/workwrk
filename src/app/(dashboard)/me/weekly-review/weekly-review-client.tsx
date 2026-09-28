@@ -11,7 +11,7 @@
 // (The data-integrity rule: nothing a person typed is lost because they closed
 // the tab.)
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
@@ -71,7 +71,27 @@ export function WeeklyReviewClient({
   const [busy, setBusy] = useState<null | "submit" | "reopen">(null);
 
   const submitted = review?.status === "SUBMITTED" || review?.status === "ACKNOWLEDGED";
-  const readOnly = !editable || !review || submitted;
+  // This week is writable before any row exists: opening the page writes
+  // nothing, and the first save creates the DRAFT (POST, idempotent).
+  const readOnly = !editable || submitted;
+
+  // The row this page writes to; set once it exists (from the server, or the
+  // first save's POST) so a burst of autosaves never POSTs twice.
+  const reviewRef = useRef<WeeklyReviewDoc | null>(initialReview);
+  const creatingRef = useRef<Promise<WeeklyReviewDoc> | null>(null);
+  const ensureReview = useCallback(async (): Promise<WeeklyReviewDoc> => {
+    if (reviewRef.current) return reviewRef.current;
+    if (!creatingRef.current) {
+      creatingRef.current = (async () => {
+        const res = await apiFetch<{ review: WeeklyReviewDoc }>("/api/me/weekly-review", { method: "POST" });
+        if (!res.ok) throw new Error(res.error);
+        reviewRef.current = res.data.review;
+        setReview(res.data.review);
+        return res.data.review;
+      })().finally(() => { creatingRef.current = null; });
+    }
+    return creatingRef.current;
+  }, []);
 
   const snapshot = useMemo(
     () => ({
@@ -86,16 +106,16 @@ export function WeeklyReviewClient({
 
   const save = useCallback(
     async (value: typeof snapshot) => {
-      if (!review) return;
-      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${review.id}`, {
+      // useAutosave decides retry from the throw, so a failure must throw
+      // rather than be swallowed: "Not saved, retrying" is the honest state.
+      const current = await ensureReview();
+      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${current.id}`, {
         method: "PATCH",
         json: { ...value, action: "save" },
       });
-      // useAutosave decides retry from the throw, so a failure must throw
-      // rather than be swallowed: "Not saved, retrying" is the honest state.
       if (!res.ok) throw new Error(res.error);
     },
-    [review],
+    [ensureReview],
   );
 
   const { status, lastSavedAt } = useAutosave({
@@ -107,7 +127,7 @@ export function WeeklyReviewClient({
 
   const act = useCallback(
     async (action: "submit" | "reopen") => {
-      if (!review) return;
+      if (action === "reopen" && !review) return;
       if (action === "submit") {
         const ok = await confirm({
           title: "Submit this week's review?",
@@ -117,7 +137,15 @@ export function WeeklyReviewClient({
         if (!ok) return;
       }
       setBusy(action);
-      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${review.id}`, {
+      let current: WeeklyReviewDoc;
+      try {
+        current = await ensureReview();
+      } catch (e) {
+        setBusy(null);
+        toast("Couldn't submit", { tone: "danger", description: e instanceof Error ? e.message : undefined });
+        return;
+      }
+      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${current.id}`, {
         method: "PATCH",
         json: { ...snapshot, action },
       });
@@ -126,7 +154,7 @@ export function WeeklyReviewClient({
       setReview(res.data.review);
       router.refresh();
     },
-    [review, snapshot, confirm, toast, router],
+    [review, ensureReview, snapshot, confirm, toast, router],
   );
 
   const start = parseWeekKey(weekKeyValue);
@@ -163,7 +191,7 @@ export function WeeklyReviewClient({
           {review?.managerStatus === "PENDING" ? <span className="text-ink-2">Waiting on your manager</span> : null}
         </div>
 
-        {!review ? (
+        {!review && !editable ? (
           <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
             <DotsArt arrangement="stack" size={64} />
             <p className="text-base font-medium text-ink">Nothing filed for this week</p>
@@ -275,7 +303,7 @@ export function WeeklyReviewClient({
             <Narrative title="Blockers" value={blockers} onChange={setBlockers} readOnly={readOnly} placeholder="What is stuck, or where you need help" />
             <Narrative title="Plan for next week" value={plan} onChange={setPlan} readOnly={readOnly} placeholder="What you will ship next" />
 
-            {review.managerNotes ? (
+            {review?.managerNotes ? (
               <Card title="Manager note">
                 <p className="whitespace-pre-wrap text-base text-ink">{review.managerNotes}</p>
               </Card>
@@ -283,7 +311,7 @@ export function WeeklyReviewClient({
 
             {editable ? (
               <div className="flex items-center gap-2">
-                {review.status === "DRAFT" ? (
+                {!review || review.status === "DRAFT" ? (
                   <button
                     type="button"
                     disabled={busy !== null}
@@ -293,7 +321,7 @@ export function WeeklyReviewClient({
                     {busy === "submit" ? <Dots variant="pending" /> : null} Submit for review
                   </button>
                 ) : null}
-                {review.status === "SUBMITTED" ? (
+                {review?.status === "SUBMITTED" ? (
                   <button
                     type="button"
                     disabled={busy !== null}

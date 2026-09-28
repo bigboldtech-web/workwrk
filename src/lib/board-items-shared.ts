@@ -421,6 +421,29 @@ export function applyHandoverAssignees(
 }
 
 /**
+ * Group open items by the assignee set a handover leaves them with, so the
+ * handover route writes a handful of updateMany calls instead of one per task.
+ * The set itself is carried in the group (never re-parsed from a joined string
+ * key): a key built with one separator and split with another once rewrote a
+ * two-person task as ONE bogus id, dropping the co-assignee.
+ */
+export function groupHandoverAssignees(
+  items: ReadonlyArray<{ id: string; assigneeIds: readonly string[] | null | undefined }>,
+  leaverId: string,
+  recipientId: string,
+): Array<{ assigneeIds: string[]; ids: string[] }> {
+  const groups = new Map<string, { assigneeIds: string[]; ids: string[] }>();
+  for (const it of items) {
+    const next = applyHandoverAssignees(it.assigneeIds, leaverId, recipientId);
+    const key = JSON.stringify(next);
+    const g = groups.get(key);
+    if (g) g.ids.push(it.id);
+    else groups.set(key, { assigneeIds: next, ids: [it.id] });
+  }
+  return [...groups.values()];
+}
+
+/**
  * Normalise an assignee set. Every WRITE path runs through this: create, the
  * multi-picker, /api/items/bulk.
  *

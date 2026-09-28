@@ -31,6 +31,7 @@ import {
   wouldHaveEscalated,
   type ThresholdSummary,
 } from "../src/lib/people/escalation-report";
+import { getBoardStatuses, type StatusOption } from "../src/lib/board-items-shared";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -56,25 +57,34 @@ async function countWouldEscalate(orgId: string, holderIds: string[], ms: number
   let cursor: string | null = null;
   let scanned = 0;
   let hits = 0;
+  // Each List's own statuses, parsed once: a custom closed status is done.
+  const statusesByBoard = new Map<string, StatusOption[]>();
   // An item crosses at dueAt + ms, so only items due in [since - ms, now - ms] can cross inside the window.
   const dueFrom = new Date(since.getTime() - ms);
   const dueTo = new Date(now.getTime() - ms);
   for (;;) {
-    const page: { id: string; ownerId: string | null; assigneeIds: string[]; status: string | null; dueAt: Date | null }[] = await prisma.item.findMany({
+    const page: { id: string; ownerId: string | null; assigneeIds: string[]; status: string | null; dueAt: Date | null; boardId: string; board: { statuses: unknown } }[] = await prisma.item.findMany({
       where: {
         organizationId: orgId,
         archivedAt: null,
+        // An archived List's work is out of play: it never escalates.
+        board: { archivedAt: null },
         dueAt: { gte: dueFrom, lte: dueTo },
         OR: [{ ownerId: { in: holderIds } }, { assigneeIds: { hasSome: holderIds } }],
       },
-      select: { id: true, ownerId: true, assigneeIds: true, status: true, dueAt: true },
+      select: { id: true, ownerId: true, assigneeIds: true, status: true, dueAt: true, boardId: true, board: { select: { statuses: true } } },
       orderBy: { id: "asc" },
       take: PAGE,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
     for (const it of page) {
       scanned += 1;
-      if (wouldHaveEscalated(it, holderSet, ms, since, now)) hits += 1;
+      let statuses = statusesByBoard.get(it.boardId);
+      if (!statuses) {
+        statuses = getBoardStatuses(it.board);
+        statusesByBoard.set(it.boardId, statuses);
+      }
+      if (wouldHaveEscalated({ ...it, statuses }, holderSet, ms, since, now)) hits += 1;
     }
     if (page.length < PAGE) break;
     cursor = page[page.length - 1].id;

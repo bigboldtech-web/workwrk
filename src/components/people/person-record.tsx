@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/layout/os/top-bar/breadcrumb";
 import { personOrigin } from "@/lib/nav/teams-rows";
+import { formatPeriodLabel } from "@/lib/kpi-utils";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { NotFoundView } from "@/components/access/not-found-view";
@@ -547,7 +548,11 @@ export function PersonRecord({
       <EditShortcut enabled={editEnabled} onOpen={() => setEditOpen(true)} />
       {presentation === "page" ? (
         <>
-          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: origin.href, label: origin.label }} actions={actions} />
+          {/* back-map.md section 5: from /team the browser history gives the
+              back; the fallback is always the Directory, which every viewer
+              can open (a manager who lost their reports would land on the My
+              team lock). */}
+          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: "/people", label: "Directory" }} actions={actions} />
           {body}
         </>
       ) : (
@@ -755,7 +760,7 @@ function OverviewTab({ person }: { person: Person }) {
                 <span className="text-sm font-medium text-ink-2">By month</span>
                 {(person.scoreHistory ?? []).map((h) => (
                   <div key={h.period} className="grid grid-cols-[140px_1fr_40px] items-center gap-3 text-sm">
-                    <span className="tabular-nums text-ink-2">{h.period}</span>
+                    <span className="tabular-nums text-ink-2">{formatPeriodLabel(h.period)}</span>
                     <Bar value={h.score} />
                     <span className="text-end tabular-nums text-ink">{Math.round(h.score)}</span>
                   </div>
@@ -784,7 +789,7 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
   return (
     <div className="flex flex-col gap-5">
       <Section
-        title={alignment ? `Weights total ${total}% · ${alignment.currentPeriod}` : "KRAs & KPIs"}
+        title={alignment ? `Weights total ${total}% · ${formatPeriodLabel(alignment.currentPeriod)}` : "KRAs & KPIs"}
         action={
           <span className="flex items-center gap-1">
             {kras.length > 0 && total !== 100 ? <ToneChip tone="warning" label={`Weights total ${total}%`} /> : null}
@@ -826,7 +831,7 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
                           {kpi.ownership === "SHARED" ? <Chip>Shared</Chip> : null}
                           <span className="shrink-0 tabular-nums text-ink">
                             {kpi.latestValue != null ? `${kpi.latestValue}${kpi.unit ? ` ${kpi.unit}` : ""}` : "No reading"}
-                            {kpi.latestPeriod ? <span className="text-ink-2"> · {kpi.latestPeriod}</span> : null}
+                            {kpi.latestPeriod ? <span className="text-ink-2"> · {formatPeriodLabel(kpi.latestPeriod)}</span> : null}
                           </span>
                           <span className="hidden shrink-0 tabular-nums text-ink-2 sm:inline">{kpi.targetValue != null ? `target ${kpi.targetValue}` : "No baseline yet"}</span>
                           <ToneChip tone={rec.tone} label={rec.label} />
@@ -860,7 +865,7 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
                   const st = RECORD_STATUS[r.status] ?? RECORD_STATUS.PENDING;
                   return (
                     <tr key={r.id} className="h-9">
-                      <td className="px-3 tabular-nums text-ink-2">{r.period}</td>
+                      <td className="px-3 tabular-nums text-ink-2">{formatPeriodLabel(r.period)}</td>
                       <td className="max-w-[220px] truncate px-3 text-ink">{r.kpi.name}</td>
                       <td className="px-3 text-end tabular-nums text-ink">{r.actualValue ?? "·"}{r.kpi.unit && r.actualValue != null ? ` ${r.kpi.unit}` : ""}</td>
                       <td className="px-3"><ToneChip tone={st.tone} label={st.label} /></td>

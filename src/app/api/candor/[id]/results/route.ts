@@ -26,12 +26,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const isOwner = candor.createdBy === getUserId(session);
   if (!isOwner && !(await isPeopleTeamOrAdmin(session))) return jsonError("Forbidden", 403);
 
-  // Anonymity: we read ONLY the answers + timestamp. CandorResponse has no user
-  // column, so there is nothing here that could identify a respondent.
+  // Anonymity: we read ONLY the answers. CandorResponse has no user column,
+  // and neither its time nor its insertion order is read, so nothing here can
+  // line an answer up with who answered when (respondedAt is day-truncated
+  // for the same reason). Text answers are shuffled below; ratings aggregate.
   const responses = await prisma.candorResponse.findMany({
     where: { sessionId: id },
-    select: { answers: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
+    select: { answers: true },
   });
 
   // The anonymity floor (DECIDED: four answers): under it, nothing but the

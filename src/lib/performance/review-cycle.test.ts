@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isReviewDraft,
   bandOf,
   cleanManagerAssessment,
   cleanSelfRatings,
@@ -138,5 +139,19 @@ describe("new cycle defaults", () => {
     expect(defaultCyclePeriod("MONTHLY_PULSE", now)).toEqual({ start: "2026-08-01", end: "2026-08-31" });
     expect(defaultCyclePeriod("ANNUAL", now).end).toBe("2026-12-31");
     expect(defaultCycleName("QUARTERLY", now)).toBe("Q3 2026 review");
+  });
+});
+
+describe("isReviewDraft, a save never erases a draft with nothing", () => {
+  it("accepts a draft object", () => {
+    expect(isReviewDraft({ kraRatings: [], reflection: {} })).toBe(true);
+    expect(isReviewDraft({})).toBe(true);
+  });
+  it("rejects a missing, unparsed or wrong-shaped body", () => {
+    expect(isReviewDraft(undefined)).toBe(false);
+    expect(isReviewDraft(null)).toBe(false);
+    expect(isReviewDraft("garbage")).toBe(false);
+    expect(isReviewDraft([])).toBe(false);
+    expect(isReviewDraft(3)).toBe(false);
   });
 });

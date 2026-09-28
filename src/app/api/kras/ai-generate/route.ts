@@ -3,6 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
+/** The parts of Organization.settings this prompt reads. */
+interface OrgSettingsForKras {
+  industry?: string;
+  companyProfile?: { industry?: string; mission?: string; vision?: string; about?: string; values?: unknown };
+}
+
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -37,7 +43,7 @@ export async function POST(req: NextRequest) {
     }),
   ]);
 
-  const settings = (org?.settings as any) || {};
+  const settings = ((org?.settings ?? {}) as OrgSettingsForKras) || {};
   const profile = settings.companyProfile || {};
   const companyName = org?.name || "";
   const industry = profile.industry || settings.industry || "";
@@ -133,8 +139,8 @@ Rules:
       ],
     });
 
-    const textBlock = message.content.find((b: any) => b.type === "text");
-    const text = textBlock ? (textBlock as any).text : "";
+    const textBlock = message.content.find((b) => b.type === "text");
+    const text = textBlock && textBlock.type === "text" ? textBlock.text : "";
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -143,7 +149,8 @@ Rules:
     }
 
     return jsonError("Failed to generate KRAs. Try again.");
-  } catch (err: any) {
+  } catch (caught: unknown) {
+    const err = caught as { error?: { error?: { message?: string } }; message?: string } | null;
     console.error("AI KRA generation error:", err);
     // Surface the actual Anthropic error message so admins can see if it's
     // a credit/auth/rate-limit issue vs a code problem

@@ -13,7 +13,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { notifyKpiSubmitted } from "@/lib/kpi-review.server";
-import { kpiWriteStatus } from "@/lib/kpi-record-status";
+import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
 import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 
@@ -55,6 +55,10 @@ export async function POST(req: NextRequest) {
     evidence?: string | null;
   }
   const rows = records as SelfReportRecordInput[];
+  // Every number is checked before any row is touched: a non-numeric value
+  // used to store NaN over an approved number (src/lib/kpi-record-status.ts).
+  const badRow = rows.find((r) => !parseKpiNumber(r.actualValue).ok);
+  if (badRow) return jsonError(`KPI numbers must be numbers (KPI ${String(badRow.kpiId)}).`, 400);
 
   const before = await prisma.kPIRecord.findMany({
     where: { userId, period, kpiId: { in: rows.map((r) => r.kpiId) } },
@@ -69,7 +73,7 @@ export async function POST(req: NextRequest) {
       const kpi = kpiMap.get(r.kpiId);
       if (!kpi) return null;
 
-      const actual = r.actualValue != null ? Number(r.actualValue) : null;
+      const actual = numberOrNull(r.actualValue);
       const prior = beforeBy.get(r.kpiId) ?? null;
       const noteText = r.notes || null;
       const evidenceText = r.evidence || null;
@@ -122,5 +126,15 @@ export async function POST(req: NextRequest) {
   void notifyKpiSubmitted({ userId, organizationId: getOrgId(session), period, count: fresh });
 
   // `saved` counts the rows this save changed; an unchanged resend is 0.
-  return jsonSuccess({ saved: results.length, period, status: "SUBMITTED" });
+  // `skipped` counts rows for a KPI no longer in this person's active KRA
+  // assignments (a job title change mid-month): those take no number, and
+  // the recorder says so instead of "already saved".
+  const skipped = rows.filter((r) => !allowedKpiIds.has(r.kpiId)).length;
+  return jsonSuccess({ saved: results.length, skipped, period, status: "SUBMITTED" });
+}
+
+/** The value parseKpiNumber already accepted above; a blank is null. */
+function numberOrNull(raw: unknown): number | null {
+  const p = parseKpiNumber(raw);
+  return p.ok ? p.value : null;
 }

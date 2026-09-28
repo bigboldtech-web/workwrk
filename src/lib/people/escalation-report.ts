@@ -9,7 +9,7 @@
 // Thresholds card stays behind "Show upcoming features" with "Not enforced
 // yet". Pure, so every rule is pinned by escalation-report.test.ts.
 
-import { isDoneStatusName } from "../board-items-shared";
+import { getBoardStatuses, isDoneStatus, type StatusOption } from "../board-items-shared";
 
 /** A threshold's value as milliseconds, when its unit is a duration; else null. */
 export function thresholdDurationMs(value: number, unit: string | null | undefined): number | null {
@@ -37,6 +37,18 @@ export interface ReportItem {
   assigneeIds: string[];
   status: string | null;
   dueAt: Date | null;
+  /**
+   * The item's List statuses. A custom closed status (Shipped, Resolved in
+   * a CLOSED group) is done by its group, not by a fixed list of names; a
+   * List with no set of its own uses the default set, and a value missing
+   * from the set falls back to the name rule (isDoneStatus).
+   */
+  statuses?: readonly StatusOption[] | null;
+}
+
+/** Done on this item's own List, the product's one rule. */
+export function isReportItemDone(item: Pick<ReportItem, "status" | "statuses">): boolean {
+  return isDoneStatus(item.statuses ?? getBoardStatuses(null), item.status);
 }
 
 /** The people on an item, owner first, each once. */
@@ -63,7 +75,7 @@ export function wouldHaveEscalated(
   now: Date,
 ): boolean {
   if (!item.dueAt) return false;
-  if (isDoneStatusName(item.status)) return false;
+  if (isReportItemDone(item)) return false;
   if (!itemPeople(item).some((id) => holderIds.has(id))) return false;
   const crossedAt = item.dueAt.getTime() + thresholdMs;
   return crossedAt >= since.getTime() && crossedAt <= now.getTime();

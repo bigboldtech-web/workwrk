@@ -19,10 +19,19 @@ export function getLastPeriod(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+const PERIOD_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "2026-09" reads "Sep 2026". Fixed month names rather than the runtime
+ * locale, so the server render and the browser always agree; anything that
+ * is not a YYYY-MM key comes back as it was.
+ */
 export function formatPeriodLabel(period: string): string {
-  const [year, month] = period.split("-");
-  const date = new Date(parseInt(year), parseInt(month) - 1);
-  return date.toLocaleString("default", { month: "short", year: "numeric" });
+  const m = /^(\d{4})-(\d{2})$/.exec(period ?? "");
+  if (!m) return period;
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) return period;
+  return `${PERIOD_MONTHS[month - 1]} ${m[1]}`;
 }
 
 export type KpiFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "ANNUALLY";

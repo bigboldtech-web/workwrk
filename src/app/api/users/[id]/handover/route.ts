@@ -15,7 +15,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { logActivity } from "@/lib/activity";
 import { managerMapFor, peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
-import { applyHandoverAssignees } from "@/lib/board-items-shared";
+import { groupHandoverAssignees } from "@/lib/board-items-shared";
 
 // Same completion heuristic as /api/me/work, Item.status is a per-board
 // free string, so "open" = anything that doesn't read as finished.
@@ -150,13 +150,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Grouped by resulting set so this stays a handful of updateMany calls
   // rather than one per task, and it all lands in the same transaction as the
   // reports move.
-  const bySet = new Map<string, string[]>();
-  for (const it of open) {
-    const key = applyHandoverAssignees(it.assigneeIds, id, reassignToId).join(" ");
-    const bucket = bySet.get(key);
-    if (bucket) bucket.push(it.id);
-    else bySet.set(key, [it.id]);
-  }
+  const bySet = groupHandoverAssignees(open, id, reassignToId);
 
   // The reports that move: never the recipient themselves, and never a
   // report whose move would close a loop (the recipient sits somewhere under
@@ -181,10 +175,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id: { in: openIds } },
       data: { ownerId: reassignToId },
     }),
-    ...[...bySet.entries()].map(([key, ids]) =>
+    ...bySet.map(({ assigneeIds, ids }) =>
       prisma.item.updateMany({
         where: { id: { in: ids } },
-        data: { assigneeIds: key.length ? key.split(" ") : [] },
+        data: { assigneeIds },
       }),
     ),
     // Exclude the recipient themselves so we never create a self-managing

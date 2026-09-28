@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       // viewer's own order; `period` stays for any existing reader.
       startDate: r.cycle.startDate,
       endDate: r.cycle.endDate,
-      period: `${r.cycle.startDate ? new Date(r.cycle.startDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""} - ${r.cycle.endDate ? new Date(r.cycle.endDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}`,
+      period: `${r.cycle.startDate ? new Date(r.cycle.startDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""} to ${r.cycle.endDate ? new Date(r.cycle.endDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}`,
       overallScore: r.overallScore || r.calibratedScore || r.compositeScore,
       outcome: r.outcome,
       reviewerName: r.reviewer ? `${r.reviewer.firstName} ${r.reviewer.lastName}` : "",
