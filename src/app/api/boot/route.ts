@@ -31,7 +31,7 @@ import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
 import { parseAccessSettings } from "@/lib/access/settings";
-import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 
@@ -84,9 +84,15 @@ export interface BootPayload {
     /** Reports, solid or dotted (the access engine's rule). */
     hasReports: boolean;
     peopleTeam: boolean;
-    /** Phase 6: in scope of an open candor session, or answered one (the Candor row). */
+    /**
+     * Phase 6: in scope of an open candor session, or answered one, or an
+     * organiser by the legacy manager tier (the Candor row). The organiser
+     * part is the same predicate the /candor page gate and POST /api/candor
+     * read (culture-gate.ts isCultureOrganiser), so the row, the palette and
+     * the page never disagree.
+     */
     candorInvited: TeamsViewerFacts["candorInvited"];
-    /** Phase 6: targeted by an open survey, or answered one (the Surveys row). */
+    /** Phase 6: targeted by an open survey, or answered one, or an organiser by the legacy manager tier (the Surveys row). */
     surveyTargeted: TeamsViewerFacts["surveyTargeted"];
     name: string;
     firstName: string | null;
@@ -353,8 +359,8 @@ export async function GET(req: NextRequest) {
         adminScopes: [],
         hasReports: cf.teams.hasReports,
         peopleTeam,
-        candorInvited: cf.teams.candorInvited,
-        surveyTargeted: cf.teams.surveyTargeted,
+        candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
+        surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
         firstName: user.firstName ?? null,
         lastName: user.lastName ?? null,

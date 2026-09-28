@@ -149,8 +149,15 @@ export async function GET(
     cycle.createdById ? prisma.user.findUnique({ where: { id: cycle.createdById }, select: { id: true, firstName: true, lastName: true } }) : Promise.resolve(null),
   ]);
 
+  // Who the cycle covers is the runner's to read (the People team, Admin
+  // and whoever runs it): a manager reading their chain, a
+  // peer asked for feedback or a subject never learns who else is in a
+  // targeted cycle, such as a PIP or probation review.
+  const seesAudience = hrAdmin || canManage;
+  const { userIds, departmentIds, audienceType, ...cycleHeader } = cycle;
   return jsonSuccess({
-    ...cycle,
+    ...cycleHeader,
+    ...(seesAudience ? { userIds, departmentIds, audienceType } : {}),
     reviews,
     stats: { total, selfDone, managerDone, calibrated, completed },
     viewer: {

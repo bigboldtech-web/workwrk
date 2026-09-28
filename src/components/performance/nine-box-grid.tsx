@@ -58,7 +58,11 @@ export function NineBoxGrid({
           </div>
         ) : null}
         <div role="grid" aria-label="Talent grid" className={cn("grid min-w-0 flex-1 grid-cols-3 gap-px overflow-hidden rounded-lg border border-line bg-[var(--os-line-soft)]", mini ? "max-w-[360px]" : "max-w-[900px]")}>
-          {GRID_ROWS.map((row, ri) => row.map((key) => {
+          {GRID_ROWS.map((row, ri) => (
+            // role=row wrappers make the grid's ARIA valid; `contents` keeps
+            // the cells in the parent's 3 column CSS grid.
+            <div key={ri} role="row" aria-rowindex={ri + 1} className="contents">
+            {row.map((key) => {
             const people = cells[key] ?? [];
             const on = selected === key;
             const dot = TOP_BOXES.includes(key) ? "bg-[var(--os-success-solid)]" : ATTENTION_BOXES.includes(key) ? "bg-[var(--os-danger-solid)]" : null;
@@ -68,7 +72,6 @@ export function NineBoxGrid({
                 ref={(el) => { refs.current[key] = el; }}
                 type="button"
                 role="gridcell"
-                aria-rowindex={ri + 1}
                 aria-selected={on}
                 aria-label={`${BOX_LABELS[key]}, ${boxDescription(key)}${mini ? "" : `, ${people.length} ${people.length === 1 ? "person" : "people"}`}`}
                 disabled={readOnly}
@@ -98,21 +101,24 @@ export function NineBoxGrid({
                 ) : null}
               </button>
             );
-          }))}
+          })}
+            </div>
+          ))}
         </div>
       </div>
       <div className={cn("flex items-center gap-2 text-sm text-ink-2", mini ? "ps-7" : "ps-[88px]")}>
         {!mini ? <span className="grid w-full max-w-[900px] grid-cols-3" aria-hidden>{["Low", "Medium", "High"].map((l) => <span key={l} className="text-center">{l}</span>)}</span> : null}
       </div>
-      <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-1", mini ? "ps-7" : "ps-[88px]")}>
-        <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Performance</span>
-        {!mini ? (
-          <>
-            <span className="flex items-center gap-1.5 text-sm text-ink-2"><span className="h-1.5 w-1.5 rounded-full bg-[var(--os-success-solid)]" aria-hidden />Top talent</span>
-            <span className="flex items-center gap-1.5 text-sm text-ink-2"><span className="h-1.5 w-1.5 rounded-full bg-[var(--os-danger-solid)]" aria-hidden />Needs attention</span>
-          </>
-        ) : null}
+      {/* The X axis name, centred under the grid; the legend on its own row. */}
+      <div className={cn(mini ? "ps-7" : "ps-[88px]")}>
+        <span className={cn("block w-full text-center text-micro font-semibold uppercase tracking-[0.06em] text-ink-2", mini ? "max-w-[360px]" : "max-w-[900px]")}>Performance</span>
       </div>
+      {!mini ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 ps-[88px]">
+          <span className="flex items-center gap-1.5 text-sm text-ink-2"><span className="h-1.5 w-1.5 rounded-full bg-[var(--os-success-solid)]" aria-hidden />Top talent</span>
+          <span className="flex items-center gap-1.5 text-sm text-ink-2"><span className="h-1.5 w-1.5 rounded-full bg-[var(--os-danger-solid)]" aria-hidden />Needs attention</span>
+        </div>
+      ) : null}
     </div>
   );
 }

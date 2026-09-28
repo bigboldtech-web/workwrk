@@ -3,8 +3,10 @@
 // access-model-spec 5.2: a Guest always gets the in-shell 404; Kudos opens to
 // every Member; Candor and Surveys open to the people who run them and to
 // the people asked to answer them, and to nobody else (a Member outside
-// every session and survey audience gets the in-shell 404, so the page and
-// its sidebar row never disagree).
+// every session and survey audience gets the in-shell 404). The page and its
+// sidebar row never disagree: /api/boot folds the same organiser predicate
+// (the legacy manager tier) into the candorInvited and surveyTargeted facts
+// the Teams rows and the launcher read.
 //
 // `organiser` is the SAME predicate the create routes check (POST
 // /api/candor and POST /api/pulse-surveys: the manager tier, HR included,

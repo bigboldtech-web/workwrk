@@ -20,6 +20,11 @@ describe("review visibility", () => {
     expect(reviewLens({ callerId: "peer", hrAdmin: false, subjectId: "emp", reviewerId: "mgr", inTree: false })).toBe("peer");
   });
 
+  it("gives an Admin or People team member who is the subject the subject lens", () => {
+    expect(reviewLens({ callerId: "hr", hrAdmin: true, subjectId: "hr", reviewerId: "boss", inTree: false })).toBe("subject");
+    expect(reviewLens({ callerId: "hr", hrAdmin: true, subjectId: "hr", reviewerId: "hr", inTree: true })).toBe("subject");
+  });
+
   it("never gives the subject the manager draft, calibration or the 9-box potential", () => {
     const v = subjectRowView(row, "emp");
     expect(v.managerAssessment).toBeNull();

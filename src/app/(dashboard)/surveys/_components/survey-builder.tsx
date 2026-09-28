@@ -26,7 +26,8 @@ import { PickerButton } from "@/components/dashboards/widget-registry";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { ReorderableList } from "@/components/performance/reorderable-list";
 import { apiFetch } from "@/lib/api-fetch";
-import { SURVEY_QUESTION_TYPES, type SurveyQuestionType } from "@/lib/performance/survey";
+import { SURVEY_QUESTION_TYPES, closesAtDateKey, closesAtFromDateKey, pickerZone, type SurveyQuestionType } from "@/lib/performance/survey";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
 
 export type QType = SurveyQuestionType;
 export interface BuilderQuestion { id: string; text: string; type: QType; options?: string[]; required?: boolean }
@@ -87,7 +88,8 @@ export function SurveyBuilder({
   const [userIds, setUserIds] = useState<string[]>(survey?.userIds ?? []);
   const [anonymous, setAnonymous] = useState(survey?.anonymous ?? true);
   const [frequency, setFrequency] = useState(survey?.frequency ?? "");
-  const [closesAt, setClosesAt] = useState<string>(survey?.closesAt ? survey.closesAt.slice(0, 10) : "");
+  const zone = pickerZone(useDatePrefs().timezone);
+  const [closesAt, setClosesAt] = useState<string>(closesAtDateKey(survey?.closesAt, zone) ?? "");
   const [lookups, setLookups] = useState<{ offices: Lookup[]; departments: Lookup[]; tags: Lookup[] }>({ offices: [], departments: [], tags: [] });
   const [busy, setBusy] = useState<null | "DRAFT" | "ACTIVE">(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +149,7 @@ export function SurveyBuilder({
       officeIds, departmentIds, tagIds, userIds,
       anonymous,
       frequency: frequency || null,
-      closesAt: closesAt ? new Date(`${closesAt}T23:59:59`).toISOString() : null,
+      closesAt: closesAtFromDateKey(closesAt || null, zone),
       status,
     };
     const r = mode === "edit" && survey

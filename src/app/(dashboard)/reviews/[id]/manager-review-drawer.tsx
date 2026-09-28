@@ -6,7 +6,9 @@
 // KRA, the five behaviours on the org's scale words (Settings > Scoring and
 // reviews > Behavioural anchors, or the built-in five), overall comments
 // and the outcome (all five, Exit recommendation included). Autosaves with
-// the AutosaveIndicator in the header (local backup mgr-review:{reviewId});
+// the AutosaveIndicator in the header (a local backup under the manager's own
+// mgr-review key, offered back through a Restore banner when it is newer
+// than the server copy);
 // the footer's blue Submit manager review is the only blue on screen while
 // the drawer is open. Someone who reads but does not write it (a manager
 // higher in the chain, the People team) gets the same drawer read only.
@@ -24,13 +26,17 @@ import { PickerButton } from "@/components/dashboards/widget-registry";
 import { PersonAvatar, personName } from "@/components/people/person-bits";
 import { RatingScale } from "@/components/performance/rating-scale";
 import { ReviewFormCard } from "@/components/performance/review-form-card";
-import { useAutosave } from "@/hooks/use-autosave";
+import { useAutosave, readAutosaveBackup, clearAutosaveBackup } from "@/hooks/use-autosave";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { draftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { BEHAVIOURS, OUTCOMES, outcomeLabel, reviewStatusOf } from "@/lib/performance/review-cycle";
 import type { PeerFeedbackRow, ReviewRow } from "./cycle-types";
 
 type DrawerData = {
-  review: ReviewRow & { cycle: { id: string; name: string; status: string } };
+  review: ReviewRow & { updatedAt?: string; cycle: { id: string; name: string; status: string } };
   peerFeedback: PeerFeedbackRow[];
   peersAsked: number;
   kras: Array<{ id: string; name: string; weight: number | null }>;
@@ -81,6 +87,12 @@ export function ManagerReviewDrawer({
   const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const datePrefs = useDatePrefs();
+  const viewerId = (useBoot().boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const [backup, setBackup] = useState<{ at: number; data: Form } | null>(null);
+  // A 409 while typing (calibration started, the cycle closed): autosave
+  // stops, the text stays on screen, the local backup is kept.
+  const [locked, setLocked] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await apiFetch<DrawerData>(`/api/reviews/${cycleId}/manager-review?subjectId=${encodeURIComponent(subjectId)}`, { cache: "no-store" });
@@ -97,13 +109,19 @@ export function ManagerReviewDrawer({
       outcome: r.data.review.outcome ?? ma.recommendation ?? "",
     });
     setLoaded(true);
-  }, [cycleId, subjectId]);
+    // Unsaved changes from a closed drawer or a failed save are offered
+    // back, never dropped: the promise the close confirm makes.
+    dropLegacyDraft("mgr-review:", r.data.review.id);
+    const b = readAutosaveBackup<Form>(draftKey("mgr-review:", viewerId, r.data.review.id));
+    const serverAt = r.data.review.updatedAt ? new Date(r.data.review.updatedAt).getTime() : 0;
+    setBackup(b && r.data.canWrite && b.at > serverAt + 2000 ? b : null);
+  }, [cycleId, subjectId, viewerId]);
   useEffect(() => {
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
   }, [load]);
 
-  const canWrite = !!data?.canWrite;
+  const canWrite = !!data?.canWrite && !locked;
   const reviewId = data?.review.id;
   const payload = useCallback((f: Form, submit: boolean) => ({
     reviewId,
@@ -122,10 +140,11 @@ export function ManagerReviewDrawer({
     snapshot: form,
     enabled: canWrite && loaded,
     delay: 1200,
-    localKey: reviewId ? `mgr-review:${reviewId}` : undefined,
+    localKey: reviewId ? draftKey("mgr-review:", viewerId, reviewId) : undefined,
     save: async (snap) => {
       const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/manager-review`, { method: "PATCH", keepalive: true, json: payload(snap, false) }, { retryWrites: true });
-      if (!r.ok && r.status === 409) { void load(); return; }
+      // Throwing keeps the local backup (a resolved save removes it).
+      if (!r.ok && r.status === 409) { setLocked(r.error || "This review no longer takes changes"); throw new Error("locked"); }
       if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);
     },
   });
@@ -135,7 +154,7 @@ export function ManagerReviewDrawer({
   const { status: saveStatus, flushNow } = autosave;
   const close = useCallback(async () => {
     if (saveStatus === "error") {
-      if (!(await confirm({ title: "Leave without saving?", description: "Your latest changes did not save yet. They are kept on this device and saved when you come back.", confirmLabel: "Leave", destructive: true }))) return;
+      if (!(await confirm({ title: "Leave without saving?", description: "Your latest changes did not save yet. They are kept on this device, and you can restore them when you open this review again.", confirmLabel: "Leave", destructive: true }))) return;
     } else if (saveStatus === "dirty" || saveStatus === "saving") {
       await flushNow();
     }
@@ -198,6 +217,19 @@ export function ManagerReviewDrawer({
       ) : undefined}
     >
       <div className="flex flex-col gap-4 px-5 py-4">
+        {backup && canWrite ? (
+          <div role="status" className="flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-subtle px-4 text-sm text-ink">
+            <span className="min-w-0 flex-1">You have changes from {formatDate(backup.at, datePrefs, "datetime")} that were not saved.</span>
+            <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { setForm(backup.data); setBackup(null); }}>Restore</button>
+            <button type="button" className="font-medium text-ink-2 hover:text-ink" onClick={() => { if (reviewId) clearAutosaveBackup(draftKey("mgr-review:", viewerId, reviewId)); setBackup(null); }}>Discard</button>
+          </div>
+        ) : null}
+        {locked ? (
+          <div role="alert" className="flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-subtle px-4 py-2 text-sm text-danger-text">
+            <span className="min-w-0 flex-1">Not saved: {locked}. What you typed is still on screen and kept on this device.</span>
+            <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { setLocked(null); void load(); }}>Show the saved review</button>
+          </div>
+        ) : null}
         {error ? (
           <OsEmptyView variant="error" compact title="Couldn't open this review" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
         ) : !data || !subject ? (

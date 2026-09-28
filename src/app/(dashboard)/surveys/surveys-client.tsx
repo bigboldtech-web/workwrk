@@ -227,7 +227,10 @@ export default function SurveysClient({ canCreate }: { canCreate: boolean }) {
         </span>
       ),
     }] : []),
-    ...(cols.opened ? [{ key: "opened", label: view === "closed" ? "Closed on" : "Opened", width: "120px", hideBelow: 1000, render: (r: Row) => <span className="tabular-nums text-ink-2">{formatDate(view === "closed" ? r.closedAt : r.createdAt, datePrefs, "date")}</span> }] : []),
+    ...(cols.opened ? [{ key: "opened", label: view === "closed" ? "Closed on" : "Opened", width: "120px", hideBelow: 1000, render: (r: Row) => (view !== "closed" && r.status === "DRAFT"
+      // A draft was never opened: a dash, never its creation date.
+      ? <span className="text-ink-3" aria-label="Not opened">-</span>
+      : <span className="tabular-nums text-ink-2">{formatDate(view === "closed" ? r.closedAt : r.createdAt, datePrefs, "date")}</span>) }] : []),
     { key: "closes", label: "Closes", width: "120px", render: (r) => <span className="tabular-nums text-ink-2">{r.closesAt ? formatDate(r.closesAt, datePrefs, "date") : ""}</span> },
   ];
 

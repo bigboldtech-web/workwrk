@@ -12,17 +12,20 @@ import { DateField } from "@/components/ui/date-field";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { closesAtDateKey, closesAtFromDateKey, pickerZone } from "@/lib/performance/survey";
 
 export function ChangeCloseDateDialog({ surveyId, title, closesAt, onClose, onSaved }: { surveyId: string; title: string; closesAt: string | null; onClose: () => void; onSaved: () => void }) {
   const { toast } = useOsToast();
-  const [date, setDate] = useState<string | null>(closesAt ? closesAt.slice(0, 10) : null);
+  const zone = pickerZone(useDatePrefs().timezone);
+  const [date, setDate] = useState<string | null>(closesAtDateKey(closesAt, zone));
   const [remind, setRemind] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const save = async () => {
     setBusy(true);
     setErr(null);
-    const r = await apiFetch(`/api/pulse-surveys/${surveyId}`, { method: "PATCH", json: { closesAt: date ? new Date(`${date}T23:59:59`).toISOString() : null, remind } });
+    const r = await apiFetch(`/api/pulse-surveys/${surveyId}`, { method: "PATCH", json: { closesAt: closesAtFromDateKey(date, zone), remind } });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Couldn't change the date"); return; }
     toast(remind ? "Close date changed and a reminder sent" : "Close date changed");

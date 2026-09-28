@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
         "Placed on": r.updatedAt.toISOString().slice(0, 10),
       })),
       ["Person", "Department", "Job title", "Box", "Performance", "Potential", "Action", "Period", "Placed by", "Placed on"],
+      { formulaSafe: true },
     );
     return new Response(csv, {
       headers: {

@@ -44,6 +44,8 @@ import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { CANDOR_PROMPT_TYPES, candorStatusOf, type CandorPrompt, type CandorPromptType } from "@/lib/performance/candor";
 import { ANONYMITY_FLOOR } from "@/lib/people/anonymity";
+import { draftKey as scopedDraftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
+import { useBoot } from "@/components/layout/os/boot-context";
 
 type Faces = { isOwner: boolean; canManage: boolean; canSeeResults: boolean; inScope: boolean; canRespond: boolean; hasResponded: boolean; canDelete: boolean; canExport: boolean };
 type Session = {
@@ -64,12 +66,15 @@ type Results = {
   belowFloor: boolean;
   floor: number;
   results: Array<
-    | { prompt: CandorPrompt; type: "rating"; average: string | null; distribution: Array<{ value: number; count: number }>; count: number }
-    | { prompt: CandorPrompt; type: "text"; responses: unknown[]; count: number }
+    | { prompt: CandorPrompt; type: "rating"; average: string | null; distribution: Array<{ value: number; count: number }>; count: number; hidden?: boolean }
+    | { prompt: CandorPrompt; type: "text"; responses: unknown[]; count: number; hidden?: boolean }
   >;
 };
 
-const draftKey = (id: string) => `workwrk:candor-answers:${id}`;
+// Unsent answers are kept per person (lib/people/draft-keys.ts): the next
+// person on a shared browser never sees them. The old object-only key is
+// removed on sight.
+const candorDraftKey = (userId: string, id: string) => scopedDraftKey("workwrk:candor-answers:", userId, id);
 
 export default function CandorSessionClient({ id }: { id: string }) {
   const router = useRouter();
@@ -79,6 +84,9 @@ export default function CandorSessionClient({ id }: { id: string }) {
   const { blockingLayerOpen } = useOsShell();
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
+  const viewerId = (useBoot().boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const draftKey = useCallback((sid: string) => candorDraftKey(viewerId, sid), [viewerId]);
+  useEffect(() => { dropLegacyDraft("workwrk:candor-answers:", id); }, [id]);
 
   const [s, setS] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +145,7 @@ export default function CandorSessionClient({ id }: { id: string }) {
     try { window.localStorage.removeItem(draftKey(s.id)); } catch { /* ignore */ }
     setThanks(true);
     void load();
-  }, [s, answeredCount, answers, confirm, load]);
+  }, [s, answeredCount, answers, confirm, load, draftKey]);
   useEffect(() => {
     if (face !== "respond") return;
     const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void submit(); } };
@@ -243,9 +251,10 @@ export default function CandorSessionClient({ id }: { id: string }) {
             <div className="flex flex-col items-center gap-3 py-16 text-center">
               <OsEmptyView title={thanks || faces.hasResponded ? "Thanks. Your answers are in." : "This session is not open for answers"} />
               <Link href="/candor" className="text-sm font-medium text-brand-deep hover:underline">Back to Candor</Link>
+              {s.launchedAt ? <p className="m-0 text-xs text-ink-3">Opened {formatDate(s.launchedAt, datePrefs, "date")}{s.closedAt ? ` · Closed ${formatDate(s.closedAt, datePrefs, "date")}` : ""}</p> : null}
             </div>
           )}
-          {s.launchedAt && face !== "editor" && face !== "results" ? <p className="m-0 text-xs text-ink-3">Opened {formatDate(s.launchedAt, datePrefs, "date")}{s.closedAt ? ` · Closed ${formatDate(s.closedAt, datePrefs, "date")}` : ""}</p> : null}
+          {s.launchedAt && face === "respond" && !thanks ? <p className="m-0 text-xs text-ink-3">Opened {formatDate(s.launchedAt, datePrefs, "date")}{s.closedAt ? ` · Closed ${formatDate(s.closedAt, datePrefs, "date")}` : ""}</p> : null}
         </div>
       </div>
     </>
@@ -281,7 +290,11 @@ function CandorResults({ session }: { session: Session }) {
       {r.results.map((res, i) => (
         <section key={res.prompt.id} className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-6">
           <p className="m-0 text-row font-medium text-ink">{i + 1}. {res.prompt.text}</p>
-          {res.type === "rating" ? (
+          {res.hidden ? (
+            <p className="m-0 text-sm text-ink-2">
+              {res.count === 0 ? "No answers to this question" : `Shown once ${r.floor} people have answered this question (${res.count} so far), to protect who answered.`}
+            </p>
+          ) : res.type === "rating" ? (
             <div className="flex items-start gap-6">
               <span className="text-xl font-semibold tabular-nums text-ink">{res.average ?? ""}</span>
               <ul className="m-0 flex flex-1 list-none flex-col gap-1.5 p-0">

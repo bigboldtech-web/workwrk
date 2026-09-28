@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
       Completed: c.counts.completed,
     })),
     ["Cycle", "Type", "Status", "Starts", "Closes", "Covers", "Started by", "People", "Completed"],
+    { formulaSafe: true },
   );
   return new Response(csv, {
     headers: {

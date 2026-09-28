@@ -45,6 +45,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { PickerButton } from "@/components/dashboards/widget-registry";
 import { PeoplePickerField, PersonAvatar, personName, type PickPerson } from "@/components/people/person-bits";
+import { DotsArt } from "@/components/ui/dots-art";
 import { NineBoxGrid } from "@/components/performance/nine-box-grid";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { apiFetch } from "@/lib/api-fetch";
@@ -147,7 +148,19 @@ export default function TalentClient() {
   useEffect(() => {
     if (!unplaced || allPeriods || !period) return;
     let live = true;
-    void apiFetch<{ data: UserLite[] }>(`/api/talent-assessment/people?unplacedFor=${encodeURIComponent(period)}`, { cache: "no-store" }).then((r) => { if (live) setUnplacedPeople(r.ok ? r.data.data : []); });
+    // Everyone not yet placed, page by page (the route pages by cursor).
+    void (async () => {
+      const all: UserLite[] = [];
+      let cursor: string | null = null;
+      for (let i = 0; i < 1000; i += 1) {
+        const r: Awaited<ReturnType<typeof apiFetch<{ data: UserLite[]; nextCursor?: string | null }>>> = await apiFetch<{ data: UserLite[]; nextCursor?: string | null }>(`/api/talent-assessment/people?unplacedFor=${encodeURIComponent(period)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+        if (!r.ok) break;
+        all.push(...r.data.data);
+        cursor = r.data.nextCursor ?? null;
+        if (!cursor || !live) break;
+      }
+      if (live) setUnplacedPeople(all);
+    })();
     return () => { live = false; };
   }, [unplaced, allPeriods, period, rows]);
 
@@ -353,7 +366,10 @@ export default function TalentClient() {
                   filters ? (
                     <p className="m-0 text-sm text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></p>
                   ) : (
-                    <p className="m-0 text-sm text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}.{!allPeriods ? <> <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</p>
+                    <div className="flex flex-col items-center gap-2 py-4 text-center">
+                      <DotsArt arrangement="cluster" size={72} />
+                      <p className="m-0 text-sm text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}.{!allPeriods ? <> <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</p>
+                    </div>
                   )
                 ) : null}
               </div>

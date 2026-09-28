@@ -3,7 +3,8 @@
 // My review (spec-teams-performance /reviews/[id], the subject's section):
 // what the system already knows, your goals, a rating and a note per KRA,
 // your reflection. Autosaves per field (AutosaveIndicator in the card
-// header, keepalive plus retry, a local backup under review-self:{cycleId});
+// header, keepalive plus retry, a local backup under the person's own
+// review-self key, lib/people/draft-keys.ts);
 // "Submit my review" is the page's blue button, handed up through
 // onPrimary. Once submitted it is read only; once the cycle is completed a
 // "Your result" card shows the band, the manager's comments, the outcome and
@@ -23,6 +24,8 @@ import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { outcomeLabel } from "@/lib/performance/review-cycle";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { draftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
 import type { Band, PanelPrimary, Reflection, ReviewRow, SelfKraRating } from "./cycle-types";
 
 type SelfData = {
@@ -78,8 +81,18 @@ export function MyReviewPanel({
   const [loaded, setLoaded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const localKey = `review-self:${cycleId}`;
+  const viewerId = (useBoot().boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const localKey = draftKey("review-self:", viewerId, cycleId);
+  useEffect(() => { dropLegacyDraft("review-self:", cycleId); }, [cycleId]);
   const [backup, setBackup] = useState<{ at: number; data: Draft } | null>(null);
+  // The server stopped taking this review while the person typed (submitted
+  // in another tab, or the cycle moved to calibration or was cancelled): the
+  // autosave stops, the text on screen stays, the local backup is KEPT, and
+  // the person is told. It never reloads the server copy over their words.
+  const [locked, setLocked] = useState<string | null>(null);
+  // Stored ratings for a KRA no longer assigned are carried through every
+  // save, so removing an assignment mid-cycle never drops what was written.
+  const storedRef = useRef<SelfKraRating[]>([]);
 
   const load = useCallback(async () => {
     const r = await apiFetch<SelfData>(`/api/reviews/${cycleId}/self-assessment`, { cache: "no-store" });
@@ -87,6 +100,7 @@ export function MyReviewPanel({
     setError(null);
     setData(r.data);
     const sr = r.data.review.selfRatings;
+    storedRef.current = (sr?.kraRatings ?? []) as SelfKraRating[];
     const ratings: Draft["kraRatings"] = {};
     for (const k of sr?.kraRatings ?? []) ratings[k.kraId] = { rating: k.rating ?? null, achievements: k.achievements ?? "" };
     const ref: Reflection = sr?.reflection ?? {};
@@ -104,13 +118,19 @@ export function MyReviewPanel({
   }, [load]);
 
   const review = data?.review ?? null;
-  const writable = !!review && review.status === "PENDING" && cycleStatus === "ACTIVE";
+  const writable = !!review && review.status === "PENDING" && cycleStatus === "ACTIVE" && !locked;
   const kras = useMemo(() => (data?.kraAssignments ?? []).map((a) => ({ id: a.kra.id, name: a.kra.name, weight: a.weightage || a.kra.weight || null })), [data]);
 
-  const body = useCallback((d: Draft) => ({
-    kraRatings: kras.map((k) => ({ kraId: k.id, kraName: k.name, rating: d.kraRatings[k.id]?.rating ?? null, achievements: d.kraRatings[k.id]?.achievements ?? "" })) as SelfKraRating[],
-    reflection: d.reflection,
-  }), [kras]);
+  const body = useCallback((d: Draft) => {
+    const current = new Set(kras.map((k) => k.id));
+    return {
+      kraRatings: [
+        ...kras.map((k) => ({ kraId: k.id, kraName: k.name, rating: d.kraRatings[k.id]?.rating ?? null, achievements: d.kraRatings[k.id]?.achievements ?? "" })),
+        ...storedRef.current.filter((k) => k.kraId && !current.has(k.kraId)),
+      ] as SelfKraRating[],
+      reflection: d.reflection,
+    };
+  }, [kras]);
 
   const autosave = useAutosave({
     snapshot: draft,
@@ -119,8 +139,13 @@ export function MyReviewPanel({
     localKey,
     save: async (snap) => {
       const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, { method: "PATCH", keepalive: true, json: { selfRatings: body(snap), submit: false } }, { retryWrites: true });
-      // A 409 means it was submitted elsewhere: stop saving over it.
-      if (!r.ok && r.status === 409) { void load(); return; }
+      // A 409: submitted elsewhere, or the cycle no longer takes self
+      // reviews. Throwing keeps the local backup (a resolved save removes
+      // it); `locked` stops the autosave and says so.
+      if (!r.ok && r.status === 409) {
+        setLocked(r.error || "This review no longer takes changes");
+        throw new Error("locked");
+      }
       if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);
     },
   });
@@ -193,30 +218,11 @@ export function MyReviewPanel({
         <p className="m-0 text-sm text-ink-2">Your review saves as you go. Submit it when every KRA is rated.</p>
       )}
       {submitError ? <p role="alert" className="m-0 text-sm text-danger-text">{submitError}</p> : null}
-
-      {completed ? (
-        <Card title="Your result">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-xl font-semibold tabular-nums text-ink">{score != null ? Math.round(score) : ""}</span>
-              <PerformanceBandChip score={score} bands={bands} />
-              {review.outcome ? <span className="inline-flex h-[26px] items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{outcomeLabel(review.outcome)}</span> : null}
-            </div>
-            {review.managerComments ? <p className="m-0 whitespace-pre-wrap text-row text-ink">{review.managerComments}</p> : null}
-            {review.peerSummary ? (
-              <p className="m-0 text-sm text-ink-2">
-                {review.peerSummary.belowFloor
-                  ? `Peer feedback: shown once 4 people have answered (${review.peerSummary.submitted} so far).`
-                  : `Peer feedback: ${review.peerSummary.averageRating ?? ""} of 5 on average, from ${review.peerSummary.submitted} people.`}
-              </p>
-            ) : null}
-            <div>
-              <button type="button" onClick={() => onOpenLetter(review.id)} className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
-                Download appraisal letter
-              </button>
-            </div>
-          </div>
-        </Card>
+      {locked ? (
+        <div role="alert" className="flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-subtle px-4 py-2 text-sm text-danger-text">
+          <span className="min-w-0 flex-1">Not saved: {locked}. What you typed is still on screen and kept on this device.</span>
+          <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { setLocked(null); void load(); onChanged(); }}>Show the saved review</button>
+        </div>
       ) : null}
 
       <Card title="What the system already knows" hint="Read only. Each number opens where it comes from.">
@@ -280,6 +286,36 @@ export function MyReviewPanel({
           ))}
         </div>
       </Card>
+
+      {completed ? (
+        <Card title="Your result">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xl font-semibold tabular-nums text-ink">{score != null ? Math.round(score) : ""}</span>
+              <PerformanceBandChip score={score} bands={bands} />
+              {review.outcome ? <span className="inline-flex h-[26px] items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{outcomeLabel(review.outcome)}</span> : null}
+            </div>
+            {review.managerComments ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-ink-2">Your manager&apos;s comments</span>
+                <p className="m-0 whitespace-pre-wrap text-row text-ink">{review.managerComments}</p>
+              </div>
+            ) : null}
+            {review.peerSummary ? (
+              <p className="m-0 text-sm text-ink-2">
+                {review.peerSummary.belowFloor
+                  ? `Peer feedback: shown once 4 people have answered (${review.peerSummary.submitted} so far).`
+                  : `Peer feedback: ${review.peerSummary.averageRating ?? ""} of 5 on average, from ${review.peerSummary.submitted} people.`}
+              </p>
+            ) : null}
+            <div>
+              <button type="button" onClick={() => onOpenLetter(review.id)} className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+                Download appraisal letter
+              </button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }

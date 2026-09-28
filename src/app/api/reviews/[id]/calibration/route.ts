@@ -21,7 +21,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canManageReviewCycle, cycleSubjectReach } from "@/lib/people/review-cycle-access";
+import { canManageReviewCycle, cycleSubjectReach, notOwnReview } from "@/lib/people/review-cycle-access";
 import { calibrationNumbers, orgScoring, sopScoresFor } from "@/lib/performance/review-cycle.server";
 import { bandOf, isOutcome } from "@/lib/performance/review-cycle";
 import { logActivity } from "@/lib/activity";
@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const [reviews, scoring] = await Promise.all([
     prisma.review.findMany({
-      where: { cycleId, ...(chain ? { subjectId: { in: chain } } : {}) },
+      where: { cycleId, ...(chain ? { subjectId: { in: chain } } : {}), ...notOwnReview(getUserId(session)) },
       include: {
         subject: {
           select: {
@@ -137,8 +137,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (cycle.status !== "IN_CALIBRATION") return jsonError("Start calibration first", 409);
 
-  const reviews = await prisma.review.findMany({ where: { id: { in: ids }, cycleId }, select: { id: true, subjectId: true, status: true } });
+  const reviews = await prisma.review.findMany({ where: { id: { in: ids }, cycleId }, select: { id: true, subjectId: true, reviewerId: true, status: true } });
   if (reviews.length !== ids.length) return jsonError("Review not found", 404);
+  const me = getUserId(session);
+  if (reviews.some((r) => r.subjectId === me)) {
+    return jsonError("Your own review is calibrated by someone else", 403);
+  }
   const reach = await cycleSubjectReach(session);
   if (reach && reviews.some((r) => !reach.has(r.subjectId))) {
     return jsonError("Some of these people no longer report to you, so their calibration is the People team's", 403);

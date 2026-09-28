@@ -47,6 +47,7 @@ export async function GET(req: Request) {
         Decided: r.reviewedAt ?? "",
       })),
       ["Person", "Email", "Week", "Status", "KRAs on track", "Highlights", "Submitted", "Decided"],
+      { formulaSafe: true },
     );
     return new NextResponse(body, {
       headers: {

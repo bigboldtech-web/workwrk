@@ -44,9 +44,14 @@ export async function GET(
     take: 200,
   });
 
-  // Calculate average KPI score
-  const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
-  const avgKpiScore = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
+  // The average KPI score over EVERY record in the window (the list above
+  // shows the latest 200; the mean never stops at them), so the shown and
+  // the stored score agree however many records there are.
+  const agg = await prisma.kPIRecord.aggregate({
+    where: { userId, kpi: { organizationId: orgId }, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate }, score: { not: null } },
+    _avg: { score: true },
+  });
+  const avgKpiScore = agg._avg.score != null ? Math.round(agg._avg.score) : null;
 
   // SOP compliance
   const sopRecords = await prisma.sOPCompliance.findMany({

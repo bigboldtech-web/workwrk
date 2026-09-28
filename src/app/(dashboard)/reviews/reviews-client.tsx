@@ -260,12 +260,13 @@ export default function ReviewsClient() {
     },
     ...(cols.type ? [{ key: "type", label: "Type", width: "150px", hideBelow: 820, render: (c: CycleRow) => <span className="truncate">{cycleTypeLabel(c.type)}</span> }] : []),
     ...(cols.period ? [{ key: "period", label: "Period", width: "minmax(200px,1fr)", hideBelow: 980, render: (c: CycleRow) => <span className="truncate tabular-nums">{period(c)}</span> }] : []),
-    ...(cols.covers ? [{ key: "covers", label: "Covers", width: "minmax(120px,1fr)", hideBelow: 1100, render: (c: CycleRow) => <span className="truncate text-ink-2">{c.covers}</span> }] : []),
+    ...(cols.covers ? [{ key: "covers", label: "Covers", width: "minmax(110px,1fr)", hideBelow: 1000, render: (c: CycleRow) => <span className="truncate text-ink-2">{c.covers}</span> }] : []),
     ...(cols.progress ? [{
       key: "progress", label: "Progress", width: "190px", hideBelow: 700,
       render: (c: CycleRow) => (
         <span className="flex items-center gap-2">
-          <ReviewStepDots passed={stepsPassed(c.status, c.counts)} />
+          {/* Stalled: still Active past its close date, so the step it is on is --os-danger-solid. */}
+          <ReviewStepDots passed={stepsPassed(c.status, c.counts)} stalled={c.status === "ACTIVE" && new Date(c.endDate).getTime() < Date.now()} />
           <span className="text-sm tabular-nums text-ink-2">{c.counts.total ? `${c.counts.completed} of ${c.counts.total}` : c.status === "DRAFT" ? "Not launched" : "Nobody"}</span>
         </span>
       ),

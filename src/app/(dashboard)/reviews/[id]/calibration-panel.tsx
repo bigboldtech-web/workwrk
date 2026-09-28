@@ -51,7 +51,9 @@ type Payload = {
   warning: string | null;
 };
 
-const n = (v: number | null) => (v == null ? "" : String(Math.round(v)));
+// Every score is out of 100 (the same scale as the Team tab); an empty cell
+// reads as a dash.
+const n = (v: number | null) => (v == null ? "-" : String(Math.round(v)));
 
 export function CalibrationPanel({
   cycleId,
@@ -174,6 +176,7 @@ export function CalibrationPanel({
           ))}
         </ul>
       </section>
+      <p className="m-0 text-xs text-ink-2">Every score here is out of 100: KPI, Self, Manager, Peers, Composite and Calibrated.</p>
       <TableCard
         ariaLabel="Calibration"
         columns={columns}

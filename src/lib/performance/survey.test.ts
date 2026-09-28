@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanSurveyAnswers, cleanSurveyQuestions, missingRequired, surveyMinutes, surveyStatusOf, surveyTransitionBlocked } from "./survey";
+import { closesAtDateKey, closesAtFromDateKey, cleanSurveyAnswers, cleanSurveyQuestions, missingRequired, surveyMinutes, surveyStatusOf, surveyTransitionBlocked } from "./survey";
 
 describe("cleanSurveyQuestions", () => {
   it("keeps real questions, drops blanks and gives every question an id", () => {
@@ -45,5 +45,19 @@ describe("survey moves and words", () => {
     expect(surveyStatusOf("ACTIVE").label).toBe("Open");
     expect(surveyMinutes(8)).toBe("about 2 minutes");
     expect(surveyMinutes(2)).toBe("about a minute");
+  });
+});
+
+describe("survey close date round trip", () => {
+  it("never moves the date when saved unchanged, in any zone", () => {
+    for (const zone of ["America/New_York", "Asia/Kolkata", "UTC", "Pacific/Auckland"]) {
+      const iso = closesAtFromDateKey("2026-10-20", zone)!;
+      expect(closesAtDateKey(iso, zone)).toBe("2026-10-20");
+      expect(closesAtDateKey(closesAtFromDateKey(closesAtDateKey(iso, zone), zone), zone)).toBe("2026-10-20");
+    }
+  });
+  it("stores the end of the picker's day", () => {
+    expect(closesAtFromDateKey("2026-10-20", "Asia/Kolkata")).toBe("2026-10-20T18:29:59.999Z");
+    expect(closesAtFromDateKey(null, "UTC")).toBeNull();
   });
 });

@@ -76,8 +76,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // The same decision twice (a retry whose first answer was lost after the
+  // write landed, a double click, a second tab) is not an error: the
+  // decision stands, so the answer is the review as it is, nothing written,
+  // no second Inbox row.
+  if (parsed.decision !== "REOPEN" && row.status === "ACKNOWLEDGED" && row.managerStatus === parsed.decision) {
+    const review = await prisma.weeklyReview.findUnique({ where: { id: row.id } });
+    return NextResponse.json({ review, unchanged: true });
+  }
   const blocked = weeklyDecisionBlocked(row.status, parsed.decision);
-  if (blocked) return NextResponse.json({ error: blocked }, { status: 400 });
+  // A different decision on an already decided review is a conflict (409),
+  // not a bad request: someone else decided first.
+  if (blocked) return NextResponse.json({ error: blocked }, { status: row.status === "ACKNOWLEDGED" && parsed.decision !== "REOPEN" ? 409 : 400 });
 
   if (parsed.decision === "REOPEN") {
     // Who made the decision being undone: the latest decision in the log.
@@ -154,20 +164,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const actor = await prisma.user.findUnique({ where: { id: u.id }, select: { firstName: true, lastName: true } });
   const actorName = actor ? `${actor.firstName} ${actor.lastName}`.trim() : "Your manager";
   if (parsed.decision !== "REOPEN") {
-    await prisma.notification
-      .create({
-        data: {
-          userId: row.userId,
-          type: "weekly_review_decided",
-          title:
-            parsed.decision === "APPROVED"
-              ? `${actorName} approved your weekly review`
-              : `${actorName} asked for changes to your weekly review`,
-          message: parsed.decision === "APPROVED" ? "Nothing more to do this week." : parsed.notes ?? "",
-          link: inboxLink,
-        },
+    // One Inbox row per review: a decision after an Undo rewrites the row
+    // the Undo left ("reopened"), so decide, Undo, decide never piles up.
+    const title =
+      parsed.decision === "APPROVED"
+        ? `${actorName} approved your weekly review`
+        : `${actorName} asked for changes to your weekly review`;
+    const message = parsed.decision === "APPROVED" ? "Nothing more to do this week." : parsed.notes ?? "";
+    const rewrote = await prisma.notification
+      .updateMany({
+        where: { userId: row.userId, type: "weekly_review_decided", link: inboxLink },
+        data: { title, message, read: false, clearedAt: null, createdAt: new Date() },
       })
-      .catch((e: unknown) => console.error("weekly review notification", e));
+      .catch((e: unknown) => { console.error("weekly review notification", e); return { count: -1 }; });
+    if (rewrote.count === 0) {
+      await prisma.notification
+        .create({ data: { userId: row.userId, type: "weekly_review_decided", title, message, link: inboxLink } })
+        .catch((e: unknown) => console.error("weekly review notification", e));
+    }
   } else {
     // The Undo: the decision's Inbox row now says it was withdrawn (never a
     // silent "approved" left behind). A row from before this release has no

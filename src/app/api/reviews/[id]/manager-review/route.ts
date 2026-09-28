@@ -155,7 +155,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     where: { id: reviewId },
     data: {
       managerAssessment: { ...assessment, overallComments: comments, recommendation: outcome ?? "" },
-      managerRating: managerRating ?? undefined,
+      // The assessment is replaced whole, so the rating follows it: behaviours
+      // cleared means no rating (null), never a stale number the composite
+      // and calibration would keep reading.
+      managerRating: managerRating ?? null,
       managerComments: comments,
       ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
       status: nextStatus,

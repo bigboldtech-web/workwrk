@@ -130,7 +130,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   let closesChanged = false;
   if (body.closesAt !== undefined) {
-    if (existing.status === "CLOSED") return jsonError("Reopen the survey to change when it closes", 409);
+    // A closed survey takes a new close date only as part of Reopen (status
+    // ACTIVE in the same call): every survey the rotate cron closed has a
+    // past close date, and Reopen sends a new one or none.
+    if (existing.status === "CLOSED" && body.status !== "ACTIVE") return jsonError("Reopen the survey to change when it closes", 409);
     if (body.closesAt === null || body.closesAt === "") {
       data.closesAt = null;
       data.reminderSentAt = null;

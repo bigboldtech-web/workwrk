@@ -59,6 +59,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       })
       .filter((v) => v !== undefined && v !== null && v !== "");
 
+    // The floor applies per prompt too (as surveys do): a prompt answered by
+    // fewer than four people shows its count only, never one person's
+    // rating or words on their own.
+    if (promptAnswers.length < ANONYMITY_FLOOR) {
+      return { prompt, type: prompt.type === "rating" ? "rating" : "text", hidden: true, count: promptAnswers.length, ...(prompt.type === "rating" ? { average: null, distribution: [] } : { responses: [] }) };
+    }
+
     if (prompt.type === "rating") {
       const nums = promptAnswers.map(Number).filter((n) => !isNaN(n));
       const avg = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : null;

@@ -65,3 +65,25 @@ export async function cycleSubjectReach(session: unknown): Promise<Set<string> |
   if (v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true) return null;
   return new Set(await chainOf(v.userId));
 }
+
+/**
+ * The Prisma clause that keeps a caller's own review out of the runner's
+ * surfaces (calibration, the cycle CSV): nobody reads their own calibration
+ * or 9-box potential, or calibrates or exports their own review, whoever
+ * they are (DECIDED: a person never sees their own 9-box placement).
+ */
+export function notOwnReview(callerId: string) {
+  return { subjectId: { not: callerId } };
+}
+
+/**
+ * Finalize's version: the caller's own review is left for someone else to
+ * finalize, except for a person with nobody above them (their review's
+ * reviewer is themselves, the launch rule for someone with no manager): they
+ * already wrote its manager half, it finalizes at its composite (they can
+ * never calibrate it), and without this a one-admin org's cycle could never
+ * complete.
+ */
+export function notOwnReviewUnlessSelfReviewer(callerId: string) {
+  return { NOT: { AND: [{ subjectId: callerId }, { reviewerId: { not: callerId } }] } };
+}

@@ -22,12 +22,14 @@ import { outcomeLabel, ratingsTo100, reviewStatusOf } from "@/lib/performance/re
 import type { ReviewRow } from "./cycle-types";
 import { AskPeersDialog } from "./ask-peers-dialog";
 
-function selfOf(r: ReviewRow): string {
-  const v = ratingsTo100((r.selfRatings?.kraRatings ?? []).map((k) => k.rating));
-  return v == null ? "" : (v / 20).toFixed(1);
+// One scale on the whole cycle page: every score is out of 100, the same
+// numbers the Calibration tab, the composite and the bands use.
+function selfOf(r: ReviewRow): number | null {
+  return ratingsTo100((r.selfRatings?.kraRatings ?? []).map((k) => k.rating));
 }
-function managerOf(r: ReviewRow): string {
-  return r.managerRating == null ? "" : (r.managerRating / 20).toFixed(1);
+/** An empty cell reads as a dash, so "no value" never looks like "failed to load". */
+function Num({ v }: { v: number | null | undefined }) {
+  return v == null ? <span className="text-ink-3" aria-label="None">-</span> : <span>{Math.round(v)}</span>;
 }
 
 export function TeamPanel({
@@ -79,16 +81,17 @@ export function TeamPanel({
       ),
     },
     { key: "status", label: "Status", width: "180px", render: (r) => <ToneChip tone={reviewStatusOf(r).tone} label={reviewStatusOf(r).label} /> },
-    { key: "kpi", label: "KPI", width: "70px", numeric: true, hideBelow: 760, render: (r) => <span>{r.kpiScore == null ? "" : `${Math.round(r.kpiScore)}%`}</span> },
-    { key: "self", label: "Self", width: "64px", numeric: true, hideBelow: 700, render: (r) => <span>{selfOf(r)}</span> },
-    { key: "manager", label: "Manager", width: "80px", numeric: true, hideBelow: 700, render: (r) => <span>{managerOf(r)}</span> },
-    { key: "peers", label: "Peers", width: "64px", numeric: true, hideBelow: 900, render: (r) => <span>{(r.peerFeedback ?? []).filter((p) => p.status === "SUBMITTED").length || ""}</span> },
-    { key: "outcome", label: "Outcome", width: "minmax(130px,1fr)", hideBelow: 1000, render: (r) => (r.outcome ? <span className="inline-flex h-6 items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{outcomeLabel(r.outcome)}</span> : null) },
+    { key: "kpi", label: "KPI", width: "70px", numeric: true, hideBelow: 760, render: (r) => <Num v={r.kpiScore} /> },
+    { key: "self", label: "Self", width: "64px", numeric: true, hideBelow: 700, render: (r) => <Num v={selfOf(r)} /> },
+    { key: "manager", label: "Manager", width: "80px", numeric: true, hideBelow: 700, render: (r) => <Num v={r.managerRating} /> },
+    { key: "peers", label: "Peers", width: "64px", numeric: true, hideBelow: 900, render: (r) => <Num v={(r.peerFeedback ?? []).filter((p) => p.status === "SUBMITTED").length || null} /> },
+    { key: "outcome", label: "Outcome", width: "minmax(130px,1fr)", hideBelow: 1000, render: (r) => (r.outcome ? <span className="inline-flex h-6 items-center rounded-md border border-line bg-subtle px-2 text-xs font-medium text-ink">{outcomeLabel(r.outcome)}</span> : <Num v={null} />) },
   ];
 
   return (
     <div className="flex flex-col gap-2">
       {allDone && open ? <p className="m-0 text-sm text-ink-2">Everyone you review is done.</p> : null}
+      <p className="m-0 text-xs text-ink-2">KPI, Self and Manager are scores out of 100. Peers counts the answers in.</p>
       <TableCard
         ariaLabel="People in this cycle"
         columns={columns}

@@ -229,7 +229,8 @@ export default function CandorClient({ canCreate }: { canCreate: boolean }) {
           ...(tableView ? { menu: OPTIONAL_COLS.map((c) => ({ label: `Show ${c.label}`, checked: cols[c.key], keepOpen: true, onClick: () => setCol(c.key, !cols[c.key]) })) } : {}),
         } : undefined}
       />
-      {notice ? <p className="m-0 px-6 pt-2 text-sm text-ink-2">{notice}</p> : null}
+      {/* The notice sits in the same column as the body under it. */}
+      {notice ? <p className={`m-0 w-full px-6 pt-2 text-sm text-ink-2 ${tableView ? "" : "mx-auto max-w-[720px]"}`}>{notice}</p> : null}
       <div className="relative">
         {sortOpen ? (
           <div className="absolute start-[110px] top-0 z-40">

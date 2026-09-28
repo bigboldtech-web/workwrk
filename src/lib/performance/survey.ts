@@ -11,6 +11,38 @@
 //     one of the survey's own options).
 //   - Closed reopens to Open, never back to Draft; Draft launches to Open.
 
+import { endOfZonedDay, zonedDateKey } from "@/lib/zoned-time";
+
+/**
+ * The close date a person picks is a day in THEIR time zone (the same zone
+ * every date on the page is shown in: home.locale.timezone, else the
+ * browser's). It is stored as the last instant of that day, and read back
+ * into a date field in the same zone, so opening Change close date and
+ * saving without touching it never moves the date (the old code built the
+ * instant in the browser's zone and reseeded from the UTC date, which
+ * pushed a US admin's date a day later on every save).
+ */
+export function closesAtDateKey(iso: string | null | undefined, zone: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : zonedDateKey(d, zone);
+}
+
+export function closesAtFromDateKey(key: string | null | undefined, zone: string | null | undefined): string | null {
+  if (!key) return null;
+  return endOfZonedDay(key, zone)?.toISOString() ?? null;
+}
+
+/** The zone a date picker reads and writes in: the preference, else the browser's. */
+export function pickerZone(prefTimezone: string | null | undefined): string | null {
+  if (prefTimezone && prefTimezone.trim()) return prefTimezone.trim();
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 export type SurveyQuestionType = "rating" | "nps" | "yes_no" | "single_choice" | "multi_choice" | "text";
 export type SurveyQuestion = { id: string; text: string; type: SurveyQuestionType; options?: string[]; required?: boolean };
 

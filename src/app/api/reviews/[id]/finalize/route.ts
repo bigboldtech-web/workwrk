@@ -23,7 +23,7 @@
 //     CALIBRATION with the cycle id. A placement someone made by hand for
 //     the same period is never overwritten.
 
-import { canManageReviewCycle, cycleSubjectReach } from "@/lib/people/review-cycle-access";
+import { canManageReviewCycle, cycleSubjectReach, notOwnReviewUnlessSelfReviewer } from "@/lib/people/review-cycle-access";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -72,6 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       cycleId,
       status: { not: "COMPLETED" },
       ...(reach ? { subjectId: { in: [...reach] } } : {}),
+      ...notOwnReviewUnlessSelfReviewer(actorId),
       ...(explicit ? { id: { in: explicit.map((o) => String(o.reviewId ?? "")) } } : { outcome: { not: null } }),
     },
     include: { peerFeedback: { where: { status: "SUBMITTED" }, select: { rating: true, collaborationRating: true } } },

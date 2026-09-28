@@ -407,7 +407,9 @@ export default function KudosClient() {
         toolbar={{
           filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: view === "leaderboard" ? (period !== "month" ? 1 : 0) : filters },
           sort: view === "leaderboard" ? undefined : { onClick: () => setSortOpen((v) => !v), label: sort === "reactions" ? "Most reactions" : "Sort", active: sort === "reactions" },
-          primary: { label: "Give kudos", icon: Heart, onClick: () => { setGiveTo(undefined); setGiveOpen(true); } },
+          // One primary at a time: while the Give kudos modal (with its own
+          // primary) is open, the title-row button is removed, not dimmed.
+          primary: giveOpen ? undefined : { label: "Give kudos", icon: Heart, onClick: () => { setGiveTo(undefined); setGiveOpen(true); } },
           menu: [
             ...(view === "leaderboard"
               ? LEADER_COLS.map((c) => ({ label: `Show ${c.label}`, checked: leaderCols[c.key], keepOpen: true, onClick: () => setLeaderCol(c.key, !leaderCols[c.key]) }))

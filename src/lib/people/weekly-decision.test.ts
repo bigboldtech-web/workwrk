@@ -29,7 +29,7 @@ describe("weeklyDecisionBlocked", () => {
     expect(weeklyDecisionBlocked("SUBMITTED", "APPROVED")).toBeNull();
     expect(weeklyDecisionBlocked("SUBMITTED", "CHANGES_REQUESTED")).toBeNull();
     expect(weeklyDecisionBlocked("DRAFT", "APPROVED")).toMatch(/draft/);
-    expect(weeklyDecisionBlocked("ACKNOWLEDGED", "APPROVED")).toMatch(/acknowledged/);
+    expect(weeklyDecisionBlocked("ACKNOWLEDGED", "APPROVED")).toMatch(/already decided/);
   });
   it("Undo (REOPEN) acts only on a decided review", () => {
     expect(weeklyDecisionBlocked("ACKNOWLEDGED", "REOPEN")).toBeNull();

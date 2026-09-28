@@ -51,8 +51,12 @@ export function reviewLens(opts: {
   /** The caller's chain, the caller included. */
   inTree: boolean;
 }): ReviewLens {
-  if (opts.hrAdmin) return "full";
+  // The subject check comes first: an Owner, Admin or People team member
+  // who is reviewed in a cycle reads their own row as its subject, never
+  // through the People team lens (their manager's draft, their calibration,
+  // their potential and their peers' written answers stay back).
   if (opts.subjectId === opts.callerId) return "subject";
+  if (opts.hrAdmin) return "full";
   if (opts.reviewerId === opts.callerId || opts.inTree) return "full";
   return "peer";
 }

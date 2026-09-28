@@ -25,6 +25,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
+import { draftKey as scopedDraftKey, dropLegacyDraft } from "@/lib/people/draft-keys";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -55,7 +56,9 @@ type ResultQuestion =
   | { questionId: string; text: string; kind: "text"; totalAnswered: number; belowFloor?: boolean; responses: Array<{ value: string; createdAt: string | null; respondent: { id: string; name: string } | null }> };
 type Results = { totalResponses: number; belowFloor: boolean; anonymityFloor?: number; summary: { npsScore: number | null }; questions: ResultQuestion[] };
 
-const draftKey = (id: string) => `workwrk:survey-answers:${id}`;
+// Unsent answers are kept per person (lib/people/draft-keys.ts); the old
+// object-only key is removed on sight.
+const surveyDraftKey = (userId: string, id: string) => scopedDraftKey("workwrk:survey-answers:", userId, id);
 
 export default function SurveyDetailClient({ id }: { id: string }) {
   const router = useRouter();
@@ -64,6 +67,9 @@ export default function SurveyDetailClient({ id }: { id: string }) {
   const { toast } = useOsToast();
   const { blockingLayerOpen } = useOsShell();
   const { boot } = useBoot();
+  const viewerId = (boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const draftKey = useCallback((sid: string) => surveyDraftKey(viewerId, sid), [viewerId]);
+  useEffect(() => { dropLegacyDraft("workwrk:survey-answers:", id); }, [id]);
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
   const isAgent = !!(boot.viewer as { isAgent?: boolean }).isAgent;
@@ -116,7 +122,7 @@ export default function SurveyDetailClient({ id }: { id: string }) {
     setDirty(false);
     toast(d.viewer.hasResponded ? "Your answers are updated" : "Thanks. Your answers are in.");
     void load();
-  }, [d, questions, answers, toast, load]);
+  }, [d, questions, answers, toast, load, draftKey]);
 
   // ── Faces and tabs ────────────────────────────────────────────────
   const v = d?.viewer;

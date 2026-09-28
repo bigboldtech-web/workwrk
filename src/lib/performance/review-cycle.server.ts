@@ -178,12 +178,14 @@ export async function cycleCounts(cycleIds: string[], reviewsWhere?: object): Pr
 }
 
 /**
- * Who may be asked for peer feedback on a subject: people who work with
- * them (their department, their office, the people who share their
- * manager, their manager, their direct reports), active and in the org,
- * never the subject. The peers picker lists this and the request route
- * enforces it, so the list and the write can never disagree. (Space
- * membership is the access engine's store and is not read here.)
+ * The people who work with a subject: their department, their office, the
+ * people who share their manager, their manager and their direct reports.
+ * Active, in the org, never the subject. The peers picker SUGGESTS these
+ * first, labelled with why; anyone else (a Space teammate in another
+ * department included) is found by name through peerAllowedWhere. Space
+ * membership is the access engine's store (read only through loadFacts or
+ * accessibleIds, which answer for the viewer, not for the subject), so it
+ * is not a suggestion source here.
  */
 export async function peerCandidateWhere(
   organizationId: string,
@@ -194,4 +196,14 @@ export async function peerCandidateWhere(
   if (subject.departmentId) or.push({ departmentId: subject.departmentId });
   if (subject.officeId) or.push({ officeId: subject.officeId });
   return { organizationId, deletedAt: null, status: "ACTIVE", id: { not: subject.id }, OR: or };
+}
+
+/**
+ * Who a runner MAY ask, which is wider than who the picker suggests: anyone
+ * active in the org but the subject, as the product allowed before Phase 6
+ * (a subject with no department, no office, no manager and no Space still
+ * gets peer feedback; a cross-functional collaborator is found by name).
+ */
+export function peerAllowedWhere(organizationId: string, subjectId: string): import("@/generated/prisma").Prisma.UserWhereInput {
+  return { organizationId, deletedAt: null, status: "ACTIVE", id: { not: subjectId } };
 }

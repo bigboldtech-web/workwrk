@@ -161,7 +161,9 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
           { user: { firstName: { contains: text, mode: "insensitive" } } },
           { user: { lastName: { contains: text, mode: "insensitive" } } },
           { user: { email: { contains: text, mode: "insensitive" } } },
-          { highlights: { contains: text, mode: "insensitive" } },
+          // A draft's body is its author's alone: search never matches it, so
+          // a manager cannot probe an unsubmitted draft word by word.
+          { highlights: { contains: text, mode: "insensitive" }, status: { not: "DRAFT" } },
         ],
       }
     : {};

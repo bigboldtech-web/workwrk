@@ -78,5 +78,8 @@ export function weeklyReopenBlocked(i: {
 /** Null when the decision may apply to a review in this status; else why not. */
 export function weeklyDecisionBlocked(status: WeeklyStatus, decision: WeeklyDecision): string | null {
   if (decision === "REOPEN") return status === "ACKNOWLEDGED" ? null : "Only a decided review can be reopened";
-  return status === "SUBMITTED" ? null : `Cannot act on a ${status.toLowerCase()} review`;
+  if (status === "SUBMITTED") return null;
+  return status === "DRAFT"
+    ? "This review is still a draft, so there is nothing to decide yet"
+    : "This review was already decided. Undo that decision first to change it";
 }

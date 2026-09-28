@@ -3,12 +3,15 @@
 // bars). The People team and Admin export the cycle; anyone else only the
 // people in their current chain (the same reach calibration reads), and an
 // Agent never exports (cap.agent.export). Performance data never leaves to
-// someone the cycle page would not show it to.
+// someone the cycle page would not show it to: ?subjectIds= only narrows
+// the reach (it is intersected with it, never replaces it), and nobody's
+// export carries their own review (notOwnReview).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError } from "@/lib/api-helpers";
 import { cycleViewerCtx } from "@/lib/performance/review-cycle.server";
+import { notOwnReview } from "@/lib/people/review-cycle-access";
 import { outcomeLabel, reviewStatusOf, POTENTIALS } from "@/lib/performance/review-cycle";
 import { toCsv } from "@/lib/csv";
 
@@ -28,8 +31,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cycl
     include: {
       reviews: {
         where: {
-          ...(ctx.peopleTeamOrAdmin ? {} : { subjectId: { in: [...ctx.chain] } }),
-          ...(only.length ? { subjectId: { in: only } } : {}),
+          AND: [
+            ctx.peopleTeamOrAdmin ? {} : { subjectId: { in: [...ctx.chain] } },
+            only.length ? { subjectId: { in: only } } : {},
+            notOwnReview(ctx.userId),
+          ],
         },
         include: {
           subject: { select: { firstName: true, lastName: true, email: true, department: { select: { name: true } } } },
@@ -56,6 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cycl
       Outcome: outcomeLabel(r.outcome),
     })),
     ["Person", "Email", "Department", "Reviewer", "Status", "KPI score", "Manager rating", "Composite", "Calibrated", "Potential", "Overall score", "Outcome"],
+    { formulaSafe: true },
   );
   return new Response(csv, {
     headers: {

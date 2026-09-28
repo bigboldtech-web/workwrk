@@ -931,8 +931,26 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
 
 function ReviewsTab({ person }: { person: Person }) {
   const self = person.access.relation === "self";
-  const reviews = person.reviews ?? [];
+  const [all, setAll] = useState<ReviewRow[] | null>(null);
+  const [allState, setAllState] = useState<"idle" | "loading" | "error">("idle");
+  const reviews = all ?? person.reviews ?? [];
   const datePrefs = useDatePrefs();
+  // Every cycle, in place: the same lens as the profile payload (GET
+  // /api/reviews?subjectId= runs the subject's own rows through
+  // subjectRowView). The old link went to Review cycles, which is the
+  // in-shell 404 for a subject who holds no app:reviews.
+  const showAll = async () => {
+    setAllState("loading");
+    const r = await apiFetch<{ data: Array<{ id: string; cycleId: string; cycleName: string; cycleStatus: string; cycleStartsAt: string; closesAt: string; status: string; outcome: string | null; overallScore: number | null; calibratedScore: number | null }> }>(
+      `/api/reviews?subjectId=${encodeURIComponent(person.id)}`, { cache: "no-store" },
+    );
+    if (!r.ok) { setAllState("error"); return; }
+    setAll(r.data.data.map((x) => ({
+      id: x.id, cycleId: x.cycleId, status: x.status, outcome: x.outcome, overallScore: x.overallScore, calibratedScore: x.calibratedScore,
+      cycle: { id: x.cycleId, name: x.cycleName, startDate: x.cycleStartsAt, endDate: x.closesAt, status: x.cycleStatus },
+    })));
+    setAllState("idle");
+  };
   return (
     <Section title="Reviews">
       <Rows>
@@ -940,7 +958,7 @@ function ReviewsTab({ person }: { person: Person }) {
           <li>
             <Link href="/me/weekly-review" className="flex min-h-11 items-center gap-3 px-3 hover:bg-hover">
               <CalendarCheck className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
-              <span className="flex-1 text-row text-ink">My weekly review</span>
+              <span className="flex-1 text-row text-ink">Weekly review</span>
             </Link>
           </li>
         ) : null}
@@ -956,9 +974,13 @@ function ReviewsTab({ person }: { person: Person }) {
         ))}
         {!self && reviews.length === 0 ? <li className="px-3 py-3 text-row text-ink-2">No reviews yet</li> : null}
       </Rows>
-      {(person.reviewsTotal ?? 0) > reviews.length ? (
+      {!all && (person.reviewsTotal ?? 0) > reviews.length ? (
         <p className="text-sm text-ink-2">
-          Showing the latest {reviews.length} of {person.reviewsTotal}. <Link href="/reviews" className="text-brand-deep hover:underline">See every cycle in Review cycles</Link>
+          Showing the latest {reviews.length} of {person.reviewsTotal}.{" "}
+          <button type="button" className="text-brand-deep hover:underline disabled:opacity-60" disabled={allState === "loading"} onClick={() => void showAll()}>
+            {allState === "loading" ? "Showing all" : `Show all ${person.reviewsTotal}`}
+          </button>
+          {allState === "error" ? <span role="alert" className="ms-2 text-danger-text">Couldn&apos;t load them. Try again.</span> : null}
         </p>
       ) : null}
       {self && reviews.length === 0 ? <p className="text-sm text-ink-2">No review cycles yet.</p> : null}

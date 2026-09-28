@@ -101,7 +101,10 @@ export function useAutosave<T>({
       return;
     }
     inFlightRef.current = true;
-    setStatus("saving");
+    // While automatic retries run after a failure, the indicator keeps its
+    // red "Not saved, retrying" until a save lands (design system: the
+    // error state stays until saved), never flickering back to "Saving".
+    if (failRetriesRef.current === 0) setStatus("saving");
     try {
       await saveRef.current(snapshotRef.current);
       baselineRef.current = currentSerialized;
@@ -176,7 +179,7 @@ export function useAutosave<T>({
 
   // beforeunload guard — fires only while something is genuinely unsaved.
   useEffect(() => {
-    const pending = status === "dirty" || status === "saving";
+    const pending = status === "dirty" || status === "saving" || status === "error";
     if (!pending) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();

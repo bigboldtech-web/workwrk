@@ -1,11 +1,10 @@
 "use client";
 
-// Ask for peer feedback (560): a people picker SCOPED to the people who work
-// with the subject (GET /api/reviews/[id]/peers: their department, their
-// office, their manager, the people who share their manager, their reports),
-// never the whole org; up to five, plus an optional note. From the bulk bar
-// it asks the same people about each selected person, and anyone who does
-// not work with one of them is skipped for that one and said so.
+// Ask for peer feedback (560): a people picker that SUGGESTS the people who
+// work with the subject (GET /api/reviews/[id]/peers: their department,
+// their office, their manager, the people who share their manager, their
+// reports) and finds anyone else in the org by name; up to five. From the bulk bar it asks the same people about each
+// selected person; the subject themself is skipped for their own review.
 
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,6 +21,7 @@ export function AskPeersDialog({ cycleId, subjects, onClose, onDone }: { cycleId
   const { toast } = useOsToast();
   const [q, setQ] = useState("");
   const [lists, setLists] = useState<Record<string, Candidate[]> | null>(null);
+  const [more, setMore] = useState<{ total: number; shown: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -31,7 +31,8 @@ export function AskPeersDialog({ cycleId, subjects, onClose, onDone }: { cycleId
     let live = true;
     const t = setTimeout(() => {
       void Promise.all(subjects.map(async (s) => {
-        const r = await apiFetch<{ data: Candidate[] }>(`/api/reviews/${cycleId}/peers?subjectId=${encodeURIComponent(s.subjectId)}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        const r = await apiFetch<{ data: Candidate[]; total?: number; more?: boolean }>(`/api/reviews/${cycleId}/peers?subjectId=${encodeURIComponent(s.subjectId)}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        if (r.ok && subjects.length === 1) setMore(r.data.more ? { total: r.data.total ?? 0, shown: r.data.data.length } : null);
         return [s.subjectId, r.ok ? r.data.data : null] as const;
       })).then((pairs) => {
         if (!live) return;
@@ -66,7 +67,7 @@ export function AskPeersDialog({ cycleId, subjects, onClose, onDone }: { cycleId
     }
     setBusy(false);
     if (failed) toast(`Asked for ${created} answers. ${failed} ${failed === 1 ? "request" : "requests"} failed, try again.`, { tone: "danger" });
-    else toast(skipped ? `Asked for ${created} answers. ${skipped} skipped: they do not work with that person.` : `Asked for ${created} ${created === 1 ? "answer" : "answers"}`);
+    else toast(skipped ? `Asked for ${created} answers. ${skipped} skipped: already asked, left, or the person being reviewed.` : `Asked for ${created} ${created === 1 ? "answer" : "answers"}`);
     onDone();
   };
 
@@ -76,7 +77,7 @@ export function AskPeersDialog({ cycleId, subjects, onClose, onDone }: { cycleId
       <DialogContent className="max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>Pick up to five people who work with them. Their names are not shown to the person, and nobody sees which answer is whose.</DialogDescription>
+          <DialogDescription>Pick up to five people. The people who work with them are listed first; search to find anyone else. Their names are not shown to the person, and nobody sees which answer is whose.</DialogDescription>
         </DialogHeader>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people" aria-label="Search people"
           className="h-9 rounded-md border border-line bg-raised px-3 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]" />
@@ -95,15 +96,18 @@ export function AskPeersDialog({ cycleId, subjects, onClose, onDone }: { cycleId
                     <Avatar person={c} size={24} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-row text-ink">{personName(c)}</span>
-                      <span className="block truncate text-xs text-ink-2">{[c.jobTitle, subjects.length > 1 ? `works with ${c.count} of ${subjects.length}` : c.why].filter(Boolean).join(" · ")}</span>
+                      <span className="block truncate text-xs text-ink-2">{[c.jobTitle, subjects.length > 1 && c.why !== "Elsewhere in the org" ? `works with ${c.count} of ${subjects.length}` : c.why].filter(Boolean).join(" · ")}</span>
                     </span>
                   </label>
                 </li>
               );
             })}
           </ul>
-        ) : (
-          <p className="m-0 text-sm text-ink-2">{q ? "Nobody by that name works with them." : "Nobody shares a department, an office or a manager with them yet."}</p>
+        ) : null}
+        {lists && union.length && more ? (
+          <p className="m-0 text-xs text-ink-2">Showing {more.shown} of {more.total} people who work with them. Search to find the rest.</p>
+        ) : lists && union.length ? null : error || !lists ? null : (
+          <p className="m-0 text-sm text-ink-2">{q ? "Nobody by that name is active in your organization." : "Nobody shares a department, an office or a manager with them yet. Search to find anyone in your organization."}</p>
         )}
         <DialogFooter>
           <span className="me-auto self-center text-xs text-ink-2">{picked.length} of 5 picked</span>

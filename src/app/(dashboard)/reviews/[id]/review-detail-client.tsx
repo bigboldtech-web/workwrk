@@ -120,7 +120,11 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
   ].filter((t): t is Tab => t !== null);
   const asked = sp?.get("tab");
   const tabAlias: Record<string, Tab> = { self: "self", "self-assessment": "self", team: "team", "manager-review": "team", peer: "peer", "peer-feedback": "peer", calibration: "calibration" };
-  const tab: Tab | null = (asked && tabAlias[asked] && tabs.includes(tabAlias[asked]) ? tabAlias[asked] : tabs[0]) ?? null;
+  // The landing tab is the viewer's single next action: a runner of a cycle
+  // In calibration lands on Calibration (where Finalize outcomes is), even
+  // when they are also its subject, whose own review is read only by then.
+  const defaultTab: Tab | undefined = status === "IN_CALIBRATION" && tabs.includes("calibration") ? "calibration" : tabs[0];
+  const tab: Tab | null = (asked && tabAlias[asked] && tabs.includes(tabAlias[asked]) ? tabAlias[asked] : defaultTab) ?? null;
   const person = sp?.get("person") ?? null;
 
   // The primary the active panel hands up (Submit my review, Finalize).
@@ -248,13 +252,13 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
           {/* The meta strip: steps, period, what is left. */}
           <div className="flex min-h-14 flex-wrap items-center gap-x-6 gap-y-2">
             <ReviewStepDots passed={passed} stalled={stalled} withLabels />
-            <span className="text-sm text-ink-2">
+            <span className="whitespace-nowrap text-sm text-ink-2">
               {formatDate(cycle.startDate, dayPrefs, "date")} to {formatDate(cycle.endDate, dayPrefs, "date")}
               {" · "}
               {closed ? (status === "CANCELLED" ? "Cancelled" : "Closed") : daysLeft < 0 ? `Closed for answers ${-daysLeft} ${-daysLeft === 1 ? "day" : "days"} ago` : daysLeft === 0 ? "Closes today" : `Closes in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`}
             </span>
             {above && cycle.stats.total ? (
-              <span className="flex items-center gap-2 text-sm text-ink-2">
+              <span className="flex items-center gap-2 whitespace-nowrap text-sm text-ink-2">
                 {cycle.stats.completed} of {cycle.stats.total} reviews complete
                 <span className="h-1 w-[120px] overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} /></span>
               </span>
@@ -271,7 +275,7 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
           {tabs.length > 1 ? (
             <div role="tablist" aria-label="Sections" className="flex h-9 items-center gap-1">
               {tabs.map((t) => (
-                <ViewTab key={t} label={t === "self" ? "My review" : t === "team" ? "Team" : t === "peer" ? "Peer feedback" : "Calibration"} active={tab === t} onClick={() => setParams({ tab: t === tabs[0] ? null : t, person: null })} />
+                <ViewTab key={t} label={t === "self" ? "My review" : t === "team" ? "Team" : t === "peer" ? "Peer feedback" : "Calibration"} active={tab === t} onClick={() => setParams({ tab: t === defaultTab ? null : t, person: null })} />
               ))}
             </div>
           ) : null}
@@ -280,7 +284,7 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
             <MyReviewPanel cycleId={cycleId} cycleStatus={status} cycleEnd={cycle.endDate} words={cycle.scale.words} bands={cycle.bands} onPrimary={onPrimary} onChanged={() => void load()} onOpenLetter={(id) => void openLetter(id)} />
           ) : tab === "team" ? (
             <TeamPanel cycleId={cycleId} cycleStatus={status} rows={teamRows} viewerId={viewer.id} isAgent={!!viewer.isAgent}
-              onOpen={(id) => setParams({ person: id, tab: tabs[0] === "team" ? null : "team" }, true)} onOpenLetter={(id) => void openLetter(id)} onChanged={() => void load()} />
+              onOpen={(id) => setParams({ person: id, tab: defaultTab === "team" ? null : "team" }, true)} onOpenLetter={(id) => void openLetter(id)} onChanged={() => void load()} />
           ) : tab === "peer" ? (
             <PeerFeedbackPanel cycleId={cycleId} cycleStatus={status} words={cycle.scale.words} />
           ) : tab === "calibration" ? (

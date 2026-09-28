@@ -9,8 +9,11 @@ import { formatDate } from "@/lib/format/date";
  *   a subject whose own review is not submitted    review_open
  *   a reviewer who still owes manager reviews      manager_reviews_due
  * Both link the cycle itself (/reviews/{cycleId}, the Team section for a
- * reviewer). Nobody is told twice about the same cycle in 20 hours, so the
- * daily run never piles up rows, and a removed person is never written to.
+ * reviewer). Once means once: anyone already told about the cycle inside
+ * its closing window (from three days before it closes) is not told again,
+ * so the daily run sends one nudge per person per cycle, and a removed
+ * person is never written to. The title says how long is really left
+ * (today, tomorrow, or in N days).
  *
  * Schedule: daily at 8:30 (scripts/CRON-SETUP.md). NOT installed by this
  * change: the founder adds the row. Guarded by CRON_SECRET, and closed in
@@ -29,7 +32,6 @@ export async function POST(req: NextRequest) {
 
   const now = new Date();
   const horizon = new Date(now.getTime() + 3 * 86_400_000);
-  const since = new Date(now.getTime() - 20 * 60 * 60 * 1000);
   const cycles = await prisma.reviewCycle.findMany({
     where: { status: "ACTIVE", endDate: { gte: now, lte: horizon } },
     select: { id: true, name: true, endDate: true },
@@ -39,6 +41,14 @@ export async function POST(req: NextRequest) {
   for (const c of cycles) {
     const link = `/reviews/${c.id}`;
     const due = formatDate(c.endDate, { timezone: "UTC" }, "date");
+    // The closing window opens three days before the close date: a nudge (or
+    // the launch notice, for a cycle launched inside it) sent since then is
+    // the one this person gets.
+    const since = new Date(c.endDate.getTime() - 3 * 86_400_000);
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const endUtc = Date.UTC(c.endDate.getUTCFullYear(), c.endDate.getUTCMonth(), c.endDate.getUTCDate());
+    const daysLeft = Math.max(0, Math.round((endUtc - todayUtc) / 86_400_000));
+    const when = daysLeft === 0 ? "closes today" : daysLeft === 1 ? "closes tomorrow" : `closes in ${daysLeft} days`;
     const rows = await prisma.review.findMany({
       where: { cycleId: c.id, status: { in: ["PENDING", "SELF_ASSESSMENT"] }, subject: { deletedAt: null } },
       select: { subjectId: true, reviewerId: true, status: true },
@@ -52,7 +62,7 @@ export async function POST(req: NextRequest) {
     for (const r of rows) {
       if (r.status !== "PENDING" || quiet.has(`review_open:${r.subjectId}`)) continue;
       quiet.add(`review_open:${r.subjectId}`);
-      data.push({ userId: r.subjectId, type: "review_open", title: `Your review for ${c.name} closes in 3 days`, message: `Due ${due}`, link });
+      data.push({ userId: r.subjectId, type: "review_open", title: `Your review for ${c.name} ${when}`, message: `Due ${due}`, link });
     }
     const owed = new Map<string, number>();
     for (const r of rows) if (r.reviewerId !== r.subjectId) owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
@@ -61,7 +71,7 @@ export async function POST(req: NextRequest) {
       : new Set<string>();
     for (const [reviewerId, n] of owed) {
       if (!activeReviewers.has(reviewerId) || quiet.has(`manager_reviews_due:${reviewerId}`)) continue;
-      data.push({ userId: reviewerId, type: "manager_reviews_due", title: `You owe ${n} manager ${n === 1 ? "review" : "reviews"} for ${c.name}`, message: `Closes in 3 days, ${due}`, link: `${link}?tab=team` });
+      data.push({ userId: reviewerId, type: "manager_reviews_due", title: `You owe ${n} manager ${n === 1 ? "review" : "reviews"} for ${c.name}`, message: `${when.charAt(0).toUpperCase()}${when.slice(1)}, ${due}`, link: `${link}?tab=team` });
     }
     if (data.length) {
       const res = await prisma.notification.createMany({ data });

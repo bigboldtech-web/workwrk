@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
+import { clearAllPerformanceDrafts } from "@/lib/people/draft-keys";
 import {
   Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, MinusCircle, Pin, PinOff, Settings, SmilePlus, Wrench,
 } from "lucide-react";
@@ -238,7 +239,7 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
           <HelpMenuRows onDone={close} onPrivacy={onPrivacy} />
         </MenuSubmenu>
         <MenuSeparator />
-        <MenuItem icon={LogOut} label={SHELL_LABELS.logOut} onClick={() => { close(); void signOut({ callbackUrl: "/login" }); }} />
+        <MenuItem icon={LogOut} label={SHELL_LABELS.logOut} onClick={() => { close(); clearAllPerformanceDrafts(); void signOut({ callbackUrl: "/login" }); }} />
       </div>
     </ChromePopover>
   );

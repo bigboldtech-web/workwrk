@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { isInReportTree } from "@/lib/reporting-line";
-import { peerCandidateWhere } from "@/lib/performance/review-cycle.server";
+import { peerAllowedWhere } from "@/lib/performance/review-cycle.server";
 
 // GET: Get peer feedback requests for current user (to give) or for a review (as manager)
 export async function GET(
@@ -99,14 +99,14 @@ export async function POST(
     if (reach && !reach.has(review.subjectId)) return jsonError("Forbidden", 403);
   }
 
-  // Peers must be people who work with the subject (the same rule the
-  // picker lists, review-cycle.server.ts peerCandidateWhere), each once,
-  // never the subject. A bulk request (skipInvalid) keeps the ones that fit
-  // this subject and reports the rest instead of failing the whole batch.
+  // Peers are anyone active in the org but the subject (peerAllowedWhere:
+  // the rule before Phase 6, kept so no runner loses who they could ask;
+  // the picker SUGGESTS the people who work with them and finds anyone
+  // else by name), each once. A bulk request (skipInvalid) keeps the ones
+  // that fit this subject and reports the rest instead of failing the batch.
   const requested = [...new Set(peerIds.filter((p: unknown): p is string => typeof p === "string" && p.length > 0))];
   if (requested.length > 5) return jsonError("Ask up to five people at a time", 400);
-  const subj = await prisma.user.findUnique({ where: { id: review.subjectId }, select: { id: true, managerId: true, departmentId: true, officeId: true } });
-  const candidate = await peerCandidateWhere(orgId, { id: review.subjectId, managerId: subj?.managerId ?? null, departmentId: subj?.departmentId ?? null, officeId: subj?.officeId ?? null });
+  const candidate = peerAllowedWhere(orgId, review.subjectId);
   const valid = await prisma.user.findMany({
     where: { AND: [candidate, { id: { in: requested } }] },
     select: { id: true },
@@ -115,9 +115,9 @@ export async function POST(
   const skipInvalid = body.skipInvalid === true;
   if (validPeerIds.length === 0) {
     if (skipInvalid) return jsonSuccess({ created: 0, skipped: requested.length }, 200);
-    return jsonError("Pick people who work with them: their department, their office, their manager or their team");
+    return jsonError("Pick people who are active in your organization, other than the person being reviewed");
   }
-  if (!skipInvalid && validPeerIds.length !== requested.length) return jsonError("Some of the people picked do not work with them, have left, or are the person being reviewed");
+  if (!skipInvalid && validPeerIds.length !== requested.length) return jsonError("Some of the people picked have left, or are the person being reviewed");
 
   // Create peer feedback records
   const feedbackData = validPeerIds.map((peerId: string) => ({

@@ -28,6 +28,8 @@ import type { Prisma, CycleStatus } from "@/generated/prisma";
 import { cycleCounts, cycleViewerCtx } from "@/lib/performance/review-cycle.server";
 import { cycleTransitionBlocked, CYCLE_TYPES } from "@/lib/performance/review-cycle";
 import { subjectRowView } from "@/lib/people/review-visibility";
+import { can } from "@/lib/access/index";
+import { viewerFromSession } from "@/lib/access/viewer";
 
 const VIEW_STATUSES: Record<string, CycleStatus[] | null> = {
   active: ["ACTIVE", "IN_CALIBRATION"],
@@ -54,16 +56,18 @@ export async function GET(req: NextRequest) {
     if (!self && !ctx.peopleTeamOrAdmin && !ctx.chain.has(subjectId)) return jsonError("Not found", 404);
     const rows = await prisma.review.findMany({
       where: { subjectId, cycle: { organizationId: orgId, status: { not: "DRAFT" } } },
-      include: { cycle: { select: { id: true, name: true, status: true, endDate: true } } },
+      include: { cycle: { select: { id: true, name: true, status: true, startDate: true, endDate: true } } },
       orderBy: { createdAt: "desc" },
-      take: 100,
     });
     return jsonSuccess({
       data: rows.map((r) => {
         const v = (self ? subjectRowView(r as unknown as Record<string, unknown>, ctx.userId) : r) as Record<string, unknown>;
         return {
+          id: r.id,
           cycleId: r.cycle.id,
           cycleName: r.cycle.name,
+          cycleStartsAt: r.cycle.startDate,
+          calibratedScore: v.calibratedScore ?? null,
           cycleStatus: r.cycle.status,
           status: r.status,
           selfRatings: r.selfRatings,
@@ -74,6 +78,17 @@ export async function GET(req: NextRequest) {
         };
       }),
     });
+  }
+
+  // The cycle list itself (and its CSV, which reads through here) is the
+  // Review cycles page's: whoever holds app:reviews (reports over their
+  // chain, the People team, Admin), the same answer as the page's 404. A
+  // subject reaches their own review by the ?subjectId= door above and the
+  // cycle link they are sent.
+  {
+    const v = await viewerFromSession();
+    const d = v ? await can(v, "view", { type: "app", key: "reviews" }) : null;
+    if (!d?.discoverable) return jsonError("Not found", 404);
   }
 
   const viewParam = sp.get("view") ?? "active";
