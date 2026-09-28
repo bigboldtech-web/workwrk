@@ -31,6 +31,9 @@
 // then offers Retry; it is never dropped. Drafts also mirror to
 // localStorage (workwrk:kpi-review-draft:{person}:{period}, the key the old
 // page used), so an expired session or a closed tab does not lose typing.
+// Browser Back cannot be stopped, so on return the page opens the person
+// whose numbers are still unsaved (not whoever is first), says the numbers
+// are back, and names any other unsaved drafts with a link to each.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -58,6 +61,7 @@ import { useShortcut } from "@/lib/shortcuts";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { isKpiPeriodWritable, kpiPeriodLabel } from "@/lib/kpi-period";
+import { draftHasContent, loadKpiDraft, persistKpiDraft, storedDraftsFor, type KpiDraft, type KpiDraftMap } from "@/lib/kpi-review-draft";
 import { kpiStatusLabel, kpiStatusTone, personKpiChip } from "@/lib/kpi-record-status";
 import { previewKpiScore, type KpiDirection } from "@/lib/kpi-preview-score";
 import { scoreBand } from "@/lib/people/score-band";
@@ -109,23 +113,11 @@ interface KpiLine {
   lowerIsBetter: boolean;
 }
 
-type Draft = { actual?: string; notes?: string };
+type Draft = KpiDraft;
 type RowState = { kind: "retrying" | "failed"; message: string };
 
-const DRAFT_NS = "workwrk:kpi-review-draft";
-const draftKey = (userId: string, period: string) => `${DRAFT_NS}:${userId}:${period}`;
-function loadDraft(userId: string, period: string): Record<string, Draft> {
-  try {
-    const raw = typeof window !== "undefined" ? window.localStorage.getItem(draftKey(userId, period)) : null;
-    return raw ? (JSON.parse(raw) as Record<string, Draft>) : {};
-  } catch { return {}; }
-}
-function persistDraft(userId: string, period: string, d: Record<string, Draft>) {
-  try {
-    if (Object.keys(d).length === 0) window.localStorage.removeItem(draftKey(userId, period));
-    else window.localStorage.setItem(draftKey(userId, period), JSON.stringify(d));
-  } catch { /* private mode: the page still works, only the mirror is off */ }
-}
+const loadDraft = (userId: string, period: string): KpiDraftMap => loadKpiDraft(userId, period);
+const persistDraft = (userId: string, period: string, d: KpiDraftMap) => persistKpiDraft(userId, period, d);
 
 const nameOf = (p: { firstName?: string | null; lastName?: string | null; email?: string | null }) => `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "Someone";
 const num = (n: number | null | undefined) => (n == null ? "" : Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
@@ -188,6 +180,10 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [changesFor, setChangesFor] = useState<string[] | null>(null);
   const [showRecent, setShowRecent] = useState(false);
+  // True when the person's pane opened on numbers typed earlier and never
+  // saved (Browser Back, a closed tab, Leave them unsaved), so the page says
+  // so instead of showing a save bar nobody remembers starting.
+  const [restored, setRestored] = useState(false);
   const actualRefs = useRef(new Map<string, HTMLInputElement | null>());
   // The right pane's width decides whether a submitted row's decision fits
   // as two labelled buttons (a wide screen) or Approve plus an icon (1440
@@ -267,18 +263,24 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     return list;
   }, [summary, statusFilter, directOnly, deptFilter, sort]);
 
+  // With nobody asked for, a person whose numbers for this month are still
+  // unsaved on this device comes first, so coming back (Browser Back, then
+  // Forward, or the sidebar link) opens the numbers where they were left.
   useEffect(() => {
     if (!peopleSorted || personId) return;
-    const first = peopleSorted.find((p) => personKpiChip(p).needsYou) ?? peopleSorted[0];
+    const pending = storedDraftsFor(peopleSorted.map((p) => p.userId), (p) => p === period)[0];
+    const first = (pending && peopleSorted.find((p) => p.userId === pending.userId)) ?? peopleSorted.find((p) => personKpiChip(p).needsYou) ?? peopleSorted[0];
     if (first) setPersonId(first.userId);
-  }, [peopleSorted, personId]);
+  }, [peopleSorted, personId, period]);
 
   useEffect(() => {
     if (!personId) return;
     setLines(null);
     setSelected(new Set());
     setRowState({});
-    setDrafts(loadDraft(personId, period));
+    const stored = loadDraft(personId, period);
+    setDrafts(stored);
+    setRestored(draftHasContent(stored));
     void loadPane(personId);
   }, [personId, period, loadPane]);
 
@@ -303,6 +305,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     pendingNotes ? `${pendingNotes} ${pendingNotes === 1 ? "note" : "notes"}` : null,
   ].filter(Boolean).join(" and ");
   const dirty = pendingSaves.length > 0;
+  // Once the pane is loaded and nothing is left to save (saved, discarded,
+  // or the rows were decided meanwhile), the restored note goes: typing
+  // again after that is new work, not the numbers that came back.
+  useEffect(() => {
+    if (lines && !dirty) setRestored(false);
+  }, [lines, dirty]);
 
   const setDraft = (kpiId: string, patch: Draft) => {
     if (!personId) return;
@@ -603,6 +611,17 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const filterCount = statusFilter.length + (directOnly ? 1 : 0) + deptFilter.length;
   const selectedSubmitted = [...selected];
   const others = otherMonths.filter((o) => o.period !== period && o.count > 0);
+  // Unsaved drafts on this device for anyone else this page lists, in a
+  // month that still takes numbers. Read again whenever the drafts change.
+  const otherDrafts = useMemo(() => {
+    if (!summary) return [];
+    const names = new Map(summary.people.map((p) => [p.userId, p]));
+    return storedDraftsFor(summary.people.map((p) => p.userId), (p) => isKpiPeriodWritable(p))
+      .filter((d) => !(d.userId === personId && d.period === period))
+      .map((d) => ({ ...d, person: names.get(d.userId)! }));
+    // drafts: a save or discard here changes what is stored.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, personId, period, drafts]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -615,12 +634,19 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
           menu: [{ label: "Show KPI descriptions", checked: display.showDescriptions, keepOpen: true, onClick: () => setDisplay({ showDescriptions: !display.showDescriptions }) }],
         }}
       />
-      {others.length || recentDecisions.length ? (
+      {others.length || recentDecisions.length || otherDrafts.length ? (
         <p className="os-chrome m-0 flex flex-wrap items-center gap-x-4 px-6 pb-1 text-sm text-ink-2">
           {others.length ? (
             <span>
               Also awaiting you: {others.map((o, i) => (
                 <span key={o.period}>{i ? ", " : ""}<button type="button" className="text-brand-deep hover:underline" onClick={async () => { if (await guardSwitch()) { setShowRecent(false); setPeriod(o.period); } }}>{kpiPeriodLabel(o.period)} ({o.count})</button></span>
+              ))}
+            </span>
+          ) : null}
+          {otherDrafts.length ? (
+            <span>
+              Not saved yet: {otherDrafts.map((d, i) => (
+                <span key={`${d.userId}:${d.period}`}>{i ? ", " : ""}<button type="button" className="text-brand-deep hover:underline" onClick={async () => { if (await guardSwitch()) { setShowRecent(false); setPeriod(d.period); setPersonId(d.userId); } }}>{nameOf(d.person)}{d.period !== period ? ` (${kpiPeriodLabel(d.period)})` : ""}</button></span>
               ))}
             </span>
           ) : null}
@@ -691,6 +717,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                     </div>
                     <a href={`/people/${person.userId}?tab=kras`} className="shrink-0 text-sm text-brand-deep hover:underline">Open profile</a>
                   </header>
+                  {restored && dirty ? (
+                    <p role="status" className="m-0 flex items-center gap-3 rounded-md border border-line bg-subtle px-3 py-2 text-sm text-ink">
+                      <span className="min-w-0 flex-1">Numbers typed earlier on this device and not saved are back. Save them, or Discard to drop them.</span>
+                      <button type="button" className="shrink-0 text-brand-deep hover:underline" onClick={() => setRestored(false)}>Dismiss</button>
+                    </p>
+                  ) : null}
                   {paneErr ? (
                     <OsEmptyView variant="error" title="Couldn't load their numbers" hint={paneErr} action={{ label: "Retry", onClick: () => void loadPane(person.userId) }} />
                   ) : lines && lines.length === 0 ? (

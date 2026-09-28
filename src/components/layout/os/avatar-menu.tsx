@@ -19,6 +19,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { clearAllPerformanceDrafts } from "@/lib/people/draft-keys";
+import { leaveThen } from "@/lib/dirty-guard";
 import {
   Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, MinusCircle, Pin, PinOff, Settings, SmilePlus, Wrench,
 } from "lucide-react";
@@ -166,7 +167,7 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
         <MenuItem
           icon={CircleUser}
           label={SHELL_LABELS.myProfile}
-          onClick={() => { close(); if (isGuest) openSettings(profileHref); else router.push(profileHref); }}
+          onClick={() => { close(); if (isGuest) openSettings(profileHref); else void leaveThen(() => router.push(profileHref)); }}
         />
         {!isGuest ? (
           <MenuItem icon={Settings} label={SHELL_LABELS.mySettings} onClick={() => { close(); openSettings("/account/profile"); }} />

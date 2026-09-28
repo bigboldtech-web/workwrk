@@ -44,6 +44,12 @@ interface Props {
    * the panel and its anchor. Hosts that own their own listeners omit it.
    */
   onClose?: () => void;
+  /**
+   * When set, the panel grows to its longest row instead of staying at
+   * `width`: `width` becomes the least it can be and this the most, and it
+   * never gets wider than the viewport less an 8px margin on each side.
+   */
+  maxWidth?: number;
 }
 
 export function MorePortal({
@@ -55,6 +61,7 @@ export function MorePortal({
   placement = "right",
   point = null,
   onClose,
+  maxWidth,
 }: Props) {
   const localRef = useRef<HTMLDivElement>(null);
   const ref = panelRef ?? localRef;
@@ -102,14 +109,16 @@ export function MorePortal({
       ? ({ left: point.x, right: point.x, top: point.y, bottom: point.y } as DOMRect)
       : anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
+    // A panel that fits its content is measured; a fixed one is its width.
+    const w = maxWidth != null ? node.offsetWidth || width : width;
     let left = placement === "right" ? rect.right + gap : rect.left;
     let top = placement === "right" ? rect.top : rect.bottom + gap;
 
     // Flip horizontally if it would overflow the viewport.
-    if (left + width + margin > window.innerWidth) {
+    if (left + w + margin > window.innerWidth) {
       left = placement === "right"
-        ? rect.left - width - gap
-        : Math.max(margin, window.innerWidth - width - margin);
+        ? rect.left - w - gap
+        : Math.max(margin, window.innerWidth - w - margin);
     }
     if (left < margin) left = margin;
 
@@ -155,7 +164,7 @@ export function MorePortal({
       window.removeEventListener("resize", compute);
       window.removeEventListener("scroll", compute, true);
     };
-  }, [open, anchorRef, width, placement, point, ref]);
+  }, [open, anchorRef, width, maxWidth, placement, point, ref]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -166,7 +175,9 @@ export function MorePortal({
         position: "fixed",
         left: 0,
         top: 0,
-        width,
+        ...(maxWidth != null
+          ? { width: "max-content", minWidth: `min(${width}px, calc(100vw - 16px))`, maxWidth: `min(${maxWidth}px, calc(100vw - 16px))` }
+          : { width }),
         // Hidden at mount; the pre-paint layout pass positions the node and
         // flips this to visible, so the user only ever sees the final spot.
         visibility: "hidden",

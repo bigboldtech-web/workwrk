@@ -374,7 +374,7 @@ function HeaderMenu({ entries, variant = "bordered", label = "More options" }: {
       >
         <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </button>
-      <MorePortal anchorRef={btnRef} width={220} open={open} panelRef={panelRef} placement="below">
+      <MorePortal anchorRef={btnRef} width={220} maxWidth={360} open={open} panelRef={panelRef} placement="below">
         <MenuList aria-label="Page options">
           {entries.map((e, i) =>
             "separator" in e ? (

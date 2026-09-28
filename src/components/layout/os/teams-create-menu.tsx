@@ -25,6 +25,7 @@ import { MenuList, MenuItem, MenuSectionLabel } from "@/components/ui/menu";
 import { usePermission } from "@/hooks/use-permission";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useBoot } from "./boot-context";
+import { leaveThen } from "@/lib/dirty-guard";
 
 interface Row { label: string; description: string; icon: LucideIcon; href: string; settings?: boolean }
 
@@ -69,8 +70,10 @@ export function TeamsCreateMenu({ anchorRef, open, onClose }: { anchorRef: RefOb
 
   const go = (r: Row) => {
     onClose();
+    // Both kinds of row ask before leaving unsaved work: openSettings asks
+    // on its own, and a page row goes through the same leaveThen.
     if (r.settings) openSettings(r.href);
-    else router.push(r.href);
+    else void leaveThen(() => router.push(r.href));
   };
 
   return (

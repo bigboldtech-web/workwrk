@@ -19,6 +19,7 @@ import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
 import { Fragment } from "react";
+import { leaveThen } from "@/lib/dirty-guard";
 import { NEW_EVENT_PREFIX, type CreateAction, type CreateActionContext } from "./apps-catalog";
 
 /**
@@ -57,7 +58,10 @@ export function runCreateAction(action: CreateAction, ctx: CreateActionContext) 
     return;
   }
   if (action.href) {
-    ctx.push(action.href);
+    // A plain destination row asks before leaving unsaved work, like the
+    // rail. onSelect rows that create first and then open are left alone.
+    const href = action.href;
+    void leaveThen(() => ctx.push(href));
     return;
   }
   if (action.event && typeof window !== "undefined") {
