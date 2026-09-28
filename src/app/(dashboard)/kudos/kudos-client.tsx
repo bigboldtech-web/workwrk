@@ -83,6 +83,27 @@ type LeaderRow = { userId: string; firstName: string | null; lastName: string | 
 type View = "all" | "received" | "given" | "leaderboard";
 const WEEK_MS = 7 * 86_400_000;
 
+export type FeedMeta = { total: number; nextCursor: string | null; groups: { thisWeek: number; earlier: number }; reactions: number | null };
+
+/** The feed counts after one kudos is deleted in place. The group headers
+ *  read meta.groups (the server's counts for the whole filtered set), so a
+ *  delete lowers the group the card sat in by the same WEEK_MS rule the
+ *  render uses, plus the total and that card's reactions, each floored at
+ *  0. Without it the header kept the old number until the next refetch. */
+export function metaAfterRemove(meta: FeedMeta | null, k: { createdAt: string; totalReactions?: number }, now: number): FeedMeta | null {
+  if (!meta) return meta;
+  const recent = now - new Date(k.createdAt).getTime() <= WEEK_MS;
+  return {
+    ...meta,
+    total: Math.max(0, meta.total - 1),
+    groups: {
+      thisWeek: recent ? Math.max(0, meta.groups.thisWeek - 1) : meta.groups.thisWeek,
+      earlier: recent ? meta.groups.earlier : Math.max(0, meta.groups.earlier - 1),
+    },
+    reactions: meta.reactions == null ? null : Math.max(0, meta.reactions - (k.totalReactions ?? 0)),
+  };
+}
+
 function readView(v: string | null | undefined): View {
   return v === "received" || v === "given" || v === "leaderboard" ? v : "all";
 }
@@ -91,7 +112,7 @@ export default function KudosClient() {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const { toast } = useOsToast();
+  const { toast, dismiss } = useOsToast();
   const { prefs, patchPrefs, rowVersion } = useOsShell();
   const { boot } = useBoot();
   const confirm = useConfirm();
@@ -122,11 +143,20 @@ export default function KudosClient() {
     value: colsLocal.value ?? stored.columns?.value ?? true,
     last: colsLocal.last ?? stored.columns?.last ?? true,
   };
+  // A failed save keeps what was picked on screen and offers Try again,
+  // which resends the same patch; a second failure shows the toast again.
+  // One key per column: a later save of it that lands takes the old toast
+  // down, so a stale Try again never flips the column back.
+  const saveLeaderCol = (k: LeaderCol, on: boolean) => {
+    const key = `kudos-col-${k}`;
+    void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
+      if (ok) { dismiss(key); return; }
+      toast("Couldn't save that setting", { tone: "danger", key, action: { label: "Try again", onClick: () => saveLeaderCol(k, on) } });
+    });
+  };
   const setLeaderCol = (k: LeaderCol, on: boolean) => {
     setColsLocal((c) => ({ ...c, [k]: on }));
-    void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
-      if (!ok) toast("Couldn't save that setting", { tone: "danger" });
-    });
+    saveLeaderCol(k, on);
   };
   const [display, setDisplay] = useState<{ showValueChip?: boolean; showReactions?: boolean }>({});
   const showValueChip = display.showValueChip ?? stored.showValueChip ?? true;
@@ -136,11 +166,16 @@ export default function KudosClient() {
     setDisplay((d) => ({ ...d, ...patch }));
     if (displayTimer.current) clearTimeout(displayTimer.current);
     const next = { showValueChip, showReactions, ...patch };
-    displayTimer.current = setTimeout(() => {
-      void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: next } } } } }).then((ok) => {
-        if (!ok) toast("Couldn't save that setting", { tone: "danger" });
-      });
-    }, 400);
+    displayTimer.current = setTimeout(() => saveDisplay(next), 400);
+  };
+  // Try again resends the whole computed Display object, so a retry after
+  // two quick toggles still writes both. A later Display save that lands
+  // takes the old toast down, so a stale Try again never writes it back.
+  const saveDisplay = (next: { showValueChip: boolean; showReactions: boolean }) => {
+    void patchPrefs({ home: { teams: { surface: { kudos: { viewOptions: next } } } } }).then((ok) => {
+      if (ok) { dismiss("kudos-display"); return; }
+      toast("Couldn't save that setting", { tone: "danger", key: "kudos-display", action: { label: "Try again", onClick: () => saveDisplay(next) } });
+    });
   };
 
   const setParams = useCallback((patch: Record<string, string | null>) => {
@@ -167,7 +202,7 @@ export default function KudosClient() {
 
   // ── Feed ──────────────────────────────────────────────────────────
   const [feed, setFeed] = useState<ApiKudos[] | null>(null);
-  const [meta, setMeta] = useState<{ total: number; nextCursor: string | null; groups: { thisWeek: number; earlier: number }; reactions: number | null } | null>(null);
+  const [meta, setMeta] = useState<FeedMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -273,7 +308,7 @@ export default function KudosClient() {
     if (!r.ok) { toast(r.error || "Couldn't delete it", { tone: "danger" }); return; }
     toast("Kudos deleted");
     setFeed((f) => (f ?? []).filter((x) => x.id !== k.id));
-    setMeta((m) => (m ? { ...m, total: Math.max(0, m.total - 1) } : m));
+    setMeta((m) => metaAfterRemove(m, k, now));
   }
 
   const clearFilters = () => { setDraftQ(""); setPersonPick(null); setParams({ q: null, value: null, person: null, dept: null, since: null, until: null }); };

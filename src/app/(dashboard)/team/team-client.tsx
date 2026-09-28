@@ -93,7 +93,7 @@ export default function TeamClient() {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const { toast } = useOsToast();
+  const { toast, dismiss } = useOsToast();
   const { rowVersion, prefs, patchPrefs } = useOsShell();
   const { boot } = useBoot();
   // The Activity scope that holds this viewer's people (activity-scope.ts):
@@ -128,11 +128,20 @@ export default function TeamClient() {
   const [managerPick, setManagerPick] = useState<PickPerson | null>(null);
 
   const columns = useMemo<Record<ColKey, boolean>>(() => ({ ...COL_DEFAULT, ...storedColumns(prefs.home), ...columnsLocal }), [prefs.home, columnsLocal]);
+  // A failed save keeps the column as picked and offers Try again, which
+  // resends the same column; a second failure shows the toast again. One
+  // key per column: a later save of that column that lands takes the old
+  // toast down, so a stale Try again never flips it back.
+  const saveColumn = (k: ColKey, on: boolean) => {
+    const key = `my-team-col-${k}`;
+    void patchPrefs({ home: { teams: { surface: { "my-team": { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
+      if (ok) { dismiss(key); return; }
+      toast("Couldn't save that setting. It applies until you leave.", { tone: "danger", key, action: { label: "Try again", onClick: () => saveColumn(k, on) } });
+    });
+  };
   const setColumn = (k: ColKey, on: boolean) => {
     setColumnsLocal((c) => ({ ...c, [k]: on }));
-    void patchPrefs({ home: { teams: { surface: { "my-team": { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
-      if (!ok) toast("Couldn't save that setting. It applies until you leave.", { tone: "danger" });
-    });
+    saveColumn(k, on);
   };
   // One-time move of the browser-only store into the preference; the key is
   // removed only once the preference write has answered.

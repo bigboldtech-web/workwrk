@@ -102,18 +102,31 @@ export function TeamWorkloadView() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const datePrefs = useDatePrefs();
-  const { toast } = useOsToast();
+  const { toast, dismiss } = useOsToast();
   const { prefs, patchPrefs } = useOsShell();
   const stored = workloadPrefs(prefs.home);
   // Optimistic local copy so a toggle never waits on the round trip.
   const [local, setLocal] = useState<Partial<WorkloadPrefs>>({});
   const p: WorkloadPrefs = { ...stored, ...local };
+  // A failed save keeps the local value on screen and offers Try again,
+  // which resends the same patch; a second failure shows the toast again.
+  // The key is per setting: retries of one setting share one toast, and a
+  // later save of that setting that lands takes the old toast down, so a
+  // stale Try again can never write back a value the person moved off.
+  const savePref = useCallback((patch: Partial<WorkloadPrefs>) => {
+    const key = `workload-pref-${Object.keys(patch).sort().join(",")}`;
+    const send = () => {
+      void patchPrefs({ home: { work: { workload: patch } } }).then((ok) => {
+        if (ok) { dismiss(key); return; }
+        toast("Couldn't save that setting. It applies until you leave.", { tone: "danger", key, action: { label: "Try again", onClick: send } });
+      });
+    };
+    send();
+  }, [patchPrefs, toast, dismiss]);
   const setPref = useCallback((patch: Partial<WorkloadPrefs>) => {
     setLocal((l) => ({ ...l, ...patch }));
-    void patchPrefs({ home: { work: { workload: patch } } }).then((ok) => {
-      if (!ok) toast("Couldn't save that setting. It applies until you leave.", { tone: "danger" });
-    });
-  }, [patchPrefs, toast]);
+    savePref(patch);
+  }, [savePref]);
 
   const [anchor, setAnchor] = useState<Date>(() => startOfWeek(new Date()));
   const to = useMemo(() => new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + p.windowDays - 1), [anchor, p.windowDays]);
@@ -355,7 +368,9 @@ export function TeamWorkloadView() {
             { label: "Window: 28 days", checked: p.windowDays === 28, onClick: () => setPref({ windowDays: 28 }) },
             { separator: true as const },
             { label: "Count weekends", checked: p.countWeekends, keepOpen: true, onClick: () => setPref({ countWeekends: !p.countWeekends }) },
-            { label: "Show people with no scheduled work", checked: p.showAllPeople, keepOpen: true, onClick: () => setPref({ showAllPeople: !p.showAllPeople }) },
+            // The shared "..." menu is 220 wide, so the row carries a short
+            // name and the full meaning rides on hover.
+            { label: "Show people with no work", title: "Show people with no scheduled work in this window", checked: p.showAllPeople, keepOpen: true, onClick: () => setPref({ showAllPeople: !p.showAllPeople }) },
             { separator: true as const },
             { label: "Capacity...", icon: Gauge, onClick: () => setCapacityOpen(true) },
             ...(data?.viewer.canExport ? [{ label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
