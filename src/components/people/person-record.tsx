@@ -10,7 +10,7 @@
 //                 people-data viewers when a score exists
 //   KRAs & KPIs   the alignment, Manage alignment, Record numbers, History
 //                 (the old KPI history tab, folded in)
-//   Goals         this quarter's goals
+//   Goals         their open goals, each with the verdict /okrs shows
 //   Reviews       My weekly review (self) and review-cycle results, as links
 //   Skills        names for everyone; ratings, Add, Rate and Remove by rule
 //   Kudos         received, with reactions; Give kudos (not self)
@@ -137,8 +137,8 @@ interface AlignKpi {
   currentRecord: { status: string } | null;
 }
 interface AlignKra { assignmentId: string; weightage: number; id: string; name: string; description: string | null; role: { id: string; title: string } | null; kpis: AlignKpi[] }
-interface AlignOkr { id: string; title: string; status: string; progress: number; progressSource?: string; quarter: string | null }
-interface Alignment { quarter: string; currentPeriod: string; kras: AlignKra[]; okrs: AlignOkr[] }
+interface AlignOkr { id: string; title: string; status: string; progress: number; progressSource?: string; quarter: string | null; verdict?: GoalVerdict; quarterLabel?: string | null }
+interface Alignment { quarter: string; window?: "current" | "quarter"; currentPeriod: string; kras: AlignKra[]; okrs: AlignOkr[] }
 
 type TabKey = "overview" | "kras" | "goals" | "reviews" | "skills" | "kudos" | "assets" | "reports";
 const TAB_LABEL: Record<TabKey, string> = {
@@ -152,16 +152,6 @@ const RECORD_STATUS: Record<string, { label: string; tone: "success" | "info" | 
   SUBMITTED: { label: "Submitted", tone: "info" },
   REJECTED: { label: "Changes requested", tone: "warning" },
   PENDING: { label: "Not recorded", tone: "neutral" },
-};
-
-// A goal's stored status read through the one verdict vocabulary
-// (goal-verdict.ts verdictChip), so a goal reads the same words here as on
-// /okrs: BEHIND is "Off track", never the retired "Behind".
-const OKR_VERDICT: Record<string, GoalVerdict> = {
-  ON_TRACK: "on_track",
-  AT_RISK: "at_risk",
-  BEHIND: "off_track",
-  COMPLETED: "completed",
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -712,15 +702,31 @@ const SCORE_ROWS: Array<{ label: string; key: string; weightKey?: string }> = [
 
 function Bar({ value }: { value: number }) {
   return (
-    <span className="h-1 w-full overflow-hidden rounded-full bg-hover">
+    // block: inside the Goals row's wrapper an inline span has no height,
+    // so the bar never drew there (a grid cell blockifies it on its own).
+    <span className="block h-1 w-full overflow-hidden rounded-full bg-hover">
       <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
     </span>
   );
 }
 
+/**
+ * Is anything behind this score? A PerformanceScore row whose every input is
+ * null (a brand new member, recalculated because a welcome kudos arrived) is
+ * a 0 with nothing measured, and scoreBand(0) would call it "At risk". The
+ * service no longer writes such a row; this guards the rows written before.
+ */
+function scoreHasInputs(breakdown: Record<string, unknown> | null): boolean {
+  return !!breakdown && SCORE_ROWS.some((r) => typeof breakdown[r.key] === "number");
+}
+
 function OverviewTab({ person }: { person: Person }) {
   const breakdown = person.score?.breakdown ?? null;
   const weights = (breakdown?.weights ?? {}) as Record<string, number>;
+  const measured = scoreHasInputs(breakdown);
+  // The latest history month is the row person.score reads; when nothing
+  // is behind it, its 0 is not a month to chart either.
+  const history = measured ? person.scoreHistory ?? [] : (person.scoreHistory ?? []).slice(0, -1);
   return (
     <div className="flex flex-col gap-5">
       <Section title="About" action={person.role ? <GhostButton href={`/people/roles/${person.role.id}`}>Open job title</GhostButton> : undefined}>
@@ -737,6 +743,9 @@ function OverviewTab({ person }: { person: Person }) {
       {person.access.peopleData && person.score ? (
         <Section title="Score">
           <div className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-4">
+            {!measured ? (
+              <p className="text-row text-ink-2">No score yet. It appears once KPIs, reviews or SOP results are recorded.</p>
+            ) : (<>
             <div className="flex items-center gap-2">
               <span className="text-title font-semibold tabular-nums text-ink">{Math.round(person.score.score)}</span>
               {person.score.band ? <ToneChip tone={person.score.band.tone} label={person.score.band.label} /> : null}
@@ -760,10 +769,11 @@ function OverviewTab({ person }: { person: Person }) {
                 </li>
               ) : null}
             </ul>
-            {(person.scoreHistory ?? []).length > 1 ? (
-              <div className="flex flex-col gap-1.5 border-t border-line-soft pt-3">
+            </>)}
+            {history.length > (measured ? 1 : 0) ? (
+              <div className={`flex flex-col gap-1.5${measured ? " border-t border-line-soft pt-3" : ""}`}>
                 <span className="text-sm font-medium text-ink-2">By month</span>
-                {(person.scoreHistory ?? []).map((h) => (
+                {history.map((h) => (
                   <div key={h.period} className="grid grid-cols-[140px_1fr_40px] items-center gap-3 text-sm">
                     <span className="tabular-nums text-ink-2">{formatPeriodLabel(h.period)}</span>
                     <Bar value={h.score} />
@@ -794,7 +804,10 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
   return (
     <div className="flex flex-col gap-5">
       <Section
-        title={alignment ? `Weights total ${total}% · ${formatPeriodLabel(alignment.currentPeriod)}` : "KRAs & KPIs"}
+        // The total lives in the warning chip alone (shown only when it is
+        // not 100), so it is never printed twice and a person with no KRAs
+        // never reads "Weights total 0%".
+        title={alignment ? `KRAs & KPIs · ${formatPeriodLabel(alignment.currentPeriod)}` : "KRAs & KPIs"}
         action={
           <span className="flex items-center gap-1">
             {kras.length > 0 && total !== 100 ? <ToneChip tone="warning" label={`Weights total ${total}%`} /> : null}
@@ -908,7 +921,10 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
   const mayCreateFor = relation === "chain" || relation === "people-team" || relation === "admin";
   return (
     <Section
-      title={alignment ? `Goals · ${alignment.quarter}` : "Goals"}
+      // The default window is every open goal (the same set /okrs lists), so
+      // it can hold a goal due next quarter: the heading names no quarter
+      // then, and each row carries its own due quarter as /okrs does.
+      title={alignment?.window === "quarter" ? `Goals · ${alignment.quarter}` : "Goals"}
       action={
         <span className="flex items-center gap-1">
           {self
@@ -928,16 +944,19 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
       ) : state !== "ready" ? (
         <SkeletonRows rows={2} />
       ) : okrs.length === 0 ? (
-        <p className="text-row text-ink-2">No goals this quarter.</p>
+        <p className="text-row text-ink-2">{alignment?.window === "quarter" ? "No goals this quarter." : "No open goals."}</p>
       ) : (
         <Rows>
           {okrs.map((o) => {
-            const st = verdictChip(OKR_VERDICT[o.status] ?? "not_measured");
+            // The computed verdict (person-alignment.ts), never the stored
+            // status: the same word /okrs and the goal page show.
+            const st = verdictChip(o.verdict ?? "not_measured");
             return (
               <li key={o.id}>
                 <Link href={`/okrs/${o.id}`} className="flex min-h-11 items-center gap-3 px-3 hover:bg-hover">
                   <Trophy className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-row text-ink">{o.title}</span>
+                  {o.quarterLabel ? <span className="hidden shrink-0 text-sm tabular-nums text-ink-2 sm:inline">{o.quarterLabel}</span> : null}
                   <ToneChip tone={st.tone} label={st.label} />
                   <span className="hidden w-24 sm:block"><Bar value={o.progress} /></span>
                   <span className="w-10 shrink-0 text-end text-sm tabular-nums text-ink">{o.progressSource === "NONE" ? "·" : `${o.progress}%`}</span>
