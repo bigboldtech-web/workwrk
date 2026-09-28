@@ -184,7 +184,7 @@ export default function MembersPage() {
       </header>
       <p className="mb-4 text-sm text-zinc-500">
         Set each person’s access level and who they report to.
-        {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
+        {canEdit ? "" : " You need Company Admin to make changes. This view is read-only."}
       </p>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -266,7 +266,7 @@ export default function MembersPage() {
                       onChange={(e) => patch(m.id, { managerId: e.target.value || null })}
                       className="h-8 max-w-[200px] rounded-md border border-zinc-200 bg-white px-2 text-base text-zinc-800 disabled:opacity-60"
                     >
-                      <option value="">— None —</option>
+                      <option value="">No manager</option>
                       {(members ?? [])
                         .filter((o) => o.id !== m.id)
                         .map((o) => (
