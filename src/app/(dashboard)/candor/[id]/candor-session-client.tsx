@@ -18,7 +18,7 @@
 // Someone who may both answer and read results (People team in scope) gets a
 // Respond · Results pill row and lands on Respond until they have answered.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Ban, Link2, MoreHorizontal, Plus, RotateCcw, Trash2, X } from "lucide-react";
@@ -59,8 +59,32 @@ type Session = {
   launchedAt: string | null;
   closedAt: string | null;
   responseCount?: number | null;
+  /** Who this viewer may ask, sent with a Draft they may edit (null departmentIds: any department). */
+  scopes?: Scopes;
   faces: Faces;
 };
+type Scopes = { everyone: boolean; departmentIds: string[] | null };
+
+// The scope rule of lib/performance/candor.server.ts (candorScopeAllowed and
+// candorScopeRefusal; that module is server only), repeated here so the
+// picker and the Launch confirm never offer what the server refuses. The
+// server stays the authority: a refused launch still toasts its message.
+function scopeOk(sc: Scopes | undefined, departmentId: string | null): boolean {
+  if (!sc) return true;
+  if (departmentId === null) return sc.everyone;
+  return sc.departmentIds === null || sc.departmentIds.includes(departmentId);
+}
+function scopeNote(sc: Scopes, departmentId: string | null): string {
+  const which = "a department you head, or one where everyone in it reports to you";
+  if (sc.departmentIds !== null && !sc.departmentIds.length && !sc.everyone) return `You can run a Candor session for ${which}. None fits yet, so ask the People team to run this one.`;
+  return departmentId === null ? `Only the People team and Admins can ask everyone. Pick ${which}.` : `You can only ask ${which}.`;
+}
+// Who a session asks, in the words the Launch and Reopen confirms use: the
+// department, or the whole company by name (never "Everyone in everyone").
+function audienceOf(departmentName: string | null | undefined, orgName: string | null): string {
+  if (departmentName) return `Everyone in ${departmentName}`;
+  return orgName ? `Everyone at ${orgName}` : "Everyone in the company";
+}
 type Results = {
   totalResponses: number;
   belowFloor: boolean;
@@ -84,7 +108,14 @@ export default function CandorSessionClient({ id }: { id: string }) {
   const { blockingLayerOpen } = useOsShell();
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
-  const viewerId = (useBoot().boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const boot = useBoot().boot;
+  const viewerId = (boot?.viewer as { id?: string } | undefined)?.id ?? "anon";
+  const orgName = boot?.org?.name?.trim() || null;
+  // What the editor holds right now, typed or not yet autosaved: Launch sends
+  // it and names its audience, so a scope picked a moment ago is the one
+  // that opens (never the last saved one) and no question typed just before
+  // Launch is left out.
+  const draftRef = useRef<EditorDraft | null>(null);
   const draftKey = useCallback((sid: string) => candorDraftKey(viewerId, sid), [viewerId]);
   useEffect(() => { dropLegacyDraft("workwrk:candor-answers:", id); }, [id]);
 
@@ -156,16 +187,26 @@ export default function CandorSessionClient({ id }: { id: string }) {
   // ── Owner actions ─────────────────────────────────────────────────
   const move = async (status: "ACTIVE" | "CLOSED", reopen = false) => {
     if (!s) return;
-    const scope = s.department?.name ?? "everyone";
+    const draft = status === "ACTIVE" && !reopen && s.status === "DRAFT" ? draftRef.current : null;
+    const prompts = draft ? draft.state.prompts.filter((p) => p.text.trim()) : null;
+    if (draft) {
+      if (!scopeOk(s.scopes, draft.state.departmentId)) { toast(scopeNote(s.scopes!, draft.state.departmentId), { tone: "danger" }); return; }
+      if (!prompts?.length) { toast("Add at least one question before you launch", { tone: "danger" }); return; }
+    }
+    const title = draft ? draft.state.title.trim() || "Untitled session" : s.title;
+    const audience = audienceOf(draft ? draft.departmentName : s.department?.name, orgName);
     const ok = await confirm(
       status === "CLOSED"
         ? { title: `Close ${s.title}?`, description: "Nobody can answer after this. You can reopen it later.", confirmLabel: "Close session", destructive: false }
         : reopen
-          ? { title: `Reopen ${s.title}?`, description: `Everyone in ${scope} who has not answered can answer again.`, confirmLabel: "Reopen", destructive: false }
-          : { title: `Launch ${s.title}?`, description: `Everyone in ${scope} can answer from now on, and is told so. The questions are fixed from then.`, confirmLabel: "Launch session", destructive: false },
+          ? { title: `Reopen ${s.title}?`, description: `${audience} who has not answered can answer again.`, confirmLabel: "Reopen", destructive: false }
+          : { title: `Launch ${title}?`, description: `${audience} can answer from now on, and is told so. The questions are fixed from then.`, confirmLabel: "Launch session", destructive: false },
     );
     if (!ok) return;
-    const r = await apiFetch(`/api/candor/${s.id}`, { method: "PATCH", json: { status } });
+    const r = await apiFetch(`/api/candor/${s.id}`, {
+      method: "PATCH",
+      json: draft ? { status, title, description: draft.state.description, departmentId: draft.state.departmentId, prompts } : { status },
+    });
     if (!r.ok) { toast(r.error || "Couldn't change the session", { tone: "danger" }); return; }
     toast(status === "CLOSED" ? "Session closed" : reopen ? "Session reopened" : "Session launched");
     void load();
@@ -234,7 +275,7 @@ export default function CandorSessionClient({ id }: { id: string }) {
           ) : null}
 
           {face === "editor" ? (
-            <CandorEditor session={s} onDelete={faces.canDelete ? () => void remove() : undefined} onSaved={(next) => setS((cur) => (cur ? { ...cur, ...next } : cur))} />
+            <CandorEditor session={s} draftRef={draftRef} onDelete={faces.canDelete ? () => void remove() : undefined} onSaved={(next) => setS((cur) => (cur ? { ...cur, ...next } : cur))} />
           ) : face === "respond" && !thanks ? (
             <>
               <AnonymityNote mode="candor" />
@@ -325,8 +366,9 @@ function CandorResults({ session }: { session: Session }) {
 }
 
 type EditorState = { title: string; description: string; departmentId: string | null; prompts: CandorPrompt[] };
+type EditorDraft = { state: EditorState; departmentName: string | null };
 
-function CandorEditor({ session, onDelete, onSaved }: { session: Session; onDelete?: () => void; onSaved: (next: Partial<Session>) => void }) {
+function CandorEditor({ session, draftRef, onDelete, onSaved }: { session: Session; draftRef: { current: EditorDraft | null }; onDelete?: () => void; onSaved: (next: Partial<Session>) => void }) {
   const [state, setState] = useState<EditorState>({ title: session.title, description: session.description ?? "", departmentId: session.departmentId, prompts: session.prompts.length ? session.prompts : [] });
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
   const [menu, setMenu] = useState<{ id: string; anchor: { current: HTMLElement | null }; up?: () => void; down?: () => void } | null>(null);
@@ -354,6 +396,18 @@ function CandorEditor({ session, onDelete, onSaved }: { session: Session; onDele
     while (used.has(`p${n}`)) n += 1;
     return `p${n}`;
   }, [state.prompts]);
+  const deptName = state.departmentId ? depts.find((d) => d.id === state.departmentId)?.name ?? session.department?.name ?? "A department" : null;
+  useEffect(() => { draftRef.current = { state, departmentName: deptName }; }, [draftRef, state, deptName]);
+  // Only the scopes this organiser may ask (Session.scopes). The current
+  // one stays listed even when it is not, so the label is honest, with a
+  // note to change it: an older Draft keeps its questions and only its
+  // launch waits.
+  const scopes = session.scopes;
+  const scopeOptions = [
+    ...(scopeOk(scopes, null) || state.departmentId === null ? [{ value: "all", label: "Everyone" }] : []),
+    ...depts.filter((d) => scopeOk(scopes, d.id) || d.id === state.departmentId).map((d) => ({ value: d.id, label: d.name })),
+  ];
+  const scopeProblem = scopes && !scopeOk(scopes, state.departmentId) ? scopeNote(scopes, state.departmentId) : null;
   const setPrompt = (pid: string, patch: Partial<CandorPrompt>) => setState((s) => ({ ...s, prompts: s.prompts.map((p) => (p.id === pid ? { ...p, ...patch } : p)) }));
   const input = "h-9 w-full rounded-md border border-line bg-raised px-3 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]";
 
@@ -375,9 +429,10 @@ function CandorEditor({ session, onDelete, onSaved }: { session: Session; onDele
         </label>
         <div className="flex flex-col gap-1">
           <span className="text-sm font-medium text-ink">Who can answer</span>
-          <PickerButton ariaLabel="Who can answer" label={state.departmentId ? depts.find((d) => d.id === state.departmentId)?.name ?? session.department?.name ?? "A department" : "Everyone"}
-            selected={state.departmentId ?? "all"} sections={[{ options: [{ value: "all", label: "Everyone" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
+          <PickerButton ariaLabel="Who can answer" label={deptName ?? "Everyone"}
+            selected={state.departmentId ?? "all"} sections={[{ options: scopeOptions }]}
             onSelect={(v) => setState((s) => ({ ...s, departmentId: v === "all" ? null : v }))} />
+          {scopeProblem ? <span role="alert" className="text-xs text-danger-text">{scopeProblem}</span> : null}
           <span className="text-xs text-ink-2">Only people in the scope you pick can see or answer this.</span>
         </div>
       </section>

@@ -11,7 +11,11 @@
 //      answer view back, flagged `downgraded`, so the page can say why.
 // POST { title, description?, prompts, departmentId?, status? }: a new
 //      session, a Draft unless status is ACTIVE (launch at once). Every
-//      prompt gets a stable id here (lib/performance/candor.ts).
+//      prompt gets a stable id here (lib/performance/candor.ts). The scope
+//      must be one the organiser may ask (candorScopesFor): a manager who
+//      runs sessions only through their reports gets a department they head
+//      or one their chain covers, never Everyone. A Draft that names no
+//      scope starts on the first one they may ask.
 // PATCH { id, ... }: kept for one release; the same rules as PATCH
 //      /api/candor/[id].
 
@@ -20,7 +24,7 @@ import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
-import { candorCtx, notifyCandorOpen } from "@/lib/performance/candor.server";
+import { candorCtx, candorDefaultScope, candorScopeRefusal, candorScopesFor, notifyCandorOpen } from "@/lib/performance/candor.server";
 import { normalizeCandorPrompts } from "@/lib/performance/candor";
 import { PATCH as patchOne } from "./[id]/route";
 
@@ -105,6 +109,19 @@ export async function POST(req: NextRequest) {
     if (!dept) return jsonError("Invalid department", 400);
     departmentId = dept.id;
   }
+  // Who it asks must be inside what this organiser may ask. New session
+  // sends no scope, so a Draft from a chain-only manager starts on a scope
+  // they may launch instead of on Everyone; naming a scope, or launching at
+  // once, is checked as sent and never silently narrowed.
+  const ctx = await candorCtx();
+  if (!ctx) return jsonError("Not found", 404);
+  const scopes = await candorScopesFor(ctx);
+  if (!body.departmentId && status === "DRAFT") {
+    const first = candorDefaultScope(scopes, ctx.departmentId);
+    if (first !== undefined) departmentId = first;
+  }
+  const refused = candorScopeRefusal(scopes, departmentId);
+  if (refused) return jsonError(refused, 403);
 
   const candor = await prisma.candorSession.create({
     data: {

@@ -8,10 +8,18 @@
 //               answer would count toward the floor of results they read)
 //   anyone else a session is not discoverable (404, never a locked page)
 //
+// Who a session may ask (its scope) follows who runs it (access-model-spec
+// Candor session row: "anyone with reports FULL for sessions over their
+// chain; People team and Admin FULL org-wide"). candorScopesFor below is
+// the one rule; POST /api/candor, PATCH /api/candor/[id] and the editor's
+// picker all read it, so a manager with one report can never ask the whole
+// company.
+//
 // Server only.
 
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
 
 export interface CandorCtx {
   userId: string;
@@ -41,6 +49,84 @@ export function candorFaces(ctx: CandorCtx, s: { createdBy: string; status: stri
   const canRespond = !isOwner && inScope && s.status === "ACTIVE" && !hasResponded;
   const visible = canManage || (inScope && s.status === "ACTIVE");
   return { isOwner, canManage, canSeeResults: canManage, inScope, canRespond, hasResponded, visible };
+}
+
+/**
+ * The scopes a person may ask. `departmentIds: null` means any department.
+ *   org-wide   Owner, Admin, the People team, and the legacy manager tier
+ *              (MANAGER, DIRECTOR and up, HR), who could already ask
+ *              everyone before Phase 6: Everyone and any department.
+ *   chain      someone who runs sessions only because people report to them
+ *              (Phase 6 opened Candor to them): a department they head, or
+ *              one where every active member reports to them; Everyone only
+ *              when the whole company does. A chain that covers no scope
+ *              yet leaves nothing to pick, and the routes say so plainly.
+ */
+export type CandorScopes = { everyone: boolean; departmentIds: string[] | null };
+
+export const CANDOR_ORG_WIDE: CandorScopes = { everyone: true, departmentIds: null };
+
+/** Pure: the scopes a chain-only organiser covers. `members` is every active member of the org. */
+export function candorChainScopes(input: {
+  userId: string;
+  reportTree: ReadonlySet<string>;
+  members: ReadonlyArray<{ id: string; departmentId: string | null }>;
+  departments: ReadonlyArray<{ id: string; headId: string | null }>;
+}): CandorScopes {
+  if (!input.reportTree.size) return { everyone: false, departmentIds: [] };
+  const others = input.members.filter((m) => m.id !== input.userId);
+  // Covered means everyone who would be told (notifyCandorOpen asks every
+  // active member of the scope but the owner) is in the chain, and there is
+  // at least one of them: an empty department is nobody to ask.
+  const covered = (ids: string[]) => ids.length > 0 && ids.every((id) => input.reportTree.has(id));
+  const byDept = new Map<string, string[]>();
+  for (const m of others) {
+    if (!m.departmentId) continue;
+    const list = byDept.get(m.departmentId);
+    if (list) list.push(m.id);
+    else byDept.set(m.departmentId, [m.id]);
+  }
+  return {
+    everyone: covered(others.map((m) => m.id)),
+    departmentIds: input.departments.filter((d) => d.headId === input.userId || covered(byDept.get(d.id) ?? [])).map((d) => d.id),
+  };
+}
+
+export function candorScopeAllowed(scopes: CandorScopes, departmentId: string | null): boolean {
+  if (departmentId === null) return scopes.everyone;
+  return scopes.departmentIds === null || scopes.departmentIds.includes(departmentId);
+}
+
+/** Pure: why this scope is refused (null when allowed), in words the organiser can act on. */
+export function candorScopeRefusal(scopes: CandorScopes, departmentId: string | null): string | null {
+  if (candorScopeAllowed(scopes, departmentId)) return null;
+  const which = "a department you head, or one where everyone in it reports to you";
+  if (scopes.departmentIds !== null && !scopes.departmentIds.length && !scopes.everyone) {
+    return `You can run a Candor session for ${which}. None fits yet, so ask the People team to run this one.`;
+  }
+  return departmentId === null
+    ? `Only the People team and Admins can ask everyone. Pick ${which}.`
+    : `You can only ask ${which}.`;
+}
+
+/** The first scope to give a new draft that names none: the organiser's own department when allowed. */
+export function candorDefaultScope(scopes: CandorScopes, ownDepartmentId: string | null): string | null | undefined {
+  if (scopes.everyone) return null;
+  if (ownDepartmentId && candorScopeAllowed(scopes, ownDepartmentId)) return ownDepartmentId;
+  return scopes.departmentIds?.[0];
+}
+
+/** The scopes this viewer may ask (see CandorScopes). */
+export async function candorScopesFor(ctx: CandorCtx): Promise<CandorScopes> {
+  if (ctx.peopleTeamOrAdmin || (await sessionOnLegacyManagerTier())) return CANDOR_ORG_WIDE;
+  const v = await viewerFromSession();
+  const reportTree = v?.reportTree ?? new Set<string>();
+  if (!reportTree.size) return { everyone: false, departmentIds: [] };
+  const [members, departments] = await Promise.all([
+    prisma.user.findMany({ where: { organizationId: ctx.organizationId, deletedAt: null }, select: { id: true, departmentId: true } }),
+    prisma.department.findMany({ where: { organizationId: ctx.organizationId }, select: { id: true, headId: true } }),
+  ]);
+  return candorChainScopes({ userId: ctx.userId, reportTree, members, departments });
 }
 
 /** Has this person answered this session (CandorRespondent; absent table reads as no). */

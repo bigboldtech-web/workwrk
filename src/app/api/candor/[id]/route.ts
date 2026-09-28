@@ -9,13 +9,18 @@
 //         owner, the People team and Admin. Prompts and scope change only
 //         while it is a Draft (answers are keyed to them). Status moves:
 //         Draft to Open (launch, which notifies the scope), Open to Closed,
-//         Closed to Open (reopen, the close date cleared).
+//         Closed to Open (reopen, the close date cleared). The scope must
+//         be one the organiser may ask (candorScopesFor), checked when it
+//         changes and again on every move to Open, so a Draft saved before
+//         the rule, or by someone whose reports have since moved, cannot
+//         launch beyond their chain. GET sends `scopes` to the editor so the
+//         picker offers only those.
 // DELETE  a Draft only (nothing has been answered), never by an Agent.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { candorCtx, candorFaces, hasAnsweredCandor, notifyCandorOpen } from "@/lib/performance/candor.server";
+import { candorCtx, candorFaces, candorScopeRefusal, candorScopesFor, hasAnsweredCandor, notifyCandorOpen } from "@/lib/performance/candor.server";
 import { candorTransitionBlocked, normalizeCandorPrompts } from "@/lib/performance/candor";
 import { logActivity } from "@/lib/activity";
 
@@ -33,9 +38,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!s) return jsonError("Not found", 404);
   const faces = candorFaces(ctx, s, await hasAnsweredCandor(id, ctx.userId));
   if (!faces.visible) return jsonError("Not found", 404);
-  const [responseCount, dept] = await Promise.all([
+  const [responseCount, dept, scopes] = await Promise.all([
     faces.canManage ? prisma.candorResponse.count({ where: { sessionId: id } }) : Promise.resolve(null),
     s.departmentId ? prisma.department.findFirst({ where: { id: s.departmentId, organizationId: ctx.organizationId }, select: { id: true, name: true } }) : Promise.resolve(null),
+    // Only the editor needs it (a Draft someone may manage).
+    faces.canManage && s.status === "DRAFT" ? candorScopesFor(ctx) : Promise.resolve(null),
   ]);
   return jsonSuccess({
     id: s.id,
@@ -49,6 +56,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     closedAt: s.closedAt,
     createdAt: s.createdAt,
     ...(faces.canManage ? { responseCount } : {}),
+    ...(scopes ? { scopes } : {}),
     faces: { ...faces, canDelete: faces.canManage && !ctx.isAgent && s.status === "DRAFT", canExport: faces.canManage && !ctx.isAgent },
   }, 200);
 }
@@ -101,6 +109,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data.status = "CLOSED";
       data.closedAt = new Date();
     }
+  }
+  // The scope rule (lib/performance/candor.server.ts candorScopesFor): on a
+  // change of who it asks, and on every move to Open with the scope it will
+  // open with. An autosave that resends the unchanged scope of an older
+  // Draft still saves its title and questions; only the launch is refused.
+  const nextDept = data.departmentId !== undefined ? (data.departmentId as string | null) : s.departmentId;
+  if (nextDept !== s.departmentId || data.status === "ACTIVE") {
+    const refused = candorScopeRefusal(await candorScopesFor(ctx), nextDept);
+    if (refused) return jsonError(refused, 403);
   }
   const updated = await prisma.candorSession.update({ where: { id }, data });
   if (launched) await notifyCandorOpen(updated, ctx.organizationId, ctx.userId);
