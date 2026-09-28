@@ -8,9 +8,12 @@
 //                already placed for the period is never touched, so a double
 //                click or a second run places nobody twice.
 //
-// Anyone who holds the page may run it over the people they can see (the
-// People team and Admin: the org; a manager: their chain), which is what
-// the old auto-place allowed, now behind a confirm.
+// The People team and Admin only (spec-teams-performance /talent: "Fill from
+// scores (People team and Admin; ...)" and "Read only: a manager sees only
+// their chain and no Fill from scores"). A manager keeps the grid, the List
+// and Place person, one person at a time, but not the bulk write: a 403 on
+// both the count and the write. The page asks GET /api/talent-assessment
+// ?viewer=1 for canFill so it never offers a control that would refuse.
 
 import { NextRequest } from "next/server";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -26,6 +29,9 @@ export async function GET(req: NextRequest) {
   if (error) return error;
   const ctx = await talentCtx();
   if (!ctx || !ctx.allowed) return jsonError("Forbidden", 403);
+  // ids === null is the org scope, which talentCtx gives only the People
+  // team, Owner and Admin; a manager's scope is their chain.
+  if (ctx.ids !== null) return jsonError("Only the People team and Admin can fill from scores", 403);
   const period = periodOf(new URL(req.url).searchParams.get("period"));
   if (!period) return jsonError("period required");
   const res = await fillFromScores(ctx, period, { dryRun: true });
@@ -37,6 +43,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   const ctx = await talentCtx();
   if (!ctx || !ctx.allowed) return jsonError("Forbidden", 403);
+  // ids === null is the org scope, which talentCtx gives only the People
+  // team, Owner and Admin; a manager's scope is their chain.
+  if (ctx.ids !== null) return jsonError("Only the People team and Admin can fill from scores", 403);
   const body = ((await req.json().catch(() => null)) ?? {}) as { period?: unknown };
   const period = periodOf(body.period);
   if (!period) return jsonError("period required");

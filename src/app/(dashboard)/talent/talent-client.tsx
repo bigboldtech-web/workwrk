@@ -11,8 +11,9 @@
 //   toolbar   Filter (search, Department, Job title, Reports to, Action,
 //             Not yet placed) | Grid or List, the ONE blue Place person,
 //             "..." Display (List columns), Fill from scores (a confirm that
-//             names the count), Export CSV (never an Agent), Scoring and
-//             reviews (Owner and Admin)
+//             names the count; the People team and Admin only, never a
+//             manager), Export CSV (never an Agent), Scoring and reviews
+//             (Owner and Admin)
 //   Grid      the neutral 9-box (NineBoxGrid); a cell opens the 360 detail
 //             panel with its people, each a link, with Move on the grid,
 //             Open profile and Remove placement in its "..."
@@ -110,6 +111,17 @@ export default function TalentClient() {
     setPeriods(r.data);
   }, []);
   useEffect(() => { const t = setTimeout(() => { void loadPeriods(); }, 0); return () => clearTimeout(t); }, [loadPeriods]);
+
+  // Fill from scores is the People team and Admin only (the spec: a manager
+  // gets no Fill from scores). The boot viewer does not carry the People
+  // team flag, so the server says. It starts false: until the answer comes,
+  // and if it never does, nobody is offered a control that answers 403.
+  const [canFill, setCanFill] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void apiFetch<{ canFill: boolean }>("/api/talent-assessment?viewer=1", { cache: "no-store" }).then((r) => { if (live && r.ok) setCanFill(r.data.canFill === true); });
+    return () => { live = false; };
+  }, []);
   const periodParam = sp?.get("period") ?? "";
   const period = periodParam || periods?.current || "";
   const allPeriods = period === ALL;
@@ -230,11 +242,14 @@ export default function TalentClient() {
   const fill = async () => {
     if (allPeriods || !period) return;
     const c = await apiFetch<{ wouldPlace: number; skipped: number }>(`/api/talent-assessment/fill?period=${encodeURIComponent(period)}`, { cache: "no-store" });
+    // Access lowered since the page loaded: say so and stop offering it.
+    if (!c.ok && c.status === 403) setCanFill(false);
     if (!c.ok) { toast(c.error || "Couldn't count who to place", { tone: "danger" }); return; }
     if (!c.data.wouldPlace) { toast(`Nobody to place: everyone with a performance score is already placed for ${period}`); return; }
     const ok = await confirm({ title: `Place ${c.data.wouldPlace} ${c.data.wouldPlace === 1 ? "person" : "people"}?`, description: `${c.data.wouldPlace === 1 ? "This person has" : "They have"} a performance score and no placement for ${period}. Potential starts at Medium. You can move anyone afterwards.`, confirmLabel: "Place", destructive: false });
     if (!ok) return;
     const r = await apiFetch<{ placed: number }>("/api/talent-assessment/fill", { method: "POST", json: { period } });
+    if (!r.ok && r.status === 403) setCanFill(false);
     if (!r.ok) { toast(r.error || "Couldn't place them", { tone: "danger" }); return; }
     toast(`Placed ${r.data.placed} ${r.data.placed === 1 ? "person" : "people"}`);
     void load();
@@ -300,7 +315,10 @@ export default function TalentClient() {
           ...(place ? {} : { primary: { label: "Place person", icon: Plus, onClick: () => openPlace([], cell) } }),
           menu: [
             ...(view === "list" ? OPTIONAL_COLS.map((c) => ({ label: `Show ${c.label}`, checked: cols[c.key], keepOpen: true, onClick: () => setCol(c.key, !cols[c.key]) })) : []),
-            ...(!allPeriods ? [...(view === "list" ? [{ separator: true as const }] : []), { label: "Fill from scores", icon: Wand2, onClick: () => void fill() }] : []),
+            // The line under the List columns goes above whichever action
+            // comes first, Fill from scores or, for a manager, Export CSV.
+            ...(view === "list" && ((!allPeriods && canFill) || !viewer.isAgent) ? [{ separator: true as const }] : []),
+            ...(!allPeriods && canFill ? [{ label: "Fill from scores", icon: Wand2, onClick: () => void fill() }] : []),
             ...(!viewer.isAgent ? [{ label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref(); } }] : []),
             ...(orgAdmin ? [{ separator: true as const }, { label: "Scoring and reviews", icon: Settings2, onClick: () => openSettings("/settings/scoring") }] : []),
           ],
@@ -345,7 +363,7 @@ export default function TalentClient() {
                 selected={selected}
                 onSelectedChange={setSelected}
                 rowMenu={(p) => (p.user ? <RowMoreButton label={`Actions for ${personName(p.user)}`} onClick={(e) => setMenu({ p, u: p.user!, anchor: { current: e.currentTarget } })} /> : null)}
-                empty={filters ? <span className="text-row text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span> : <span className="text-row text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}{!allPeriods ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</span>}
+                empty={filters ? <span className="text-row text-ink-2">No one matches · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span> : <span className="text-row text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}{!allPeriods && canFill ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</span>}
                 bulkActions={
                   <>
                     <BulkAction icon={Move} label="Move on the grid" onClick={() => openPlace(shown.filter((p) => selected.has(p.id) && p.user).map((p) => p.user!), null)} />
@@ -368,7 +386,7 @@ export default function TalentClient() {
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-4 text-center">
                       <DotsArt arrangement="cluster" size={72} />
-                      <p className="m-0 text-sm text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}.{!allPeriods ? <> <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</p>
+                      <p className="m-0 text-sm text-ink-2">Nobody is placed for {allPeriods ? "any period" : period}.{!allPeriods && canFill ? <> <button type="button" className="text-brand-deep hover:underline" onClick={() => void fill()}>Fill from scores</button></> : null}</p>
                     </div>
                   )
                 ) : null}

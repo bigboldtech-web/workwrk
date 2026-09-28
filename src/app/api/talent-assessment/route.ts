@@ -4,9 +4,14 @@
 //      period when omitted), with the person, their department, job title
 //      and manager, and who placed them. Never the viewer's own placement.
 //      A GET never writes (PO-22): the old ?auto=true seeded rows from a read.
+// GET  ?viewer=1  { canFill }: what the page may offer this viewer. Fill from
+//      scores is the People team and Admin only (a manager gets the grid and
+//      Place person, not the bulk write), so the page hides it for anyone
+//      else rather than offering a control that answers 403.
 // POST { userId, period, performance, potential, action?, notes? }: place or
 //      move one person (a MANUAL placement). { autoPlace: true, period } is
-//      kept for one release and runs Fill from scores (POST /fill).
+//      kept for one release and runs Fill from scores (POST /fill), with the
+//      same People team and Admin check.
 //
 // Scope (lib/performance/talent.server.ts): the People team and Admin see
 // the org, anyone with reports their chain, nobody else anything.
@@ -26,6 +31,10 @@ export async function GET(req: NextRequest) {
   if (error) return error;
   const ctx = await talentCtx();
   if (!ctx || !ctx.allowed) return jsonError("Forbidden", 403);
+
+  // ids === null is the org scope (People team, Owner, Admin), the same test
+  // POST /fill makes.
+  if (new URL(req.url).searchParams.get("viewer") === "1") return jsonSuccess({ canFill: ctx.ids === null });
 
   const period = new URL(req.url).searchParams.get("period") || "";
   const assessments = await prisma.talentAssessment.findMany({
@@ -104,6 +113,9 @@ export async function POST(req: NextRequest) {
   const period = typeof body.period === "string" ? body.period.trim().slice(0, 100) : "";
 
   if (body.autoPlace === true) {
+    // The legacy door to Fill from scores keeps the /fill check, or a
+    // manager could still bulk-place their chain through it.
+    if (ctx.ids !== null) return jsonError("Only the People team and Admin can fill from scores", 403);
     if (!period) return jsonError("period required");
     const res = await fillFromScores(ctx, period);
     if (res.placed > 0) {
