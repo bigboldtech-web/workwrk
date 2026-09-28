@@ -14,8 +14,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
-import { isOrgWideAlignment } from "@/lib/alignment-scope";
+import { canEditGoal, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
+import { GOAL_EDIT_REFUSED, mayEditGoal, type GoalRightsActor, type GoalRightsTarget } from "@/lib/goals/goal-rights";
 import type { Prisma } from "@/generated/prisma";
 
 export const GOAL_AUDIENCE_TYPES = ["USER", "DEPARTMENT", "ROLE", "TAG"] as const;
@@ -236,45 +237,17 @@ export async function summarizeGoalAudiences(
 /* ───────────────────────────── edit rules ────────────────────────────── */
 
 /**
- * Who is asking, reduced to the facts every goal write rule reads. teamIds
- * is the caller's report tree (getTeamUserIds), and is only read for a
- * manager-tier caller: having one report is a fact about the org chart,
- * never a grant to edit (or re-weight) goals outside it.
- */
-export interface GoalEditActor {
-  callerId: string;
-  /** isOrgWideAlignment: admin, exec and People team levels. */
-  orgWide: boolean;
-  /** isManager: the manager tier of the access ladder. */
-  manager: boolean;
-  teamIds: ReadonlySet<string> | null;
-}
-
-/**
- * May this actor edit a goal owned by ownerId? The one rule PATCH
- * /api/okrs enforces and the list's per-row canEdit flag reports: an
- * org-wide level, the owner, or a manager whose report tree holds the
- * owner (unowned goals stay editable by the manager tier, who create them).
- */
-export function mayEditGoalAs(actor: GoalEditActor, ownerId: string | null): boolean {
-  if (actor.orgWide) return true;
-  if (ownerId && ownerId === actor.callerId) return true;
-  if (!actor.manager) return false;
-  if (!ownerId) return true;
-  return actor.teamIds?.has(ownerId) ?? false;
-}
-
-/**
  * May this actor put a goal under `parent` (Part of)? A parent's progress
  * is the mean of its own targets and every measured child, persisted up
  * the chain, so attaching a goal re-weights the parent's headline number.
- * That is an edit of the parent, and needs the same right as editing it:
- * without this, any member could drag a Company goal the whole org reads
- * by attaching their own 1% goal to it. Clearing Part of is an edit of the
- * child only, and never reaches this rule.
+ * That is an edit of the parent, and needs the same right as editing it
+ * (mayEditGoal, src/lib/goals/goal-rights.ts): without this, any member
+ * could drag a Company goal the whole org reads by attaching their own 1%
+ * goal to it. Clearing Part of is an edit of the child only, and never
+ * reaches this rule.
  */
-export function mayAttachUnderGoal(actor: GoalEditActor, parent: { ownerId: string | null }): boolean {
-  return mayEditGoalAs(actor, parent.ownerId);
+export function mayAttachUnderGoal(actor: GoalRightsActor, parent: GoalRightsTarget): boolean {
+  return mayEditGoal(actor, parent);
 }
 
 /**
@@ -331,6 +304,21 @@ export async function canSeeGoal(
     if (members.some((id) => teamIds.has(id))) return true;
   }
   return false;
+}
+
+/**
+ * The one write gate for a goal's sub-resources (targets, contributors):
+ * null when the caller may edit it; a 404 when they cannot even see it, so
+ * a refusal never confirms a hidden goal exists; else the 403 copy, which
+ * names the right and never the goal.
+ */
+export async function goalEditDenial(
+  session: unknown,
+  okr: { id: string; level: string; ownerId: string | null; departmentId?: string | null },
+): Promise<{ status: 403 | 404; error: string } | null> {
+  if (!(await canSeeGoal(session, okr))) return { status: 404, error: "Not found" };
+  if (!(await canEditGoal(session, okr))) return { status: 403, error: GOAL_EDIT_REFUSED };
+  return null;
 }
 
 /**

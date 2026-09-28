@@ -12,7 +12,7 @@
 //   Copy link     → the goal's URL onto the clipboard
 //   Delete goal   → destructive, last                          (canDelete)
 //
-// canEdit mirrors PATCH /api/okrs (owner / tree-manager / org-wide levels);
+// canEdit mirrors PATCH /api/okrs (mayEditGoal, src/lib/goals/goal-rights.ts);
 // canDelete mirrors DELETE /api/okrs/[id] (canDeleteGoal): an action only
 // renders when the API will honor it. Open and Copy link need no gate: the
 // viewer can already see the goal.

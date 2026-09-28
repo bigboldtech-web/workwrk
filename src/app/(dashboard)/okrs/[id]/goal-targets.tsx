@@ -43,7 +43,7 @@ function fmtNum(n: number): string {
 
 export function GoalTargets({ okrId, canEdit, canCheckIn, targets, onHistory }: {
   okrId: string;
-  /** Target writer (add, delete): canEditOkrOwner, the key-results routes' gate. */
+  /** Target writer (add, delete): canEditGoal, the key-results routes' gate. */
   canEdit: boolean;
   /** May check in: target writers plus the goal's contributors. */
   canCheckIn: boolean;

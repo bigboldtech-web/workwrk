@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { goalCreatorIds, goalRightsActor } from "@/lib/alignment-scope";
+import { GOAL_EDIT_REFUSED, mayEditGoal } from "@/lib/goals/goal-rights";
 
 /**
  * Batch-update OKR.position for a manual drag-reorder. Mirrors the
@@ -26,10 +28,16 @@ export async function POST(req: NextRequest) {
   const ids = (items as Array<{ id: string }>).map((i) => i.id);
   const owned = await prisma.oKR.findMany({
     where: { id: { in: ids }, organizationId: orgId },
-    select: { id: true },
+    select: { id: true, level: true, ownerId: true },
   });
   if (owned.length !== items.length) {
     return jsonError("One or more OKRs are not in your organization", 403);
+  }
+  // Moving a goal is an edit of it: every goal in the batch needs the edit
+  // right (mayEditGoal), or nothing moves.
+  const [actor, creators] = await Promise.all([goalRightsActor(session), goalCreatorIds(orgId, ids)]);
+  if (!owned.every((o) => mayEditGoal(actor, { level: o.level, ownerId: o.ownerId, creatorId: creators.get(o.id) ?? null }))) {
+    return jsonError(GOAL_EDIT_REFUSED, 403);
   }
 
   await prisma.$transaction(

@@ -23,7 +23,7 @@
 // attached files to a task, and removed other people's attachments.
 
 import { prisma } from "@/lib/prisma";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
+import { canEditGoal } from "@/lib/alignment-scope";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { checkFileEdit } from "@/lib/access/node-placement";
 import { roleAtLeast, type NodeKind, type NodeRef } from "@/lib/access/node-rules";
@@ -42,18 +42,18 @@ export async function canMutateLinkFromSource(
   if (source.type === "OKR") {
     const okr = await prisma.oKR.findFirst({
       where: { id: source.id, organizationId: orgId },
-      select: { ownerId: true },
+      select: { level: true, ownerId: true },
     });
     if (!okr) return false; // unknown / cross-org source: refuse the write
-    return canEditOkrOwner(session, okr.ownerId);
+    return canEditGoal(session, { id: source.id, level: okr.level, ownerId: okr.ownerId });
   }
   if (source.type === "KEY_RESULT") {
     const kr = await prisma.keyResult.findFirst({
       where: { id: source.id, okr: { organizationId: orgId } },
-      select: { okr: { select: { ownerId: true } } },
+      select: { okr: { select: { id: true, level: true, ownerId: true } } },
     });
     if (!kr) return false;
-    return canEditOkrOwner(session, kr.okr.ownerId);
+    return canEditGoal(session, kr.okr);
   }
   return true;
 }

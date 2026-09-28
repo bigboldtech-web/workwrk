@@ -121,6 +121,16 @@ export function goalsGroupHeld(pathname: string): boolean {
 }
 
 /**
+ * Does the Goals parent row light? Only while the group is collapsed on a
+ * Goals page: its children are not rendered then, so the parent stands in
+ * for the lit child. Expanded, the child lights and the parent reads as the
+ * parent, so one URL still lights exactly one row.
+ */
+export function goalsParentLit(pathname: string, expanded: boolean): boolean {
+  return !expanded && goalsGroupHeld(pathname);
+}
+
+/**
  * Is the Work sidebar's Goals group expanded? spec-goals section 1: expanded
  * while the pathname starts with /okrs; otherwise the remembered
  * `sidebar.groups.goals`; collapsed when never set.

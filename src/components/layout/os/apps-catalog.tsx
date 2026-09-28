@@ -59,7 +59,7 @@ import { useSidebarSearch } from "./sidebar-search-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsShell } from "./shell-context";
 import { readSidebarCards } from "@/lib/home-prefs";
-import { goalsGroupExpanded, goalsGroupHeld } from "@/lib/people-prefs";
+import { goalsGroupExpanded, goalsGroupHeld, goalsParentLit } from "@/lib/people-prefs";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
@@ -348,8 +348,9 @@ function GroupRow({
 
 function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   // spec-goals section 1, the Work hub's Goals group. The parent row reads as
-  // the parent and never lights on its own: "My goals" is the child that
-  // lights on /okrs, so one URL still lights exactly one row. The gates are
+  // the parent: expanded, "My goals" is the child that lights on /okrs, so
+  // one URL still lights exactly one row; collapsed, the children are not
+  // rendered, so on any Goals page the parent lights in their place. The gates are
   // the boot facts (hasReports solid or dotted, the People team, Admin), not
   // an accessLevel tier. Expanded while the URL is under /okrs; otherwise the
   // chevron's last choice, persisted as sidebar.groups.goals. On /okrs the
@@ -386,7 +387,7 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   };
   return (
     <>
-      <GroupRow href="/okrs" label="Goals" Icon={Target} active={false} expanded={expanded} onToggle={onToggle} />
+      <GroupRow href="/okrs" label="Goals" Icon={Target} active={goalsParentLit(pathname, expanded)} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <>
           <SidebarRow depth={1} href="/okrs" icon={Trophy} label="My goals" active={active("/okrs")} />

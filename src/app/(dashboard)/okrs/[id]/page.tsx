@@ -13,8 +13,9 @@
 //               Targets · Effort · Linked work · Supports this goal (only the
 //               children the viewer can see) · Activity (paged)
 //
-// Roles on a goal: the owner, the owner's manager chain, the org-wide levels
-// (canEditOkrOwner) edit everything; Contributors (GoalAssignee, resolved at
+// Roles on a goal: whoever mayEditGoal allows (src/lib/goals/goal-rights.ts:
+// the owner, Owner/Admin, the People team, and below Company level the
+// creator and the owner's manager chain) edit everything; Contributors (GoalAssignee, resolved at
 // read time) check in; everyone else who can see it (canSeeGoal: company
 // goals, their department's, a manager's tree) reads it.
 
@@ -22,7 +23,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireGoalPage } from "@/lib/page-gates";
-import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
+import { canDeleteGoal, canEditGoal as canEditGoalFor } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
@@ -83,8 +84,8 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
     listGoalAssigneeEntries(okr.id),
     resolveGoalMembersBatch(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
     prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
-    canDeleteGoal(sessionLike, okr.ownerId),
-    canEditOkrOwner(sessionLike, okr.ownerId),
+    canDeleteGoal(sessionLike, okr),
+    canEditGoalFor(sessionLike, okr),
     isGoalContributor(sessionLike, okr.id),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);

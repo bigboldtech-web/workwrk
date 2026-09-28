@@ -7,10 +7,10 @@
 // response says so via `currentValueIgnored` and the KR's `isDerived`.
 
 import { NextRequest } from "next/server";
+import { goalEditDenial } from "@/lib/goal-audience";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -37,15 +37,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const okr = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: orgId },
-    select: { id: true, ownerId: true },
+    select: { id: true, level: true, ownerId: true, departmentId: true },
   });
   if (!okr) return jsonError("OKR not found", 404);
 
   // Adding a KR is a WRITE on the objective, owner / tree-manager /
   // org-wide only.
-  if (!(await canEditOkrOwner(session, okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

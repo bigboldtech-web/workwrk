@@ -5,52 +5,50 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => [] }));
 
-import { mayAttachUnderGoal, mayEditGoalAs, seesUnownedGoals, type GoalEditActor } from "./goal-audience";
+import { mayAttachUnderGoal, seesUnownedGoals } from "./goal-audience";
+import type { GoalRightsActor } from "./goals/goal-rights";
 
-const member = (over: Partial<GoalEditActor> = {}): GoalEditActor => ({
+const member = (over: Partial<GoalRightsActor> = {}): GoalRightsActor => ({
   callerId: "me",
-  orgWide: false,
+  admin: false,
+  peopleTeam: false,
   manager: false,
-  teamIds: new Set(["me", "report"]),
+  agent: false,
+  chain: new Set(["me", "report"]),
   ...over,
 });
+const parent = (level: string, ownerId: string | null, creatorId: string | null = null) => ({ level, ownerId, creatorId });
 
 describe("mayAttachUnderGoal (Part of)", () => {
   it("refuses a member attaching their goal under a Company goal they cannot edit", () => {
     // The walk's case: a brand new employee dragged an unowned Company goal
     // from 80 to 41 by attaching a 1% goal to it.
-    expect(mayAttachUnderGoal(member({ teamIds: new Set(["me"]) }), { ownerId: null })).toBe(false);
-    expect(mayAttachUnderGoal(member({ teamIds: new Set(["me"]) }), { ownerId: "ceo" })).toBe(false);
+    expect(mayAttachUnderGoal(member({ chain: new Set(["me"]) }), parent("COMPANY", null))).toBe(false);
+    expect(mayAttachUnderGoal(member({ chain: new Set(["me"]) }), parent("COMPANY", "ceo"))).toBe(false);
   });
 
   it("refuses a member with one report too: a report is not an edit grant", () => {
-    expect(mayAttachUnderGoal(member(), { ownerId: null })).toBe(false);
-    expect(mayAttachUnderGoal(member(), { ownerId: "report" })).toBe(false);
+    expect(mayAttachUnderGoal(member(), parent("DEPARTMENT", null))).toBe(false);
+    expect(mayAttachUnderGoal(member(), parent("DEPARTMENT", "report"))).toBe(false);
   });
 
   it("allows the parent's owner", () => {
-    expect(mayAttachUnderGoal(member(), { ownerId: "me" })).toBe(true);
+    expect(mayAttachUnderGoal(member(), parent("COMPANY", "me"))).toBe(true);
   });
 
-  it("allows the manager tier over their tree and over unowned goals, never outside the tree", () => {
+  it("allows the manager tier over their chain's Department goals, never a Company goal or outside the chain", () => {
     const mgr = member({ manager: true });
-    expect(mayAttachUnderGoal(mgr, { ownerId: "report" })).toBe(true);
-    expect(mayAttachUnderGoal(mgr, { ownerId: null })).toBe(true);
-    expect(mayAttachUnderGoal(mgr, { ownerId: "stranger" })).toBe(false);
+    expect(mayAttachUnderGoal(mgr, parent("DEPARTMENT", "report"))).toBe(true);
+    expect(mayAttachUnderGoal(mgr, parent("DEPARTMENT", null))).toBe(false);
+    expect(mayAttachUnderGoal(mgr, parent("DEPARTMENT", null, "me"))).toBe(true);
+    expect(mayAttachUnderGoal(mgr, parent("DEPARTMENT", "stranger"))).toBe(false);
+    expect(mayAttachUnderGoal(mgr, parent("COMPANY", null))).toBe(false);
+    expect(mayAttachUnderGoal(mgr, parent("COMPANY", "report"))).toBe(false);
   });
 
-  it("allows an org-wide level anywhere", () => {
-    expect(mayAttachUnderGoal(member({ orgWide: true, teamIds: null }), { ownerId: "stranger" })).toBe(true);
-    expect(mayAttachUnderGoal(member({ orgWide: true, teamIds: null }), { ownerId: null })).toBe(true);
-  });
-});
-
-describe("mayEditGoalAs", () => {
-  it("is the PATCH edit gate: owner, manager over the tree, org-wide", () => {
-    expect(mayEditGoalAs(member(), "me")).toBe(true);
-    expect(mayEditGoalAs(member(), "report")).toBe(false);
-    expect(mayEditGoalAs(member({ manager: true }), "report")).toBe(true);
-    expect(mayEditGoalAs(member({ manager: true, teamIds: null }), "report")).toBe(false);
+  it("allows Owner/Admin and the People team anywhere", () => {
+    expect(mayAttachUnderGoal(member({ admin: true, chain: null }), parent("COMPANY", "stranger"))).toBe(true);
+    expect(mayAttachUnderGoal(member({ peopleTeam: true, chain: null }), parent("COMPANY", null))).toBe(true);
   });
 });
 

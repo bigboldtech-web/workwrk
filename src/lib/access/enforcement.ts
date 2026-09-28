@@ -146,7 +146,7 @@ const OBJECT_ENFORCEMENT: Record<`object.${ObjectType}`, string> = {
   "object.sop_folder": "sop-access.ts canWriteToFolder, /api/sop-folders/[id]/access",
   "object.policy": "api/policies/[id]",
   "object.contract": "api/agreements/[id]",
-  "object.goal": "goal-audience.ts canSeeGoal, alignment-scope.ts canEditOkrOwner",
+  "object.goal": "goal-audience.ts canSeeGoal, goals/goal-rights.ts mayEditGoal and mayDeleteGoal",
   "object.kra": "api/kras/[id], access.ts resolveKra",
   "object.channel": "api/conversations/[id] (getSessionAndModule + ConversationMember)",
   "object.team": "api/teams/[id] (step 4)",

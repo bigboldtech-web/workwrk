@@ -10,10 +10,10 @@
 // here ever writes a KPI or KPIRecord.
 
 import { NextRequest } from "next/server";
+import { goalEditDenial } from "@/lib/goal-audience";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -36,7 +36,7 @@ const patchSchema = z.object({
 async function findScopedKeyResult(okrId: string, krId: string, orgId: string) {
   return prisma.keyResult.findFirst({
     where: { id: krId, okrId, okr: { organizationId: orgId } },
-    include: { okr: { select: { ownerId: true } } },
+    include: { okr: { select: { id: true, level: true, ownerId: true, departmentId: true } } },
   });
 }
 
@@ -54,9 +54,8 @@ export async function PATCH(
 
   // Editing a KR is a WRITE on the objective, owner / tree-manager /
   // org-wide only.
-  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, kr.okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
@@ -121,9 +120,8 @@ export async function DELETE(
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
 
-  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, kr.okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   await prisma.keyResult.delete({ where: { id: kr.id } });
 

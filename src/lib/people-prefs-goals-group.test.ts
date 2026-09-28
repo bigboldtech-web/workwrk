@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { goalsGroupExpanded, goalsGroupHeld } from "./people-prefs";
+import { goalsGroupExpanded, goalsGroupHeld, goalsParentLit } from "./people-prefs";
 
 // The Work sidebar's Goals group on /okrs: the route holds it open by default,
 // but the chevron's per-visit choice (heldClosed) must still collapse it, so
@@ -20,5 +20,19 @@ describe("goalsGroupExpanded with the per-visit collapse", () => {
     expect(goalsGroupHeld("/okrs/abc")).toBe(true);
     expect(goalsGroupHeld("/okrsx")).toBe(false);
     expect(goalsGroupHeld("/home")).toBe(false);
+  });
+});
+
+// With the group collapsed on a Goals page no child row renders, so the
+// parent lights in its place; expanded, the child lights and the parent
+// never does, so one URL lights exactly one row.
+describe("goalsParentLit", () => {
+  it("lights the parent only when collapsed on a Goals page", () => {
+    expect(goalsParentLit("/okrs", false)).toBe(true);
+    expect(goalsParentLit("/okrs/abc", false)).toBe(true);
+    expect(goalsParentLit("/okrs", true)).toBe(false);
+    expect(goalsParentLit("/okrs/abc", true)).toBe(false);
+    expect(goalsParentLit("/home", false)).toBe(false);
+    expect(goalsParentLit("/okrsx", false)).toBe(false);
   });
 });

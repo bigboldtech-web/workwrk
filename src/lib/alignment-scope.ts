@@ -11,6 +11,14 @@
 
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
+import { prisma } from "@/lib/prisma";
+import { isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import {
+  mayDeleteGoal,
+  mayEditGoal,
+  type GoalRightsActor,
+  type GoalRightsTarget,
+} from "@/lib/goals/goal-rights";
 
 /** Door 3, may read/write alignment data across the whole org. */
 export const ORG_WIDE_ALIGNMENT_LEVELS = new Set([
@@ -63,45 +71,75 @@ export async function canTouchUserAlignment(
   return teamIds.includes(targetUserId);
 }
 
-/**
- * May the caller EDIT an objective owned by `ownerId`? The owner always;
- * org-wide levels always; manager tiers when the owner is in their report
- * tree, and for unowned objectives (managers create those), any manager.
- */
-export async function canEditOkrOwner(
-  session: unknown,
-  ownerId: string | null,
-): Promise<boolean> {
-  const callerId = getUserId(session);
-  if (ownerId === callerId) return true;
-  if (isOrgWideAlignment(session)) return true;
-  if (!isManager(session)) return false;
-  if (!ownerId) return true;
-  const teamIds = await getTeamUserIds(getOrgId(session), callerId);
-  return teamIds.includes(ownerId);
+/** A goal as the edit and delete rules read it (src/lib/goals/goal-rights.ts). */
+export interface GoalRef {
+  id: string;
+  level: string;
+  ownerId: string | null;
 }
 
 /**
- * May the caller DELETE an objective owned by `ownerId`? Deleting is a
- * heavier action than editing, so the org-wide door is narrowed to true
- * org admins (SUPER_ADMIN / COMPANY_ADMIN), a Director can edit a goal
- * but not wipe it. The owner may always; a manager may delete a report's
- * goal (and unowned objectives, which managers create). This is the ONE
- * predicate DELETE /api/okrs/[id] enforces AND the list/detail surfaces
- * gate their Delete affordance on, so the UI can never show a Delete that
- * the API then 403s.
+ * The caller as the goal rules see them. The reporting chain is only walked
+ * for the manager tier, the one tier it grants to, and only when the answer
+ * is not already settled by admin or People team.
  */
-export async function canDeleteGoal(
-  session: unknown,
-  ownerId: string | null,
-): Promise<boolean> {
+export async function goalRightsActor(session: unknown, chainIds?: readonly string[]): Promise<GoalRightsActor> {
   const callerId = getUserId(session);
-  if (isOrgAdminLevel(session)) return true;
-  if (ownerId === callerId) return true;
-  if (!isManager(session)) return false;
-  if (!ownerId) return true;
-  const teamIds = await getTeamUserIds(getOrgId(session), callerId);
-  return teamIds.includes(ownerId);
+  const level = sessionAccessLevel(session);
+  const admin = isOrgAdminLevel(session);
+  const peopleTeam = isSeededPeopleTeam(level);
+  const manager = isManager(session);
+  const chain = !manager || admin || peopleTeam
+    ? null
+    : new Set(chainIds ?? (await getTeamUserIds(getOrgId(session), callerId)));
+  return { callerId, admin, peopleTeam, manager, agent: isAgentOf(level), chain };
+}
+
+/**
+ * Who created each goal: the okr_created activity row POST /api/okrs writes.
+ * OKR has no creator column, and the activity row is written in the same
+ * request as the goal. A goal with no row (seeded or imported) has no
+ * creator, so only its owner, its owner's manager, the People team and
+ * Owner/Admin may edit it: the narrow answer.
+ */
+export async function goalCreatorIds(orgId: string, goalIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (goalIds.length === 0) return out;
+  const rows = await prisma.activityLog.findMany({
+    where: { organizationId: orgId, type: "okr_created", targetType: "okr", targetId: { in: goalIds } },
+    select: { targetId: true, actorId: true },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const r of rows) if (r.targetId && !out.has(r.targetId)) out.set(r.targetId, r.actorId);
+  return out;
+}
+
+async function rightsTarget(session: unknown, goal: GoalRef): Promise<GoalRightsTarget> {
+  // The creator only matters below Company level, and only for someone who
+  // is not the owner: skip the lookup when it cannot change the answer.
+  const needsCreator = goal.level !== "COMPANY" && goal.ownerId !== getUserId(session);
+  const creatorId = needsCreator ? (await goalCreatorIds(getOrgId(session), [goal.id])).get(goal.id) ?? null : null;
+  return { level: goal.level, ownerId: goal.ownerId, creatorId };
+}
+
+/**
+ * May the caller EDIT this goal (rename, targets, contributors, linked work,
+ * Part of, check in as more than a contributor)? mayEditGoal is the rule.
+ */
+export async function canEditGoal(session: unknown, goal: GoalRef): Promise<boolean> {
+  const [actor, target] = await Promise.all([goalRightsActor(session), rightsTarget(session, goal)]);
+  return mayEditGoal(actor, target);
+}
+
+/**
+ * May the caller DELETE this goal? mayDeleteGoal is the rule. This is the
+ * ONE predicate DELETE /api/okrs/[id] enforces AND the list and detail
+ * surfaces gate their Delete control on, so the UI never shows a Delete the
+ * API then refuses.
+ */
+export async function canDeleteGoal(session: unknown, goal: GoalRef): Promise<boolean> {
+  const [actor, target] = await Promise.all([goalRightsActor(session), rightsTarget(session, goal)]);
+  return mayDeleteGoal(actor, target);
 }
 
 /**

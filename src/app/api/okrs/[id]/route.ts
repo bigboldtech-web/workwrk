@@ -10,6 +10,7 @@ import {
   persistGoalRollupChain,
 } from "@/lib/alignment";
 import { canSeeGoal, summarizeGoalAudiences } from "@/lib/goal-audience";
+import { GOAL_DELETE_REFUSED } from "@/lib/goals/goal-rights";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -52,7 +53,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     progressSource: rollup.source,
     // Whether THIS viewer may delete the goal, same predicate the DELETE
     // handler enforces, surfaced so the client can show/hide its affordance.
-    canDelete: await canDeleteGoal(session, okr.ownerId),
+    canDelete: await canDeleteGoal(session, okr),
     children: okr.children.map((c) => {
       const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
       return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
@@ -68,12 +69,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const okr = await prisma.oKR.findFirst({ where: { id, organizationId: getOrgId(session) } });
   if (!okr) return jsonError("Not found", 404);
 
-  // Deleting a goal is owner / tree-manager / org-admin territory,
-  // a peer can never remove someone else's objective. Same predicate the
-  // list/detail Delete affordance gates on, so the UI never offers a
-  // Delete the API then refuses.
-  if (!(await canDeleteGoal(session, okr.ownerId))) {
-    return jsonError("You can only delete your own goals or your reports' goals.", 403);
+  // A goal the caller cannot see answers exactly like a missing one, so a
+  // refused delete never confirms that it exists.
+  if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
+  // mayDeleteGoal (src/lib/goals/goal-rights.ts): a peer, or a manager with
+  // no tie to the goal, can never remove it, and a Company goal is only
+  // removed by its owner or an Admin. Same predicate the list and detail
+  // Delete controls gate on, so the UI never offers a Delete the API refuses.
+  if (!(await canDeleteGoal(session, okr))) {
+    return jsonError(GOAL_DELETE_REFUSED, 403);
   }
 
   // Key results, their check-ins, and the goal's audience rows all cascade

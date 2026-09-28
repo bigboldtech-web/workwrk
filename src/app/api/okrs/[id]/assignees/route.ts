@@ -12,10 +12,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
 import {
   addGoalAssignees,
   canSeeGoal,
+  goalEditDenial,
   listGoalAssigneeEntries,
   removeGoalAssignees,
   summarizeGoalAudiences,
@@ -70,9 +70,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const orgId = getOrgId(session);
   const okr = await loadOkr(id, orgId);
   if (!okr) return jsonError("Not found", 404);
-  if (!(await canEditOkrOwner(session, okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   const body = await req.json().catch(() => ({}));
   const parsed = await validateGoalAssignees(orgId, body?.assignees);
@@ -90,9 +89,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const orgId = getOrgId(session);
   const okr = await loadOkr(id, orgId);
   if (!okr) return jsonError("Not found", 404);
-  if (!(await canEditOkrOwner(session, okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   const body = await req.json().catch(() => ({}));
   const entries = parseRemovalEntries(body?.assignees);

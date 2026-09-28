@@ -26,7 +26,7 @@ import { DateField } from "@/components/ui/date-field";
 import { Picker } from "@/components/ui/picker";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { legacyIsHrAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { apiFetch } from "@/lib/api-fetch";
 import type { PersonRef } from "@/components/board-view/assignee-picker";
 
@@ -110,6 +110,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // /api/okrs ask before they accept an owner or a non-Individual level, so
   // the modal never offers a choice the save would silently drop.
   const mayAssign = legacyIsManagerLevel(accessLevel);
+  const myId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const confirm = useConfirm();
 
   const [title, setTitle] = useState(goal?.title ?? "");
@@ -134,6 +135,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<{ title?: string; endDate?: string }>({});
+  // A Company goal is edited only by Owner/Admin, the People team and its
+  // own owner (src/lib/goals/goal-rights.ts), and POST and PATCH refuse to
+  // make one the saver could not then fix. Say so before the save, not after.
+  const companyBlocked = mayAssign && selLevel === "COMPANY" && goal?.level !== "COMPANY" &&
+    !legacyIsHrAdminLevel(accessLevel) && (!owner || owner.id !== myId);
 
   // Part of: goals one level up that the viewer can see (Company goals for
   // a Department goal; Company or Department goals for an Individual one).
@@ -192,7 +198,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     if (!endDate) errs.endDate = "Pick a due date.";
     if (startDate && endDate && startDate > endDate) errs.endDate = "The due date is before the start date.";
     setFieldError(errs);
-    if (errs.title || errs.endDate) return;
+    if (errs.title || errs.endDate || companyBlocked) return;
     setSaving(true);
     setError(null);
     const payload: Record<string, unknown> = {
@@ -254,6 +260,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
             <div className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>Level</span>
               <SegmentedControl label="Level" value={selLevel} options={LEVEL_OPTIONS} onChange={(v) => setSelLevel(v)} />
+              {companyBlocked ? (
+                <span className="text-sm font-normal text-ink-2">
+                  Only an Admin, the People team or the goal&apos;s owner can make a Company goal. Make yourself the owner, or ask an Admin.
+                </span>
+              ) : null}
             </div>
           ) : null}
 

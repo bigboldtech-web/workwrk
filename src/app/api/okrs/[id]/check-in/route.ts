@@ -2,7 +2,7 @@ import { canSeeGoal } from "@/lib/goal-audience";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
+import { canEditGoal } from "@/lib/alignment-scope";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
@@ -38,7 +38,7 @@ export async function POST(
   // read routes do the same), so a check-in never confirms that it exists.
   if (!(await canSeeGoal(session, okrRef))) return jsonError("OKR not found", 404);
   // Contributors check in too (spec-goals access: Can edit = check in).
-  if (!(await canEditOkrOwner(session, okrRef.ownerId)) && !(await isGoalContributor(session, okrId))) {
+  if (!(await canEditGoal(session, okrRef)) && !(await isGoalContributor(session, okrId))) {
     return jsonError("You need Can edit on this goal to check in.", 403);
   }
 
