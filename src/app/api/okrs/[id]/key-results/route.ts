@@ -1,9 +1,9 @@
-// POST /api/okrs/[id]/key-results — add a key result to an objective.
+// POST /api/okrs/[id]/key-results, add a key result to an objective.
 //
 // `kpiId` (optional) links the KR UP at a role-level KPI gauge, validated
 // against the caller's org. While linked, the KR is measured BY that
 // gauge: currentValue/progress are derived from the KPI's latest record
-// on read, so a hand-typed currentValue is not stored as the truth — the
+// on read, so a hand-typed currentValue is not stored as the truth, the
 // response says so via `currentValueIgnored` and the KR's `isDerived`.
 
 import { NextRequest } from "next/server";
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!okr) return jsonError("OKR not found", 404);
 
-  // Adding a KR is a WRITE on the objective — owner / tree-manager /
+  // Adding a KR is a WRITE on the objective, owner / tree-manager /
   // org-wide only.
   if (!(await canEditOkrOwner(session, okr.ownerId))) {
     return jsonError("You can only edit your own goals or your reports' goals.", 403);
@@ -59,11 +59,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const startValue = d.startValue ?? 0;
   const targetValue = d.targetValue ?? 100;
-  // A linked KR is measured by its gauge — a hand-typed currentValue is
+  // A linked KR is measured by its gauge, a hand-typed currentValue is
   // ignored (derived wins). Unlinked KRs keep the classic manual number.
   // Default the current to the START, not 0: a target that opens at
   // start=40 must read 40 (0% of the 40→90 journey), so the first "increase
-  // by 2" check-in lands at 42 — not 2, which is what a 0 default produced.
+  // by 2" check-in lands at 42, not 2, which is what a 0 default produced.
   const currentValueIgnored = kpiId != null && d.currentValue !== undefined;
   const currentValue = kpiId == null ? (d.currentValue ?? startValue) : 0;
   const progress =

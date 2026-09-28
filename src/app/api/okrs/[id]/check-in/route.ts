@@ -28,7 +28,7 @@ export async function POST(
 
   if (!keyResultId || value == null) return jsonError("keyResultId and value required");
 
-  // Checking in is a WRITE on the objective — owner, tree-manager of the
+  // Checking in is a WRITE on the objective, owner, tree-manager of the
   // owner, or org-wide level only (a peer can't move someone else's goal).
   const okrRef = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: getOrgId(session) },
@@ -48,7 +48,7 @@ export async function POST(
   });
   if (!kr) return jsonError("Key Result not found", 404);
 
-  // A KR linked to a role KPI is measured BY that gauge — its number comes
+  // A KR linked to a role KPI is measured BY that gauge, its number comes
   // from the KPI's records, not from a hand-typed check-in. Refuse rather
   // than accept a value we would then ignore on read.
   if (kr.kpiId) {
@@ -82,7 +82,7 @@ export async function POST(
 
   // Roll the objective up from its key results' LIVE numbers (KPI-linked
   // KRs contribute their derived progress) and persist the whole ancestor
-  // chain — a check-in on a child must move its parent goal too.
+  // chain, a check-in on a child must move its parent goal too.
   const rollup = await persistGoalRollupChain(okrId);
   const avgProgress = rollup?.progress ?? progress;
   const status = rollup?.status ?? "ON_TRACK";

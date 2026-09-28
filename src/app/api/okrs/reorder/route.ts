@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-he
 
 /**
  * Batch-update OKR.position for a manual drag-reorder. Mirrors the
- * Idea reorder endpoint — see that file for the rationale.
+ * Idea reorder endpoint, see that file for the rationale.
  */
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();

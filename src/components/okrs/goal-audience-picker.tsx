@@ -114,7 +114,7 @@ export function GoalAudiencePicker({
   value,
   onChange,
   canEdit = true,
-  placeholder = "Assign people, departments or roles",
+  placeholder = "Assign people, departments or job titles",
 }: GoalAudiencePickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -227,7 +227,7 @@ export function GoalAudiencePicker({
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search people, departments, roles…"
+              placeholder="Search people, departments, job titles"
               className="flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-3"
             />
             {query && (
@@ -275,11 +275,11 @@ export function GoalAudiencePicker({
             )}
 
             <MenuSeparator />
-            <MenuSectionLabel>Roles</MenuSectionLabel>
+            <MenuSectionLabel>Job titles</MenuSectionLabel>
             {roles === null ? (
               <PickerSkeleton />
             ) : filteredRoles.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-ink-2">No roles found</div>
+              <div className="px-3 py-2 text-sm text-ink-2">No job titles found</div>
             ) : (
               filteredRoles.map((r) => (
                 <MenuItem

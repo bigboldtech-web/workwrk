@@ -1,4 +1,4 @@
-// /api/okrs/[id]/assignees — incremental audience edits on one goal.
+// /api/okrs/[id]/assignees, incremental audience edits on one goal.
 //
 //   GET     the goal's audience: labeled entries (for pickers) + the
 //           resolved member summary (avatars + overflow count).
@@ -38,7 +38,7 @@ async function audiencePayload(orgId: string, okr: { id: string; ownerId: string
   return { entries, audience: summaries.get(okr.id) };
 }
 
-/** DELETE payload shape check — org membership is irrelevant for removal
+/** DELETE payload shape check, org membership is irrelevant for removal
  *  (rows are already scoped to this okr), so only the shape is enforced. */
 function parseRemovalEntries(input: unknown): GoalAudienceRef[] | null {
   if (!Array.isArray(input) || input.length === 0) return null;

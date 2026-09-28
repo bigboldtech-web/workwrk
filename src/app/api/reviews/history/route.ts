@@ -52,6 +52,10 @@ export async function GET(req: NextRequest) {
       id: r.id,
       cycleName: r.cycle.name,
       cycleType: r.cycle.type,
+      // The raw bounds, so a client renders them through formatDate in the
+      // viewer's own order; `period` stays for any existing reader.
+      startDate: r.cycle.startDate,
+      endDate: r.cycle.endDate,
       period: `${r.cycle.startDate ? new Date(r.cycle.startDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""} - ${r.cycle.endDate ? new Date(r.cycle.endDate).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}`,
       overallScore: r.overallScore || r.calibratedScore || r.compositeScore,
       outcome: r.outcome,

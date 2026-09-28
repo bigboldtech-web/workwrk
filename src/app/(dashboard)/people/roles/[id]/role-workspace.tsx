@@ -132,7 +132,7 @@ export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, tab 
       <div className="flex-1 overflow-y-auto pb-10">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 sm:px-6">
           {!canEditIdentity ? (
-            <p className="flex h-9 items-center rounded-md bg-surface-2 px-3 text-sm text-ink-2">View only. Job titles are managed by Admins and the People team.</p>
+            <p className="flex h-9 items-center rounded-md bg-active px-3 text-sm text-ink-2">View only. Job titles are managed by Admins and the People team.</p>
           ) : null}
           <div className="flex h-9 items-center gap-1" role="tablist" aria-label="Job title sections">
             <ViewTab label="Overview" active={active === "overview"} href={`/people/roles/${roleId}`} />

@@ -67,9 +67,9 @@ export function GoalAssessment({ okrId, initialVerdict, cadence, canCheckIn, onC
         <p className="m-0 text-sm text-ink-2">Couldn&apos;t assess this goal · <button type="button" onClick={retry} className="text-brand-deep hover:underline">Retry</button></p>
       ) : !data ? (
         <div className="flex flex-col gap-1.5" aria-hidden>
-          <span className="h-4 w-3/5 animate-pulse rounded bg-surface-2" />
-          <span className="h-3 w-4/5 animate-pulse rounded bg-surface-2" />
-          <span className="h-3 w-2/5 animate-pulse rounded bg-surface-2" />
+          <span className="h-4 w-3/5 rounded bg-skeleton os-skeleton-pulse" />
+          <span className="h-3 w-4/5 rounded bg-skeleton os-skeleton-pulse" />
+          <span className="h-3 w-2/5 rounded bg-skeleton os-skeleton-pulse" />
         </div>
       ) : (
         <>

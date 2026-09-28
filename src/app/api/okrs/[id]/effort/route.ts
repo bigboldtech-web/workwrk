@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!okr) return jsonError("Not found", 404);
   if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
-  // KRA tasks + linked-board/space item time — the join point between a goal
+  // KRA tasks + linked-board/space item time, the join point between a goal
   // and the real work moving it.
   // Under the viewer's access: a List they cannot open never counts here.
   return jsonSuccess(await computeGoalEffort(orgId, id, await viewerFromSession()));

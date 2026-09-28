@@ -10,7 +10,7 @@ import { kpiDirection } from "@/lib/alignment";
 import type { KpiDirection, KPIRecordStatus, KPIType } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
-// Scoring — the ONE rule all three KPIRecord writers share
+// Scoring, the ONE rule all three KPIRecord writers share
 // (/api/kpi-records POST, /batch, /self-report), so they stop disagreeing.
 // ---------------------------------------------------------------------------
 

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   // Three-door scoping: employees read their own records, managers their
   // report tree's, admin/exec/HR the whole org. A record is a person's
-  // performance data — never org-public.
+  // performance data, never org-public.
   const visibleIds = await visibleAlignmentUserIds(session);
   if (visibleIds !== null && userId && !visibleIds.includes(userId)) {
     // The KPI reviews reach: dotted-line managers and the People team read
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
   if (!subject) return jsonError("User not found", 404);
 
   // Target comes from the KPI definition, falling back to a manual one.
-  // NULL means "no baseline yet" — the actual is stored with score null
+  // NULL means "no baseline yet", the actual is stored with score null
   // (health derives as no_target); we never invent a line. The record
   // column is non-nullable, so 0 is stored purely as the empty sentinel.
   // A QUALITATIVE KPI is the exception: its actual is a rubric rating, so

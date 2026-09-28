@@ -1,5 +1,5 @@
 // Three-door scoping for alignment data (KRAs, KPIs, KPI records, OKRs,
-// reviews). Every alignment API enforces the same ladder SERVER-SIDE —
+// reviews). Every alignment API enforces the same ladder SERVER-SIDE,
 // hiding a nav link is never the permission:
 //
 //   Door 1  EMPLOYEE / AGENT      → self only
@@ -12,7 +12,7 @@
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
 
-/** Door 3 — may read/write alignment data across the whole org. */
+/** Door 3, may read/write alignment data across the whole org. */
 export const ORG_WIDE_ALIGNMENT_LEVELS = new Set([
   "COMPANY_ADMIN",
   "SUPER_ADMIN",
@@ -66,7 +66,7 @@ export async function canTouchUserAlignment(
 /**
  * May the caller EDIT an objective owned by `ownerId`? The owner always;
  * org-wide levels always; manager tiers when the owner is in their report
- * tree — and for unowned objectives (managers create those), any manager.
+ * tree, and for unowned objectives (managers create those), any manager.
  */
 export async function canEditOkrOwner(
   session: unknown,
@@ -84,7 +84,7 @@ export async function canEditOkrOwner(
 /**
  * May the caller DELETE an objective owned by `ownerId`? Deleting is a
  * heavier action than editing, so the org-wide door is narrowed to true
- * org admins (SUPER_ADMIN / COMPANY_ADMIN) — a Director can edit a goal
+ * org admins (SUPER_ADMIN / COMPANY_ADMIN), a Director can edit a goal
  * but not wipe it. The owner may always; a manager may delete a report's
  * goal (and unowned objectives, which managers create). This is the ONE
  * predicate DELETE /api/okrs/[id] enforces AND the list/detail surfaces

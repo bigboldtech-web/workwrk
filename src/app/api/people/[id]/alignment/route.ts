@@ -1,4 +1,4 @@
-// GET /api/people/[id]/alignment — one person's live alignment picture
+// GET /api/people/[id]/alignment, one person's live alignment picture
 // (see src/lib/person-alignment.ts for what the payload derives).
 //
 // A person's readings are theirs: visible to themselves, their reporting
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       firstName: true,
       lastName: true,
       avatar: true,
-      // The JD — Role.description is the mission the career home renders
+      // The JD, Role.description is the mission the career home renders
       // under "My role"; level + department frame it.
       role: {
         select: {

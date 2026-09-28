@@ -12,7 +12,7 @@ import type { Prisma } from "@/generated/prisma";
  * - Team OKRs where user's department matches
  * - Individual OKRs where user is the owner
  * - Goals whose audience covers the user (assigned directly, or through
- *   their department / role — resolved at read time)
+ *   their department / role, resolved at read time)
  *
  * Each Key Result gets the last 8 check-ins so the client can render
  * a sparkline + "stale check-in" nudge without an extra round trip.
@@ -71,7 +71,7 @@ export async function GET(req: Request) {
     orderBy: [{ level: "asc" }, { createdAt: "desc" }],
   });
 
-  // Owners and departments aren't Prisma relations on OKR — fetch separately
+  // Owners and departments aren't Prisma relations on OKR, fetch separately
   const ownerIds = Array.from(new Set(okrs.map((o) => o.ownerId).filter((x): x is string => !!x)));
   const deptIds = Array.from(new Set(okrs.map((o) => o.departmentId).filter((x): x is string => !!x)));
   const [owners, depts] = await Promise.all([
@@ -91,7 +91,7 @@ export async function GET(req: Request) {
   // KRs linked to a role KPI report that gauge's latest reading for their
   // owner (read-side derivation) instead of the hand-typed number. Goal
   // progress/status come from the shared org-wide rollup (live KRs +
-  // measured children) — the same number every other surface shows.
+  // measured children), the same number every other surface shows.
   const [derivedGroups, rollupCtx] = await Promise.all([
     enrichKeyResultGroups(
       okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
@@ -124,8 +124,8 @@ export async function GET(req: Request) {
       keyResults: krs,
       progress: rollup.progress,
       status: rollup.status,
-      // "NONE" = nothing measurable, nothing hand-set — clients render an
-      // honest "—" instead of a fake 0%.
+      // "NONE" = nothing measurable, nothing hand-set, clients render an
+      // honest "None" instead of a fake 0%.
       progressSource: rollup.source,
       owner: o.ownerId ? ownerMap.get(o.ownerId) || null : null,
       department: o.departmentId ? deptMap.get(o.departmentId) || null : null,

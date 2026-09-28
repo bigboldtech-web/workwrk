@@ -10,13 +10,13 @@ import { ANONYMITY_FLOOR, meetsAnonymityFloor, shuffled } from "@/lib/people/ano
  * Manager-only aggregate view of a pulse survey's responses.
  *
  * Query params:
- *   officeId        — narrow to respondents in this office
- *   departmentId    — narrow to respondents in this department
+ *   officeId       , narrow to respondents in this office
+ *   departmentId   , narrow to respondents in this department
  *
  * Returned shape:
- *   - `survey` — metadata including `anonymous`.
- *   - `totalResponses` — count after filters.
- *   - `questions[]` — one entry per question:
+ *   - `survey`, metadata including `anonymous`.
+ *   - `totalResponses`, count after filters.
+ *   - `questions[]`, one entry per question:
  *       · rating/nps → distribution, average, total answered, daily trend
  *       · text       → list of responses (each with respondent info when
  *         survey.anonymous === false; otherwise just the text).
@@ -280,7 +280,7 @@ function ratingSummary(
     ? Math.round((numbers.reduce((s, { n }) => s + n, 0) / numbers.length) * 10) / 10
     : null;
 
-  // Daily trend — one bucket per calendar day that had ≥1 response. Keeps
+  // Daily trend, one bucket per calendar day that had ≥1 response. Keeps
   // output small even for long-running surveys.
   const dayKey = (d: Date) => d.toISOString().slice(0, 10);
   const byDay = new Map<string, number[]>();

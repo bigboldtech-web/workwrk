@@ -1,4 +1,4 @@
-// /api/users/[id]/handover — the offboarding ledger. Before removing a
+// /api/users/[id]/handover, the offboarding ledger. Before removing a
 // person, the manager sees what they still hold (open tasks, live OKRs,
 // KRA assignments, company assets, direct reports) so nothing falls on
 // the floor. Same gate as DELETE /api/users/[id]: manager tier AND
@@ -17,7 +17,7 @@ import { managerMapFor, peopleCtx, relationTo } from "@/lib/people/person-access
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { applyHandoverAssignees } from "@/lib/board-items-shared";
 
-// Same completion heuristic as /api/me/work — Item.status is a per-board
+// Same completion heuristic as /api/me/work, Item.status is a per-board
 // free string, so "open" = anything that doesn't read as finished.
 function isOpenStatus(s?: string | null): boolean {
   return !/(done|complete|closed|resolved|shipped)/i.test(s ?? "");
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!recipient) return jsonError("Reassignment target not found or inactive", 404);
 
-  // Open items only — completed/closed work stays attributed to the
+  // Open items only, completed/closed work stays attributed to the
   // person who did it (data integrity: history is never rewritten).
   const items = await prisma.item.findMany({
     where: { organizationId: orgId, ownerId: id, archivedAt: null },

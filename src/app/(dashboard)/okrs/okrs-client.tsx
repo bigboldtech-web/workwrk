@@ -286,12 +286,12 @@ export default function OkrsClient({ initialNew = false, view, legacyLevel, cano
     const progressCell = (r: GoalRow) => r.progressSource === "NONE"
       ? (
         <span className="flex items-center gap-2">
-          <span className="h-1 w-24 shrink-0 rounded-full bg-surface-2" aria-hidden />
+          <span className="h-1 w-24 shrink-0 rounded-full bg-active" aria-hidden />
           <span className="whitespace-nowrap text-sm text-ink-2">Not measured</span>
         </span>
       ) : (
         <span className="flex items-center gap-2">
-          <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+          <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-active" aria-hidden>
             <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.max(0, Math.min(100, r.progress))}%` }} />
           </span>
           <span className="tabular-nums">{r.progress}%</span>

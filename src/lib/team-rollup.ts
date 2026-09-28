@@ -1,4 +1,4 @@
-// Director rollup — walks the reporting tree one level deeper than
+// Director rollup, walks the reporting tree one level deeper than
 // the manager-rollup helper (Phase 4c) and groups by sub-manager.
 //
 // Layout:
@@ -56,7 +56,7 @@ export interface DirectIcSummary {
   email: string;
   avatar: string | null;
   via: "solid" | "dotted";
-  /** null = no records to measure — renders as "—", never a fake 100%. */
+  /** null = no records to measure, renders as "None", never a fake 100%. */
   kpiCompliancePct: number | null;
   sopReadRatePct: number | null;
   weeklyReview: { status: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED" | null; managerStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED" | null };
@@ -81,7 +81,7 @@ export interface DirectorRollup {
 
 interface PerUserAggregates {
   activeKras: number;
-  /** null = no records to measure — renders as "—", never a fake 100%. */
+  /** null = no records to measure, renders as "None", never a fake 100%. */
   kpiCompliancePct: number | null;
   sopReadRatePct: number | null;
   weeklyReview: {
@@ -110,7 +110,7 @@ async function aggregateForUserIds(userIds: string[], organizationId: string): P
       _count: { userId: true },
     }),
     prisma.kPIRecord.findMany({
-      // Current canonical period only — the same window /team/alignment
+      // Current canonical period only, the same window /team/alignment
       // and /people/me measure, so the two surfaces agree per person.
       where: { userId: { in: userIds }, period: currentPeriodKey(), kpi: { organizationId } },
       select: { userId: true, status: true },
@@ -194,7 +194,7 @@ export async function getDirectorRollup(args: {
     };
   }
 
-  // 2. Classify direct reports — manager (has reports) vs IC.
+  // 2. Classify direct reports, manager (has reports) vs IC.
   const directReportsOfDirects = await prisma.user.findMany({
     where: {
       managerId: { in: directIds },
@@ -233,7 +233,7 @@ export async function getDirectorRollup(args: {
   }
 
   // 5. Aggregate per-user for everyone we'll mention (direct ICs +
-  //    every sub-manager's reports + the sub-managers themselves —
+  //    every sub-manager's reports + the sub-managers themselves,
   //    we need the sub-managers' own weekly-review status to surface
   //    on the tile).
   const allReportIds = Array.from(new Set([
@@ -249,7 +249,7 @@ export async function getDirectorRollup(args: {
     const reports = reportsBySubManager.get(subId) ?? [];
 
     let kras = 0;
-    // Sum only MEASURED members — null (no data) must not count as perfect.
+    // Sum only MEASURED members, null (no data) must not count as perfect.
     let kpiSum = 0, kpiN = 0, sopSum = 0, sopN = 0, reviewedCount = 0, approvedCount = 0;
     for (const rid of reports) {
       const a = agg.get(rid)!;

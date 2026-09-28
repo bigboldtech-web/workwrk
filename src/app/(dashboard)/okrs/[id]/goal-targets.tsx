@@ -127,7 +127,7 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory }: {
         {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
       </span>
       <span className="flex shrink-0 items-center gap-2">
-        <span className="h-1 w-[72px] overflow-hidden rounded-full bg-surface-2" aria-hidden>
+        <span className="h-1 w-[72px] overflow-hidden rounded-full bg-active" aria-hidden>
           <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
         </span>
         <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>

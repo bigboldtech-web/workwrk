@@ -48,7 +48,7 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { PeoplePickerField, PersonAvatar, ToneChip, personName, type PickPerson } from "@/components/people/person-bits";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
-import { formatDate, formatRelative } from "@/lib/format/date";
+import { formatDate, formatRelative, formatWallClockDate, type DateFormatPrefs } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import { recentWeekKeys } from "@/lib/people/weekly-queue";
@@ -89,15 +89,13 @@ function readView(v: string | null | undefined): View {
   return v === "acted" || v === "all" ? v : "waiting";
 }
 
-/** "1 to 7 Sep" for the Monday a review covers. */
-function weekRange(key: string): string {
+/** "1 Sep to 7 Sep" for the Monday a review covers, in the viewer's date order. */
+function weekRange(key: string, prefs?: DateFormatPrefs | null): string {
   const start = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(start.getTime())) return "";
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 6);
-  const month = (d: Date) => d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-  return start.getUTCMonth() === end.getUTCMonth()
-    ? `${start.getUTCDate()} to ${end.getUTCDate()} ${month(end)}`
-    : `${start.getUTCDate()} ${month(start)} to ${end.getUTCDate()} ${month(end)}`;
+  return `${formatWallClockDate(key, prefs)} to ${formatWallClockDate(end.toISOString().slice(0, 10), prefs)}`;
 }
 
 /**
@@ -305,7 +303,7 @@ export function WeeklyReviewsView({
         </span>
       ),
     },
-    { key: "week", label: "Week", width: "130px", render: (r) => <span className="tabular-nums">{weekRange(r.week)}</span> },
+    { key: "week", label: "Week", width: "170px", render: (r) => <span className="whitespace-nowrap tabular-nums">{weekRange(r.week, datePrefs)}</span> },
     { key: "status", label: "Status", width: "170px", render: (r) => <ToneChip tone={r.statusTone as Tone} label={r.statusLabel} /> },
     ...(cols.highlights ? [{ key: "highlights", label: "Highlights", width: "minmax(180px,2fr)", hideBelow: 900, render: (r: WeeklyQueueRow) => <span className="truncate text-ink-2">{r.highlights || (r.status === "DRAFT" ? "Not submitted yet" : "")}</span> }] : []),
     ...(cols.kras ? [{ key: "kras", label: "KRAs", width: "130px", hideBelow: 760, render: (r: WeeklyQueueRow) => <span className="text-ink-2">{r.kras.total ? `${r.kras.onTrack} of ${r.kras.total} on track` : ""}</span> }] : []),
@@ -321,7 +319,7 @@ export function WeeklyReviewsView({
   const groupCount = new Map((list?.groups ?? []).map((g) => [g.key, g.count] as const));
   const groupOf = group === "none" ? undefined : (r: WeeklyQueueRow) => (group === "person"
     ? { key: r.userId, label: personName(r.subject), count: groupCount.get(r.userId) ?? null }
-    : { key: r.week, label: `Week of ${weekRange(r.week)}`, count: groupCount.get(r.week) ?? null });
+    : { key: r.week, label: `Week of ${weekRange(r.week, datePrefs)}`, count: groupCount.get(r.week) ?? null });
 
   const total = list?.pagination.total ?? 0;
   const pageSize = list?.pagination.pageSize ?? 40;
@@ -411,7 +409,7 @@ export function WeeklyReviewsView({
             {STATUS_ROWS.map((s) => <FilterRow key={s.key} label={s.label} checked={statuses.includes(s.key)} onCheckedChange={(on) => toggleStatus(s.key, on)} />)}
           </FilterGroup>
           <FilterGroup label="Week">
-            {weeks.map((w) => <FilterRow key={w} label={weekRange(w)} checked={week === w} onCheckedChange={(on) => setParams({ week: on ? w : null })} />)}
+            {weeks.map((w) => <FilterRow key={w} label={weekRange(w, datePrefs)} checked={week === w} onCheckedChange={(on) => setParams({ week: on ? w : null })} />)}
           </FilterGroup>
         </FilterPanel>
         <div className="min-w-0 flex-1">
@@ -598,7 +596,7 @@ function WeeklyReviewDrawer({
       header={
         <>
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
-            {review ? <>{personName(review.subject)} › <span className="text-ink">week of {weekRange(review.week)}</span></> : "Weekly review"}
+            {review ? <>{personName(review.subject)} › <span className="text-ink">week of {weekRange(review.week, datePrefs)}</span></> : "Weekly review"}
           </span>
           <button type="button" aria-label={expanded ? "Collapse" : "Expand"} title={expanded ? "Collapse" : "Expand"} onClick={() => setExpanded((v) => !v)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}

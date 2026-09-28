@@ -1,11 +1,11 @@
-// POST /api/kpi-records/self-report — the employee door for recording
+// POST /api/kpi-records/self-report, the employee door for recording
 // their own KPI numbers. Validates every kpiId against the caller's own
 // ACTIVE KRA assignments, scores direction-aware via the shared
 // scoreKpiRecord rule, and writes SUBMITTED records so the existing
 // /team/kpi-reviews approval loop (PENDING → SUBMITTED → APPROVED |
 // REJECTED) picks them up unchanged.
 //
-// NULL-target spine: a KPI with no targetValue still accepts a reading —
+// NULL-target spine: a KPI with no targetValue still accepts a reading,
 // the actual is stored with score null (health derives as "no_target").
 // We never substitute 0 for a missing line.
 

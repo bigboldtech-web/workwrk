@@ -1,4 +1,4 @@
-// POST /api/users/[id]/seed-alignment — manually (re)seed a user's KRA/SOP
+// POST /api/users/[id]/seed-alignment, manually (re)seed a user's KRA/SOP
 // defaults from their current role's templates. Auto-seeding only fires on
 // hire / role-change, so this covers backfilling existing people and
 // re-applying after a role's templates change. Idempotent (skipDuplicates).

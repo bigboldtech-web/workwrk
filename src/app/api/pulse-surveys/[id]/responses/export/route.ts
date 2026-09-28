@@ -11,7 +11,7 @@ import { csvFormulaSafe } from "@/lib/csv";
 /**
  * CSV export of all responses to a single pulse survey.
  *
- * Layout — one row per respondent, one column per question plus
+ * Layout, one row per respondent, one column per question plus
  * `submitted_at` and (if the survey is non-anonymous) respondent/office/
  * department columns. Commas and quotes in answers are escaped per RFC
  * 4180 so Excel / Sheets ingest it cleanly.

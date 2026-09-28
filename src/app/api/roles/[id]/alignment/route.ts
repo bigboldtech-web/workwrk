@@ -1,8 +1,8 @@
-// GET /api/roles/[id]/alignment — the role's PERMANENT alignment template.
+// GET /api/roles/[id]/alignment, the role's PERMANENT alignment template.
 //
 // KRAs are containers attached to the ROLE (no number, no deadline) with
 // their KPI gauges nested under them, north-star first. This is the
-// definitional view — no person's readings appear here, because a gauge is
+// definitional view, no person's readings appear here, because a gauge is
 // read per-person (every holder of the role inherits the same template and
 // records their own numbers). OKRs never appear here either: an OKR
 // belongs to a person, never to a role.
@@ -70,7 +70,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       assignmentCount: kra._count.assignments,
       kpis: kra.kpis.map((kpi) => ({
         ...kpi,
-        // Resolved direction — the enum when set, else the legacy boolean.
+        // Resolved direction, the enum when set, else the legacy boolean.
         direction: kpiDirection(kpi),
       })),
     })),

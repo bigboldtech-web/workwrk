@@ -60,7 +60,7 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
         <p className="m-0 mt-3 text-sm text-ink-2">Couldn&apos;t load activity · <button type="button" onClick={() => void fetchPage(1)} className="text-brand-deep hover:underline">Retry</button></p>
       ) : !items ? (
         <div className="mt-3 flex flex-col gap-2" aria-hidden>
-          {[0, 1, 2].map((i) => <span key={i} className="h-5 animate-pulse rounded bg-surface-2" />)}
+          {[0, 1, 2].map((i) => <span key={i} className="h-5 rounded bg-skeleton os-skeleton-pulse" />)}
         </div>
       ) : items.length === 0 ? (
         <p className="m-0 mt-3 text-row text-ink-2">No check-ins yet</p>

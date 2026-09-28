@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
       max_tokens: 3000,
       system: `You are an HR and performance management expert. Generate Key Result Areas (KRAs) and Key Performance Indicators (KPIs) for job roles.
 
-You have deep knowledge of this company and must tailor all KRAs and KPIs to align with the company's business, industry, values, and goals. Do NOT generate generic KRAs — every KRA should reflect what this specific company actually needs from this role.
+You have deep knowledge of this company and must tailor all KRAs and KPIs to align with the company's business, industry, values, and goals. Do NOT generate generic KRAs; every KRA should reflect what this specific company actually needs from this role.
 
 ${companyContext ? `=== COMPANY CONTEXT ===\n${companyContext}` : ""}
 

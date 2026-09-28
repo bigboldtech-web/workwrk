@@ -227,7 +227,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
                       <Link href={`/okrs/${c.id}`} className="os-row flex h-9 items-center gap-3 hover:bg-hover">
                         <span className="min-w-0 flex-1 truncate text-row text-ink">{c.title}</span>
                         <span className="shrink-0 text-xs text-ink-2">{LEVEL_WORD[c.level]}</span>
-                        <span className="h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+                        <span className="h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active" aria-hidden>
                           {cm ? <span className="block h-full rounded-full bg-brand" style={{ width: `${roll.progress}%` }} /> : null}
                         </span>
                         <span className="w-20 shrink-0 text-end text-sm tabular-nums text-ink-2">{cm ? `${roll.progress}%` : "Not measured"}</span>

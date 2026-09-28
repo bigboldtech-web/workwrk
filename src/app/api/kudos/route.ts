@@ -333,7 +333,7 @@ export async function POST(req: NextRequest) {
   triggerRecalculation(receiverId, orgId);
 
   // Fan out to Slack if the org has a webhook configured. Non-blocking
-  // on failure — Slack hiccups never break the kudos flow.
+  // on failure, Slack hiccups never break the kudos flow.
   notifyKudosPosted({
     organizationId: orgId,
     giverName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,

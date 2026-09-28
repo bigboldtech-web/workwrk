@@ -136,7 +136,7 @@ export function KudosReactions({
                   onClick={() => react(e)}
                   disabled={busy}
                   className={cn(
-                    "h-9 w-9 flex items-center justify-center rounded-md text-lg leading-none transition-colors hover:bg-surface-2",
+                    "h-9 w-9 flex items-center justify-center rounded-md text-lg leading-none transition-colors hover:bg-hover",
                     mine.includes(e) && "bg-[rgba(212,255,46,0.12)]",
                   )}
                   aria-label={`React ${e}`}
@@ -150,7 +150,7 @@ export function KudosReactions({
       </div>
 
       {totalReactions > 0 && !compact && (
-        <span className="text-xs text-muted ml-auto">
+        <span className="text-xs text-ink-2 ml-auto">
           {totalReactions} reaction{totalReactions === 1 ? "" : "s"}
         </span>
       )}

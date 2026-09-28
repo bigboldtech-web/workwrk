@@ -1,6 +1,6 @@
 "use client";
 
-// KraDialog — create or edit a KRA under the role-first spine.
+// KraDialog, create or edit a KRA under the role-first spine.
 //
 // A KRA exists ONLY inside a job title, so the role select is REQUIRED on
 // create (POST /api/kras rejects roleId-less KRAs). Edit mode PATCHes
@@ -9,7 +9,7 @@
 // with a 15px title, no divider hairlines.
 
 import { useEffect, useState } from "react";
-import { Target, Loader2 } from "lucide-react";
+import { Target } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -106,12 +106,12 @@ export function KraDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[440px] gap-0 p-5">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#0073EA]/10">
-            <Target size={15} className="text-[#0073EA]" />
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-soft">
+            <Target size={15} className="text-brand-deep" />
           </span>
           <DialogTitle className="leading-none">{editing ? "Edit KRA" : "New KRA"}</DialogTitle>
         </div>
-        <p className="mt-2 text-base leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2 text-base leading-relaxed text-ink-2">
           A KRA is a permanent area of responsibility inside a job title. Everyone
           holding that title inherits it.
         </p>
@@ -119,53 +119,53 @@ export function KraDialog({
         <div className="mt-4 space-y-3">
           {!lockRole || editing ? (
             <label className="block">
-              <span className="text-sm font-medium text-zinc-600">Job title</span>
+              <span className="text-sm font-medium text-ink-2">Job title</span>
               <select
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
-                className="mt-1 w-full h-9 px-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-[#0073EA]"
+                className="mt-1 w-full h-9 px-2 rounded-md border border-line bg-raised text-base focus:outline-none focus:border-brand"
               >
                 <option value="" disabled>Pick a job title…</option>
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
               </select>
             </label>
           ) : (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-ink-2">
               Job title:{" "}
-              <span className="font-medium text-zinc-800 dark:text-zinc-200">
-                {roles.find((r) => r.id === roleId)?.title ?? "—"}
+              <span className="font-medium text-ink">
+                {roles.find((r) => r.id === roleId)?.title ?? "None"}
               </span>
             </div>
           )}
 
           <label className="block">
-            <span className="text-sm font-medium text-zinc-600">Name</span>
+            <span className="text-sm font-medium text-ink-2">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
               placeholder="e.g. Pipeline generation"
               autoFocus
-              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-base focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full h-9 px-2.5 rounded-md border border-line text-base focus:outline-none focus:border-brand"
             />
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-zinc-600">
-              Description <span className="text-zinc-400 font-normal">(optional)</span>
+            <span className="text-sm font-medium text-ink-2">
+              Description <span className="text-ink-3 font-normal">(optional)</span>
             </span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="What outcome does this area own?"
-              className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-base resize-none focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full px-2.5 py-2 rounded-md border border-line text-base resize-none focus:outline-none focus:border-brand"
             />
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-zinc-600">
-              Weight % <span className="text-zinc-400 font-normal">(share of the job title, 0 to 100)</span>
+            <span className="text-sm font-medium text-ink-2">
+              Weight % <span className="text-ink-3 font-normal">(share of the job title, 0 to 100)</span>
             </span>
             <div className="mt-1 flex items-center gap-2">
               <input
@@ -176,14 +176,14 @@ export function KraDialog({
                 onChange={(e) => setWeight(e.target.value)}
                 placeholder="0"
                 // [appearance:textfield] + the webkit pseudo rules hide the
-                // native number-spinner arrows — type it, don't click it.
-                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-base text-right tabular-nums focus:outline-none focus:border-[#0073EA] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                // native number-spinner arrows, type it, don't click it.
+                className="w-24 h-9 px-2.5 rounded-md border border-line text-base text-right tabular-nums focus:outline-none focus:border-brand [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
-              <span className="text-xs text-zinc-400">Every holder inherits this as their starting weightage.</span>
+              <span className="text-xs text-ink-3">Every holder inherits this as their starting weightage.</span>
             </div>
           </label>
 
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="text-sm text-danger-text">{error}</p> : null}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
@@ -191,8 +191,8 @@ export function KraDialog({
             Cancel
           </Button>
           <Button size="sm" onClick={() => void submit()} disabled={busy || !name.trim() || !roleId}>
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            {editing ? "Save changes" : "Create KRA"}
+            
+            {busy ? "Saving" : editing ? "Save changes" : "Create KRA"}
           </Button>
         </div>
       </DialogContent>

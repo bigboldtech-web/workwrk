@@ -1,4 +1,4 @@
-// Weekly review — the heartbeat cadence. Helpers for:
+// Weekly review, the heartbeat cadence. Helpers for:
 //   - Computing the current week's ISO start (Monday 00:00 UTC).
 //   - Get-or-create the user's DRAFT review for the current week.
 //   - Submit a review (DRAFT → SUBMITTED with timestamp).
@@ -65,17 +65,6 @@ export function weekEndFor(date: Date = new Date()): Date {
   return end;
 }
 
-/**
- * Human label — "Jun 2 – Jun 8, 2026".
- */
-export function formatWeekRange(start: Date): string {
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 6);
-  const fmt = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-  return `${fmt(start)} – ${fmt(end)}, ${end.getUTCFullYear()}`;
-}
-
 function shapeFromRow(row: {
   id: string;
   organizationId: string;
@@ -134,7 +123,7 @@ export async function getOrCreateWeeklyReview(args: {
   if (existing) return shapeFromRow(existing);
 
   // Inherit manager from User.managerId at create time. If the user's
-  // manager changes mid-week, that's fine — the review keeps the
+  // manager changes mid-week, that's fine, the review keeps the
   // historical manager who is on the hook for this week's submission.
   const user = await prisma.user.findUnique({
     where: { id: args.userId },
@@ -187,7 +176,7 @@ export class WeeklyDecisionConflict extends Error {
 }
 
 /**
- * Submit a review for manager review. Idempotent — re-submitting a
+ * Submit a review for manager review. Idempotent, re-submitting a
  * SUBMITTED row just refreshes submittedAt. Sets managerStatus=PENDING
  * so the manager's queue shows it.
  */

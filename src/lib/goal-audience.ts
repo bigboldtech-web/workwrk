@@ -1,8 +1,8 @@
-// Goal audience — who a goal belongs to, resolved at READ time.
+// Goal audience, who a goal belongs to, resolved at READ time.
 //
 // A goal (OKR) is ONE record with ONE accountable owner (ownerId, the DRI)
 // and MANY assignees (GoalAssignee rows). An assignee row points at exactly
-// one subject — a user, a department, or a role (DB CHECK
+// one subject, a user, a department, or a role (DB CHECK
 // `GoalAssignee_one_subject` guarantees it; the API validators here enforce
 // the same rule before anything reaches Prisma).
 //
@@ -52,7 +52,7 @@ export interface GoalAudienceSummary {
 
 const MEMBER_PREVIEW = 5;
 
-/** Leaver safety — mirrors seedKraToRoleHolders' ACTIVE filter. */
+/** Leaver safety, mirrors seedKraToRoleHolders' ACTIVE filter. */
 const ACTIVE_USER = { status: "ACTIVE", deletedAt: null } as const;
 
 const keyOf = (e: GoalAudienceRef) => `${e.type}:${e.id}`;
@@ -64,7 +64,7 @@ function rowKey(r: { userId: string | null; departmentId: string | null; roleId:
   return `TAG:${r.tagId}`;
 }
 
-/** GoalAssignee create payload for one entry — exactly one subject set. */
+/** GoalAssignee create payload for one entry, exactly one subject set. */
 function rowFor(okrId: string, e: GoalAudienceRef) {
   return {
     okrId,
@@ -78,7 +78,7 @@ function rowFor(okrId: string, e: GoalAudienceRef) {
 /* ────────────────────────── resolution (read time) ───────────────────── */
 
 /**
- * Batch resolver — one pass for a page of goals. Returns, per okrId, the
+ * Batch resolver, one pass for a page of goals. Returns, per okrId, the
  * ordered de-duplicated member users: owner first, then directly-assigned
  * users, then members of assigned departments, then holders of assigned
  * roles. Only ACTIVE, non-soft-deleted users ever appear.
@@ -191,7 +191,7 @@ export async function resolveGoalMembersBatch(
 }
 
 /**
- * All resolved member userIds of one goal — owner + direct users + members
+ * All resolved member userIds of one goal, owner + direct users + members
  * of assigned departments + holders of assigned roles, de-duplicated.
  * Resolution happens NOW, never from a stored snapshot.
  */
@@ -239,7 +239,7 @@ export async function summarizeGoalAudiences(
  * May the caller see this goal? True when they own it, are a resolved
  * member, or manage someone who is (report tree via getTeamUserIds).
  * COMPANY-level goals are visible to everyone in the org (org scoping is
- * the caller's job — check organizationId before calling). The legacy
+ * the caller's job, check organizationId before calling). The legacy
  * DEPARTMENT + departmentId match is kept so pre-audience goals stay
  * visible to their department.
  */
@@ -260,7 +260,7 @@ export async function canSeeGoal(
     if (me?.departmentId === okr.departmentId) return true;
   }
 
-  // Resolved at read time — dept/role audiences follow today's org chart.
+  // Resolved at read time, dept/role audiences follow today's org chart.
   const members = await resolveGoalMembers(okr.id);
   if (members.includes(callerId)) return true;
 
@@ -285,7 +285,7 @@ export function memberVisibilityOr(me: {
   id: string;
   departmentId?: string | null;
   roleId?: string | null;
-  /** The viewer's own person-tag ids — goals targeting any of them are visible.
+  /** The viewer's own person-tag ids, goals targeting any of them are visible.
    *  Fetch with getUserTagIds(orgId, me.id) at the call site. */
   tagIds?: string[] | null;
 }): Prisma.OKRWhereInput[] {
@@ -298,7 +298,7 @@ export function memberVisibilityOr(me: {
 
 /**
  * WHERE fragments for a manager's list: goals whose audience covers anyone
- * in their report tree — directly, or through the department/role a team
+ * in their report tree, directly, or through the department/role a team
  * member currently sits in.
  */
 export async function teamAudienceVisibilityOr(
@@ -314,7 +314,7 @@ export async function teamAudienceVisibilityOr(
   const roleIds = [...new Set(rows.map((r) => r.roleId).filter((x): x is string => !!x))];
   if (deptIds.length > 0) or.push({ assignees: { some: { departmentId: { in: deptIds } } } });
   if (roleIds.length > 0) or.push({ assignees: { some: { roleId: { in: roleIds } } } });
-  // Person-tags any team member carries — goals targeting those tags are
+  // Person-tags any team member carries, goals targeting those tags are
   // team-visible too (resolved live from TagAssignment).
   const tagRows = await prisma.tagAssignment.findMany({
     where: { entityType: "USER", entityId: { in: teamIds }, tag: { archived: false } },
@@ -338,7 +338,7 @@ export type GoalAssigneeValidation =
  *  - shape: array of `{ type: "USER"|"DEPARTMENT"|"ROLE", id: string }`
  *  - exactly one subject per row (a row is one type + one id, nothing else)
  *  - de-duplication by (type, id)
- *  - every id belongs to `orgId` — cross-org ids are rejected wholesale.
+ *  - every id belongs to `orgId`, cross-org ids are rejected wholesale.
  */
 export async function validateGoalAssignees(
   orgId: string,
@@ -417,7 +417,7 @@ export async function validateGoalAssignees(
   return { ok: true, entries };
 }
 
-/** Add audience entries to a goal (idempotent — duplicates are skipped). */
+/** Add audience entries to a goal (idempotent, duplicates are skipped). */
 export async function addGoalAssignees(okrId: string, entries: GoalAudienceRef[]): Promise<number> {
   if (entries.length === 0) return 0;
   const res = await prisma.goalAssignee.createMany({
@@ -446,7 +446,7 @@ export async function removeGoalAssignees(okrId: string, entries: GoalAudienceRe
 /**
  * Make the goal's audience exactly `entries` (PATCH full-replacement).
  * Diff-synced: existing rows that stay are untouched (createdAt kept),
- * missing ones are created, removed ones deleted — atomically.
+ * missing ones are created, removed ones deleted, atomically.
  */
 export async function syncGoalAssignees(okrId: string, entries: GoalAudienceRef[]): Promise<void> {
   const existing = await prisma.goalAssignee.findMany({

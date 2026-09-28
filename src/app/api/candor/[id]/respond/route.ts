@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Authz: a department-scoped session only accepts responses from members of
   // that department (mirrors the list-visibility gate in /api/candor GET).
-  // The current user's department is read for AUTHORIZATION ONLY — it is never
+  // The current user's department is read for AUTHORIZATION ONLY, it is never
   // written to the response, so anonymity is preserved.
   if (candor.departmentId) {
     const me = await prisma.user.findUnique({
@@ -43,8 +43,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const answers = cleanCandorAnswers(body.answers, normalizeCandorPrompts(candor.prompts));
   if (!answers) return jsonError("Answer at least one question");
 
-  // Create anonymous response — NO userId, IP, or device is stored, ever.
-  // The row has only { sessionId, answers } (see CandorResponse model — it has
+  // Create anonymous response, NO userId, IP, or device is stored, ever.
+  // The row has only { sessionId, answers } (see CandorResponse model, it has
   // no user column), so a response can never be traced back to a person.
   //
   // Phase 6: WHO answered is recorded separately in CandorRespondent (one row

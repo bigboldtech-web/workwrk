@@ -1,21 +1,21 @@
-// One person's live alignment picture — the shared read-side builder
+// One person's live alignment picture, the shared read-side builder
 // behind GET /api/people/[id]/alignment (manager inspection) and
 // GET /api/me/alignment (the employee door). One builder so both doors
 // always show the same numbers.
 //
 //  - kras: the KRAs + KPI gauges this person holds (KRAAssignment, seeded
 //    from their role's templates by src/lib/alignment-assign.ts). Each KPI
-//    carries THIS PERSON's latest usable reading (their own KPIRecords —
+//    carries THIS PERSON's latest usable reading (their own KPIRecords,
 //    a gauge is read per-person), its health against the healthy line,
 //    and their current-period record with its approval status. A KPI with
 //    no targetValue reports "no_target": no line is invented.
 //  - okrs: the person's objectives for the requested cycle (default =
-//    current quarter) — goals they OWN plus goals whose audience resolves
+//    current quarter), goals they OWN plus goals whose audience resolves
 //    to them (assigned directly, or through their department / role;
 //    GoalAssignee resolution happens at read time, so it always reflects
 //    today's org chart). KR→KPI links resolved and derived
 //    currentValue/progress. A shared goal stays ONE record with one
-//    scoreboard — appearing on several people's pages is the same row.
+//    scoreboard, appearing on several people's pages is the same row.
 
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
@@ -108,7 +108,7 @@ export async function buildPersonAlignment(
   ]);
 
   // This person's latest usable reading per gauge (their own records only)
-  // plus their current-period record — "what have I achieved, what still
+  // plus their current-period record, "what have I achieved, what still
   // needs my number this month, where is it in the approval loop."
   const kpiIds = assignments.flatMap((a) => a.kra.kpis.map((k) => k.id));
   const [latest, currentRecords] = await Promise.all([
@@ -139,7 +139,7 @@ export async function buildPersonAlignment(
       const reading = latest.get(kpi.id);
       return {
         ...kpi,
-        // Resolved direction — the enum when set, else the legacy boolean.
+        // Resolved direction, the enum when set, else the legacy boolean.
         direction: kpiDirection(kpi),
         latestValue: reading?.value ?? null,
         latestPeriod: reading?.period ?? null,
@@ -151,7 +151,7 @@ export async function buildPersonAlignment(
 
   // KPI-linked KRs report the gauge's latest reading (read-side
   // derivation). Goal progress/status come from the shared org-wide
-  // rollup (live KRs + measured children) — the same computeGoalRollups
+  // rollup (live KRs + measured children), the same computeGoalRollups
   // number the goals list / detail / dashboard show, never a second math.
   const [groups, rollupCtx] = await Promise.all([
     enrichKeyResultGroups(

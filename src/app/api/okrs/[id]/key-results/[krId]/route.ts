@@ -1,10 +1,10 @@
-// PATCH  /api/okrs/[id]/key-results/[krId] — edit a key result, including
+// PATCH  /api/okrs/[id]/key-results/[krId], edit a key result, including
 //         linking (kpiId, validated against the caller's org) or unlinking
 //         (kpiId: null) a role-level KPI gauge.
-// DELETE /api/okrs/[id]/key-results/[krId] — remove the key result.
+// DELETE /api/okrs/[id]/key-results/[krId], remove the key result.
 //
 // While a KR is linked, it is measured BY the gauge: a hand-typed
-// currentValue is ignored (derived wins — `currentValueIgnored` in the
+// currentValue is ignored (derived wins, `currentValueIgnored` in the
 // response says so) and the stored hand-typed number is left untouched,
 // so unlinking later restores exactly what the owner last typed. Nothing
 // here ever writes a KPI or KPIRecord.
@@ -52,7 +52,7 @@ export async function PATCH(
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
 
-  // Editing a KR is a WRITE on the objective — owner / tree-manager /
+  // Editing a KR is a WRITE on the objective, owner / tree-manager /
   // org-wide only.
   if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
     return jsonError("You can only edit your own goals or your reports' goals.", 403);
@@ -129,7 +129,7 @@ export async function DELETE(
 
   // If that was the goal's LAST key result, it is no longer measured by
   // KRs. Clear the stored rollup number so the goal reads as "no measure
-  // yet" instead of freezing at the last derived score — a goal that was
+  // yet" instead of freezing at the last derived score, a goal that was
   // at 80% must not keep showing 80% with nothing left to back it. (A goal
   // whose progress was hand-set never had KRs, so this path never touches
   // it.) persistGoalRollupChain then propagates the empty state to ancestors.

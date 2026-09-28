@@ -1,4 +1,4 @@
-// Alignment engine — the shared read-side math for the three-layer model.
+// Alignment engine, the shared read-side math for the three-layer model.
 //
 //   KRA  = permanent container on the ROLE (KRA.roleId). No number, no date.
 //   KPI  = permanent running gauge under its KRA (KPI.kraId). Definition,
@@ -9,7 +9,7 @@
 //
 // DERIVATION IS READ-SIDE. When a KeyResult is linked to a KPI, its
 // currentValue/progress are computed from the KPI's latest KPIRecord at
-// read time — we never write the derived number back onto the KeyResult
+// read time, we never write the derived number back onto the KeyResult
 // row, and we never touch a KPIRecord. The hand-typed value stays on the
 // row untouched (surfaced as `enteredValue`) so no user data is lost or
 // silently rewritten; it is simply not what the UI reads while a link
@@ -52,13 +52,13 @@ export function kpiDirection(kpi: KpiDirectionInput | null | undefined): KpiDire
 /**
  * Health of a reading against the KPI's healthy line.
  *
- * A NULL targetValue means "no baseline yet" — we return "no_target" and
+ * A NULL targetValue means "no baseline yet", we return "no_target" and
  * never invent a line. A missing reading is likewise "no_target": there is
  * nothing to judge.
  *
- * HIGHER  — at or above the line is healthy, within 10% below is at risk.
- * LOWER   — at or below the line is healthy, within 10% above is at risk.
- * MAINTAIN— the value must sit ON the line; anything outside 0.5% is off
+ * HIGHER , at or above the line is healthy, within 10% below is at risk.
+ * LOWER  , at or below the line is healthy, within 10% above is at risk.
+ * MAINTAIN,  the value must sit ON the line; anything outside 0.5% is off
  *           track (there is no at-risk band for a hold-the-line gauge).
  */
 export function kpiHealth(
@@ -215,7 +215,7 @@ export interface LatestKpiValue {
 /**
  * Canonical KPIRecord period key: "YYYY-MM". Legacy keys ("2026-W33",
  * "2026-Q3") out-sort every real month in max-string ordering ("W"/"Q" >
- * any digit), so derivation filters them out — the stored rows themselves
+ * any digit), so derivation filters them out, the stored rows themselves
  * are never modified, they just stop driving "latest" readings.
  */
 const CANONICAL_PERIOD = /^\d{4}-\d{2}$/;
@@ -236,7 +236,7 @@ const CANONICAL_PERIOD_WHERE: { AND: Prisma.KPIRecordWhereInput[] } = {
  * Latest usable KPIRecord per KPI. "Latest" = highest period string
  * (KPIRecord.period is "YYYY-MM" everywhere in this codebase), tie-broken
  * by most recently updated. REJECTED records and records without an
- * actualValue are ignored — a sent-back number must not drive a KR.
+ * actualValue are ignored, a sent-back number must not drive a KR.
  *
  * Two bounded queries (max-period per KPI, then those rows) so list
  * endpoints never N+1 or drag a whole history table into memory.
@@ -299,7 +299,7 @@ export async function latestKpiValue(
 const pairKey = (kpiId: string, userId: string) => `${kpiId}::${userId}`;
 
 /**
- * Latest usable reading for a set of (KPI, person) pairs — one person's
+ * Latest usable reading for a set of (KPI, person) pairs, one person's
  * OKR must read that person's own records. Still two bounded queries no
  * matter how many pairs are asked for. Keyed `${kpiId}::${userId}`.
  */
@@ -379,7 +379,7 @@ export interface LinkedKpiPayload {
   id: string;
   name: string;
   unit: string | null;
-  /** Resolved direction — the enum when set, else derived from lowerIsBetter. */
+  /** Resolved direction, the enum when set, else derived from lowerIsBetter. */
   direction: KpiDirection;
   targetValue: number | null;
   ownership: KpiOwnership;
@@ -512,7 +512,7 @@ export async function enrichKeyResultGroups<T extends RawKeyResultWithKpi>(
 }
 
 // ---------------------------------------------------------------------------
-// Goal rollup — one number per goal, everywhere
+// Goal rollup, one number per goal, everywhere
 // ---------------------------------------------------------------------------
 //
 // A goal's effective progress is derived, never trusted from the stored
@@ -524,10 +524,10 @@ export async function enrichKeyResultGroups<T extends RawKeyResultWithKpi>(
 //   parent  → mean of its own KRs (if any) plus each measured child's
 //             effective progress, recursively.
 //   neither → nothing to derive. `source` says so honestly: "MANUAL" when
-//             someone hand-set a progress, "NONE" when there is nothing —
-//             the UI shows "—", not a fake 0% that reads as "behind".
+//             someone hand-set a progress, "NONE" when there is nothing,
+//             the UI shows "None", not a fake 0% that reads as "behind".
 //
-// The whole org is computed in one pass (goals are a small table — this is
+// The whole org is computed in one pass (goals are a small table, this is
 // the goal graph, not the task table) so a parent's number is right even
 // when the viewer can't see every child.
 
@@ -536,7 +536,7 @@ export type GoalProgressSource = "ROLLUP" | "MANUAL" | "NONE";
 export interface GoalRollup {
   /** Effective progress 0-100 (stored value when source is not ROLLUP). */
   progress: number;
-  /** Display status — derived thresholds for ROLLUP, stored otherwise. */
+  /** Display status, derived thresholds for ROLLUP, stored otherwise. */
   status: string;
   source: GoalProgressSource;
 }
@@ -552,7 +552,7 @@ export interface GoalRollupContext {
 /**
  * Effective rollup for every goal in the org: two bounded queries + pure
  * recursion. Unmeasured (source "NONE") children contribute nothing to
- * their parent — three empty sub-goals must not drag a measured sibling's
+ * their parent, three empty sub-goals must not drag a measured sibling's
  * 60% down to 15%.
  */
 export async function computeGoalRollups(orgId: string): Promise<GoalRollupContext> {
@@ -594,7 +594,7 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
     if (memo) return memo;
     const node = byId.get(id)!;
     if (visiting.has(id)) {
-      // parentId cycle — treat the back-edge as unmeasured, don't recurse.
+      // parentId cycle, treat the back-edge as unmeasured, don't recurse.
       return { progress: clampPct(node.progress), status: node.status, source: "NONE" };
     }
     visiting.add(id);
@@ -651,7 +651,7 @@ export function goalRollupFor(
  * children. Called after a check-in, a KR mutation, or a re-parent, so
  * the stored summary any raw reader sees matches what the derived read
  * paths show. Goals with nothing to derive (MANUAL / NONE) are never
- * overwritten — a hand-set number is user data.
+ * overwritten, a hand-set number is user data.
  */
 export async function persistGoalRollupChain(okrId: string): Promise<GoalRollup | null> {
   const okr = await prisma.oKR.findUnique({

@@ -33,7 +33,7 @@ import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
-// clients may still send "TEAM" — map it to DEPARTMENT, mirroring the
+// clients may still send "TEAM", map it to DEPARTMENT, mirroring the
 // goal_audience_kra_weight migration; anything unrecognised is null.
 function normalizeGoalLevel(v: unknown): GoalLevel | null {
   const s = typeof v === "string" ? v.toUpperCase() : v;
@@ -378,7 +378,7 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim()) return jsonError("Title required");
 
-  // Audience — contributors beside the single accountable owner. Validate
+  // Audience, contributors beside the single accountable owner. Validate
   // BEFORE creating anything: shape, one-subject-per-row, de-dupe, and
   // every id must live inside the caller's organization.
   let audience: GoalAudienceRef[] = [];
@@ -388,7 +388,7 @@ export async function POST(req: NextRequest) {
     audience = parsed.entries;
   }
 
-  // Door 1: an employee's objective is their OWN — they can't file goals
+  // Door 1: an employee's objective is their OWN, they can't file goals
   // under someone else's name. Managers may assign anyone in the org.
   // A cross-org or unknown ownerId is a bad request body → 400.
   const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
@@ -400,7 +400,7 @@ export async function POST(req: NextRequest) {
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
 
-  // departmentId is a real FK since the goals rebuild — a cross-org or
+  // departmentId is a real FK since the goals rebuild, a cross-org or
   // unknown id must 400 here, not 500 at the constraint.
   if (departmentId) {
     const dept = await prisma.department.findFirst({
@@ -410,7 +410,7 @@ export async function POST(req: NextRequest) {
     if (!dept) return jsonError("Department not found in this organization", 400);
   }
 
-  // parentId is a real FK too — nesting under another org's goal (or a
+  // parentId is a real FK too, nesting under another org's goal (or a
   // typo'd id) must 400 here, not 500 at the constraint.
   if (parentId) {
     const parent = await prisma.oKR.findFirst({
@@ -470,7 +470,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Audience rows — refs to users/departments/roles, resolved to people
+  // Audience rows, refs to users/departments/roles, resolved to people
   // at read time (one shared goal, one scoreboard; no per-person copies).
   if (audience.length > 0) {
     await addGoalAssignees(okr.id, audience);
@@ -559,7 +559,7 @@ export async function POST(req: NextRequest) {
   return jsonSuccess(createdPayload, 201);
 }
 
-// Columns a PATCH may touch — an unvalidated spread must never reach
+// Columns a PATCH may touch, an unvalidated spread must never reach
 // prisma (organizationId / id / createdAt are not editable, ever).
 const OKR_PATCH_KEYS = [
   "title", "description", "level", "status", "progress", "quarter",
@@ -602,13 +602,13 @@ export async function PATCH(req: NextRequest) {
     delete updates.ownerId;
     delete updates.level;
   }
-  // level is an enum now — drop anything that doesn't normalize.
+  // level is an enum now, drop anything that doesn't normalize.
   if ("level" in updates) {
     const lvl = normalizeGoalLevel(updates.level);
     if (lvl) updates.level = lvl;
     else delete updates.level;
   }
-  // checkInCadence is a free String column — only let known values through
+  // checkInCadence is a free String column, only let known values through
   // (NONE opts the goal out of the check-in reminder cron). A garbage value
   // must never reach the column or the cron's cadence lookup.
   if ("checkInCadence" in updates &&
@@ -622,7 +622,7 @@ export async function PATCH(req: NextRequest) {
     });
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
-  // departmentId is a real FK — validate before Prisma hits the constraint.
+  // departmentId is a real FK, validate before Prisma hits the constraint.
   if (typeof updates.departmentId === "string" && updates.departmentId.length > 0) {
     const dept = await prisma.department.findFirst({
       where: { id: updates.departmentId, organizationId: orgId },
@@ -630,7 +630,7 @@ export async function PATCH(req: NextRequest) {
     });
     if (!dept) return jsonError("Department not found in this organization", 400);
   }
-  // parentId is a real FK — same rule, and a goal can never parent itself.
+  // parentId is a real FK, same rule, and a goal can never parent itself.
   if (typeof updates.parentId === "string" && updates.parentId.length > 0) {
     if (updates.parentId === id) return jsonError("A goal can't be its own parent", 400);
     const parent = await prisma.oKR.findFirst({
@@ -692,7 +692,7 @@ export async function PATCH(req: NextRequest) {
     await syncGoalAssignees(id, audience);
   }
 
-  // Re-derive stored progress/status for this goal and its ancestors —
+  // Re-derive stored progress/status for this goal and its ancestors,
   // a PATCH can move the goal (parentId), hand-set progress, or change
   // the owner whose KPI readings drive linked KRs. If the goal LEFT a
   // parent, that old chain shrinks too and must be recomputed.

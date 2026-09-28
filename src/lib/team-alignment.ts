@@ -1,4 +1,4 @@
-// Team alignment — manager rollup for /team/alignment.
+// Team alignment, manager rollup for /team/alignment.
 //
 // One DB pass per surface, then aggregate in memory. Includes both
 // solid reports (User.managerId) and dotted-line reports (Phase 1's
@@ -7,7 +7,7 @@
 // Three slices:
 //   - KRAs per report (active KRAAssignments)
 //   - KPI compliance: for each report, % of their CURRENT-PERIOD KPI
-//     records (currentPeriodKey, "YYYY-MM" — the same canonical period
+//     records (currentPeriodKey, "YYYY-MM", the same canonical period
 //     /people/me measures) that are SUBMITTED or APPROVED. All-history
 //     counting would let one great quarter mask a silent one.
 //   - SOP read-rate: for each report, % of their SOPAssignments that
@@ -38,7 +38,7 @@ export interface TeamMember {
     pending: number;
     rejected: number;
     /** Compliance % = (submitted + approved) / total. null when the person
-     *  has NO records — an unmeasured person must read "—", not a perfect
+     *  has NO records, an unmeasured person must read "None", not a perfect
      *  100% (the least-instrumented team looked the healthiest). */
     compliancePct: number | null;
   };
@@ -120,7 +120,7 @@ export async function getTeamAlignment(args: {
       include: { kra: { select: { id: true, name: true } } },
     }),
     prisma.kPIRecord.findMany({
-      // Current canonical period only, org-scoped — compliance is "are
+      // Current canonical period only, org-scoped, compliance is "are
       // this month's gauges filed", not a lifetime average.
       where: { userId: { in: validIds }, period: currentPeriodKey(), kpi: { organizationId } },
       select: { userId: true, status: true },
@@ -199,7 +199,7 @@ export async function getTeamAlignment(args: {
   });
 
   const totalKras = members.reduce((acc, m) => acc + m.activeKras.length, 0);
-  // Averages over MEASURED members only — a null (no data) neither lifts
+  // Averages over MEASURED members only, a null (no data) neither lifts
   // nor sinks the team number, and an entirely-unmeasured team reads null.
   const kpiMeasured = members.filter((m) => m.kpis.compliancePct != null);
   const avgKpiCompliancePct = kpiMeasured.length > 0

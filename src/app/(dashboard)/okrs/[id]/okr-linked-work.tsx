@@ -192,7 +192,7 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
         ) : null}
       </div>
       {rows === null ? (
-        <span className="mt-2 block h-5 w-1/3 animate-pulse rounded bg-surface-2" aria-hidden />
+        <span className="mt-2 block h-5 w-1/3 rounded bg-skeleton os-skeleton-pulse" aria-hidden />
       ) : rows.length === 0 ? (
         <p className="m-0 mt-2 text-sm text-ink-2">Nothing linked yet</p>
       ) : (

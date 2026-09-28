@@ -72,7 +72,7 @@ export async function GET(
 
   // OKRs owned by the user during this cycle's window. We pull every
   // owned OKR plus the check-ins inside the cycle dates so the
-  // self-assessment auto-populates with what they actually shipped —
+  // self-assessment auto-populates with what they actually shipped,
   // they barely have to type anything to fill in the "what went well"
   // section.
   const cycleStart = review.cycle?.startDate;
@@ -98,7 +98,7 @@ export async function GET(
   });
   // Derive each goal's progress from the same org-wide rollup every other
   // surface uses (live KRs + measured children), instead of reading the
-  // stored OKR.progress column — that column goes stale whenever a linked
+  // stored OKR.progress column, that column goes stale whenever a linked
   // KPI's reading changes, so a raw read here would disagree with the
   // dashboard and the goals page for the same goal.
   const rollupCtx = await computeGoalRollups(orgId);
@@ -163,12 +163,12 @@ export async function PATCH(
 
   // NOTE: the old "task completion rate" metric is gone, honestly. It
   // read the legacy (always-empty) prisma.task table, then wrote a
-  // `taskCompletionRate` column that does not exist on Review — so
+  // `taskCompletionRate` column that does not exist on Review, so
   // EVERY self-assessment save crashed with a Prisma validation error.
   // Review has no column to store it and nothing consumes it; bringing
   // it back (from the live Item model) needs a schema migration first.
 
-  // KPI score — only records made inside this cycle's window. Averaging
+  // KPI score, only records made inside this cycle's window. Averaging
   // the user's entire KPI history would score this period with last
   // year's numbers.
   const orgId = getOrgId(session);

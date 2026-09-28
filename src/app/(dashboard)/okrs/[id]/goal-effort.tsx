@@ -42,7 +42,7 @@ export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: 
         <p className="m-0 mt-3 text-sm text-ink-2">Couldn&apos;t load effort · <button type="button" onClick={retry} className="text-brand-deep hover:underline">Retry</button></p>
       ) : !data ? (
         <div className="mt-3 grid grid-cols-4 gap-4" aria-hidden>
-          {[0, 1, 2, 3].map((i) => <span key={i} className="h-10 animate-pulse rounded bg-surface-2" />)}
+          {[0, 1, 2, 3].map((i) => <span key={i} className="h-10 rounded bg-skeleton os-skeleton-pulse" />)}
         </div>
       ) : !data.hasLinkedWork ? (
         <p className="m-0 mt-3 text-sm text-ink-2">

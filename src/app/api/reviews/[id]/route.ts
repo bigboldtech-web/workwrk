@@ -73,7 +73,7 @@ export async function GET(
   }
 
   // Peer feedback: below hr-admin, a row is visible only to its giver,
-  // its receiver, or a manager with the subject in their tree — and an
+  // its receiver, or a manager with the subject in their tree, and an
   // anonymous giver stays anonymous (field names kept, values nulled).
   const lensOf = (review: { subjectId: string; reviewerId: string }) =>
     reviewLens({ callerId, hrAdmin, subjectId: review.subjectId, reviewerId: review.reviewerId, inTree: treeSet.has(review.subjectId) });

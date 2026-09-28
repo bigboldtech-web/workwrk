@@ -595,7 +595,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
           <div className="flex min-h-0 min-w-0 flex-1 gap-4 max-lg:flex-col">
             <aside className={cn("min-h-0 w-[280px] shrink-0 overflow-y-auto rounded-lg border border-line bg-subtle py-1 max-lg:w-full min-[1600px]:w-[360px]", personId ? "max-lg:hidden" : "")} aria-label="People">
               {!summary ? (
-                <div className="flex flex-col gap-2 p-3" aria-hidden>{[0, 1, 2, 3].map((i) => <span key={i} className="h-8 animate-pulse rounded bg-surface-2" />)}</div>
+                <div className="flex flex-col gap-2 p-3" aria-hidden>{[0, 1, 2, 3].map((i) => <span key={i} className="h-8 rounded bg-skeleton os-skeleton-pulse" />)}</div>
               ) : listItems.length === 0 ? (
                 <p className="m-0 px-3 py-3 text-row text-ink-2">Nobody matches · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setStatusFilter([]); setDirectOnly(false); setDeptFilter([]); }}>Clear filters</button></p>
               ) : (
