@@ -51,6 +51,8 @@ export interface Dept {
   head: PickPerson | null;
   createdAt: string;
   removedMembers: number;
+  /** Goals a delete would take this department off; only sent to writers. */
+  goalCount?: number;
   _count: { members: number; roles: number };
   subDepartments: Array<{ id: string; name: string }>;
 }
@@ -209,11 +211,16 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     ) }] : []),
   ], [layout, collapsed, byId, router, showDesc, showTitles]);
 
-  // A department is deletable only when nobody (current or removed) is in it
-  // and it has no sub-departments: the same rule the drawer and the route use.
-  const isDeletable = (d: Dept) => d._count.members === 0 && d.removedMembers === 0 && d.subDepartments.length === 0;
+  // A department can be deleted when no current person is in it and it has
+  // no sub-departments: the same rule the drawer and the route use. Removed
+  // people never block it (nothing in the product can edit a removed record);
+  // the route takes them out in the same write. One that goals name is
+  // deleted from its drawer, where those goals are listed before the confirm,
+  // never from a bulk action or a row menu that can't show them.
+  const isDeletable = (d: Dept) => d._count.members === 0 && d.subDepartments.length === 0;
+  const isQuickDeletable = (d: Dept) => isDeletable(d) && !d.goalCount;
   const selectedDepts = (list ?? []).filter((d) => selected.has(d.id));
-  const selectedDeletable = selectedDepts.filter(isDeletable);
+  const selectedDeletable = selectedDepts.filter(isQuickDeletable);
   async function bulkSetParent(parentId: string | null) {
     const rows = selectedDepts.filter((d) => d.id !== parentId);
     const failed: string[] = [];
@@ -230,7 +237,9 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     if (rows.length === 0) return;
     const ok = await confirm({
       title: rows.length === 1 ? `Delete ${rows[0].name}?` : `Delete ${rows.length} departments?`,
-      description: "Only empty departments with no sub-departments are deleted. This can't be undone.",
+      // Only goal-free, empty rows reach here (isQuickDeletable), so goals
+      // is 0; job titles and removed people still go with them, so say so.
+      description: deleteConsequences({ goals: 0, jobTitles: rows.reduce((n, d) => n + d._count.roles, 0), removed: rows.reduce((n, d) => n + d.removedMembers, 0) }),
       confirmLabel: "Delete",
       destructive: true,
     });
@@ -361,7 +370,7 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
             {isDeletable(menu.d) ? (
               <>
                 <MenuSeparator />
-                <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const d = menu.d; setMenu(null); void deleteDepts([d]); }} />
+                <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const d = menu.d; setMenu(null); if (isQuickDeletable(d)) void deleteDepts([d]); else setParams({ open: d.id, new: null }); }} />
               </>
             ) : null}
           </MenuList>
@@ -418,6 +427,7 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
   const [busy, setBusy] = useState(false);
   const [people, setPeople] = useState<{ rows: PickPerson[]; total: number } | null>(null);
   const [titles, setTitles] = useState<Array<{ id: string; title: string }> | null>(null);
+  const [goals, setGoals] = useState<{ goals: Array<{ id: string; title: string }>; hiddenGoals: number; totalGoals: number } | null>(null);
 
   useEffect(() => {
     if (!dept) return;
@@ -428,6 +438,17 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
       .then((r) => { if (live && r.ok && Array.isArray(r.data)) setTitles(r.data.filter((t) => t.departmentId === dept.id)); });
     return () => { live = false; };
   }, [dept]);
+  // The goals a delete would change, named before the confirm (writers only;
+  // the list's goalCount says whether there is anything to fetch).
+  const deptId = dept?.id ?? null;
+  const goalCount = dept?.goalCount ?? 0;
+  useEffect(() => {
+    if (!deptId || !canWrite || goalCount === 0) return;
+    let live = true;
+    void apiFetch<{ goals: Array<{ id: string; title: string }>; hiddenGoals: number; totalGoals: number }>(`/api/departments/${deptId}`, { cache: "no-store" })
+      .then((r) => { if (live && r.ok) setGoals(r.data); });
+    return () => { live = false; };
+  }, [deptId, canWrite, goalCount]);
 
   // A department can never sit under itself or one of its own descendants.
   const blocked = useMemo(() => {
@@ -466,21 +487,28 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
 
   async function remove() {
     if (!dept) return;
-    const ok = await confirm({ title: `Delete ${dept.name}?`, description: "This can't be undone.", confirmLabel: "Delete", destructive: true });
+    const ok = await confirm({ title: `Delete ${dept.name}?`, description: deleteConsequences({ goals: goalTotal, jobTitles: dept._count.roles, removed: dept.removedMembers }), confirmLabel: "Delete", destructive: true });
     if (!ok) return;
-    const r = await apiFetch(`/api/departments/${dept.id}`, { method: "DELETE" });
-    if (!r.ok) { toast(r.error || "Couldn't delete it", { tone: "danger" }); return; }
+    // The route deletes only when the goal count it finds is the one this
+    // confirm named; a goal added since is a 409, and the reload shows it.
+    const r = await apiFetch(`/api/departments/${dept.id}${goalTotal ? `?detachGoals=${goalTotal}` : ""}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete it", { tone: "danger" }); onChanged(); return; }
     toast(`Deleted ${dept.name}`);
     onChanged();
     onClose();
   }
 
-  const deletable = dept && dept._count.members === 0 && dept.removedMembers === 0 && dept.subDepartments.length === 0;
+  // Removed people are not a blocker: the People list above counts only
+  // current people, and the route takes removed ones out as it deletes.
+  const deletable = dept && dept._count.members === 0 && dept.subDepartments.length === 0;
   const blockers = dept ? [
     dept._count.members ? `${dept._count.members} ${dept._count.members === 1 ? "person" : "people"}` : null,
-    dept.removedMembers ? `${dept.removedMembers} removed ${dept.removedMembers === 1 ? "person" : "people"}` : null,
     dept.subDepartments.length ? `${dept.subDepartments.length} sub-department${dept.subDepartments.length === 1 ? "" : "s"}` : null,
   ].filter(Boolean) : [];
+  // The preview's count is fresher than the list's; either is what the
+  // confirm names and the DELETE sends back. A list that now says 0 wins
+  // over a preview fetched before the goals were reassigned.
+  const goalTotal = goalCount === 0 ? 0 : goals?.totalGoals ?? goalCount;
   const parentName = parentId ? all.find((d) => d.id === parentId)?.name ?? "" : "";
   return (
     <Drawer
@@ -576,7 +604,21 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
               <section className="rounded-lg border border-line p-3">
                 <h3 className="text-sm font-semibold text-ink">Delete department</h3>
                 {deletable ? (
-                  <button type="button" onClick={() => void remove()} className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-danger-text hover:bg-danger-bg"><Trash2 className="h-4 w-4" aria-hidden />Delete department</button>
+                  <>
+                    {goalTotal > 0 ? (
+                      <div className="mt-1 flex flex-col gap-1">
+                        <p className="text-sm text-ink-2">{goalTotal === 1 ? "1 goal names" : `${goalTotal} goals name`} this department. Deleting it takes the department off {goalTotal === 1 ? "that goal" : "them"}; reassign {goalTotal === 1 ? "it" : "them"} first if its people should stay on {goalTotal === 1 ? "it" : "them"}.</p>
+                        {goals === null ? <SkeletonRows rows={Math.min(goalTotal, 3)} rowHeight="36px" /> : (
+                          <ul className="flex flex-col">
+                            {goals.goals.map((g) => <li key={g.id}><Link href={`/okrs/${g.id}`} className="flex h-9 items-center rounded-md px-1 text-sm text-ink hover:bg-hover"><span className="truncate">{g.title}</span></Link></li>)}
+                            {goals.hiddenGoals ? <li className="px-1 text-sm text-ink-2">{goals.hiddenGoals === 1 ? "1 more goal you can't open" : `${goals.hiddenGoals} more goals you can't open`}</li> : null}
+                          </ul>
+                        )}
+                      </div>
+                    ) : null}
+                    {dept.removedMembers ? <p className="mt-1 text-sm text-ink-2">{dept.removedMembers === 1 ? "1 removed person is" : `${dept.removedMembers} removed people are`} taken out of this department when it is deleted.</p> : null}
+                    <button type="button" onClick={() => void remove()} className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-danger-text hover:bg-danger-bg"><Trash2 className="h-4 w-4" aria-hidden />Delete department</button>
+                  </>
                 ) : (
                   <p className="mt-1 text-sm text-ink-2">Move {blockers.join(" and ")} first.</p>
                 )}
@@ -587,4 +629,16 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
       </div>
     </Drawer>
   );
+}
+
+/** The Delete confirm's body: everything besides the department row that
+ *  the delete changes, so nothing goes without the admin being told. Pure,
+ *  and tested in departments-delete.test.ts. */
+export function deleteConsequences({ goals, jobTitles, removed }: { goals: number; jobTitles: number; removed: number }): string {
+  const lines: string[] = [];
+  if (goals > 0) lines.push(`${goals === 1 ? "1 goal loses" : `${goals} goals lose`} this department as ${goals === 1 ? "its" : "their"} audience or department. ${goals === 1 ? "It stays" : "They stay"} in Goals with ${goals === 1 ? "its" : "their"} owner.`);
+  if (jobTitles > 0) lines.push(`${jobTitles === 1 ? "1 job title loses" : `${jobTitles} job titles lose`} ${jobTitles === 1 ? "its" : "their"} department.`);
+  if (removed > 0) lines.push(`${removed === 1 ? "1 removed person is" : `${removed} removed people are`} taken out of it.`);
+  lines.push("This can't be undone.");
+  return lines.join(" ");
 }
