@@ -281,9 +281,9 @@ export default function PeopleDirectoryClient() {
         <span className={`flex min-w-0 items-center gap-2 ${removedView ? "opacity-70" : ""}`}>
           <PersonAvatar person={r} size={28} />
           <span className={`truncate ${removedView ? "text-ink-2" : ""}`}>{personName(r)}</span>
-          {listView === "new" ? <Chip>New</Chip> : null}
-          {r.isAgent ? <Chip>Agent</Chip> : null}
-          {r.status === "INACTIVE" && !r.deletedAt ? <Chip>Deactivated</Chip> : null}
+          {listView === "new" ? <Chip as="span">New</Chip> : null}
+          {r.isAgent ? <Chip as="span">Agent</Chip> : null}
+          {r.status === "INACTIVE" && !r.deletedAt ? <Chip as="span">Deactivated</Chip> : null}
         </span>
       ) },
       // The row is itself a link, so the cells that go somewhere else are
@@ -302,7 +302,7 @@ export default function PeopleDirectoryClient() {
     if (columns.phone) cols.push({ key: "phone", label: "Phone", width: "140px", hideBelow: 1000, render: (r) => <span className="truncate tabular-nums">{r.phone ?? ""}</span> });
     if (columns.office) cols.push({ key: "office", label: "Office", width: "120px", hideBelow: 1200, render: (r) => <span className="truncate">{r.office?.city || r.office?.name || ""}</span> });
     if (columns.tags) cols.push({ key: "tags", label: "Tags", width: "minmax(140px,0.8fr)", hideBelow: 1100, render: (r) => (
-      <span className="flex min-w-0 items-center gap-1 overflow-hidden">{r.tags.map((t) => <Chip key={t.id}>{t.name}</Chip>)}</span>
+      <span className="flex min-w-0 items-center gap-1 overflow-hidden">{r.tags.map((t) => <Chip as="span" key={t.id}>{t.name}</Chip>)}</span>
     ) });
     if (columns.joined) cols.push({ key: "joined", label: removedView ? "Removed" : "Joined", width: "136px", hideBelow: 700, render: (r) => (
       <span className="tabular-nums text-ink-2">{formatDate(removedView && r.deletedAt ? r.deletedAt : r.joinDate, datePrefs, "date")}</span>
@@ -390,6 +390,11 @@ export default function PeopleDirectoryClient() {
       rowMenu={removedView
         ? (r) => (data?.viewer.privileged ? <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void restore(r); }} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><RotateCcw className="h-3.5 w-3.5" aria-hidden />Restore</button> : null)
         : rowMenu}
+      // The Removed view's end column holds a labelled "Restore" (icon plus
+      // word, about 81px), not the 32px "...", so it asks for a track that
+      // fits it. 100 still leaves the Email column in at 1440 with the
+      // sidebar open; the "..." views keep the 44px default.
+      rowMenuWidth={removedView ? 100 : undefined}
       selectable={canSelect}
       isRowSelectable={(r) => r.canEdit}
       selected={selected}
@@ -513,7 +518,7 @@ export default function PeopleDirectoryClient() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-row font-medium text-ink">{personName(r)}</span>
                         <span className="block truncate text-sm text-ink-2">{r.role?.title ?? "No job title"}</span>
-                        {r.department ? <span className="mt-1 inline-flex"><Chip>{r.department.name}</Chip></span> : null}
+                        {r.department ? <span className="mt-1 inline-flex"><Chip as="span">{r.department.name}</Chip></span> : null}
                       </span>
                     </Link>
                   </li>

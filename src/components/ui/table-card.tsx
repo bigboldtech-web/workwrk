@@ -108,6 +108,15 @@ export interface TableCardProps<T> {
   onSort?: (key: string) => void;
   /** The "..." trigger for a row (a 32px ghost button the caller controls). */
   rowMenu?: (row: T) => ReactNode;
+  /**
+   * The width in px of the pinned end column `rowMenu` renders into. The
+   * default 44 fits the 32px "..." trigger. A caller that puts a labelled
+   * action there instead (the Directory's Removed view: an icon plus
+   * "Restore") passes the width that label needs, so the sticky cell is not
+   * narrower than its content: at 44 the button spilled past the card's
+   * edge, read "Restor" and gave the whole table a sideways scroll.
+   */
+  rowMenuWidth?: number;
   /** Content rendered in the one empty row. */
   empty?: ReactNode;
   footer?: TableFooter;
@@ -207,6 +216,7 @@ export function TableCard<T>({
   sort,
   onSort,
   rowMenu,
+  rowMenuWidth = 44,
   empty,
   footer,
   bulkActions,
@@ -242,8 +252,8 @@ export function TableCard<T>({
   }, [settingsKey]);
   const updateChoice = useCallback((next: ColumnChoice) => { setChoice(next); writeChoice(settingsKey, next); }, [settingsKey]);
   const columns = useMemo(
-    () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? 44 : 0), choice),
-    [allColumns, cardWidth, selectable, rowMenu, choice],
+    () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0), choice),
+    [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice],
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
@@ -280,9 +290,9 @@ export function TableCard<T>({
     const tracks: string[] = [];
     if (selectable) tracks.push("44px");
     for (const c of columns) tracks.push(c.width ?? "minmax(120px,1fr)");
-    if (rowMenu) tracks.push("44px");
+    if (rowMenu) tracks.push(`${rowMenuWidth}px`);
     return tracks.join(" ");
-  }, [columns, selectable, rowMenu]);
+  }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   const allKeys = useMemo(
     () => (rows ?? []).filter((r) => !isRowSelectable || isRowSelectable(r)).map(rowKey),
@@ -342,13 +352,13 @@ export function TableCard<T>({
   const minWidth = useMemo(() => {
     // Sum of the fixed tracks plus 120 per fluid column, so the card scrolls
     // sideways inside itself rather than squashing cells to nothing.
-    let w = (selectable ? 44 : 0) + (rowMenu ? 44 : 0);
+    let w = (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0);
     for (const c of columns) {
       const m = /(\d+)px/.exec(c.width ?? "");
       w += m ? Number(m[1]) : 120;
     }
     return w;
-  }, [columns, selectable, rowMenu]);
+  }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
     <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>

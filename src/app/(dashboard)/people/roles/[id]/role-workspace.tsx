@@ -120,7 +120,7 @@ export function RoleWorkspace({ bundle, canEdit, canEditIdentity = canEdit, tab 
         titleSlot={
           <div className="flex min-w-0 items-center gap-2">
             <h1 className="min-w-0 truncate text-title font-semibold text-ink" title={bundle.role.title}>{bundle.role.title}</h1>
-            <Chip>{seniorityLabel(bundle.role.level)}</Chip>
+            <Chip as="span">{seniorityLabel(bundle.role.level)}</Chip>
           </div>
         }
         more={[
@@ -227,7 +227,7 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
                       {seedingId === p.id ? "Seeding" : "Seed"}
                     </button>
                   </>
-                ) : totalTemplates > 0 ? <Chip>Up to date</Chip> : null
+                ) : totalTemplates > 0 ? <Chip as="span">Up to date</Chip> : null
               ) : null}
             </li>
           );
@@ -1122,7 +1122,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                           <span className="text-xs italic text-ink-2 shrink-0">no baseline yet</span>
                         )}
                         <span className="shrink-0" title={shared ? "Influenced by this job title: reviewed, not graded" : "Controlled by this job title: graded"}>
-                          <Chip>{shared ? "Shared" : "Owned"}</Chip>
+                          <Chip as="span">{shared ? "Shared" : "Owned"}</Chip>
                         </span>
                         {canEdit ? (
                           <RowMenu
@@ -1287,7 +1287,7 @@ function SopCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) 
                 <FileText className="w-3.5 h-3.5 text-ink-2 shrink-0" />
                 <span className="flex-1 min-w-0 truncate text-ink">{s.title}</span>
                 <span className="text-xs text-ink-2 shrink-0">via {s.kraName}</span>
-                <Chip>{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Chip>
+                <Chip as="span">{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Chip>
               </Link>
             </li>
           ))}
