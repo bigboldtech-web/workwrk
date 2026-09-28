@@ -175,7 +175,7 @@ export function verdictNarrative(v: GoalVerdict, s: {
       : v === "on_track" ? "On track for the due date."
         : v === "off_track" ? "Well behind pace. It needs attention."
           : v === "not_measured" ? "Not measured yet. Add a target to track it."
-            : "Slipping. A few risk signals.";
+            : "At risk. A few risk signals.";
   const recommendation =
     v === "completed" ? "Nothing to do. Start the next goal when you are ready."
       : v === "not_measured" ? "Add a target with a start and a goal number."

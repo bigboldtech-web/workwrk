@@ -36,8 +36,14 @@ export default async function TeamRollupPage() {
   const ctx = await kpiActorCtx();
   if (!ctx) redirect("/login");
   const orgWide = ctx.isAdmin || ctx.peopleTeam;
+  // Org-wide viewers see every top of the company AND their own direct
+  // reports (who sit under them, so they are not roots): without the second
+  // half an admin's own team fell out of the page.
   const rootIds = orgWide
-    ? (await prisma.user.findMany({ where: { organizationId: u.organizationId, deletedAt: null, managerId: null, status: { not: "INACTIVE" }, id: { not: u.id } }, select: { id: true } })).map((r) => r.id)
+    ? (await prisma.user.findMany({
+        where: { organizationId: u.organizationId, deletedAt: null, status: { not: "INACTIVE" }, id: { not: u.id }, OR: [{ managerId: null }, { managerId: u.id }] },
+        select: { id: true },
+      })).map((r) => r.id)
     : undefined;
   const data = await getDirectorRollup({ directorId: u.id, organizationId: u.organizationId, rootIds });
 
@@ -55,8 +61,8 @@ export default async function TeamRollupPage() {
   const directIcs = (alignment?.members ?? []).filter((m) => icIds.has(m.id));
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-surface">
-      <SubTeamsView subTeams={subTeams} directIcs={directIcs} totals={data.totals} />
+    <div className="flex h-full flex-col overflow-y-auto bg-raised">
+      <SubTeamsView subTeams={subTeams} directIcs={directIcs} totals={data.totals} orgWide={orgWide} />
     </div>
   );
 }

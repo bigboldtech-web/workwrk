@@ -16,6 +16,7 @@ import { logActivity } from "@/lib/activity";
 import { managerMapFor, peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { groupHandoverAssignees } from "@/lib/board-items-shared";
+import { followReportingLine } from "@/lib/performance/review-cycle.server";
 
 // Same completion heuristic as /api/me/work, Item.status is a per-board
 // free string, so "open" = anything that doesn't read as finished.
@@ -197,6 +198,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Positional, because the assignee rewrites above are a variable-length run.
   const tasksMoved = results[0] as { count: number };
   const reportsMoved = results[results.length - 1] as { count: number };
+
+  // The moved reports' open review cycles follow them to their new manager.
+  await followReportingLine(orgId, reportIds, getUserId(session)).catch((e: unknown) => console.error("followReportingLine failed", e));
 
   logActivity({
     type: "user_handover",

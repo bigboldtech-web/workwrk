@@ -26,6 +26,9 @@ import { calibrationNumbers, orgScoring, sopScoresFor } from "@/lib/performance/
 import { bandOf, isOutcome } from "@/lib/performance/review-cycle";
 import { logActivity } from "@/lib/activity";
 
+/** The most reviews one bulk calibration change may touch (an enterprise cycle's whole population fits). */
+const MAX_BULK_CALIBRATION = 10_000;
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -113,10 +116,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id: cycleId } = await params;
   const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  // Every selected review, never a silent prefix: a bulk change is all or
+  // nothing, so the "Updated N people" the panel shows is always true.
   const ids = Array.isArray(body.reviewIds)
-    ? body.reviewIds.filter((x): x is string => typeof x === "string").slice(0, 500)
+    ? [...new Set(body.reviewIds.filter((x): x is string => typeof x === "string" && x.length > 0))]
     : typeof body.reviewId === "string" ? [body.reviewId] : [];
   if (!ids.length) return jsonError("reviewId is required");
+  if (ids.length > MAX_BULK_CALIBRATION) {
+    return jsonError(`Select at most ${MAX_BULK_CALIBRATION.toLocaleString("en-US")} people at a time. Nothing was changed.`, 400);
+  }
 
   const hasScore = body.calibratedScore !== undefined && body.calibratedScore !== null;
   const score = hasScore ? Number(body.calibratedScore) : null;
@@ -150,7 +158,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (reviews.some((r) => r.status === "COMPLETED")) return jsonError("A finalized review can no longer change", 409);
 
   const actor = getUserId(session);
-  await prisma.$transaction(
+  if (!hasScore && reviews.length > 1) {
+    // A bulk change writes the same fields to every row, so one statement
+    // covers any selection size atomically.
+    await prisma.review.updateMany({
+      where: { id: { in: ids }, cycleId, status: { not: "COMPLETED" } },
+      data: {
+        ...(notes !== undefined ? { calibrationNotes: notes } : {}),
+        ...(potential !== undefined ? { potential } : {}),
+        ...(outcome !== undefined ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
+      },
+    });
+  } else await prisma.$transaction(
     reviews.map((r) =>
       prisma.review.update({
         where: { id: r.id },

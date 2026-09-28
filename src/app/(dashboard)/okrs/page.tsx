@@ -12,6 +12,8 @@
 //                  levels (GET /api/okrs?team=1)
 //   ?view=company  Company goals
 //   ?new=1         auto-open the create-goal modal on load
+//   ?owner={id}    the Owner filter starts on that person, and ?new=1 starts
+//                  the new goal with them as owner (a person's record doors)
 //
 // The retired forms `?mine=1`, `?team=1` and `?level=company` are READ for
 // one release and canonicalised client-side with router.replace, so stored
@@ -21,6 +23,7 @@
 // their own list.
 
 import { requireGoalsPage } from "@/lib/page-gates";
+import { prisma } from "@/lib/prisma";
 import { isOrgWideAlignment } from "@/lib/alignment-scope";
 import { can } from "@/lib/access/index";
 import { viewerFromSession } from "@/lib/access/viewer";
@@ -49,8 +52,19 @@ export default async function OkrsPage({
     { view: str("view"), mine: str("mine"), team: str("team"), level: str("level"), new: str("new") },
     { canTeam },
   );
+  // ?owner= (a person's record "All goals" and "Set a goal"): the Owner
+  // filter starts on that person, and a new goal starts with them as owner.
+  // Only a person in this workspace resolves; anything else is ignored.
+  const ownerParam = str("owner");
+  const ownerRow = ownerParam
+    ? await prisma.user.findFirst({
+        where: { id: ownerParam, organizationId: viewer.organizationId, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+      })
+    : null;
   return (
     <OkrsClient
+      initialOwner={ownerRow}
       initialNew={str("new") === "1"}
       view={resolved.view}
       legacyLevel={resolved.legacyLevel}

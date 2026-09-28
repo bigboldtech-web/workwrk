@@ -65,7 +65,8 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError("The request body did not arrive as JSON. Nothing was saved.", 400);
   const { kpiId, userId, period, targetValue: manualTarget, actualValue, notes, managerNotes, evidence } = body;
 
   if (!kpiId || !userId || !period) {

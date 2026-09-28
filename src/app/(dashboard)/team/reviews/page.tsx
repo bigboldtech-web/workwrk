@@ -25,7 +25,7 @@ export default async function TeamReviewsPage() {
   const ctx = await weeklyQueueCtx();
   if (!ctx) redirect("/login?callbackUrl=%2Fteam%2Freviews");
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col bg-raised">
       <Suspense>
         <WeeklyReviewsView
           viewerId={ctx.userId}

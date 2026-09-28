@@ -18,6 +18,11 @@ import {
   selfReviewGap,
   stepsPassed,
   subjectMayWrite,
+  draftHasContent,
+  effectiveReviewerId,
+  reviewIsOpen,
+  reviewerAfterMove,
+  wouldBlankDraft,
 } from "./review-cycle";
 
 const FIVE = [
@@ -153,5 +158,47 @@ describe("isReviewDraft, a save never erases a draft with nothing", () => {
     expect(isReviewDraft("garbage")).toBe(false);
     expect(isReviewDraft([])).toBe(false);
     expect(isReviewDraft(3)).toBe(false);
+  });
+});
+
+describe("the reviewer follows the reporting line", () => {
+  it("an open review is written by the subject's current manager, never the launch stamp", () => {
+    expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "ACTIVE", reviewStatus: "PENDING" })).toBe("new");
+    expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "IN_CALIBRATION", reviewStatus: "MANAGER_REVIEW" })).toBe("new");
+  });
+  it("someone with nobody above them keeps the stamped reviewer (the launch rule)", () => {
+    expect(effectiveReviewerId({ reviewerId: "launcher", subjectManagerId: null, cycleStatus: "ACTIVE", reviewStatus: "PENDING" })).toBe("launcher");
+  });
+  it("a finalized review keeps its stamp as the record of who wrote it", () => {
+    expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "COMPLETED", reviewStatus: "COMPLETED" })).toBe("old");
+    expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "ACTIVE", reviewStatus: "COMPLETED" })).toBe("old");
+    expect(reviewIsOpen("CANCELLED", "PENDING")).toBe(false);
+    expect(reviewIsOpen("DRAFT", "PENDING")).toBe(true);
+  });
+  it("a move hands the review to the new manager", () => {
+    expect(reviewerAfterMove({ reviewerId: "old", subjectId: "s", managerId: "new", actorId: "admin" })).toBe("new");
+    expect(reviewerAfterMove({ reviewerId: "new", subjectId: "s", managerId: "new", actorId: "admin" })).toBeNull();
+  });
+  it("a manager cleared hands it to whoever made the change, never to the subject", () => {
+    expect(reviewerAfterMove({ reviewerId: "old", subjectId: "s", managerId: null, actorId: "admin" })).toBe("admin");
+    expect(reviewerAfterMove({ reviewerId: "old", subjectId: "s", managerId: null, actorId: "s" })).toBeNull();
+    expect(reviewerAfterMove({ reviewerId: "old", subjectId: "s", managerId: null, actorId: "old" })).toBeNull();
+  });
+});
+
+describe("wouldBlankDraft", () => {
+  const empty = { kraRatings: [{ kraId: "k", kraName: "K", rating: null, achievements: "" }], reflection: { wentWell: "", couldImprove: "", goals: "" } };
+  const written = { kraRatings: [], reflection: { wentWell: "shipped the thing", couldImprove: "", goals: "" } };
+  it("refuses an empty save over a written draft", () => {
+    expect(wouldBlankDraft(written, empty, false)).toBe(true);
+    expect(wouldBlankDraft({ kraRatings: [{ kraId: "k", rating: 4 }] }, empty, false)).toBe(true);
+    expect(wouldBlankDraft({ behavioral: { quality: 3 } }, { kraRatings: [], behavioral: {}, overallComments: "", recommendation: "" }, false)).toBe(true);
+  });
+  it("lets the page clear its own draft, and never blocks content or a first save", () => {
+    expect(wouldBlankDraft(written, empty, true)).toBe(false);
+    expect(wouldBlankDraft(null, empty, false)).toBe(false);
+    expect(wouldBlankDraft({}, empty, false)).toBe(false);
+    expect(wouldBlankDraft(written, { ...empty, reflection: { ...empty.reflection, goals: "x" } }, false)).toBe(false);
+    expect(draftHasContent({ kraRatings: [], overallComments: " " })).toBe(false);
   });
 });

@@ -164,7 +164,9 @@ export function WeeklyReviewsView({
 
   const view = readView(sp?.get("view"));
   const q = sp?.get("q") ?? "";
-  const person = sp?.get("person") ?? "";
+  // ?user= is the retired name (calendar links written before Phase 6),
+  // read as ?person= so a stored link still opens that person's review.
+  const person = sp?.get("person") ?? sp?.get("user") ?? "";
   const week = sp?.get("week") ?? "";
   const status = sp?.get("status") ?? "";
   const statuses = useMemo(() => status.split(",").filter(Boolean), [status]);
@@ -306,7 +308,7 @@ export function WeeklyReviewsView({
     { key: "week", label: "Week", width: "170px", render: (r) => <span className="whitespace-nowrap tabular-nums">{weekRange(r.week, datePrefs)}</span> },
     { key: "status", label: "Status", width: "170px", render: (r) => <ToneChip tone={r.statusTone as Tone} label={r.statusLabel} /> },
     ...(cols.highlights ? [{ key: "highlights", label: "Highlights", width: "minmax(180px,2fr)", hideBelow: 900, render: (r: WeeklyQueueRow) => <span className="truncate text-ink-2">{r.highlights || (r.status === "DRAFT" ? "Not submitted yet" : "")}</span> }] : []),
-    ...(cols.kras ? [{ key: "kras", label: "KRAs", width: "130px", hideBelow: 760, render: (r: WeeklyQueueRow) => <span className="text-ink-2">{r.kras.total ? `${r.kras.onTrack} of ${r.kras.total} on track` : ""}</span> }] : []),
+    ...(cols.kras ? [{ key: "kras", label: "KRAs", width: "130px", hideBelow: 760, render: (r: WeeklyQueueRow) => <span className="text-ink-2">{r.kras.total ? `${r.kras.onTrack} of ${r.kras.total} on track` : "None"}</span> }] : []),
     ...(cols.submitted ? [{
       key: "submitted", label: view === "acted" ? "Decided" : "Submitted", width: "120px", hideBelow: 640,
       render: (r: WeeklyQueueRow) => {

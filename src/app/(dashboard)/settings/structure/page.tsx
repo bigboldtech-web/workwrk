@@ -1,4 +1,4 @@
-// Settings · Org structure: the Admin-door hub for how the company is
+// Settings · Structure: the Admin-door hub for how the company is
 // shaped: Departments, Job titles, the Org chart link, Offices, and the
 // Levels ladder. ?tab=departments and ?tab=titles render the Teams hub's own
 // DepartmentsManager and JobTitlesList in this door.
@@ -83,7 +83,7 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-2 px-6 pt-4">
-          <BackButton fallbackHref="/settings/structure" label="Org structure" />
+          <BackButton fallbackHref="/settings/structure" label="Structure" />
           <h1 className="text-title font-semibold text-ink">{tab === "departments" ? "Departments" : tab === "titles" ? "Job titles" : "Profile fields"}</h1>
         </div>
         <Suspense>
@@ -116,11 +116,11 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
         <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
           <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
           <ChevronRight className="h-3 w-3" />
-          <span>Org structure</span>
+          <span>Structure</span>
         </div>
         <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900">
           <Layers className="h-5 w-5 text-[#0073EA]" />
-          Org structure
+          Structure
         </h1>
         <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
           How the company is shaped: the departments people belong to, the job titles they hold, the

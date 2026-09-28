@@ -313,7 +313,7 @@ export default function SurveysClient({ canCreate }: { canCreate: boolean }) {
               ) : rows.length === 0 ? (
                 <OsEmptyView title="Nothing to answer right now" />
               ) : rows.map((r) => r.hasResponded ? (
-                <div key={r.id} className="flex h-9 items-center gap-2 rounded-md px-3 text-row text-ink-2">
+                <div key={r.id} className="flex h-11 items-center gap-2 rounded-lg border border-line bg-raised px-4 text-row text-ink-2">
                   <Check className="h-4 w-4 text-success-text" aria-hidden />
                   <span className="min-w-0 flex-1 truncate">{r.title}</span>
                   <span className="text-sm">Answered</span>
@@ -331,6 +331,11 @@ export default function SurveysClient({ canCreate }: { canCreate: boolean }) {
                   <Link href={`/surveys/${r.id}`} className="inline-flex h-9 shrink-0 items-center rounded-md border border-line bg-raised px-4 text-sm font-medium text-ink hover:bg-hover">Answer</Link>
                 </article>
               ))}
+              {!loading && rows.length > 0 ? (
+                <p className="m-0 px-1 text-sm tabular-nums text-ink-2">
+                  {`${total || rows.length} ${(total || rows.length) === 1 ? "survey" : "surveys"} · ${rows.filter((r) => !r.hasResponded).length} to answer`}
+                </p>
+              ) : null}
             </div>
           )}
         </div>

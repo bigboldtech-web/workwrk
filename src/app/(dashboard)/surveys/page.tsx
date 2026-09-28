@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function SurveysPage() {
   const g = await cultureGate("surveys", "/surveys");
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-raised">
       <Suspense>
         <SurveysClient canCreate={g.organiser} />
       </Suspense>

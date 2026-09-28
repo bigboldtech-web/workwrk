@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 import { subjectRowView } from "@/lib/people/review-visibility";
-import { cleanSelfRatings, isReviewDraft, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
+import { cleanSelfRatings, isReviewDraft, wouldBlankDraft, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
 export async function GET(
@@ -156,6 +156,9 @@ export async function PATCH(
   // Never overwrite a stored draft with nothing (src/lib/performance/review-cycle.ts).
   if (!isReviewDraft(body.selfRatings)) return jsonError("Nothing to save: the review did not arrive. Your draft is unchanged.", 400);
   const selfRatings = cleanSelfRatings(body.selfRatings);
+  if (wouldBlankDraft(review.selfRatings, selfRatings, body.allowEmpty === true)) {
+    return jsonError("Nothing to save: this would empty your written draft. Your draft is unchanged.", 400);
+  }
   if (submit) {
     const kras = await prisma.kRAAssignment.findMany({ where: { userId, status: "ACTIVE" }, select: { kraId: true } });
     const gap = selfReviewGap(selfRatings, kras.map((k) => k.kraId));

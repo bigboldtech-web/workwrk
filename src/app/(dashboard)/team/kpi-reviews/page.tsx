@@ -43,7 +43,7 @@ export default async function TeamKpiReviewsPage({ searchParams }: { searchParam
   for (const w of waiting) byMonth.set(w.period, (byMonth.get(w.period) ?? 0) + 1);
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col bg-raised">
       <KpiReviewsView
         initialPeriod={period}
         currentPeriod={currentKpiPeriod()}

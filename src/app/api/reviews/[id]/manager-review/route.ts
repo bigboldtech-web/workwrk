@@ -21,7 +21,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, orgScoring, reviewMetrics } from "@/lib/performance/review-cycle.server";
-import { cleanManagerAssessment, isOutcome, isReviewDraft, managerMayWrite, managerRatingFrom } from "@/lib/performance/review-cycle";
+import { cleanManagerAssessment, effectiveReviewerId, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         cycle: { select: { id: true, name: true, status: true, startDate: true, endDate: true } },
         subject: {
           select: {
-            id: true, firstName: true, lastName: true, email: true, avatar: true,
+            id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true,
             department: { select: { name: true } },
             role: { select: { title: true } },
           },
@@ -57,7 +57,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
     if (!review || subjectId === ctx.userId) return jsonError("Not found", 404);
-    const allowed = ctx.peopleTeamOrAdmin || review.reviewerId === ctx.userId || ctx.chain.has(subjectId);
+    // The writer of an open review is whoever the subject reports to NOW
+    // (review-cycle.ts effectiveReviewerId): a former manager keeps no
+    // reach through the stamp launch left behind.
+    const writer = effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: review.subject.managerId, cycleStatus: review.cycle.status, reviewStatus: review.status });
+    const allowed = ctx.peopleTeamOrAdmin || writer === ctx.userId || ctx.chain.has(subjectId);
     if (!allowed) return jsonError("Not found", 404);
 
     const [kras, metrics, scoring] = await Promise.all([
@@ -71,13 +75,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     ]);
     const submittedPeers = review.peerFeedback.filter((pf) => pf.status === "SUBMITTED");
     return jsonSuccess({
-      review: { ...review, peerFeedback: undefined },
+      review: { ...review, reviewerId: writer, subject: { ...review.subject, managerId: undefined }, peerFeedback: undefined },
       peerFeedback: submittedPeers.map((pf) => (pf.anonymous && !ctx.peopleTeamOrAdmin ? { ...pf, giver: null } : pf)),
       peersAsked: review.peerFeedback.length,
       kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
       metrics,
       scale: scoring.scale,
-      canWrite: review.reviewerId === ctx.userId && managerMayWrite(review.cycle.status, review.status),
+      canWrite: writer === ctx.userId && managerMayWrite(review.cycle.status, review.status),
     });
   }
 
@@ -130,10 +134,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return jsonError("Unknown outcome", 400);
   }
 
-  const review = await prisma.review.findFirst({
-    where: { id: reviewId, cycleId, reviewerId: userId, cycle: { organizationId: getOrgId(session) } },
-    include: { cycle: { select: { status: true, name: true } } },
+  const found = await prisma.review.findFirst({
+    where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
+    include: { cycle: { select: { status: true, name: true } }, subject: { select: { managerId: true } } },
   });
+  // Only the reviewer the reporting line names today writes it (review-cycle.ts
+  // effectiveReviewerId); the stamp is healed to them on this write.
+  const review = found && effectiveReviewerId({ reviewerId: found.reviewerId, subjectManagerId: found.subject.managerId, cycleStatus: found.cycle.status, reviewStatus: found.status }) === userId
+    ? found
+    : null;
   if (!review) return jsonError("Review not found or you are not the reviewer", 404);
   if (!managerMayWrite(review.cycle.status, review.status)) {
     return jsonError(
@@ -147,6 +156,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Never overwrite a stored manager draft with nothing (review-cycle.ts isReviewDraft).
   if (!isReviewDraft(body.managerAssessment)) return jsonError("Nothing to save: the review did not arrive. Your draft is unchanged.", 400);
   const assessment = cleanManagerAssessment(body.managerAssessment);
+  if (wouldBlankDraft(review.managerAssessment, { ...assessment, overallComments: typeof body.managerComments === "string" ? body.managerComments : assessment.overallComments }, body.allowEmpty === true)) {
+    return jsonError("Nothing to save: this would empty the written review. It is unchanged.", 400);
+  }
   const outcome = isOutcome(body.outcome) ? (body.outcome as string) : assessment.recommendation || null;
   if (submit && !outcome) return jsonError("Pick an outcome before you submit", 400);
   const managerRating = managerRatingFrom(assessment.behavioral);
@@ -164,6 +176,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       managerComments: comments,
       ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
       status: nextStatus,
+      ...(review.reviewerId !== userId ? { reviewerId: userId } : {}),
     },
   });
 

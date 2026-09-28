@@ -22,6 +22,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
+import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import { getLatestScore, getScoreHistory } from "@/services/performanceScoreService";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import {
@@ -463,6 +464,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (data.managerId !== undefined && data.managerId !== target.managerId) {
+    // Open review cycles follow the new line: the former manager stops
+    // writing this person's manager review on the next request.
+    try {
+      await followReportingLine(ctx.organizationId, [id], ctx.userId);
+    } catch (e) {
+      console.error("followReportingLine failed", e);
+    }
     void logActivity({
       type: "reporting_line_changed",
       actorId: ctx.userId,

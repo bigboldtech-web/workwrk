@@ -1,13 +1,13 @@
 "use client";
 
 // "Working on" on a person's record (Overview tab), for the people who
-// manage them: their open items, newest due first, each opening the task
+// manage them: their open items, soonest due first, each opening the task
 // drawer (spec-teams-people /team, the "+2" on a My team row). Items come
 // only from Lists the viewer can read (GET /api/team/person-work).
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Flag } from "lucide-react";
+import { PriorityFlag } from "@/components/board-view/priority-picker";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
@@ -62,7 +62,7 @@ export function WorkingOnSection({ userId }: { userId: string }) {
             <li key={it.id}>
               <Link href={`/item/${it.id}`} className="flex h-9 items-center gap-2 px-3 text-sm hover:bg-hover">
                 <span className="min-w-0 flex-1 truncate text-ink">{it.title}</span>
-                {it.priority && it.priority !== "none" ? <Flag className="h-3.5 w-3.5 shrink-0 text-ink-2" aria-label={`Priority ${it.priority}`} /> : null}
+                {it.priority && it.priority !== "none" ? <span className="shrink-0"><PriorityFlag value={it.priority} /></span> : null}
                 <span className="hidden max-w-[140px] truncate text-ink-2 sm:inline">{it.board.name}</span>
                 <span className="w-16 shrink-0 text-end tabular-nums text-ink-2">{it.dueAt ? formatDate(it.dueAt, datePrefs, "date") : ""}</span>
               </Link>

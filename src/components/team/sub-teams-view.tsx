@@ -49,8 +49,10 @@ const SORTS: Array<{ value: Sort; label: string }> = [
 ];
 const nameOf = (p: { firstName: string; lastName: string; email: string }) => `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email;
 
-export function SubTeamsView({ subTeams, directIcs, totals }: {
+export function SubTeamsView({ subTeams, directIcs, totals, orgWide = false }: {
   subTeams: SubTeamRow[];
+  /** People team or Admin: the rows are every top of the company plus the viewer's own reports, not only people who report to the viewer. */
+  orgWide?: boolean;
   directIcs: AlignmentPerson[];
   totals: { avgKpiCompliancePct: number | null; avgSopReadRatePct: number | null; weeklyReviewSubmittedPct: number; weeklyReviewApprovedPct: number; aggregateReportCount: number };
 }) {
@@ -90,8 +92,8 @@ export function SubTeamsView({ subTeams, directIcs, totals }: {
     { key: "via", label: "Report type", width: "100px", hideBelow: 1280, render: (t) => <span className="text-sm text-ink-2">{t.via === "dotted" ? "Dotted" : "Solid"}</span> },
     { key: "people", label: "People", width: "90px", render: (t) => <span className="tabular-nums" title="Metrics cover this manager's direct reports">{t.metrics.reportCount} direct</span> },
     { key: "kras", label: "KRAs", width: "70px", numeric: true, render: (t) => <span className="tabular-nums">{t.metrics.activeKras}</span> },
-    { key: "kpi", label: "KPI compliance", width: "130px", render: (t) => <PctCell pct={t.metrics.avgKpiCompliancePct} /> },
-    { key: "sop", label: "SOP read-rate", width: "130px", hideBelow: 900, render: (t) => <PctCell pct={t.metrics.avgSopReadRatePct} /> },
+    { key: "kpi", label: "KPI compliance", width: "170px", render: (t) => <PctCell pct={t.metrics.avgKpiCompliancePct} /> },
+    { key: "sop", label: "SOP read-rate", width: "170px", hideBelow: 900, render: (t) => <PctCell pct={t.metrics.avgSopReadRatePct} /> },
     { key: "reviews", label: "Reviews submitted", width: "150px", render: (t) => (
       <span className="tabular-nums">{t.metrics.weeklyReviewSubmittedPct}% <span className="text-ink-2">· {Math.round((t.metrics.weeklyReviewSubmittedPct / 100) * t.metrics.reportCount)} of {t.metrics.reportCount}</span></span>
     ) },
@@ -168,8 +170,8 @@ export function SubTeamsView({ subTeams, directIcs, totals }: {
               )}
               {display.showDirectIcs && directIcs.length > 0 ? (
                 <>
-                  <h2 className="m-0 mt-2 text-row font-medium text-ink">Direct reports without a team</h2>
-                  <AlignmentTable className="shrink-0" people={shownIcs} showKraNames={display.showKraNames} ariaLabel="Direct reports without a team"
+                  <h2 className="m-0 mt-2 text-row font-medium text-ink">{orgWide ? "People without a team under them" : "Direct reports without a team"}</h2>
+                  <AlignmentTable className="shrink-0" people={shownIcs} showKraNames={display.showKraNames} ariaLabel={orgWide ? "People without a team under them" : "Direct reports without a team"}
                     empty={<span className="text-row text-ink-2">Nobody matches</span>} />
                 </>
               ) : null}

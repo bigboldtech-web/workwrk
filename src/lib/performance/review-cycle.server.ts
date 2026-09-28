@@ -10,7 +10,8 @@ import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { DEFAULT_SCORE_WEIGHTS, getScoringBands, type ScoringBand } from "@/lib/review-cadence";
-import { compositeScore, ratingsTo100, scaleWords } from "./review-cycle";
+import { compositeScore, ratingsTo100, reviewerAfterMove, scaleWords } from "./review-cycle";
+import { logActivity } from "@/lib/activity";
 
 export interface CycleViewerCtx {
   userId: string;
@@ -206,4 +207,54 @@ export async function peerCandidateWhere(
  */
 export function peerAllowedWhere(organizationId: string, subjectId: string): import("@/generated/prisma").Prisma.UserWhereInput {
   return { organizationId, deletedAt: null, status: "ACTIVE", id: { not: subjectId } };
+}
+
+/**
+ * After a reporting line changes, hand each moved person's OPEN reviews to
+ * the reviewer the line now names (review-cycle.ts reviewerAfterMove): the
+ * former manager stops reading and writing the manager half on the next
+ * request, and the reminders go to the new one. Finalized reviews keep
+ * their stamp. Best effort per row: a clash with an existing row for the
+ * same person and reviewer leaves that row as it was and is logged, never
+ * thrown, so the reporting-line edit itself always stands.
+ */
+export async function followReportingLine(organizationId: string, subjectIds: string[], actorId: string): Promise<number> {
+  const ids = [...new Set(subjectIds)].filter(Boolean);
+  if (!ids.length) return 0;
+  const [people, open] = await Promise.all([
+    prisma.user.findMany({ where: { id: { in: ids }, organizationId }, select: { id: true, managerId: true } }),
+    prisma.review.findMany({
+      where: {
+        subjectId: { in: ids },
+        status: { not: "COMPLETED" },
+        cycle: { organizationId, status: { in: ["DRAFT", "ACTIVE", "IN_CALIBRATION"] } },
+      },
+      select: { id: true, subjectId: true, reviewerId: true, cycleId: true },
+    }),
+  ]);
+  const managerOf = new Map(people.map((p) => [p.id, p.managerId]));
+  let moved = 0;
+  for (const r of open) {
+    if (!managerOf.has(r.subjectId)) continue;
+    const next = reviewerAfterMove({ reviewerId: r.reviewerId, subjectId: r.subjectId, managerId: managerOf.get(r.subjectId) ?? null, actorId });
+    if (!next) continue;
+    try {
+      await prisma.review.update({ where: { id: r.id }, data: { reviewerId: next } });
+      moved += 1;
+      void logActivity({
+        type: "review.reviewer_moved",
+        actorId,
+        organizationId,
+        description: "The manager review moved with the reporting line",
+        targetId: r.id,
+        targetType: "Review",
+        oldValue: { reviewerId: r.reviewerId },
+        newValue: { reviewerId: next },
+        metadata: { cycleId: r.cycleId, subjectId: r.subjectId },
+      });
+    } catch (e) {
+      console.error("followReportingLine: review not moved", r.id, e);
+    }
+  }
+  return moved;
 }

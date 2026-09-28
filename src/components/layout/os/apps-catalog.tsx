@@ -25,7 +25,7 @@ import {
   Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Hammer,
-  FileSpreadsheet, Star,
+  Star,
   Boxes, Layers, Upload, ClipboardList, Import as ImportIcon,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
@@ -1462,7 +1462,7 @@ function CalendarSidebar() {
 // the org role), never an accessLevel tier, so a row renders exactly when its
 // page lets the viewer in. The retired Rollup row lives on as the Sub-teams
 // view of Alignment (/team/rollup still lights Alignment).
-const TEAMS_ICONS: Record<TeamsRow["icon"], LucideIcon> = {
+export const TEAMS_ICONS: Record<TeamsRow["icon"], LucideIcon> = {
   CircleUser, Users, Scale, BookUser, Network, Building2, Briefcase, Zap,
   Gauge, Target, ClipboardCheck, CalendarCheck, ClipboardList, Grid3x3,
   BarChart3, Heart, MessageSquare, ListChecks, Wrench, Boxes,
@@ -1831,8 +1831,8 @@ export const APPS: AppEntry[] = [
   // Every Member gives and reads kudos (access 5.2.1 `kudos`).
   { key: "kudos", label: "Kudos", Icon: Heart, defaultHref: "/kudos", category: "People",
     Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: Heart }]) },
-  { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People",
-    Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
+  { key: "surveys", label: "Surveys", Icon: ListChecks, defaultHref: "/surveys", category: "People",
+    Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: ListChecks }]) },
 
   // ── People resourcing: provisioning what employees need to do work.
   // Tools = SaaS subscriptions + access grants (Slack, GitHub, Figma…).

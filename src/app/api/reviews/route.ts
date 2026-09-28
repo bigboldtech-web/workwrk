@@ -324,6 +324,14 @@ export async function DELETE(req: NextRequest) {
     return jsonError("Only the People team or an Admin can delete a review cycle", 403);
   }
 
+  // Appraisal history is never destroyed: only a cycle nobody has a review
+  // in yet (a Draft, or one that never launched) can go. Once reviews exist,
+  // Cancel is the path, and it keeps every row.
+  const written = await prisma.review.count({ where: { cycleId: id } });
+  if (existing.status !== "DRAFT" || written > 0) {
+    return jsonError("Only a draft cycle with no reviews can be deleted. Cancel this cycle instead: it keeps every review.", 409);
+  }
+
   await prisma.reviewCycle.delete({ where: { id } });
   logActivity({
     type: "review_cycle.delete",

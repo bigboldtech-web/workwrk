@@ -142,7 +142,7 @@ export function ManagerReviewDrawer({
     delay: 1200,
     localKey: reviewId ? draftKey("mgr-review:", viewerId, reviewId) : undefined,
     save: async (snap) => {
-      const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/manager-review`, { method: "PATCH", keepalive: true, json: payload(snap, false) }, { retryWrites: true });
+      const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/manager-review`, { method: "PATCH", keepalive: true, json: { ...payload(snap, false), allowEmpty: true } }, { retryWrites: true });
       // Throwing keeps the local backup (a resolved save removes it).
       if (!r.ok && r.status === 409) { setLocked(r.error || "This review no longer takes changes"); throw new Error("locked"); }
       if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);

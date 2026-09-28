@@ -64,7 +64,7 @@ export default async function TeamAlignmentPage({ searchParams }: { searchParams
   })) > 0;
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-surface">
+    <div className="flex h-full flex-col overflow-y-auto bg-raised">
       <AlignmentView people={data.members} hasSubTeams={hasSubTeams} drill={drill} />
     </div>
   );

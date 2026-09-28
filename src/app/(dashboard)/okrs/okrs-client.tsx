@@ -114,8 +114,10 @@ const PAGE_SIZE = 40;
 const nameOf = (p: { firstName?: string | null; lastName?: string | null; email?: string | null } | null | undefined) =>
   p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "Someone" : "";
 
-export default function OkrsClient({ initialNew = false, view, legacyLevel, canonicalHref, notice }: {
+export default function OkrsClient({ initialNew = false, initialOwner = null, view, legacyLevel, canonicalHref, notice }: {
   initialNew?: boolean;
+  /** ?owner=: the Owner filter's first value, and a new goal's owner. */
+  initialOwner?: PickPerson | null;
   view: GoalsView;
   legacyLevel?: string;
   canonicalHref?: string;
@@ -153,7 +155,7 @@ export default function OkrsClient({ initialNew = false, view, legacyLevel, cano
   const [filterOpen, setFilterOpen] = useState(false);
   const [verdicts, setVerdicts] = useState<GoalVerdict[]>([]);
   const [levels, setLevels] = useState<GoalLevel[]>([]);
-  const [owners, setOwners] = useState<PickPerson[]>([]);
+  const [owners, setOwners] = useState<PickPerson[]>(initialOwner ? [initialOwner] : []);
   const [dueFrom, setDueFrom] = useState<string | null>(null);
   const [dueTo, setDueTo] = useState<string | null>(null);
   const [nudge, setNudge] = useState(false);
@@ -498,6 +500,7 @@ export default function OkrsClient({ initialNew = false, view, legacyLevel, cano
         <CreateGoalModal
           open
           level={view === "company" ? "COMPANY" : "INDIVIDUAL"}
+          initialOwner={fromQuery ? initialOwner : null}
           onClose={closeCreate}
           onSaved={(id) => {
             closeCreate();

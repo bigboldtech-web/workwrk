@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { recordWriteQueue } from "@/lib/people/record-write-queue";
+import { useOsToast } from "@/components/layout/os/toast";
 import type { OrgNode, OrgPerson } from "@/lib/people/reporting-lines";
 import { PeoplePickerField, PersonAvatar, type PickPerson } from "./person-bits";
 
@@ -53,9 +54,15 @@ function Row({
   const manager = p.managerId ? byId.get(p.managerId) : null;
   const toPick = (x: ChartPerson): PickPerson => ({ id: x.id, firstName: x.firstName, lastName: x.lastName, avatar: x.avatar, email: null });
   const meta = [display.showTitle ? p.jobTitle : null, display.showDepartment ? p.department : null].filter(Boolean).join(" · ");
+  const { toast } = useOsToast();
   // Through the record write queue: a dropped connection keeps the change
   // and retries it (at once on reconnect), and the row says so meanwhile.
-  async function setManager(id: string | null) {
+  // A reporting line decides who reads this person's reviews, KPI sign-offs
+  // and weekly reviews, so every saved change says what moved and offers
+  // one Undo back to the previous manager (principle 10).
+  async function setManager(id: string | null, undoing = false) {
+    const previous = p.managerId ?? null;
+    if (!undoing && id === previous) return;
     onError(p.id, null);
     const r = await recordWriteQueue().write("PATCH", `/api/users/${p.id}`, { managerId: id }, {
       onRetrying: () => onError(p.id, "Not saved, retrying"),
@@ -63,6 +70,20 @@ function Row({
     if (!r.ok) { onError(p.id, r.error || "Not saved"); return; }
     onError(p.id, null);
     onSaved();
+    if (undoing) {
+      toast(`Undone. ${p.name} reports to ${id ? byId.get(id)?.name ?? "their manager" : "nobody"} again`, { key: `org-line:${p.id}` });
+      return;
+    }
+    const prevName = previous ? byId.get(previous)?.name ?? "their manager" : null;
+    const message = id
+      ? `${p.name} now reports to ${byId.get(id)?.name ?? "the new manager"}`
+      : `${p.name} no longer reports to anyone`;
+    toast(message, {
+      key: `org-line:${p.id}`,
+      tone: id ? "info" : "danger",
+      description: prevName ? `Their open reviews and approvals move away from ${prevName}.` : undefined,
+      action: { label: "Undo", onClick: () => void setManager(previous, true) },
+    });
   }
   async function setDotted(ids: string[]) {
     onError(p.id, null);

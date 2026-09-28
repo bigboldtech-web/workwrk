@@ -273,8 +273,12 @@ export default function ReviewsClient() {
     }] : []),
     ...(cols.by ? [{ key: "by", label: "Started by", width: "150px", hideBelow: 1200, render: (c: CycleRow) => <span className="truncate text-ink-2">{c.createdBy?.name ?? "People team"}</span> }] : []),
     {
-      key: "closes", label: "Closes", width: "130px",
-      render: (c) => <span className="tabular-nums text-ink-2">{c.status === "COMPLETED" || c.status === "CANCELLED" ? `Closed ${formatDate(c.endDate, dayPrefs, "date")}` : formatDate(c.endDate, dayPrefs, "date")}</span>,
+      key: "closes", label: "Closes", width: "170px",
+      // A stalled cycle (Active past its close date) says so in words next to
+      // the red dot: colour never travels alone (principle 7).
+      render: (c) => c.status === "ACTIVE" && new Date(c.endDate).getTime() < Date.now()
+        ? <span className="truncate whitespace-nowrap tabular-nums text-danger-text">{`Overdue, ${formatDate(c.endDate, dayPrefs, "date")}`}</span>
+        : <span className="tabular-nums text-ink-2">{c.status === "COMPLETED" || c.status === "CANCELLED" ? `Closed ${formatDate(c.endDate, dayPrefs, "date")}` : formatDate(c.endDate, dayPrefs, "date")}</span>,
     },
   ];
 

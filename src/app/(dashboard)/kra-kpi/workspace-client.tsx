@@ -40,6 +40,7 @@ import { Picker, type PickerOption, type PickerSectionDef } from "@/components/u
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 import { ToneChip } from "@/components/people/person-bits";
+import { Chip } from "@/components/ui/chip";
 import { KraDialog } from "@/components/alignment/kra-dialog";
 import { KpiDialog } from "@/components/alignment/kpi-dialog";
 import { usePermission } from "@/hooks/use-permission";
@@ -263,7 +264,7 @@ export default function KraKpiPage() {
         {matchesByRole.has(r.id) && !r.title.toLowerCase().includes(needle) ? <span className="truncate text-sm font-normal text-ink-2">· matched {matchesByRole.get(r.id)}</span> : null}
       </span>
     ) },
-    { key: "seniority", label: "Seniority", width: "130px", hideBelow: 720, render: (r) => <span className="text-sm text-ink-2">{r.seniority || r.level ? seniorityLabel(r.seniority ?? r.level) : NOT_SET}</span> },
+    { key: "seniority", label: "Seniority", width: "130px", hideBelow: 720, render: (r) => (r.seniority || r.level ? <Chip>{seniorityLabel(r.seniority ?? r.level)}</Chip> : <span className="text-sm text-ink-2">{NOT_SET}</span>) },
     { key: "people", label: "People", width: "90px", numeric: true, render: (r) => <span className="tabular-nums">{r._count?.users ?? 0}</span> },
     { key: "kras", label: "KRAs", width: "150px", render: (r) => {
       const k = r._count?.kraTemplates ?? 0;

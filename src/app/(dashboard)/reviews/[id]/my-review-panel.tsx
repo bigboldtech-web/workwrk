@@ -138,7 +138,7 @@ export function MyReviewPanel({
     delay: 1200,
     localKey,
     save: async (snap) => {
-      const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, { method: "PATCH", keepalive: true, json: { selfRatings: body(snap), submit: false } }, { retryWrites: true });
+      const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/self-assessment`, { method: "PATCH", keepalive: true, json: { selfRatings: body(snap), submit: false, allowEmpty: true } }, { retryWrites: true });
       // A 409: submitted elsewhere, or the cycle no longer takes self
       // reviews. Throwing keeps the local backup (a resolved save removes
       // it); `locked` stops the autosave and says so.

@@ -321,7 +321,7 @@ export function WeeklyReviewClient({
                     {busy === "submit" ? <Dots variant="pending" /> : null} Submit for review
                   </button>
                 ) : null}
-                {review?.status === "SUBMITTED" ? (
+                {review?.status === "SUBMITTED" || (review?.status === "ACKNOWLEDGED" && review.managerStatus === "CHANGES_REQUESTED") ? (
                   <button
                     type="button"
                     disabled={busy !== null}
@@ -344,7 +344,7 @@ export function WeeklyReviewClient({
 function Card({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
   return (
     <section id={id} className="os-row scroll-mt-4 rounded-lg border border-line bg-raised p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-2">{title}</h2>
+      <h2 className="mb-3 text-base font-semibold text-ink">{title}</h2>
       {children}
     </section>
   );

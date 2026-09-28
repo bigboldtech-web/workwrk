@@ -229,13 +229,38 @@ export async function submitWeeklyReview(reviewId: string): Promise<WeeklyReview
 }
 
 /**
- * Reopen a SUBMITTED review back to DRAFT (e.g. manager requested
- * changes and the IC is editing). Caller side enforces that the IC
- * owns the review.
+ * Why an employee's write to their own weekly review is refused, or null
+ * when it may go ahead. Worst cases closed: an approved week reopened (and
+ * the manager's approval erased) through the API, and a past week rewritten
+ * after the manager read it. Only the current week changes, with a day's
+ * slack either side of the Monday boundary for time zones; an approved week
+ * never changes; a reviewed week with changes requested only reopens (the
+ * edit then goes through the draft).
+ */
+export function weeklyEditRefusal(
+  row: { status: string; managerStatus: string | null; periodStart: Date },
+  action: "save" | "submit" | "reopen",
+  now: Date = new Date(),
+): string | null {
+  const SLACK_MS = 14 * 3600_000;
+  const weekMs = 7 * 24 * 3600_000;
+  if (now.getTime() - row.periodStart.getTime() > weekMs + SLACK_MS) return "Only this week's review can change. Past weeks are a record.";
+  if (row.status === "ACKNOWLEDGED") {
+    if (row.managerStatus !== "CHANGES_REQUESTED") return "Your manager already approved this week, so it can no longer change";
+    if (action !== "reopen") return "Your manager asked for changes. Reopen the review to edit it.";
+  }
+  return null;
+}
+
+/**
+ * Reopen a SUBMITTED review, or a reviewed one whose manager asked for
+ * changes, back to DRAFT. Caller side enforces that the IC owns the review
+ * (weeklyEditRefusal); the where clause never lets an APPROVED week reopen,
+ * even from a caller that skipped the check.
  */
 export async function reopenWeeklyReview(reviewId: string): Promise<WeeklyReviewDoc> {
   const updated = await prisma.weeklyReview.update({
-    where: { id: reviewId },
+    where: { id: reviewId, OR: [{ status: { not: "ACKNOWLEDGED" } }, { managerStatus: "CHANGES_REQUESTED" }] },
     data: { status: "DRAFT", submittedAt: null, managerStatus: null },
   });
   return shapeFromRow(updated);

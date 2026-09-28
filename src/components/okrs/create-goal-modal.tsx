@@ -71,6 +71,8 @@ interface CreateGoalModalProps {
   goal?: EditableGoal | null;
   /** Land the user straight in the Owner picker ("Assign owner"). */
   focusOwner?: boolean;
+  /** CREATE: start with this owner (a person record's "Set a goal"). */
+  initialOwner?: PickPerson | null;
   /** Land the user on the Part of field ("Add" on the goal page). */
   focusParent?: boolean;
   onClose: () => void;
@@ -86,7 +88,18 @@ function toDateInput(iso?: string | null): string | null {
 
 const LEVEL_WORD: Record<GoalLevel, string> = { COMPANY: "Company", DEPARTMENT: "Department", INDIVIDUAL: "Individual" };
 
-export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, onClose, onSaved }: CreateGoalModalProps) {
+/**
+ * May the viewer give a new goal an owner other than themselves? The same
+ * ladder the modal and POST /api/okrs read, for doors that open the modal
+ * with an owner already chosen (a person record's "Set a goal").
+ */
+export function useMayAssignGoalOwner(): boolean {
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  return legacyIsManagerLevel(accessLevel);
+}
+
+export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, initialOwner, onClose, onSaved }: CreateGoalModalProps) {
   const isEdit = Boolean(goal);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
@@ -100,7 +113,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, on
   const [description, setDescription] = useState(goal?.description ?? "");
   const [selLevel, setSelLevel] = useState<GoalLevel>(goal?.level ?? (mayAssign ? level : "INDIVIDUAL"));
   const [owner, setOwner] = useState<PickPerson | null>(
-    goal?.owner ? { id: goal.owner.id, firstName: goal.owner.firstName ?? null, lastName: goal.owner.lastName ?? null, avatar: goal.owner.avatar ?? null, email: goal.owner.email ?? null } : null,
+    goal?.owner ? { id: goal.owner.id, firstName: goal.owner.firstName ?? null, lastName: goal.owner.lastName ?? null, avatar: goal.owner.avatar ?? null, email: goal.owner.email ?? null } : !goal && initialOwner ? initialOwner : null,
   );
   // Edit mode: only PATCH ownerId when the user touched the field, so an
   // untouched save never silently unassigns.

@@ -80,7 +80,8 @@ import { useOsToast } from "./toast";
 // The palette opens over any page, so an object row opens in the section
 // the person is in at the moment they pick it (src/lib/nav/object-href.ts).
 import { objectHrefNow, sectionHrefNow } from "./use-object-href";
-import type { AppEntry } from "./apps-catalog";
+import { TEAMS_ICONS, type AppEntry } from "./apps-catalog";
+import { visibleTeamsRows } from "@/lib/nav/teams-rows";
 
 /* ─── Model ─── */
 
@@ -539,8 +540,30 @@ function PaletteBody() {
     }
     const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);
     const folded = launcherApps.filter((a) => !isHubKey(a.key)).map(appRow);
-    return [...personal, ...hubs, ...folded];
-  }, [launcherApps, appRow, isMember, aiVisible]);
+    // The Teams hub's pages that are routes, not catalog apps (Directory, My
+    // profile, Job titles, Weekly reviews, Talent (9-box), Analytics and the
+    // rest): the same rows and gates the Teams sidebar renders
+    // (src/lib/nav/teams-rows.ts), so the palette reaches exactly what the
+    // sidebar does (sidebar-map section 10; the naming canon's "command
+    // palette" use of each label). Only while the viewer holds the Teams hub,
+    // and never twice: a row already listed as a folded app keeps that one.
+    const teamsHeld = launcherApps.some((a) => a.key === "teams");
+    const taken = new Set(folded.flatMap((r) => [r.label.toLowerCase(), r.href ?? ""]));
+    const teams: Row[] = teamsHeld
+      ? visibleTeamsRows({
+          userId: viewerId,
+          orgRole: boot.viewer.orgRole,
+          isAgent: boot.viewer.isAgent,
+          hasReports: boot.viewer.hasReports,
+          peopleTeam: boot.viewer.peopleTeam,
+          candorInvited: boot.viewer.candorInvited,
+          surveyTargeted: boot.viewer.surveyTargeted,
+        })
+          .filter((r) => !taken.has(r.label.toLowerCase()) && !taken.has(r.href))
+          .map((r) => ({ id: `teams-${r.key}`, label: r.label, secondary: HUB_LABELS.teams, glyph: <Glyph icon={TEAMS_ICONS[r.icon]} />, href: r.href }))
+      : [];
+    return [...personal, ...hubs, ...teams, ...folded];
+  }, [launcherApps, appRow, isMember, aiVisible, viewerId, boot.viewer.orgRole, boot.viewer.isAgent, boot.viewer.hasReports, boot.viewer.peopleTeam, boot.viewer.candorInvited, boot.viewer.surveyTargeted]);
 
   const recentRows = useMemo<Row[]>(() => {
     const byKey = new Map(launcherApps.map((a) => [a.key, a]));

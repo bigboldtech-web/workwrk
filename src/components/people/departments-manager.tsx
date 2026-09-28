@@ -199,7 +199,7 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     { key: "head", label: "Head", width: "minmax(160px,1fr)", render: ({ d }) => d.head
       ? <span className="flex min-w-0 items-center gap-1.5"><Avatar person={d.head} size={20} /><span className="truncate">{personName(d.head)}</span></span>
       : <span className="text-ink-3">No head</span> },
-    { key: "parent", label: "Parent", width: "minmax(130px,0.8fr)", hideBelow: 700, render: ({ d }) => <span className="truncate text-ink-2">{d.parentId ? byId.get(d.parentId)?.name ?? "" : ""}</span> },
+    { key: "parent", label: "Parent", width: "minmax(130px,0.8fr)", hideBelow: 700, render: ({ d }) => <span className="truncate text-ink-2">{d.parentId ? byId.get(d.parentId)?.name ?? "None" : "None"}</span> },
     ...(showDesc ? [{ key: "desc", label: "Description", width: "minmax(180px,1.2fr)", hideBelow: 900, render: ({ d }: { d: Dept }) => <span className="truncate text-ink-2">{d.description ?? ""}</span> }] : []),
     { key: "people", label: "People", width: "96px", numeric: true, render: ({ d }) => (
       <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/people?dept=${d.id}`); }} className="tabular-nums hover:underline">{d._count.members}</button>

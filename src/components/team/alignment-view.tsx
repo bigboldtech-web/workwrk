@@ -146,9 +146,12 @@ export function AlignmentFilterGroups({ filter, setFilter, withWeights = true, w
 export function PctCell({ pct, of, pending }: { pct: number | null; of?: string; pending?: number }) {
   if (pct == null) return <span className="text-ink-2">Not measured</span>;
   return (
-    <span className="tabular-nums" title={`${complianceWord(pct)}${of ? ` · ${of}` : ""}`}>
+    // The band's word sits beside the number: colour never travels alone
+    // (principle 7).
+    <span className="flex min-w-0 items-baseline gap-1 tabular-nums" title={`${complianceWord(pct)}${of ? ` · ${of}` : ""}`}>
       <span className={complianceTextClass(pct)}>{pct}%</span>
-      {pending ? <> · <span className="text-danger-text">{pending} pending</span></> : null}
+      <span className="min-w-0 truncate text-sm text-ink-2">{complianceWord(pct)}</span>
+      {pending ? <span className="shrink-0"> · <span className="text-danger-text">{pending} pending</span></span> : null}
     </span>
   );
 }
@@ -235,8 +238,8 @@ export function AlignmentTable({ people, showKraNames, ariaLabel, empty, classNa
       const w = kraWeightTotal(p.activeKras);
       return w === 100 ? <span className="tabular-nums">100%</span> : <span className="tabular-nums text-warning-text">{w}% not 100%</span>;
     } },
-    { key: "kpi", label: "KPI compliance", width: "130px", render: (p) => <PctCell pct={p.kpis.compliancePct} of={`${p.kpis.submitted + p.kpis.approved} of ${p.kpis.total} on time`} /> },
-    { key: "sop", label: "SOP read-rate", width: "150px", hideBelow: 900, render: (p) => <PctCell pct={p.sops.readRatePct} of={`${p.sops.completed} of ${p.sops.total} read`} pending={p.sops.mandatoryPending} /> },
+    { key: "kpi", label: "KPI compliance", width: "170px", render: (p) => <PctCell pct={p.kpis.compliancePct} of={`${p.kpis.submitted + p.kpis.approved} of ${p.kpis.total} on time`} /> },
+    { key: "sop", label: "SOP read-rate", width: "190px", hideBelow: 900, render: (p) => <PctCell pct={p.sops.readRatePct} of={`${p.sops.completed} of ${p.sops.total} read`} pending={p.sops.mandatoryPending} /> },
     { key: "review", label: "This week's review", width: "160px", render: (p) => { const c = weeklyReviewChip(p.weeklyReview); return <ToneChip tone={c.tone} label={c.label} />; } },
     { key: "actions", label: "", width: "220px", render: (p) => <WeeklyActions person={p} onChanged={(patch) => setOverrides((o) => ({ ...o, [p.id]: { ...o[p.id], ...patch } }))} /> },
   ], [showKraNames]);

@@ -637,12 +637,13 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const manageableOffModules = boot.manageableOffModules;
   const canCreateSpace = accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
   const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
-  // sidebar-map section 5: RESOURCING > Tools is a row for every Member, and
-  // the Teams sidebar already renders a Member branch (My profile, Tools). A
-  // Member does not hold the Teams pill (its landing /people is manager-gated),
-  // so on a Teams URL they get that branch with no "+" (every TeamsCreateMenu
-  // row is a manager or People-team create) and a landing of their own career
-  // home. Guests never see this hub (sidebar-map 5).
+  // sidebar-map section 5: the Teams hub lands on /people for every Member.
+  // This branch is only for a viewer whose rail does NOT carry Teams (an
+  // Admin hid or floored it in Apps config): /people reads the same app row,
+  // so their landing is their own record (/people/me, never gated) rather
+  // than a page that may refuse them. The "+" stays: TeamsCreateMenu renders
+  // only the rows this viewer's create would pass (Give kudos for every
+  // Member), so it never offers a dead door. Guests never see this hub.
   const memberTeamsHub = !railKeys.has("teams") && boot.viewer.orgRole !== "GUEST";
   const hubHref = useCallback(
     (appKey: string): string => {
@@ -664,7 +665,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const memberTeamsApp = useMemo<AppEntry | null>(() => {
     if (!memberTeamsHub) return null;
     const teams = getApp("teams");
-    return teams ? { ...teams, defaultHref: "/people/me", CreateMenu: undefined, createActions: undefined } : null;
+    return teams ? { ...teams, defaultHref: "/people/me" } : null;
   }, [memberTeamsHub]);
   const hubSidebarApp = useCallback(
     (hub: HubKey): AppEntry => {

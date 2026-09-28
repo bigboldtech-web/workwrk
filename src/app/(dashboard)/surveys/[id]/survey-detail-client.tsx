@@ -226,7 +226,7 @@ export default function SurveyDetailClient({ id }: { id: string }) {
               <p className="m-0 text-sm text-ink-2">
                 {v.hasResponded
                   ? face === "results" ? "You have answered. Switch to Respond to change your answers while this is open." : "You have answered. Your answers are below."
-                  : face === "results" ? "You have not answered yet. Switch to Respond to answer." : "You have not answered yet, so you land on Respond. Results are one tab over."}
+                  : face === "results" ? "You have not answered yet. Switch to Respond to answer." : "You have not answered yet. The results are under Results."}
               </p>
             </div>
           ) : null}

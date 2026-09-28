@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isHrAdminLevel } from "@/lib/alignment-scope";
 import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { effectiveReviewerId } from "@/lib/performance/review-cycle";
 import { peerAggregate } from "@/lib/people/anonymity";
 import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
 import { orgScoring } from "@/lib/performance/review-cycle.server";
@@ -41,7 +42,7 @@ export async function GET(
         include: {
           subject: {
             select: {
-              id: true, firstName: true, lastName: true, email: true,
+              id: true, firstName: true, lastName: true, email: true, managerId: true,
               department: { select: { id: true, name: true } },
               role: { select: { id: true, title: true } },
             },
@@ -75,8 +76,14 @@ export async function GET(
   // Peer feedback: below hr-admin, a row is visible only to its giver,
   // its receiver, or a manager with the subject in their tree, and an
   // anonymous giver stays anonymous (field names kept, values nulled).
-  const lensOf = (review: { subjectId: string; reviewerId: string }) =>
-    reviewLens({ callerId, hrAdmin, subjectId: review.subjectId, reviewerId: review.reviewerId, inTree: treeSet.has(review.subjectId) });
+  // A former manager's launch stamp grants nothing on an open review: the
+  // reviewer is whoever the subject reports to now (review-cycle.ts).
+  const lensOf = (review: { subjectId: string; reviewerId: string; status: string; subject: { managerId: string | null } }) =>
+    reviewLens({
+      callerId, hrAdmin, subjectId: review.subjectId,
+      reviewerId: effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: review.subject.managerId, cycleStatus: cycle.status, reviewStatus: review.status }),
+      inTree: treeSet.has(review.subjectId),
+    });
   const reviews = cycle.reviews.map((review) => {
     const lens = lensOf(review);
     // DECIDED (Phase 6): the subject of peer feedback sees the aggregate

@@ -134,6 +134,44 @@ export function managerMayWrite(cycleStatus: string, reviewStatus: string): bool
   return cycleStatus === "IN_CALIBRATION" && (reviewStatus === "PENDING" || reviewStatus === "SELF_ASSESSMENT");
 }
 
+// ── The reviewer follows the reporting line ────────────────────────
+//
+// A review's reviewer is stamped at launch (the subject's manager, or the
+// launcher for someone with no manager). While the review is still open
+// the manager half belongs to whoever the subject reports to NOW
+// (access-model-spec 3.3, "manager chain EDIT on their reports' reviews"),
+// never to a former manager. A finalized review keeps its stamp: that is
+// the record of who wrote it.
+
+/** Is this review still open, so its reviewer follows the reporting line? */
+export function reviewIsOpen(cycleStatus: string, reviewStatus: string): boolean {
+  return (cycleStatus === "DRAFT" || cycleStatus === "ACTIVE" || cycleStatus === "IN_CALIBRATION") && reviewStatus !== "COMPLETED";
+}
+
+/**
+ * Who writes the manager half of an open review right now: the subject's
+ * current manager when they have one, otherwise the stamped reviewer (the
+ * launch rule for someone with nobody above them). A closed review answers
+ * its stamp.
+ */
+export function effectiveReviewerId(r: { reviewerId: string; subjectManagerId: string | null; cycleStatus: string; reviewStatus: string }): string {
+  if (!reviewIsOpen(r.cycleStatus, r.reviewStatus)) return r.reviewerId;
+  return r.subjectManagerId ?? r.reviewerId;
+}
+
+/**
+ * The reviewer an open review moves to after the subject's reporting line
+ * changes, or null when it stays. A new manager takes it. With no manager
+ * any more, the person who made the change takes it (they run the org's
+ * reporting lines), unless that is the subject (nobody writes their own
+ * manager review) or the reviewer already.
+ */
+export function reviewerAfterMove(r: { reviewerId: string; subjectId: string; managerId: string | null; actorId: string }): string | null {
+  const next = r.managerId ?? (r.actorId !== r.subjectId ? r.actorId : null);
+  if (!next || next === r.reviewerId || next === r.subjectId) return null;
+  return next;
+}
+
 // ── Scale words ─────────────────────────────────────────────────────
 
 /** The five words under a 1 to 5 scale when Settings has none (the spec's fallback). */
@@ -191,6 +229,48 @@ export function cleanSelfRatings(input: unknown): { kraRatings: Array<{ kraId: s
  */
 export function isReviewDraft(input: unknown): input is Record<string, unknown> {
   return !!input && typeof input === "object" && !Array.isArray(input);
+}
+
+/**
+ * Does a cleaned self review or manager assessment hold anything a person
+ * wrote: a rating, a behaviour score or a word of text?
+ */
+export function draftHasContent(d: {
+  kraRatings: Array<{ rating: number | null; achievements?: string; comments?: string }>;
+  reflection?: Record<string, string>;
+  behavioral?: Record<string, number>;
+  overallComments?: string;
+  recommendation?: string;
+}): boolean {
+  if (d.kraRatings.some((k) => k.rating != null || (k.achievements ?? "").trim() || (k.comments ?? "").trim())) return true;
+  if (d.reflection && Object.values(d.reflection).some((v) => typeof v === "string" && v.trim())) return true;
+  if (d.behavioral && Object.keys(d.behavioral).length) return true;
+  return !!((d.overallComments ?? "").trim() || (d.recommendation ?? "").trim());
+}
+
+/**
+ * True when a save would replace a written draft with an empty one without
+ * saying so. The review pages send `allowEmpty: true` when the person
+ * cleared their own draft on screen; any other caller (a script, an agent,
+ * a request that lost its body on the way) is refused and the stored draft
+ * stays as it was.
+ */
+export function wouldBlankDraft(stored: unknown, incoming: Parameters<typeof draftHasContent>[0], allowEmpty: boolean): boolean {
+  if (allowEmpty || draftHasContent(incoming)) return false;
+  if (!stored || typeof stored !== "object") return false;
+  const s = stored as Record<string, unknown>;
+  const kraRatings = Array.isArray(s.kraRatings) ? (s.kraRatings as Array<Record<string, unknown>>) : [];
+  return draftHasContent({
+    kraRatings: kraRatings.map((k) => ({
+      rating: typeof k.rating === "number" ? k.rating : null,
+      achievements: typeof k.achievements === "string" ? k.achievements : "",
+      comments: typeof k.comments === "string" ? k.comments : "",
+    })),
+    reflection: s.reflection && typeof s.reflection === "object" ? (s.reflection as Record<string, string>) : undefined,
+    behavioral: s.behavioral && typeof s.behavioral === "object" ? (s.behavioral as Record<string, number>) : undefined,
+    overallComments: typeof s.overallComments === "string" ? s.overallComments : "",
+    recommendation: typeof s.recommendation === "string" ? s.recommendation : "",
+  });
 }
 
 /** What a submitted self review is missing (every KRA rated), or null. */

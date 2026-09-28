@@ -60,6 +60,8 @@ import { seniorityLabel } from "@/lib/people/seniority";
 import { describeSchedule } from "@/lib/work-schedule";
 import { fitTabs } from "@/lib/people/fit-tabs";
 import { cn } from "@/lib/utils";
+import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
+import { useMayAssignGoalOwner } from "@/components/okrs/create-goal-modal";
 import { PersonAvatar, ToneChip, personName, type PickPerson } from "./person-bits";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { EditDetailsDialog } from "./edit-details-dialog";
@@ -152,11 +154,14 @@ const RECORD_STATUS: Record<string, { label: string; tone: "success" | "info" | 
   PENDING: { label: "Not recorded", tone: "neutral" },
 };
 
-const OKR_STATUS: Record<string, { label: string; tone: "success" | "info" | "warning" | "danger" | "neutral" }> = {
-  ON_TRACK: { label: "On track", tone: "success" },
-  AT_RISK: { label: "At risk", tone: "warning" },
-  BEHIND: { label: "Behind", tone: "danger" },
-  COMPLETED: { label: "Completed", tone: "info" },
+// A goal's stored status read through the one verdict vocabulary
+// (goal-verdict.ts verdictChip), so a goal reads the same words here as on
+// /okrs: BEHIND is "Off track", never the retired "Behind".
+const OKR_VERDICT: Record<string, GoalVerdict> = {
+  ON_TRACK: "on_track",
+  AT_RISK: "at_risk",
+  BEHIND: "off_track",
+  COMPLETED: "completed",
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -413,7 +418,7 @@ export function PersonRecord({
     return <OsEmptyView variant="error" title="Couldn't load this record" action={{ label: "Try again", onClick: () => { setState("loading"); void load(); } }} compact={presentation === "drawer"} />;
   }
 
-  const editLabel = self ? "Edit personal info" : "Edit details";
+  const editLabel = self ? "Edit profile" : "Edit details";
   const canEdit = !!person && !person.deletedAt && (self || person.access.editable.length > 0 || person.access.dottedLines);
 
   const titleSlot = person ? (
@@ -890,19 +895,31 @@ function KrasTab({ person, alignment, state, onRetry, onChanged, datePrefs }: {
 }
 
 function GoalsTab({ person, alignment, state, onRetry }: { person: Person; alignment: Alignment | null; state: string; onRetry: () => void }) {
-  const self = person.access.relation === "self";
+  const relation = person.access.relation;
+  const self = relation === "self";
   const okrs = alignment?.okrs ?? [];
+  // The manager chain, the People team and Admin get this person's doors
+  // (spec-teams-people section 2): All goals filtered to them, and Set a goal
+  // with them as the owner. Set a goal also needs the tier the goal form
+  // accepts an owner from (create-goal-modal.tsx mayAssign); without it the
+  // goal would be created as the viewer's own, so the door is not offered.
+  const manages = relation === "chain" || relation === "people-team" || relation === "admin" || relation === "org-wide";
+  const mayAssign = useMayAssignGoalOwner();
+  const mayCreateFor = relation === "chain" || relation === "people-team" || relation === "admin";
   return (
     <Section
       title={alignment ? `Goals · ${alignment.quarter}` : "Goals"}
       action={
         <span className="flex items-center gap-1">
-          {/* /okrs has no per-person owner filter yet, so a link claiming to
-              be about this person would show the viewer's own goals, and a
-              "Set a goal" would create the goal as the viewer's. On someone
-              else's record the door is the Team goals view instead. */}
-          {self ? <GhostButton href="/okrs">All goals</GhostButton> : person.access.relation !== "chain-view" ? <GhostButton href="/okrs?view=team">Team goals</GhostButton> : null}
+          {self
+            ? <GhostButton href="/okrs">All goals</GhostButton>
+            : manages
+              ? <GhostButton href={`/okrs?view=team&owner=${encodeURIComponent(person.id)}`}>All goals</GhostButton>
+              : relation !== "chain-view" ? <GhostButton href="/okrs?view=team">Team goals</GhostButton> : null}
           {self && !person.deletedAt ? <GhostButton icon={Plus} href="/okrs?new=1">Set a goal</GhostButton> : null}
+          {!self && mayCreateFor && mayAssign && !person.deletedAt
+            ? <GhostButton icon={Plus} href={`/okrs?view=team&new=1&owner=${encodeURIComponent(person.id)}`}>Set a goal</GhostButton>
+            : null}
         </span>
       }
     >
@@ -915,7 +932,7 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
       ) : (
         <Rows>
           {okrs.map((o) => {
-            const st = OKR_STATUS[o.status] ?? { label: o.status, tone: "neutral" as const };
+            const st = verdictChip(OKR_VERDICT[o.status] ?? "not_measured");
             return (
               <li key={o.id}>
                 <Link href={`/okrs/${o.id}`} className="flex min-h-11 items-center gap-3 px-3 hover:bg-hover">

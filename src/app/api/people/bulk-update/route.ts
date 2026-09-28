@@ -14,6 +14,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
+import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import {
   checkManagerCandidate,
   isPeopleAdmin,
@@ -84,7 +85,11 @@ export async function POST(req: NextRequest) {
         managers.set(id, managerId);
         ok.push(id);
       }
-      if (ok.length) await prisma.user.updateMany({ where: { id: { in: ok } }, data: { managerId } });
+      if (ok.length) {
+        await prisma.user.updateMany({ where: { id: { in: ok } }, data: { managerId } });
+        // Open review cycles follow the new line (review-cycle.server.ts).
+        await followReportingLine(orgId, ok, ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
+      }
       updated = ok.length;
       const mgr = await prisma.user.findUnique({ where: { id: managerId }, select: { firstName: true, lastName: true } });
       description = `${updated} ${updated === 1 ? "person now reports" : "people now report"} to ${mgr?.firstName ?? ""} ${mgr?.lastName ?? ""}`.trim();

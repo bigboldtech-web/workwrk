@@ -48,6 +48,18 @@ export function RatingScale({
     if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); pick(Math.max(1, at - 1 || 1)); }
   };
 
+  // View only: the value as text in the control's place, never a row of
+  // greyed segments that looks editable (principle 14).
+  if (readOnly) {
+    return (
+      <p className="m-0 text-base text-ink" aria-label={ariaLabel ?? name}>
+        {current == null
+          ? <span className="text-ink-2">Not rated</span>
+          : <><span className="font-medium tabular-nums">{current} of 5</span>{words ? <span className="text-ink-2">, {words[current - 1]}</span> : null}</>}
+      </p>
+    );
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div

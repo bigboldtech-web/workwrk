@@ -3,7 +3,10 @@
 //           action?: "save" | "submit" | "reopen" }
 //
 // Save a draft, submit for manager review, or reopen a submitted
-// review back to draft. Author ownership is enforced (userId === me).
+// review back to draft. Author ownership is enforced (userId === me), and
+// weeklyEditRefusal decides what may still change: only this week's review,
+// never one the manager approved, and a reviewed week reopens only when the
+// manager asked for changes.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -14,6 +17,7 @@ import {
   reopenWeeklyReview,
   saveWeeklyReviewDraft,
   submitWeeklyReview,
+  weeklyEditRefusal,
 } from "@/lib/weekly-review";
 
 const bodySchema = z.object({
@@ -49,14 +53,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // Ownership check.
   const owner = await prisma.weeklyReview.findUnique({
     where: { id },
-    select: { userId: true, status: true },
+    select: { userId: true, status: true, managerStatus: true, periodStart: true },
   });
   if (!owner || owner.userId !== u.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (owner.status === "ACKNOWLEDGED" && parsed.data.action !== "reopen") {
-    return NextResponse.json({ error: "Already acknowledged by manager" }, { status: 400 });
-  }
+  const refusal = weeklyEditRefusal(owner, parsed.data.action ?? "save");
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
 
   // Save any body fields first.
   let review = await saveWeeklyReviewDraft(id, {
