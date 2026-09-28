@@ -10,11 +10,99 @@
 // so a slip of the hand never throws a written note away. Send is secondary,
 // not blue: the page that hosts it has no primary to compete with.
 //
-// Rendered in place (position absolute inside a relative parent), never in a
-// portal, so it stays inside any drawer or dialog focus trap.
+// Rendered in place, never in a portal, so it stays inside any drawer or
+// dialog focus trap and the outside-click check below still counts it as
+// inside. But it is position FIXED, placed from its anchor's box (the
+// element it is rendered into, or `anchorRef`): the buttons it hangs off
+// sit in a TableCard row, and the card's body is overflow auto inside an
+// overflow hidden card. An absolute popover there was clipped by the card
+// and made the body scroll to fit it, so the row being judged scrolled out
+// of view and Send sat half under the table footer. Fixed escapes that
+// clipping; it opens below the anchor and flips above when there is no
+// room, and follows the anchor on every scroll and resize.
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useConfirm } from "@/components/ui/dialog-provider";
+
+export interface AnchorBox { top: number; bottom: number; left: number; right: number }
+
+/**
+ * Where a popover of `size` goes next to `anchor` inside a viewport, in
+ * viewport px. Pure, so it is tested (request-changes-popover.test.ts).
+ * `prefer` side first; the other side when only it has room; else the side
+ * with more room. Always clamped `margin` px inside the viewport, so Send is
+ * never off screen. `align` is logical: "end" lines the popover's inline end
+ * up with the anchor's (the right edge, or the left one in RTL).
+ */
+export function placePopover(
+  anchor: AnchorBox,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  opts: { align?: "start" | "end"; prefer?: "below" | "above"; rtl?: boolean; gap?: number; margin?: number } = {},
+): { top: number; left: number; side: "below" | "above" } {
+  const { align = "start", prefer = "below", rtl = false, gap = 4, margin = 8 } = opts;
+  const roomBelow = viewport.height - margin - (anchor.bottom + gap);
+  const roomAbove = anchor.top - gap - margin;
+  const fitsBelow = size.height <= roomBelow;
+  const fitsAbove = size.height <= roomAbove;
+  const side: "below" | "above" =
+    prefer === "below"
+      ? (fitsBelow || (!fitsAbove && roomBelow >= roomAbove) ? "below" : "above")
+      : (fitsAbove || (!fitsBelow && roomAbove >= roomBelow) ? "above" : "below");
+  const rawTop = side === "below" ? anchor.bottom + gap : anchor.top - gap - size.height;
+  const top = Math.max(margin, Math.min(rawTop, viewport.height - margin - size.height));
+  const alignRight = (align === "end") !== rtl;
+  const rawLeft = alignRight ? anchor.right - size.width : anchor.left;
+  const left = Math.max(margin, Math.min(rawLeft, viewport.width - margin - size.width));
+  return { top, left, side };
+}
+
+/**
+ * Keeps a position-fixed element `ref` next to its anchor: `anchorRef`, or
+ * the element it is rendered into. Written straight to the style before
+ * paint (no state, no flash at 0,0) and again on any scroll (capture, so a
+ * scrolling table body counts), a resize, or the popover growing (a textarea
+ * pulled taller, the "Not sent" line appearing).
+ */
+export function useAnchoredPosition(
+  ref: RefObject<HTMLElement | null>,
+  opts: { anchorRef?: RefObject<HTMLElement | null>; align?: "start" | "end"; prefer?: "below" | "above" } = {},
+): void {
+  const { anchorRef, align, prefer } = opts;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const place = () => {
+      const anchor = anchorRef?.current ?? el.parentElement;
+      if (!anchor) return;
+      const a = anchor.getBoundingClientRect();
+      const p = placePopover(
+        a,
+        { width: el.offsetWidth, height: el.offsetHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+        { align, prefer, rtl: getComputedStyle(anchor).direction === "rtl" },
+      );
+      // Fixed is relative to the viewport unless an ancestor has a transform
+      // (the TableCard bulk bar is centred with one). So park the element at
+      // 0,0, read where that lands, and offset by it: right in both cases.
+      el.style.top = "0px";
+      el.style.left = "0px";
+      const o = el.getBoundingClientRect();
+      el.style.top = `${p.top - o.top}px`;
+      el.style.left = `${p.left - o.left}px`;
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
+    ro?.observe(el);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+      ro?.disconnect();
+    };
+  }, [ref, anchorRef, align, prefer]);
+}
 
 export function RequestChangesPopover({
   personFirstName,
@@ -22,6 +110,8 @@ export function RequestChangesPopover({
   onCancel,
   busy = false,
   align = "start",
+  prefer = "below",
+  anchorRef,
 }: {
   personFirstName: string;
   /** Resolve true when the note was saved; the popover closes on true. */
@@ -29,6 +119,10 @@ export function RequestChangesPopover({
   onCancel: () => void;
   busy?: boolean;
   align?: "start" | "end";
+  /** The side to open on when both have room (a bar at the bottom wants "above"). */
+  prefer?: "below" | "above";
+  /** The element to hang off; the element it is rendered into by default. */
+  anchorRef?: RefObject<HTMLElement | null>;
 }) {
   const [note, setNote] = useState("");
   const [failed, setFailed] = useState(false);
@@ -37,6 +131,7 @@ export function RequestChangesPopover({
   const confirm = useConfirm();
   const labelId = useId();
   const dirty = note.trim().length > 0;
+  useAnchoredPosition(ref, { anchorRef, align, prefer });
 
   const tryClose = async () => {
     if (dirty) {
@@ -80,7 +175,7 @@ export function RequestChangesPopover({
       ref={ref}
       role="dialog"
       aria-labelledby={labelId}
-      className={`absolute top-full z-[60] mt-1 w-[280px] rounded-lg border border-line bg-raised p-3 text-ink shadow-[var(--os-shadow-pop)] ${align === "end" ? "end-0" : "start-0"}`}
+      className="fixed z-[60] w-[280px] rounded-lg border border-line bg-raised p-3 text-ink shadow-[var(--os-shadow-pop)]"
     >
       <label id={labelId} htmlFor={`${labelId}-note`} className="mb-1.5 block text-sm font-medium text-ink">
         What should {personFirstName} change?

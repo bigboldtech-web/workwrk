@@ -19,7 +19,11 @@
 //               Recorded · Score · Note · Status · Approve / Request changes
 //   save bar    56px, sticky, "3 numbers to save" with the blue Save numbers
 //               and Discard; Cmd+S saves while dirty (a page-scoped chord);
-//               leaving with unsaved numbers asks first (useDirtyGuard)
+//               leaving with unsaved numbers asks first: a person switch, a
+//               month change, and any in-app link (the sidebar, Open
+//               profile) get the same Save numbers and leave / Leave them
+//               unsaved / Keep editing choice; tab close gets the browser's
+//               own prompt (useDirtyGuard)
 //
 // Save posts each number through POST /api/kpi-records (a number a manager
 // records lands APPROVED with reviewedById; src/lib/kpi-record-status.ts).
@@ -29,7 +33,7 @@
 // page used), so an expired session or a closed tab does not lose typing.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { CheckCircle2, MessageSquare, XCircle } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -41,11 +45,15 @@ import { Picker } from "@/components/ui/picker";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MonthControl } from "@/components/ui/month-control";
 import { ToneChip } from "@/components/people/person-bits";
 import { PersonStatusList, type PersonStatusItem } from "@/components/team/person-status-list";
-import { RequestChangesPopover } from "@/components/team/request-changes-popover";
+import { RequestChangesPopover, useAnchoredPosition } from "@/components/team/request-changes-popover";
+import { sectionHrefNow } from "@/components/layout/os/use-object-href";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { useElementWidth } from "@/hooks/use-element-width";
+import { confirmLeave, setLeaveConfirmer, type LeaveDecision } from "@/lib/dirty-guard";
 import { useShortcut } from "@/lib/shortcuts";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -153,6 +161,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   recentDecisions?: RecentDecisionRow[];
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const fmt = useFormat();
   const { toast } = useOsToast();
   const confirm = useConfirm();
@@ -180,6 +189,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const [changesFor, setChangesFor] = useState<string[] | null>(null);
   const [showRecent, setShowRecent] = useState(false);
   const actualRefs = useRef(new Map<string, HTMLInputElement | null>());
+  // The right pane's width decides whether a submitted row's decision fits
+  // as two labelled buttons (a wide screen) or Approve plus an icon (1440
+  // with the sidebar open, where the labels took the KPI name's room).
+  const paneRef = useRef<HTMLElement>(null);
+  const paneWidth = useElementWidth(paneRef);
+  const compactDecisions = paneWidth < 960;
 
   const stored = kpiReviewsSurfacePrefs(prefs.home);
   const [localPrefs, setLocalPrefs] = useState<Partial<KpiReviewsSurfacePrefs>>({});
@@ -354,13 +369,52 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     setRowState({});
   };
 
+  // Leaving with unsaved numbers asks, on the app's own dialog, with three
+  // ways out: save and leave (a failed save keeps the person here, the rows
+  // saying Not saved with Retry), leave them unsaved (they stay as this
+  // device's draft), or keep editing. useDirtyGuard alone only covered tab
+  // close: a sidebar link left in silence, and a manager who typed a
+  // month of numbers and clicked away believed they were recorded.
+  const [leaveAsk, setLeaveAsk] = useState<{ resolve: (d: LeaveDecision) => void } | null>(null);
+  const askLeave = useCallback(() => new Promise<LeaveDecision>((resolve) => setLeaveAsk({ resolve })), []);
+  const decideLeave = (d: LeaveDecision) => {
+    const cur = leaveAsk;
+    setLeaveAsk(null);
+    cur?.resolve(d);
+  };
+  useEffect(() => {
+    setLeaveConfirmer(askLeave);
+    return () => setLeaveConfirmer(null);
+  }, [askLeave]);
+  // Any in-app link while dirty (the sidebar, the breadcrumb, Open profile,
+  // an empty view's Assign KRAs) goes through confirmLeave first: the form
+  // builder's pattern. A link the section interceptor already remapped
+  // arrives defaultPrevented, and that interceptor asks confirmLeave itself.
+  useEffect(() => {
+    if (!dirty) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void confirmLeave().then((ok) => { if (ok) router.push(sectionHrefNow(url.pathname + url.search + url.hash)); });
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [dirty, router]);
+
+  // A person switch or a month change asks the same question. The drafts
+  // are keyed by person and month, so leaving them unsaved loses nothing on
+  // this device; saving first keeps the person here when a row fails.
   const guardSwitch = async (): Promise<boolean> => {
     if (!dirty) return true;
-    return confirm({
-      title: `${pendingLabel} not saved`,
-      description: "They stay as a draft on this device, but nobody sees them until you save.",
-      confirmLabel: "Leave them unsaved",
-    });
+    const d = await askLeave();
+    if (d === "stay") return false;
+    if (d === "discard") return true;
+    return save();
   };
 
   // Decisions on submitted numbers.
@@ -392,14 +446,18 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   };
 
   const columns = useMemo<TableColumn<KpiLine>[]>(() => [
-    { key: "kpi", label: "KPI", title: true, width: "minmax(130px,1.2fr)", render: (l) => (
+    // Widths at 1440 with the sidebar open (a 768px card, Recorded and Score
+    // already hidden): the KPI name is what the manager reads a row by, so it
+    // takes the larger share and Note the smaller; the names still truncate
+    // on a narrower card, so the full one is on hover.
+    { key: "kpi", label: "KPI", title: true, width: "minmax(160px,1.5fr)", render: (l) => (
       <span className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate">{l.name}</span>
+        <span className="truncate" title={l.name}>{l.name}</span>
         {display.showDescriptions && l.description ? <span className="truncate text-sm font-normal text-ink-2">{l.description}</span> : null}
       </span>
     ) },
-    { key: "target", label: "Target", width: "104px", numeric: true, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
-    { key: "actual", label: "Actual", width: "124px", render: (l) => {
+    { key: "target", label: "Target", width: "96px", numeric: true, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
+    { key: "actual", label: "Actual", width: "140px", render: (l) => {
       const r = records.get(l.kpiId);
       if (takesInput(l.kpiId)) {
         const st = rowState[l.kpiId];
@@ -416,7 +474,10 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                 value={drafts[l.kpiId]?.actual ?? ""}
                 onChange={(e) => setDraft(l.kpiId, { actual: e.target.value })}
                 aria-invalid={st ? true : undefined}
-                className={cn("w-14 min-w-0 rounded-md border bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none", st ? "border-danger-text" : "border-line")}
+                // 72px with the spin buttons hidden (the kra-dialog idiom; the arrow
+                // keys still step): Chrome kept room for them inside a 56px box
+                // and cut the "Record" placeholder to "Recc".
+                className={cn("w-[72px] min-w-0 shrink-0 rounded-md border bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none", st ? "border-danger-text" : "border-line")}
                 style={{ height: "calc(var(--os-row-h) - 12px)" }}
               />
               {l.unit ? <span className="min-w-0 max-w-[48px] truncate text-xs text-ink-2" title={l.unit}>{l.unit}</span> : null}
@@ -445,7 +506,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       const cls = band?.tone === "success" ? "text-success-text" : band?.tone === "warning" ? "text-warning-text" : band?.tone === "danger" ? "text-danger-text" : "text-ink";
       return <span className="truncate tabular-nums" title={band ? `${Math.round(score)}% · ${band.label}` : undefined}><span className={cls}>{Math.round(score)}%</span>{band ? <span className="text-ink-2"> · {band.label}</span> : null}</span>;
     } },
-    { key: "note", label: "Note", width: "minmax(120px,1.2fr)", render: (l) => {
+    { key: "note", label: "Note", width: "minmax(120px,1fr)", render: (l) => {
       const r = records.get(l.kpiId);
       const canNote = takesInput(l.kpiId) || r?.status === "SUBMITTED";
       const draftNote = drafts[l.kpiId]?.notes;
@@ -469,7 +530,10 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     // Approve and Request changes (it is awaiting you); every other row shows
     // its one status chip. At 1440 with the sidebar open there is no room
     // for both without dropping Target or Score, which the old page had.
-    { key: "status", label: "Status", width: "204px", render: (l) => {
+    // On a pane under 960px Request changes is an icon (named in its tooltip
+    // and label, and still a word in the bulk bar), which gives the KPI name
+    // the room the two labels took.
+    { key: "status", label: "Status", width: compactDecisions ? "164px" : "220px", render: (l) => {
       const r = records.get(l.kpiId);
       // An unsaved row says so here, where there is room for the Retry.
       const st = rowState[l.kpiId];
@@ -490,18 +554,22 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       return (
         <span className="relative flex items-center gap-1" title="Awaiting you" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
           <button type="button" onClick={() => void approve([r.id])} style={{ height: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-line bg-raised px-2 text-sm font-medium text-ink hover:bg-hover">Approve</button>
-          <button type="button" onClick={() => setChangesFor([r.id])} style={{ height: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Request changes</button>
+          {compactDecisions ? (
+            <button type="button" onClick={() => setChangesFor([r.id])} title="Request changes" aria-label={`Request changes on ${l.name}`} style={{ height: "calc(var(--os-row-h) - 16px)", width: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><XCircle className="h-4 w-4" aria-hidden /></button>
+          ) : (
+            <button type="button" onClick={() => setChangesFor([r.id])} style={{ height: "calc(var(--os-row-h) - 16px)" }} className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Request changes</button>
+          )}
+          {/* Fixed, hung off this cell: it floats over the table instead of
+              being clipped by the card (request-changes-popover.tsx). */}
           {changesFor?.length === 1 && changesFor[0] === r.id ? (
-            <div className="absolute end-0 top-8 z-50">
-              <RequestChangesPopover personFirstName={person?.firstName || "them"} align="end" onCancel={() => setChangesFor(null)}
-                onSend={async (note) => { const done = await decide([r.id], "request_changes", note); if (done.length) { setChangesFor(null); toast(`Sent ${person?.firstName || "them"} your note`); } return done.length > 0; }} />
-            </div>
+            <RequestChangesPopover personFirstName={person?.firstName || "them"} align="end" onCancel={() => setChangesFor(null)}
+              onSend={async (note) => { const done = await decide([r.id], "request_changes", note); if (done.length) { setChangesFor(null); toast(`Sent ${person?.firstName || "them"} your note`); } return done.length > 0; }} />
           ) : null}
         </span>
       );
     } },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [records, drafts, rowState, takesInput, bands, display.showDescriptions, noteFor, changesFor, person, viewerId, fmt]);
+  ], [records, drafts, rowState, takesInput, bands, display.showDescriptions, noteFor, changesFor, person, viewerId, fmt, compactDecisions]);
 
   const kraWeight = useMemo(() => new Map((lines ?? []).map((l) => [l.kraId, l.kraWeight])), [lines]);
   const kraCount = useMemo(() => {
@@ -604,7 +672,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                   onEnter={() => { const first = (lines ?? []).find((l) => takesInput(l.kpiId)); if (first) actualRefs.current.get(first.kpiId)?.focus(); }} />
               )}
             </aside>
-            <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto" aria-label="Their numbers">
+            <section ref={paneRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto" aria-label="Their numbers">
               {showRecent ? (
                 <RecentDecisions rows={recentDecisions} fmt={fmt} onOpen={async (row) => {
                   if (!(await guardSwitch())) return;
@@ -639,14 +707,14 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                       selected={new Set([...selected].map((id) => [...records.values()].find((r) => r.id === id)?.kpiId).filter((x): x is string => !!x))}
                       onSelectedChange={(kpiIds) => setSelected(new Set([...kpiIds].map((k) => records.get(k)?.id).filter((x): x is string => !!x)))}
                       bulkActions={(
-                        <span className="relative flex items-center gap-1">
+                        // self-stretch: the popover hangs off this span, so it
+                        // is as tall as the bar and "above" clears the bar's edge.
+                        <span className="relative flex items-center gap-1 self-stretch">
                           <BulkAction icon={CheckCircle2} label="Approve" onClick={() => void approve(selectedSubmitted)} />
                           <BulkAction icon={XCircle} label="Request changes" onClick={() => setChangesFor(selectedSubmitted)} />
                           {changesFor && changesFor.length > 1 ? (
-                            <div className="absolute bottom-10 start-0 z-50">
-                              <RequestChangesPopover personFirstName={person.firstName || "them"} onCancel={() => setChangesFor(null)}
-                                onSend={async (note) => { const done = await decide(changesFor, "request_changes", note); if (done.length) { setChangesFor(null); toast(`Sent ${person.firstName || "them"} your note on ${done.length} numbers`); } return done.length > 0; }} />
-                            </div>
+                            <RequestChangesPopover personFirstName={person.firstName || "them"} prefer="above" onCancel={() => setChangesFor(null)}
+                              onSend={async (note) => { const done = await decide(changesFor, "request_changes", note); if (done.length) { setChangesFor(null); toast(`Sent ${person.firstName || "them"} your note on ${done.length} numbers`); } return done.length > 0; }} />
                           ) : null}
                         </span>
                       )}
@@ -673,6 +741,19 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
           <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving" : pendingNumbers ? "Save numbers" : "Save notes"}</Button>
         </div>
       ) : null}
+      <Dialog open={!!leaveAsk} onOpenChange={(o) => { if (!o) decideLeave("stay"); }}>
+        <DialogContent className="os-chrome max-w-[540px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg">{pendingLabel || "Your changes"} not saved</DialogTitle>
+            <DialogDescription>They stay as a draft on this device, but nobody sees them until you save.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <Button variant="ghost" onClick={() => decideLeave("stay")}>Keep editing</Button>
+            <Button variant="outline" onClick={() => decideLeave("discard")}>Leave them unsaved</Button>
+            <Button onClick={() => decideLeave("save")}>{pendingNumbers ? "Save numbers and leave" : "Save notes and leave"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -712,6 +793,9 @@ function NotePopover({ initial, onClose, onDone }: { initial: string; onClose: (
   const ref = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
   const dirty = text !== initial;
+  // Fixed and hung off the note cell, like RequestChangesPopover: absolute,
+  // the table card clipped it and scrolled its own row away.
+  useAnchoredPosition(ref, { align: "end" });
   const tryClose = useCallback(async () => {
     if (dirty && !(await confirm({ title: "Discard this note?", confirmLabel: "Discard", destructive: true }))) return;
     onClose();
@@ -724,7 +808,7 @@ function NotePopover({ initial, onClose, onDone }: { initial: string; onClose: (
     return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("mousedown", onDown); };
   }, [tryClose]);
   return (
-    <div ref={ref} className="absolute end-0 top-8 z-50 w-[240px] rounded-lg border border-line bg-raised p-2" style={{ boxShadow: "var(--os-shadow-pop)" }} role="dialog" aria-label="Your note">
+    <div ref={ref} className="fixed z-[60] w-[240px] rounded-lg border border-line bg-raised p-2" style={{ boxShadow: "var(--os-shadow-pop)" }} role="dialog" aria-label="Your note">
       <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={5000} placeholder="Your note to them"
         className="w-full resize-y rounded-md border border-line bg-raised px-2 py-1.5 text-sm text-ink focus:border-brand focus:outline-none" />
       <div className="mt-1 flex justify-end">

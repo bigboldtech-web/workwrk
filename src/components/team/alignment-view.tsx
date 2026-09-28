@@ -189,18 +189,18 @@ function WeeklyActions({ person, onChanged }: { person: AlignmentPerson; onChang
         className="inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
         Request changes
       </button>
+      {/* Fixed, hung off this cell: it floats over the table instead of
+          being clipped by the card (request-changes-popover.tsx). */}
       {asking ? (
-        <div className="absolute end-0 top-8 z-50">
-          <RequestChangesPopover personFirstName={first} align="end" busy={busy}
-            onCancel={() => setAsking(false)}
-            onSend={async (note) => {
-              setBusy(true);
-              const ok = await decide("CHANGES_REQUESTED", note);
-              setBusy(false);
-              if (ok) { setAsking(false); onChanged({ status: "ACKNOWLEDGED", managerStatus: "CHANGES_REQUESTED" }); toast(`Sent ${first} your note`); }
-              return ok;
-            }} />
-        </div>
+        <RequestChangesPopover personFirstName={first} align="end" busy={busy}
+          onCancel={() => setAsking(false)}
+          onSend={async (note) => {
+            setBusy(true);
+            const ok = await decide("CHANGES_REQUESTED", note);
+            setBusy(false);
+            if (ok) { setAsking(false); onChanged({ status: "ACKNOWLEDGED", managerStatus: "CHANGES_REQUESTED" }); toast(`Sent ${first} your note`); }
+            return ok;
+          }} />
       ) : null}
     </span>
   );
