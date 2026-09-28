@@ -60,7 +60,9 @@ export default async function ReviewCycleDetailPage({ params }: { params: Promis
   if (!faces.self && !faces.team && !faces.peer && !faces.canManage && !faces.chain) notFound();
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-raised">
+      {/* bg-raised is the white canvas the list pages use; bg-surface is the
+          legacy warm grey (#F7F7F6) and made this page float on grey. */}
       <Suspense>
         <ReviewDetailClient cycleId={id} faces={faces} />
       </Suspense>

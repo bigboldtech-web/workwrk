@@ -23,7 +23,9 @@ export default async function CandorSessionPage({ params }: { params: Promise<{ 
   const answered = await hasAnsweredCandor(id, ctx.userId);
   if (!candorFaces(ctx, s, answered).visible) notFound();
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-raised">
+      {/* bg-raised is the white canvas the list pages use; bg-surface is the
+          legacy warm grey (#F7F7F6) and made this page float on grey. */}
       <Suspense>
         <CandorSessionClient id={id} />
       </Suspense>

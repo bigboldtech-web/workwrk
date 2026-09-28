@@ -152,7 +152,9 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   const ownerName = owner ? `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email : null;
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-surface">
+    <div className="flex h-full flex-col overflow-y-auto bg-raised">
+      {/* bg-raised is the white canvas the list pages use; bg-surface is the
+          legacy warm grey (#F7F7F6) and made this page float on grey. */}
       <Breadcrumb items={[{ label: "Goals", href: sidebarView }, { label: okr.title }]} />
       <OsPageHeader
         title={okr.title}
