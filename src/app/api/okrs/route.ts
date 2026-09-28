@@ -15,12 +15,16 @@ import {
 } from "@/lib/alignment";
 import {
   addGoalAssignees,
+  mayAttachUnderGoal,
+  mayEditGoalAs,
   memberVisibilityOr,
+  seesUnownedGoals,
   summarizeGoalAudiences,
   syncGoalAssignees,
   teamAudienceVisibilityOr,
   validateGoalAssignees,
   type GoalAudienceRef,
+  type GoalEditActor,
 } from "@/lib/goal-audience";
 import { getUserTagIds } from "@/lib/user-tags";
 import { logActivity } from "@/lib/activity";
@@ -40,6 +44,19 @@ function normalizeGoalLevel(v: unknown): GoalLevel | null {
   if (s === "TEAM") return "DEPARTMENT";
   return s === "COMPANY" || s === "DEPARTMENT" || s === "INDIVIDUAL" ? (s as GoalLevel) : null;
 }
+
+// The caller as the goal write rules see them (mayEditGoalAs). The report
+// tree is only walked for the manager tier, the one tier it can grant to.
+async function goalEditActor(session: unknown, orgId: string): Promise<GoalEditActor> {
+  const callerId = getUserId(session);
+  const orgWide = isOrgWideAlignment(session);
+  const manager = isManager(session);
+  const teamIds = !orgWide && manager ? new Set(await getTeamUserIds(orgId, callerId)) : null;
+  return { callerId, orgWide, manager, teamIds };
+}
+
+const ATTACH_REFUSED =
+  "You can only make this part of a goal you can edit. Ask that goal's owner or your manager to link it.";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -100,7 +117,10 @@ export async function GET(req: NextRequest) {
     visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
     if (hasTree) {
       visible.push({ ownerId: { in: treeIds } });
-      visible.push({ ownerId: null });
+      // Unowned goals only for the manager tier (seesUnownedGoals): one
+      // report must not open every ownerless goal in the org, other
+      // departments' included. canSeeGoal reads the same rule.
+      if (seesUnownedGoals({ manager: isManager(session) })) visible.push({ ownerId: null });
       visible.push(...(await teamAudienceVisibilityOr(treeIds)));
     }
     and.push({ OR: visible });
@@ -123,10 +143,15 @@ export async function GET(req: NextRequest) {
     // "People team and Admin over the org"). No narrowing beyond visibility.
   } else if (teamOnly && hasTree) {
     // The report tree, never the viewer's own goals (those are My goals).
-    // Unowned goals stay in the manager's view: managers create them and
-    // must be able to find them.
+    // Unowned Department and Individual goals stay in the manager tier's
+    // view: they create them, and no other view lists them. Company goals
+    // never do (they have their own tab), and someone who only has a
+    // report gets their reports' goals, not the org's ownerless ones.
     const reports = treeIds.filter((id) => id !== callerId);
-    and.push({ OR: [{ ownerId: { in: reports } }, { ownerId: null }, ...(await teamAudienceVisibilityOr(reports))] });
+    const unowned: Prisma.OKRWhereInput[] = seesUnownedGoals({ manager: isManager(session) })
+      ? [{ ownerId: null, level: { not: "COMPANY" } }]
+      : [];
+    and.push({ OR: [{ ownerId: { in: reports } }, ...unowned, ...(await teamAudienceVisibilityOr(reports))] });
   } else if (teamOnly) {
     // Team goals for someone nobody reports to is empty, never their own
     // visible goals under a Team title (the page shows My goals instead).
@@ -295,15 +320,16 @@ export async function GET(req: NextRequest) {
     if (!oid) return true;
     return deleteTeamIds.has(oid);
   };
-  // Per-goal Edit gate: the exact rule PATCH /api/okrs enforces.
-  const orgWideEdit = isOrgWideAlignment(session);
-  const canEditOkr = (oid: string | null): boolean => {
-    if (orgWideEdit) return true;
-    if (oid === callerId) return true;
-    if (deleteTeamIds === null) return false;
-    if (!oid) return true;
-    return deleteTeamIds.has(oid);
+  // Per-goal Edit gate: the exact rule PATCH /api/okrs enforces
+  // (mayEditGoalAs). It is also the Part of rule (mayAttachUnderGoal), so
+  // the goal modal's picker offers only parents the save will accept.
+  const editActor: GoalEditActor = {
+    callerId,
+    orgWide: isOrgWideAlignment(session),
+    manager: isManager(session),
+    teamIds: new Set(treeIds),
   };
+  const canEditOkr = (oid: string | null): boolean => mayEditGoalAs(editActor, oid);
 
   const enriched = pageOkrs.map((okr, i) => {
     const a = assessedById.get(okr.id)!;
@@ -415,9 +441,14 @@ export async function POST(req: NextRequest) {
   if (parentId) {
     const parent = await prisma.oKR.findFirst({
       where: { id: parentId, organizationId: orgId },
-      select: { id: true },
+      select: { id: true, ownerId: true },
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
+    // A child re-weights its parent's stored progress, so creating a goal
+    // under one needs the right to edit that parent (mayAttachUnderGoal).
+    if (!mayAttachUnderGoal(await goalEditActor(session, orgId), parent)) {
+      return jsonError(ATTACH_REFUSED, 403);
+    }
   }
 
   // NONE is a first-class opt-out: it silences the check-in reminder cron
@@ -582,14 +613,8 @@ export async function PATCH(req: NextRequest) {
 
   // Edit gate: the owner, a manager with the owner in their report tree
   // (unowned objectives stay manager-editable), or an org-wide level.
-  const callerId = getUserId(session);
-  let canEdit = isOrgWideAlignment(session) || existing.ownerId === callerId;
-  if (!canEdit && isManager(session)) {
-    canEdit = existing.ownerId
-      ? (await getTeamUserIds(orgId, callerId)).includes(existing.ownerId)
-      : true;
-  }
-  if (!canEdit) {
+  const actor = await goalEditActor(session, orgId);
+  if (!mayEditGoalAs(actor, existing.ownerId)) {
     return jsonError("You can only edit your own goals or your reports' goals.", 403);
   }
 
@@ -635,9 +660,17 @@ export async function PATCH(req: NextRequest) {
     if (updates.parentId === id) return jsonError("A goal can't be its own parent", 400);
     const parent = await prisma.oKR.findFirst({
       where: { id: updates.parentId, organizationId: orgId },
-      select: { id: true },
+      select: { id: true, ownerId: true },
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
+    // Attaching re-weights the parent's stored progress, so a NEW parent
+    // needs the right to edit it (mayAttachUnderGoal). The modal resends
+    // the unchanged parentId on every save, and keeping a parent the
+    // caller can no longer edit changes nothing, so only a change is
+    // checked. Clearing Part of ("") never reaches here.
+    if (updates.parentId !== existing.parentId && !mayAttachUnderGoal(actor, parent)) {
+      return jsonError(ATTACH_REFUSED, 403);
+    }
     // Part of can never point below the goal itself: walk up from the new
     // parent, and refuse when the walk reaches this goal (a cycle would
     // make both goals roll up into each other).

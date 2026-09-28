@@ -233,6 +233,61 @@ export async function summarizeGoalAudiences(
   return out;
 }
 
+/* ───────────────────────────── edit rules ────────────────────────────── */
+
+/**
+ * Who is asking, reduced to the facts every goal write rule reads. teamIds
+ * is the caller's report tree (getTeamUserIds), and is only read for a
+ * manager-tier caller: having one report is a fact about the org chart,
+ * never a grant to edit (or re-weight) goals outside it.
+ */
+export interface GoalEditActor {
+  callerId: string;
+  /** isOrgWideAlignment: admin, exec and People team levels. */
+  orgWide: boolean;
+  /** isManager: the manager tier of the access ladder. */
+  manager: boolean;
+  teamIds: ReadonlySet<string> | null;
+}
+
+/**
+ * May this actor edit a goal owned by ownerId? The one rule PATCH
+ * /api/okrs enforces and the list's per-row canEdit flag reports: an
+ * org-wide level, the owner, or a manager whose report tree holds the
+ * owner (unowned goals stay editable by the manager tier, who create them).
+ */
+export function mayEditGoalAs(actor: GoalEditActor, ownerId: string | null): boolean {
+  if (actor.orgWide) return true;
+  if (ownerId && ownerId === actor.callerId) return true;
+  if (!actor.manager) return false;
+  if (!ownerId) return true;
+  return actor.teamIds?.has(ownerId) ?? false;
+}
+
+/**
+ * May this actor put a goal under `parent` (Part of)? A parent's progress
+ * is the mean of its own targets and every measured child, persisted up
+ * the chain, so attaching a goal re-weights the parent's headline number.
+ * That is an edit of the parent, and needs the same right as editing it:
+ * without this, any member could drag a Company goal the whole org reads
+ * by attaching their own 1% goal to it. Clearing Part of is an edit of the
+ * child only, and never reaches this rule.
+ */
+export function mayAttachUnderGoal(actor: GoalEditActor, parent: { ownerId: string | null }): boolean {
+  return mayEditGoalAs(actor, parent.ownerId);
+}
+
+/**
+ * May a caller outside the org-wide levels see goals nobody owns, beyond
+ * the Company goals and their own department's goals everyone sees? Only
+ * the manager tier, who create unowned goals. Someone who simply has a
+ * report does not: their team is the people in it, not every ownerless
+ * goal in the org (GET /api/okrs and canSeeGoal both read this).
+ */
+export function seesUnownedGoals(actor: { manager: boolean }): boolean {
+  return actor.manager;
+}
+
 /* ───────────────────────────── visibility ────────────────────────────── */
 
 /**
@@ -269,8 +324,10 @@ export async function canSeeGoal(
   // lists by, so a Team goals row never opens onto a 404.
   const teamIds = new Set(await getTeamUserIds(getOrgId(session), callerId));
   if (isManager(session) || teamIds.size > 1) {
-    if (!okr.ownerId) return true; // unowned objectives stay manager-visible
-    if (teamIds.has(okr.ownerId)) return true;
+    // Unowned objectives stay visible to the manager tier (who create
+    // them), never to everyone with a report: the same rule GET lists by.
+    if (!okr.ownerId && seesUnownedGoals({ manager: isManager(session) })) return true;
+    if (okr.ownerId && teamIds.has(okr.ownerId)) return true;
     if (members.some((id) => teamIds.has(id))) return true;
   }
   return false;

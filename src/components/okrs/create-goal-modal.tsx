@@ -80,7 +80,10 @@ interface CreateGoalModalProps {
   onSaved: (id?: string) => void;
 }
 
-type ParentOption = { id: string; title: string; level: GoalLevel };
+// canAttach is the list row's canEdit flag: attaching a goal re-weights the
+// parent's progress, so POST and PATCH /api/okrs accept a new parent only
+// when the viewer may edit it (mayAttachUnderGoal in src/lib/goal-audience).
+type ParentOption = { id: string; title: string; level: GoalLevel; canAttach: boolean };
 
 function toDateInput(iso?: string | null): string | null {
   return iso ? iso.slice(0, 10) : null;
@@ -144,10 +147,10 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     // Every page, not the first 100: in a large org a later parent must
     // still be choosable, and the current parent must still read by name.
     void (async () => {
-      const all: ParentOption[] = [];
+      const all: Array<Omit<ParentOption, "canAttach"> & { canEdit?: boolean }> = [];
       for (let page = 1; page <= 200; page += 1) {
         const qs = new URLSearchParams({ page: String(page), pageSize: "100", level: parentLevels.join(","), sort: "name" });
-        const r = await apiFetch<{ data: ParentOption[]; pagination?: { total: number } }>(`/api/okrs?${qs}`, { cache: "no-store" });
+        const r = await apiFetch<{ data: Array<Omit<ParentOption, "canAttach"> & { canEdit?: boolean }>; pagination?: { total: number } }>(`/api/okrs?${qs}`, { cache: "no-store" });
         if (!live) return;
         if (!r.ok) break;
         all.push(...(r.data.data ?? []));
@@ -155,11 +158,18 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
         if ((r.data.data ?? []).length === 0 || all.length >= total) break;
       }
       if (!live) return;
-      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level })));
+      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level, canAttach: g.canEdit === true })));
     })();
     return () => { live = false; };
   }, [open, parentLevels, goal?.id]);
   const parentTitle = parents?.find((p) => p.id === parentId)?.title ?? (parentId ? "The current goal" : null);
+  // Offered: the goals the save will accept, plus the goal this one is part
+  // of today (kept readable by name and keepable even when the viewer can
+  // no longer attach to it; the API only checks a changed parent).
+  const parentChoices = (parents ?? []).filter((p) => p.canAttach || p.id === goal?.parentId);
+  // The why, shown only when goals one level up exist but none will take
+  // this one (an org with none yet needs no explanation).
+  const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => p.canAttach);
 
   const initial = useMemo(() => JSON.stringify({
     t: goal?.title ?? "", d: goal?.description ?? "", l: goal?.level ?? level, p: goal?.parentId ?? null,
@@ -271,13 +281,18 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
                 sections={[{
                   options: [
                     { value: "__none__", label: "Not part of another goal" },
-                    ...(parents ?? []).map((p) => ({ value: p.id, label: p.title, hint: LEVEL_WORD[p.level] })),
+                    ...parentChoices.map((p) => ({ value: p.id, label: p.title, hint: LEVEL_WORD[p.level] })),
                   ],
                 }]}
                 onSelect={(v) => { setParentOpen(false); setParentId(v === "__none__" ? null : v); }}
                 className="absolute start-0 top-10 z-50"
               />
             </div>
+            {noAttachable ? (
+              <span className="text-sm font-normal text-ink-2">
+                Only a goal you can edit can hold this one. To link it to another goal, ask that goal&apos;s owner or your manager.
+              </span>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
