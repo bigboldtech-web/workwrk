@@ -12,7 +12,7 @@
 //                      stale line and "View history" on a target can reach
 //                      the Targets and Activity cards.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link2 } from "lucide-react";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { GoalEffort } from "./goal-effort";
 import { GoalActivity } from "./goal-activity";
-import { GoalAssessment } from "./goal-assessment";
+import { GoalAssessment, markGoalServerRender, useGoalServerRender } from "./goal-assessment";
 import type { GoalVerdict } from "@/lib/goal-verdict";
 import { useFormat } from "@/lib/format/use-date-prefs";
 
@@ -83,10 +83,15 @@ export function CopyLinkButton({ okrId }: { okrId: string }) {
 
 /** The summary's On track? block plus the cards that need to talk to each other. */
 export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdict; cadence: string; canCheckIn: boolean }) {
+  // Moves on every server render of this goal (GoalWorkCards marks it), so a
+  // check-in, a target added or deleted, linked work or new dates refetch
+  // the words beside the ring instead of leaving the first load's.
+  const render = useGoalServerRender(props.okrId);
   return (
     <GoalAssessment
       okrId={props.okrId}
       initialVerdict={props.verdict}
+      refreshKey={String(render)}
       cadence={props.cadence}
       canCheckIn={props.canCheckIn}
       onCheckIn={() => document.getElementById("goal-targets-h")?.scrollIntoView({ behavior: "smooth", block: "center" })}
@@ -106,6 +111,16 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
 }) {
   const activityRef = useRef<HTMLElement>(null);
   const refreshKey = targets.map((t) => `${t.id}:${t.currentValue}`).join("|");
+  // `targets` is a fresh array each time the server renders the page, and
+  // only then, so a new one means router.refresh() delivered new numbers.
+  // The first one is the page load itself (the Summary already fetched for
+  // it), and the ref keeps a Strict Mode double effect from counting twice.
+  const seenTargets = useRef(targets);
+  useEffect(() => {
+    if (seenTargets.current === targets) return;
+    seenTargets.current = targets;
+    markGoalServerRender(okrId);
+  }, [okrId, targets]);
   return (
     <>
       <GoalTargets okrId={okrId} canEdit={canEdit} canCheckIn={canCheckIn} targets={targets}

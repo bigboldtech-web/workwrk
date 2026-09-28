@@ -7,8 +7,17 @@
 // adds the pace line, the headline, two or three reasons and one next step
 // (written by the org's AI when one is configured, never changing the word).
 // Loading is a three-line skeleton; a failure says so with Retry.
+//
+// Staying current: every write on this page (a check-in, a target added or
+// deleted, work linked, the goal's dates edited) ends in router.refresh(),
+// which repaints the ring and the target rows from the server. The words
+// here come from a client fetch, so they have to follow that refresh or the
+// Summary card contradicts its own ring ("0% done" beside 50%). The caller
+// passes a refreshKey that moves on every server render; an assessment is
+// only shown for the key it was fetched for, and until the new one lands
+// the chip reads the fresh server verdict and the text is the skeleton.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ArrowRight, Clock, Sparkles } from "lucide-react";
 import { ToneChip } from "@/components/people/person-bits";
 import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
@@ -26,29 +35,82 @@ interface Assessment {
   source: "ai" | "heuristic";
 }
 
+/**
+ * A fetched assessment remembers the refresh key it was fetched for and the
+ * server verdict the page held at that moment.
+ */
+export interface AssessmentEntry<T extends { verdict: GoalVerdict } = Assessment> {
+  key: string;
+  verdictAtFetch: GoalVerdict;
+  data: T;
+}
+
+/**
+ * What the block shows for the page as it is NOW. An entry fetched for an
+ * older refresh key is not shown (its pace line and reasons describe numbers
+ * the ring no longer shows), and the chip always takes the server's verdict
+ * once that verdict has moved past the one the entry was fetched beside, so
+ * the chip never lags the /okrs row while the refetch runs.
+ */
+export function pickAssessment<T extends { verdict: GoalVerdict }>(
+  entry: AssessmentEntry<T> | null,
+  key: string,
+  initialVerdict: GoalVerdict,
+): { current: T | null; verdict: GoalVerdict } {
+  const current = entry && entry.key === key && entry.verdictAtFetch === initialVerdict ? entry.data : null;
+  return { current, verdict: current ? current.verdict : initialVerdict };
+}
+
+// One counter per goal that moves each time the server hands the page a new
+// render (router.refresh() after any write). GoalWorkCards marks it, since
+// its `targets` prop is a fresh array on every server render; the Summary
+// reads it. A module store because the two sit in different server-rendered
+// cards with no client parent to share state through.
+const renders = new Map<string, number>();
+const listeners = new Set<() => void>();
+export function markGoalServerRender(okrId: string) {
+  renders.set(okrId, (renders.get(okrId) ?? 0) + 1);
+  listeners.forEach((l) => l());
+}
+function subscribeRenders(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
+export function useGoalServerRender(okrId: string): number {
+  return useSyncExternalStore(subscribeRenders, () => renders.get(okrId) ?? 0, () => 0);
+}
+
 const CADENCE_WORD: Record<string, string> = { WEEKLY: "weekly", BIWEEKLY: "every two weeks", MONTHLY: "monthly" };
 
-export function GoalAssessment({ okrId, initialVerdict, cadence, canCheckIn, onCheckIn }: {
+export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, onCheckIn }: {
   okrId: string;
   initialVerdict: GoalVerdict;
+  /** Moves whenever the server re-renders the page; a new key refetches. */
+  refreshKey?: string;
   cadence: string;
   canCheckIn: boolean;
   onCheckIn?: () => void;
 }) {
-  const [data, setData] = useState<Assessment | null>(null);
-  const [err, setErr] = useState(false);
+  const [entry, setEntry] = useState<AssessmentEntry | null>(null);
+  // The key a failure belongs to, so a refresh after a failed fetch tries
+  // again on its own and Retry is only offered for the page as it is now.
+  const [errKey, setErrKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const retry = useCallback(() => { setErr(false); setData(null); setTick((n) => n + 1); }, []);
+  const key = `${refreshKey}#${tick}`;
+  const retry = useCallback(() => { setTick((n) => n + 1); }, []);
   useEffect(() => {
     let active = true;
+    const verdictAtFetch = initialVerdict;
     fetch(`/api/okrs/${okrId}/assess`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j) => { if (active) setData(j.data ?? j); })
-      .catch(() => { if (active) setErr(true); });
+      .then((j) => { if (active) setEntry({ key, verdictAtFetch, data: j.data ?? j }); })
+      .catch(() => { if (active) setErrKey(key); });
     return () => { active = false; };
-  }, [okrId, tick]);
+    // initialVerdict is read, not tracked: a verdict change always comes
+    // with a server render, which moves refreshKey, so tracking it too
+    // would fetch twice for one refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [okrId, key]);
 
-  const verdict = data?.verdict ?? initialVerdict;
+  const { current: data, verdict } = pickAssessment(entry, key, initialVerdict);
+  const err = errKey === key && !data;
   const chip = verdictChip(verdict);
   const pace = data ? [
     data.progress != null ? `${data.progress}% done` : null,
