@@ -59,7 +59,7 @@ import { useSidebarSearch } from "./sidebar-search-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsShell } from "./shell-context";
 import { readSidebarCards } from "@/lib/home-prefs";
-import { goalsGroupExpanded } from "@/lib/people-prefs";
+import { goalsGroupExpanded, goalsGroupHeld } from "@/lib/people-prefs";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
@@ -352,13 +352,26 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   // lights on /okrs, so one URL still lights exactly one row. The gates are
   // the boot facts (hasReports solid or dotted, the People team, Admin), not
   // an accessLevel tier. Expanded while the URL is under /okrs; otherwise the
-  // chevron's last choice, persisted as sidebar.groups.goals.
+  // chevron's last choice, persisted as sidebar.groups.goals. On /okrs the
+  // chevron still works: it flips a per-visit heldClosed instead of the pref,
+  // so the click is never a dead control and never rewrites the choice other
+  // pages read.
   const { boot, counts } = useBoot();
   const { prefs, patchPrefs } = useOsShell();
   const pathname = usePathname() || "";
   const v = boot.viewer;
   const seesTeam = v.hasReports || v.peopleTeam || v.orgRole === "OWNER" || v.orgRole === "ADMIN";
-  const expanded = goalsGroupExpanded(prefs.sidebar, pathname);
+  const held = goalsGroupHeld(pathname);
+  const [heldClosed, setHeldClosed] = useState(false);
+  // Leaving /okrs forgets the per-visit collapse, so the next Goals page opens
+  // the group again (adjusted during render, React's pattern for state that
+  // follows a prop, rather than an effect that paints the stale state first).
+  const [prevHeld, setPrevHeld] = useState(held);
+  if (prevHeld !== held) {
+    setPrevHeld(held);
+    if (!held) setHeldClosed(false);
+  }
+  const expanded = goalsGroupExpanded(prefs.sidebar, pathname, heldClosed);
   // On a goal page the active row is the view that goal belongs to for this
   // viewer, which only the page knows: it declares it as the Goals crumb's
   // href (okrs/[id]/page.tsx). Until the crumb lands, My goals lights.
@@ -368,6 +381,7 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
     : null;
   const active = (href: string) => (goalPageView ? goalPageView === href && (href !== "/okrs?view=team" || seesTeam) : activeHref === href);
   const onToggle = () => {
+    if (held) { setHeldClosed((v) => !v); return; }
     void patchPrefs({ sidebar: { groups: { goals: !expanded } } });
   };
   return (

@@ -115,13 +115,23 @@ export function kpiReviewsSurfacePrefs(home: unknown): KpiReviewsSurfacePrefs {
 
 // ── sidebar.groups ────────────────────────────────────────────────
 
+/** Is this pathname one that holds the Goals group open (/okrs and its goal pages)? */
+export function goalsGroupHeld(pathname: string): boolean {
+  return pathname === "/okrs" || pathname.startsWith("/okrs/");
+}
+
 /**
- * Is the Work sidebar's Goals group expanded? spec-goals section 1: always
- * expanded while the pathname starts with /okrs; otherwise the remembered
+ * Is the Work sidebar's Goals group expanded? spec-goals section 1: expanded
+ * while the pathname starts with /okrs; otherwise the remembered
  * `sidebar.groups.goals`; collapsed when never set.
+ *
+ * The /okrs hold is a default, not a lock: `heldClosed` is the chevron's
+ * choice for this visit, so "Collapse Goals" on a Goals page really collapses
+ * the group. It lives in the component (never in the pref), so collapsing on
+ * /okrs does not overwrite what the person chose for every other page.
  */
-export function goalsGroupExpanded(sidebar: unknown, pathname: string): boolean {
-  if (pathname === "/okrs" || pathname.startsWith("/okrs/")) return true;
+export function goalsGroupExpanded(sidebar: unknown, pathname: string, heldClosed = false): boolean {
+  if (goalsGroupHeld(pathname)) return !heldClosed;
   return bool(obj(obj(sidebar).groups).goals, false);
 }
 
