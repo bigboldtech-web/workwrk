@@ -7,6 +7,7 @@ import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
 import { apiFetch } from "@/lib/api-fetch";
+import { leaveThen } from "@/lib/dirty-guard";
 import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import { readLastAppPath, recordLastAppPath, serverLastAppPath, subscribeLastAppPath } from "@/lib/settings-nav";
 import { deepMergePatch, type PreferencesPatch } from "@/lib/preferences-schema";
@@ -513,8 +514,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     const width = typeof window === "undefined" ? 1440 : window.innerWidth;
     const target = askAiTarget({ width, pathname: pathnameRef.current, prompt: initialPrompt });
     if (target.kind === "navigate") {
-      setSidekickOpen(false);
-      router.push(target.href);
+      // Below 1024 Ask AI is a page: unsaved work asks first.
+      void leaveThen(() => {
+        setSidekickOpen(false);
+        router.push(target.href);
+      });
       return;
     }
     if (target.kind === "focus-page") {

@@ -73,3 +73,27 @@ export async function confirmLeave(): Promise<boolean> {
   const results = await Promise.all(saves.map((s) => Promise.resolve(s).catch(() => false)));
   return results.every(Boolean);
 }
+
+/**
+ * The shell's one way to navigate on a person's behalf without a link: the
+ * rail, the top bar's Back and Forward, the G shortcuts and the palette.
+ * With nothing dirty `go` runs at once, in the same tick, so a clean page
+ * moves exactly as before. With something dirty the person gets the page's
+ * own question first, and `go` runs only when they chose to leave (Discard,
+ * or Save and every save succeeded). A question that throws counts as Keep
+ * editing: staying can never lose anything, leaving can.
+ * Resolves to whether `go` ran.
+ */
+export function leaveThen(go: () => void): Promise<boolean> {
+  if (dirty.size === 0) {
+    go();
+    return Promise.resolve(true);
+  }
+  return confirmLeave().then(
+    (ok) => {
+      if (ok) go();
+      return ok;
+    },
+    () => false,
+  );
+}

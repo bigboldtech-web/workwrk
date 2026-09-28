@@ -21,6 +21,7 @@ import { resolveHub, type HubKey } from "@/lib/nav/route-hub";
 import { HUB_LABELS } from "@/lib/nav/labels";
 import { hubShortcutHint } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
+import { leaveThen } from "@/lib/dirty-guard";
 import { getApp, type AppEntry } from "./apps-catalog";
 import { useOsShell } from "./shell-context";
 import { useBoot } from "./boot-context";
@@ -113,8 +114,12 @@ export function Rail() {
     // otherwise does nothing (spec-shell 1.1).
     setSidebarCollapsed(false);
     if (activeHub === app.key) return;
-    pushRecentApp(app.key);
-    router.push(hubHref(app.key));
+    // Unsaved work on the page asks first (the page's own dialog); with
+    // nothing dirty this navigates at once.
+    void leaveThen(() => {
+      pushRecentApp(app.key);
+      router.push(hubHref(app.key));
+    });
   }, [activeHub, hubHref, pushRecentApp, router, setSidebarCollapsed]);
 
   // Arrow keys move focus between hubs (Settings included), Enter opens. The
@@ -185,7 +190,7 @@ export function Rail() {
             dot={false}
             shortcut=""
             off
-            onClick={() => router.push(hubHref(app.key))}
+            onClick={() => void leaveThen(() => router.push(hubHref(app.key)))}
             tabIndex={0}
           />
         ))}

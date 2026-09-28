@@ -73,6 +73,7 @@ import {
   settingsHrefToday,
 } from "@/lib/settings-registry";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { leaveThen } from "@/lib/dirty-guard";
 import { cn } from "@/lib/utils";
 import { useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
@@ -602,7 +603,7 @@ function PaletteBody() {
             label: e.label,
             secondary: e.description,
             glyph: <Glyph icon={Settings2} />,
-            action: () => router.push(e.href),
+            action: () => void leaveThen(() => router.push(e.href)),
           }))
         : [];
       return [...pageRows, ...entryRows];
@@ -816,8 +817,12 @@ function PaletteBody() {
         return;
       }
       closePalette();
-      if (row.href) router.push(sectionHrefNow(row.href));
-      else row.action?.();
+      // A jump row asks about unsaved work first (the page's own dialog,
+      // shown once the palette is out of the way); a clean page moves at once.
+      if (row.href) {
+        const href = sectionHrefNow(row.href);
+        void leaveThen(() => router.push(href));
+      } else row.action?.();
     },
     [closePalette, router],
   );

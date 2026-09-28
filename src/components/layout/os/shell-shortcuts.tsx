@@ -26,6 +26,7 @@ import { isSettingsRoute } from "@/lib/settings-nav";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
 import { apiFetch } from "@/lib/api-fetch";
+import { leaveThen } from "@/lib/dirty-guard";
 import { useOsToast } from "./toast";
 // A note made with the chord opens in the section the person is in.
 import { objectHrefNow } from "./use-object-href";
@@ -179,15 +180,16 @@ export function ShellShortcuts() {
         run: () => {
           if (!key) return;
           setSidebarCollapsed(false);
-          router.push(hubHref(key));
+          // Unsaved work asks first, as the rail does.
+          void leaveThen(() => router.push(hubHref(key)));
         },
       },
       !!key,
     );
   }
-  useShortcut({ ...canon["go-inbox"], scope: "global", run: () => router.push("/inbox") });
-  useShortcut({ ...canon["go-home"], scope: "global", run: () => router.push(WORK_HOME_HREF) });
-  useShortcut({ ...canon["go-my-work"], scope: "global", run: () => router.push("/my-work") });
+  useShortcut({ ...canon["go-inbox"], scope: "global", run: () => void leaveThen(() => router.push("/inbox")) });
+  useShortcut({ ...canon["go-home"], scope: "global", run: () => void leaveThen(() => router.push(WORK_HOME_HREF)) });
+  useShortcut({ ...canon["go-my-work"], scope: "global", run: () => void leaveThen(() => router.push("/my-work")) });
   // Esc is handled above before dispatch; this entry exists so the overlay
   // lists it while a layer is open, and it is a no-op otherwise.
   useShortcut({
