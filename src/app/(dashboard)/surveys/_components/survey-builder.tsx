@@ -13,8 +13,20 @@
 //
 // The runner gate is server side (POST /api/pulse-surveys and PATCH
 // /api/pulse-surveys/[id]); the page only opens this for a runner.
+//
+// The dialog is a shell layer (kind "dialog"), as the widget editor is. Every
+// Picker and the DateField in here registers a popover layer above it, and Esc
+// goes to the LayerStack: the first Esc closes the open list, and only an Esc
+// with nothing open reaches requestClose (and its Discard confirm). Radix sees
+// Esc first, so without onEscapeKeyDown one Esc on an open Who it goes to list
+// asked to throw the whole survey away with the list still open over it.
+//
+// The body scrolls, and every popover in it is an absolutely positioned DOM
+// child (never a portal: see the row "..." note below), so a list that opens
+// near the body's foot (Who it goes to, Repeats, Closes on) was clipped by it.
+// When a popover opens, the body scrolls just far enough to show it whole.
 
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MoreHorizontal, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -22,6 +34,7 @@ import { DateField } from "@/components/ui/date-field";
 import { Switch } from "@/components/ui/switch";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Picker } from "@/components/ui/picker";
+import { OsShellContext, useLayer } from "@/components/layout/os/shell-context";
 import { PickerButton } from "@/components/dashboards/widget-registry";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { ReorderableList } from "@/components/performance/reorderable-list";
@@ -64,6 +77,21 @@ const REPEATS = [
 type Lookup = { id: string; name: string };
 const blank = (n: number): BuilderQuestion => ({ id: `q${Date.now().toString(36)}${n}`, text: "", type: "rating" });
 
+type Span = { top: number; bottom: number };
+/**
+ * How far to scroll the builder's body so a popover that opened below its
+ * foot shows whole: 0 when it already fits. Never so far that the popover's
+ * anchor (the button that opened it) leaves the top of the body, so a list
+ * taller than the body shows its trigger and as much of itself as fits.
+ */
+const REVEAL_GAP = 8;
+export function popoverRevealDelta(pop: Span, anchor: Span, body: Span, gap = REVEAL_GAP): number {
+  const below = pop.bottom + gap - body.bottom;
+  if (below <= 0) return 0;
+  const room = Math.max(0, anchor.top - gap - body.top);
+  return Math.min(below, room);
+}
+
 export function SurveyBuilder({
   open,
   onOpenChange,
@@ -98,6 +126,48 @@ export function SurveyBuilder({
   // dialog.
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
+  const shell = useContext(OsShellContext);
+  const topLayerKind = shell?.topLayerKind ?? null;
+  const layerCount = shell?.layerCount ?? 0;
+
+  // Reveal a popover that just opened (the top layer became one) inside the
+  // scrolling body. A Picker's root is the role="presentation" box around its
+  // listbox; the DateField's is its role="dialog" calendar. Both are
+  // positioned against the relative span that holds their trigger.
+  //
+  // An absolutely positioned box extends the body's scroll area only to its
+  // own border (the body's padding is not added after it), so a list at the
+  // foot could be scrolled flush with the edge and no further, its border
+  // and shadow shaved off. The tail spacer at the end of the body grows
+  // while the popover is open to leave REVEAL_GAP below it, and goes back to
+  // nothing when it closes. The body's height is held while it is open, so
+  // the tail scrolls rather than growing the dialog (a centred dialog that
+  // grew would jump up under the pointer). Both are set on the DOM, not in
+  // state: a re-render here would move the very list being measured.
+  useEffect(() => {
+    if (!open || topLayerKind !== "popover") return;
+    const tail = tailRef.current;
+    const body = bodyRef.current;
+    const raf = requestAnimationFrame(() => {
+      if (!body || !tail) return;
+      const found = Array.from(body.querySelectorAll<HTMLElement>('[role="listbox"], [role="dialog"]')).pop();
+      if (!found) return;
+      const pop = found.getAttribute("role") === "listbox" && found.parentElement?.getAttribute("role") === "presentation" ? found.parentElement : found;
+      const anchor = pop.offsetParent instanceof HTMLElement ? pop.offsetParent : pop;
+      body.style.maxHeight = `${body.clientHeight}px`;
+      const popBox = pop.getBoundingClientRect();
+      tail.style.height = `${Math.max(0, Math.ceil(popBox.bottom + REVEAL_GAP - tail.getBoundingClientRect().top))}px`;
+      const delta = popoverRevealDelta(popBox, anchor.getBoundingClientRect(), body.getBoundingClientRect());
+      if (delta > 0) body.scrollTop += delta;
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (tail) tail.style.height = "";
+      if (body) body.style.maxHeight = "";
+    };
+  }, [open, topLayerKind, layerCount]);
 
   useEffect(() => {
     if (!open) return;
@@ -121,6 +191,8 @@ export function SurveyBuilder({
     if (dirty && !(await confirm({ title: "Discard this survey?", description: "Your changes have not been saved.", confirmLabel: "Discard", destructive: true }))) return;
     onOpenChange(false);
   };
+  // Refuses while a save is in flight, so the answer lands on the dialog that asked.
+  useLayer(open, { kind: "dialog", close: () => void requestClose(), canClose: () => !busy });
 
   const validate = (): string | null => {
     if (!title.trim()) return "Give the survey a title.";
@@ -174,12 +246,18 @@ export function SurveyBuilder({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) void requestClose(); }}>
-      <DialogContent className="max-h-[90vh] max-w-[960px]">
+      <DialogContent className="max-h-[90vh] max-w-[960px]"
+        onEscapeKeyDown={(e) => {
+          // Outside the shell (no LayerStack) Radix's own Esc runs requestClose.
+          if (!shell) return;
+          e.preventDefault();
+          if (shell.closeTopLayer() === "none") void requestClose();
+        }}>
         <DialogHeader>
           <DialogTitle>{mode === "edit" ? "Edit survey" : "New survey"}</DialogTitle>
           <DialogDescription>Save it as a draft, or publish it to send it now.</DialogDescription>
         </DialogHeader>
-        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto pe-1" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void save("ACTIVE"); } }}>
+        <div ref={bodyRef} className="flex min-h-0 flex-col gap-5 overflow-y-auto pe-1" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void save("ACTIVE"); } }}>
           <label className="flex flex-col gap-1">
             <span className="text-sm font-medium text-ink">Title</span>
             <input autoFocus value={title} maxLength={200} onChange={(e) => touch(setTitle)(e.target.value)} className={input} />
@@ -277,6 +355,9 @@ export function SurveyBuilder({
             </div>
           </div>
           {error ? <p role="alert" className="m-0 text-sm text-danger-text">{error}</p> : null}
+          {/* The reveal tail (see the popover effect above). -mt-5 cancels the
+              column gap, so at rest it adds nothing to the layout. */}
+          <div ref={tailRef} aria-hidden className="-mt-5 shrink-0" />
         </div>
         <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <span className="me-auto text-xs text-ink-2">Publishing sends this to {reachLine} right away.</span>
