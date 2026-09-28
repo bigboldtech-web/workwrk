@@ -63,10 +63,17 @@ export default async function WeeklyReviewPage({
   const rows = await prisma.weeklyReview
     .findMany({
       where: { userId: viewer.userId, periodStart: { gte: oldest } },
-      select: { periodStart: true, status: true },
+      select: { periodStart: true, status: true, managerStatus: true },
     })
     .catch(() => []);
-  const byWeek = new Map(rows.map((r) => [weekKey(r.periodStart), r.status]));
+  const byWeek = new Map(rows.map((r) => [weekKey(r.periodStart), r]));
+  // A week the manager sent back is ACKNOWLEDGED too, but it is not done:
+  // its pill must not wear the same check as an approved week.
+  const isDone = (key: string) => {
+    const r = byWeek.get(key);
+    if (!r || r.managerStatus === "CHANGES_REQUESTED") return false;
+    return r.status === "SUBMITTED" || r.status === "ACKNOWLEDGED";
+  };
 
   const assignments = await prisma.kRAAssignment.findMany({
     where: { userId: viewer.userId, status: "ACTIVE" },
@@ -87,7 +94,7 @@ export default async function WeeklyReviewPage({
       weeks={pills.map((p) => ({
         ...p,
         hasReview: byWeek.has(p.key),
-        submitted: byWeek.get(p.key) === "SUBMITTED" || byWeek.get(p.key) === "ACKNOWLEDGED",
+        submitted: isDone(p.key),
       }))}
       review={review}
       editable={current}
