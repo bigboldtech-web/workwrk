@@ -41,7 +41,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { cycleStatusOf, stepsPassed } from "@/lib/performance/review-cycle";
-import type { AppraisalLetter, CycleData, PanelPrimary } from "./cycle-types";
+import { audiencePhrase, calibrationConfirmText, launchConfirmText, launchNobodyText, peopleCount, type AppraisalLetter, type CycleData, type LaunchPreview, type PanelPrimary } from "./cycle-types";
 import { buildLetterHtml, downloadLetter } from "./appraisal-letter";
 import { MyReviewPanel } from "./my-review-panel";
 import { TeamPanel } from "./team-panel";
@@ -100,6 +100,21 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
     return () => clearTimeout(t);
   }, [load]);
 
+  // Who a Draft cycle would ask, for its runner's note (and refreshed by
+  // every Launch click, which never trusts this copy for its confirm).
+  const [preview, setPreview] = useState<{ data: LaunchPreview | null; error: string | null } | null>(null);
+  const draftRunner = cycle?.status === "DRAFT" && (cycle.viewer?.canManage ?? faces.canManage);
+  const loadPreview = useCallback(async () => {
+    setPreview(null);
+    const r = await apiFetch<LaunchPreview>(`/api/reviews/${cycleId}/launch`, { cache: "no-store" });
+    setPreview(r.ok ? { data: r.data, error: null } : { data: null, error: r.error || "Couldn't count who it covers" });
+  }, [cycleId]);
+  useEffect(() => {
+    if (!draftRunner) return;
+    const t = setTimeout(() => { void loadPreview(); }, 0);
+    return () => clearTimeout(t);
+  }, [draftRunner, loadPreview]);
+
   const setParams = useCallback((patch: Record<string, string | null>, push = false) => {
     const next = new URLSearchParams(sp?.toString() ?? "");
     for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
@@ -133,14 +148,25 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
 
   // ── Actions ───────────────────────────────────────────────────────
   const [launching, setLaunching] = useState(false);
+  // Launch emails every person it covers and cannot be undone, so the
+  // confirm names the count first (GET /launch works it out the same way
+  // the launch does). No count, no confirm: a launch never goes ahead on a
+  // number nobody saw, and the POST refuses if the count moved meanwhile.
   const launch = async () => {
     if (!cycle) return;
-    const ok = await confirm({ title: `Launch ${cycle.name}?`, description: "This creates a review for everyone it covers and emails each of them.", confirmLabel: "Launch", destructive: false });
+    setLaunching(true);
+    const pre = await apiFetch<LaunchPreview>(`/api/reviews/${cycleId}/launch`, { cache: "no-store" });
+    setLaunching(false);
+    if (!pre.ok) { toast(pre.error || "Couldn't count who this cycle covers", { tone: "danger", action: { label: "Try again", onClick: () => void launch() } }); return; }
+    setPreview({ data: pre.data, error: null });
+    const description = launchConfirmText(pre.data);
+    if (!description) { toast(launchNobodyText(pre.data), { tone: "danger" }); return; }
+    const ok = await confirm({ title: `Launch ${cycle.name}?`, description, confirmLabel: "Launch", destructive: false });
     if (!ok) return;
     setLaunching(true);
-    const r = await apiFetch<{ count: number }>(`/api/reviews/${cycleId}/launch`, { method: "POST" });
+    const r = await apiFetch<{ count: number }>(`/api/reviews/${cycleId}/launch`, { method: "POST", json: { expect: pre.data.count } });
     setLaunching(false);
-    if (!r.ok) { toast(r.error || "Couldn't launch the cycle", { tone: "danger" }); return; }
+    if (!r.ok) { toast(r.error || "Couldn't launch the cycle", { tone: "danger" }); void loadPreview(); return; }
     toast(`Launched. ${r.data.count} ${r.data.count === 1 ? "person" : "people"} asked for a review.`);
     router.refresh();
     void load();
@@ -161,7 +187,7 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
   };
   const startCalibration = async () => {
     if (!cycle) return;
-    const ok = await confirm({ title: `Start calibration for ${cycle.name}?`, description: "Managers can no longer change a review they submitted after this. Anyone not done yet can still submit.", confirmLabel: "Start calibration", destructive: false });
+    const ok = await confirm({ title: `Start calibration for ${cycle.name}?`, description: calibrationConfirmText(cycle.stats), confirmLabel: "Start calibration", destructive: false });
     if (!ok) return;
     const r = await apiFetch(`/api/reviews`, { method: "PATCH", json: { id: cycleId, status: "IN_CALIBRATION" } });
     if (!r.ok) { toast(r.error || "Couldn't start calibration", { tone: "danger" }); return; }
@@ -220,10 +246,16 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
 
   const st = cycleStatusOf(status);
   const closed = status === "COMPLETED" || status === "CANCELLED";
-  const passed = stepsPassed(status, cycle.stats);
+  // A subject's own row still Not started once the cycle is past Active is
+  // a self review that closed unsent (self reviews close when calibration
+  // starts): their dots show Self missed, never passed, and the header
+  // stops saying their review is due (My review says why, just below).
+  // (A runner or reviewer who is also a subject reads the cycle's dots.)
+  const above = canManage || v?.inChain || v?.peopleTeamOrAdmin || v?.isReviewer;
+  const selfMissed = !above && !!faces.self && status === "IN_CALIBRATION" && myRow?.status === "PENDING";
+  const passed = selfMissed ? 0 : stepsPassed(status, cycle.stats);
   const daysLeft = Math.ceil((new Date(cycle.endDate).getTime() - now) / 86_400_000);
   const stalled = status === "ACTIVE" && daysLeft < 0;
-  const above = canManage || v?.inChain || v?.peopleTeamOrAdmin || v?.isReviewer;
   const pct = cycle.stats.total ? Math.round((cycle.stats.completed / cycle.stats.total) * 100) : 0;
   const wide = tab === "team" || tab === "calibration";
 
@@ -251,7 +283,7 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
         <div className={`mx-auto flex w-full flex-col gap-4 px-6 pb-10 pt-2 ${wide ? "max-w-[1152px]" : "max-w-[720px]"}`}>
           {/* The meta strip: steps, period, what is left. */}
           <div className="flex min-h-14 flex-wrap items-center gap-x-6 gap-y-2">
-            <ReviewStepDots passed={passed} stalled={stalled} withLabels />
+            <ReviewStepDots passed={passed} stalled={stalled || selfMissed} withLabels />
             <span className="whitespace-nowrap text-sm text-ink-2">
               {formatDate(cycle.startDate, dayPrefs, "date")} to {formatDate(cycle.endDate, dayPrefs, "date")}
               {" · "}
@@ -262,14 +294,28 @@ export default function ReviewDetailClient({ cycleId, faces }: { cycleId: string
                 {cycle.stats.completed} of {cycle.stats.total} reviews complete
                 <span className="h-1 w-[120px] overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} /></span>
               </span>
-            ) : faces.self && !closed ? (
+            ) : faces.self && status === "ACTIVE" ? (
               <span className="text-sm text-ink-2">Your review is due {formatDate(cycle.endDate, dayPrefs, "date")}</span>
             ) : null}
           </div>
 
           {closed && !primary ? <p className="m-0 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">{status === "CANCELLED" ? "This cycle was cancelled. Nothing more is asked of anyone." : "This cycle is closed. Scores and outcomes are final."}</p> : null}
           {status === "DRAFT" && canManage ? (
-            <p className="m-0 rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">Nobody has been added yet. Launching the cycle creates a review for everyone it covers ({cycle.createdBy && !v?.peopleTeamOrAdmin ? "the people who report to you" : "as set when it was created"}).</p>
+            // Who it covers, from the cycle's own audience and the same count
+            // the launch makes (the old note told a manager "the people who
+            // report to you" even for a cycle naming one person).
+            <p className="m-0 rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">
+              Nobody has been added yet.{" "}
+              {preview?.data ? (
+                preview.data.count > 0
+                  ? `Launching the cycle creates a review for ${peopleCount(preview.data.count)} (${audiencePhrase(preview.data)}).`
+                  : launchNobodyText(preview.data)
+              ) : preview?.error ? (
+                <>Couldn&apos;t count who it covers. <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => void loadPreview()}>Try again</button></>
+              ) : (
+                "Launching the cycle creates a review for everyone it covers."
+              )}
+            </p>
           ) : null}
 
           {tabs.length > 1 ? (

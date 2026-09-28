@@ -41,6 +41,7 @@ import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { surveyStatusOf } from "@/lib/performance/survey";
 import { SurveyBuilder, type EditableSurvey } from "./_components/survey-builder";
 import { ChangeCloseDateDialog } from "./_components/change-close-date-dialog";
+import { audienceInSentence } from "../reviews/[id]/cycle-types";
 
 type Row = {
   id: string;
@@ -172,7 +173,7 @@ export default function SurveysClient({ canCreate }: { canCreate: boolean }) {
     return true;
   };
   const launch = async (row: Row) => {
-    if (!(await confirm({ title: `Send ${row.title} now?`, description: `It goes to ${row.audience?.toLowerCase() ?? "its audience"}${row.audienceSize != null ? ` (${row.audienceSize} ${row.audienceSize === 1 ? "person" : "people"})` : ""}, and each of them is told.`, confirmLabel: "Launch", destructive: false }))) return;
+    if (!(await confirm({ title: `Send ${row.title} now?`, description: `It goes to ${audienceInSentence(row.audience) ?? "its audience"}${row.audienceSize != null ? ` (${row.audienceSize} ${row.audienceSize === 1 ? "person" : "people"})` : ""}, and each of them is told.`, confirmLabel: "Launch", destructive: false }))) return;
     await patch(row, { status: "ACTIVE" }, "Survey launched");
   };
   const close = async (row: Row) => {

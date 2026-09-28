@@ -38,6 +38,7 @@ import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { surveyMinutes, surveyStatusOf, type SurveyQuestion } from "@/lib/performance/survey";
 import { SurveyBuilder, type EditableSurvey } from "../_components/survey-builder";
 import { ChangeCloseDateDialog } from "../_components/change-close-date-dialog";
+import { audienceInSentence } from "../../reviews/[id]/cycle-types";
 
 type Detail = {
   survey: {
@@ -186,7 +187,7 @@ export default function SurveyDetailClient({ id }: { id: string }) {
     : null;
   const more = v.canManage ? [
     { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/surveys/${id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
-    ...(s.status === "DRAFT" ? [{ label: "Edit", icon: Pencil, onClick: () => setBuilder(true) }, { label: "Launch", icon: Play, onClick: () => { void confirm({ title: `Send ${s.title} now?`, description: `It goes to ${s.audience?.toLowerCase() ?? "its audience"}, and each of them is told.`, confirmLabel: "Launch", destructive: false }).then((ok) => { if (ok) void patch({ status: "ACTIVE" }, "Survey launched"); }); } }] : []),
+    ...(s.status === "DRAFT" ? [{ label: "Edit", icon: Pencil, onClick: () => setBuilder(true) }, { label: "Launch", icon: Play, onClick: () => { void confirm({ title: `Send ${s.title} now?`, description: `It goes to ${audienceInSentence(s.audience) ?? "its audience"}, and each of them is told.`, confirmLabel: "Launch", destructive: false }).then((ok) => { if (ok) void patch({ status: "ACTIVE" }, "Survey launched"); }); } }] : []),
     ...(s.status === "ACTIVE" ? [
       { label: "Change close date", icon: CalendarClock, onClick: () => setCloseDate(true) },
       { label: "Send a reminder", icon: Bell, onClick: () => void remind() },

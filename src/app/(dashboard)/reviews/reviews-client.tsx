@@ -47,6 +47,7 @@ import { formatDate } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { CYCLE_STATUS, CYCLE_TYPES, cycleStatusOf, cycleTypeLabel, stepsPassed } from "@/lib/performance/review-cycle";
 import { NewReviewCycleDialog } from "./new-review-dialog";
+import { calibrationConfirmText, launchConfirmText, launchNobodyText, type LaunchPreview } from "./[id]/cycle-types";
 
 type CycleRow = {
   id: string;
@@ -200,16 +201,24 @@ export default function ReviewsClient() {
   // ── Row actions ───────────────────────────────────────────────────
   const [menu, setMenu] = useState<{ row: CycleRow; anchor: RefObject<HTMLElement | null> } | null>(null);
   const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  // Launch emails every person it covers and cannot be undone: the confirm
+  // names the count the launch will use (GET /launch, the same rule, and a
+  // manager's cycle clipped to their line as the launch clips it), never the
+  // raw Covers label. No count, no confirm; the POST refuses if it moved.
   const launch = async (c: CycleRow) => {
-    const ok = await confirm({ title: `Launch ${c.name}?`, description: `This creates a review for everyone it covers (${c.covers.toLowerCase()}) and emails each of them.`, confirmLabel: "Launch", destructive: false });
+    const pre = await apiFetch<LaunchPreview>(`/api/reviews/${c.id}/launch`, { cache: "no-store" });
+    if (!pre.ok) { toast(pre.error || "Couldn't count who this cycle covers", { tone: "danger", action: { label: "Try again", onClick: () => void launch(c) } }); return; }
+    const description = launchConfirmText(pre.data);
+    if (!description) { toast(launchNobodyText(pre.data), { tone: "danger" }); return; }
+    const ok = await confirm({ title: `Launch ${c.name}?`, description, confirmLabel: "Launch", destructive: false });
     if (!ok) return;
-    const r = await apiFetch<{ count: number }>(`/api/reviews/${c.id}/launch`, { method: "POST" });
+    const r = await apiFetch<{ count: number }>(`/api/reviews/${c.id}/launch`, { method: "POST", json: { expect: pre.data.count } });
     if (!r.ok) { toast(r.error || "Couldn't launch the cycle", { tone: "danger" }); return; }
     toast(`Launched. ${people(r.data.count)} asked for a review.`);
     void load();
   };
   const startCalibration = async (c: CycleRow) => {
-    const ok = await confirm({ title: `Start calibration for ${c.name}?`, description: "Managers can no longer change a review they submitted after this. Anyone not done yet can still submit.", confirmLabel: "Start calibration", destructive: false });
+    const ok = await confirm({ title: `Start calibration for ${c.name}?`, description: calibrationConfirmText(c.counts), confirmLabel: "Start calibration", destructive: false });
     if (!ok) return;
     const r = await apiFetch(`/api/reviews`, { method: "PATCH", json: { id: c.id, status: "IN_CALIBRATION" } });
     if (!r.ok) { toast(r.error || "Couldn't start calibration", { tone: "danger" }); return; }

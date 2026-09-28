@@ -7,35 +7,35 @@ import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
 import { formatDate } from "@/lib/format/date";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
+type Session = NonNullable<Awaited<ReturnType<typeof getSessionOrFail>>["session"]>;
 
-  const { id } = await params;
+/**
+ * Who a launch of this cycle would ask, worked out ONE way for the preview
+ * (GET) and the launch itself (POST), so the count a confirm names is the
+ * count the launch creates reviews for and emails. Every refusal the launch
+ * makes is made here too, so the preview fails before a confirm ever opens.
+ */
+async function launchPlan(session: Session, id: string) {
   const orgId = getOrgId(session);
-
   const cycle = await prisma.reviewCycle.findFirst({
     where: { id, organizationId: orgId },
     include: { reviews: true },
   });
-  if (!cycle) return jsonError("Review cycle not found", 404);
+  if (!cycle) return { error: jsonError("Review cycle not found", 404) } as const;
   // Phase 6: the People team and Admin, or the manager who started it.
   if (!(await canManageReviewCycle(session, cycle))) {
-    return jsonError("Only the People team, an Admin or the manager who started this cycle can launch it", 403);
+    return { error: jsonError("Only the People team, an Admin or the manager who started this cycle can launch it", 403) } as const;
   }
 
   // Launchable states: DRAFT (the normal path) and ACTIVE-with-no-reviews
   // (heals legacy cycles whose status was flipped before this route had a
   // UI caller). Never a cycle that's calibrating, finished or cancelled.
   if (["IN_CALIBRATION", "COMPLETED", "CANCELLED"].includes(cycle.status)) {
-    return jsonError(`Cannot launch a ${cycle.status.replace(/_/g, " ").toLowerCase()} cycle`);
+    return { error: jsonError(`Cannot launch a ${cycle.status.replace(/_/g, " ").toLowerCase()} cycle`) } as const;
   }
 
   if (cycle.reviews.length > 0) {
-    return jsonError("Reviews already generated for this cycle. Delete existing reviews first.");
+    return { error: jsonError("Reviews already generated for this cycle. Delete existing reviews first.") } as const;
   }
 
   // The active people the cycle covers (review-cycle-rules.ts): the cycle's
@@ -57,9 +57,64 @@ export async function POST(
     }),
   );
   const employees = people.filter((p) => covered.has(p.id));
+  return { cycle, employees, peopleOrAdmin } as const;
+}
+
+/**
+ * The launch preview (spec-teams-performance: "Launch {name}? This creates
+ * a review for 24 people and emails each of them."). Read only: nothing is
+ * created, nobody is told. `clipped` is true for a manager's launch, whose
+ * cycle only ever reaches their own reporting line; `covers` names the
+ * departments of a Departments cycle as they are spelled.
+ */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  const { id } = await params;
+  const plan = await launchPlan(session, id);
+  if ("error" in plan) return plan.error;
+  const { cycle, employees, peopleOrAdmin } = plan;
+  const covers =
+    cycle.audienceType === "DEPARTMENTS"
+      ? (await prisma.department.findMany({ where: { id: { in: cycle.departmentIds }, organizationId: getOrgId(session) }, select: { name: true } })).map((d) => d.name).join(", ") || null
+      : null;
+  return jsonSuccess({
+    count: employees.length,
+    audienceType: cycle.audienceType,
+    named: cycle.audienceType === "USERS" ? cycle.userIds.length : null,
+    covers,
+    clipped: !peopleOrAdmin,
+  });
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+
+  const { id } = await params;
+  const orgId = getOrgId(session);
+
+  const plan = await launchPlan(session, id);
+  if ("error" in plan) return plan.error;
+  const { cycle, employees } = plan;
 
   if (employees.length === 0) {
     return jsonError("No active employees found");
+  }
+
+  // The confirm named a count (GET above). If who the cycle covers changed
+  // between that preview and this click (someone joined, left or moved
+  // teams), refuse rather than email a number of people nobody agreed to.
+  // A caller that sends no `expect` (older clients) launches as before.
+  const body = await req.json().catch(() => null) as { expect?: unknown } | null;
+  if (typeof body?.expect === "number" && body.expect !== employees.length) {
+    return jsonError(`Who this cycle covers changed while the confirm was open: it now covers ${employees.length} ${employees.length === 1 ? "person" : "people"}. Nothing was sent. Launch again to see the new count.`, 409);
   }
 
   // Create a Review for each employee
