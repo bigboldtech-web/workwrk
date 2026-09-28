@@ -16,8 +16,13 @@ interface Effort {
   tasksDone: number;
   tasksOpen: number;
   lastActivityAt: string | null;
+  // Newest of task activity and a target check-in, the goals list's "Last
+  // moved". Absent from an older response, so the card falls back to tasks.
+  lastMovedAt?: string | null;
   contributors: { id: string; name: string; avatar: string | null; hours: number; tasks: number }[];
 }
+
+const lastMoved = (e: Effort) => e.lastMovedAt ?? e.lastActivityAt;
 
 export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: () => void }) {
   const fmt = useFormat();
@@ -56,7 +61,7 @@ export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: 
               ["Hours logged", `${data.totalHours}h`],
               ["Tasks done", String(data.tasksDone)],
               ["In progress", String(data.tasksOpen)],
-              ["Last moved", data.lastActivityAt ? fmt.relative(data.lastActivityAt) : "Never"],
+              ["Last moved", lastMoved(data) ? fmt.relative(lastMoved(data)!) : "Never"],
             ].map(([k, v]) => (
               <div key={k} className="flex flex-col gap-0.5">
                 <dt className="text-xs font-medium text-ink-2">{k}</dt>

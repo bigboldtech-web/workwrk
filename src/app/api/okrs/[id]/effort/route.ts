@@ -3,6 +3,12 @@
 // last moved, from every piece of work linked to the goal (KRAs, Lists,
 // Spaces; src/lib/goal-effort.ts). Contributors carry their avatar.
 // Visibility mirrors the goal itself (canSeeGoal). Reads only.
+//
+// lastMovedAt is the card's "Last moved": the newest of task activity and a
+// target check-in, the same definition the goals list (GET /api/okrs) uses,
+// so one goal never reads "9h ago" on the list and "Never" on its own page.
+// lastActivityAt stays task-only (computeGoalEffort is shared with the
+// assess route, whose effort must not count check-ins).
 
 import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
@@ -24,5 +30,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // KRA tasks + linked-board/space item time, the join point between a goal
   // and the real work moving it.
   // Under the viewer's access: a List they cannot open never counts here.
-  return jsonSuccess(await computeGoalEffort(orgId, id, await viewerFromSession()));
+  const [effort, lastCheckIn] = await Promise.all([
+    computeGoalEffort(orgId, id, await viewerFromSession()),
+    // The goal's newest target check-in (the list's lastByKr, for one goal).
+    prisma.kRCheckIn.aggregate({ where: { keyResult: { okrId: id } }, _max: { createdAt: true } }),
+  ]);
+  const lastCheckInAt = lastCheckIn._max.createdAt ?? null;
+  const lastMovedAt = [effort.lastActivityAt, lastCheckInAt]
+    .reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null);
+  return jsonSuccess({ ...effort, lastCheckInAt, lastMovedAt });
 }
