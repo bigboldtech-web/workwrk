@@ -121,17 +121,24 @@ export function visibleTeamsRows(v: TeamsViewer): TeamsRow[] {
 const PEOPLE_STATIC = new Set(["me", "departments", "roles", "skills"]);
 
 /**
- * Where a person record was opened from, when that is not the Directory:
- * `?from=team` (a My team row, its "+N" and its row menu) keeps My team lit
- * and names it in the breadcrumbs, because My team is still the page under
- * the drawer. Anything else is the Directory.
+ * Where a person record was opened from, when that is not the Directory. The
+ * person opens as a drawer over the page they were on, so that page stays
+ * lit and the breadcrumbs name it: `?from=team` (a My team row, its "+N" and
+ * its row menu), `?from=org` (an Org chart row) and `?from=skills` (a
+ * Skills holder). Anything else, or no `from`, is the Directory.
  */
-export const PERSON_ORIGINS = { team: { label: "My team", href: "/team" } } as const;
+export const PERSON_ORIGINS = {
+  team: { label: "My team", href: "/team" },
+  org: { label: "Org chart", href: "/organization" },
+  skills: { label: "Skills", href: "/people/skills" },
+} as const;
 export type PersonOrigin = { label: string; href: string };
+const DIRECTORY_ORIGIN: PersonOrigin = { label: "Directory", href: "/people" };
 export function personOrigin(search: string | URLSearchParams | null | undefined): PersonOrigin {
   const sp = typeof search === "string" || search == null ? new URLSearchParams(search ?? "") : search;
   const from = sp.get("from");
-  return from === "team" ? PERSON_ORIGINS.team : { label: "Directory", href: "/people" };
+  // Own keys only, so `?from=constructor` or `?from=__proto__` is the Directory.
+  return from && Object.hasOwn(PERSON_ORIGINS, from) ? PERSON_ORIGINS[from as keyof typeof PERSON_ORIGINS] : DIRECTORY_ORIGIN;
 }
 
 export function teamsActivePath(pathname: string, selfId: string | null | undefined, search = ""): string {

@@ -34,8 +34,52 @@ export interface OrgTreeDisplay { showTitle: boolean; showDepartment: boolean }
 
 type RowError = Record<string, string>;
 
+/**
+ * Everyone below each person, over solid AND dotted lines, any depth: the
+ * people the Dotted lines picker must leave out. A dotted line to your own
+ * report puts you in their report tree, which is the chain-view read reach,
+ * so the report could read your people data (the server refuses it with
+ * dotted_line_cycle too; this keeps them out of the list in the first
+ * place). Built once per chart; each lookup walks only that person's
+ * subtree, and a loop in the data never hangs it.
+ */
+/**
+ * The picker sends `exclude` in the /api/people/pick query string, so a
+ * chart root's whole org would outgrow a URL. Nearest first (the walk is
+ * breadth first), so direct reports always make the cut, and anyone past
+ * the cap is still refused by the server's dotted_line_cycle check, which
+ * shows under the row like any refused change.
+ */
+export const DOTTED_EXCLUDE_CAP = 200;
+
+export function reportTreeOf(people: Iterable<Pick<ChartPerson, "id" | "managerId" | "dottedManagerIds">>): (id: string) => string[] {
+  const under = new Map<string, string[]>();
+  const link = (managerId: string | null, userId: string) => {
+    if (!managerId || managerId === userId) return;
+    const list = under.get(managerId) ?? [];
+    list.push(userId);
+    under.set(managerId, list);
+  };
+  for (const p of people) {
+    link(p.managerId, p.id);
+    for (const d of p.dottedManagerIds) link(d, p.id);
+  }
+  return (id) => {
+    const below = new Set<string>();
+    const queue = [id];
+    while (queue.length) {
+      for (const next of under.get(queue.shift()!) ?? []) {
+        if (next === id || below.has(next)) continue;
+        below.add(next);
+        queue.push(next);
+      }
+    }
+    return [...below];
+  };
+}
+
 function Row({
-  node, depth, open, toggle, editable, display, byId, error, onSaved, onError, focused, flash,
+  node, depth, open, toggle, editable, display, byId, below, error, onSaved, onError, focused, flash,
 }: {
   node: OrgNode<ChartPerson>;
   depth: number;
@@ -44,6 +88,8 @@ function Row({
   editable: boolean;
   display: OrgTreeDisplay;
   byId: Map<string, ChartPerson>;
+  /** Everyone below a person (solid and dotted), for the Dotted lines picker. */
+  below: (id: string) => string[];
   error?: string;
   onSaved: () => void;
   onError: (id: string, msg: string | null) => void;
@@ -114,7 +160,7 @@ function Row({
         )}
         <PersonAvatar person={p} size={28} />
         <span className="min-w-0 flex-1">
-          <Link href={`/people/${p.id}`} tabIndex={-1} className="block truncate text-row font-medium text-ink hover:underline">{p.name}</Link>
+          <Link href={`/people/${p.id}?from=org`} tabIndex={-1} className="block truncate text-row font-medium text-ink hover:underline">{p.name}</Link>
           {meta ? <span className="block truncate text-sm text-ink-2">{meta}</span> : null}
         </span>
         {editable ? (
@@ -135,7 +181,7 @@ function Row({
               ariaLabel={`${p.name} dotted lines`}
               multiple
               managersOnly
-              exclude={[p.id, ...(p.managerId ? [p.managerId] : [])]}
+              exclude={[p.id, ...(p.managerId ? [p.managerId] : []), ...below(p.id).slice(0, DOTTED_EXCLUDE_CAP)]}
               value={p.dottedManagerIds}
               people={p.dottedManagerIds.map((id) => byId.get(id)).filter((x): x is ChartPerson => !!x).map(toPick)}
               placeholder="Dotted lines"
@@ -172,6 +218,7 @@ export function OrgTree({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const below = useMemo(() => reportTreeOf(byId.values()), [byId]);
 
   useEffect(() => {
     if (expandAll === 0) return;
@@ -252,6 +299,7 @@ export function OrgTree({
             editable={editable}
             display={display}
             byId={byId}
+            below={below}
             error={errors[v.node.person.id]}
             onSaved={onSaved}
             onError={setError}
@@ -277,6 +325,7 @@ export function OrgTree({
               editable={editable}
               display={display}
               byId={byId}
+              below={below}
               error={errors[p.id]}
               onSaved={onSaved}
               onError={setError}

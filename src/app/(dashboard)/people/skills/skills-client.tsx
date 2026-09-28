@@ -246,7 +246,7 @@ function SkillDrawer({ skill, me, heldByMe, onClose, onAddMine, onChanged }: {
               <li key={p.skillId} className="flex min-h-11 items-center gap-3 px-3">
                 <Avatar person={{ id: p.userId, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar }} size={28} />
                 <span className="min-w-0 flex-1">
-                  <Link href={`/people/${p.userId}?tab=skills`} className="block truncate text-row text-ink hover:underline">{personName(p)}</Link>
+                  <Link href={`/people/${p.userId}?tab=skills&from=skills`} className="block truncate text-row text-ink hover:underline">{personName(p)}</Link>
                   {p.department ? <span className="block truncate text-xs text-ink-2">{p.department.name}</span> : null}
                 </span>
                 {self || mgr ? <span className="shrink-0 text-sm tabular-nums text-ink-2">{[self ? `Self ${self}` : null, mgr ? `Manager ${mgr}` : null].filter(Boolean).join(" · ")}</span> : null}

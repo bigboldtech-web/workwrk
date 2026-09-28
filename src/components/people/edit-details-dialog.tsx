@@ -8,7 +8,7 @@
 // refused field shows the server's reason under it; the footer has only
 // Close. Org role, Agent and access are the Members drawer's.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,8 @@ export interface EditablePerson {
   office: { id: string; name: string } | null;
   manager: PickPerson | null;
   dottedManagers: PickPerson[];
+  /** The record's direct reports: left out of the Dotted-line managers picker at once, before the full tree loads. */
+  directReports?: Array<{ id: string }>;
   weeklyCapacityHours?: number | null;
   workSchedule?: { workdays: number[]; hoursPerDay: number } | null;
   orgSchedule?: { workdays: number[]; hoursPerDay: number } | null;
@@ -41,8 +43,63 @@ export interface EditablePerson {
 
 type Opt = { id: string; label: string };
 type FieldState = "idle" | "saving" | "saved" | "retrying" | { error: string };
+type Side = "bottom" | "top";
 
-function OptionField({ value, options, onPick, ariaLabel, noneLabel, footer }: { value: string | null; options: Opt[]; onPick: (id: string | null) => void; ariaLabel: string; noneLabel: string; footer?: ReactNode }) {
+/**
+ * The pickers here are absolute children of their trigger (they must stay
+ * inside the dialog's focus trap, no body portal), so the dialog's own
+ * scroll box clips whatever hangs past its edge. FlipSlot measures the
+ * trigger against the dialog the moment it is pressed: when the list does
+ * not fit below but does fit above, it opens upward. Otherwise it opens
+ * downward and the dialog scrolls it into view, because a list hanging past
+ * the bottom can be scrolled to and one past the top never can.
+ * PICKER_ROOM is the Picker's tallest: the search row, the 280 list, padding.
+ */
+const PICKER_ROOM = 340;
+/** The same cap as the org chart's DOTTED_EXCLUDE_CAP (org-tree.tsx), for the same reason. */
+const DOTTED_EXCLUDE_CAP = 200;
+function FlipSlot({ children }: { children: (side: Side) => ReactNode }) {
+  const [side, setSide] = useState<Side>("bottom");
+  const measure = (el: HTMLElement) => {
+    const box = el.closest('[role="dialog"]')?.getBoundingClientRect();
+    if (!box) return;
+    const r = el.getBoundingClientRect();
+    const below = box.bottom - r.bottom;
+    const above = r.top - box.top;
+    if (below < PICKER_ROOM && above >= PICKER_ROOM) { setSide("top"); return; }
+    setSide("bottom");
+    if (below < PICKER_ROOM) {
+      // After the click has opened it, bring the whole list into view, and
+      // again as it grows: the people list arrives a moment after opening.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const pop = el.querySelector('[role="listbox"]')?.parentElement;
+        if (!pop) return;
+        const reveal = () => pop.scrollIntoView({ block: "nearest" });
+        reveal();
+        if (typeof ResizeObserver === "undefined") return;
+        const watch = new ResizeObserver(reveal);
+        watch.observe(pop);
+        setTimeout(() => watch.disconnect(), 1500);
+      }));
+    }
+  };
+  // Only a press on the closed trigger measures: a click on an option or a
+  // space typed in the search box must never move a list that is open.
+  const opening = (e: { target: EventTarget; currentTarget: HTMLElement }) => {
+    const trigger = (e.target as HTMLElement).closest?.('[aria-haspopup="listbox"]');
+    if (trigger && e.currentTarget.contains(trigger) && trigger.getAttribute("aria-expanded") !== "true") measure(e.currentTarget);
+  };
+  return (
+    <div
+      onPointerDownCapture={opening}
+      onKeyDownCapture={(e: KeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter" || e.key === " ") opening(e); }}
+    >
+      {children(side)}
+    </div>
+  );
+}
+
+function OptionField({ value, options, onPick, ariaLabel, noneLabel, footer, side = "bottom" }: { value: string | null; options: Opt[]; onPick: (id: string | null) => void; ariaLabel: string; noneLabel: string; footer?: ReactNode; side?: Side }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.id === value);
   return (
@@ -61,7 +118,8 @@ function OptionField({ value, options, onPick, ariaLabel, noneLabel, footer }: {
         sections={[{ options: [{ value: "__none__", label: noneLabel }, ...options.map((o) => ({ value: o.id, label: o.label }))] }]}
         onSelect={(v) => { setOpen(false); onPick(v === "__none__" ? null : v); }}
         footer={footer}
-        className="absolute start-0 top-10 z-50"
+        side={side}
+        className={side === "top" ? "absolute start-0 z-50" : "absolute start-0 top-10 z-50"}
       />
     </div>
   );
@@ -165,6 +223,11 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
   const [officeId, setOfficeId] = useState(person.office?.id ?? null);
   const [manager, setManager] = useState<PickPerson | null>(person.manager);
   const [dotted, setDotted] = useState<PickPerson[]>(person.dottedManagers);
+  // Everyone below this person (solid and dotted, any depth), from the
+  // dotted-lines route. None of them may be a dotted-line manager: that would
+  // put the person in their own report's tree and let the report read their
+  // people data. Direct reports are known at once; the full tree follows.
+  const [below, setBelow] = useState<string[]>(() => (person.directReports ?? []).map((r) => r.id));
   const [capacity, setCapacity] = useState(person.weeklyCapacityHours == null ? "" : String(person.weeklyCapacityHours));
   const [dob, setDob] = useState(person.dateOfBirth && !person.dateOfBirth.startsWith("--") ? person.dateOfBirth : "");
   const [firstName, setFirstName] = useState(person.firstName);
@@ -176,6 +239,15 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
     Object.fromEntries((person.profileFields ?? []).map((f) => [f.key, f.value ?? ""])),
   );
   const [status, setStatus] = useState(person.status);
+
+  useEffect(() => {
+    if (!person.access.dottedLines) return;
+    let live = true;
+    void apiFetch<{ below?: string[] }>(`/api/users/${person.id}/dotted-lines`, { cache: "no-store" }).then((r) => {
+      if (live && r.ok && Array.isArray(r.data.below)) setBelow((cur) => [...new Set([...cur, ...r.data.below!])]);
+    });
+    return () => { live = false; };
+  }, [person.id, person.access.dottedLines]);
 
   useEffect(() => {
     const load = async () => {
@@ -230,7 +302,9 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
           <DialogTitle>Edit details</DialogTitle>
           <DialogDescription>Each change saves as you make it.</DialogDescription>
         </DialogHeader>
-        <div className="flex max-h-[62vh] flex-col overflow-y-auto">
+        {/* No scroll box of its own: DialogContent already scrolls (85vh), and
+            a second, shorter one clipped every picker below the fold. */}
+        <div className="flex flex-col">
           {personal ? (
             <>
               {can("firstName") ? (
@@ -252,22 +326,24 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
           ) : null}
           {can("roleId") ? (
             <Row label="Job title" state={state.roleId ?? "idle"}>
-              <OptionField ariaLabel="Job title" noneLabel="No job title" value={roleId} options={roles} onPick={(v) => { setRoleId(v); void save("roleId", { roleId: v }); }} />
+              <FlipSlot>{(side) => <OptionField side={side} ariaLabel="Job title" noneLabel="No job title" value={roleId} options={roles} onPick={(v) => { setRoleId(v); void save("roleId", { roleId: v }); }} />}</FlipSlot>
             </Row>
           ) : null}
           {can("departmentId") ? (
             <Row label="Department" state={state.departmentId ?? "idle"}>
-              <OptionField ariaLabel="Department" noneLabel="No department" value={deptId} options={depts} onPick={(v) => { setDeptId(v); void save("departmentId", { departmentId: v }); }} />
+              <FlipSlot>{(side) => <OptionField side={side} ariaLabel="Department" noneLabel="No department" value={deptId} options={depts} onPick={(v) => { setDeptId(v); void save("departmentId", { departmentId: v }); }} />}</FlipSlot>
             </Row>
           ) : null}
           {can("officeId") ? (
             <Row label="Office" state={state.officeId ?? "idle"}>
-              <OptionField ariaLabel="Office" noneLabel="No office" value={officeId} options={offices} onPick={(v) => { setOfficeId(v); void save("officeId", { officeId: v }); }} />
+              <FlipSlot>{(side) => <OptionField side={side} ariaLabel="Office" noneLabel="No office" value={officeId} options={offices} onPick={(v) => { setOfficeId(v); void save("officeId", { officeId: v }); }} />}</FlipSlot>
             </Row>
           ) : null}
           {can("managerId") ? (
             <Row label="Reports to" state={state.managerId ?? "idle"}>
+              <FlipSlot>{(side) => (
               <PeoplePickerField
+                side={side}
                 ariaLabel="Reports to"
                 managersOnly
                 exclude={[person.id]}
@@ -281,15 +357,21 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                   void save("managerId", { managerId: next?.id ?? null }).then((ok) => { if (!ok) setManager(prev); });
                 }}
               />
+              )}</FlipSlot>
             </Row>
           ) : null}
           {person.access.dottedLines ? (
             <Row label="Dotted-line managers" state={state.dotted ?? "idle"}>
+              <FlipSlot>{(side) => (
               <PeoplePickerField
+                side={side}
                 ariaLabel="Dotted-line managers"
                 multiple
                 managersOnly
-                exclude={[person.id, ...(manager ? [manager.id] : [])]}
+                // The cap keeps the /api/people/pick query string short for
+                // someone with a whole org below them; the server's
+                // dotted_line_cycle check still refuses anyone past it.
+                exclude={[person.id, ...(manager ? [manager.id] : []), ...below.slice(0, DOTTED_EXCLUDE_CAP)]}
                 value={dotted.map((d) => d.id)}
                 people={dotted}
                 placeholder="None"
@@ -299,6 +381,7 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                   void save("dotted", { managerIds: ids }, `/api/users/${person.id}/dotted-lines`, "PUT").then((ok) => { if (!ok) setDotted(prev); });
                 }}
               />
+              )}</FlipSlot>
             </Row>
           ) : null}
           {can("weeklyCapacityHours") ? (

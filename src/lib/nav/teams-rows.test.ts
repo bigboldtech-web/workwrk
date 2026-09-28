@@ -104,6 +104,23 @@ describe("the active row follows the URL", () => {
     expect(personOrigin("")).toEqual({ label: "Directory", href: "/people" });
   });
 
+  it("a record opened from the Org chart or a Skills holder keeps that page lit and named", () => {
+    // The drawer opens over the page the person was on, so the sidebar pill
+    // and both breadcrumbs name that page, not the Directory.
+    expect(teamsActiveHref("/people/u2", "from=org", "u1")).toBe("/organization");
+    expect(personOrigin("from=org")).toEqual({ label: "Org chart", href: "/organization" });
+    expect(teamsActiveHref("/people/u2", "tab=skills&from=skills", "u1")).toBe("/people/skills");
+    expect(personOrigin(new URLSearchParams("tab=skills&from=skills"))).toEqual({ label: "Skills", href: "/people/skills" });
+    // Opening yourself is still My profile, from anywhere.
+    expect(teamsActiveHref("/people/u1", "from=org", "u1")).toBe("/people/me");
+  });
+
+  it("an unknown or inherited `from` is the Directory", () => {
+    for (const from of ["constructor", "__proto__", "toString", "ORG", ""]) {
+      expect(personOrigin(`from=${from}`), from).toEqual({ label: "Directory", href: "/people" });
+    }
+  });
+
   it("the static /people children are never taken for an id", () => {
     expect(teamsActivePath("/people/departments", "u1")).toBe("/people/departments");
     expect(teamsActiveHref("/people/roles/r1", "", "u1")).toBe("/people/roles");
