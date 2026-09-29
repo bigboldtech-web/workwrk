@@ -17,7 +17,7 @@ export function ChangePasswordDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onChanged: () => void;
+  onChanged: (tokenVersionProof: string | null) => void;
 }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -53,7 +53,7 @@ export function ChangePasswordDialog({
       reset();
       setSubmitting(false);
       onOpenChange(false);
-      onChanged();
+      onChanged(typeof body?.tokenVersionProof === "string" ? body.tokenVersionProof : null);
     } catch {
       setErr("Network error. Try again.");
       setSubmitting(false);

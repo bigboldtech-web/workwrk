@@ -20,9 +20,11 @@ separate deployments.
 - `(marketing)` / `(public)` groups → the public site (`/`, `/features`, `/pricing`, `/demo`, `/contact`).
 - `(dashboard)` group → the product (`/today`, `/spaces`, …).
 - **`(admin)/admin`** → a real cross-tenant console: `Companies` (all orgs),
-  `Analytics`, `AppSumo Codes`. `/api/admin/stats` already computes **MRR,
-  12-month MRR history, signup funnel, cohort churn** from a `Subscription`
-  model. This IS the "how much did we make" panel.
+  `Analytics`, `AppSumo Codes`. `/api/admin/overview` and `/api/admin/analytics` (which replaced
+  `/api/admin/stats` in Phase 9) report revenue from Stripe, one line per
+  currency, plus growth, the signup funnel and retention. The old MRR was a
+  hard-coded price list times companies per plan; see
+  `docs/plans/ui-refresh/staff-console-numbers.md`.
 - **`src/proxy.ts`** (Next 16's renamed middleware) already implements the
   **admin host split**: when `ADMIN_HOST` is set, only `/admin`, `/api/admin`,
   `/api/auth`, `/login` pass on that host; everything else redirects to
@@ -84,8 +86,8 @@ match.
 
 ## Risks
 - The admin API routes may currently rely only on the client-side layout gate —
-  must be independently gated server-side (anyone could `curl /api/admin/stats`
-  today if not). Audit in W-1.
+  must be independently gated server-side (anyone could `curl /api/admin/overview`
+  if not; every handler now gates, asserted by a test). Audit in W-1.
 - Cookie-domain change can log everyone out once; ship during a low-traffic
   window.
 - Edge runtime in `proxy.ts` can't use Prisma — keep all DB-backed decisions

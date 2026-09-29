@@ -12,6 +12,10 @@
 //     the pollers stop
 //   - a network failure dispatches `workwrk:offline`; the next success after it
 //     dispatches `workwrk:online`
+//   - a 403 from the Staff console's gate (body code `not_staff`) marks staff
+//     access removed and dispatches `workwrk:staff-access-removed`, once; every
+//     later /api/admin/* call then short-circuits to the same 403, so the
+//     console's pollers stop and the console shell takes over the screen
 //   - the body is parsed as JSON when it is JSON, else kept as text; a 401 body
 //     is never assumed to be JSON (one route answers with plain text)
 //
@@ -35,6 +39,8 @@ export type ApiFail = {
   offline?: boolean;
   /** zod issues or any structured detail the route returned. */
   issues?: unknown;
+  /** A machine-readable reason the route named (`{ code }` in its JSON body). */
+  code?: string;
 };
 export type ApiResult<T> = ApiOk<T> | ApiFail;
 
@@ -49,14 +55,46 @@ export interface ApiFetchInit extends Omit<RequestInit, "body"> {
 export const SESSION_EXPIRED_ERROR = "Your session has expired";
 export const OFFLINE_ERROR = "You're offline";
 
+// ── Staff console: access removed mid-session ─────────────────────
+//
+// The console's server layout refuses a non-staff person, but only on a full
+// render: a soft navigation keeps the layout mounted, so someone removed from
+// the staff list while the console is open kept the whole frame and every
+// page read "Could not load... Retry", a Retry that could never succeed. The
+// gate (requirePlatformAdminApi) now names its 403 with this code, and the
+// first one seen here tells the console shell, which replaces the screen with
+// the staff denial.
+
+/** The `code` requirePlatformAdminApi puts on its 403 body. */
+export const NOT_STAFF_CODE = "not_staff";
+export const STAFF_ACCESS_REMOVED_EVENT = "workwrk:staff-access-removed";
+
+let staffAccessRemoved = false;
+
+/** True once a /api/admin/* call has answered "not on the staff list" this page load. */
+export function isStaffAccessRemoved(): boolean {
+  return staffAccessRemoved;
+}
+
+/** Test seam. */
+export function resetStaffAccessRemoved(): void {
+  staffAccessRemoved = false;
+}
+
+/** True when a failed result is the Staff console gate's refusal. */
+export function isStaffDenial(result: { ok: boolean; status: number; code?: string }): boolean {
+  return !result.ok && result.status === 403 && result.code === NOT_STAFF_CODE;
+}
+
 /** Pick the human message out of whatever the route sent. */
-export function parseErrorBody(status: number, contentType: string | null, text: string): { error: string; issues?: unknown } {
+export function parseErrorBody(status: number, contentType: string | null, text: string): { error: string; issues?: unknown; code?: string } {
   const trimmed = text.trim();
   if (contentType && contentType.includes("application/json") && trimmed) {
     try {
       const body = JSON.parse(trimmed) as Record<string, unknown>;
       const msg = typeof body?.error === "string" ? body.error : typeof body?.message === "string" ? body.message : null;
-      return { error: msg ?? defaultErrorFor(status), issues: body?.issues };
+      const code = typeof body?.code === "string" ? body.code : undefined;
+      return { error: msg ?? defaultErrorFor(status), issues: body?.issues, ...(code ? { code } : {}) };
     } catch {
       // declared JSON that does not parse: never surface the raw bytes
       return { error: defaultErrorFor(status) };
@@ -117,6 +155,10 @@ export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}
   if (isSessionExpired() && !allowWhenExpired) {
     return { ok: false, status: 401, error: SESSION_EXPIRED_ERROR };
   }
+  // Only the console's own routes stop: the product never depends on them.
+  if (staffAccessRemoved && isAdminApiPath(url)) {
+    return { ok: false, status: 403, error: defaultErrorFor(403), code: NOT_STAFF_CODE };
+  }
 
   const finalHeaders = new Headers(headers ?? {});
   let finalBody: BodyInit | null | undefined = body;
@@ -157,7 +199,12 @@ export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     const parsed = parseErrorBody(res.status, res.headers.get("content-type"), text);
-    return { ok: false, status: res.status, error: parsed.error, issues: parsed.issues };
+    const fail: ApiFail = { ok: false, status: res.status, error: parsed.error, issues: parsed.issues, ...(parsed.code ? { code: parsed.code } : {}) };
+    if (isStaffDenial(fail) && !staffAccessRemoved) {
+      staffAccessRemoved = true;
+      dispatch(STAFF_ACCESS_REMOVED_EVENT, { url });
+    }
+    return fail;
   }
 
   if (res.status === 204) return { ok: true, status: 204, data: undefined as T };
@@ -191,6 +238,16 @@ function isApiPath(url: string): boolean {
   if (url.startsWith("/api/")) return true;
   try {
     return new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.href).pathname.startsWith("/api/");
+  } catch {
+    return false;
+  }
+}
+
+/** Does this URL address the Staff console's API (/api/admin/*)? */
+function isAdminApiPath(url: string): boolean {
+  try {
+    const path = new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.href).pathname;
+    return path === "/api/admin" || path.startsWith("/api/admin/");
   } catch {
     return false;
   }

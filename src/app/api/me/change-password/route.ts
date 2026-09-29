@@ -6,13 +6,15 @@ import bcrypt from "bcryptjs";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { logAuditEvent } from "@/lib/activity";
 import { ipFromRequest } from "@/lib/rate-limit-memory";
+import { issueTokenVersionProof } from "@/lib/session-proof";
 
 /**
  * POST /api/me/change-password  { currentPassword, newPassword }
  * Self-service password change for a signed-in user. Verifies the current
  * password, enforces the org policy, and bumps tokenVersion so every OTHER
  * session is signed out. THIS session survives because the client calls
- * session.update() afterward (the jwt "update" branch re-syncs tokenVersion).
+ * session.update({ tokenVersionProof }) with the proof returned here: the jwt
+ * "update" branch syncs tokenVersion only for a token that presents it.
  */
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -46,10 +48,12 @@ export async function POST(req: Request) {
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
-  await prisma.user.update({
+  const bumped = await prisma.user.update({
     where: { id: userId },
     data: { passwordHash, tokenVersion: { increment: 1 } },
+    select: { tokenVersion: true },
   });
+  const tokenVersionProof = issueTokenVersionProof(userId, bumped.tokenVersion - 1, bumped.tokenVersion);
 
   void logAuditEvent({
     type: "password_changed",
@@ -64,5 +68,6 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     message: "Password updated. Your other devices have been signed out.",
+    tokenVersionProof,
   });
 }

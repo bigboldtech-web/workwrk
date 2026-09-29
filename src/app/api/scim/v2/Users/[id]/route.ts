@@ -1,8 +1,8 @@
-// SCIM 2.0 Users — single resource. GET / PUT / PATCH / DELETE.
+// SCIM 2.0 Users: single resource. GET / PUT / PATCH / DELETE.
 //
 // PATCH supports the SCIM 2.0 "Operations" body (RFC 7644 §3.5.2),
 // which is what Okta sends for incremental changes. PUT is a full
-// replace — Azure AD uses it more.
+// replace; Azure AD uses it more.
 //
 // DELETE soft-deactivates by default (status = INACTIVE), not a hard
 // row drop. Real deletion is a separate hard-delete admin action; an
@@ -10,8 +10,9 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
+import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 
 export async function GET(
   req: NextRequest,
@@ -41,7 +42,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -70,6 +71,21 @@ export async function PUT(
   }
 
   if (Object.keys(data).length === 0) return scimError(400, "No fields to update");
+  if (auth.workspaceInactive) {
+    // Suspended or cancelled: only a deprovision goes through. An identity
+    // provider that deprovisions with a FULL resource (name, emails and
+    // active:false) is still deprovisioning, so the rest is dropped and the
+    // deactivation lands; otherwise the fired person would come back ACTIVE
+    // the day the company is reactivated.
+    if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
+    for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  }
+  if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
+    if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
+    // A renamed address is not a proven one: verification is per address.
+    data.emailVerifiedAt = null;
+  }
 
   const updated = await prisma.user.update({
     where: { id },
@@ -91,7 +107,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -139,12 +155,27 @@ export async function PATCH(
       const next = value.trim().toLowerCase();
       if (next.includes("@")) data.email = next;
     }
-    // Unknown paths are silently ignored — SCIM spec allows skipping
+    // Unknown paths are silently ignored; SCIM spec allows skipping
     // unsupported attributes rather than 400-ing the whole request.
   }
 
   if (Object.keys(data).length === 0) {
     return scimResponse(userToScim({ ...existing, externalId: null }));
+  }
+  if (auth.workspaceInactive) {
+    // Suspended or cancelled: only a deprovision goes through. An identity
+    // provider that deprovisions with a FULL resource (name, emails and
+    // active:false) is still deprovisioning, so the rest is dropped and the
+    // deactivation lands; otherwise the fired person would come back ACTIVE
+    // the day the company is reactivated.
+    if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
+    for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  }
+  if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
+    if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
+    // A renamed address is not a proven one: verification is per address.
+    data.emailVerifiedAt = null;
   }
 
   const updated = await prisma.user.update({
@@ -167,7 +198,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -177,7 +208,7 @@ export async function DELETE(
   });
   if (!existing) return scimError(404, "User not found");
 
-  // Soft delete — SCIM clients call this when a user is removed from
+  // Soft delete: SCIM clients call this when a user is removed from
   // the WorkWrk app on their side. Hard delete is a separate admin
   // action so we never lose audit / time-off / payroll history.
   await prisma.user.update({

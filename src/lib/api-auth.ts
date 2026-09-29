@@ -82,10 +82,16 @@ export async function authenticate(
         revokedAt: true,
         rateLimitPerMinute: true,
         rateLimitPerDay: true,
+        organization: { select: { status: true } },
       },
     });
     if (!record) return authFail("Invalid API key");
     if (record.revokedAt) return authFail("API key has been revoked");
+    // A suspended or cancelled workspace has no programmatic access either:
+    // suspension promises nobody there can work, and a key is somebody there.
+    if (record.organization.status === "SUSPENDED" || record.organization.status === "CANCELLED") {
+      return authFail("This workspace is suspended. Please contact WorkwrK support.", 403);
+    }
 
     if (requiredScope && !scopesCover(record.scopes, requiredScope)) {
       return authFail(

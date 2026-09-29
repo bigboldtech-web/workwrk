@@ -9,10 +9,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { getCsrfToken, getSession, useSession } from "next-auth/react";
 import {
   ArrowRight, ArrowLeft, Check, Sparkles, Loader2, Users, BarChart3,
-  Headphones, Megaphone, Calculator, Code2, Scale, Boxes, Wrench,
+  Headphones, Megaphone, Calculator, Code2, Scale, Boxes, Wrench, AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -140,6 +140,10 @@ export default function OnboardPage() {
 
   return (
     <>
+      {/* A brand new fallback workspace lands here first, so the move out of
+          a suspended company is explained here as well as in the frame. */}
+      <WorkspaceMoveNotice />
+
       {/* Progress */}
       <div className="mb-9 flex shrink-0 justify-center gap-2" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
@@ -303,6 +307,64 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
         <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} style={{ opacity: selected ? 1 : 0 }} />
       </span>
     </button>
+  );
+}
+
+/**
+ * The frame's WorkspaceMoveStrip for this light, token-free page (twin of
+ * os-shell.tsx; a page file cannot import the frame without bundling all of
+ * it). Same rules: shown until dismissed, the dismiss posts to the session
+ * endpoint directly (useSession().update() would flip this layout to its
+ * loader and reset the wizard), and a failed dismiss keeps it with Retry.
+ */
+function WorkspaceMoveNotice() {
+  const { data } = useSession();
+  const move = data?.workspaceMove;
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [state, setState] = useState<"idle" | "saving" | "failed">("idle");
+  if (!move || move.at === dismissedAt) return null;
+  const dismiss = async () => {
+    setState("saving");
+    let ok = false;
+    try {
+      const csrfToken = await getCsrfToken();
+      if (csrfToken) {
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csrfToken, data: { workspaceMoveAck: move.at } }),
+          cache: "no-store",
+        });
+        const next = res.ok ? ((await res.json().catch(() => null)) as { workspaceMove?: { at?: number } } | null) : null;
+        ok = !!next && next.workspaceMove?.at !== move.at;
+      }
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      void getSession();
+      setDismissedAt(move.at);
+      setState("idle");
+    } else {
+      setState("failed");
+    }
+  };
+  return (
+    <div role="status" className="mb-6 flex shrink-0 items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <p className="min-w-0 flex-1">
+        {move.message}
+        {state === "failed" ? " Couldn't dismiss this notice." : null}
+      </p>
+      <button
+        type="button"
+        onClick={() => void dismiss()}
+        disabled={state === "saving"}
+        className="shrink-0 rounded-md px-2 py-0.5 font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+      >
+        {state === "failed" ? "Retry" : "Dismiss"}
+      </button>
+    </div>
   );
 }
 

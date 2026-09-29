@@ -1,71 +1,135 @@
-// Server-side gate for the cross-tenant back-office (bbtadmin.workwrk.com).
+// Server-side gate for the Staff console (admin.workwrk.com).
 //
-// Platform STAFF only — resolved from the PlatformAdmin allowlist, NOT from
+// Platform STAFF only, resolved from the PlatformAdmin allow-list, NOT from
 // tenant `User.accessLevel`. A customer's own SUPER_ADMIN is an admin of THEIR
-// org, not of WorkwrK, and must never reach this surface or other tenants'
-// data/ARR. The matching API routes (/api/admin/*) gate on the same check, so
-// security does not depend on this UI layer alone.
+// workspace, not of WorkwrK, and must never reach this surface or another
+// company's data. The matching API routes (/api/admin/*) gate on the same
+// check (src/app/api/admin/require-platform-admin.test.ts asserts it for
+// every file), so security does not depend on this layout alone.
 //
 // LOOP SAFETY: on the admin host the proxy bounces every non-/admin path back
-// to /admin. So we must NEVER redirect to a relative app path from here —
-// unauthenticated users go to the APP host login (absolute URL); non-staff get
-// a rendered dead-end page, not a redirect.
+// to /admin. So this file never redirects to a relative app path: an
+// unauthenticated person goes to /login (allowed on the admin host, with
+// callbackUrl bringing them back), and a signed-in person who is not staff
+// gets a rendered denial, whose links are the ABSOLUTE app URL (only when
+// NEXT_PUBLIC_APP_URL is set) and /login, which the admin host allows.
 
-import { redirect } from "next/navigation";
+import "@/app/(dashboard)/tokens.css";
+import "@/app/(dashboard)/os.css";
+import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { isPlatformAdminSession } from "@/lib/platform-admin";
+import { isPlatformAdminSession, staffDenialReason } from "@/lib/platform-admin";
+import { recordDeniedAccess, requestIp } from "@/lib/staff-audit";
+import { LockedPage } from "@/components/access";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { getEffectivePreferences, DEFAULT_DENSITY, DEFAULT_THEME, type DensityPref } from "@/lib/preferences";
+import { loadConsoleMe, stampConsoleOpened, staffEmailOf } from "@/lib/admin/console-me";
+import { isAdminHost, productHref } from "@/lib/admin/console-nav";
 import { AdminShell } from "./admin-shell";
+import { SignedOutRedirect } from "./signed-out-redirect";
 
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+/**
+ * The staff member's OWN product preferences, read (never written) for the
+ * console: appearance, density and Language & region. Their one home is My
+ * settings > Preferences; a failure reads as the product defaults, never as
+ * a broken console.
+ */
+async function personPrefs(userId: string | undefined, organizationId: string | undefined) {
+  if (!userId || !organizationId) return { density: DEFAULT_DENSITY, appearance: DEFAULT_THEME.appearance, locale: {} };
+  try {
+    const p = await getEffectivePreferences(userId, organizationId);
+    return { density: p.density as DensityPref, appearance: p.theme.appearance, locale: p.home.locale ?? {} };
+  } catch {
+    return { density: DEFAULT_DENSITY, appearance: DEFAULT_THEME.appearance, locale: {} };
+  }
+}
+
+export default async function AdminLayout({
+  children,
+  drawer,
+}: {
+  children: React.ReactNode;
+  /** The @drawer parallel slot: the company drawer intercept, or nothing. */
+  drawer: React.ReactNode;
+}) {
   const session = await getServerSession(authOptions);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
-  // bbtadmin is a STANDALONE back-office with its own login on its own host —
-  // internal staff never need to touch the customer app. The proxy allows
-  // /login + /api/auth through on the admin host; callbackUrl returns the
-  // staff member to the console after they sign in. (Relative, not the app
-  // host — this is a self-contained system.)
   if (!session?.user) {
-    redirect("/login?callbackUrl=/admin");
+    // Back to the page asked for after sign-in, not Overview. The path is
+    // only known in the browser (a layout has no request path); the edge
+    // gate in proxy.ts does the same server side when it is on.
+    return <SignedOutRedirect />;
   }
+
+  const requestHeaders = await headers();
+  const onAdmin = isAdminHost(requestHeaders.get("host"), process.env.ADMIN_HOST);
 
   const allowed = await isPlatformAdminSession(session);
   if (!allowed) {
-    const email = (session.user as { email?: string | null }).email ?? "unknown";
+    const backHref = productHref(WORK_HOME_HREF, appUrl, onAdmin);
+    const user = session.user as { id?: string; email?: string | null };
+    const email = user.email ?? "an account with no email";
+    // One row per would-be viewer per ten minutes (spec section 1 Denial):
+    // a person who hits the wall is recorded on /admin/audit, a script
+    // hammering the host bumps one row's hit count. Never throws.
+    await recordDeniedAccess({ email, userId: user.id ?? null, ip: requestIp(requestHeaders) });
+    // The allow-list names an address, and only an account that has PROVEN
+    // it owns that address gets in (platform-admin.ts). A real staff member
+    // who has not verified yet is told how, not that they are not staff.
+    const reason = await staffDenialReason(session);
+    const sentence =
+      reason === "unverified"
+        ? `You are signed in as ${email}, which is on the WorkwrK staff list, but this account has not verified its email address. Verify it from My settings › Security, then open the console again.`
+        : reason === "duplicate"
+          ? `You are signed in as ${email}. More than one verified WorkwrK account uses this address, so the console opens for none of them. Ask another staff member to check the accounts.`
+          : `You are signed in as ${email}. That account is not on the WorkwrK staff list.`;
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#0a0a0a",
-          color: "#fafafa",
-          fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
-          padding: 24,
-        }}
-      >
-        <div style={{ maxWidth: 440, textAlign: "center" }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 8px" }}>
-            Restricted — WorkwrK staff only
-          </h1>
-          <p style={{ fontSize: 14, color: "#a0a0a0", lineHeight: 1.55, margin: "0 0 10px" }}>
-            This back-office is limited to the WorkwrK platform-staff allowlist.
-          </p>
-          <p style={{ fontSize: 13, color: "#808080", margin: "0 0 22px" }}>
-            Signed in as <span style={{ color: "#d4ff2e" }}>{email}</span>
-          </p>
-          {appUrl ? (
-            <a href={appUrl} style={{ color: "#fafafa", fontSize: 13, textDecoration: "underline" }}>
-              ← Back to the app
-            </a>
-          ) : null}
-        </div>
+      <div className="workwrk-os min-h-screen bg-app text-ink">
+        <LockedPage
+          glyph="shield"
+          name="This console is for WorkwrK staff"
+          sentence={sentence}
+          // Absolute on the admin host, which bounces relative paths to
+          // /admin: with no NEXT_PUBLIC_APP_URL there is no back link there
+          // at all rather than one that loops to this page (productHref).
+          back={backHref ? { fallbackHref: backHref, label: "WorkwrK" } : undefined}
+          // A staff member signed in with their customer account (the
+          // session cookie is shared across subdomains) switches here.
+          elsewhere={{ href: "/login?callbackUrl=/admin", label: "Sign in with a different account" }}
+        />
       </div>
     );
   }
 
-  const email = (session.user as { email?: string | null }).email ?? null;
-  return <AdminShell email={email}>{children}</AdminShell>;
+  const user = session.user as { id?: string; email?: string | null; name?: string | null; organizationId?: string };
+  const [email, prefs] = await Promise.all([staffEmailOf(session), personPrefs(user.id, user.organizationId)]);
+  const me = await loadConsoleMe(email ?? "", user.name ?? null);
+  // Staff > "Last opened the console" (at most one write per ten minutes).
+  if (me.persisted && email) await stampConsoleOpened(email);
+  const runbook = process.env.STAFF_RUNBOOK_URL?.trim() || null;
+
+  return (
+    <AdminShell
+      staff={me.staff}
+      prefs={me.prefs}
+      recents={me.recents}
+      persisted={me.persisted}
+      density={prefs.density}
+      appearance={prefs.appearance}
+      datePrefs={{
+        timezone: prefs.locale.timezone ?? null,
+        dateFormat: prefs.locale.dateFormat ?? null,
+        timeFormat: prefs.locale.timeFormat ?? null,
+        language: prefs.locale.language ?? null,
+      }}
+      appUrl={appUrl}
+      mySettingsHref={productHref("/account/preferences?tab=appearance", appUrl, onAdmin)}
+      runbookUrl={runbook}
+      drawer={drawer}
+    >
+      {children}
+    </AdminShell>
+  );
 }

@@ -1,282 +1,328 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Building2, Users, CreditCard, TrendingUp, AlertTriangle, Activity,
-  RefreshCw,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+// Overview (spec-admin-backoffice 2.1): the first screen of the morning. How
+// many customers there are, what Stripe charges, and what needs a person
+// today. One read, GET /api/admin/overview. No toolbar, so the title row
+// carries the 28px ghost "..." (Refresh, About this page).
+//
+// Nothing here is fabricated: no version string, no environment, no "Active
+// rate" (it measured a billing flag), and no revenue computed from a price
+// list. Revenue is what Stripe charges, one line per currency, or the words
+// "Not connected".
 
-interface Stats {
-  totalOrgs: number;
-  totalUsers: number;
-  activeOrgs: number;
-  trialOrgs: number;
-  mrr: number;
-  activeRate: number;
-  newOrgsThisMonth: number;
-  newUsersThisMonth: number;
-  planBreakdown: { plan: string; count: number }[];
-}
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { AlarmClock, ChevronRight, CreditCard, Info, KeyRound, PauseCircle, RefreshCw, ShieldOff, type LucideIcon } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatTile, StatTileSkeleton } from "@/components/ui/stat-tile";
+import { StatusChip, Chip } from "@/components/ui/chip";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, formatDateTitle } from "@/lib/format/date";
+import { formatMoney } from "@/lib/admin/numbers";
+import { companyStatusColor, planLabel, statusLabel } from "@/lib/admin/console-labels";
+import { useConsole } from "../console-context";
+import { AboutDialog, TEXT_LINK, rememberCompanyNames, useStaleRefetch } from "../console-ui";
+import { CardRetry, NumbersCard, NumbersMeta, SkeletonBars, connectLink } from "../numbers-ui";
 
-interface Company {
+type Revenue =
+  | { source: "unavailable" }
+  | { source: "error" }
+  | { source: "stripe"; lines: { currency: string; monthly: number; subscriptions: number }[]; uncounted: number; truncated: boolean; asOf: string };
+
+interface NewestCompany {
   id: string;
   name: string;
-  slug: string;
   plan: string;
   status: string;
+  people: number;
   createdAt: string;
-  _count: {
-    users: number;
-    tasks: number;
-    sops: number;
-    reviewCycles: number;
-    kras: number;
-  };
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
+interface Overview {
+  companies: { total: number; newIn30: number };
+  people: { total: number; newIn30: number };
+  paying: { count: number; of: number };
+  revenue: Revenue;
+  attention: { trialsEndingIn7: number; pastDue: number; withoutOwner: number; suspended: number; codesRedeemedIn7: number; codesSince: string };
+  newest: NewestCompany[];
 }
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "ACTIVE": return <Badge variant="success">Active</Badge>;
-    case "TRIAL": return <Badge variant="warning">Trial</Badge>;
-    case "SUSPENDED": return <Badge variant="destructive">Suspended</Badge>;
-    case "CANCELLED": return <Badge variant="secondary">Cancelled</Badge>;
-    default: return <Badge variant="secondary">{status}</Badge>;
-  }
-}
+const nf = new Intl.NumberFormat();
+const n = (v: number) => nf.format(v);
+const plural = (v: number, one: string, many: string) => `${n(v)} ${v === 1 ? one : many}`;
 
-function getPlanBadge(plan: string) {
-  const colors: Record<string, string> = {
-    STARTER: "bg-gray-500/10 text-gray-400 border-gray-500/20",
-    GROWTH: "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]",
-    SCALE: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    ENTERPRISE: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colors[plan] || ""}`}>
-      {plan}
-    </span>
-  );
-}
+export default function OverviewPage() {
+  const { datePrefs, runbookUrl } = useConsole();
+  const [data, setData] = useState<Overview | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
-export default function AdminDashboard() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [statsRes, companiesRes] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/companies?limit=10"),
-      ]);
-
-      if (statsRes.ok) {
-        const data = await statsRes.json();
-        setStats(data);
-      }
-      if (companiesRes.ok) {
-        const data = await companiesRes.json();
-        setCompanies(data.companies || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch admin data:", err);
-    } finally {
-      setLoading(false);
+  const load = useCallback(async () => {
+    const r = await apiFetch<Overview>("/api/admin/overview");
+    if (r.ok) {
+      setData(r.data);
+      setFailed(false);
+      setLoadedAt(Date.now());
+      rememberCompanyNames(r.data.newest);
+    } else if (r.status !== 401) {
+      // 401 is the session-ended dialog's; anything else keeps the last
+      // numbers on screen and says the refresh failed.
+      setFailed(true);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
   }, []);
+  useEffect(() => {
+    const t = setTimeout(() => void load(), 0);
+    return () => clearTimeout(t);
+  }, [load]);
+  useStaleRefetch(() => void load(), loadedAt);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
-      </div>
-    );
-  }
+  const retry = () => void load();
+  const loading = !data && !failed;
+  const broken = !data && failed;
+  const lang = datePrefs.language;
 
-  const statCards = [
+  const columns: TableColumn<NewestCompany>[] = [
+    { key: "name", label: "Company", title: true, width: "minmax(200px,2fr)", render: (r) => <span className="truncate">{r.name}</span> },
     {
-      title: "Total Companies",
-      value: stats?.totalOrgs ?? 0,
-      change: `+${stats?.newOrgsThisMonth ?? 0} this month`,
-      icon: Building2,
-      color: "text-[#d4ff2e]",
-      bg: "bg-[rgba(212,255,46,0.08)]",
+      key: "plan",
+      label: "Plan",
+      width: "140px",
+      render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip>,
     },
+    { key: "status", label: "Status", width: "150px", render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
+    { key: "people", label: "People", width: "100px", align: "end", numeric: true, render: (r) => <span className="tabular-nums">{n(r.people)}</span> },
     {
-      title: "Total Users",
-      value: stats?.totalUsers ?? 0,
-      change: `+${stats?.newUsersThisMonth ?? 0} this month`,
-      icon: Users,
-      color: "text-blue-400",
-      bg: "bg-blue-500/10",
-    },
-    {
-      title: "Monthly Revenue",
-      value: formatCurrency(stats?.mrr ?? 0),
-      change: `${stats?.activeOrgs ?? 0} paying orgs`,
-      icon: CreditCard,
-      color: "text-green-400",
-      bg: "bg-green-500/10",
-    },
-    {
-      title: "Active Rate",
-      value: `${stats?.activeRate ?? 0}%`,
-      change: `${stats?.trialOrgs ?? 0} on trial`,
-      icon: TrendingUp,
-      color: "text-orange-400",
-      bg: "bg-orange-500/10",
+      key: "signed",
+      label: "Signed up",
+      width: "140px",
+      render: (r) => <span className="tabular-nums text-ink-2" title={formatDateTitle(r.createdAt, datePrefs)}>{formatDate(r.createdAt, datePrefs, "date")}</span>,
     },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Admin Dashboard</h1>
-          <p className="text-muted text-base mt-1">Platform overview and subscriber management</p>
+    <>
+      <OsPageHeader
+        title="Overview"
+        actions={<NumbersMeta at={loadedAt} failed={failed} prefs={datePrefs} onRetry={retry} />}
+        more={[
+          { label: "Refresh", icon: RefreshCw, onClick: retry },
+          { label: "About this page", icon: Info, onClick: () => setAboutOpen(true) },
+        ]}
+      />
+      <div className="os-chrome flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6 pt-2">
+        {/* 1. Numbers: four cards, two per row below 1280, so a card's context
+            sentence always has room at 1024 (a 760px body). */}
+        <div className="grid grid-cols-2 gap-4 min-[1280px]:grid-cols-4">
+          <Stat label="Companies" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.companies.total) : null} context={data ? `+${n(data.companies.newIn30)} in the last 30 days` : null} />
+          <Stat label="People" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.people.total) : null} context={data ? `+${n(data.people.newIn30)} in the last 30 days` : null} />
+          <Stat
+            label="Paying"
+            loading={loading}
+            broken={broken}
+            onRetry={retry}
+            value={data ? n(data.paying.count) : null}
+            context={data ? `of ${plural(data.paying.of, "company", "companies")}` : null}
+          />
+          <RevenueStat revenue={data?.revenue ?? null} loading={loading} broken={broken} onRetry={retry} language={lang} runbookUrl={runbookUrl} />
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData}>
-          <RefreshCw size={14} className="mr-2" /> Refresh
-        </Button>
+
+        {data && data.companies.total === 0 ? (
+          <NumbersCard ariaLabel="No companies">
+            <OsEmptyView context="list" title="No companies yet" className="mt-4 pb-4" />
+          </NumbersCard>
+        ) : (
+          <>
+            {/* 2. Needs attention: a row only when its count is above zero. */}
+            <NumbersCard title="Needs attention">
+              {loading ? (
+                <SkeletonBars rows={3} height={16} gap={20} />
+              ) : broken || !data ? (
+                <CardRetry onRetry={retry} />
+              ) : (
+                <AttentionRows a={data.attention} />
+              )}
+            </NumbersCard>
+
+            {/* 3. Newest companies: a sample of eight, so the footer carries a link, not a total. */}
+            <section aria-label="Newest companies" className="flex min-w-0 flex-col gap-2">
+              <h2 className="m-0 text-lg font-semibold text-ink">Newest companies</h2>
+              <TableCard<NewestCompany>
+                ariaLabel="Newest companies"
+                columns={columns}
+                rows={broken ? [] : data ? data.newest : null}
+                rowKey={(r) => r.id}
+                rowHref={(r) => `/admin/companies/${r.id}`}
+                skeletonRows={8}
+                empty={broken ? <CardRetry onRetry={retry} /> : "No companies yet"}
+                footer={{
+                  total: data?.newest.length ?? 0,
+                  noun: "companies",
+                  from: 1,
+                  to: data?.newest.length ?? 0,
+                  hidePaging: true,
+                  hideTotal: true,
+                  leading: (
+                    <Link href="/admin/companies" className={`text-base ${TEXT_LINK}`}>
+                      See all companies
+                    </Link>
+                  ),
+                }}
+              />
+            </section>
+          </>
+        )}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((stat) => (
-          <Card key={stat.title}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className={`rounded-lg p-2.5 ${stat.bg}`}>
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                </div>
-              </div>
-              <p className="text-2xl font-semibold">{stat.value}</p>
-              <p className="text-sm text-muted mt-0.5">{stat.change}</p>
-              <p className="text-sm text-muted mt-1 font-medium">{stat.title}</p>
-            </CardContent>
-          </Card>
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Overview">
+        Today&apos;s numbers and what needs a person. Everything here counts companies, plans and dates; no customer&apos;s
+        work is ever read to make a number on this page. Paying and Monthly revenue both count WorkwrK Stripe subscriptions
+        that are active or past due; revenue is at Stripe&apos;s own prices after their discounts, one line per currency and
+        never converted.
+      </AboutDialog>
+    </>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  context,
+  loading,
+  broken,
+  onRetry,
+}: {
+  label: string;
+  value: string | null;
+  context: string | null;
+  loading: boolean;
+  broken: boolean;
+  onRetry: () => void;
+}) {
+  if (loading) return <StatTileSkeleton />;
+  if (broken || value === null) {
+    return (
+      <StatTile label={label}>
+        <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
+      </StatTile>
+    );
+  }
+  return <StatTile label={label} value={value} hint={context ?? undefined} hintWraps />;
+}
+
+const untold = (v: number) =>
+  `${plural(v, "subscription has", "subscriptions have")} a tiered or metered price, or a discount with no exact amount, and ${v === 1 ? "is" : "are"} not counted`;
+
+function RevenueStat({
+  revenue,
+  loading,
+  broken,
+  onRetry,
+  language,
+  runbookUrl,
+}: {
+  revenue: Revenue | null;
+  loading: boolean;
+  broken: boolean;
+  onRetry: () => void;
+  language?: string | null;
+  runbookUrl: string | null;
+}) {
+  const label = "Monthly revenue";
+  if (loading) return <StatTileSkeleton />;
+  if (broken || !revenue || revenue.source === "error") {
+    return (
+      <StatTile label={label}>
+        <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
+      </StatTile>
+    );
+  }
+  if (revenue.source === "unavailable") {
+    const link = connectLink(runbookUrl);
+    return (
+      <StatTile label={label}>
+        <p className="m-0 mt-1 text-row text-ink-2">Not connected</p>
+        <p className="m-0 mt-1 text-xs text-ink-2">
+          Billing is not connected yet.
+          {link ? (
+            <>
+              {" "}
+              <a href={link.href} target="_blank" rel="noopener noreferrer" className={TEXT_LINK}>{link.label}</a>
+            </>
+          ) : null}
+        </p>
+      </StatTile>
+    );
+  }
+  if (revenue.lines.length === 0) {
+    // Connected, and nothing paying: zero is the true answer here, in no currency.
+    return <StatTile label={label} value="0" hint={revenue.uncounted > 0 ? untold(revenue.uncounted) : "No active or past-due Stripe subscriptions"} hintWraps />;
+  }
+  if (revenue.lines.length === 1) {
+    const [only] = revenue.lines;
+    return (
+      <StatTile
+        label={label}
+        value={formatMoney(only.monthly, only.currency, language)}
+        hint={`from ${plural(only.subscriptions, "Stripe subscription", "Stripe subscriptions")}${revenue.uncounted > 0 ? `; ${untold(revenue.uncounted)}` : ""}`}
+        hintWraps
+      />
+    );
+  }
+  // One line per currency, every line the same size: no currency is the
+  // headline and nothing is added across them.
+  return (
+    <StatTile label={label}>
+      <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+        {revenue.lines.map((l) => (
+          <li key={l.currency} className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-row font-semibold tabular-nums text-ink" title={formatMoney(l.monthly, l.currency, language)}>
+              {formatMoney(l.monthly, l.currency, language)}
+            </span>
+            <span className="shrink-0 text-xs text-ink-2">{plural(l.subscriptions, "subscription", "subscriptions")}</span>
+          </li>
         ))}
-      </div>
+      </ul>
+      {revenue.uncounted > 0 ? <p className="m-0 mt-1 text-xs text-ink-2">{untold(revenue.uncounted)}.</p> : null}
+    </StatTile>
+  );
+}
 
-      {/* Plan Breakdown */}
-      {stats?.planBreakdown && stats.planBreakdown.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Plan Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-6">
-              {stats.planBreakdown.map((p) => (
-                <div key={p.plan} className="flex items-center gap-3">
-                  {getPlanBadge(p.plan)}
-                  <span className="text-base font-semibold">{p.count}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+interface AttentionRow {
+  key: string;
+  count: number;
+  icon: LucideIcon;
+  sentence: string;
+  href: string;
+}
 
-      {/* Companies Table */}
-      <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">Subscriber Companies</CardTitle>
-          <a href="/admin/companies" className="text-sm text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
-            View all →
-          </a>
-        </CardHeader>
-        <CardContent className="p-0">
-          {companies.length === 0 ? (
-            <div className="p-8 text-center text-base text-muted">
-              No companies registered yet. Share your registration page to get started.
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.map((company) => (
-                  <tr key={company.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-[#d4ff2e]" />
-                        <div>
-                          <span className="text-base font-medium">{company.name}</span>
-                          <p className="text-xs text-muted">{company.slug}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 text-center">{getPlanBadge(company.plan)}</td>
-                    <td className="p-4 text-center text-base text-muted">{company._count.users}</td>
-                    <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
-                        <span>{company._count.tasks} tasks</span>
-                        <span>{company._count.kras} KRAs</span>
-                        <span>{company._count.sops} SOPs</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-right text-sm text-muted">
-                      {new Date(company.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
+function AttentionRows({ a }: { a: Overview["attention"] }) {
+  // The sentence and its count: "Trials end in the next 7 days ... 3". The
+  // count is not repeated inside the sentence, so each fact is read once.
+  const one = (v: number, single: string, many: string) => (v === 1 ? single : many);
+  const rows: AttentionRow[] = [
+    { key: "trials", count: a.trialsEndingIn7, icon: AlarmClock, sentence: one(a.trialsEndingIn7, "Trial ends in the next 7 days", "Trials end in the next 7 days"), href: "/admin/companies?view=trials&trial_ends=7d" },
+    { key: "pastdue", count: a.pastDue, icon: CreditCard, sentence: one(a.pastDue, "Subscription is past due", "Subscriptions are past due"), href: "/admin/companies?view=paying&subscription=past_due" },
+    { key: "owners", count: a.withoutOwner, icon: ShieldOff, sentence: one(a.withoutOwner, "Workspace has nobody with Owner access", "Workspaces have nobody with Owner access"), href: "/admin/companies?owners=0&status=ACTIVE,TRIAL,SUSPENDED" },
+    { key: "suspended", count: a.suspended, icon: PauseCircle, sentence: one(a.suspended, "Workspace is suspended", "Workspaces are suspended"), href: "/admin/companies?view=suspended" },
+    { key: "codes", count: a.codesRedeemedIn7, icon: KeyRound, sentence: one(a.codesRedeemedIn7, "AppSumo code was redeemed this week", "AppSumo codes were redeemed this week"), href: `/admin/appsumo?view=redeemed&redeemed_from=${a.codesSince}` },
+  ].filter((r) => r.count > 0);
 
-      {/* Quick Info */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Activity size={16} className="text-[#d4ff2e]" /> System Info
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-base text-muted">
-          <div className="flex justify-between">
-            <span>Platform</span>
-            <span className="text-foreground font-medium">WorkwrK v1.0</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Environment</span>
-            <span className="text-foreground font-medium">{process.env.NODE_ENV === "production" ? "Production" : "Development"}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Organizations</span>
-            <span className="text-foreground font-medium">{stats?.totalOrgs ?? 0}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Users</span>
-            <span className="text-foreground font-medium">{stats?.totalUsers ?? 0}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+  if (rows.length === 0) return <p className="m-0 text-row text-ink-2">Nothing needs attention.</p>;
+  return (
+    <ul className="m-0 -mx-2 flex list-none flex-col p-0">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <Link href={r.href} className="flex h-9 items-center gap-3 rounded-md px-2 text-row text-ink hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-focus-ring,var(--os-brand))]">
+            <r.icon className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{r.sentence}</span>
+            <span className="font-medium tabular-nums">{n(r.count)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }

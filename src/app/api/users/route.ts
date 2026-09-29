@@ -13,6 +13,8 @@ import { orgRoleOf } from "@/lib/access/org-role";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
+import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -164,8 +166,22 @@ export async function POST(req: NextRequest) {
     where: { email, organizationId: getOrgId(session) },
   });
   if (existing) return jsonError("A user with this email already exists");
+  // The creator chooses this account's password, so it may never carry a
+  // WorkwrK staff address (platform-admin.ts).
+  if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);
 
-  const passwordHash = await bcrypt.hash(password || "Welcome@123", 12);
+  // No default password, ever: an account made here used to get the shared
+  // "Welcome@123", so anyone who knew it could sign in as a new member (the
+  // People import dropped it for the same reason). The creator must set one
+  // that meets the workspace's own password policy; the product's screens
+  // invite people instead, and the invitee chooses.
+  if (typeof password !== "string" || !password) {
+    return jsonError("Set a password for this account, or invite the person from Members so they choose their own.");
+  }
+  const org = await prisma.organization.findUnique({ where: { id: getOrgId(session) }, select: { settings: true } });
+  const pwError = validatePassword(password, policyFromOrgSettings(org?.settings));
+  if (pwError) return jsonError(pwError);
+  const passwordHash = await bcrypt.hash(password, 12);
 
   const user = await prisma.user.create({
     data: {
@@ -179,6 +195,9 @@ export async function POST(req: NextRequest) {
       managerId,
       organizationId: getOrgId(session),
     },
+    // Never the password hash, MFA secrets or token version: the answer is
+    // what the person who added them may see.
+    select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, status: true, departmentId: true, roleId: true, managerId: true, organizationId: true, createdAt: true },
   });
 
   logActivity({

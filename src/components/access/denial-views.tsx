@@ -25,7 +25,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Hash, Lock } from "lucide-react";
+import { Hash, Lock, ShieldCheck } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
 import { BackButton } from "@/components/ui/back-button";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,15 @@ function LockTile() {
   return (
     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-hover text-ink-2" aria-hidden>
       <Lock className="h-5 w-5" strokeWidth={1.5} />
+    </span>
+  );
+}
+
+/** The same tile with a shield: a staff-only surface (the Staff console gate). */
+function ShieldTile() {
+  return (
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-hover text-ink-2" aria-hidden>
+      <ShieldCheck className="h-5 w-5" strokeWidth={1.5} />
     </span>
   );
 }
@@ -160,7 +169,7 @@ export interface LockedPageProps {
    * with a "#" in the sidebar two columns away, so a lock here said the
    * opposite of what the product said about it everywhere else.
    */
-  glyph?: "lock" | "hash";
+  glyph?: "lock" | "hash" | "shield";
   /** The owner's avatar beside their name (spec-talk 2.2 States). */
   ownerAvatar?: string | null;
   /** One text link so the viewer leaves with somewhere to go (Connections to Integrations). */
@@ -172,7 +181,12 @@ export interface LockedPageProps {
    * to request.
    */
   admins?: OrgAdmin[];
-  back: BackTarget;
+  /**
+   * Optional only for the Staff console's denial on a host with no app URL
+   * configured: there a relative back link would bounce to /admin and render
+   * this same page again, so no back link is better than a loop.
+   */
+  back?: BackTarget;
 }
 
 export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId, primaryLabel, glyph, ownerAvatar, elsewhere, admins, back }: LockedPageProps) {
@@ -197,7 +211,7 @@ export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId
     <DenialBlock
       title={name}
       sentence={sentence}
-      tile={kind === "hash" ? <HashTile /> : <LockTile />}
+      tile={kind === "hash" ? <HashTile /> : kind === "shield" ? <ShieldTile /> : <LockTile />}
       back={back}
       primary={primary}
     >

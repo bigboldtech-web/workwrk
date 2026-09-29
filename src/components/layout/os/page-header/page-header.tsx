@@ -43,7 +43,7 @@ import { EntityTile, type EntityTileProps } from "@/components/ui/entity-tile";
 import { BackButton } from "@/components/ui/back-button";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "../more-portal";
-import { useLayer, useOsShell } from "../shell-context";
+import { useLayer, useLayerStack, useOsShell } from "../shell-context";
 import { askSidekick } from "../empty-view";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 
@@ -414,7 +414,9 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
   // because the thing in front is what the person is doing. It reads the
   // whole stack, not the top layer: a picker opened inside that modal is a
   // popover on top of it, and the modal's own primary is still showing.
-  const { blockingLayerOpen } = useOsShell();
+  // useLayerStack, not useOsShell: the Staff console renders this header
+  // with a LayerStackProvider and no product shell (shell-context.tsx).
+  const blockingLayerOpen = useLayerStack()?.blockingLayerOpen ?? false;
   const primaryHidden = blockingLayerOpen;
   const shownPrimary = primaryHidden ? undefined : primary;
   return (

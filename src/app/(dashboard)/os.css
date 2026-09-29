@@ -23894,6 +23894,8 @@ table.os-tbl {
 .os-tc__more-btn.is-open,
 .os-tc__more-btn:focus-visible { opacity: 1; }
 @media (pointer: coarse) { .os-tc__more-btn { opacity: 1; } }
+/* A TableCard with rowMenuAlwaysVisible (the Staff console): at rest too. */
+.os-tc--menus-visible .os-tc__more-btn { opacity: 1; }
 
 /* At Comfortable density the checkbox is visible at rest; at Cozy and
    Compact it appears on row hover and whenever any row is selected. */

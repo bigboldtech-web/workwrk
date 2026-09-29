@@ -30,9 +30,11 @@
 // open a tab; `onRowClick` is for surfaces that open a drawer instead. The
 // "..." trigger the caller passes in `rowMenu` is visible on hover and focus
 // and always at Compact density on touch devices (os.css `.os-tc__more`).
+// A surface whose rules forbid any hover-only affordance (the Staff console)
+// passes `rowMenuAlwaysVisible`, and the trigger shows at rest on every row.
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,8 +89,17 @@ export interface TableFooter {
   onPageSize?: (n: number) => void;
   /** Extra text after the total ("· 3.4 GB"). */
   extra?: ReactNode;
+  /** A sentence at the footer's end edge, before any paging. */
+  trailing?: ReactNode;
   /** A list that never pages (a person's KPIs): no range and no arrows. */
   hidePaging?: boolean;
+  /**
+   * A card that is a SAMPLE, not a paged list (the Staff console's newest
+   * eight companies): no "Total" count, which would be a lie, and `leading`
+   * (one text link) at the start edge instead.
+   */
+  hideTotal?: boolean;
+  leading?: ReactNode;
 }
 
 export interface TableCardProps<T> {
@@ -117,6 +128,11 @@ export interface TableCardProps<T> {
    * edge, read "Restor" and gave the whole table a sideways scroll.
    */
   rowMenuWidth?: number;
+  /**
+   * The "..." shows at rest on every row, not only on hover and focus. Opt
+   * in; the product's own tables keep the hover rule.
+   */
+  rowMenuAlwaysVisible?: boolean;
   /** Content rendered in the one empty row. */
   empty?: ReactNode;
   footer?: TableFooter;
@@ -148,9 +164,17 @@ export interface TableCardProps<T> {
    * on this device (a per-viewer convenience, never shared state).
    */
   columnSettings?: boolean | { storageKey?: string };
+  /**
+   * A controlled column choice, for a surface that keeps it somewhere other
+   * than this device (the Staff console keeps it per staff member on the
+   * server). When given it wins over `storageKey`, and every change goes to
+   * `onColumnChoiceChange` instead of localStorage.
+   */
+  columnChoice?: ColumnChoice;
+  onColumnChoiceChange?: (next: ColumnChoice) => void;
 }
 
-type ColumnChoice = { shown: string[]; hidden: string[] };
+export type ColumnChoice = { shown: string[]; hidden: string[] };
 const COL_NS = "workwrk:table-columns";
 function readChoice(key: string | undefined): ColumnChoice {
   if (!key) return { shown: [], hidden: [] };
@@ -217,6 +241,7 @@ export function TableCard<T>({
   onSort,
   rowMenu,
   rowMenuWidth = 44,
+  rowMenuAlwaysVisible = false,
   empty,
   footer,
   bulkActions,
@@ -230,10 +255,19 @@ export function TableCard<T>({
   collapsedGroups,
   onToggleGroup,
   columnSettings,
+  columnChoice,
+  onColumnChoiceChange,
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const cardWidth = useElementWidth(cardRef);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The room the columns really get: the card less its two 1px borders and
+  // any vertical scrollbar the body scroller draws (a classic scrollbar is
+  // about 15px; an overlay one is 0). Without these the fit below believed
+  // the row had room it did not, and the pinned end cell covered the last
+  // column ("Signed up" read "Sign").
+  const gutter = useScrollGutter(scrollRef, cardWidth);
   // The columns this card is wide enough for. Unmeasured (the first frame,
   // a test) shows every column.
   // Beyond each column's own hideBelow, the droppable columns (the ones
@@ -242,18 +276,29 @@ export function TableCard<T>({
   // cell sits over the last visible column and cuts it mid-word (a date
   // reading "17 S" with the Filter panel open).
   const settingsKey = typeof columnSettings === "object" ? columnSettings.storageKey : undefined;
-  const [choice, setChoice] = useState<ColumnChoice>({ shown: [], hidden: [] });
+  const [localChoice, setChoice] = useState<ColumnChoice>({ shown: [], hidden: [] });
+  const choice = columnChoice ?? localChoice;
   // Read after mount, so server render and hydration agree.
   // The setState runs in a timer (the bulk bar's pattern), after the first paint.
   useEffect(() => {
-    if (!settingsKey) return;
+    if (!settingsKey || columnChoice !== undefined) return;
     const t = setTimeout(() => setChoice(readChoice(settingsKey)), 0);
     return () => clearTimeout(t);
-  }, [settingsKey]);
-  const updateChoice = useCallback((next: ColumnChoice) => { setChoice(next); writeChoice(settingsKey, next); }, [settingsKey]);
+  }, [settingsKey, columnChoice]);
+  const controlled = columnChoice !== undefined;
+  const updateChoice = useCallback((next: ColumnChoice) => {
+    if (controlled) { onColumnChoiceChange?.(next); return; }
+    setChoice(next); writeChoice(settingsKey, next);
+  }, [settingsKey, controlled, onColumnChoiceChange]);
   const columns = useMemo(
-    () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0), choice),
-    [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice],
+    () =>
+      visibleTableColumns(
+        allColumns,
+        cardWidth,
+        (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0) + (cardWidth > 0 ? 2 + gutter : 0),
+        choice,
+      ),
+    [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice, gutter],
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
@@ -361,8 +406,8 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
-    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>
-      <div className="min-h-0 flex-1 overflow-auto">
+    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)} role="table" aria-label={ariaLabel}>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}
           <div
@@ -461,7 +506,10 @@ export function TableCard<T>({
               ));
               const rowClass = cn(
                 "os-tc__row group/row grid items-center border-b border-line-soft text-row text-ink last:border-b-0",
-                "hover:bg-hover focus-within:bg-hover",
+                // A highlighted row keeps its tint while focus is on it (a page
+                // moves focus there, see tabIndex below): focus-within grey would
+                // otherwise replace the very mark that says which row it is.
+                isHi && !isSel ? "hover:bg-hover" : "hover:bg-hover focus-within:bg-hover",
                 isSel ? "bg-selected hover:bg-selected-hov" : "",
                 isHi ? "bg-selected" : "",
                 // The same state as a tint the sticky "..." cell paints over
@@ -469,7 +517,9 @@ export function TableCard<T>({
                 // stacked as classes, so two hover rules never race.
                 isSel
                   ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-selected-hov)]"
-                  : cn(isHi ? "[--tc-tint:var(--os-selected)]" : "", "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]"),
+                  : isHi
+                    ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-surface-hov)]"
+                    : "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]",
               );
               const style = { gridTemplateColumns: template, height: "var(--os-row-h)" } as React.CSSProperties;
               const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -532,8 +582,18 @@ export function TableCard<T>({
                 <div
                   key={key}
                   role="row"
-                  tabIndex={onRowClick ? 0 : undefined}
-                  className={cn(rowClass, onRowClick ? "cursor-pointer" : "")}
+                  // The highlighted row is a programmatic focus target (-1: out of
+                  // the Tab order) even without onRowClick, so a page that lands a
+                  // person on it (a Search result) can move focus there and a
+                  // screen reader reads that row. Inset ring: the body clips overflow.
+                  tabIndex={onRowClick ? 0 : isHi ? -1 : undefined}
+                  className={cn(
+                    rowClass,
+                    onRowClick ? "cursor-pointer" : "",
+                    // outline-solid: outline-none zeroes the style variable that
+                    // outline-2 reads, so the ring needs its style set back.
+                    onRowClick || isHi ? "outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--os-focus)]" : "",
+                  )}
                   style={style}
                   data-key={key}
                   onClick={onRowClick ? (e) => onRowClick(row, e) : undefined}
@@ -604,15 +664,19 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, hidePaging }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging, hideTotal, leading }: TableFooter) {
   const hasRows = total > 0;
   return (
     <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
-      <span className="font-medium text-ink">
-        Total {noun} <span className="tabular-nums">{new Intl.NumberFormat().format(total)}</span>
-      </span>
+      {leading ? <span className="min-w-0 truncate">{leading}</span> : null}
+      {hideTotal ? null : (
+        <span className="font-medium text-ink">
+          Total {noun} <span className="tabular-nums">{new Intl.NumberFormat().format(total)}</span>
+        </span>
+      )}
       {extra ? <span className="text-ink-2">{extra}</span> : null}
       <span className="flex-1" />
+      {trailing ? <span className="min-w-0 truncate text-ink-2">{trailing}</span> : null}
       {onPageSize && pageSize ? (
         // Shown on hover, and to the keyboard: opacity (not display:none),
         // so Tab still reaches the select and it shows while it has focus.
@@ -716,6 +780,27 @@ function ColumnSettingsPopover<T>({ anchorRef, columns, visible, choice, onChang
     </div>,
     document.body,
   );
+}
+
+/**
+ * The width of the vertical scrollbar `ref` draws (offsetWidth less
+ * clientWidth), re-read whenever the element or its content resizes. 0 for
+ * overlay scrollbars and before the first measurement.
+ */
+function useScrollGutter(ref: React.RefObject<HTMLElement | null>, cardWidth: number): number {
+  const [gutter, setGutter] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => setGutter(Math.max(0, el.offsetWidth - el.clientWidth));
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [ref, cardWidth]);
+  return gutter;
 }
 
 /** The 32px ghost "..." trigger a row menu mounts inside `rowMenu`. */

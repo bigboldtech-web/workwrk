@@ -1,6 +1,6 @@
 "use client";
 
-/* Account · Security — personal posture + org policy.
+/* Account · Security: personal posture + org policy.
  *
  *  GET /api/me
  *  GET /api/auth/mfa/status
@@ -97,7 +97,7 @@ export default function AccountSecurityPage() {
     try {
       const res = await fetch("/api/me/sign-out-everywhere", { method: "POST" });
       if (!res.ok) throw new Error();
-      toast("Signed out of all devices — sign back in to continue");
+      toast("Signed out of all devices. Sign back in to continue.");
       // This session is revoked too; clear it locally and return to login.
       await signOut({ callbackUrl: "/login" });
     } catch {
@@ -113,7 +113,7 @@ export default function AccountSecurityPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      toast("Verification email sent — check your inbox");
+      toast("Verification email sent. Check your inbox.");
     } catch {
       toast("Couldn't send verification email");
     }
@@ -184,8 +184,8 @@ export default function AccountSecurityPage() {
         <section className="acs__section">
           <header><h2><Key /> Your posture</h2></header>
           <div className="acs__list">
-            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "—"} action={!mfa?.emailVerified && "Resend"} onAction={() => void resendVerification()} Icon={Mail} />
-            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active — backup codes issued" : "Not enabled"} action={mfa ? (mfa.mfaEnabled ? "Turn off" : "Enable") : null} onAction={() => (mfa?.mfaEnabled ? setDisableOpen(true) : setEnrollOpen(true))} Icon={Smartphone} />
+            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "No email on file"} action={!mfa?.emailVerified && "Resend"} onAction={() => void resendVerification()} Icon={Mail} />
+            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active, backup codes issued" : "Not enabled"} action={mfa ? (mfa.mfaEnabled ? "Turn off" : "Enable") : null} onAction={() => (mfa?.mfaEnabled ? setDisableOpen(true) : setEnrollOpen(true))} Icon={Smartphone} />
             <CheckRow ok={true} title="Password" desc="Change your account password" action="Change" onAction={() => setChangePwOpen(true)} Icon={KeyRound} />
             <CheckRow ok={true} title="Access level" desc={me?.user?.accessLevel ?? "EMPLOYEE"} Icon={Building} />
           </div>
@@ -207,7 +207,7 @@ export default function AccountSecurityPage() {
           <div className="acs__sessions">
             <div className="acs__sessions-copy">
               Signed in on this device. If you&apos;ve used a shared or lost device,
-              sign out everywhere — it ends every session, including this one.
+              sign out everywhere. It ends every session, including this one.
             </div>
             <button type="button" className="acs__danger-btn" onClick={() => void signOutEverywhere()} disabled={signingOutAll}>
               {signingOutAll ? <Dots variant="pending" /> : <LogOut />}
@@ -232,7 +232,7 @@ export default function AccountSecurityPage() {
                     <span className={`acs__act-icon${meta.warn ? " is-warn" : ""}`}><Icon /></span>
                     <div className="acs__act-main">
                       <div className="acs__act-desc">{meta.label}</div>
-                      <div className="acs__act-sub">{e.ipAddress ? `IP ${e.ipAddress}` : "—"}</div>
+                      <div className="acs__act-sub">{e.ipAddress ? `IP ${e.ipAddress}` : "IP not recorded"}</div>
                     </div>
                     <span className="acs__act-time">{relativeTime(e.createdAt)}</span>
                   </div>
@@ -256,10 +256,11 @@ export default function AccountSecurityPage() {
       <ChangePasswordDialog
         open={changePwOpen}
         onOpenChange={setChangePwOpen}
-        onChanged={() => {
+        onChanged={(tokenVersionProof) => {
           // Re-sync this session's token (it survives; other devices are out).
-          void updateSession();
-          toast("Password updated — other devices signed out");
+          // The proof is what lets THIS token take the new version.
+          void updateSession({ tokenVersionProof });
+          toast("Password updated. Other devices signed out.");
           void loadActivity();
         }}
       />

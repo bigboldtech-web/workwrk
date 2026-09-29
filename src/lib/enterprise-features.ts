@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import type { Prisma } from "@/generated/prisma";
 
 /**
  * Enterprise feature flags.
@@ -58,8 +59,10 @@ export async function setFeature(
   organizationId: string,
   feature: EnterpriseFeature,
   enabled: boolean,
+  /** The caller's transaction, so the flag and its audit row commit together. */
+  db: typeof prisma | Prisma.TransactionClient = prisma,
 ): Promise<void> {
-  const org = await prisma.organization.findUnique({
+  const org = await db.organization.findUnique({
     where: { id: organizationId },
     select: { settings: true },
   });
@@ -69,7 +72,9 @@ export async function setFeature(
   features[feature] = enabled;
   // Only the `features` key: every other key of the shared settings column
   // (doc sharing, branding, the access model) stays as the database holds it.
-  await writeOrgSettingsKeys(organizationId, { features });
+  // Written through the caller's transaction, so the flag and its staff audit
+  // row commit together.
+  await writeOrgSettingsKeys(organizationId, { features }, db);
 }
 
 /** Read all flags for an org. Used by the customer-side Settings UI

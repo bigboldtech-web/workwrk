@@ -1,432 +1,734 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+// Analytics (spec-admin-backoffice 2.5): whether the business is growing, in
+// numbers that are true. One read, GET /api/admin/analytics?range=, with the
+// range in the URL (the back arrow undoes a change, a link carries it).
+//
+// Revenue is what Stripe charges, one line per currency, never converted,
+// and never a price multiplied by a count of companies (the old "MRR" and
+// "Revenue by Plan" did that; see docs/plans/ui-refresh/staff-console-numbers.md).
+// Growth bars reuse the dashboards' ChartBody (one series, the one blue); the
+// revenue line follows the same chart rules.
+
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download, Info, RefreshCw } from "lucide-react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Chip } from "@/components/ui/chip";
+import { ChartBody } from "@/components/dashboards/widgets/chart-widget";
+import type { WidgetResult } from "@/lib/dashboards/widget-data";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, formatDateTitle } from "@/lib/format/date";
 import {
-  Building2, Users, CreditCard, TrendingUp, RefreshCw, Target,
-  CheckSquare, BookOpen, Star, BarChart3, ArrowDownRight, Activity, UserMinus,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-} from "recharts";
+  ANALYTICS_RANGES,
+  RANGE_LABEL,
+  barPct,
+  bucketLabel,
+  conversionPct,
+  formatMoney,
+  fromMinor,
+  monthKeyLabel,
+  parseRange,
+  type AnalyticsRange,
+  type CohortRow,
+  type RankedCompany,
+} from "@/lib/admin/numbers";
+import { planLabel } from "@/lib/admin/console-labels";
+import { useConsole } from "../../console-context";
+import { AboutDialog, downloadHref, rememberCompanyNames, useStaleRefetch } from "../../console-ui";
+import { Bar4, CardRetry, NumbersCard, NumbersMeta, QuietBlock, SkeletonBars, connectLink } from "../../numbers-ui";
 
-interface Stats {
-  totalOrgs: number;
-  totalUsers: number;
-  activeOrgs: number;
-  trialOrgs: number;
-  mrr: number;
-  activeRate: number;
-  newOrgsThisMonth: number;
-  newUsersThisMonth: number;
-  planBreakdown: { plan: string; count: number }[];
-  funnel?: {
-    signedUp: number;
-    completedSetup: number;
-    engaged: number;
-    paying: number;
-    windowDays: number;
-  };
-  cohorts?: { month: string; size: number; active: number; paying: number; churned: number }[];
-  mrrOverTime?: { month: string; mrr: number }[];
-  recentChurn?: { orgId: string; orgName: string; plan: string; canceledAt: string | null }[];
+interface RevenueLineOut {
+  currency: string;
+  monthly: number;
+  arr: number;
+  arpu: number | null;
+  subscriptions: number;
+  companies: number;
+  series: number[] | null;
 }
 
-interface Company {
-  id: string;
-  name: string;
-  plan: string;
-  status: string;
-  _count: {
-    users: number;
-    tasks: number;
-    sops: number;
-    reviewCycles: number;
-    kras: number;
-  };
+type Revenue =
+  | { source: "unavailable" }
+  | { source: "error" }
+  | { source: "stripe"; lines: RevenueLineOut[]; seriesFailed: boolean; uncounted: number; truncated: boolean; asOf: string };
+
+interface Analytics {
+  range: AnalyticsRange;
+  rangeLabel: string;
+  window: { start: string; end: string; windowDays: number; granularity: "day" | "month"; buckets: { start: string; end: string }[] };
+  revenue: Revenue;
+  growth: { newCompanies: number; newPeople: number; onTrial: number; byBucket: number[]; avgPeoplePerCompany: number; totalPeople: number; totalCompanies: number };
+  funnel: { signedUp: number; finishedSetup: number; createdSomething: number; paying: number; windowDays: number };
+  retention: { cohorts: CohortRow[]; from: string; partialFirst: boolean };
+  cancellations: {
+    id: string;
+    name: string;
+    /** Null only for a company deleted for good (`gone`). */
+    plan: string | null;
+    canceledAt: string | null;
+    what: "subscription" | "workspace" | "deleted";
+    restored: boolean;
+    /** Deleted for good by the hard-delete cron: there is no company page to open. */
+    gone?: boolean;
+  }[];
+  biggest: RankedCompany[];
+  busiest: RankedCompany[];
+  plans: { plan: string; count: number }[];
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
+const nf = new Intl.NumberFormat();
+const n = (v: number) => nf.format(v);
+
+export default function AnalyticsPage() {
+  // useSearchParams needs a Suspense boundary on a client page.
+  return (
+    <Suspense fallback={null}>
+      <AnalyticsInner />
+    </Suspense>
+  );
 }
 
-const planPrices: Record<string, number> = {
-  STARTER: 4999,
-  GROWTH: 14999,
-  SCALE: 29999,
-  ENTERPRISE: 75000,
-};
+function AnalyticsInner() {
+  const { datePrefs, runbookUrl } = useConsole();
+  const router = useRouter();
+  const pathname = usePathname() || "/admin/analytics";
+  const sp = useSearchParams();
+  const range = parseRange(sp.get("range"));
+  const [data, setData] = useState<Analytics | null>(null);
+  // The range whose last load failed, so a new range starts on its skeleton
+  // rather than on the old range's failure.
+  const [failedRange, setFailedRange] = useState<AnalyticsRange | null>(null);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
-const planColors: Record<string, string> = {
-  STARTER: "bg-gray-500",
-  GROWTH: "bg-[#d4ff2e]",
-  SCALE: "bg-blue-500",
-  ENTERPRISE: "bg-amber-500",
-};
-
-export default function AdminAnalyticsPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [statsRes, companiesRes] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/companies?limit=100"),
-      ]);
-      if (statsRes.ok) setStats(await statsRes.json());
-      if (companiesRes.ok) {
-        const data = await companiesRes.json();
-        setCompanies(data.companies || []);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+  const load = useCallback(async (r: AnalyticsRange) => {
+    const res = await apiFetch<Analytics>(`/api/admin/analytics?range=${r}`);
+    if (res.ok) {
+      setData(res.data);
+      setFailedRange(null);
+      setLoadedAt(Date.now());
+      rememberCompanyNames([...res.data.biggest, ...res.data.busiest, ...res.data.cancellations]);
+    } else if (res.status !== 401) {
+      setFailedRange(r);
     }
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => void load(range), 0);
+    return () => clearTimeout(t);
+  }, [load, range]);
+  useStaleRefetch(() => void load(range), loadedAt);
+
+  const setRange = (r: AnalyticsRange) => {
+    if (r === range) return;
+    const q = new URLSearchParams(sp.toString());
+    q.set("range", r);
+    router.push(`${pathname}?${q.toString()}`, { scroll: false });
   };
 
-  useEffect(() => { fetchData(); }, []);
+  const retry = () => void load(range);
+  // A range change keeps the last numbers until the new ones arrive, but a
+  // card never presents another range's numbers as this one's.
+  const current = data && data.range === range ? data : null;
+  const failed = failedRange === range;
+  const loading = !current && !failed;
+  const broken = !current && failed;
+  const lang = datePrefs.language;
+  // A brand-new install: every card shows its own quiet block (spec 2.5 empty).
+  const nothing = !!current && current.growth.totalCompanies === 0;
 
+  return (
+    <>
+      <OsPageHeader
+        title="Analytics"
+        // The title row describes the numbers on screen, never another
+        // range's: loadedAt is the time of `data`, so it is shown only while
+        // `data` is this range's. After a failed range switch no card has
+        // numbers (each says "Could not load this" with Retry), so the header
+        // shows no time rather than the old range's "Updated just now". A
+        // failed background refresh of the range on screen still reads red
+        // "Updated X, Retry" over the older numbers.
+        actions={<NumbersMeta at={current ? loadedAt : null} failed={!!current && failed} prefs={datePrefs} onRetry={retry} />}
+        toolbar={{
+          left: (
+            <SegmentedControl<AnalyticsRange>
+              label="Range"
+              value={range}
+              options={ANALYTICS_RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r] }))}
+              onChange={setRange}
+            />
+          ),
+          menu: [
+            { label: "Refresh", icon: RefreshCw, onClick: retry },
+            { label: "Export CSV", icon: Download, onClick: () => downloadHref(`/api/admin/analytics?range=${range}&format=csv`) },
+            { label: "About this page", icon: Info, onClick: () => setAboutOpen(true) },
+          ],
+        }}
+      />
+      <div className="os-chrome flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6 pt-2">
+        <RevenueCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} runbookUrl={runbookUrl} datePrefs={datePrefs} />
+        <GrowthCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} />
+        <FunnelCard data={current} range={range} loading={loading} broken={broken} nothing={nothing} onRetry={retry} />
+        <RetentionCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} datePrefs={datePrefs} />
+        <CancellationsCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} datePrefs={datePrefs} />
+        <div className="grid grid-cols-1 gap-4 min-[1280px]:grid-cols-2">
+          <RankCard
+            title="Biggest workspaces"
+            rows={current?.biggest ?? null}
+            loading={loading}
+            broken={broken}
+            nothing={nothing}
+            onRetry={retry}
+            unit={(v) => `${n(v)} ${v === 1 ? "person" : "people"}`}
+            note="Top five by people"
+          />
+          <RankCard
+            title="Busiest workspaces"
+            rows={current?.busiest ?? null}
+            loading={loading}
+            broken={broken}
+            nothing={nothing}
+            onRetry={retry}
+            unit={(v) => `${n(v)} ${v === 1 ? "action" : "actions"}`}
+            note={`Actions by people in each workspace in the last ${RANGE_LABEL[range]}, not counting signing in or out`}
+          />
+        </div>
+        <PlansCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} />
+      </div>
+
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Analytics">
+        Whether the business is growing. Revenue is what Stripe charged; everything else is counted from companies, people
+        and recorded activity in the range you pick. Monthly revenue is every WorkwrK Stripe subscription that is active or
+        past due, at Stripe&apos;s own price after its discounts, one line per currency and never converted. The chart is
+        what paid invoices took in each period, before refunds. Stripe figures are refreshed at most once an hour.
+      </AboutDialog>
+    </>
+  );
+}
+
+interface CardProps {
+  data: Analytics | null;
+  loading: boolean;
+  broken: boolean;
+  /** No companies at all: the card shows its own quiet block. */
+  nothing: boolean;
+  onRetry: () => void;
+}
+
+const NOTHING = "Nothing to measure yet";
+
+/**
+ * A card's body by state. Loading: a chart card draws its plot frame with a
+ * skeleton plot area (`plot` is the plot's height), a list card skeleton
+ * rows, each at the card's own height. Empty install: the quiet block of the
+ * card's family (four-dot 2x2 for charts, a row for lists).
+ */
+function CardState({
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  height,
+  plot,
+  children,
+}: {
+  loading: boolean;
+  broken: boolean;
+  nothing: boolean;
+  onRetry: () => void;
+  height: number;
+  plot?: number;
+  children: () => React.ReactNode;
+}) {
   if (loading) {
+    if (plot) {
+      return (
+        <div className="flex flex-col gap-3" style={{ minHeight: height }} aria-busy="true">
+          <SkeletonBars rows={1} height={14} />
+          <div className="relative w-full border-b border-l border-line" style={{ height: plot }} aria-hidden>
+            {[0.25, 0.5, 0.75].map((f) => (
+              <div key={f} className="absolute inset-x-0 border-t border-[var(--os-line-soft)]" style={{ top: `${f * 100}%` }} />
+            ))}
+            <div className="absolute inset-2 animate-pulse rounded bg-[var(--os-skeleton)] opacity-40" style={{ animationDuration: "1.6s" }} />
+          </div>
+          <SkeletonBars rows={2} height={12} />
+        </div>
+      );
+    }
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
+      <div style={{ minHeight: height }} aria-busy="true">
+        <SkeletonBars rows={3} height={14} gap={12} />
       </div>
     );
   }
+  if (broken) return <CardRetry onRetry={onRetry} />;
+  if (nothing) return <QuietBlock sentence={NOTHING} arrangement={plot ? "grid" : "row"} height={plot ? Math.min(height, 200) : 96} />;
+  return <>{children()}</>;
+}
 
-  // Revenue by plan
-  const revenueByPlan = (stats?.planBreakdown || []).map((p) => ({
-    plan: p.plan,
-    count: p.count,
-    revenue: (planPrices[p.plan] || 0) * p.count,
-  }));
+/* ───────────────────────── 1. Revenue ───────────────────────── */
 
-  const totalRevenue = revenueByPlan.reduce((sum, p) => sum + p.revenue, 0);
-
-  // Top companies by usage
-  const topByUsers = [...companies].sort((a, b) => b._count.users - a._count.users).slice(0, 5);
-  const topByActivity = [...companies]
-    .map((c) => ({ ...c, totalActivity: c._count.tasks + c._count.kras + c._count.sops + c._count.reviewCycles }))
-    .sort((a, b) => b.totalActivity - a.totalActivity)
-    .slice(0, 5);
-
-  const maxUsers = topByUsers[0]?._count.users || 1;
-  const maxActivity = topByActivity[0]?.totalActivity || 1;
-
-  // Average users per org
-  const avgUsers = stats && stats.totalOrgs > 0 ? Math.round(stats.totalUsers / stats.totalOrgs) : 0;
-
+function RevenueCard({
+  data,
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  language,
+  runbookUrl,
+  datePrefs,
+}: CardProps & { language?: string | null; runbookUrl: string | null; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
+  const rev = data?.revenue;
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Platform Analytics</h1>
-          <p className="text-muted text-base mt-1">Revenue, usage, and growth metrics</p>
+    <NumbersCard
+      title="Revenue"
+      meta={rev?.source === "stripe" ? <span title={formatDateTitle(rev.asOf, datePrefs)}>Stripe figures from {formatDate(rev.asOf, datePrefs, "time")}</span> : null}
+    >
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={300} plot={224}>
+        {() => {
+          if (!data || !rev) return null;
+          if (rev.source === "unavailable") {
+            return <QuietBlock sentence="Billing is not connected yet" arrangement="grid" link={connectLink(runbookUrl)} height={224} />;
+          }
+          if (rev.source === "error") return <CardRetry onRetry={onRetry} />;
+          if (rev.lines.length === 0 && rev.uncounted === 0) {
+            return <QuietBlock sentence="No active Stripe subscriptions and nothing charged in this range" arrangement="grid" height={160} />;
+          }
+          return (
+            <div className="flex flex-col gap-5">
+              {rev.lines.map((line, i) => (
+                <div key={line.currency} className={i > 0 ? "border-t border-line pt-5" : undefined}>
+                  <RevenueLineBlock line={line} data={data} seriesFailed={rev.seriesFailed} onRetry={onRetry} language={language} />
+                </div>
+              ))}
+              {rev.uncounted > 0 ? (
+                <p className="m-0 text-sm text-ink-2">
+                  {n(rev.uncounted)} {rev.uncounted === 1 ? "subscription has" : "subscriptions have"} a tiered or metered price, or a
+                  discount Stripe gave no exact amount for, and {rev.uncounted === 1 ? "is" : "are"} not counted.
+                </p>
+              ) : null}
+              {rev.truncated ? <p className="m-0 text-sm text-ink-2">Stripe stopped answering before every record was read, so the real figure is higher.</p> : null}
+              <p className="m-0 text-sm text-ink-2">
+                From WorkwrK&apos;s Stripe subscriptions only, active or past due, after their discounts; the chart is before refunds.
+                Lifetime deals and companies on manual invoices are not counted.
+              </p>
+            </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+function RevenueLineBlock({
+  line,
+  data,
+  seriesFailed,
+  onRetry,
+  language,
+}: {
+  line: RevenueLineOut;
+  data: Analytics;
+  seriesFailed: boolean;
+  onRetry: () => void;
+  language?: string | null;
+}) {
+  const per = data.window.granularity === "month" ? "per month" : "per 5 days";
+  const points = useMemo(
+    () =>
+      (line.series ?? []).map((v, i) => ({
+        label: bucketLabel(data.window.buckets[i].start, data.window.granularity, language),
+        value: fromMinor(v, line.currency),
+        minor: v,
+        last: i === data.window.buckets.length - 1,
+      })),
+    [line.series, line.currency, data.window, language],
+  );
+  const compact = useMemo(
+    () => new Intl.NumberFormat(language || undefined, { notation: "compact", maximumFractionDigits: 1 }),
+    [language],
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="m-0 text-sm font-medium text-ink-2">
+        What Stripe was paid, {per} ({line.currency})
+      </p>
+      {seriesFailed || !line.series ? (
+        <div style={{ minHeight: 224 }} className="flex items-center">
+          <CardRetry onRetry={onRetry} />
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData}>
-          <RefreshCw size={14} className="mr-2" /> Refresh
-        </Button>
-      </div>
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Monthly Recurring Revenue</p>
-            <p className="text-2xl font-semibold text-green-400">{formatCurrency(stats?.mrr ?? 0)}</p>
-            <p className="text-xs text-muted mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Avg. Revenue Per Org</p>
-            <p className="text-2xl font-semibold text-[#d4ff2e]">
-              {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "—"}
-            </p>
-            <p className="text-xs text-muted mt-1">ARPU across all plans</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Avg. Users Per Org</p>
-            <p className="text-2xl font-semibold text-blue-400">{avgUsers}</p>
-            <p className="text-xs text-muted mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Trial Conversion Pipeline</p>
-            <p className="text-2xl font-semibold text-orange-400">{stats?.trialOrgs ?? 0}</p>
-            <p className="text-xs text-muted mt-1">Organizations currently on trial</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* MRR over time */}
-      {stats?.mrrOverTime && stats.mrrOverTime.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Activity size={16} className="text-green-400" /> MRR — last 12 months
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-56 w-full">
-              <ResponsiveContainer>
-                <LineChart data={stats.mrrOverTime} margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#888" }} stroke="#444" />
-                  <YAxis tick={{ fontSize: 10, fill: "#888" }} stroke="#444" tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <Tooltip
-                    formatter={(v) => formatCurrency(typeof v === "number" ? v : Number(v) || 0)}
-                    contentStyle={{ background: "#0f0f0f", border: "1px solid #2a2a2a", fontSize: 12 }}
-                  />
-                  <Line type="monotone" dataKey="mrr" stroke="#d4ff2e" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Signup funnel */}
-      {stats?.funnel && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <ArrowDownRight size={16} className="text-blue-400" /> Signup funnel — last {stats.funnel.windowDays} days
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(() => {
-              const f = stats.funnel!;
-              const steps = [
-                { label: "Signed up", count: f.signedUp, hint: "Org created" },
-                { label: "Completed setup", count: f.completedSetup, hint: "Finished setup wizard" },
-                { label: "Engaged", count: f.engaged, hint: "Created ≥1 SOP / KRA / Task" },
-                { label: "Paying", count: f.paying, hint: "Active subscription" },
-              ];
-              const top = steps[0].count || 1;
-              return (
-                <div className="space-y-3">
-                  {steps.map((step, i) => {
-                    const prev = i === 0 ? null : steps[i - 1].count;
-                    const conv = prev && prev > 0 ? Math.round((step.count / prev) * 100) : null;
-                    return (
-                      <div key={step.label} className="space-y-1">
-                        <div className="flex items-center justify-between text-base">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{step.label}</span>
-                            <span className="text-muted text-sm">{step.hint}</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {conv !== null && (
-                              <span className="text-sm text-muted font-mono">{conv}%</span>
-                            )}
-                            <span className="font-mono text-base">{step.count}</span>
-                          </div>
-                        </div>
-                        <Progress value={(step.count / top) * 100} className="h-2" />
+      ) : (
+        <div style={{ height: 224 }} className="w-full min-w-0" role="img" aria-label={`What Stripe was paid ${per} in ${line.currency}`}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={points} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--os-line-soft)" />
+              <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--os-line-strong)" }} tick={{ fontSize: 12, fill: "var(--os-ink-2)" }} interval="preserveStartEnd" />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                width={48}
+                tick={{ fontSize: 12, fill: "var(--os-ink-2)" }}
+                tickFormatter={(v: number) => compact.format(v)}
+                allowDecimals={false}
+              />
+              <Tooltip
+                isAnimationActive={false}
+                cursor={{ stroke: "var(--os-line-strong)", strokeWidth: 1 }}
+                content={(p) => {
+                  const pt = p.payload?.[0]?.payload as (typeof points)[number] | undefined;
+                  if (!p.active || !pt) return null;
+                  return (
+                    <div className="rounded-md border border-line bg-raised px-2.5 py-1.5 text-xs shadow-[var(--os-shadow-pop)]">
+                      <div className="font-semibold tabular-nums text-ink">{formatMoney(pt.minor, line.currency, language)}</div>
+                      <div className="mt-0.5 text-ink-2">
+                        {pt.label}
+                        {pt.last ? ", so far" : ""}
                       </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </CardContent>
-        </Card>
+                    </div>
+                  );
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="var(--os-brand)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--os-brand)", stroke: "var(--os-surface)", strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       )}
-
-      {/* Revenue Breakdown */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <CreditCard size={16} className="text-green-400" /> Revenue by Plan
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {revenueByPlan.length === 0 ? (
-            <p className="text-base text-muted">No revenue data yet.</p>
-          ) : (
-            revenueByPlan.map((p) => (
-              <div key={p.plan} className="space-y-1">
-                <div className="flex items-center justify-between text-base">
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2.5 w-2.5 rounded-full ${planColors[p.plan] || "bg-gray-500"}`} />
-                    <span className="font-medium">{p.plan}</span>
-                    <span className="text-muted text-sm">({p.count} orgs)</span>
-                  </div>
-                  <span className="font-mono text-base">{formatCurrency(p.revenue)}</span>
-                </div>
-                <Progress value={totalRevenue > 0 ? (p.revenue / totalRevenue) * 100 : 0} className="h-2" />
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Top by Users */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users size={16} className="text-blue-400" /> Largest Organizations
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {topByUsers.map((c, i) => (
-              <div key={c.id} className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-muted w-4">{i + 1}</span>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-base font-medium">{c.name}</span>
-                    <span className="text-sm text-muted">{c._count.users} users</span>
-                  </div>
-                  <Progress value={(c._count.users / maxUsers) * 100} className="h-1.5" />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Top by Activity */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <BarChart3 size={16} className="text-[#d4ff2e]" /> Most Active Organizations
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {topByActivity.map((c, i) => (
-              <div key={c.id} className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-muted w-4">{i + 1}</span>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-base font-medium">{c.name}</span>
-                    <span className="text-sm text-muted">{c.totalActivity} items</span>
-                  </div>
-                  <Progress value={(c.totalActivity / maxActivity) * 100} className="h-1.5" />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      <div className="flex flex-col gap-0.5 text-sm text-ink-2">
+        <span>
+          Monthly revenue <span className="font-medium tabular-nums text-ink">{formatMoney(line.monthly, line.currency, language)}</span>
+          {" "}from {n(line.subscriptions)} Stripe {line.subscriptions === 1 ? "subscription" : "subscriptions"}
+        </span>
+        <span>
+          Annual run rate <span className="font-medium tabular-nums text-ink">{formatMoney(line.arr, line.currency, language)}</span> (monthly × 12)
+        </span>
+        {line.arpu !== null ? (
+          <span>
+            Average per paying company <span className="font-medium tabular-nums text-ink">{formatMoney(line.arpu, line.currency, language)}</span>
+          </span>
+        ) : null}
       </div>
+    </div>
+  );
+}
 
-      {/* Plan Distribution */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp size={16} className="text-orange-400" /> Growth Snapshot
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-[#d4ff2e]">+{stats?.newOrgsThisMonth ?? 0}</p>
-              <p className="text-xs text-muted mt-1">New orgs this month</p>
-            </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-blue-400">+{stats?.newUsersThisMonth ?? 0}</p>
-              <p className="text-xs text-muted mt-1">New users this month</p>
-            </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-green-400">{stats?.activeRate ?? 0}%</p>
-              <p className="text-xs text-muted mt-1">Active rate</p>
-            </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-amber-400">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
-              <p className="text-xs text-muted mt-1">Projected ARR</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+/* ───────────────────────── 2. Growth ───────────────────────── */
 
-      {/* Cohort retention */}
-      {stats?.cohorts && stats.cohorts.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users size={16} className="text-blue-400" /> Cohort retention — last 6 months
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-base">
-                <thead>
-                  <tr className="text-left text-sm text-muted">
-                    <th className="pb-2 font-normal">Cohort</th>
-                    <th className="pb-2 font-normal">Size</th>
-                    <th className="pb-2 font-normal">Active</th>
-                    <th className="pb-2 font-normal">Paying</th>
-                    <th className="pb-2 font-normal">Churned</th>
-                    <th className="pb-2 font-normal">Retention</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.cohorts.map((c) => {
-                    const retention = c.size > 0 ? Math.round((c.active / c.size) * 100) : 0;
-                    return (
-                      <tr key={c.month} className="border-t border-white/5">
-                        <td className="py-2 font-mono text-sm">{c.month}</td>
-                        <td className="py-2">{c.size}</td>
-                        <td className="py-2 text-green-400">{c.active}</td>
-                        <td className="py-2 text-[#d4ff2e]">{c.paying}</td>
-                        <td className="py-2 text-red-400">{c.churned}</td>
-                        <td className="py-2">
+function GrowthCard({ data, loading, broken, nothing, onRetry, language }: CardProps & { language?: string | null }) {
+  return (
+    <NumbersCard title="Growth">
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={240} plot={168}>
+        {() => {
+          if (!data) return null;
+          const g = data.growth;
+          const result: Extract<WidgetResult, { kind: "chart" }> = {
+            kind: "chart",
+            groupBy: "status",
+            display: "bar",
+            buckets: g.byBucket.map((count, i) => ({
+              key: data.window.buckets[i].start,
+              label: bucketLabel(data.window.buckets[i].start, data.window.granularity, language),
+              // One series, the one blue (spec 2.5 chart rules).
+              color: "var(--os-brand)",
+              count,
+            })),
+          };
+          const any = g.byBucket.some((v) => v > 0);
+          return (
+            <div className="flex flex-col gap-3">
+              <p className="m-0 flex flex-wrap gap-x-6 gap-y-1 text-row text-ink-2">
+                <span>
+                  New companies <span className="font-semibold tabular-nums text-ink">{n(g.newCompanies)}</span>
+                </span>
+                <span>
+                  New people <span className="font-semibold tabular-nums text-ink">{n(g.newPeople)}</span>
+                </span>
+              </p>
+              <div style={{ height: 168 }} className="w-full min-w-0">
+                {any ? (
+                  <ChartBody result={result} />
+                ) : (
+                  <QuietBlock sentence="No new companies in this range" arrangement="grid" height={168} />
+                )}
+              </div>
+              <div className="flex flex-col gap-0.5 text-sm text-ink-2">
+                <span>New companies {data.window.granularity === "month" ? "per month" : "per 5 days"}; the last bar is so far.</span>
+                <span>
+                  {n(g.onTrial)} {g.onTrial === 1 ? "company is" : "companies are"} on trial.
+                </span>
+                <span>
+                  <span className="font-semibold text-ink">Average people per company {g.avgPeoplePerCompany}</span>, {n(g.totalPeople)}{" "}
+                  {g.totalPeople === 1 ? "person" : "people"} across {n(g.totalCompanies)} {g.totalCompanies === 1 ? "company" : "companies"}.
+                </span>
+              </div>
+            </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+/* ───────────────────────── 3. Signup funnel ───────────────────────── */
+
+function FunnelCard({ data, range, loading, broken, nothing, onRetry }: CardProps & { range: AnalyticsRange }) {
+  // The range the person picked, in the same words as the Range control.
+  return (
+    <NumbersCard title={`Signup funnel · last ${RANGE_LABEL[range]}`}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={180}>
+        {() => {
+          if (!data) return null;
+          const f = data.funnel;
+          const steps = [
+            { label: "Signed up", hint: "A company was created", count: f.signedUp },
+            { label: "Finished setup", hint: "They completed the setup wizard", count: f.finishedSetup },
+            { label: "Created something", hint: "Of those, at least one SOP, KRA or task", count: f.createdSomething },
+            { label: "Paying", hint: "Of those, an active or past-due subscription", count: f.paying },
+          ];
+          if (f.signedUp === 0) return <p className="m-0 text-row text-ink-2">No companies signed up in this range.</p>;
+          return (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {steps.map((s, i) => {
+                const conv = i === 0 ? null : conversionPct(s.count, steps[i - 1].count);
+                return (
+                  <li key={s.label} className="flex flex-col gap-1">
+                    <div className="flex h-7 min-w-0 items-center gap-3">
+                      <span className="shrink-0 text-row font-medium text-ink">{s.label}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{s.hint}</span>
+                      {conv !== null ? <span className="shrink-0 text-sm tabular-nums text-ink-2">{conv}%</span> : null}
+                      <span className="w-12 shrink-0 text-right text-row font-medium tabular-nums text-ink">{n(s.count)}</span>
+                    </div>
+                    <Bar4 pct={barPct(s.count, f.signedUp)} />
+                  </li>
+                );
+              })}
+            </ul>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+/* ───────────────────────── 4. Retention ───────────────────────── */
+
+function RetentionCard({
+  data,
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  language,
+  datePrefs,
+}: CardProps & { language?: string | null; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
+  return (
+    <NumbersCard title="Retention">
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={200}>
+        {() => {
+          if (!data) return null;
+          // A month nobody signed up in is not a cohort: twelve rows of zeros
+          // would bury the ones that exist.
+          const rows = data.retention.cohorts.filter((c) => c.size > 0);
+          if (rows.length === 0) return <p className="m-0 text-row text-ink-2">No companies signed up in this range.</p>;
+          return (
+            <div className="flex flex-col gap-3">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] border-collapse text-row">
+                  <thead>
+                    <tr className="text-left text-sm text-ink-2">
+                      <th className="h-9 pe-3 font-medium">Cohort</th>
+                      <th className="h-9 pe-3 text-right font-medium">Size</th>
+                      <th className="h-9 pe-3 text-right font-medium">Still active</th>
+                      <th className="h-9 pe-3 text-right font-medium">Paying</th>
+                      <th className="h-9 pe-3 text-right font-medium">Cancelled</th>
+                      <th className="h-9 w-[200px] font-medium">Retention</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((c) => (
+                      <tr key={c.month} className="border-t border-line">
+                        <td className="h-9 pe-3 text-ink">{monthKeyLabel(c.month, language)}</td>
+                        <td className="h-9 pe-3 text-right tabular-nums">{n(c.size)}</td>
+                        <td className="h-9 pe-3 text-right tabular-nums">{n(c.stillActive)}</td>
+                        <td className="h-9 pe-3 text-right tabular-nums">{n(c.paying)}</td>
+                        <td className="h-9 pe-3 text-right tabular-nums">{n(c.cancelled)}</td>
+                        <td className="h-9">
                           <div className="flex items-center gap-2">
-                            <Progress value={retention} className="h-1.5 w-16" />
-                            <span className="text-sm text-muted font-mono w-9">{retention}%</span>
+                            <div className="w-24"><Bar4 pct={c.retention ?? 0} /></div>
+                            <span className="w-10 text-sm tabular-nums text-ink-2">{c.retention ?? 0}%</span>
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Recent churn */}
-      {stats?.recentChurn && stats.recentChurn.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <UserMinus size={16} className="text-red-400" /> Recent cancellations
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {stats.recentChurn.map((c) => (
-                <li
-                  key={c.orgId + (c.canceledAt ?? "")}
-                  className="flex items-center justify-between text-base"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-medium">{c.orgName}</span>
-                    <span className="text-sm text-muted">{c.plan}</span>
-                  </div>
-                  <span className="text-sm text-muted">
-                    {c.canceledAt ? new Date(c.canceledAt).toLocaleDateString() : "—"}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col gap-0.5 text-sm text-ink-2">
+                <span>Still active means somebody in that workspace did something in the last 30 days. Signing in or out does not count.</span>
+                <span>Paying means an active or past-due subscription today.</span>
+                {data.retention.partialFirst && rows[rows.length - 1]?.month === data.retention.from.slice(0, 7) ? (
+                  <span>
+                    {monthKeyLabel(rows[rows.length - 1].month, language)} counts only the companies that signed up from{" "}
+                    {formatDate(data.retention.from, datePrefs, "date")}.
                   </span>
+                ) : null}
+              </div>
+            </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+/* ───────────────────────── 5. Cancellations ───────────────────────── */
+
+function PlanChip({ plan }: { plan: string }) {
+  return <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(plan)}</Chip>;
+}
+
+function CancellationsCard({ data, loading, broken, nothing, onRetry, datePrefs }: CardProps & { datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
+  return (
+    <NumbersCard title="Cancellations">
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={120}>
+        {() => {
+          if (!data) return null;
+          if (data.cancellations.length === 0) return <p className="m-0 text-row text-ink-2">No cancellations in this range.</p>;
+          return (
+            <ul className="m-0 -mx-2 flex list-none flex-col p-0">
+              {data.cancellations.map((c) => (
+                // Two lines on a phone (the company, then what happened and
+                // when), one h-9 line from sm up. The name keeps a minimum
+                // width and the status truncates before the date, so neither
+                // the name nor the date can be squeezed out of the card.
+                <li
+                  key={`${c.id}-${c.what}-${c.canceledAt ?? ""}`}
+                  className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5 sm:h-9 sm:flex-row sm:items-center sm:gap-3 sm:py-0"
+                >
+                  <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+                    {c.gone ? (
+                      <span className="min-w-[8ch] truncate text-row text-ink" title={c.name}>{c.name}</span>
+                    ) : (
+                      <Link href={`/admin/companies/${c.id}`} className="min-w-[8ch] truncate text-row text-ink hover:underline" title={c.name}>
+                        {c.name}
+                      </Link>
+                    )}
+                    {c.plan ? <PlanChip plan={c.plan} /> : null}
+                  </div>
+                  <div className="flex min-w-0 items-center gap-3 text-sm text-ink-2">
+                    <span className="min-w-0 truncate">
+                      {c.what === "workspace" ? "Workspace cancelled" : c.what === "deleted" ? "Deleted by its Owner" : "Subscription cancelled"}
+                      {c.restored ? ", restored since" : ""}
+                      {c.gone ? ", deleted for good" : ""}
+                    </span>
+                    <span className="shrink-0 tabular-nums" title={c.canceledAt ? formatDateTitle(c.canceledAt, datePrefs) : undefined}>
+                      {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
+                    </span>
+                  </div>
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+/* ───────────────────────── 6. Biggest and busiest ───────────────────────── */
+
+function RankCard({
+  title,
+  rows,
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  unit,
+  note,
+}: {
+  title: string;
+  rows: RankedCompany[] | null;
+  loading: boolean;
+  broken: boolean;
+  nothing: boolean;
+  onRetry: () => void;
+  unit: (v: number) => string;
+  note: string;
+}) {
+  return (
+    <NumbersCard title={title}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={200}>
+        {() => {
+          if (!rows) return null;
+          const max = rows[0]?.value ?? 0;
+          return (
+            <div className="flex flex-col gap-3">
+              {rows.length === 0 ? (
+                <p className="m-0 text-row text-ink-2">Nothing recorded in this range.</p>
+              ) : (
+                <ol className="m-0 flex list-none flex-col gap-2 p-0">
+                  {rows.map((r, i) => (
+                    <li key={r.id} className="flex flex-col gap-1">
+                      <div className="flex h-7 min-w-0 items-center gap-3">
+                        <span className="w-4 shrink-0 text-sm font-medium tabular-nums text-ink-2">{i + 1}</span>
+                        <Link href={`/admin/companies/${r.id}`} className="min-w-0 flex-1 truncate text-row text-ink hover:underline">{r.name}</Link>
+                        <span className="shrink-0 text-row tabular-nums text-ink">{unit(r.value)}</span>
+                      </div>
+                      <div className="ps-7"><Bar4 pct={barPct(r.value, max)} /></div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <p className="m-0 text-sm text-ink-2">{note}</p>
+            </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
+  );
+}
+
+/* ───────────────────────── 7. Plans ───────────────────────── */
+
+function PlansCard({ data, loading, broken, nothing, onRetry }: CardProps) {
+  return (
+    <NumbersCard title="Plans">
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={160}>
+        {() => {
+          if (!data) return null;
+          const max = Math.max(0, ...data.plans.map((p) => p.count));
+          return (
+            <div className="flex flex-col gap-3">
+              <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                {data.plans.map((p) => (
+                  <li key={p.plan} className="flex flex-col gap-1">
+                    <div className="flex h-7 items-center gap-3">
+                      <PlanChip plan={p.plan} />
+                      <span className="flex-1" />
+                      <span className="text-row tabular-nums text-ink">
+                        {n(p.count)} {p.count === 1 ? "company" : "companies"}
+                      </span>
+                    </div>
+                    <Bar4 pct={barPct(p.count, max)} />
+                  </li>
+                ))}
+              </ul>
+              <p className="m-0 text-sm text-ink-2">Every company that is not cancelled, today. There is no revenue per plan: Stripe does not know our plan names.</p>
+            </div>
+          );
+        }}
+      </CardState>
+    </NumbersCard>
   );
 }

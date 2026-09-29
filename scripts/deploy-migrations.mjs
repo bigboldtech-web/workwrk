@@ -145,6 +145,13 @@ const SQL_MANIFEST = [
   // really runs). One CREATE TABLE IF NOT EXISTS. Deploy order is free: the
   // writer and the reader both catch the missing relation.
   "2026-09-27-automation-cron-tick.sql",
+  // Phase 9, the Staff console: "StaffAction" (one row per write a WorkwrK
+  // staff member makes from the console, kept for ever) and
+  // "PlatformAdmin"."consolePrefs" (nullable, read as an empty object). One
+  // CREATE TABLE IF NOT EXISTS, four indexes, one guarded foreign key with
+  // ON DELETE SET NULL, one ADD COLUMN IF NOT EXISTS. Deploy order is free:
+  // nothing in the running release names either object.
+  "2026-09-27-staff-console.sql",
 ];
 
 /**

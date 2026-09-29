@@ -20,6 +20,8 @@
 
 import { Children, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { getCsrfToken, getSession, useSession } from "next-auth/react";
+import { AlertTriangle } from "lucide-react";
 import { recordShellPath } from "@/lib/nav/entry-path";
 import { OsShellProvider, useLayer, useOsShell } from "./shell-context";
 import { OsCommandPalette } from "./command-palette";
@@ -136,6 +138,81 @@ function NavigationAnnouncer() {
 }
 
 /**
+ * Clears the workspace-move marker for the move `at` names (lib/auth.ts,
+ * WorkspaceMove). It posts to the session endpoint directly instead of
+ * calling useSession().update(): update() flips the session status to
+ * "loading" while it runs, and the dashboard layout swaps the whole frame
+ * for the boot screen on "loading", which would throw away whatever the
+ * person had open just to dismiss a notice. True only when the server's
+ * answer no longer carries that marker. /onboard has a twin of this (a page
+ * file cannot import from here without pulling the whole frame in).
+ */
+async function ackWorkspaceMove(at: number): Promise<boolean> {
+  try {
+    const csrfToken = await getCsrfToken();
+    if (!csrfToken) return false;
+    const res = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csrfToken, data: { workspaceMoveAck: at } }),
+      cache: "no-store",
+    });
+    if (!res.ok) return false;
+    const next = (await res.json().catch(() => null)) as { workspaceMove?: { at?: number } } | null;
+    if (!next || next.workspaceMove?.at === at) return false;
+    // Other open tabs refetch on this broadcast and drop the notice too.
+    void getSession();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * "{Old Co} is suspended, so you are now in {New Co}." The strip under the bar
+ * after the session moved this person out of a suspended or closed company
+ * (spec-admin-backoffice 2.3, the healthy-workspace fallback): without it the
+ * first thing they saw was another company's pages with no reason given. It
+ * stays until they dismiss it, on every route and across reloads, because
+ * the marker lives on the session; a failed dismiss says so and keeps the
+ * notice with Retry.
+ */
+function WorkspaceMoveStrip() {
+  const { data } = useSession();
+  const move = data?.workspaceMove;
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [state, setState] = useState<"idle" | "saving" | "failed">("idle");
+  if (!move || move.at === dismissedAt) return null;
+  const dismiss = async () => {
+    setState("saving");
+    const ok = await ackWorkspaceMove(move.at);
+    if (ok) {
+      setDismissedAt(move.at);
+      setState("idle");
+    } else {
+      setState("failed");
+    }
+  };
+  return (
+    <div role="status" className="os-chrome flex min-h-8 shrink-0 items-center gap-2 bg-warning-bg px-4 py-1 text-sm text-warning-text">
+      <AlertTriangle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 flex-1">
+        {move.message}
+        {state === "failed" ? " Couldn't dismiss this notice." : null}
+      </span>
+      <button
+        type="button"
+        onClick={() => void dismiss()}
+        disabled={state === "saving"}
+        className="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline disabled:opacity-60"
+      >
+        {state === "failed" ? "Retry" : "Dismiss"}
+      </button>
+    </div>
+  );
+}
+
+/**
  * The tablet overlay sidebar (768 to 1023): opened from the bar's Menu
  * button; a layer, so Esc closes it (spec-shell 1.16); closes on row click.
  */
@@ -234,6 +311,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       </div>
       <div className="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-col">
         <OfflineStrip />
+        <WorkspaceMoveStrip />
         {!settingsMode ? <TopPinsStrip /> : null}
       </div>
       {settingsMode ? (

@@ -1,21 +1,74 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
-import {
-  Building2, Search, RefreshCw, ChevronLeft, ChevronRight, Eye,
-  Users, CheckSquare, BookOpen, Target, Star,
-} from "lucide-react";
+// Companies (spec-admin-backoffice 2.2): every company that has a WorkwrK
+// workspace, on the design system's one page pattern. The views row is the
+// URL's ?view=, the Filter panel's fields are the URL's filters (so a link,
+// a Search result and the back arrow all restore the list exactly), and a
+// row opens the company in the 520 drawer at /admin/companies/[id] over this
+// list, which stays mounted, scrolled and filtered underneath.
+//
+// Where the old controls went:
+//   - the search box above the table: the Filter panel's "Name or domain"
+//     field (the same `search=` the old box wrote) and Search (Cmd+K);
+//   - the plan and status selects: the Plan and Status filter fields and the
+//     views row;
+//   - the Eye "quick edit" dialog and the Manage button: the whole row, which
+//     opens the company page (drawer), where every field the dialog had is,
+//     with the confirms the dialog skipped;
+//   - the slug under the name: the company page's Facts card, the row
+//     menu's "Copy slug", and Search, which matches it;
+//   - pagination below the card: the card's own footer;
+//   - Refresh: "..." > Refresh, plus a refetch on focus after 60 seconds.
 
-interface Company {
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Building2, Copy, Download, ExternalLink, Info, RefreshCw, ScrollText } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { useOsToast } from "@/components/layout/os/toast";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Picker } from "@/components/ui/picker";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatusChip, Chip } from "@/components/ui/chip";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { DateField } from "@/components/ui/date-field";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, formatDateTitle } from "@/lib/format/date";
+import { MODULES } from "@/lib/modules";
+import {
+  COMPANY_SORTS,
+  COMPANY_VIEWS,
+  COMPANY_VIEW_LABEL,
+  SUBSCRIPTION_FILTERS,
+  SUBSCRIPTION_FILTER_LABEL,
+  activeCompanyFilterCount,
+  companyListQuery,
+  parseCompanyListParams,
+  type CompanyListParams,
+  type CompanyView,
+} from "@/lib/admin/companies-list";
+import { PLAN_OPTIONS, STATUS_OPTIONS, companyStatusColor, planLabel, statusLabel } from "@/lib/admin/console-labels";
+import { choiceFromStored, storedFromChoice } from "@/lib/admin/console-columns";
+import { useConsole } from "../../console-context";
+import {
+  AboutDialog,
+  FIELD,
+  InlineRetry,
+  RowMenuTrigger,
+  TEXT_LINK,
+  UpdatedMeta,
+  ViewCount,
+  downloadHref,
+  useCopy,
+  rememberCompanyNames,
+  useListSearchKey,
+  useStaleRefetch,
+} from "../../console-ui";
+
+interface CompanyRow {
   id: string;
   name: string;
   slug: string;
@@ -23,320 +76,464 @@ interface Company {
   plan: string;
   status: string;
   createdAt: string;
-  updatedAt: string;
-  _count: {
-    users: number;
-    tasks: number;
-    sops: number;
-    reviewCycles: number;
-    kras: number;
+  people: number;
+  ownerCount: number;
+  modules: string[];
+  subscription: { source: "stripe" | "lifetime" | "none"; status: string; seats: number; trialEndsAt: string | null } | null;
+  seatsLabel: string;
+}
+
+interface Payload {
+  companies: CompanyRow[];
+  total: number;
+  page: number;
+  limit: number;
+  counts: Record<CompanyView, number>;
+}
+
+const COLUMN_KEYS = ["company", "domain", "plan", "status", "people", "seats", "modules", "signed"] as const;
+const OFF_BY_DEFAULT = ["domain"];
+
+// A column's inline filter must never squeeze its title: TableCard truncates
+// the title and keeps the filter whole, so "Suspended, Cancelled ▾" used to
+// cut Status down to "Sta...". One choice shows by name, several as a count
+// (the names are in the tooltip and the Filter panel), and the trigger has a
+// cap; Plan and Status are wide enough for the longest single name.
+const HEADER_FILTER_BTN =
+  "inline-flex h-6 max-w-[96px] items-center gap-0.5 rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink";
+function headerFilterLabel(chosen: string[]): string {
+  if (chosen.length === 0) return "All";
+  return chosen.length === 1 ? chosen[0] : String(chosen.length);
+}
+function headerFilterTitle(column: string, chosen: string[]): string {
+  return chosen.length === 0 ? `${column}: all` : `${column}: ${chosen.join(", ")}`;
+}
+
+export default function CompaniesPage() {
+  const router = useRouter();
+  const { spKey, onList } = useListSearchKey("/admin/companies");
+  const params = useMemo(() => parseCompanyListParams(new URLSearchParams(spKey)), [spKey]);
+  const { datePrefs, prefs, patchPrefs } = useConsole();
+  const { toast } = useOsToast();
+  const copy = useCopy(toast);
+
+  const [payload, setPayload] = useState<Payload | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [filterOpen, setFilterOpen] = useState(() => activeCompanyFilterCount(params) > 0);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [menu, setMenu] = useState<{ row: CompanyRow; anchor: React.RefObject<HTMLElement | null> } | null>(null);
+  // A column's inline "All ▾" filter. The Picker is anchored to a fixed point
+  // under the button, because the card clips an absolutely placed popover.
+  const [headerFilter, setHeaderFilter] = useState<{ key: "plan" | "status"; point: { top: number; left: number } } | null>(null);
+  const openHeaderFilter = (key: "plan" | "status", e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setHeaderFilter((f) => (f?.key === key ? null : { key, point: { top: r.bottom + 4, left: r.left } }));
   };
-}
+  const seq = useRef(0);
 
-const plans = ["STARTER", "GROWTH", "SCALE", "ENTERPRISE"];
-const statuses = ["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"];
+  // The list only answers on /admin/companies itself: while the company
+  // drawer is open the URL is the company's, and this page keeps showing
+  // the list it had rather than refetching for a URL that is not its own.
+  const query = companyListQuery(params);
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "ACTIVE": return <Badge variant="success">Active</Badge>;
-    case "TRIAL": return <Badge variant="warning">Trial</Badge>;
-    case "SUSPENDED": return <Badge variant="destructive">Suspended</Badge>;
-    case "CANCELLED": return <Badge variant="secondary">Cancelled</Badge>;
-    default: return <Badge variant="secondary">{status}</Badge>;
-  }
-}
-
-function getPlanColor(plan: string) {
-  switch (plan) {
-    case "STARTER": return "text-gray-400";
-    case "GROWTH": return "text-[#d4ff2e]";
-    case "SCALE": return "text-blue-400";
-    case "ENTERPRISE": return "text-amber-400";
-    default: return "text-gray-400";
-  }
-}
-
-export default function AdminCompaniesPage() {
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [filterPlan, setFilterPlan] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [selected, setSelected] = useState<Company | null>(null);
-  const [editPlan, setEditPlan] = useState("");
-  const [editStatus, setEditStatus] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const { success: toastSuccess, error: toastError } = useToast();
-
-  const fetchCompanies = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: "15" });
-      if (search) params.set("search", search);
-      if (filterPlan) params.set("plan", filterPlan);
-      if (filterStatus) params.set("status", filterStatus);
-
-      const res = await fetch(`/api/admin/companies?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCompanies(data.companies || []);
-        setTotalPages(data.totalPages || 1);
-        setTotal(data.total || 0);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+  const load = useCallback(async () => {
+    const mine = ++seq.current;
+    const r = await apiFetch<Payload>(`/api/admin/companies${query}`);
+    if (mine !== seq.current) return;
+    if (r.ok) {
+      setFailed(false);
+      rememberCompanyNames(r.data.companies);
+      setPayload(r.data);
+      setLoadedAt(Date.now());
+    } else if (r.status !== 401) {
+      // A failure says so. It never reads as an empty database.
+      setFailed(true);
     }
-  }, [page, search, filterPlan, filterStatus]);
+  }, [query]);
 
   useEffect(() => {
-    fetchCompanies();
-  }, [fetchCompanies]);
+    if (!onList) return;
+    const t = setTimeout(() => void load(), 0);
+    return () => clearTimeout(t);
+  }, [load, onList]);
+  useStaleRefetch(() => { if (onList) void load(); }, loadedAt);
 
-  const openDetail = (company: Company) => {
-    setSelected(company);
-    setEditPlan(company.plan);
-    setEditStatus(company.status);
-  };
+  const setParams = useCallback(
+    (patch: Partial<CompanyListParams>, opts: { keepPage?: boolean } = {}) => {
+      const next = { ...params, ...patch, ...(opts.keepPage ? {} : { page: 1 }) };
+      router.replace(`/admin/companies${companyListQuery(next)}`, { scroll: false });
+    },
+    [params, router],
+  );
 
-  const handleUpdate = async () => {
-    if (!selected) return;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/admin/companies", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selected.id, plan: editPlan, status: editStatus }),
-      });
-      if (res.ok) {
-        toastSuccess("Company updated successfully");
-        setSelected(null);
-        fetchCompanies();
-      } else {
-        toastError("Failed to update company");
-      }
-    } catch {
-      toastError("Failed to update company");
-    } finally {
-      setSaving(false);
+  // Name or domain: typed into a local field, written to ?search= after
+  // 250ms. The URL's value wins when it changes from outside (Search's
+  // "See all in Companies", the back arrow).
+  const [searchText, setSearchText] = useState(params.search);
+  // What this page last wrote to ?search=: its echo is not a new query.
+  const [written, setWritten] = useState(params.search);
+  const [seenSearch, setSeenSearch] = useState(params.search);
+  if (seenSearch !== params.search) {
+    setSeenSearch(params.search);
+    if (params.search !== written) {
+      setWritten(params.search);
+      setSearchText(params.search);
     }
+  }
+  useEffect(() => {
+    const v = searchText.trim();
+    if (v === written) return;
+    const t = window.setTimeout(() => {
+      setWritten(v);
+      setParams({ search: v });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [searchText, written, setParams]);
+  const [nameOn, setNameOn] = useState(params.search.length > 0);
+  const [peopleOn, setPeopleOn] = useState(params.peopleMin !== null || params.peopleMax !== null);
+  const [signedOn, setSignedOn] = useState(params.signedFrom !== null || params.signedTo !== null);
+
+  const activeCount = activeCompanyFilterCount(params);
+  /** Every filter off, plus `extra` (the empty row's view reset) in the SAME navigation. */
+  const clearFilters = (extra: Partial<CompanyListParams> = {}) => {
+    setWritten("");
+    setSearchText("");
+    setNameOn(false);
+    setPeopleOn(false);
+    setSignedOn(false);
+    setParams({
+      search: "", plans: [], statuses: [], subscriptions: [], modules: [], owners: null, trialEnds: null,
+      peopleMin: null, peopleMax: null, signedFrom: null, signedTo: null,
+      ...extra,
+    });
   };
+  const clearAll = () => clearFilters();
+
+  const toggleIn = <T extends string>(list: T[], v: T, on: boolean): T[] =>
+    on ? (list.includes(v) ? list : [...list, v]) : list.filter((x) => x !== v);
+
+  const exportCsv = () => {
+    const q = new URLSearchParams(query.replace(/^\?/, ""));
+    q.delete("page");
+    q.set("format", "csv");
+    downloadHref(`/api/admin/companies?${q.toString()}`);
+  };
+
+  const rows = payload?.companies ?? null;
+  const total = payload?.total ?? 0;
+  const lastPage = Math.max(1, Math.ceil(total / params.limit));
+  // The range only counts rows that are on screen: a page past the end (a
+  // bookmarked ?page=99) used to read "3921 to 14".
+  const shown = rows?.length ?? 0;
+  const from = shown === 0 ? 0 : (params.page - 1) * params.limit + 1;
+  const to = shown === 0 ? 0 : Math.min(total, (params.page - 1) * params.limit + shown);
+
+  // A page past the end (an old link, or a list that shrank under a later
+  // page) jumps to the last page that has rows, instead of an empty page that
+  // says "No companies yet" with Previous stepping back one empty page at a
+  // time. Only on an answer for this very page and size, so a stale payload
+  // from the last query never moves the list.
+  useEffect(() => {
+    if (!onList || !payload || payload.companies.length > 0 || payload.total === 0) return;
+    if (payload.page !== params.page || payload.limit !== params.limit) return;
+    const last = Math.max(1, Math.ceil(payload.total / payload.limit));
+    if (params.page > last) setParams({ page: last }, { keepPage: true });
+  }, [onList, payload, params.page, params.limit, setParams]);
+
+  const planFilter = (
+    <span className="relative inline-flex">
+      <button type="button" onClick={(e) => openHeaderFilter("plan", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "plan"} title={headerFilterTitle("Plan", params.plans.map(planLabel))} className={HEADER_FILTER_BTN}>
+        <span className="truncate">{headerFilterLabel(params.plans.map(planLabel))}</span> ▾
+      </button>
+      <Picker
+        open={headerFilter?.key === "plan"}
+        onClose={() => setHeaderFilter(null)}
+        anchorPoint={headerFilter?.key === "plan" ? headerFilter.point : null}
+        ariaLabel="Filter by plan"
+        multi
+        selected={params.plans}
+        onSelect={(v) => setParams({ plans: toggleIn(params.plans, v as CompanyListParams["plans"][number], !params.plans.includes(v as never)) })}
+        sections={[{ options: PLAN_OPTIONS.map((o) => ({ value: o.value, label: o.label })) }]}
+        width={200}
+      />
+    </span>
+  );
+  const statusFilter = (
+    <span className="relative inline-flex">
+      <button type="button" onClick={(e) => openHeaderFilter("status", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "status"} title={headerFilterTitle("Status", params.statuses.map(statusLabel))} className={HEADER_FILTER_BTN}>
+        <span className="truncate">{headerFilterLabel(params.statuses.map(statusLabel))}</span> ▾
+      </button>
+      <Picker
+        open={headerFilter?.key === "status"}
+        onClose={() => setHeaderFilter(null)}
+        anchorPoint={headerFilter?.key === "status" ? headerFilter.point : null}
+        ariaLabel="Filter by status"
+        multi
+        selected={params.statuses}
+        onSelect={(v) => setParams({ statuses: toggleIn(params.statuses, v as CompanyListParams["statuses"][number], !params.statuses.includes(v as never)) })}
+        sections={[{ options: STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })) }]}
+        width={200}
+      />
+    </span>
+  );
+
+  const columns: TableColumn<CompanyRow>[] = [
+    {
+      key: "company",
+      label: "Company",
+      title: true,
+      width: "minmax(220px,2fr)",
+      render: (r) => (
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <EntityTile size="sm" fallbackIcon={Building2} name={r.name} />
+          <span className="truncate" title={r.name}>{r.name}</span>
+        </span>
+      ),
+    },
+    // After Modules, Sign-in domain then Seats give way on a narrow card, so
+    // the pinned "..." never covers Signed up; both are on the company page.
+    { key: "domain", label: "Sign-in domain", width: "minmax(140px,1fr)", hideBelow: 960, render: (r) => <span className={r.domain ? "truncate" : "text-ink-3"}>{r.domain ?? "None"}</span> },
+    { key: "plan", label: "Plan", width: "150px", headerFilter: planFilter, render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip> },
+    { key: "status", label: "Status", width: "170px", headerFilter: statusFilter, render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
+    { key: "people", label: "People", width: "90px", numeric: true, render: (r) => new Intl.NumberFormat().format(r.people) },
+    { key: "seats", label: "Seats", width: "120px", hideBelow: 880, render: (r) => <span className={r.seatsLabel === "None" ? "text-ink-3" : "tabular-nums"}>{r.seatsLabel}</span> },
+    {
+      key: "modules",
+      label: "Modules",
+      width: "150px",
+      // Gives way first when the card is narrow (the Filter panel open, a
+      // 1024 window); column settings bring it back.
+      hideBelow: 1000,
+      render: (r) => (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {MODULES.filter((m) => r.modules.includes(m.appKey)).map((m) => (
+            <Chip key={m.appKey} as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{m.label}</Chip>
+          ))}
+        </span>
+      ),
+    },
+    {
+      key: "signed",
+      label: "Signed up",
+      width: "120px",
+      align: "end",
+      render: (r) => <span className="tabular-nums text-ink-2" title={formatDateTitle(r.createdAt, datePrefs)}>{formatDate(r.createdAt, datePrefs, "date")}</span>,
+    },
+  ];
+
+  const columnChoice = choiceFromStored(COLUMN_KEYS, prefs.companies.columns, OFF_BY_DEFAULT);
+  const noCompaniesAtAll = !!payload && payload.counts.all === 0 && activeCount === 0;
+
+  const emptyRow = failed ? (
+    <InlineRetry text="Could not load companies." onRetry={() => void load()} />
+  ) : activeCount > 0 || params.view !== "all" ? (
+    <span className="inline-flex items-center gap-1">
+      No companies match these filters ·
+      <button type="button" onClick={() => clearFilters(params.view !== "all" ? { view: "all" } : {})} className={TEXT_LINK}>Clear filters</button>
+    </span>
+  ) : (
+    "No companies yet"
+  );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
-        <p className="text-muted text-base mt-1">Manage all subscriber organizations — {total} total</p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <Input
-            placeholder="Search companies..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="pl-9"
+    <>
+      <OsPageHeader
+        title="Companies"
+        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} failed={failed && !!payload} />}
+        views={COMPANY_VIEWS.map((v) => (
+          <ViewTab
+            key={v}
+            label={COMPANY_VIEW_LABEL[v]}
+            active={params.view === v}
+            href={`/admin/companies${companyListQuery({ ...params, view: v, page: 1 })}`}
+            trailing={<ViewCount n={payload?.counts?.[v]} />}
           />
+        ))}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeCount },
+          sort: {
+            onClick: () => setSortOpen((o) => !o),
+            label: COMPANY_SORTS.find((s) => s.key === params.sort)?.label,
+            active: params.sort !== "newest",
+          },
+          left: (
+            <span className="relative">
+              <Picker
+                open={sortOpen}
+                onClose={() => setSortOpen(false)}
+                ariaLabel="Sort companies"
+                selected={params.sort}
+                onSelect={(v) => { setSortOpen(false); setParams({ sort: v as CompanyListParams["sort"] }); }}
+                sections={[{ options: COMPANY_SORTS.map((s) => ({ value: s.key, label: s.label })) }]}
+                width={200}
+              />
+            </span>
+          ),
+          menu: [
+            { label: "Refresh", icon: RefreshCw, onClick: () => void load() },
+            { label: "Export CSV", icon: Download, onClick: exportCsv },
+            { label: "About this page", icon: Info, onClick: () => setAboutOpen(true) },
+          ],
+        }}
+      />
+
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="companies" activeCount={activeCount} onClearAll={clearAll}>
+          <FilterGroup label="Name or domain">
+            <FilterRow
+              label="Contains"
+              checked={nameOn || params.search.length > 0}
+              onCheckedChange={(on) => {
+                setNameOn(on);
+                if (!on) { setWritten(""); setSearchText(""); setParams({ search: "" }); }
+              }}
+            >
+              <input
+                autoFocus={nameOn && !params.search}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="acme, acme.com"
+                aria-label="Name or domain"
+                className={`${FIELD} h-8 text-sm`}
+              />
+            </FilterRow>
+          </FilterGroup>
+          <FilterGroup label="Plan">
+            {PLAN_OPTIONS.map((o) => (
+              <FilterRow key={o.value} label={o.label} checked={params.plans.includes(o.value)} onCheckedChange={(on) => setParams({ plans: toggleIn(params.plans, o.value, on) })} />
+            ))}
+          </FilterGroup>
+          <FilterGroup label="Status">
+            {STATUS_OPTIONS.map((o) => (
+              <FilterRow key={o.value} label={o.label} checked={params.statuses.includes(o.value)} onCheckedChange={(on) => setParams({ statuses: toggleIn(params.statuses, o.value, on) })} />
+            ))}
+          </FilterGroup>
+          <FilterGroup label="Subscription">
+            {SUBSCRIPTION_FILTERS.map((s) => (
+              <FilterRow key={s} label={SUBSCRIPTION_FILTER_LABEL[s]} checked={params.subscriptions.includes(s)} onCheckedChange={(on) => setParams({ subscriptions: toggleIn(params.subscriptions, s, on) })} />
+            ))}
+          </FilterGroup>
+          <FilterGroup label="Modules">
+            {MODULES.map((m) => (
+              <FilterRow key={m.appKey} label={`${m.label} is on`} checked={params.modules.includes(m.appKey)} onCheckedChange={(on) => setParams({ modules: toggleIn(params.modules, m.appKey, on) })} />
+            ))}
+          </FilterGroup>
+          <FilterGroup label="Owners">
+            <FilterRow label="Has an Owner" checked={params.owners === "has"} onCheckedChange={(on) => setParams({ owners: on ? "has" : null })} />
+            <FilterRow label="Has nobody" checked={params.owners === "none"} onCheckedChange={(on) => setParams({ owners: on ? "none" : null })} />
+          </FilterGroup>
+          <FilterGroup label="Trial">
+            <FilterRow label="Ends in the next 7 days" checked={params.trialEnds === "7d"} onCheckedChange={(on) => setParams({ trialEnds: on ? "7d" : null })} />
+          </FilterGroup>
+          <FilterGroup label="People">
+            <FilterRow
+              label="Number of people"
+              checked={peopleOn || params.peopleMin !== null || params.peopleMax !== null}
+              onCheckedChange={(on) => { setPeopleOn(on); if (!on) setParams({ peopleMin: null, peopleMax: null }); }}
+            >
+              <div className="flex items-center gap-2 text-sm text-ink-2">
+                <NumberBox value={params.peopleMin} onChange={(n) => setParams({ peopleMin: n })} label="At least" />
+                <span>to</span>
+                <NumberBox value={params.peopleMax} onChange={(n) => setParams({ peopleMax: n })} label="At most" />
+              </div>
+            </FilterRow>
+          </FilterGroup>
+          <FilterGroup label="Signed up">
+            <FilterRow
+              label="Date range"
+              checked={signedOn || params.signedFrom !== null || params.signedTo !== null}
+              onCheckedChange={(on) => { setSignedOn(on); if (!on) setParams({ signedFrom: null, signedTo: null }); }}
+            >
+              <div className="flex flex-col gap-1.5">
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">From</span><DateField size="sm" value={params.signedFrom} onChange={(v) => setParams({ signedFrom: v })} placeholder="Any" ariaLabel="Signed up from" className="min-w-0 flex-1" /></span>
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">To</span><DateField size="sm" value={params.signedTo} onChange={(v) => setParams({ signedTo: v })} placeholder="Any" ariaLabel="Signed up to" className="min-w-0 flex-1" /></span>
+              </div>
+            </FilterRow>
+          </FilterGroup>
+        </FilterPanel>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {noCompaniesAtAll && params.view === "all" ? (
+            <OsEmptyView title="No companies yet" hint="A company appears here when somebody signs up for WorkwrK." />
+          ) : (
+            <TableCard<CompanyRow>
+              ariaLabel="Companies"
+              columns={columns}
+              rows={failed && !payload ? [] : rows}
+              rowKey={(r) => r.id}
+              rowHref={(r) => `/admin/companies/${r.id}`}
+              rowMenuAlwaysVisible
+              rowMenu={(r) => (
+                <RowMenuTrigger open={menu?.row.id === r.id} onOpen={(ref) => setMenu({ row: r, anchor: ref })} label={`Actions for ${r.name}`} />
+              )}
+              empty={emptyRow}
+              columnSettings
+              columnChoice={columnChoice}
+              onColumnChoiceChange={(next) => patchPrefs({ companies: { columns: storedFromChoice(COLUMN_KEYS, next, OFF_BY_DEFAULT) } })}
+              footer={{
+                total,
+                noun: "records",
+                from,
+                to,
+                onPrev: params.page > 1 ? () => setParams({ page: Math.min(params.page - 1, lastPage) }, { keepPage: true }) : undefined,
+                onNext: to < total ? () => setParams({ page: params.page + 1 }, { keepPage: true }) : undefined,
+                pageSize: params.limit,
+                pageSizes: [40, 100],
+                onPageSize: (n) => setParams({ limit: n }),
+              }}
+            />
+          )}
+          {failed && payload ? <InlineRetry text="Could not refresh companies." onRetry={() => void load()} /> : null}
         </div>
-        <Select value={filterPlan} onValueChange={(v) => { setFilterPlan(v === "ALL" ? "" : v); setPage(1); }}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="All Plans" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Plans</SelectItem>
-            {plans.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v === "ALL" ? "" : v); setPage(1); }}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="All Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Status</SelectItem>
-            {statuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
 
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center h-40">
-              <RefreshCw className="h-5 w-5 animate-spin text-muted" />
-            </div>
-          ) : companies.length === 0 ? (
-            <div className="p-8 text-center text-base text-muted">
-              No companies found.
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Activity</th>
-                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.map((c) => (
-                  <tr key={c.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-[#d4ff2e]" />
-                        <div>
-                          <span className="text-base font-medium">{c.name}</span>
-                          <p className="text-xs text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className={`text-sm font-semibold ${getPlanColor(c.plan)}`}>{c.plan}</span>
-                    </td>
-                    <td className="p-4 text-center text-base">{c._count.users}</td>
-                    <td className="p-4 text-center">{getStatusBadge(c.status)}</td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
-                        <span title="Tasks"><CheckSquare size={10} className="inline mr-0.5" />{c._count.tasks}</span>
-                        <span title="KRAs"><Target size={10} className="inline mr-0.5" />{c._count.kras}</span>
-                        <span title="SOPs"><BookOpen size={10} className="inline mr-0.5" />{c._count.sops}</span>
-                        <span title="Reviews"><Star size={10} className="inline mr-0.5" />{c._count.reviewCycles}</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-right text-sm text-muted">
-                      {new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center gap-1 justify-center">
-                        <Button variant="ghost" size="sm" onClick={() => openDetail(c)} title="Quick edit">
-                          <Eye size={14} />
-                        </Button>
-                        <Button asChild variant="outline" size="sm" title="Open detail / manage Enterprise add-ons">
-                          <a href={`/admin/companies/${c.id}`}>Manage</a>
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open onClose={() => setMenu(null)} placement="below">
+          <MenuList onClick={() => setMenu(null)}>
+            <MenuItem icon={ExternalLink} label="Open" onClick={() => router.push(`/admin/companies/${menu.row.id}`)} />
+            <MenuItem icon={Copy} label="Copy company ID" onClick={() => void copy(menu.row.id, "Company ID")} />
+            <MenuItem icon={Copy} label="Copy slug" onClick={() => void copy(menu.row.slug, "Slug")} />
+            <MenuItem icon={ScrollText} label="Staff activity" onClick={() => router.push(`/admin/audit?company=${encodeURIComponent(menu.row.id)}`)} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted">
-            Page {page} of {totalPages} ({total} companies)
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              <ChevronLeft size={14} />
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              <ChevronRight size={14} />
-            </Button>
-          </div>
-        </div>
-      )}
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Companies">
+        Every company that has a WorkwrK workspace. To find one by name, press ⌘K or open Filter and type into Name or domain.
+      </AboutDialog>
+    </>
+  );
+}
 
-      {/* Detail / Edit Dialog */}
-      <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 size={18} className="text-[#d4ff2e]" />
-              {selected?.name}
-            </DialogTitle>
-          </DialogHeader>
-
-          {selected && (
-            <div className="space-y-4">
-              {/* Stats */}
-              <div className="grid grid-cols-5 gap-3 text-center">
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Users size={14} className="mx-auto mb-1 text-blue-400" />
-                  <p className="text-lg font-semibold">{selected._count.users}</p>
-                  <p className="text-xs text-muted">Users</p>
-                </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <CheckSquare size={14} className="mx-auto mb-1 text-green-400" />
-                  <p className="text-lg font-semibold">{selected._count.tasks}</p>
-                  <p className="text-xs text-muted">Tasks</p>
-                </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Target size={14} className="mx-auto mb-1 text-orange-400" />
-                  <p className="text-lg font-semibold">{selected._count.kras}</p>
-                  <p className="text-xs text-muted">KRAs</p>
-                </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <BookOpen size={14} className="mx-auto mb-1 text-[#d4ff2e]" />
-                  <p className="text-lg font-semibold">{selected._count.sops}</p>
-                  <p className="text-xs text-muted">SOPs</p>
-                </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Star size={14} className="mx-auto mb-1 text-yellow-400" />
-                  <p className="text-lg font-semibold">{selected._count.reviewCycles}</p>
-                  <p className="text-xs text-muted">Reviews</p>
-                </div>
-              </div>
-
-              {/* Info */}
-              <div className="space-y-2 text-base">
-                <div className="flex justify-between">
-                  <span className="text-muted">Slug</span>
-                  <span className="font-mono text-sm">{selected.slug}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted">Domain</span>
-                  <span>{selected.domain || "—"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted">Joined</span>
-                  <span>{new Date(selected.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</span>
-                </div>
-              </div>
-
-              {/* Editable fields */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm text-muted mb-1 block">Plan</label>
-                  <Select value={editPlan} onValueChange={setEditPlan}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {plans.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-sm text-muted mb-1 block">Status</label>
-                  <Select value={editStatus} onValueChange={setEditStatus}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {statuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSelected(null)}>Cancel</Button>
-            <Button onClick={handleUpdate} disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+/** A small whole-number box for the People range; empty means no bound. */
+function NumberBox({ value, onChange, label }: { value: number | null; onChange: (n: number | null) => void; label: string }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setText(value == null ? "" : String(value));
+  }
+  const commit = () => {
+    const t = text.trim();
+    if (!t) return onChange(null);
+    const n = Number.parseInt(t, 10);
+    if (Number.isFinite(n) && n >= 0) onChange(n);
+    else setText(value == null ? "" : String(value));
+  };
+  return (
+    <input
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => setText(e.target.value.replace(/[^\d]/g, ""))}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+      placeholder="Any"
+      aria-label={label}
+      className={`${FIELD} h-8 w-20 text-sm tabular-nums`}
+    />
   );
 }

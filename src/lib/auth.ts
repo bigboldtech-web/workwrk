@@ -7,6 +7,8 @@ import { prisma } from "./prisma";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
+import { verifyTokenVersionProof } from "./session-proof";
+import { reanchorUser } from "./access/workspace-anchor";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -64,6 +66,41 @@ type AuthIdentity = {
   lastName: string;
   avatar: string | null;
 };
+
+/**
+ * The one-shot marker left on a token when it is moved out of a suspended or
+ * closed company into another workspace the person belongs to. The move is
+ * right (they keep working) but silent on its own: the next page is simply
+ * another company's. The session turns the marker into one sentence that the
+ * dashboard frame and /onboard show until the person dismisses it; the
+ * dismissal is an update carrying `workspaceMoveAck: <at>`, which clears only
+ * the marker it names, so a second move that lands in between is never
+ * swallowed. The marker is not part of the tokenVersion proof and the ack
+ * never touches `revoked`: it can clear a notice and nothing else.
+ */
+type WorkspaceMove = NonNullable<import("next-auth/jwt").JWT["workspaceMove"]>;
+
+function workspaceMoveStamp(
+  fromName: string | null | undefined,
+  fromStatus: string | null | undefined,
+  toName: string | null | undefined,
+): WorkspaceMove | undefined {
+  // A company that no longer exists (status unknown) reads as closed; a
+  // healthy status is no move worth explaining.
+  if (fromStatus && fromStatus !== "SUSPENDED" && fromStatus !== "CANCELLED") return undefined;
+  return {
+    from: fromName?.trim() || "Your previous workspace",
+    status: fromStatus === "SUSPENDED" ? "SUSPENDED" : "CANCELLED",
+    to: toName?.trim() || "another workspace",
+    at: Date.now(),
+  };
+}
+
+function workspaceMoveMessage(m: WorkspaceMove): string {
+  const state = m.status === "SUSPENDED" ? "is suspended" : "is closed";
+  const owner = m.from === "Your previous workspace" ? "its Owner" : `${m.from}'s Owner`;
+  return `${m.from} ${state}, so you are now in ${m.to}. Contact ${owner} or WorkwrK support.`;
+}
 
 const googleEnabled =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -162,6 +199,7 @@ const providers = [
       // only person who could undo the deletion would otherwise be the one
       // person who can't sign in.
       let org = user.organization;
+      let workspaceMove: WorkspaceMove | undefined;
       if (org.status === "CANCELLED" || org.status === "SUSPENDED") {
         const alt = await prisma.organizationMembership.findFirst({
           where: { userId: user.id, organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } } },
@@ -169,7 +207,12 @@ const providers = [
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         });
         if (alt) {
-          await prisma.user.update({ where: { id: user.id }, data: { organizationId: alt.organizationId } });
+          // The level held here stays on this workspace's membership, and
+          // the healthy one's own level applies (src/lib/workspace-anchor.ts).
+          await reanchorUser({ userId: user.id, to: { organizationId: alt.organizationId, role: alt.role } });
+          user.accessLevel = alt.role;
+          // Say why they land in another company (see WorkspaceMove).
+          workspaceMove = workspaceMoveStamp(org.name, org.status, alt.organization.name);
           org = alt.organization; // sign in under the healthy workspace
         }
       }
@@ -179,7 +222,18 @@ const providers = [
         throw new Error("This workspace is suspended. Please contact WorkwrK support.");
       }
       if (org.status === "CANCELLED") {
-        throw new Error("This workspace is scheduled for deletion. It's recoverable for 30 days — contact WorkwrK support to restore it.");
+        // Only an Owner's own deletion (Settings > Danger zone) schedules a
+        // purge, recorded as settings.scheduledHardDeleteAt. A workspace
+        // cancelled from the Staff console schedules nothing, so its members
+        // are never told their data is about to be deleted.
+        const st = (org.settings && typeof org.settings === "object" && !Array.isArray(org.settings) ? org.settings : {}) as Record<string, unknown>;
+        const purgeAt = typeof st.scheduledHardDeleteAt === "string" ? new Date(st.scheduledHardDeleteAt) : null;
+        if (purgeAt && !Number.isNaN(purgeAt.getTime())) {
+          throw new Error(
+            `This workspace is scheduled for deletion on ${purgeAt.toISOString().slice(0, 10)}. Until then it can be restored: contact WorkwrK support.`,
+          );
+        }
+        throw new Error("This workspace is closed. Please contact WorkwrK support.");
       }
 
       // Security activity: record the successful sign-in now that every check
@@ -205,6 +259,7 @@ const providers = [
         organizationName: org.name,
         avatar: user.avatar,
         tokenVersion: user.tokenVersion,
+        workspaceMove,
       };
     },
   }),
@@ -271,6 +326,33 @@ export const authOptions: NextAuthOptions = {
   providers,
   callbacks: {
     /**
+     * next-auth's default rule plus exactly one more origin: the Staff
+     * console's (ADMIN_HOST). Without it the console's Log out resolved
+     * against NEXTAUTH_URL, the app host, and dropped staff on the customer
+     * sign-in page. Any other absolute URL still falls back to baseUrl, so
+     * this is no open redirect.
+     */
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      try {
+        const target = new URL(url);
+        if (target.origin === new URL(baseUrl).origin) return url;
+        // The proxy's comparison: port stripped, case-insensitive.
+        const adminHost = process.env.ADMIN_HOST?.trim().toLowerCase().replace(/:\d+$/, "");
+        const secureOnly = process.env.NODE_ENV === "production";
+        if (adminHost && target.hostname.toLowerCase() === adminHost) {
+          if (target.protocol === "https:" || (!secureOnly && target.protocol === "http:")) return url;
+        }
+        // Local development only: worktree servers run on their own ports
+        // while NEXTAUTH_URL names one, so a same-machine origin is the
+        // server the person is actually using. Never in production.
+        if (!secureOnly && (target.hostname === "localhost" || target.hostname === "127.0.0.1")) return url;
+      } catch {
+        // Not a URL: fall through to the app root.
+      }
+      return baseUrl;
+    },
+    /**
      * Google sign-in rule: only admit users whose email already exists
      * in the DB (via invitation or earlier credentials signup). We never
      * auto-create an organization from an SSO attempt — that's a
@@ -290,7 +372,7 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
 
-    async jwt({ token, user, account, trigger }) {
+    async jwt({ token, user, account, trigger, session }) {
       if (user) {
         const u = user as unknown as AuthIdentity;
         token.id = u.id;
@@ -301,6 +383,16 @@ export const authOptions: NextAuthOptions = {
         token.lastName = u.lastName;
         token.avatar = u.avatar;
         token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
+        const move = (user as unknown as { workspaceMove?: WorkspaceMove }).workspaceMove;
+        if (move) token.workspaceMove = move;
+      }
+
+      // Dismissing the workspace-move notice. It clears only the marker the
+      // ack names (a newer move stays), and it is deliberately separate from
+      // the refresh below: it never reads or writes tokenVersion or revoked.
+      if (trigger === "update" && token.workspaceMove) {
+        const ack = (session as { workspaceMoveAck?: unknown } | null | undefined)?.workspaceMoveAck;
+        if (typeof ack === "number" && ack === token.workspaceMove.at) delete token.workspaceMove;
       }
 
       // Google flow: first-time sign-in returns only minimal identity;
@@ -323,6 +415,49 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
+      // Session-update path: triggered by the org-switcher calling
+      // `session.update()` after `POST /api/me/switch-org` flips the
+      // user's `organizationId`. We re-fetch so the JWT picks up the
+      // new org immediately rather than waiting for natural refresh.
+      //
+      // It runs BEFORE the revalidation below and forces it (checkedAt = 0),
+      // so the workspace just switched into gets the same health check and
+      // healthy-workspace fallback as every other token: a switch into a
+      // suspended or cancelled company never acts there, not even for the
+      // five minutes until the next check. A token that is already revoked
+      // is not refreshed: session.update() must never revive it by copying
+      // the new tokenVersion in.
+      //
+      // tokenVersion is never copied in on request alone. A cookie that was
+      // signed out by a bump (Sign out everywhere, a password reset, a staff
+      // suspension) but not yet re-checked would otherwise come straight
+      // back by calling update. Only the session that caused the bump, and
+      // that holds the proof the bumping route returned to it, is synced;
+      // any other token whose version no longer matches is revoked here.
+      if (trigger === "update" && token.id && token.revoked !== true) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          include: { organization: { select: { name: true } } },
+        });
+        if (fresh) {
+          if (typeof token.tokenVersion === "number" && fresh.tokenVersion !== token.tokenVersion) {
+            const proof = (session as { tokenVersionProof?: unknown } | null | undefined)?.tokenVersionProof;
+            if (!verifyTokenVersionProof(proof, token.id as string, token.tokenVersion, fresh.tokenVersion)) {
+              token.revoked = true;
+              token.checkedAt = Date.now();
+              return token;
+            }
+          }
+          token.organizationId = fresh.organizationId;
+          token.organizationName = fresh.organization.name;
+          token.accessLevel = fresh.accessLevel;
+          // A proven bump (or a grandfathered token with no version yet,
+          // which was never revocable by version) takes the current one.
+          token.tokenVersion = fresh.tokenVersion;
+          token.checkedAt = 0;
+        }
+      }
+
       // Offboarding revocation. A JWT lives for weeks, so removing someone
       // would otherwise leave their live session working until it expired.
       // Re-check the account against the DB at most every 5 minutes (cheap:
@@ -334,7 +469,14 @@ export const authOptions: NextAuthOptions = {
       if (token.id && Date.now() - lastCheck > REVALIDATE_MS) {
         const account_ = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { deletedAt: true, status: true, accessLevel: true, tokenVersion: true },
+          select: {
+            deletedAt: true,
+            status: true,
+            accessLevel: true,
+            tokenVersion: true,
+            organizationId: true,
+            organization: { select: { status: true, name: true } },
+          },
         });
         token.checkedAt = Date.now();
         const versionMismatch =
@@ -350,28 +492,70 @@ export const authOptions: NextAuthOptions = {
           // Access-level changes (promotion / demotion) take effect in the
           // same window instead of waiting for a fresh sign-in.
           token.accessLevel = account_.accessLevel;
+
+          // The workspace itself. A support suspension or a scheduled
+          // deletion blocked new sign-ins but never touched a live session,
+          // so a company suspended from the Staff console kept working for
+          // the rest of every token's life. Same rule and same fallback as
+          // authorize(): someone who also belongs to a healthy workspace is
+          // moved into it rather than locked out; everyone else is revoked.
+          //
+          // The workspace checked is the one THIS TOKEN acts in
+          // (token.organizationId), not only the anchored one: after a switch
+          // on another device the two differ, and a token still acting in a
+          // suspended company must not keep working there.
+          const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
+          const actingOrgId =
+            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          const acting =
+            actingOrgId === account_.organizationId
+              ? account_.organization
+              : await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true, name: true } });
+          const actingStatus = acting?.status;
+          // The name the person knew the company by: the fresh one, else the
+          // one this token was issued with.
+          const actingName = acting?.name ?? (typeof token.organizationName === "string" ? token.organizationName : null);
+          if (unhealthy(actingStatus)) {
+            if (actingOrgId !== account_.organizationId && !unhealthy(account_.organization?.status)) {
+              // Acting in a stale workspace while the anchored one is healthy:
+              // come back to the anchored one; the database already says so.
+              // This is also where a move made by a request that could not
+              // write its cookie lands on the next check, so it stamps too.
+              token.organizationId = account_.organizationId;
+              token.organizationName = account_.organization?.name;
+              const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
+              if (move) token.workspaceMove = move;
+            } else {
+              const alt = await prisma.organizationMembership.findFirst({
+                where: {
+                  userId: token.id as string,
+                  organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
+                },
+                select: { organizationId: true, role: true, organization: { select: { name: true } } },
+                orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+              });
+              const moved = alt
+                ? await reanchorUser({ userId: token.id as string, to: { organizationId: alt.organizationId, role: alt.role } })
+                    .then(() => true)
+                    .catch(() => false)
+                : false;
+              if (alt && moved) {
+                token.organizationId = alt.organizationId;
+                token.organizationName = alt.organization.name;
+                token.accessLevel = alt.role;
+                const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
+                if (move) token.workspaceMove = move;
+              } else {
+                // No healthy workspace, or the move did not save (the token
+                // and the database must agree on the workspace). Revoked
+                // for now; the next check, five minutes on, tries again.
+                token.revoked = true;
+              }
+            }
+          }
         }
       }
 
-      // Session-update path: triggered by the org-switcher calling
-      // `session.update()` after `POST /api/me/switch-org` flips the
-      // user's `organizationId`. We re-fetch so the JWT picks up the
-      // new org immediately rather than waiting for natural refresh.
-      if (trigger === "update" && token.id) {
-        const fresh = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          include: { organization: { select: { name: true } } },
-        });
-        if (fresh) {
-          token.organizationId = fresh.organizationId;
-          token.organizationName = fresh.organization.name;
-          token.accessLevel = fresh.accessLevel;
-          // Sync tokenVersion too: a self password-change bumps it and then
-          // calls session.update(), so THIS session (the one that made the
-          // change) stays valid while every OTHER session is revoked.
-          token.tokenVersion = fresh.tokenVersion;
-        }
-      }
       return token;
     },
     async session({ session, token }) {
@@ -391,6 +575,11 @@ export const authOptions: NextAuthOptions = {
           lastName: token.lastName,
           avatar: token.avatar,
         } satisfies Partial<AuthIdentity>);
+      }
+      // Only the sentence and the marker's id reach the client; the ack
+      // sends the id back (see WorkspaceMove).
+      if (token.workspaceMove) {
+        session.workspaceMove = { at: token.workspaceMove.at, message: workspaceMoveMessage(token.workspaceMove) };
       }
       return session;
     },

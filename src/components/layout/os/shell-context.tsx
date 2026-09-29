@@ -767,7 +767,8 @@ export function useOsShell() {
  */
 export function useLayer(open: boolean, entry: Omit<LayerEntry, "id"> & { id?: string }): void {
   const ctx = useContext(Ctx);
-  const register = ctx?.registerLayer;
+  const stack = useContext(LayerStackContext);
+  const register = ctx?.registerLayer ?? stack?.registerLayer;
   const closeRef = useRef(entry.close);
   const canCloseRef = useRef(entry.canClose);
   useEffect(() => {
@@ -786,4 +787,62 @@ export function useLayer(open: boolean, entry: Omit<LayerEntry, "id"> & { id?: s
       canClose: () => (canCloseRef.current ? canCloseRef.current() : true),
     });
   }, [open, register, id, kind]);
+}
+
+/* ── A layer stack without the product frame ───────────────────────
+ * The Staff console (src/app/(admin)) cannot mount OsShellProvider: it
+ * fetches /api/preferences and /api/boot, which the admin host never
+ * serves. It still needs the one Esc rule (the top layer closes first, then
+ * the one under it), so it mounts this instead. `useLayer` falls back to it
+ * when there is no shell, and `useLayerStack` reads whichever is present, so
+ * a Drawer, Picker or header menu behaves the same in both frames.
+ */
+export interface LayerStackValue {
+  registerLayer: (entry: LayerEntry) => () => void;
+  closeTopLayer: () => CloseTopLayerResult;
+  layerCount: number;
+  topLayerKind: LayerKind | null;
+  blockingLayerOpen: boolean;
+}
+
+export const LayerStackContext = createContext<LayerStackValue | null>(null);
+
+/** The product shell's stack when inside it, else a LayerStackProvider's, else null. */
+export function useLayerStack(): LayerStackValue | null {
+  const ctx = useContext(Ctx);
+  const stack = useContext(LayerStackContext);
+  return ctx ?? stack;
+}
+
+export function LayerStackProvider({ children }: { children: React.ReactNode }) {
+  const layersRef = useRef<LayerEntry[]>([]);
+  const [snap, setSnap] = useState<{ count: number; top: LayerKind | null; blocking: boolean }>({ count: 0, top: null, blocking: false });
+  const snapshot = useCallback(() => {
+    const list = layersRef.current;
+    const top = list[list.length - 1]?.kind ?? null;
+    const blocking = hasBlockingLayer(list);
+    setSnap((prev) => (prev.count === list.length && prev.top === top && prev.blocking === blocking ? prev : { count: list.length, top, blocking }));
+  }, []);
+  const registerLayer = useCallback((entry: LayerEntry) => {
+    layersRef.current = [...layersRef.current.filter((l) => l.id !== entry.id), entry];
+    snapshot();
+    return () => {
+      if (layersRef.current.some((l) => l.id === entry.id)) {
+        layersRef.current = layersRef.current.filter((l) => l.id !== entry.id);
+        snapshot();
+      }
+    };
+  }, [snapshot]);
+  const closeTopLayer = useCallback((): CloseTopLayerResult => {
+    const top = layersRef.current[layersRef.current.length - 1];
+    if (!top) return "none";
+    if (top.canClose && !top.canClose()) return "refused";
+    top.close();
+    return "closed";
+  }, []);
+  const value = useMemo<LayerStackValue>(
+    () => ({ registerLayer, closeTopLayer, layerCount: snap.count, topLayerKind: snap.top, blockingLayerOpen: snap.blocking }),
+    [registerLayer, closeTopLayer, snap],
+  );
+  return <LayerStackContext.Provider value={value}>{children}</LayerStackContext.Provider>;
 }
