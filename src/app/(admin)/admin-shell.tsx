@@ -89,6 +89,7 @@ export function AdminShell({
           persisted={persisted}
           datePrefs={datePrefs}
           appUrl={appUrl}
+          runbookUrl={runbookUrl}
         >
           <ConsoleAppearance density={density} appearance={appearance} />
           {/* The legacy toast and dialog providers stay until every page is on

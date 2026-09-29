@@ -1,237 +1,343 @@
 "use client";
 
-import { formatDate } from "@/lib/format/date";
+// Overview (spec-admin-backoffice 2.1): the first screen of the morning. How
+// many customers there are, what Stripe charges, and what needs a person
+// today. One read, GET /api/admin/overview. No toolbar, so the title row
+// carries the 28px ghost "..." (Refresh, About this page).
+//
+// Nothing here is fabricated: no version string, no environment, no "Active
+// rate" (it measured a billing flag), and no revenue computed from a price
+// list. Revenue is what Stripe charges, one line per currency, or the words
+// "Not connected".
 
-import { useConsole } from "../console-context";
-
-import { Dots } from "@/components/ui/dots";
-
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Building2, RefreshCw } from "lucide-react";
-import { planLabel } from "@/lib/staff-audit-helpers";
-import { Button } from "@/components/ui/button";
+import { AlarmClock, ChevronRight, CreditCard, Info, KeyRound, PauseCircle, RefreshCw, ShieldOff, type LucideIcon } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatusChip, Chip } from "@/components/ui/chip";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate, formatDateTitle } from "@/lib/format/date";
+import { formatMoney } from "@/lib/admin/numbers";
+import { companyStatusColor, planLabel, statusLabel } from "@/lib/admin/console-labels";
+import { useConsole } from "../console-context";
+import { AboutDialog, TEXT_LINK, rememberCompanyNames, useStaleRefetch } from "../console-ui";
+import { CardRetry, NumbersCard, NumbersMeta, SkeletonBars, connectLink } from "../numbers-ui";
 
-interface Stats {
-  totalOrgs: number;
-  totalUsers: number;
-  activeOrgs: number;
-  trialOrgs: number;
-  payingOrgs: number;
-  newOrgsThisMonth: number;
-  newUsersThisMonth: number;
-  planBreakdown: { plan: string; count: number }[];
-}
+type Revenue =
+  | { source: "unavailable" }
+  | { source: "error" }
+  | { source: "stripe"; lines: { currency: string; monthly: number; subscriptions: number }[]; uncounted: number; truncated: boolean; asOf: string };
 
-interface Company {
+interface NewestCompany {
   id: string;
   name: string;
-  slug: string;
   plan: string;
   status: string;
+  people: number;
   createdAt: string;
-  _count: {
-    users: number;
-    tasks: number;
-    sops: number;
-    reviewCycles: number;
-    kras: number;
-  };
 }
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "ACTIVE": return <Badge variant="success">Active</Badge>;
-    case "TRIAL": return <Badge variant="warning">Trial</Badge>;
-    case "SUSPENDED": return <Badge variant="destructive">Suspended</Badge>;
-    case "CANCELLED": return <Badge variant="secondary">Cancelled</Badge>;
-    default: return <Badge variant="secondary">{status}</Badge>;
-  }
+interface Overview {
+  companies: { total: number; newIn30: number };
+  people: { total: number; newIn30: number };
+  paying: { count: number; of: number };
+  revenue: Revenue;
+  attention: { trialsEndingIn7: number; pastDue: number; withoutOwner: number; suspended: number; codesRedeemedIn7: number; codesSince: string };
+  newest: NewestCompany[];
 }
 
-function getPlanBadge(plan: string) {
-  const colors: Record<string, string> = {
-    // One neutral chip for every plan: a plan is a fact, not a status.
-    STARTER: "bg-hover text-ink-2 border-line",
-    GROWTH: "bg-hover text-ink-2 border-line",
-    SCALE: "bg-hover text-ink-2 border-line",
-    ENTERPRISE: "bg-hover text-ink-2 border-line",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colors[plan] || ""}`}>
-      {planLabel(plan)}
-    </span>
-  );
-}
+const nf = new Intl.NumberFormat();
+const n = (v: number) => nf.format(v);
+const plural = (v: number, one: string, many: string) => `${n(v)} ${v === 1 ? one : many}`;
 
-export default function AdminDashboard() {
-  const { datePrefs } = useConsole();
-  const router = useRouter();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function OverviewPage() {
+  const { datePrefs, runbookUrl } = useConsole();
+  const [data, setData] = useState<Overview | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [statsRes, companiesRes] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/companies?limit=10"),
-      ]);
-
-      if (statsRes.ok) {
-        const data = await statsRes.json();
-        setStats(data);
-      }
-      if (companiesRes.ok) {
-        const data = await companiesRes.json();
-        setCompanies(data.companies || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch admin data:", err);
-    } finally {
-      setLoading(false);
+  const load = useCallback(async () => {
+    const r = await apiFetch<Overview>("/api/admin/overview");
+    if (r.ok) {
+      setData(r.data);
+      setFailed(false);
+      setLoadedAt(Date.now());
+      rememberCompanyNames(r.data.newest);
+    } else if (r.status !== 401) {
+      // 401 is the session-ended dialog's; anything else keeps the last
+      // numbers on screen and says the refresh failed.
+      setFailed(true);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
   }, []);
+  useEffect(() => {
+    const t = setTimeout(() => void load(), 0);
+    return () => clearTimeout(t);
+  }, [load]);
+  useStaleRefetch(() => void load(), loadedAt);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Dots variant="pending" label="Loading" />
-      </div>
-    );
-  }
+  const retry = () => void load();
+  const loading = !data && !failed;
+  const broken = !data && failed;
+  const lang = datePrefs.language;
 
-  // Naming canon: Companies, People, Paying. No icon tiles and no green or
-  // amber numbers (spec 2.1): a count is a fact, not a status. No revenue
-  // tile and no "Active rate": the old revenue figure multiplied a
-  // hard-coded price list and the rate measured billing status, not
-  // activity. Revenue returns with the Overview rebuild, read from Stripe.
-  const statCards = [
-    { title: "Companies", value: stats?.totalOrgs ?? 0, change: `${stats?.newOrgsThisMonth ?? 0} new in the last 30 days` },
-    { title: "People", value: stats?.totalUsers ?? 0, change: `${stats?.newUsersThisMonth ?? 0} new in the last 30 days` },
-    { title: "Paying", value: stats?.payingOrgs ?? 0, change: `${stats?.trialOrgs ?? 0} on trial` },
+  const columns: TableColumn<NewestCompany>[] = [
+    { key: "name", label: "Company", title: true, width: "minmax(200px,2fr)", render: (r) => <span className="truncate">{r.name}</span> },
+    {
+      key: "plan",
+      label: "Plan",
+      width: "140px",
+      render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip>,
+    },
+    { key: "status", label: "Status", width: "150px", render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
+    { key: "people", label: "People", width: "100px", align: "end", numeric: true, render: (r) => <span className="tabular-nums">{n(r.people)}</span> },
+    {
+      key: "signed",
+      label: "Signed up",
+      width: "140px",
+      render: (r) => <span className="tabular-nums text-ink-2" title={formatDateTitle(r.createdAt, datePrefs)}>{formatDate(r.createdAt, datePrefs, "date")}</span>,
+    },
   ];
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+    <>
+      <OsPageHeader
+        title="Overview"
+        actions={<NumbersMeta at={loadedAt} failed={failed} prefs={datePrefs} onRetry={retry} />}
+        more={[
+          { label: "Refresh", icon: RefreshCw, onClick: retry },
+          { label: "About this page", icon: Info, onClick: () => setAboutOpen(true) },
+        ]}
+      />
+      <div className="os-chrome flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6 pt-2">
+        {/* 1. Numbers: four cards, two per row below 1024. */}
+        <div className="grid grid-cols-2 gap-4 min-[1024px]:grid-cols-4">
+          <Stat label="Companies" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.companies.total) : null} context={data ? `+${n(data.companies.newIn30)} in the last 30 days` : null} />
+          <Stat label="People" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.people.total) : null} context={data ? `+${n(data.people.newIn30)} in the last 30 days` : null} />
+          <Stat
+            label="Paying"
+            loading={loading}
+            broken={broken}
+            onRetry={retry}
+            value={data ? n(data.paying.count) : null}
+            context={data ? `of ${plural(data.paying.of, "company", "companies")}` : null}
+          />
+          <RevenueStat revenue={data?.revenue ?? null} loading={loading} broken={broken} onRetry={retry} language={lang} runbookUrl={runbookUrl} />
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData}>
-          <RefreshCw size={14} className="mr-2" /> Refresh
-        </Button>
+
+        {data && data.companies.total === 0 ? (
+          <NumbersCard ariaLabel="No companies">
+            <OsEmptyView context="list" title="No companies yet" className="mt-4 pb-4" />
+          </NumbersCard>
+        ) : (
+          <>
+            {/* 2. Needs attention: a row only when its count is above zero. */}
+            <NumbersCard title="Needs attention">
+              {loading ? (
+                <SkeletonBars rows={3} height={16} gap={20} />
+              ) : broken || !data ? (
+                <CardRetry onRetry={retry} />
+              ) : (
+                <AttentionRows a={data.attention} />
+              )}
+            </NumbersCard>
+
+            {/* 3. Newest companies: a sample of eight, so the footer carries a link, not a total. */}
+            <section aria-label="Newest companies" className="flex min-w-0 flex-col gap-2">
+              <h2 className="m-0 text-lg font-semibold text-ink">Newest companies</h2>
+              <TableCard<NewestCompany>
+                ariaLabel="Newest companies"
+                columns={columns}
+                rows={broken ? [] : data ? data.newest : null}
+                rowKey={(r) => r.id}
+                rowHref={(r) => `/admin/companies/${r.id}`}
+                skeletonRows={8}
+                empty={broken ? <CardRetry onRetry={retry} /> : "No companies yet"}
+                footer={{
+                  total: data?.newest.length ?? 0,
+                  noun: "companies",
+                  from: 1,
+                  to: data?.newest.length ?? 0,
+                  hidePaging: true,
+                  hideTotal: true,
+                  leading: (
+                    <Link href="/admin/companies" className={`text-base ${TEXT_LINK}`}>
+                      See all companies
+                    </Link>
+                  ),
+                }}
+              />
+            </section>
+          </>
+        )}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {statCards.map((stat) => (
-          <Card key={stat.title}>
-            <CardContent className="p-5">
-              <p className="text-sm font-medium text-ink-2">{stat.title}</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">{stat.value}</p>
-              <p className="text-sm text-ink-2 mt-0.5">{stat.change}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Overview">
+        Today&apos;s numbers and what needs a person. Everything here counts companies, plans and dates; no customer&apos;s
+        work is ever read to make a number on this page. Monthly revenue is what Stripe charges for active subscriptions,
+        at Stripe&apos;s own prices, one line per currency and never converted.
+      </AboutDialog>
+    </>
+  );
+}
 
-      {/* Plan Breakdown */}
-      {stats?.planBreakdown && stats.planBreakdown.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Plans</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-6">
-              {stats.planBreakdown.map((p) => (
-                <div key={p.plan} className="flex items-center gap-3">
-                  {getPlanBadge(p.plan)}
-                  <span className="text-base font-semibold">{p.count}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+function StatShell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={label} className="os-chrome min-w-0 rounded-lg border border-line bg-raised p-4">
+      <p className="m-0 text-sm font-medium text-ink-2">{label}</p>
+      {children}
+    </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  context,
+  loading,
+  broken,
+  onRetry,
+}: {
+  label: string;
+  value: string | null;
+  context: string | null;
+  loading: boolean;
+  broken: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <StatShell label={label}>
+      {loading ? (
+        <div className="mt-2">
+          <SkeletonBars rows={2} height={14} gap={10} />
+        </div>
+      ) : broken || value === null ? (
+        <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
+      ) : (
+        <>
+          <p className="m-0 mt-1 text-xl font-semibold tabular-nums text-ink">{value}</p>
+          {context ? <p className="m-0 mt-0.5 truncate text-sm text-ink-2">{context}</p> : null}
+        </>
       )}
+    </StatShell>
+  );
+}
 
-      {/* Companies Table */}
-      <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">Newest companies</CardTitle>
-          <Link href="/admin/companies" className="text-sm text-ink-2 hover:underline transition-colors">
-            See all companies
+function RevenueStat({
+  revenue,
+  loading,
+  broken,
+  onRetry,
+  language,
+  runbookUrl,
+}: {
+  revenue: Revenue | null;
+  loading: boolean;
+  broken: boolean;
+  onRetry: () => void;
+  language?: string | null;
+  runbookUrl: string | null;
+}) {
+  const label = "Monthly revenue";
+  if (loading) {
+    return (
+      <StatShell label={label}>
+        <div className="mt-2"><SkeletonBars rows={2} height={14} gap={10} /></div>
+      </StatShell>
+    );
+  }
+  if (broken || !revenue || revenue.source === "error") {
+    return (
+      <StatShell label={label}>
+        <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
+      </StatShell>
+    );
+  }
+  if (revenue.source === "unavailable") {
+    const link = connectLink(runbookUrl);
+    return (
+      <StatShell label={label}>
+        <p className="m-0 mt-1 text-row text-ink-2">Not connected</p>
+        <p className="m-0 mt-0.5 text-sm text-ink-2">
+          Billing is not connected yet.
+          {link ? (
+            <>
+              {" "}
+              <a href={link.href} target="_blank" rel="noopener noreferrer" className={TEXT_LINK}>{link.label}</a>
+            </>
+          ) : null}
+        </p>
+      </StatShell>
+    );
+  }
+  if (revenue.lines.length === 0) {
+    // Connected, and nothing active: zero is the true answer here, in no currency.
+    return (
+      <StatShell label={label}>
+        <p className="m-0 mt-1 text-xl font-semibold tabular-nums text-ink">0</p>
+        <p className="m-0 mt-0.5 text-sm text-ink-2">
+          {revenue.uncounted > 0
+            ? `${plural(revenue.uncounted, "subscription has", "subscriptions have")} a tiered or metered price and ${revenue.uncounted === 1 ? "is" : "are"} not counted`
+            : "No active Stripe subscriptions"}
+        </p>
+      </StatShell>
+    );
+  }
+  // One line per currency, never a grand total across them.
+  const [first, ...rest] = revenue.lines;
+  return (
+    <StatShell label={label}>
+      <p className="m-0 mt-1 truncate text-xl font-semibold tabular-nums text-ink" title={formatMoney(first.monthly, first.currency, language)}>
+        {formatMoney(first.monthly, first.currency, language)}
+      </p>
+      <p className="m-0 mt-0.5 truncate text-sm text-ink-2">from {plural(first.subscriptions, "Stripe subscription", "Stripe subscriptions")}</p>
+      {rest.map((l) => (
+        <p key={l.currency} className="m-0 mt-1 truncate text-sm tabular-nums text-ink">
+          {formatMoney(l.monthly, l.currency, language)} <span className="text-ink-2">from {plural(l.subscriptions, "subscription", "subscriptions")}</span>
+        </p>
+      ))}
+      {revenue.uncounted > 0 ? (
+        <p className="m-0 mt-1 text-sm text-ink-2">{plural(revenue.uncounted, "subscription has", "subscriptions have")} a tiered or metered price and {revenue.uncounted === 1 ? "is" : "are"} not counted.</p>
+      ) : null}
+    </StatShell>
+  );
+}
+
+interface AttentionRow {
+  key: string;
+  count: number;
+  icon: LucideIcon;
+  sentence: string;
+  href: string;
+}
+
+function AttentionRows({ a }: { a: Overview["attention"] }) {
+  // The sentence and its count: "Trials end in the next 7 days ... 3". The
+  // count is not repeated inside the sentence, so each fact is read once.
+  const one = (v: number, single: string, many: string) => (v === 1 ? single : many);
+  const rows: AttentionRow[] = [
+    { key: "trials", count: a.trialsEndingIn7, icon: AlarmClock, sentence: one(a.trialsEndingIn7, "Trial ends in the next 7 days", "Trials end in the next 7 days"), href: "/admin/companies?view=trials" },
+    { key: "pastdue", count: a.pastDue, icon: CreditCard, sentence: one(a.pastDue, "Subscription is past due", "Subscriptions are past due"), href: "/admin/companies?view=paying&subscription=past_due" },
+    { key: "owners", count: a.withoutOwner, icon: ShieldOff, sentence: one(a.withoutOwner, "Workspace has nobody with Owner access", "Workspaces have nobody with Owner access"), href: "/admin/companies?view=all&owners=0" },
+    { key: "suspended", count: a.suspended, icon: PauseCircle, sentence: one(a.suspended, "Workspace is suspended", "Workspaces are suspended"), href: "/admin/companies?view=suspended" },
+    { key: "codes", count: a.codesRedeemedIn7, icon: KeyRound, sentence: one(a.codesRedeemedIn7, "AppSumo code was redeemed this week", "AppSumo codes were redeemed this week"), href: `/admin/appsumo?view=redeemed&redeemed_from=${a.codesSince}` },
+  ].filter((r) => r.count > 0);
+
+  if (rows.length === 0) return <p className="m-0 text-row text-ink-2">Nothing needs attention.</p>;
+  return (
+    <ul className="m-0 -mx-2 flex list-none flex-col p-0">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <Link href={r.href} className="flex h-9 items-center gap-3 rounded-md px-2 text-row text-ink hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-focus-ring,var(--os-brand))]">
+            <r.icon className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{r.sentence}</span>
+            <span className="font-medium tabular-nums">{n(r.count)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
           </Link>
-        </CardHeader>
-        <CardContent className="p-0">
-          {companies.length === 0 ? (
-            <div className="p-8 text-center text-base text-ink-2">
-              No companies yet.
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-line">
-                  <th className="text-left p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">People</th>
-                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Signed up</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.map((company) => (
-                  <tr
-                    key={company.id}
-                    // The row opens the company (spec 2.1); the name is also
-                    // a real link, so keyboard and middle-click work.
-                    onClick={(e) => {
-                      if ((e.target as HTMLElement).closest("a")) return;
-                      router.push(`/admin/companies/${company.id}`);
-                    }}
-                    className="cursor-pointer border-b border-line/50 hover:bg-hover transition-colors"
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-ink-2" />
-                        <div>
-                          <Link href={`/admin/companies/${company.id}`} className="text-base font-medium text-ink hover:underline">
-                            {company.name}
-                          </Link>
-                          <p className="text-xs text-ink-2">{company.slug}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 text-center">{getPlanBadge(company.plan)}</td>
-                    <td className="p-4 text-center text-base text-ink-2">{company._count.users}</td>
-                    <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-xs text-ink-2">
-                        <span>{company._count.tasks} tasks</span>
-                        <span>{company._count.kras} KRAs</span>
-                        <span>{company._count.sops} SOPs</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-right text-sm text-ink-2">
-                      {formatDate(company.createdAt, datePrefs, "date")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
-
-    </div>
+        </li>
+      ))}
+    </ul>
   );
 }

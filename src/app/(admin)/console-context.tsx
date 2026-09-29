@@ -38,6 +38,8 @@ interface ConsoleValue {
   datePrefs: DateFormatPrefs;
   /** NEXT_PUBLIC_APP_URL without a trailing slash; "" when unset. */
   appUrl: string;
+  /** STAFF_RUNBOOK_URL, or null: "How to connect it" and Help render only when it is set. */
+  runbookUrl: string | null;
   patchPrefs: (patch: Omit<ConsolePrefsPatch, "openedCompany" | "recent">) => void;
   noteCompanyOpened: (company: RecentCompany) => void;
   companyCrumb: string | null;
@@ -83,6 +85,7 @@ export function ConsoleProvider({
   persisted,
   datePrefs,
   appUrl,
+  runbookUrl = null,
   children,
 }: {
   staff: ConsoleStaff;
@@ -91,6 +94,7 @@ export function ConsoleProvider({
   persisted: boolean;
   datePrefs: DateFormatPrefs;
   appUrl: string;
+  runbookUrl?: string | null;
   children: React.ReactNode;
 }) {
   const { toast } = useOsToast();
@@ -176,10 +180,10 @@ export function ConsoleProvider({
 
   const value = useMemo<ConsoleValue>(
     () => ({
-      staff, prefs, recents, persisted, datePrefs, appUrl, patchPrefs, noteCompanyOpened,
+      staff, prefs, recents, persisted, datePrefs, appUrl, runbookUrl, patchPrefs, noteCompanyOpened,
       companyCrumb, setCompanyCrumb, searchOpen, setSearchOpen,
     }),
-    [staff, prefs, recents, persisted, datePrefs, appUrl, patchPrefs, noteCompanyOpened, companyCrumb, searchOpen],
+    [staff, prefs, recents, persisted, datePrefs, appUrl, runbookUrl, patchPrefs, noteCompanyOpened, companyCrumb, searchOpen],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

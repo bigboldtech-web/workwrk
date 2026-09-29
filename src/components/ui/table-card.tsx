@@ -93,6 +93,13 @@ export interface TableFooter {
   trailing?: ReactNode;
   /** A list that never pages (a person's KPIs): no range and no arrows. */
   hidePaging?: boolean;
+  /**
+   * A card that is a SAMPLE, not a paged list (the Staff console's newest
+   * eight companies): no "Total" count, which would be a lie, and `leading`
+   * (one text link) at the start edge instead.
+   */
+  hideTotal?: boolean;
+  leading?: ReactNode;
 }
 
 export interface TableCardProps<T> {
@@ -642,13 +649,16 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging, hideTotal, leading }: TableFooter) {
   const hasRows = total > 0;
   return (
     <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
-      <span className="font-medium text-ink">
-        Total {noun} <span className="tabular-nums">{new Intl.NumberFormat().format(total)}</span>
-      </span>
+      {leading ? <span className="min-w-0 truncate">{leading}</span> : null}
+      {hideTotal ? null : (
+        <span className="font-medium text-ink">
+          Total {noun} <span className="tabular-nums">{new Intl.NumberFormat().format(total)}</span>
+        </span>
+      )}
       {extra ? <span className="text-ink-2">{extra}</span> : null}
       <span className="flex-1" />
       {trailing ? <span className="min-w-0 truncate text-ink-2">{trailing}</span> : null}
