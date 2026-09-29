@@ -13,7 +13,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ClipboardCopy, Download, Eye, Info, RefreshCw } from "lucide-react";
+import { ChevronDown, ClipboardCopy, Download, ExternalLink, Eye, Info, RefreshCw } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -206,10 +206,10 @@ export default function StaffActivityPage() {
       render: (r) =>
         r.company ? (
           <Link href={`/admin/companies/${r.company.id}`} onClick={(e) => e.stopPropagation()} className="block min-w-0 truncate text-ink hover:underline">{r.company.name}</Link>
-        ) : r.action.startsWith("admin.staff.") ? (
-          // A change to the staff list is about Staff, not a company (spec 2.4 entry points).
-          <Link href="/admin/staff" onClick={(e) => e.stopPropagation()} className="block min-w-0 truncate text-ink hover:underline">Staff list</Link>
         ) : (
+          // Staff and code actions touch no company: the canon's "None"
+          // (spec 2.7). A staff row's link to Staff (spec 2.4) is its row
+          // menu's Open Staff.
           <span className="text-ink-3">None</span>
         ),
     },
@@ -223,7 +223,7 @@ export default function StaffActivityPage() {
     <>
       <OsPageHeader
         title="Staff activity"
-        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} />}
+        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} failed={failed && !!payload} />}
         views={ACTIVITY_VIEWS.map((v) => (
           <ViewTab key={v} label={ACTIVITY_VIEW_LABEL[v]} active={params.view === v} href={`/admin/audit${activityQuery({ ...params, view: v })}`} />
         ))}
@@ -364,6 +364,9 @@ export default function StaffActivityPage() {
         <MorePortal anchorRef={menu.anchor} width={200} open onClose={() => setMenu(null)} placement="below">
           <MenuList onClick={() => setMenu(null)}>
             <MenuItem icon={Eye} label="See details" onClick={() => setDetails(menu.row)} />
+            {menu.row.action.startsWith("admin.staff.") ? (
+              <MenuItem icon={ExternalLink} label="Open Staff" onClick={() => router.push("/admin/staff")} />
+            ) : null}
             <MenuItem icon={ClipboardCopy} label="Copy details" onClick={() => void copy(detailsText(menu.row), "Details")} />
           </MenuList>
         </MorePortal>

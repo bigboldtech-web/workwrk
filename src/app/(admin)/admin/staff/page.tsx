@@ -159,7 +159,7 @@ export default function StaffPage() {
     <>
       <OsPageHeader
         title="Staff"
-        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} />}
+        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} failed={failed && !!staff} />}
         toolbar={{
           primary: { label: "Add staff", icon: UserPlus, onClick: () => setAddOpen(true) },
           menu: [
@@ -190,6 +190,7 @@ export default function StaffPage() {
             trailing: onlyOne && staff ? "You cannot remove the last staff member." : "Anyone on this list can open the staff console and change any customer's plan.",
           }}
         />
+        {failed && staff ? <InlineRetry text="Could not refresh staff." onRetry={() => void load()} /> : null}
       </div>
 
       {menu ? (

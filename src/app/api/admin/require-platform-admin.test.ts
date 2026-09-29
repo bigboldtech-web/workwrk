@@ -36,9 +36,17 @@ export function exportedHandlers(source: string): { name: string; body: string }
 }
 
 // Anything that reads or writes data: a model call, a raw or transactional
-// call on the client, or one of the helpers that write for the console.
-const DATA_CALL =
-  /\b(prisma|tx)\.(\w+\.\w+|\$transaction|\$queryRaw\w*|\$executeRaw\w*)\s*[(`]|\b(applyCompanyPatch|logStaffAction|setFeature|writeOrgSettingsKeys|writeTenantRow)\(/;
+// call on the client, one of the console's data helpers by name, or ANY
+// awaited call other than the session read, the gate itself and the route
+// params. The last rule is what catches a helper this list has never heard
+// of (a new writer called before the gate would otherwise pass).
+const DATA_CALL = new RegExp(
+  [
+    /\b(prisma|tx)\.(\w+\.\w+|\$transaction|\$queryRaw\w*|\$executeRaw\w*)\s*[(`]/.source,
+    /\b(applyCompanyPatch|logStaffAction|setFeature|writeOrgSettingsKeys|writeTenantRow|setWorkspaceOwner|saveConsolePrefs|loadCompanyDetail|companyPeople|loadConsoleMe|readMonthlyRevenue|readChargedSeries|recordDeniedAccess|stampConsoleOpened)\s*\(/.source,
+    /\bawait\s+(?!getSessionOrFail\(|requirePlatformAdminApi\(|(?:ctx\.|context\.)?params\b)/.source,
+  ].join("|"),
+);
 
 /**
  * True when the handler assigns the gate's result, RETURNS it when set, and
@@ -112,6 +120,21 @@ describe("gatesBeforeData", () => {
     expect(
       gatesBeforeData("export async function GET() { await prisma.$queryRaw`SELECT 1`; const d = await requirePlatformAdminApi(s); if (d) return d; }"),
     ).toBe(false);
+  });
+  it("rejects a named console writer or ANY other awaited call before the gate", () => {
+    expect(
+      gatesBeforeData("export async function POST() { void setWorkspaceOwner(i); const d = await requirePlatformAdminApi(s); if (d) return d; }"),
+    ).toBe(false);
+    expect(
+      gatesBeforeData("export async function POST() { await someNewWriter(i); const d = await requirePlatformAdminApi(s); if (d) return d; }"),
+    ).toBe(false);
+  });
+  it("lets the session read and the route params come before the gate", () => {
+    expect(
+      gatesBeforeData(
+        "export async function GET() { const { session } = await getSessionOrFail(); const { id } = await params; const d = await requirePlatformAdminApi(session); if (d) return d; await prisma.a.b(); }",
+      ),
+    ).toBe(true);
   });
   it("finds handlers exported as const", () => {
     expect(exportedHandlers("export const GET = async () => {}; export async function POST() {}").map((h) => h.name)).toEqual([

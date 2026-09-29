@@ -11,6 +11,7 @@ import { AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLayer } from "@/components/layout/os/shell-context";
 
 export interface TypedConfirmRequest {
   title: string;
@@ -59,6 +60,9 @@ export function TypedConfirmDialog({
   }, [request]);
 
   const ok = request ? typedConfirmMatches(typed, request.match) : false;
+  // On the layer stack like every console modal: the page's primary steps
+  // back behind it and Esc closes this layer first.
+  useLayer(!!request, { kind: "dialog", close: onCancel, canClose: () => !busy });
 
   return (
     <Dialog open={!!request} onOpenChange={(o) => { if (!o && !busy) onCancel(); }}>

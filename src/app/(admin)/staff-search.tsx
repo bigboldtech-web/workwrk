@@ -271,7 +271,18 @@ function SearchBody({
     (row: Row) => {
       // Close first, then open: nothing ever stacks on the overlay.
       onClose();
-      void leaveThen(() => router.push(row.href));
+      // A company opens as the drawer over Companies, or as the company page
+      // when the console is somewhere else (spec 2.8): a soft navigation from
+      // Staff or Analytics would be caught by the @drawer intercept and float
+      // the drawer over a page the breadcrumb and sidebar do not name, so it
+      // loads the page itself instead.
+      const here = window.location.pathname;
+      const isCompany = /^\/admin\/companies\/[^/]+$/.test(row.href);
+      const onCompanies = here === "/admin/companies" || here.startsWith("/admin/companies/");
+      void leaveThen(() => {
+        if (isCompany && !onCompanies) window.location.assign(row.href);
+        else router.push(row.href);
+      });
     },
     [onClose, router],
   );

@@ -16,7 +16,8 @@ NEXT_PUBLIC_APP_URL=https://app.workwrk.com
 ```
 
 With `ADMIN_HOST` set, `src/proxy.ts` serves only `/admin`, `/api/admin`,
-`/api/auth`, `/login`, `/_next` and `/favicon.ico` on that host, redirects
+`/api/auth`, `/login`, `/forgot-password`, `/_next` and `/favicon.ico` on
+that host, redirects
 everything else there to `/admin`, and rewrites `/admin` and `/api/admin` to
 `/404` on every other host, so the console is not discoverable from the
 customer app or the marketing site.
@@ -44,8 +45,22 @@ seeds; every later one is added from Staff console › Staff.
 code: the running release never names either object, but the new release
 logs a StaffAction row inside every staff write's transaction, so until the
 file lands every staff write fails closed with a 500 (nothing changes, nothing
-is lost). Apply it with `prisma db execute --file <file>`: this Prisma 7 CLI
-rejects `--schema` on `db execute`.
+is lost). Apply it with `prisma db execute --file <file>` and NO `--schema`
+flag: this Prisma 7 CLI rejects `--schema` on `db execute` ("unknown or
+unexpected option"). Check the command's own exit status; a pipe such as
+`| tail` hides the failure.
+
+`/login` on `ADMIN_HOST` is the staff sign-in: "Sign in to the WorkwrK staff
+console" and no Start your free trial link (`src/app/(auth)/login/page.tsx`
+compares the request host with `ADMIN_HOST`, so the host header nginx
+forwards must be the admin host's own).
+
+Staff console writes are refused (403) unless they come from the console's
+own origin (`src/lib/admin/staff-write-origin.ts`, run in `src/proxy.ts`):
+the session cookie is shared across `.workwrk.com`, so a page on any sibling
+subdomain would otherwise count as same-site. nginx must forward the
+browser's `Host` header unchanged (`proxy_set_header Host $host;`) and should
+set `X-Real-IP $remote_addr`, which the StaffAction IP reads first.
 Every write a staff member makes is recorded there in the same transaction,
 so a change that cannot record itself does not happen; do not drop or
 truncate the table, it is the record a customer is shown when they ask who

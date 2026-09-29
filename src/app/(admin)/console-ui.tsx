@@ -12,6 +12,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { RowMoreButton } from "@/components/ui/table-card";
+import { useLayer } from "@/components/layout/os/shell-context";
 import { formatRelative, type DateFormatPrefs } from "@/lib/format/date";
 import { cn } from "@/lib/utils";
 
@@ -42,14 +43,20 @@ export function PendingDots() {
  * "Updated {relative}" for the title row, re-rendered every 30 seconds so
  * "just now" does not sit there for an hour.
  */
-export function UpdatedMeta({ at, prefs }: { at: number | null; prefs: DateFormatPrefs }) {
+export function UpdatedMeta({ at, prefs, failed = false }: { at: number | null; prefs: DateFormatPrefs; failed?: boolean }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => tick((n) => n + 1), 30_000);
     return () => window.clearInterval(t);
   }, []);
   if (!at) return null;
-  return <span className="whitespace-nowrap text-xs font-medium text-ink-2">Updated {formatRelative(at, prefs)}</span>;
+  // A refresh that failed leaves the rows on screen, so the time they are
+  // from turns danger (spec section 1 Offline) next to the Retry row.
+  return (
+    <span className={cn("whitespace-nowrap text-xs font-medium", failed ? "text-danger-text" : "text-ink-2")}>
+      Updated {formatRelative(at, prefs)}
+    </span>
+  );
 }
 
 /** Data older than this refetches when the window comes back into focus (spec 2.2 Realtime). */
@@ -102,6 +109,9 @@ export function ConsoleModal({
   initialFocus?: boolean;
 }) {
   const w = width === 400 ? "max-w-[400px]" : width === 560 ? "max-w-[560px]" : "max-w-[720px]";
+  // On the layer stack, so the page's blue primary steps back while this
+  // modal (with its own primary) is open, and Esc closes the top layer only.
+  useLayer(open, { kind: "dialog", close: onClose, canClose: () => !busy });
   const body = (
     <>
       <DialogTitle className="pe-8 text-lg font-semibold text-ink">{title}</DialogTitle>

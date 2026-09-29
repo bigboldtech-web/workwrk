@@ -32,13 +32,15 @@ describe("labels", () => {
 });
 
 describe("requestIp", () => {
-  it("takes the first x-forwarded-for hop, then x-real-ip, else null", () => {
-    expect(requestIp(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }))).toBe("203.0.113.9");
+  it("takes x-real-ip, then the last x-forwarded-for hop (the one our proxy added), else null", () => {
+    // A client-forged first hop is never the answer.
+    expect(requestIp(new Headers({ "x-forwarded-for": "6.6.6.6, 203.0.113.9" }))).toBe("203.0.113.9");
+    expect(requestIp(new Headers({ "x-forwarded-for": "6.6.6.6, 203.0.113.9", "x-real-ip": "203.0.113.9" }))).toBe("203.0.113.9");
     expect(requestIp(new Headers({ "x-real-ip": "198.51.100.4" }))).toBe("198.51.100.4");
     expect(requestIp(new Headers())).toBeNull();
     expect(requestIp(null)).toBeNull();
     expect(requestIp(new Request("http://x/", { headers: { "x-forwarded-for": " 192.0.2.1 " } }))).toBe("192.0.2.1");
-    expect(requestIp(new Headers({ "x-forwarded-for": " , 1.1.1.1" }))).toBeNull();
+    expect(requestIp(new Headers({ "x-forwarded-for": "1.1.1.1, " }))).toBeNull();
   });
 });
 
@@ -109,12 +111,23 @@ describe("tenantEventFor: the customer's sentence names WorkwrK Support, never a
       "WorkwrK Support turned White label off",
     );
   });
-  it("owner lands in Access as a warning", () => {
-    expect(tenantEventFor("admin.org.owner_set", null, { name: "Maya" })).toEqual({
+  it("owner lands in Access as a warning, with the workspace's own org_role.changed beside it", () => {
+    expect(tenantEventFor("admin.org.owner_set", { role: "COMPANY_ADMIN" }, { name: "Maya", userId: "u1" })).toEqual({
       type: "staff.owner.set",
       description: "WorkwrK Support gave Maya Owner access",
       severity: "warning",
+      companion: {
+        type: "org_role.changed",
+        description: "WorkwrK Support changed Maya's role from Admin to Owner",
+        severity: "warning",
+        targetType: "User",
+        targetId: "u1",
+        metadata: { from: "Admin", to: "Owner" },
+      },
     });
+    expect(tenantEventFor("admin.org.owner_set", { role: "EMPLOYEE" }, { name: "Sam" })?.companion?.description).toBe(
+      "WorkwrK Support changed Sam's role from Member to Owner",
+    );
   });
   it("the staff list, imports, refunds and denials have no customer half", () => {
     for (const a of ["admin.staff.added", "admin.staff.removed", "admin.codes.imported", "admin.code.refunded", "admin.access.denied"] as const) {

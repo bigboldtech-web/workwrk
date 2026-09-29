@@ -61,9 +61,13 @@ export function statusLabel(status: string | null | undefined): string {
 }
 
 /**
- * The client IP from proxy headers (behind nginx: x-forwarded-for, then
- * x-real-ip). Accepts a Request, a Headers, or anything with a `headers`
- * that has `get`. Null when nothing is known; never a guess.
+ * The client IP from proxy headers, in the order that a client cannot forge:
+ * x-real-ip first (nginx sets it to the address it accepted the connection
+ * from, overwriting anything the client sent), then the LAST x-forwarded-for
+ * hop (proxy_add_x_forwarded_for appends that same address after whatever
+ * the client claimed; the first hop is the client's own claim). Accepts a
+ * Request, a Headers, or anything with a `headers` that has `get`. Null when
+ * nothing is known; never a guess.
  */
 export function requestIp(
   source: Request | Headers | { headers: Headers } | null | undefined,
@@ -76,10 +80,12 @@ export function requestIp(
         ? (source as { headers: Headers }).headers
         : undefined;
   if (!headers) return null;
-  const raw = headers.get("x-forwarded-for") ?? headers.get("x-real-ip");
+  const real = headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const raw = headers.get("x-forwarded-for");
   if (!raw) return null;
-  const first = raw.split(",")[0]?.trim();
-  return first || null;
+  const hops = raw.split(",").map((h) => h.trim());
+  return hops[hops.length - 1] || null;
 }
 
 /** The staff actor from a NextAuth session: id when present, email lower-cased. */
@@ -108,6 +114,28 @@ export interface TenantEvent {
   /** The sentence the customer reads. Names "WorkwrK Support", never a person. */
   description: string;
   severity: "info" | "warning" | "critical";
+  /**
+   * A second customer row written with this one, in the same transaction.
+   * Set workspace Owner is an org-role change, so the workspace's own
+   * org_role.changed row lands beside staff.owner.set (spec 1 Audit): the
+   * Access tab tells the whole story whether read by actor or by event.
+   */
+  companion?: {
+    type: string;
+    description: string;
+    severity: "info" | "warning" | "critical";
+    targetType: string;
+    targetId: string | null;
+    metadata: Record<string, unknown>;
+  };
+}
+
+/** The org role a stored AccessLevel reads as, for the customer's sentence. */
+function orgRoleWord(level: string | undefined): string {
+  if (level === "SUPER_ADMIN") return "Owner";
+  if (level === "COMPANY_ADMIN") return "Admin";
+  if (level === "GUEST") return "Guest";
+  return "Member";
 }
 
 type Rec = Record<string, unknown> | null | undefined;
@@ -167,12 +195,23 @@ export function tenantEventFor(action: StaffActionKey, before: Rec, after: Rec):
         description: `${STAFF_ACTOR_LABEL} turned ${str(after, "label") ?? "an add-on"} ${after?.enabled ? "on" : "off"}`,
         severity: "info",
       };
-    case "admin.org.owner_set":
+    case "admin.org.owner_set": {
+      const name = str(after, "name") ?? "a person";
+      const from = orgRoleWord(str(before, "role"));
       return {
         type: "staff.owner.set",
-        description: `${STAFF_ACTOR_LABEL} gave ${str(after, "name") ?? "a person"} Owner access`,
+        description: `${STAFF_ACTOR_LABEL} gave ${name} Owner access`,
         severity: "warning",
+        companion: {
+          type: "org_role.changed",
+          description: `${STAFF_ACTOR_LABEL} changed ${name}'s role from ${from} to Owner`,
+          severity: "warning",
+          targetType: "User",
+          targetId: str(after, "userId") ?? null,
+          metadata: { from, to: "Owner" },
+        },
       };
+    }
     default:
       return null;
   }

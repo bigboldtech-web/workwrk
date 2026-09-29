@@ -81,7 +81,7 @@ export default async function AdminLayout({
     const reason = await staffDenialReason(session);
     const sentence =
       reason === "unverified"
-        ? `You are signed in as ${email}, which is on the WorkwrK staff list, but this account has not verified its email address. Verify it from My settings > Security, then open the console again.`
+        ? `You are signed in as ${email}, which is on the WorkwrK staff list, but this account has not verified its email address. Verify it from My settings › Security, then open the console again.`
         : reason === "duplicate"
           ? `You are signed in as ${email}. More than one verified WorkwrK account uses this address, so the console opens for none of them. Ask another staff member to check the accounts.`
           : `You are signed in as ${email}. That account is not on the WorkwrK staff list.`;

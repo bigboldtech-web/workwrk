@@ -6,7 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword } from "@/lib/password-policy";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
-import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
+import { isReservedStaffAddress } from "@/lib/platform-admin";
 
 export async function POST(req: Request) {
   try {
@@ -63,9 +63,11 @@ export async function POST(req: Request) {
       );
     }
     // The registrant chooses this password before proving the mailbox, so
-    // a WorkwrK staff address is refused (platform-admin.ts).
+    // a WorkwrK staff address is refused (platform-admin.ts). This endpoint is
+    // public: the refusal reads exactly like the existing-account one above,
+    // so it never confirms that an address is on the WorkwrK staff list.
     if (typeof email === "string" && (await isReservedStaffAddress(email))) {
-      return NextResponse.json({ error: STAFF_ADDRESS_REFUSAL }, { status: 400 });
+      return NextResponse.json({ error: "An account with this email already exists" }, { status: 400 });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);

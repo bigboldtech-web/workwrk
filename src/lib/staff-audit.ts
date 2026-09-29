@@ -28,8 +28,9 @@
 // Nothing owed is lost while the columns are missing. What a customer is owed
 // is derivable from the StaffAction row itself (targetCompanyId plus the pure
 // tenantEventFor(action, before, after)), and every customer row written
-// carries metadata.staffActionId. So the first writeTenantRow() in a process
-// that CAN write customer rows also runs replayOwedTenantRows() once: every
+// carries metadata.staffActionId. So server start, and the first
+// writeTenantRow() in a process that CAN write customer rows, run
+// replayOwedTenantRows() once (again after a failure): every
 // StaffAction that owes a customer row and has none yet gets it, dated when
 // the staff member made the change. The replay is idempotent (it skips a
 // StaffAction whose customer row exists) and bounded per batch.
@@ -141,6 +142,24 @@ let heldNoticeShown = false;
 let replayStarted = false;
 
 /**
+ * Runs the replay of owed customer rows once per process. Called from the
+ * first customer write and from server start (src/instrumentation.ts), so
+ * rows owed from before the ActivityLog columns existed are written even if
+ * no staff member changes anything afterwards. A replay that fails is
+ * retried by the next caller rather than never again.
+ */
+export async function startOwedReplay(): Promise<void> {
+  if (replayStarted || !tenantActorSupported()) return;
+  replayStarted = true;
+  try {
+    await replayOwedTenantRows();
+  } catch (err) {
+    replayStarted = false;
+    console.error("[staff-audit] replay of owed customer rows failed; it runs again on the next staff write:", err);
+  }
+}
+
+/**
  * The customer's row, written after the staff transaction committed. Never
  * throws. While the ActivityLog model cannot carry a named non-person actor
  * the row is held (once-per-process notice), never written with a foreign
@@ -162,8 +181,7 @@ export async function writeTenantRow(logged: LoggedStaffAction | null | undefine
     if (!replayStarted) {
       // Once per process, and awaited: the replay also covers this row
       // (its StaffAction has committed), so the check below never doubles it.
-      replayStarted = true;
-      await replayOwedTenantRows().catch((err) => console.error("[staff-audit] replay of owed customer rows failed:", err));
+      await startOwedReplay();
     }
     await writeOwedRow({ staffActionId: (logged as LoggedStaffAction).id, organizationId: tenant.organizationId, event: tenant.event });
     return true;
@@ -210,6 +228,26 @@ async function writeOwedRow(input: {
         ...(replayedAt ? { createdAt: replayedAt } : {}),
       } as unknown as Prisma.ActivityLogUncheckedCreateInput,
     });
+    // Same transaction and the same staffActionId, so the existence check
+    // above covers both rows: they are written together or not at all.
+    if (event.companion) {
+      const c = event.companion;
+      await tx.activityLog.create({
+        data: {
+          type: c.type,
+          actorId: null,
+          actorType: STAFF_ACTOR_TYPE,
+          actorLabel: STAFF_ACTOR_LABEL,
+          organizationId,
+          description: c.description,
+          targetType: c.targetType,
+          targetId: c.targetId,
+          severity: c.severity,
+          metadata: { ...c.metadata, staffActionId, companionOf: event.type, ...(replayedAt ? { replayed: true } : {}) },
+          ...(replayedAt ? { createdAt: replayedAt } : {}),
+        } as unknown as Prisma.ActivityLogUncheckedCreateInput,
+      });
+    }
     return true;
   });
 }

@@ -7,6 +7,7 @@ import { prisma } from "./prisma";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
+import { verifyTokenVersionProof } from "./session-proof";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -328,7 +329,7 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
 
-    async jwt({ token, user, account, trigger }) {
+    async jwt({ token, user, account, trigger, session }) {
       if (user) {
         const u = user as unknown as AuthIdentity;
         token.id = u.id;
@@ -373,18 +374,32 @@ export const authOptions: NextAuthOptions = {
       // five minutes until the next check. A token that is already revoked
       // is not refreshed: session.update() must never revive it by copying
       // the new tokenVersion in.
+      //
+      // tokenVersion is never copied in on request alone. A cookie that was
+      // signed out by a bump (Sign out everywhere, a password reset, a staff
+      // suspension) but not yet re-checked would otherwise come straight
+      // back by calling update. Only the session that caused the bump, and
+      // that holds the proof the bumping route returned to it, is synced;
+      // any other token whose version no longer matches is revoked here.
       if (trigger === "update" && token.id && token.revoked !== true) {
         const fresh = await prisma.user.findUnique({
           where: { id: token.id as string },
           include: { organization: { select: { name: true } } },
         });
         if (fresh) {
+          if (typeof token.tokenVersion === "number" && fresh.tokenVersion !== token.tokenVersion) {
+            const proof = (session as { tokenVersionProof?: unknown } | null | undefined)?.tokenVersionProof;
+            if (!verifyTokenVersionProof(proof, token.id as string, token.tokenVersion, fresh.tokenVersion)) {
+              token.revoked = true;
+              token.checkedAt = Date.now();
+              return token;
+            }
+          }
           token.organizationId = fresh.organizationId;
           token.organizationName = fresh.organization.name;
           token.accessLevel = fresh.accessLevel;
-          // Sync tokenVersion too: a self password-change bumps it and then
-          // calls session.update(), so THIS session (the one that made the
-          // change) stays valid while every OTHER session is revoked.
+          // A proven bump (or a grandfathered token with no version yet,
+          // which was never revocable by version) takes the current one.
           token.tokenVersion = fresh.tokenVersion;
           token.checkedAt = 0;
         }

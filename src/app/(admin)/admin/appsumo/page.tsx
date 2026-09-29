@@ -246,8 +246,11 @@ export default function AppsumoCodesPage() {
         </span>
       ),
     },
-    // Gives way on a narrow card; column settings bring it back.
-    { key: "gives", label: "What it gives", width: "minmax(180px,1.2fr)", hideBelow: 900, render: (r) => <span className="truncate">{r.gives}</span> },
+    // Never dropped: it is what a staff member arriving from a company page
+    // or Search came to read, and this table has no column settings to bring
+    // a dropped column back. A card narrower than every column scrolls
+    // sideways inside itself instead.
+    { key: "gives", label: "What it gives", width: "minmax(180px,1.2fr)", render: (r) => <span className="truncate">{r.gives}</span> },
     { key: "status", label: "Status", width: "130px", render: (r) => <StatusChip color={codeStatusColor(r.status)} label={codeStatusLabel(r.status)} /> },
     {
       key: "company",
@@ -257,8 +260,9 @@ export default function AppsumoCodesPage() {
         r.company ? (
           <Link href={`/admin/companies/${r.company.id}`} className="block min-w-0 truncate text-ink hover:underline">{r.company.name}</Link>
         ) : (
-          // A code refunded before anyone redeemed it says so, rather than "None".
-          <span className="text-ink-3">{r.redeemedAt ? "Company deleted" : "Not redeemed"}</span>
+          // The canon's empty word (spec 2.6). A redeemed code whose company
+          // was deleted since says so: "None" would read as never redeemed.
+          <span className="text-ink-3">{r.redeemedAt ? "Company deleted" : "None"}</span>
         ),
     },
     {
@@ -289,7 +293,7 @@ export default function AppsumoCodesPage() {
     <>
       <OsPageHeader
         title="AppSumo codes"
-        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} />}
+        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} failed={failed && !!payload} />}
         views={CODE_VIEWS.map((v) => (
           <ViewTab key={v} label={CODE_VIEW_LABEL[v]} active={params.view === v} href={`/admin/appsumo${codesQuery({ ...params, view: v, page: 1 })}`} trailing={<ViewCount n={payload?.counts?.[v]} />} />
         ))}
@@ -406,9 +410,10 @@ export default function AppsumoCodesPage() {
         <MorePortal anchorRef={menu.anchor} width={220} open onClose={() => setMenu(null)} placement="below">
           <MenuList onClick={() => setMenu(null)}>
             <MenuItem icon={Copy} label="Copy code" onClick={() => void copy(menu.row.code, "Code")} />
-            {/* An unused code can be refunded too: AppSumo refunds a buyer
-                before they redeem, and a refunded code can no longer be redeemed. */}
-            {menu.row.status !== "refunded" ? (
+            {/* Only a redeemed code that is not refunded yet (spec 2.6). A refund
+                cannot be undone here and a refunded code can never be redeemed,
+                so an unused code stays redeemable; the server refuses it too. */}
+            {menu.row.status === "redeemed" ? (
               <>
                 <MenuSeparator />
                 <MenuItem icon={ReceiptText} label="Mark refunded" destructive onClick={() => setRefunding(menu.row)} />
@@ -425,7 +430,7 @@ export default function AppsumoCodesPage() {
                 title: `Mark ${refunding.code} refunded?`,
                 body: refunding.company
                   ? `This is bookkeeping. ${refunding.company.name} keeps their plan until you change it on their company page.`
-                  : "Nobody has redeemed it. Once it is marked refunded, it can no longer be redeemed.",
+                  : "This is bookkeeping. The company that redeemed it no longer exists.",
                 note: "A refund cannot be undone from this console.",
                 match: refunding.code,
                 matchLabel: "the code",

@@ -38,7 +38,7 @@ import { useNavHistory, useNavHistoryRecorder } from "@/components/layout/os/top
 import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/components/layout/os/session-expired-dialog";
 import { SidebarRow, SidebarSectionLabel } from "@/components/layout/os/sidebar-primitives";
 import { shortcutHint, shortcuts, useShortcut, SHORTCUTS } from "@/lib/shortcuts";
-import { isSessionExpired } from "@/lib/session-expiry";
+import { SESSION_EXPIRED_EVENT, isSessionExpired } from "@/lib/session-expiry";
 import { recordShellPath } from "@/lib/nav/entry-path";
 import { activeConsoleNav, consoleCrumbs, shippedConsoleNav, type ConsoleCrumb } from "@/lib/admin/console-nav";
 import type { ConsolePrefs } from "@/lib/admin/console-prefs";
@@ -313,6 +313,30 @@ function useConsoleKeys() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [closeTopLayer]);
+
+  // When the session ends, the signed-out dialog must be the only layer: a
+  // row menu or a drawer left open would float above its scrim and stay
+  // clickable. Every layer that can close does (one that refuses, such as a
+  // write in flight, stays until it settles; the frame is inert anyway).
+  useEffect(() => {
+    if (!closeTopLayer) return;
+    // One layer per frame: a closed layer leaves the stack when its
+    // component re-renders, so the next call then reaches the one below.
+    let frame = 0;
+    const step = (left: number) => {
+      if (left <= 0 || closeTopLayer() !== "closed") return;
+      frame = window.requestAnimationFrame(() => step(left - 1));
+    };
+    const onExpired = () => {
+      window.cancelAnimationFrame(frame);
+      step(16);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    };
   }, [closeTopLayer]);
 }
 

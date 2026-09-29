@@ -312,7 +312,7 @@ export default function CompaniesPage() {
     <>
       <OsPageHeader
         title="Companies"
-        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} />}
+        actions={<UpdatedMeta at={loadedAt} prefs={datePrefs} failed={failed && !!payload} />}
         views={COMPANY_VIEWS.map((v) => (
           <ViewTab
             key={v}

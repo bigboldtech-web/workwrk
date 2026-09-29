@@ -106,7 +106,10 @@ export function CompanyDrawerHost({ companyId }: { companyId: string }) {
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
             Companies › <span className="text-ink">{shownName ?? "Company"}</span>
           </span>
-          <button type="button" aria-label={expanded ? "Collapse" : "Expand"} title={expanded ? "Collapse" : "Expand"} onClick={() => setExpanded((v) => !v)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink max-lg:hidden">
+          {/* Kept below 1024 too, where the drawer is already full width:
+              Expand is the one way to the page presentation and its "..."
+              (Refresh, About this page), which the drawer body does not repeat. */}
+          <button type="button" aria-label={expanded ? "Collapse" : "Expand"} title={expanded ? "Collapse" : "Expand"} onClick={() => setExpanded((v) => !v)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             {expanded ? <Minimize2 className="h-4 w-4" strokeWidth={1.5} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.5} />}
           </button>
           <button type="button" aria-label="Copy link" title="Copy link" onClick={() => void copyLink()} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">

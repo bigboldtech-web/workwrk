@@ -256,9 +256,10 @@ export default function AccountSecurityPage() {
       <ChangePasswordDialog
         open={changePwOpen}
         onOpenChange={setChangePwOpen}
-        onChanged={() => {
+        onChanged={(tokenVersionProof) => {
           // Re-sync this session's token (it survives; other devices are out).
-          void updateSession();
+          // The proof is what lets THIS token take the new version.
+          void updateSession({ tokenVersionProof });
           toast("Password updated — other devices signed out");
           void loadActivity();
         }}

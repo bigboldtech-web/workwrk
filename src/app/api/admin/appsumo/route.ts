@@ -198,6 +198,11 @@ export async function PATCH(req: NextRequest) {
       if (!confirmMatches(confirm, row.code)) return { status: 400 as const };
       // Already refunded: nothing changes, so nothing is written or recorded.
       if (row.refundedAt) return { status: 200 as const, refundedAt: row.refundedAt, logged: null, company: null };
+      // Only a redeemed code can be refunded (spec 2.6: the action exists
+      // only on a redeemed row). A refund cannot be undone and a refunded
+      // code can never be redeemed, so a replayed or scripted call on an
+      // unused code would take away a code a customer paid for.
+      if (!row.redeemedAt) return { status: 409 as const };
 
       // The company that redeemed it, when it still exists (redeemedByOrg is
       // a bare id with no relation; a deleted company leaves it dangling).
@@ -219,7 +224,7 @@ export async function PATCH(req: NextRequest) {
         targetLabel: code,
         reason: notes,
         summary: `Marked AppSumo code ${code} (Tier ${row.tier}) refunded${
-          company ? ` for ${company.name}; their plan was not changed` : row.redeemedByOrg ? "; the company that redeemed it no longer exists" : "; it was never redeemed"
+          company ? ` for ${company.name}; their plan was not changed` : "; the company that redeemed it no longer exists"
         }`,
         before: { refundedAt: null, redeemedAt: row.redeemedAt, plan: row.plan, seats: row.seats },
         after: { refundedAt: updated.refundedAt, companyId: company?.id ?? null, companyName: company?.name ?? null },
@@ -229,6 +234,7 @@ export async function PATCH(req: NextRequest) {
 
     if (outcome.status === 404) return jsonError("Code not found", 404);
     if (outcome.status === 400) return jsonError("Type the code to confirm the refund", 400);
+    if (outcome.status === 409) return jsonError("This code was never redeemed, so there is nothing to refund", 409);
     void writeTenantRow(outcome.logged);
     return jsonSuccess({ ok: true, refundedAt: outcome.refundedAt, company: outcome.company ?? null });
   }

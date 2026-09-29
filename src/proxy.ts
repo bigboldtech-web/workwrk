@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { isSignedOutAppPath } from "@/lib/nav/public-app-paths";
+import { staffWriteOriginRefused, STAFF_WRITE_ORIGIN_REFUSAL } from "@/lib/admin/staff-write-origin";
 
 /**
  * Host routing for WorkwrK's three surfaces:
@@ -158,6 +159,12 @@ export function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const customDomainsEnabled = process.env.CUSTOM_DOMAINS_ENABLED === "true";
   const hardSplit = process.env.HARD_HOST_SPLIT === "true";
+
+  // 0) Staff console writes must come from the console itself (CSRF guard;
+  //    see staff-write-origin.ts). Applies with or without the host split.
+  if (path.startsWith("/api/admin") && staffWriteOriginRefused(req.method, req.headers)) {
+    return NextResponse.json({ error: STAFF_WRITE_ORIGIN_REFUSAL }, { status: 403 });
+  }
 
   // 1) Admin host split — opt-in via env.
   if (adminHost) {

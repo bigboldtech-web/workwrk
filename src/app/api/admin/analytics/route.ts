@@ -47,7 +47,9 @@ import { planLabel } from "@/lib/staff-audit-helpers";
  *                 (lib/admin/workspace-use.ts), not a billing flag and not a
  *                 sign-in, a signup row or a staff change
  *   cancellations the last ten in the range: a Stripe subscription cancelled,
- *                 or a workspace a staff member set to Cancelled
+ *                 a workspace a staff member set to Cancelled, or a workspace
+ *                 its Owner deleted (scheduled for deletion); each says
+ *                 whether the company has been restored since
  *   biggest       top five by people; busiest = top five by use in the range
  *                 (the same definition as Still active)
  *   plans         companies per plan (cancelled companies not counted); no
@@ -97,6 +99,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     windowCompanies,
     cancellationRows,
     staffCancellations,
+    ownerDeletions,
     peopleGroups,
     actionGroups,
     planGroups,
@@ -119,7 +122,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       where: { canceledAt: { gte: w.start, lte: now } },
       orderBy: { canceledAt: "desc" },
       take: 10,
-      select: { canceledAt: true, plan: true, organization: { select: { id: true, name: true } } },
+      select: { canceledAt: true, plan: true, status: true, organization: { select: { id: true, name: true } } },
     }),
     // A workspace a staff member cancelled on its company page: Stripe never
     // hears of it (a lifetime deal, a trial), so its record is the StaffAction.
@@ -132,8 +135,20 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       },
       orderBy: { createdAt: "desc" },
       take: 10,
-      select: { createdAt: true, targetCompany: { select: { id: true, name: true, plan: true } } },
+      select: { createdAt: true, targetCompany: { select: { id: true, name: true, plan: true, status: true } } },
     }),
+    // The commonest churn: an Owner deleting their own workspace from
+    // Settings (status CANCELLED plus settings.cancelledAt, no Stripe row and
+    // no StaffAction). Still CANCELLED only: a restore clears the schedule.
+    prisma.$queryRaw<{ id: string; name: string; plan: string; cancelledAt: string }[]>`
+      SELECT "id", "name", "plan"::text AS "plan", "settings"->>'cancelledAt' AS "cancelledAt"
+      FROM "Organization"
+      WHERE "status" = 'CANCELLED'
+        AND "settings"->>'cancelledAt' IS NOT NULL
+        AND "settings"->>'cancelledAt' >= ${w.start.toISOString()}
+        AND "settings"->>'cancelledAt' <= ${now.toISOString()}
+      ORDER BY "settings"->>'cancelledAt' DESC
+      LIMIT 10`,
     prisma.user.groupBy({
       by: ["organizationId"],
       where: { deletedAt: null },
@@ -253,12 +268,25 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
         plan: r.plan as string,
         canceledAt: r.canceledAt?.toISOString() ?? null,
         what: "subscription" as const,
+        restored: r.status !== "CANCELED",
       })),
       staffCancellations.flatMap((r) =>
         r.targetCompany
-          ? [{ id: r.targetCompany.id, name: r.targetCompany.name, plan: r.targetCompany.plan as string, canceledAt: r.createdAt.toISOString(), what: "workspace" as const }]
+          ? [
+              {
+                id: r.targetCompany.id,
+                name: r.targetCompany.name,
+                plan: r.targetCompany.plan as string,
+                canceledAt: r.createdAt.toISOString(),
+                what: "workspace" as const,
+                // Cancelled and later set back to Trial or Active: still a
+                // fact in the range, but never read as a company that left.
+                restored: r.targetCompany.status !== "CANCELLED",
+              },
+            ]
           : [],
       ),
+      ownerDeletions.map((r) => ({ id: r.id, name: r.name, plan: r.plan, canceledAt: r.cancelledAt, what: "deleted" as const, restored: false })),
     ),
     biggest,
     busiest,
@@ -272,12 +300,22 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
   };
 }
 
-type Cancellation = { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" };
+type Cancellation = {
+  id: string;
+  name: string;
+  plan: string;
+  canceledAt: string | null;
+  /** subscription: Stripe; workspace: a staff member; deleted: its Owner scheduled deletion. */
+  what: "subscription" | "workspace" | "deleted";
+  /** True when the company is no longer cancelled (restored or resubscribed). */
+  restored: boolean;
+};
 
 /** Newest first, the last ten, one row per company and kind of cancellation. */
-function mergeCancellations(a: Cancellation[], b: Cancellation[]): Cancellation[] {
+function mergeCancellations(...lists: Cancellation[][]): Cancellation[] {
   const seen = new Set<string>();
-  return [...a, ...b]
+  return lists
+    .flat()
     .sort((x, y) => (y.canceledAt ?? "").localeCompare(x.canceledAt ?? ""))
     .filter((c) => {
       const k = `${c.id}:${c.what}`;
@@ -286,6 +324,10 @@ function mergeCancellations(a: Cancellation[], b: Cancellation[]): Cancellation[
       return true;
     })
     .slice(0, 10);
+}
+
+function cancellationWord(what: Cancellation["what"]): string {
+  return what === "workspace" ? "Workspace cancelled" : what === "deleted" ? "Deleted by its Owner" : "Subscription cancelled";
 }
 
 type Analytics = Awaited<ReturnType<typeof computeAnalytics>>;
@@ -320,7 +362,7 @@ function analyticsCsv(a: Analytics): string {
     rows.push(["Retention", `${monthKeyLabel(c.month, "en-GB")} cancelled`, c.cancelled, ""]);
   }
   for (const c of a.cancellations)
-    rows.push(["Cancellations", c.name, `${c.what === "workspace" ? "Workspace" : "Subscription"} ${planLabel(c.plan)} ${c.canceledAt?.slice(0, 10) ?? ""}`.trim(), ""]);
+    rows.push(["Cancellations", c.name, `${cancellationWord(c.what)} ${planLabel(c.plan)} ${c.canceledAt?.slice(0, 10) ?? ""}${c.restored ? " (restored since)" : ""}`.trim(), ""]);
   for (const c of a.biggest) rows.push(["Biggest workspaces (people)", c.name, c.value, ""]);
   for (const c of a.busiest) rows.push(["Busiest workspaces (actions by people in the workspace)", c.name, c.value, ""]);
   for (const p of a.plans) rows.push(["Plans (companies)", planLabel(p.plan), p.count, ""]);

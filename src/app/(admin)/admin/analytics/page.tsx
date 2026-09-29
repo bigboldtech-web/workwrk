@@ -64,7 +64,7 @@ interface Analytics {
   growth: { newCompanies: number; newPeople: number; onTrial: number; byBucket: number[]; avgPeoplePerCompany: number; totalPeople: number; totalCompanies: number };
   funnel: { signedUp: number; finishedSetup: number; createdSomething: number; paying: number; windowDays: number };
   retention: { cohorts: CohortRow[]; from: string; partialFirst: boolean };
-  cancellations: { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" }[];
+  cancellations: { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" | "deleted"; restored: boolean }[];
   biggest: RankedCompany[];
   busiest: RankedCompany[];
   plans: { plan: string; count: number }[];
@@ -594,7 +594,10 @@ function CancellationsCard({ data, loading, broken, nothing, onRetry, datePrefs 
                   <Link href={`/admin/companies/${c.id}`} className="min-w-0 truncate text-row text-ink hover:underline">{c.name}</Link>
                   <PlanChip plan={c.plan} />
                   <span className="flex-1" />
-                  <span className="shrink-0 text-sm text-ink-2">{c.what === "workspace" ? "Workspace cancelled" : "Subscription cancelled"}</span>
+                  <span className="shrink-0 text-sm text-ink-2">
+                    {c.what === "workspace" ? "Workspace cancelled" : c.what === "deleted" ? "Deleted by its Owner" : "Subscription cancelled"}
+                    {c.restored ? ", restored since" : ""}
+                  </span>
                   <span className="shrink-0 text-sm tabular-nums text-ink-2" title={c.canceledAt ? formatDateTitle(c.canceledAt, datePrefs) : undefined}>
                     {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
                   </span>
