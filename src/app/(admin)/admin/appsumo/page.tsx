@@ -95,7 +95,7 @@ interface Payload {
 
 export default function AppsumoCodesPage() {
   const router = useRouter();
-  const { spKey } = useListSearchKey("/admin/appsumo");
+  const { spKey, onList } = useListSearchKey("/admin/appsumo");
   const params = useMemo(() => parseCodeListParams(new URLSearchParams(spKey)), [spKey]);
   const { datePrefs } = useConsole();
   const { toast } = useOsToast();
@@ -230,8 +230,22 @@ export default function AppsumoCodesPage() {
 
   const rows = payload?.codes ?? null;
   const total = payload?.total ?? 0;
-  const from = total === 0 ? 0 : (params.page - 1) * params.limit + 1;
-  const to = Math.min(total, (params.page - 1) * params.limit + (rows?.length ?? 0));
+  const lastPage = Math.max(1, Math.ceil(total / params.limit));
+  // The range only counts rows that are on screen: a page past the end (a
+  // bookmarked ?page=99) used to read "9801 to 10".
+  const shown = rows?.length ?? 0;
+  const from = shown === 0 ? 0 : (params.page - 1) * params.limit + 1;
+  const to = shown === 0 ? 0 : Math.min(total, (params.page - 1) * params.limit + shown);
+
+  // A page past the end (an old link, or codes that moved to another view
+  // under a later page) jumps to the last page that has rows, the same as
+  // Companies. Only on an answer for this very page and size.
+  useEffect(() => {
+    if (!onList || !payload || payload.codes.length > 0 || payload.total === 0) return;
+    if (payload.page !== params.page || payload.limit !== params.limit) return;
+    const last = Math.max(1, Math.ceil(payload.total / payload.limit));
+    if (params.page > last) setParams({ page: last }, { keepPage: true });
+  }, [onList, payload, params.page, params.limit, setParams]);
 
   const columns: TableColumn<CodeRow>[] = [
     {
@@ -397,7 +411,7 @@ export default function AppsumoCodesPage() {
                 noun: "records",
                 from,
                 to,
-                onPrev: params.page > 1 ? () => setParams({ page: params.page - 1 }, { keepPage: true }) : undefined,
+                onPrev: params.page > 1 ? () => setParams({ page: Math.min(params.page - 1, lastPage) }, { keepPage: true }) : undefined,
                 onNext: to < total ? () => setParams({ page: params.page + 1 }, { keepPage: true }) : undefined,
               }}
             />

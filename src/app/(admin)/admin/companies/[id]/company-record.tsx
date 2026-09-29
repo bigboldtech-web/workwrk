@@ -678,9 +678,12 @@ function SeatsRow({
   const stored = sub?.seats ?? null;
   const [text, setText] = useState(stored == null ? "" : String(stored));
   const [seen, setSeen] = useState(stored);
+  // A typed number the page will not send (0), said beside the box.
+  const [refused, setRefused] = useState<string | null>(null);
   if (seen !== stored) {
     setSeen(stored);
     setText(stored == null ? "" : String(stored));
+    setRefused(null);
   }
   if (!sub || sub.source === "none") {
     return (
@@ -696,7 +699,16 @@ function SeatsRow({
       setText(stored == null ? "" : String(stored));
       return;
     }
-    const next = n === 0 ? null : n;
+    // 0 is not unlimited. It used to be sent as null, so a staff member who
+    // typed 0 to stop a company adding people got "Unlimited" instead. The 0
+    // stays in the box, nothing is sent, and the row says why; only an empty
+    // box means unlimited (the server refuses 0 too).
+    if (n === 0) {
+      setRefused("Not saved. Seats must be at least 1. Leave the box empty for unlimited.");
+      return;
+    }
+    setRefused(null);
+    const next = n;
     if (next === stored) return;
     // A failed save KEEPS the typed number in the box, next to "Not saved ·
     // Retry", so what Retry sends is the number on screen. (It used to put
@@ -711,8 +723,8 @@ function SeatsRow({
       label="Seats"
       hint={
         sub.source === "stripe"
-          ? `${using} Stripe sets this on every renewal, so a change here lasts until the next Stripe update. Empty means unlimited.`
-          : `${using} Empty means unlimited.`
+          ? `${using} Stripe sets this on every renewal, so a change here lasts until the next Stripe update. At least 1, or empty for unlimited.`
+          : `${using} At least 1, or empty for unlimited.`
       }
     >
       <input
@@ -720,6 +732,7 @@ function SeatsRow({
         value={text}
         onChange={(e) => {
           setText(e.target.value.replace(/[^\d]/g, ""));
+          setRefused(null);
           // Typing a new number after a failure: the old Retry would send the
           // old one, so it goes; leaving the box saves the new one.
           if (notSaved.seats) onEdited();
@@ -733,6 +746,7 @@ function SeatsRow({
       />
       <SavedMark at={saved.seats} />
       <NotSavedMark retry={notSaved.seats} />
+      {refused ? <span className="text-xs font-medium text-danger-text" role="alert">{refused}</span> : null}
     </Row>
   );
 }

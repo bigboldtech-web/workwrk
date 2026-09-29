@@ -94,6 +94,21 @@ interface Payload {
 const COLUMN_KEYS = ["company", "domain", "plan", "status", "people", "seats", "modules", "signed"] as const;
 const OFF_BY_DEFAULT = ["domain"];
 
+// A column's inline filter must never squeeze its title: TableCard truncates
+// the title and keeps the filter whole, so "Suspended, Cancelled ▾" used to
+// cut Status down to "Sta...". One choice shows by name, several as a count
+// (the names are in the tooltip and the Filter panel), and the trigger has a
+// cap; Plan and Status are wide enough for the longest single name.
+const HEADER_FILTER_BTN =
+  "inline-flex h-6 max-w-[96px] items-center gap-0.5 rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink";
+function headerFilterLabel(chosen: string[]): string {
+  if (chosen.length === 0) return "All";
+  return chosen.length === 1 ? chosen[0] : String(chosen.length);
+}
+function headerFilterTitle(column: string, chosen: string[]): string {
+  return chosen.length === 0 ? `${column}: all` : `${column}: ${chosen.join(", ")}`;
+}
+
 export default function CompaniesPage() {
   const router = useRouter();
   const { spKey, onList } = useListSearchKey("/admin/companies");
@@ -210,13 +225,29 @@ export default function CompaniesPage() {
 
   const rows = payload?.companies ?? null;
   const total = payload?.total ?? 0;
-  const from = total === 0 ? 0 : (params.page - 1) * params.limit + 1;
-  const to = Math.min(total, (params.page - 1) * params.limit + (rows?.length ?? 0));
+  const lastPage = Math.max(1, Math.ceil(total / params.limit));
+  // The range only counts rows that are on screen: a page past the end (a
+  // bookmarked ?page=99) used to read "3921 to 14".
+  const shown = rows?.length ?? 0;
+  const from = shown === 0 ? 0 : (params.page - 1) * params.limit + 1;
+  const to = shown === 0 ? 0 : Math.min(total, (params.page - 1) * params.limit + shown);
+
+  // A page past the end (an old link, or a list that shrank under a later
+  // page) jumps to the last page that has rows, instead of an empty page that
+  // says "No companies yet" with Previous stepping back one empty page at a
+  // time. Only on an answer for this very page and size, so a stale payload
+  // from the last query never moves the list.
+  useEffect(() => {
+    if (!onList || !payload || payload.companies.length > 0 || payload.total === 0) return;
+    if (payload.page !== params.page || payload.limit !== params.limit) return;
+    const last = Math.max(1, Math.ceil(payload.total / payload.limit));
+    if (params.page > last) setParams({ page: last }, { keepPage: true });
+  }, [onList, payload, params.page, params.limit, setParams]);
 
   const planFilter = (
     <span className="relative inline-flex">
-      <button type="button" onClick={(e) => openHeaderFilter("plan", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "plan"} className="inline-flex h-6 items-center rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink">
-        {params.plans.length ? params.plans.map(planLabel).join(", ") : "All"} ▾
+      <button type="button" onClick={(e) => openHeaderFilter("plan", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "plan"} title={headerFilterTitle("Plan", params.plans.map(planLabel))} className={HEADER_FILTER_BTN}>
+        <span className="truncate">{headerFilterLabel(params.plans.map(planLabel))}</span> ▾
       </button>
       <Picker
         open={headerFilter?.key === "plan"}
@@ -233,8 +264,8 @@ export default function CompaniesPage() {
   );
   const statusFilter = (
     <span className="relative inline-flex">
-      <button type="button" onClick={(e) => openHeaderFilter("status", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "status"} className="inline-flex h-6 items-center rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink">
-        {params.statuses.length ? params.statuses.map(statusLabel).join(", ") : "All"} ▾
+      <button type="button" onClick={(e) => openHeaderFilter("status", e)} aria-haspopup="listbox" aria-expanded={headerFilter?.key === "status"} title={headerFilterTitle("Status", params.statuses.map(statusLabel))} className={HEADER_FILTER_BTN}>
+        <span className="truncate">{headerFilterLabel(params.statuses.map(statusLabel))}</span> ▾
       </button>
       <Picker
         open={headerFilter?.key === "status"}
@@ -266,8 +297,8 @@ export default function CompaniesPage() {
     // After Modules, Sign-in domain then Seats give way on a narrow card, so
     // the pinned "..." never covers Signed up; both are on the company page.
     { key: "domain", label: "Sign-in domain", width: "minmax(140px,1fr)", hideBelow: 960, render: (r) => <span className={r.domain ? "truncate" : "text-ink-3"}>{r.domain ?? "None"}</span> },
-    { key: "plan", label: "Plan", width: "140px", headerFilter: planFilter, render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip> },
-    { key: "status", label: "Status", width: "150px", headerFilter: statusFilter, render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
+    { key: "plan", label: "Plan", width: "150px", headerFilter: planFilter, render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip> },
+    { key: "status", label: "Status", width: "170px", headerFilter: statusFilter, render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
     { key: "people", label: "People", width: "90px", numeric: true, render: (r) => new Intl.NumberFormat().format(r.people) },
     { key: "seats", label: "Seats", width: "120px", hideBelow: 880, render: (r) => <span className={r.seatsLabel === "None" ? "text-ink-3" : "tabular-nums"}>{r.seatsLabel}</span> },
     {
@@ -448,7 +479,7 @@ export default function CompaniesPage() {
                 noun: "records",
                 from,
                 to,
-                onPrev: params.page > 1 ? () => setParams({ page: params.page - 1 }, { keepPage: true }) : undefined,
+                onPrev: params.page > 1 ? () => setParams({ page: Math.min(params.page - 1, lastPage) }, { keepPage: true }) : undefined,
                 onNext: to < total ? () => setParams({ page: params.page + 1 }, { keepPage: true }) : undefined,
                 pageSize: params.limit,
                 pageSizes: [40, 100],

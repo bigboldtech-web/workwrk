@@ -143,6 +143,13 @@ export default function StaffActivityPage() {
   const [companyOpen, setCompanyOpen] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
   const [whenOn, setWhenOn] = useState(!!(params.from || params.to));
+  // Who, Company and Action keep their own "ticked" state, the way Date range
+  // does. Their `checked` used to be the URL param alone, and ticking only
+  // opened a picker that FilterRow never mounts while unticked, so the box
+  // sprang back and the three filters could only be set by editing the URL.
+  const [whoOn, setWhoOn] = useState(!!params.who);
+  const [companyOn, setCompanyOn] = useState(!!params.company);
+  const [actionOn, setActionOn] = useState(!!params.action);
   const [companyQuery, setCompanyQuery] = useState("");
   const [companyOptions, setCompanyOptions] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
@@ -159,6 +166,12 @@ export default function StaffActivityPage() {
   /** Every filter off, plus `extra` (the empty row's view reset) in the SAME navigation. */
   const clearFilters = (extra: Partial<ActivityParams> = {}) => {
     setWhenOn(false);
+    setWhoOn(false);
+    setCompanyOn(false);
+    setActionOn(false);
+    setWhoOpen(false);
+    setCompanyOpen(false);
+    setActionOpen(false);
     setParams({ who: null, company: null, action: null, from: null, to: null, ...extra });
   };
   const clearAll = () => clearFilters();
@@ -254,7 +267,7 @@ export default function StaffActivityPage() {
       <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="activity" activeCount={activeCount} onClearAll={clearAll}>
           <FilterGroup label="Who">
-            <FilterRow label="A staff member" checked={!!params.who} onCheckedChange={(on) => { if (!on) setParams({ who: null }); else setWhoOpen(true); }}>
+            <FilterRow label="A staff member" checked={whoOn || !!params.who} onCheckedChange={(on) => { setWhoOn(on); setWhoOpen(on); if (!on) setParams({ who: null }); }}>
               <PickerButton label={whoLabel ?? "Choose who"} empty={!params.who} onClick={() => setWhoOpen((o) => !o)}>
                 <Picker
                   open={whoOpen}
@@ -271,7 +284,7 @@ export default function StaffActivityPage() {
             </FilterRow>
           </FilterGroup>
           <FilterGroup label="Company">
-            <FilterRow label="A company" checked={!!params.company} onCheckedChange={(on) => { if (!on) setParams({ company: null }); else setCompanyOpen(true); }}>
+            <FilterRow label="A company" checked={companyOn || !!params.company} onCheckedChange={(on) => { setCompanyOn(on); setCompanyOpen(on); if (!on) setParams({ company: null }); }}>
               <PickerButton label={payload?.company?.name ?? (params.company ? "A company" : "Choose a company")} empty={!params.company} onClick={() => setCompanyOpen((o) => !o)}>
                 <Picker
                   open={companyOpen}
@@ -290,7 +303,7 @@ export default function StaffActivityPage() {
             </FilterRow>
           </FilterGroup>
           <FilterGroup label="Action">
-            <FilterRow label="One kind of change" checked={!!params.action} onCheckedChange={(on) => { if (!on) setParams({ action: null }); else setActionOpen(true); }}>
+            <FilterRow label="One kind of change" checked={actionOn || !!params.action} onCheckedChange={(on) => { setActionOn(on); setActionOpen(on); if (!on) setParams({ action: null }); }}>
               <PickerButton label={params.action ? ACTION_LABEL[params.action] : "Choose an action"} empty={!params.action} onClick={() => setActionOpen((o) => !o)}>
                 <Picker
                   open={actionOpen}

@@ -90,6 +90,13 @@ describe("seats and modules", () => {
       expect(validateCompanyPatch({ seats }).ok).toBe(false);
     }
   });
+  it("refuses 0: a typed 0 must never be stored as unlimited (only an empty box is)", () => {
+    expect(validateCompanyPatch({ seats: 0 })).toEqual({
+      ok: false,
+      error: "Seats must be a whole number from 1 to 1,000,000, or empty for unlimited",
+    });
+    expect(validateCompanyPatch({ seats: 1 })).toEqual({ ok: true, patch: { seats: 1 } });
+  });
   it("accepts a known module with a boolean and refuses anything else", () => {
     expect(validateCompanyPatch({ module: "chat", enabled: false })).toEqual({ ok: true, patch: { module: { key: "chat", enabled: false } } });
     expect(validateCompanyPatch({ module: "slack", enabled: true })).toEqual({ ok: false, error: "Unknown module" });

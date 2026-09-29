@@ -88,11 +88,15 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
     patch.module = { key: b.module, enabled: b.enabled };
   }
   if (b.seats !== undefined) {
+    // Unlimited is only ever an empty box (null or ""), stored as the
+    // internal 0. A typed 0 is refused rather than read as unlimited: staff
+    // typing 0 mean "none", and turning it into its opposite in silence
+    // wrote "Unlimited" onto the record.
     if (b.seats === null || b.seats === "") patch.seats = 0;
-    else if (typeof b.seats === "number" && Number.isInteger(b.seats) && b.seats >= 0 && b.seats <= MAX_SEATS) {
+    else if (typeof b.seats === "number" && Number.isInteger(b.seats) && b.seats >= 1 && b.seats <= MAX_SEATS) {
       patch.seats = b.seats;
     } else {
-      return { ok: false, error: "Seats must be a whole number from 0 to 1,000,000, or empty for unlimited" };
+      return { ok: false, error: "Seats must be a whole number from 1 to 1,000,000, or empty for unlimited" };
     }
   }
   if (b.confirm !== undefined) {
