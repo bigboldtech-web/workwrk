@@ -49,7 +49,7 @@ type Side = "bottom" | "top";
  * The pickers here are absolute children of their trigger (they must stay
  * inside the dialog's focus trap, no body portal), so the dialog's own
  * scroll box clips whatever hangs past its edge. FlipSlot measures the
- * trigger against the dialog the moment it is pressed: when the list does
+ * trigger against that box the moment it is pressed: when the list does
  * not fit below but does fit above, it opens upward. Otherwise it opens
  * downward and the dialog scrolls it into view, because a list hanging past
  * the bottom can be scrolled to and one past the top never can.
@@ -61,7 +61,9 @@ const DOTTED_EXCLUDE_CAP = 200;
 function FlipSlot({ children }: { children: (side: Side) => ReactNode }) {
   const [side, setSide] = useState<Side>("bottom");
   const measure = (el: HTMLElement) => {
-    const box = el.closest('[role="dialog"]')?.getBoundingClientRect();
+    // Measure against the scrolling field area (the header and footer stay
+    // put around it), falling back to the dialog for any other host.
+    const box = (el.closest("[data-dialog-body]") ?? el.closest('[role="dialog"]'))?.getBoundingClientRect();
     if (!box) return;
     const r = el.getBoundingClientRect();
     const below = box.bottom - r.bottom;
@@ -297,14 +299,17 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) close(); }}>
-      <DialogContent className="max-w-[560px]">
+      <DialogContent className="flex max-w-[560px] flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>Edit details</DialogTitle>
           <DialogDescription>Each change saves as you make it.</DialogDescription>
         </DialogHeader>
-        {/* No scroll box of its own: DialogContent already scrolls (85vh), and
-            a second, shorter one clipped every picker below the fold. */}
-        <div className="flex flex-col">
+        {/* Only the fields scroll: the title, the close X and the Close
+            footer stay in view on a short screen (the CSV import dialog's
+            pattern). The box fills the dialog's 85vh, and FlipSlot measures
+            each picker against it, so a list opens where it fits and is
+            scrolled into view when it fits nowhere. */}
+        <div data-dialog-body className="-mx-5 flex min-h-0 flex-1 flex-col overflow-y-auto px-5">
           {personal ? (
             <>
               {can("firstName") ? (

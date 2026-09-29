@@ -70,6 +70,9 @@ export function storedDraftsFor(
   allowed: readonly string[],
   periodOk: (period: string) => boolean,
   s?: Store | null,
+  /** Whether a stored draft can still be saved at all (the page knows the
+   *  person's rows); one that cannot is never named or opened first. */
+  isLive?: (userId: string, period: string, draft: KpiDraftMap) => boolean,
 ): Array<{ userId: string; period: string }> {
   const st = store(s);
   if (!st) return [];
@@ -85,11 +88,64 @@ export function storedDraftsFor(
       const userId = rest.slice(0, cut);
       const period = rest.slice(cut + 1);
       if (!order.has(userId) || !periodOk(period)) continue;
-      if (!draftHasContent(loadKpiDraft(userId, period, st))) continue;
+      const draft = loadKpiDraft(userId, period, st);
+      if (!draftHasContent(draft)) continue;
+      if (isLive && !isLive(userId, period, draft)) continue;
       out.push({ userId, period });
     }
   } catch {
     return [];
   }
   return out.sort((a, b) => b.period.localeCompare(a.period) || (order.get(a.userId)! - order.get(b.userId)!));
+}
+
+/** What a draft holds: a number to record, a note, or both. */
+export function draftKinds(d: KpiDraftMap): { number: boolean; note: boolean } {
+  let number = false;
+  let note = false;
+  for (const row of Object.values(d)) {
+    const actual = (row.actual ?? "").trim();
+    if (actual !== "" && Number.isFinite(Number(actual))) number = true;
+    if ((row.notes ?? "").trim() !== "") note = true;
+  }
+  return { number, note };
+}
+
+/**
+ * Whether a person's stored draft can still save, from that month's counts
+ * alone (the summary row, before their rows are loaded). A number needs a
+ * KPI that is neither submitted nor approved; a note also fits a submitted
+ * one. A manager whose report submitted or had everything approved since
+ * they typed is not told about numbers that can never be saved.
+ */
+export function draftLiveForCounts(d: KpiDraftMap, c: { total: number; submitted: number; approved: number }): boolean {
+  const k = draftKinds(d);
+  const canNumber = c.total - c.submitted - c.approved > 0;
+  const canNote = canNumber || c.submitted > 0;
+  return (k.number && canNumber) || (k.note && canNote);
+}
+
+export type DraftRowFit = "number" | "note" | "none";
+
+/**
+ * The part of a draft that can still save, once the person's rows are
+ * known: a row that takes a number keeps all of it, a submitted row keeps
+ * only its note, and a row that takes nothing (approved, or a KPI no longer
+ * assigned) is dropped. Returns the same object when nothing changes, so a
+ * caller can skip the write.
+ */
+export function pruneKpiDraft(d: KpiDraftMap, fit: (kpiId: string) => DraftRowFit): KpiDraftMap {
+  let changed = false;
+  const out: KpiDraftMap = {};
+  for (const [kpiId, row] of Object.entries(d)) {
+    const f = fit(kpiId);
+    if (f === "number") { out[kpiId] = row; continue; }
+    if (f === "note" && (row.notes ?? "").trim() !== "") {
+      if (row.actual !== undefined && row.actual !== "") changed = true;
+      out[kpiId] = { notes: row.notes };
+      continue;
+    }
+    changed = true;
+  }
+  return changed ? out : d;
 }

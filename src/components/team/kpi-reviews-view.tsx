@@ -61,7 +61,7 @@ import { useShortcut } from "@/lib/shortcuts";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { isKpiPeriodWritable, kpiPeriodLabel } from "@/lib/kpi-period";
-import { draftHasContent, loadKpiDraft, persistKpiDraft, storedDraftsFor, type KpiDraft, type KpiDraftMap } from "@/lib/kpi-review-draft";
+import { draftHasContent, draftLiveForCounts, loadKpiDraft, persistKpiDraft, pruneKpiDraft, storedDraftsFor, type KpiDraft, type KpiDraftMap } from "@/lib/kpi-review-draft";
 import { kpiStatusLabel, kpiStatusTone, personKpiChip } from "@/lib/kpi-record-status";
 import { previewKpiScore, type KpiDirection } from "@/lib/kpi-preview-score";
 import { scoreBand } from "@/lib/people/score-band";
@@ -184,6 +184,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   // saved (Browser Back, a closed tab, Leave them unsaved), so the page says
   // so instead of showing a save bar nobody remembers starting.
   const [restored, setRestored] = useState(false);
+  // Which person and month the loaded rows belong to. A slow answer for a
+  // person the manager already left never paints over the pane they moved
+  // to, and the one-time draft prune below runs only on matching rows.
+  const paneForRef = useRef<string | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const prunedForRef = useRef<string | null>(null);
   const actualRefs = useRef(new Map<string, HTMLInputElement | null>());
   // The right pane's width decides whether a submitted row's decision fits
   // as two labelled buttons (a wide screen) or Approve plus an icon (1440
@@ -191,6 +197,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const paneRef = useRef<HTMLElement>(null);
   const paneWidth = useElementWidth(paneRef);
   const compactDecisions = paneWidth < 960;
+  // Below 760 (1280 with the sidebar open) Target gives way and rides in the
+  // Actual cell ("of 95 %"), so Approve and the decision stay in view without
+  // sideways scrolling. The same threshold is Target's hideBelow, so the
+  // column and the inline copy never both show or both hide.
+  const TARGET_COLUMN_MIN = 760;
+  const targetInline = paneWidth > 0 && paneWidth < TARGET_COLUMN_MIN;
 
   const stored = kpiReviewsSurfacePrefs(prefs.home);
   const [localPrefs, setLocalPrefs] = useState<Partial<KpiReviewsSurfacePrefs>>({});
@@ -233,6 +245,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       apiFetch<Array<{ status: string; weightage: number; kra: { id: string; name: string; kpis: Array<{ id: string; name: string; description: string | null; unit: string | null; type: string | null; targetValue: number | null; direction: KpiDirection | null; lowerIsBetter: boolean }> } }>>(`/api/kra-assignments?userId=${uid}`, { cache: "no-store" }),
       apiFetch<{ records: KpiRecordRow[] }>(`/api/kpi-records?userId=${uid}&period=${period}&limit=200`, { cache: "no-store" }),
     ]);
+    if (paneForRef.current !== `${uid}:${period}`) return;
     if (!a.ok || !rec.ok) { setPaneErr((!a.ok ? a.error : !rec.ok ? rec.error : null) || "Couldn't load their numbers"); return; }
     const out: KpiLine[] = [];
     for (const asg of (Array.isArray(a.data) ? a.data : []).filter((x) => x.status === "ACTIVE")) {
@@ -242,6 +255,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     }
     setLines(out);
     setRecords(new Map((rec.data.records ?? []).map((r) => [r.kpiId, r])));
+    setLoadedFor(`${uid}:${period}`);
   }, [period]);
 
   // The first person needing attention is selected unless ?person= is set.
@@ -263,15 +277,24 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     return list;
   }, [summary, statusFilter, directOnly, deptFilter, sort]);
 
+  // Whether a stored draft can still save, judged from the month's counts
+  // before the person's rows load (a draft for another month is kept: its
+  // counts are not loaded, and opening it prunes it).
+  const draftStillSaves = useCallback((userId: string, p: string, d: KpiDraftMap) => {
+    if (p !== period) return true;
+    const row = summary?.people.find((x) => x.userId === userId);
+    return row ? draftLiveForCounts(d, row) : true;
+  }, [summary, period]);
+
   // With nobody asked for, a person whose numbers for this month are still
   // unsaved on this device comes first, so coming back (Browser Back, then
   // Forward, or the sidebar link) opens the numbers where they were left.
   useEffect(() => {
     if (!peopleSorted || personId) return;
-    const pending = storedDraftsFor(peopleSorted.map((p) => p.userId), (p) => p === period)[0];
+    const pending = storedDraftsFor(peopleSorted.map((p) => p.userId), (p) => p === period, null, draftStillSaves)[0];
     const first = (pending && peopleSorted.find((p) => p.userId === pending.userId)) ?? peopleSorted.find((p) => personKpiChip(p).needsYou) ?? peopleSorted[0];
     if (first) setPersonId(first.userId);
-  }, [peopleSorted, personId, period]);
+  }, [peopleSorted, personId, period, draftStillSaves]);
 
   useEffect(() => {
     if (!personId) return;
@@ -281,6 +304,8 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     const stored = loadDraft(personId, period);
     setDrafts(stored);
     setRestored(draftHasContent(stored));
+    paneForRef.current = `${personId}:${period}`;
+    setLoadedFor(null);
     void loadPane(personId);
   }, [personId, period, loadPane]);
 
@@ -293,11 +318,15 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     const r = records.get(kpiId);
     return writable && (!r || r.status === "PENDING" || r.status === "REJECTED");
   }, [records, writable]);
+  const lineIds = useMemo(() => (lines ? new Set(lines.map((l) => l.kpiId)) : null), [lines]);
   const pendingSaves = useMemo(() => Object.entries(drafts).filter(([kpiId, d]) => {
+    // A KPI no longer assigned shows no row, so a number kept for it is not
+    // something this page can save (the prune below drops it).
+    if (lineIds && !lineIds.has(kpiId)) return false;
     const hasNote = !!d.notes?.trim();
     if (takesInput(kpiId)) return parseActual(d.actual) != null || hasNote;
     return hasNote && writable && records.get(kpiId)?.status === "SUBMITTED";
-  }), [drafts, takesInput, writable, records]);
+  }), [drafts, takesInput, writable, records, lineIds]);
   const pendingNumbers = pendingSaves.filter(([, d]) => parseActual(d.actual) != null).length;
   const pendingNotes = pendingSaves.length - pendingNumbers;
   const pendingLabel = [
@@ -311,6 +340,27 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   useEffect(() => {
     if (lines && !dirty) setRestored(false);
   }, [lines, dirty]);
+
+  // Once per load of a person's rows, drop the parts of a stored draft that
+  // can never save (a number on a row submitted or approved since it was
+  // typed, a KPI no longer assigned), in the page and on this device, so no
+  // "Not saved yet" or save bar points at work that has nowhere to go. Only
+  // on load: text typed after that is never taken away.
+  useEffect(() => {
+    const key = personId ? `${personId}:${period}` : null;
+    if (!key || !lines || loadedFor !== key || prunedForRef.current === key) return;
+    prunedForRef.current = key;
+    const ids = new Set(lines.map((l) => l.kpiId));
+    setDrafts((cur) => {
+      const next = pruneKpiDraft(cur, (kpiId) => {
+        if (!ids.has(kpiId)) return "none";
+        if (takesInput(kpiId)) return "number";
+        return writable && records.get(kpiId)?.status === "SUBMITTED" ? "note" : "none";
+      });
+      if (next !== cur) persistDraft(personId!, period, next);
+      return next;
+    });
+  }, [personId, period, lines, loadedFor, takesInput, writable, records]);
 
   const setDraft = (kpiId: string, patch: Draft) => {
     if (!personId) return;
@@ -458,15 +508,19 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
     // already hidden): the KPI name is what the manager reads a row by, so it
     // takes the larger share and Note the smaller; the names still truncate
     // on a narrower card, so the full one is on hover.
-    { key: "kpi", label: "KPI", title: true, width: "minmax(160px,1.5fr)", render: (l) => (
-      <span className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate" title={l.name}>{l.name}</span>
+    // The name wraps to two lines rather than being cut, so a long KPI
+    // still reads on a narrow card; the full name is on hover too.
+    { key: "kpi", label: "KPI", title: true, width: targetInline ? "minmax(140px,1.5fr)" : "minmax(160px,1.5fr)", render: (l) => (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="line-clamp-2 min-w-0 whitespace-normal break-words" title={l.name}>{l.name}</span>
         {display.showDescriptions && l.description ? <span className="truncate text-sm font-normal text-ink-2">{l.description}</span> : null}
       </span>
     ) },
-    { key: "target", label: "Target", width: "96px", numeric: true, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
+    { key: "target", label: "Target", width: "96px", numeric: true, hideBelow: TARGET_COLUMN_MIN, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
     { key: "actual", label: "Actual", width: "140px", render: (l) => {
       const r = records.get(l.kpiId);
+      const tgt = l.target == null ? null : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`;
+      const inlineTarget = targetInline && tgt != null;
       if (takesInput(l.kpiId)) {
         const st = rowState[l.kpiId];
         return (
@@ -474,7 +528,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
             <span className="flex min-w-0 items-center gap-1">
               <input
                 ref={(el) => { actualRefs.current.set(l.kpiId, el); }}
-                aria-label={`Actual for ${l.name}`}
+                aria-label={inlineTarget ? `Actual for ${l.name}, target ${tgt}` : `Actual for ${l.name}`}
                 type="number"
                 step="any"
                 inputMode="decimal"
@@ -488,14 +542,23 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                 className={cn("w-[72px] min-w-0 shrink-0 rounded-md border bg-raised px-2 text-sm tabular-nums text-ink focus:border-brand focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none", st ? "border-danger-text" : "border-line")}
                 style={{ height: "calc(var(--os-row-h) - 12px)" }}
               />
-              {l.unit ? <span className="min-w-0 max-w-[48px] truncate text-xs text-ink-2" title={l.unit}>{l.unit}</span> : null}
+              {inlineTarget ? (
+                <span className="min-w-0 truncate text-xs tabular-nums text-ink-2" title={`Target ${tgt}`}>of {tgt}</span>
+              ) : l.unit ? <span className="min-w-0 max-w-[48px] truncate text-xs text-ink-2" title={l.unit}>{l.unit}</span> : null}
             </span>
           </span>
         );
       }
-      return r?.actualValue != null ? <span className="tabular-nums">{num(r.actualValue)}{l.unit ? ` ${l.unit}` : ""}</span> : <span className="text-ink-2">None</span>;
+      if (r?.actualValue == null) return <span className="text-ink-2">{inlineTarget ? `None, target ${tgt}` : "None"}</span>;
+      return (
+        <span className="min-w-0 truncate tabular-nums" title={inlineTarget ? `Target ${tgt}` : undefined}>
+          {num(r.actualValue)}{l.unit ? ` ${l.unit}` : ""}
+          {inlineTarget ? <span className="text-sm text-ink-2"> of {num(l.target)}</span> : null}
+        </span>
+      );
     } },
-    // Column priority at a laptop width: Recorded leaves first, then Score;
+    // Column priority at a laptop width: Recorded leaves first, then Score,
+    // then Target (into the Actual cell below 760);
     // Note never leaves (the employee's explanation must be in front of the
     // manager who approves). Both come back through the column settings.
     { key: "recorded", label: "Recorded", width: "140px", hideBelow: 1100, render: (l) => {
@@ -514,7 +577,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       const cls = band?.tone === "success" ? "text-success-text" : band?.tone === "warning" ? "text-warning-text" : band?.tone === "danger" ? "text-danger-text" : "text-ink";
       return <span className="truncate tabular-nums" title={band ? `${Math.round(score)}% · ${band.label}` : undefined}><span className={cls}>{Math.round(score)}%</span>{band ? <span className="text-ink-2"> · {band.label}</span> : null}</span>;
     } },
-    { key: "note", label: "Note", width: "minmax(120px,1fr)", render: (l) => {
+    { key: "note", label: "Note", width: targetInline ? "minmax(110px,1fr)" : "minmax(120px,1fr)", render: (l) => {
       const r = records.get(l.kpiId);
       const canNote = takesInput(l.kpiId) || r?.status === "SUBMITTED";
       const draftNote = drafts[l.kpiId]?.notes;
@@ -570,14 +633,14 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
           {/* Fixed, hung off this cell: it floats over the table instead of
               being clipped by the card (request-changes-popover.tsx). */}
           {changesFor?.length === 1 && changesFor[0] === r.id ? (
-            <RequestChangesPopover personFirstName={person?.firstName || "them"} align="end" onCancel={() => setChangesFor(null)}
+            <RequestChangesPopover personFirstName={person?.firstName || "them"} subject={l.name} align="end" onCancel={() => setChangesFor(null)}
               onSend={async (note) => { const done = await decide([r.id], "request_changes", note); if (done.length) { setChangesFor(null); toast(`Sent ${person?.firstName || "them"} your note`); } return done.length > 0; }} />
           ) : null}
         </span>
       );
     } },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [records, drafts, rowState, takesInput, bands, display.showDescriptions, noteFor, changesFor, person, viewerId, fmt, compactDecisions]);
+  ], [records, drafts, rowState, takesInput, bands, display.showDescriptions, noteFor, changesFor, person, viewerId, fmt, compactDecisions, targetInline]);
 
   const kraWeight = useMemo(() => new Map((lines ?? []).map((l) => [l.kraId, l.kraWeight])), [lines]);
   const kraCount = useMemo(() => {
@@ -616,12 +679,12 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   const otherDrafts = useMemo(() => {
     if (!summary) return [];
     const names = new Map(summary.people.map((p) => [p.userId, p]));
-    return storedDraftsFor(summary.people.map((p) => p.userId), (p) => isKpiPeriodWritable(p))
+    return storedDraftsFor(summary.people.map((p) => p.userId), (p) => isKpiPeriodWritable(p), null, draftStillSaves)
       .filter((d) => !(d.userId === personId && d.period === period))
       .map((d) => ({ ...d, person: names.get(d.userId)! }));
     // drafts: a save or discard here changes what is stored.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, personId, period, drafts]);
+  }, [summary, personId, period, drafts, draftStillSaves]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -767,7 +830,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
         )}
       </div>
       {dirty ? (
-        <div className="os-chrome sticky bottom-0 z-30 flex h-14 shrink-0 items-center gap-3 border-t border-line bg-surface px-6" role="region" aria-label="Unsaved numbers">
+        <div className="os-chrome sticky bottom-0 z-30 flex h-14 shrink-0 items-center gap-3 border-t border-line bg-raised px-6" role="region" aria-label="Unsaved numbers">
           <span className="flex-1 text-row text-ink">{pendingLabel} to save</span>
           <Button variant="ghost" onClick={() => void discard()} disabled={saving}>Discard</Button>
           <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving" : pendingNumbers ? "Save numbers" : "Save notes"}</Button>

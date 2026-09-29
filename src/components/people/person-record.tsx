@@ -555,11 +555,13 @@ export function PersonRecord({
       <EditShortcut enabled={editEnabled} onOpen={() => setEditOpen(true)} />
       {presentation === "page" ? (
         <>
-          {/* back-map.md section 5: from /team the browser history gives the
-              back; the fallback is always the Directory, which every viewer
-              can open (a manager who lost their reports would land on the My
-              team lock). */}
-          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: "/people", label: "Directory" }} actions={actions} />
+          {/* back-map.md section 5: the browser history gives the back; the
+              fallback is where the person came from (?from=), the same place
+              the breadcrumb and the lit sidebar row name. Org chart and Skills
+              open for every Member; a manager who has lost their reports and
+              came from My team lands on its lock, which says why and links to
+              the Directory, never a 404. */}
+          <OsPageHeader title={name || "Person"} titleSlot={titleSlot} back={{ fallbackHref: origin.href, label: origin.label }} actions={actions} />
           {body}
         </>
       ) : (

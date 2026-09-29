@@ -202,11 +202,11 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
     } finally { setSeedingId(null); }
   };
   if (bundle.people.length === 0) {
-    return <p className="rounded-lg border border-line bg-surface px-4 py-3 text-row text-ink-2">Nobody holds this job title yet.</p>;
+    return <p className="rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">Nobody holds this job title yet.</p>;
   }
   return (
     <div className="flex flex-col gap-2">
-      <ul className="os-chrome divide-y divide-line-soft overflow-hidden rounded-lg border border-line bg-surface">
+      <ul className="os-chrome divide-y divide-line-soft overflow-hidden rounded-lg border border-line bg-raised">
         {bundle.people.map((p) => {
           const missing = Math.min(Math.max(p.missingKras ?? 0, 0), totalTemplates);
           return (

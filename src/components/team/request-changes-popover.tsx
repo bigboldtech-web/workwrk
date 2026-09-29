@@ -19,7 +19,10 @@
 // and made the body scroll to fit it, so the row being judged scrolled out
 // of view and Send sat half under the table footer. Fixed escapes that
 // clipping; it opens below the anchor and flips above when there is no
-// room, and follows the anchor on every scroll and resize.
+// room, and follows the anchor on every scroll and resize. When its row
+// scrolls out of the table's visible area it hides (it never floats loose
+// over the top bar), and stays mounted, so a note being typed is still
+// there when the row scrolls back.
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -58,6 +61,26 @@ export function placePopover(
 }
 
 /**
+ * Whether any of `anchor` is inside every clipping box around it (the
+ * scrolling table body, the card). Pure, so it is tested. A zero-size anchor
+ * counts as hidden.
+ */
+export function anchorVisibleIn(anchor: AnchorBox, clips: AnchorBox[]): boolean {
+  if (anchor.bottom <= anchor.top || anchor.right <= anchor.left) return false;
+  return clips.every((c) => anchor.bottom > c.top && anchor.top < c.bottom && anchor.right > c.left && anchor.left < c.right);
+}
+
+/** The boxes that clip `el`: every ancestor whose overflow is not visible. */
+function clipBoxes(el: HTMLElement): AnchorBox[] {
+  const out: AnchorBox[] = [];
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.overflowX !== "visible" || cs.overflowY !== "visible") out.push(n.getBoundingClientRect());
+  }
+  return out;
+}
+
+/**
  * Keeps a position-fixed element `ref` next to its anchor: `anchorRef`, or
  * the element it is rendered into. Written straight to the style before
  * paint (no state, no flash at 0,0) and again on any scroll (capture, so a
@@ -76,6 +99,10 @@ export function useAnchoredPosition(
       const anchor = anchorRef?.current ?? el.parentElement;
       if (!anchor) return;
       const a = anchor.getBoundingClientRect();
+      const shown = anchorVisibleIn(a, clipBoxes(anchor));
+      el.style.visibility = shown ? "" : "hidden";
+      el.style.pointerEvents = shown ? "" : "none";
+      if (!shown) return;
       const p = placePopover(
         a,
         { width: el.offsetWidth, height: el.offsetHeight },
@@ -106,6 +133,7 @@ export function useAnchoredPosition(
 
 export function RequestChangesPopover({
   personFirstName,
+  subject,
   onSend,
   onCancel,
   busy = false,
@@ -114,6 +142,9 @@ export function RequestChangesPopover({
   anchorRef,
 }: {
   personFirstName: string;
+  /** What the note is about (the KPI's name), so a manager with many rows
+   *  knows where it lands. */
+  subject?: string;
   /** Resolve true when the note was saved; the popover closes on true. */
   onSend: (note: string) => Promise<boolean> | boolean;
   onCancel: () => void;
@@ -178,7 +209,7 @@ export function RequestChangesPopover({
       className="fixed z-[60] w-[280px] rounded-lg border border-line bg-raised p-3 text-ink shadow-[var(--os-shadow-pop)]"
     >
       <label id={labelId} htmlFor={`${labelId}-note`} className="mb-1.5 block text-sm font-medium text-ink">
-        What should {personFirstName} change?
+        {subject ? <>What should {personFirstName} change on {subject}?</> : <>What should {personFirstName} change?</>}
       </label>
       <textarea
         id={`${labelId}-note`}
@@ -190,7 +221,7 @@ export function RequestChangesPopover({
         }}
         rows={2}
         maxLength={5000}
-        className="block w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand"
+        className="block w-full resize-y rounded-md border border-line bg-raised px-2 py-1.5 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand"
         placeholder="A sentence is enough"
       />
       {failed ? <p className="mt-1.5 text-xs text-danger-text">Not sent. Your note is kept; try again.</p> : null}
@@ -206,7 +237,7 @@ export function RequestChangesPopover({
           type="button"
           onClick={() => void send()}
           disabled={!dirty || busy}
-          className="inline-flex h-8 items-center rounded-md border border-line bg-surface px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
+          className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
         >
           {busy ? "Sending" : "Send"}
         </button>

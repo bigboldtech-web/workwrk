@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placePopover } from "./request-changes-popover";
+import { placePopover, anchorVisibleIn } from "./request-changes-popover";
 
 // The Request changes popover used to be absolute inside a TableCard cell,
 // so the card's overflow clipped it and Send sat under the table footer.
@@ -47,5 +47,20 @@ describe("placePopover", () => {
   it("mirrors in RTL: end means the anchor's left edge", () => {
     expect(placePopover(box(200, 600), POP, VIEW, { align: "end", rtl: true }).left).toBe(600);
     expect(placePopover(box(200, 600), POP, VIEW, { align: "start", rtl: true }).left).toBe(800 - 280);
+  });
+});
+
+describe("anchorVisibleIn (the popover hides when its row scrolls away)", () => {
+  const body = { top: 200, bottom: 600, left: 100, right: 900 };
+  it("is visible while any of the row is inside every clipping box", () => {
+    expect(anchorVisibleIn({ top: 580, bottom: 620, left: 700, right: 760 }, [body])).toBe(true);
+    expect(anchorVisibleIn({ top: 300, bottom: 330, left: 700, right: 760 }, [body, { top: 0, bottom: 900, left: 0, right: 1440 }])).toBe(true);
+  });
+  it("hides once the row has left the table body, above or below", () => {
+    expect(anchorVisibleIn({ top: -533, bottom: -505, left: 700, right: 760 }, [body])).toBe(false);
+    expect(anchorVisibleIn({ top: 600, bottom: 630, left: 700, right: 760 }, [body])).toBe(false);
+  });
+  it("treats a collapsed anchor as hidden", () => {
+    expect(anchorVisibleIn({ top: 300, bottom: 300, left: 700, right: 700 }, [body])).toBe(false);
   });
 });

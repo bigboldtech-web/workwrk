@@ -115,7 +115,7 @@ describe("DELETE /api/departments/[id]", () => {
 describe("deleteConsequences (the Delete confirm)", () => {
   it("names the goals, job titles and removed people that go with the department", () => {
     expect(deleteConsequences({ goals: 2, jobTitles: 1, removed: 1 })).toBe(
-      "2 goals lose this department as their audience or department. They stay in Goals with their owner. 1 job title loses its department. 1 removed person is taken out of it. This can't be undone.",
+      "2 goals lose this department as their audience or department. The goals themselves are kept. 1 job title loses its department. 1 removed person is taken out of it. This can't be undone.",
     );
   });
 

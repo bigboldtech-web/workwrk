@@ -221,6 +221,10 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   const isQuickDeletable = (d: Dept) => isDeletable(d) && !d.goalCount;
   const selectedDepts = (list ?? []).filter((d) => selected.has(d.id));
   const selectedDeletable = selectedDepts.filter(isQuickDeletable);
+  // Selected rows the bulk delete leaves alone, named so nobody wonders why
+  // a department they picked is still there.
+  const skippedCount = selectedDepts.length - selectedDeletable.length;
+  const skippedWhy = "It still has people, sub-departments or goals. Open it to see which, and delete it from there.";
   async function bulkSetParent(parentId: string | null) {
     const rows = selectedDepts.filter((d) => d.id !== parentId);
     const failed: string[] = [];
@@ -238,8 +242,9 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
     const ok = await confirm({
       title: rows.length === 1 ? `Delete ${rows[0].name}?` : `Delete ${rows.length} departments?`,
       // Only goal-free, empty rows reach here (isQuickDeletable), so goals
-      // is 0; job titles and removed people still go with them, so say so.
-      description: deleteConsequences({ goals: 0, jobTitles: rows.reduce((n, d) => n + d._count.roles, 0), removed: rows.reduce((n, d) => n + d.removedMembers, 0) }),
+      // is 0; job titles and removed people still go with them, so say so,
+      // and name the selected rows this leaves alone.
+      description: `${skippedCount > 0 ? `${skippedCount === 1 ? "1 selected department is" : `${skippedCount} selected departments are`} left alone: ${skippedCount === 1 ? "it still has" : "they still have"} people, sub-departments or goals. ` : ""}${deleteConsequences({ goals: 0, jobTitles: rows.reduce((n, d) => n + d._count.roles, 0), removed: rows.reduce((n, d) => n + d.removedMembers, 0) })}`,
       confirmLabel: "Delete",
       destructive: true,
     });
@@ -346,6 +351,9 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
                   </div>
                   {selectedDeletable.length ? (
                     <button type="button" onClick={() => void deleteDepts(selectedDeletable)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-danger-text hover:bg-hover"><Trash2 className="h-4 w-4" aria-hidden />Delete empty ({selectedDeletable.length})</button>
+                  ) : null}
+                  {skippedCount > 0 ? (
+                    <span className="px-1 text-sm text-ink-2" title={skippedWhy}>{skippedCount === 1 ? "1 can't be deleted here" : `${skippedCount} can't be deleted here`}</span>
                   ) : null}
                 </>
               ) : undefined}
@@ -607,7 +615,7 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
                   <>
                     {goalTotal > 0 ? (
                       <div className="mt-1 flex flex-col gap-1">
-                        <p className="text-sm text-ink-2">{goalTotal === 1 ? "1 goal names" : `${goalTotal} goals name`} this department. Deleting it takes the department off {goalTotal === 1 ? "that goal" : "them"}; reassign {goalTotal === 1 ? "it" : "them"} first if its people should stay on {goalTotal === 1 ? "it" : "them"}.</p>
+                        <p className="text-sm text-ink-2">{goalTotal === 1 ? "1 goal names" : `${goalTotal} goals name`} this department. Deleting it takes the department off {goalTotal === 1 ? "that goal, which is kept" : "them, and they are kept"}. To keep {goalTotal === 1 ? "it" : "them"} aimed at these people, move {goalTotal === 1 ? "it" : "them"} to another department first.</p>
                         {goals === null ? <SkeletonRows rows={Math.min(goalTotal, 3)} rowHeight="36px" /> : (
                           <ul className="flex flex-col">
                             {goals.goals.map((g) => <li key={g.id}><Link href={`/okrs/${g.id}`} className="flex h-9 items-center rounded-md px-1 text-sm text-ink hover:bg-hover"><span className="truncate">{g.title}</span></Link></li>)}
@@ -636,7 +644,7 @@ function DepartmentDrawer({ dept, all, canWrite, onClose, onChanged, onCreated, 
  *  and tested in departments-delete.test.ts. */
 export function deleteConsequences({ goals, jobTitles, removed }: { goals: number; jobTitles: number; removed: number }): string {
   const lines: string[] = [];
-  if (goals > 0) lines.push(`${goals === 1 ? "1 goal loses" : `${goals} goals lose`} this department as ${goals === 1 ? "its" : "their"} audience or department. ${goals === 1 ? "It stays" : "They stay"} in Goals with ${goals === 1 ? "its" : "their"} owner.`);
+  if (goals > 0) lines.push(`${goals === 1 ? "1 goal loses" : `${goals} goals lose`} this department as ${goals === 1 ? "its" : "their"} audience or department. ${goals === 1 ? "The goal itself is" : "The goals themselves are"} kept.`);
   if (jobTitles > 0) lines.push(`${jobTitles === 1 ? "1 job title loses" : `${jobTitles} job titles lose`} ${jobTitles === 1 ? "its" : "their"} department.`);
   if (removed > 0) lines.push(`${removed === 1 ? "1 removed person is" : `${removed} removed people are`} taken out of it.`);
   lines.push("This can't be undone.");
