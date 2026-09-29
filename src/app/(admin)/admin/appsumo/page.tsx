@@ -1,9 +1,14 @@
 "use client";
 
+import { formatDate } from "@/lib/format/date";
+
+import { useConsole } from "../../console-context";
+
+import { Dots } from "@/components/ui/dots";
+
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +16,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, Upload, Loader2, KeyRound, CheckCircle2, XCircle } from "lucide-react";
+import { Sparkles, Upload, KeyRound, CheckCircle2, XCircle } from "lucide-react";
 
 interface CodeRow {
   id: string;
@@ -27,12 +32,13 @@ interface CodeRow {
 }
 
 const TIER_PRESETS: Array<{ tier: number; plan: string; seats: number; label: string }> = [
-  { tier: 1, plan: "GROWTH",     seats: 5,  label: "Tier 1 — Growth, 5 seats" },
-  { tier: 2, plan: "SCALE",      seats: 25, label: "Tier 2 — Scale, 25 seats" },
-  { tier: 3, plan: "ENTERPRISE", seats: 999_999, label: "Tier 3 — Enterprise, unlimited" },
+  { tier: 1, plan: "GROWTH",     seats: 5,  label: "Tier 1 · Growth · 5 seats" },
+  { tier: 2, plan: "SCALE",      seats: 25, label: "Tier 2 · Scale · 25 seats" },
+  { tier: 3, plan: "ENTERPRISE", seats: 999_999, label: "Tier 3 · Enterprise · Unlimited" },
 ];
 
 export default function AdminAppsumoPage() {
+  const { datePrefs } = useConsole();
   const { success: toastSuccess, error: toastError } = useToast();
   const confirm = useConfirm();
 
@@ -106,7 +112,7 @@ export default function AdminAppsumoPage() {
   async function refundCode(code: string) {
     if (!(await confirm({
       title: `Mark "${code}" as refunded?`,
-      description: "The customer's org won't be downgraded automatically — you'll need to handle that separately. This is bookkeeping only.",
+      description: "This is bookkeeping only. The company keeps its plan until someone changes it on the company page.",
       confirmLabel: "Mark refunded",
       destructive: true,
     }))) return;
@@ -133,11 +139,10 @@ export default function AdminAppsumoPage() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-5 animate-fade-in">
       <div>
-        <p className="text-xs text-muted font-mono uppercase tracking-wider">Lifetime deals</p>
         <h1 className="text-xl font-semibold flex items-center gap-2 mt-1">
-          <Sparkles size={18} className="text-[#d4ff2e]" /> AppSumo redemption codes
+          <Sparkles size={18} className="text-ink-2" /> AppSumo codes
         </h1>
-        <p className="text-sm text-muted mt-0.5">
+        <p className="text-sm text-ink-2 mt-0.5">
           Bulk-import codes from the AppSumo merchant CSV, then watch them get redeemed.
         </p>
       </div>
@@ -160,7 +165,7 @@ export default function AdminAppsumoPage() {
             <CardHeader>
               <CardTitle className="text-lg">Import codes</CardTitle>
               <CardDescription>
-                Paste codes from the AppSumo merchant CSV — one per line. The default tier
+                Paste codes from the AppSumo merchant CSV, one per line. The default tier
                 applies unless a row overrides it (format: <code>code,tier,plan,seats</code>).
               </CardDescription>
             </CardHeader>
@@ -189,11 +194,11 @@ export default function AdminAppsumoPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                <p className="text-xs text-muted">
-                  Duplicates are skipped silently — safe to re-run.
+                <p className="text-xs text-ink-2">
+                  Duplicates are skipped, so it is safe to run again.
                 </p>
                 <Button onClick={bulkImport} disabled={importing || !importCSV.trim()} className="gap-1.5">
-                  {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                  {importing ? <Dots variant="pending" label="Importing" /> : <Upload size={12} />}
                   Import
                 </Button>
               </div>
@@ -218,14 +223,14 @@ export default function AdminAppsumoPage() {
           <Card>
             <CardContent className="p-0">
               {loading ? (
-                <div className="p-8 text-center text-base text-muted">
-                  <Loader2 size={16} className="animate-spin mx-auto mb-2" /> Loading…
+                <div className="p-8 text-center text-base text-ink-2">
+                  <Dots variant="pending" label="Loading" />
                 </div>
               ) : codes.length === 0 ? (
-                <div className="p-8 text-center text-base text-muted">No codes match this filter.</div>
+                <div className="p-8 text-center text-base text-ink-2">No codes match this filter.</div>
               ) : (
                 <table className="w-full text-base">
-                  <thead className="text-micro font-mono uppercase tracking-wider text-muted bg-surface-2">
+                  <thead className="text-micro font-mono uppercase tracking-wider text-ink-2 bg-hover">
                     <tr>
                       <th className="text-left p-3">Code</th>
                       <th className="text-left p-3">Tier / Plan / Seats</th>
@@ -236,9 +241,9 @@ export default function AdminAppsumoPage() {
                   </thead>
                   <tbody>
                     {codes.map((c) => (
-                      <tr key={c.id} className="border-t border-border hover:bg-surface-2/50">
+                      <tr key={c.id} className="border-t border-line hover:bg-hover">
                         <td className="p-3 font-mono text-sm">
-                          <KeyRound size={11} className="inline mr-1.5 text-muted" />
+                          <KeyRound size={11} className="inline mr-1.5 text-ink-2" />
                           {c.code}
                         </td>
                         <td className="p-3">
@@ -246,15 +251,15 @@ export default function AdminAppsumoPage() {
                         </td>
                         <td className="p-3">
                           {c.refundedAt ? (
-                            <Badge variant="outline" className="text-amber-400 text-xs"><XCircle size={10} className="mr-1" /> Refunded</Badge>
+                            <Badge variant="outline" className="text-warning-text text-xs"><XCircle size={10} className="mr-1" /> Refunded</Badge>
                           ) : c.redeemedAt ? (
                             <Badge variant="success" className="text-xs"><CheckCircle2 size={10} className="mr-1" /> Redeemed</Badge>
                           ) : (
                             <Badge variant="outline" className="text-xs">Unused</Badge>
                           )}
                         </td>
-                        <td className="p-3 text-sm text-muted">
-                          {c.redeemedAt ? new Date(c.redeemedAt).toLocaleDateString() : "—"}
+                        <td className="p-3 text-sm text-ink-2">
+                          {c.redeemedAt ? formatDate(c.redeemedAt, datePrefs, "date") : "Not yet"}
                         </td>
                         <td className="p-3 text-right">
                           {c.redeemedAt && !c.refundedAt && (
@@ -277,12 +282,12 @@ export default function AdminAppsumoPage() {
 }
 
 function Stat({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "green" | "amber" }) {
-  const color = tone === "green" ? "text-green-400" : tone === "amber" ? "text-amber-400" : "";
+  const color = tone === "green" ? "text-success-text" : tone === "amber" ? "text-warning-text" : "";
   return (
     <Card>
       <CardContent className="p-3 text-center">
         <p className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</p>
-        <p className="text-xs text-muted">{label}</p>
+        <p className="text-xs text-ink-2">{label}</p>
       </CardContent>
     </Card>
   );

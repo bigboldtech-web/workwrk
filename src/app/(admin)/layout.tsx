@@ -24,7 +24,26 @@ import { isPlatformAdminSession } from "@/lib/platform-admin";
 import { recordDeniedAccess, requestIp } from "@/lib/staff-audit";
 import { LockedPage } from "@/components/access";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { getEffectivePreferences, DEFAULT_DENSITY, DEFAULT_THEME, type DensityPref } from "@/lib/preferences";
+import { loadConsoleMe, staffEmailOf } from "@/lib/admin/console-me";
+import { isAdminHost, productHref } from "@/lib/admin/console-nav";
 import { AdminShell } from "./admin-shell";
+
+/**
+ * The staff member's OWN product preferences, read (never written) for the
+ * console: appearance, density and Language & region. Their one home is My
+ * settings > Preferences; a failure reads as the product defaults, never as
+ * a broken console.
+ */
+async function personPrefs(userId: string | undefined, organizationId: string | undefined) {
+  if (!userId || !organizationId) return { density: DEFAULT_DENSITY, appearance: DEFAULT_THEME.appearance, locale: {} };
+  try {
+    const p = await getEffectivePreferences(userId, organizationId);
+    return { density: p.density as DensityPref, appearance: p.theme.appearance, locale: p.home.locale ?? {} };
+  } catch {
+    return { density: DEFAULT_DENSITY, appearance: DEFAULT_THEME.appearance, locale: {} };
+  }
+}
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
@@ -34,24 +53,28 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     redirect("/login?callbackUrl=/admin");
   }
 
+  const requestHeaders = await headers();
+  const onAdmin = isAdminHost(requestHeaders.get("host"), process.env.ADMIN_HOST);
+
   const allowed = await isPlatformAdminSession(session);
   if (!allowed) {
+    const backHref = productHref(WORK_HOME_HREF, appUrl, onAdmin);
     const user = session.user as { id?: string; email?: string | null };
     const email = user.email ?? "an account with no email";
     // One row per would-be viewer per ten minutes (spec section 1 Denial):
     // a person who hits the wall is recorded on /admin/audit, a script
     // hammering the host bumps one row's hit count. Never throws.
-    await recordDeniedAccess({ email, userId: user.id ?? null, ip: requestIp(await headers()) });
+    await recordDeniedAccess({ email, userId: user.id ?? null, ip: requestIp(requestHeaders) });
     return (
       <div className="workwrk-os min-h-screen bg-app text-ink">
         <LockedPage
           glyph="shield"
           name="This console is for WorkwrK staff"
           sentence={`You are signed in as ${email}. That account is not on the WorkwrK staff list.`}
-          // Absolute on purpose: the admin host bounces relative paths to
-          // /admin, so with no NEXT_PUBLIC_APP_URL there is no back link at
-          // all rather than one that loops to this page.
-          back={appUrl ? { fallbackHref: `${appUrl}${WORK_HOME_HREF}`, label: "WorkwrK" } : undefined}
+          // Absolute on the admin host, which bounces relative paths to
+          // /admin: with no NEXT_PUBLIC_APP_URL there is no back link there
+          // at all rather than one that loops to this page (productHref).
+          back={backHref ? { fallbackHref: backHref, label: "WorkwrK" } : undefined}
           // A staff member signed in with their customer account (the
           // session cookie is shared across subdomains) switches here.
           elsewhere={{ href: "/login?callbackUrl=/admin", label: "Sign in with a different account" }}
@@ -60,6 +83,30 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
-  const email = (session.user as { email?: string | null }).email ?? null;
-  return <AdminShell email={email}>{children}</AdminShell>;
+  const user = session.user as { id?: string; email?: string | null; name?: string | null; organizationId?: string };
+  const [email, prefs] = await Promise.all([staffEmailOf(session), personPrefs(user.id, user.organizationId)]);
+  const me = await loadConsoleMe(email ?? "", user.name ?? null);
+  const runbook = process.env.STAFF_RUNBOOK_URL?.trim() || null;
+
+  return (
+    <AdminShell
+      staff={me.staff}
+      prefs={me.prefs}
+      recents={me.recents}
+      persisted={me.persisted}
+      density={prefs.density}
+      appearance={prefs.appearance}
+      datePrefs={{
+        timezone: prefs.locale.timezone ?? null,
+        dateFormat: prefs.locale.dateFormat ?? null,
+        timeFormat: prefs.locale.timeFormat ?? null,
+        language: prefs.locale.language ?? null,
+      }}
+      appUrl={appUrl}
+      mySettingsHref={productHref("/account/preferences?tab=appearance", appUrl, onAdmin)}
+      runbookUrl={runbook}
+    >
+      {children}
+    </AdminShell>
+  );
 }

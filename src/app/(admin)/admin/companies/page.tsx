@@ -1,7 +1,15 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
+import { formatDate } from "@/lib/format/date";
+
+import { useConsole } from "../../console-context";
+
+import { Dots } from "@/components/ui/dots";
+
 import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import {
-  Building2, Search, RefreshCw, ChevronLeft, ChevronRight, Eye,
+  Building2, Search, ChevronLeft, ChevronRight, Eye,
   Users, CheckSquare, BookOpen, Target, Star,
 } from "lucide-react";
 
@@ -50,18 +58,22 @@ function getStatusBadge(status: string) {
 
 function getPlanColor(plan: string) {
   switch (plan) {
-    case "STARTER": return "text-gray-400";
-    case "GROWTH": return "text-[#d4ff2e]";
-    case "SCALE": return "text-blue-400";
-    case "ENTERPRISE": return "text-amber-400";
-    default: return "text-gray-400";
+    // Every plan reads the same: a plan is a fact, not a status.
+    case "STARTER":
+    case "GROWTH":
+    case "SCALE":
+    case "ENTERPRISE":
+    default: return "text-ink";
   }
 }
 
 export default function AdminCompaniesPage() {
+  const { datePrefs } = useConsole();
+  // ?search= arrives from Search (Cmd+K) "See all in Companies".
+  const initialSearch = useSearchParams().get("search") ?? "";
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [filterPlan, setFilterPlan] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -149,16 +161,16 @@ export default function AdminCompaniesPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
-        <p className="text-muted text-base mt-1">Manage all subscriber organizations — {total} total</p>
+        <p className="text-ink-2 text-base mt-1">{total} companies</p>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-2" />
           <Input
             placeholder="Search companies..."
             value={search}
@@ -187,34 +199,34 @@ export default function AdminCompaniesPage() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center h-40">
-              <RefreshCw className="h-5 w-5 animate-spin text-muted" />
+              <Dots variant="pending" label="Loading" />
             </div>
           ) : companies.length === 0 ? (
-            <div className="p-8 text-center text-base text-muted">
+            <div className="p-8 text-center text-base text-ink-2">
               No companies found.
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Activity</th>
-                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Actions</th>
+                <tr className="border-b border-line">
+                  <th className="text-left p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Company</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Plan</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Status</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Activity</th>
+                  <th className="text-right p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Joined</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {companies.map((c) => (
-                  <tr key={c.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
+                  <tr key={c.id} className="border-b border-line/50 hover:bg-hover transition-colors">
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-[#d4ff2e]" />
+                        <Building2 size={14} className="text-ink-2" />
                         <div>
                           <span className="text-base font-medium">{c.name}</span>
-                          <p className="text-xs text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
+                          <p className="text-xs text-ink-2">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
                         </div>
                       </div>
                     </td>
@@ -224,15 +236,15 @@ export default function AdminCompaniesPage() {
                     <td className="p-4 text-center text-base">{c._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(c.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
+                      <div className="flex items-center justify-center gap-3 text-xs text-ink-2">
                         <span title="Tasks"><CheckSquare size={10} className="inline mr-0.5" />{c._count.tasks}</span>
                         <span title="KRAs"><Target size={10} className="inline mr-0.5" />{c._count.kras}</span>
                         <span title="SOPs"><BookOpen size={10} className="inline mr-0.5" />{c._count.sops}</span>
                         <span title="Reviews"><Star size={10} className="inline mr-0.5" />{c._count.reviewCycles}</span>
                       </div>
                     </td>
-                    <td className="p-4 text-right text-sm text-muted">
-                      {new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    <td className="p-4 text-right text-sm text-ink-2">
+                      {formatDate(c.createdAt, datePrefs, "date")}
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center gap-1 justify-center">
@@ -255,7 +267,7 @@ export default function AdminCompaniesPage() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted">
+          <p className="text-sm text-ink-2">
             Page {page} of {totalPages} ({total} companies)
           </p>
           <div className="flex gap-2">
@@ -274,7 +286,7 @@ export default function AdminCompaniesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Building2 size={18} className="text-[#d4ff2e]" />
+              <Building2 size={18} className="text-ink-2" />
               {selected?.name}
             </DialogTitle>
           </DialogHeader>
@@ -283,53 +295,53 @@ export default function AdminCompaniesPage() {
             <div className="space-y-4">
               {/* Stats */}
               <div className="grid grid-cols-5 gap-3 text-center">
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Users size={14} className="mx-auto mb-1 text-blue-400" />
+                <div className="rounded-lg bg-hover p-3">
+                  <Users size={14} className="mx-auto mb-1 text-ink-2" />
                   <p className="text-lg font-semibold">{selected._count.users}</p>
-                  <p className="text-xs text-muted">Users</p>
+                  <p className="text-xs text-ink-2">Users</p>
                 </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <CheckSquare size={14} className="mx-auto mb-1 text-green-400" />
+                <div className="rounded-lg bg-hover p-3">
+                  <CheckSquare size={14} className="mx-auto mb-1 text-success-text" />
                   <p className="text-lg font-semibold">{selected._count.tasks}</p>
-                  <p className="text-xs text-muted">Tasks</p>
+                  <p className="text-xs text-ink-2">Tasks</p>
                 </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Target size={14} className="mx-auto mb-1 text-orange-400" />
+                <div className="rounded-lg bg-hover p-3">
+                  <Target size={14} className="mx-auto mb-1 text-ink-2" />
                   <p className="text-lg font-semibold">{selected._count.kras}</p>
-                  <p className="text-xs text-muted">KRAs</p>
+                  <p className="text-xs text-ink-2">KRAs</p>
                 </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <BookOpen size={14} className="mx-auto mb-1 text-[#d4ff2e]" />
+                <div className="rounded-lg bg-hover p-3">
+                  <BookOpen size={14} className="mx-auto mb-1 text-ink-2" />
                   <p className="text-lg font-semibold">{selected._count.sops}</p>
-                  <p className="text-xs text-muted">SOPs</p>
+                  <p className="text-xs text-ink-2">SOPs</p>
                 </div>
-                <div className="rounded-lg bg-surface-2 p-3">
-                  <Star size={14} className="mx-auto mb-1 text-yellow-400" />
+                <div className="rounded-lg bg-hover p-3">
+                  <Star size={14} className="mx-auto mb-1 text-ink-2" />
                   <p className="text-lg font-semibold">{selected._count.reviewCycles}</p>
-                  <p className="text-xs text-muted">Reviews</p>
+                  <p className="text-xs text-ink-2">Reviews</p>
                 </div>
               </div>
 
               {/* Info */}
               <div className="space-y-2 text-base">
                 <div className="flex justify-between">
-                  <span className="text-muted">Slug</span>
+                  <span className="text-ink-2">Slug</span>
                   <span className="font-mono text-sm">{selected.slug}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted">Domain</span>
-                  <span>{selected.domain || "—"}</span>
+                  <span className="text-ink-2">Domain</span>
+                  <span>{selected.domain || "None"}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted">Joined</span>
-                  <span>{new Date(selected.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</span>
+                  <span className="text-ink-2">Joined</span>
+                  <span>{formatDate(selected.createdAt, datePrefs, "date")}</span>
                 </div>
               </div>
 
               {/* Editable fields */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm text-muted mb-1 block">Plan</label>
+                  <label className="text-sm text-ink-2 mb-1 block">Plan</label>
                   <Select value={editPlan} onValueChange={setEditPlan}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -338,7 +350,7 @@ export default function AdminCompaniesPage() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-sm text-muted mb-1 block">Status</label>
+                  <label className="text-sm text-ink-2 mb-1 block">Status</label>
                   <Select value={editStatus} onValueChange={setEditStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -351,9 +363,9 @@ export default function AdminCompaniesPage() {
                   </Select>
                 </div>
               </div>
-              <p className="text-sm text-muted">
+              <p className="text-sm text-ink-2">
                 To suspend or cancel this company, open{" "}
-                <a href={`/admin/companies/${selected.id}`} className="underline underline-offset-4 hover:text-foreground">
+                <a href={`/admin/companies/${selected.id}`} className="underline underline-offset-4 hover:text-ink">
                   its company page
                 </a>
                 , which asks you to type the company name first.

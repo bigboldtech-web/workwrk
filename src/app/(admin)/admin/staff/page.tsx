@@ -1,11 +1,13 @@
 "use client";
 
+import { Dots } from "@/components/ui/dots";
+
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { ShieldCheck, Trash2, RefreshCw, UserPlus, Loader2 } from "lucide-react";
+import { ShieldCheck, Trash2, RefreshCw, UserPlus } from "lucide-react";
 import { TypedConfirmDialog, type TypedConfirmRequest } from "../../typed-confirm-dialog";
 
 interface Staff {
@@ -101,20 +103,20 @@ export default function PlatformStaffPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
-            <ShieldCheck size={20} className="text-red-400" />
-            Platform Staff
+            <ShieldCheck size={20} className="text-ink-2" />
+            Staff
           </h1>
-          <p className="text-base text-muted mt-1 max-w-2xl">
-            WorkwrK employees allowed into this back-office. Gated by email — completely
-            separate from any customer&apos;s roles, so a tenant&apos;s admin can never get in.
+          <p className="text-base text-ink-2 mt-1 max-w-2xl">
+            WorkwrK people who can open the Staff console. Matched by email, completely
+            separate from any company&apos;s roles, so a company&apos;s own admin can never get in.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={14} />
           Refresh
         </Button>
       </div>
@@ -143,11 +145,11 @@ export default function PlatformStaffPage() {
               }}
             />
             <Button onClick={add} disabled={adding || !email.trim()}>
-              {adding ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+              {adding ? <Dots variant="pending" label="Adding" /> : <UserPlus size={14} />}
               Add
             </Button>
           </div>
-          <p className="text-sm text-muted mt-2">
+          <p className="text-sm text-ink-2 mt-2">
             They must also have a WorkwrK login (same credentials). Email is matched
             case-insensitively.
           </p>
@@ -160,18 +162,18 @@ export default function PlatformStaffPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center gap-2 text-base text-muted py-4">
-              <Loader2 size={16} className="animate-spin" /> Loading…
+            <div className="flex items-center gap-2 text-base text-ink-2 py-4">
+              <Dots variant="pending" label="Loading" />
             </div>
           ) : staff.length === 0 ? (
-            <p className="text-base text-muted py-4">No staff yet.</p>
+            <p className="text-base text-ink-2 py-4">No staff yet.</p>
           ) : (
             <ul className="divide-y divide-border">
               {staff.map((s) => (
                 <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
                   <div className="min-w-0">
                     <div className="text-base font-medium truncate">{s.email}</div>
-                    {s.name ? <div className="text-sm text-muted truncate">{s.name}</div> : null}
+                    {s.name ? <div className="text-sm text-ink-2 truncate">{s.name}</div> : null}
                   </div>
                   {staff.length > 1 ? (
                     <Button
@@ -181,7 +183,7 @@ export default function PlatformStaffPage() {
                       disabled={removingId === s.id}
                       title="Remove"
                       aria-label={`Remove ${s.email}`}
-                      className="text-red-400 hover:text-red-300 shrink-0"
+                      className="text-danger-text hover:bg-danger-bg shrink-0"
                     >
                       <Trash2 size={14} />
                     </Button>
@@ -191,7 +193,7 @@ export default function PlatformStaffPage() {
             </ul>
           )}
           {!loading && staff.length === 1 ? (
-            <p className="text-sm text-muted mt-2">You cannot remove the last staff member.</p>
+            <p className="text-sm text-ink-2 mt-2">You cannot remove the last staff member.</p>
           ) : null}
         </CardContent>
       </Card>

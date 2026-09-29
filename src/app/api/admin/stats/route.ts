@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 
 // Founder dashboard stats. Single endpoint so the admin page only

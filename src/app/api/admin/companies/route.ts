@@ -10,6 +10,7 @@ import {
   VALID_PLANS,
   VALID_STATUSES,
 } from "@/lib/admin/company-patch";
+import { companySearchWhere } from "@/lib/admin/search";
 
 const LIST_REVOKE_REFUSAL =
   "Suspend or cancel a company from its company page, which asks you to type the company name first.";
@@ -37,14 +38,8 @@ export async function GET(req: NextRequest) {
   const limit = boundedInt(url.searchParams.get("limit"), 20, 1, 100);
   const skip = (page - 1) * limit;
 
-  const where: Prisma.OrganizationWhereInput = {};
-  if (search) {
-    where.OR = [
-      { name: { contains: search, mode: "insensitive" } },
-      { slug: { contains: search, mode: "insensitive" } },
-      { domain: { contains: search, mode: "insensitive" } },
-    ];
-  }
+  // The same match Search (Cmd+K) uses, so the two never disagree.
+  const where: Prisma.OrganizationWhereInput = search ? companySearchWhere(search) : {};
   if ((VALID_PLANS as readonly string[]).includes(plan)) where.plan = plan as Plan;
   if ((VALID_STATUSES as readonly string[]).includes(status)) where.status = status as OrgStatus;
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/toast";
 import { Building2, Crown, Sparkles, Palette, Globe2, type LucideIcon } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
+import { Switch } from "@/components/ui/switch";
+import { useCompanyCrumb, useConsole } from "../../../console-context";
 import { TypedConfirmDialog, type TypedConfirmRequest } from "../../../typed-confirm-dialog";
 
 interface Company {
@@ -25,11 +27,12 @@ interface Company {
 }
 
 export default function CompanyDetailPage() {
-  
   const { id } = useParams<{ id: string }>();
+  const { noteCompanyOpened } = useConsole();
   const { success: toastSuccess, error: toastError } = useToast();
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   // Suspended and Cancelled sign everyone out, so they wait for a typed
   // confirmation of the company name (spec-admin-backoffice 2.3 card 2).
@@ -37,14 +40,28 @@ export default function CompanyDetailPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch(`/api/admin/companies/${id}`);
-    if (r.ok) {
+    setLoadFailed(false);
+    const r = await fetch(`/api/admin/companies/${id}`).catch(() => null);
+    if (r?.ok) {
       const d = await r.json();
       setCompany(d.data || d);
+    } else {
+      // A failure says so; it never sits as a skeleton for ever.
+      setLoadFailed(true);
     }
     setLoading(false);
   }, [id]);
   useEffect(() => { load(); }, [load]);
+
+  // The breadcrumb names the company, and Search's RECENT learns it was
+  // opened (once per company, not on every reload after a save).
+  useCompanyCrumb(company?.name);
+  const notedId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!company || notedId.current === company.id) return;
+    notedId.current = company.id;
+    noteCompanyOpened({ id: company.id, name: company.name, plan: company.plan, status: company.status });
+  }, [company, noteCompanyOpened]);
 
   async function patch(body: Record<string, unknown>, label: string) {
     setSaving(label);
@@ -71,9 +88,20 @@ export default function CompanyDetailPage() {
     }
   }
 
+  if (!company && loadFailed && !loading) {
+    return (
+      <div className="flex items-center gap-1 p-6 text-row text-ink-2">
+        <span>Could not load this company.</span>
+        <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   if (loading || !company) {
     return (
-      <div className="py-8">
+      <div className="p-6">
         <SkeletonRows rows={4} />
       </div>
     );
@@ -106,10 +134,10 @@ export default function CompanyDetailPage() {
         <div className="flex items-start justify-between gap-3 mt-3">
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2">
-              <Building2 size={18} className="text-muted" />
+              <Building2 size={18} className="text-ink-2" />
               {company.name}
             </h1>
-            <p className="text-sm text-muted font-mono mt-0.5">{company.slug}{company.domain ? ` · ${company.domain}` : ""}</p>
+            <p className="text-sm text-ink-2 font-mono mt-0.5">{company.slug}{company.domain ? ` · ${company.domain}` : ""}</p>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline">{company.plan}</Badge>
@@ -137,7 +165,7 @@ export default function CompanyDetailPage() {
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label className="text-sm text-muted">Plan</label>
+            <label className="text-sm text-ink-2">Plan</label>
             <Select value={company.plan} onValueChange={(v) => patch({ plan: v }, "Plan")} disabled={saving !== null}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -149,7 +177,7 @@ export default function CompanyDetailPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm text-muted">Status</label>
+            <label className="text-sm text-ink-2">Status</label>
             <Select
               value={company.status}
               onValueChange={(v) => {
@@ -179,10 +207,10 @@ export default function CompanyDetailPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
-                <Crown size={14} className="text-[#d4ff2e]" /> Enterprise add-ons
+                <Crown size={14} className="text-ink-2" /> Enterprise add-ons
               </CardTitle>
               <CardDescription>
-                Toggleable per customer. {isEnterprise ? "Org is on Enterprise — toggles take effect immediately." : "Org isn't on Enterprise yet, so toggles are stored but don't activate the feature."}
+                Toggleable per customer. {isEnterprise ? "This company is on Enterprise, so each switch takes effect at once." : "This company is not on Enterprise, so a switch is stored but does nothing until it is."}
               </CardDescription>
             </div>
           </div>
@@ -190,7 +218,7 @@ export default function CompanyDetailPage() {
         <CardContent className="space-y-2">
           <FeatureRow
             icon={Sparkles}
-            title="BYOK — bring your own AI key"
+            title="Bring your own AI key"
             blurb="Lets the customer plug in their own Anthropic API key in their Settings → AI tab. Falls back to the WorkwrK shared key when off."
             enabled={company.features.byok}
             disabled={saving !== null || !isEnterprise}
@@ -198,7 +226,7 @@ export default function CompanyDetailPage() {
           />
           <FeatureRow
             icon={Palette}
-            title="White-label — in-app rebrand"
+            title="White label: their own brand in the app"
             blurb="Replaces the WorkwrK wordmark with the customer's logo + primary color across topbar, sidebar, and emails."
             enabled={company.features.whiteLabel}
             disabled={saving !== null || !isEnterprise}
@@ -213,7 +241,7 @@ export default function CompanyDetailPage() {
             onChange={(v) => patch({ feature: "customDomain", enabled: v }, "Custom domain")}
           />
           {!isEnterprise && (
-            <p className="text-xs text-muted pt-2 border-t border-border">
+            <p className="text-xs text-ink-2 pt-2 border-t border-line">
               Lift their plan to Enterprise above for these flags to activate.
             </p>
           )}
@@ -240,7 +268,7 @@ function Stat({ label, value }: { label: string; value: number }) {
     <Card>
       <CardContent className="p-3 text-center">
         <p className="text-xl font-semibold tabular-nums">{value}</p>
-        <p className="text-xs text-muted">{label}</p>
+        <p className="text-xs text-ink-2">{label}</p>
       </CardContent>
     </Card>
   );
@@ -257,35 +285,21 @@ function FeatureRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface-2 p-3">
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-line bg-hover p-3">
       <div className="flex items-start gap-3 min-w-0">
-        <div className="h-8 w-8 rounded-lg bg-surface flex items-center justify-center shrink-0 mt-0.5">
-          <Icon size={14} className="text-[#d4ff2e]" />
+        <div className="h-8 w-8 rounded-lg bg-raised flex items-center justify-center shrink-0 mt-0.5">
+          <Icon size={14} className="text-ink-2" />
         </div>
         <div className="min-w-0">
           <div className="text-base font-medium">{title}</div>
-          <p className="text-xs text-muted leading-relaxed mt-0.5">{blurb}</p>
+          <p className="text-xs text-ink-2 leading-relaxed mt-0.5">{blurb}</p>
         </div>
       </div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange(!enabled)}
-        className={[
-          "shrink-0 mt-1 inline-flex h-5 w-9 items-center rounded-full transition-colors",
-          enabled ? "bg-[#d4ff2e]" : "bg-surface",
-          disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer",
-        ].join(" ")}
-        aria-pressed={enabled}
-        aria-label={`${enabled ? "Disable" : "Enable"} ${title}`}
-      >
-        <span
-          className={[
-            "inline-block h-4 w-4 transform rounded-full bg-background transition-transform",
-            enabled ? "translate-x-4" : "translate-x-0.5",
-          ].join(" ")}
-        />
-      </button>
+      <span className="mt-1 shrink-0">
+        {/* The design system's one Switch (its track is inline-styled, so the
+            .workwrk-os button reset cannot hide it). */}
+        <Switch checked={enabled} disabled={disabled} onChange={onChange} aria-label={title} />
+      </span>
     </div>
   );
 }

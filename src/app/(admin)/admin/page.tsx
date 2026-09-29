@@ -1,5 +1,11 @@
 "use client";
 
+import { formatDate } from "@/lib/format/date";
+
+import { useConsole } from "../console-context";
+
+import { Dots } from "@/components/ui/dots";
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,10 +52,11 @@ function getStatusBadge(status: string) {
 
 function getPlanBadge(plan: string) {
   const colors: Record<string, string> = {
-    STARTER: "bg-gray-500/10 text-gray-400 border-gray-500/20",
-    GROWTH: "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]",
-    SCALE: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    ENTERPRISE: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    // One neutral chip for every plan: a plan is a fact, not a status.
+    STARTER: "bg-hover text-ink-2 border-line",
+    GROWTH: "bg-hover text-ink-2 border-line",
+    SCALE: "bg-hover text-ink-2 border-line",
+    ENTERPRISE: "bg-hover text-ink-2 border-line",
   };
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colors[plan] || ""}`}>
@@ -59,6 +66,7 @@ function getPlanBadge(plan: string) {
 }
 
 export default function AdminDashboard() {
+  const { datePrefs } = useConsole();
   const [stats, setStats] = useState<Stats | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +101,7 @@ export default function AdminDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
+        <Dots variant="pending" label="Loading" />
       </div>
     );
   }
@@ -104,16 +112,16 @@ export default function AdminDashboard() {
       value: stats?.totalOrgs ?? 0,
       change: `+${stats?.newOrgsThisMonth ?? 0} this month`,
       icon: Building2,
-      color: "text-[#d4ff2e]",
-      bg: "bg-[rgba(212,255,46,0.08)]",
+      color: "text-ink-2",
+      bg: "bg-hover",
     },
     {
       title: "Total Users",
       value: stats?.totalUsers ?? 0,
       change: `+${stats?.newUsersThisMonth ?? 0} this month`,
       icon: Users,
-      color: "text-blue-400",
-      bg: "bg-blue-500/10",
+      color: "text-ink-2",
+      bg: "bg-hover",
     },
     // No revenue tile and no "Active rate" here: the old revenue figure
     // multiplied a hard-coded price list and the rate measured billing
@@ -124,17 +132,16 @@ export default function AdminDashboard() {
       value: stats?.payingOrgs ?? 0,
       change: `${stats?.trialOrgs ?? 0} on trial`,
       icon: CreditCard,
-      color: "text-green-400",
-      bg: "bg-green-500/10",
+      color: "text-success-text",
+      bg: "bg-hover",
     },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Admin Dashboard</h1>
-          <p className="text-muted text-base mt-1">Platform overview and subscriber management</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         </div>
         <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw size={14} className="mr-2" /> Refresh
@@ -152,8 +159,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <p className="text-2xl font-semibold">{stat.value}</p>
-              <p className="text-sm text-muted mt-0.5">{stat.change}</p>
-              <p className="text-sm text-muted mt-1 font-medium">{stat.title}</p>
+              <p className="text-sm text-ink-2 mt-0.5">{stat.change}</p>
+              <p className="text-sm text-ink-2 mt-1 font-medium">{stat.title}</p>
             </CardContent>
           </Card>
         ))}
@@ -163,7 +170,7 @@ export default function AdminDashboard() {
       {stats?.planBreakdown && stats.planBreakdown.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Plan Distribution</CardTitle>
+            <CardTitle className="text-lg">Plans</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex gap-6">
@@ -181,52 +188,52 @@ export default function AdminDashboard() {
       {/* Companies Table */}
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">Subscriber Companies</CardTitle>
-          <Link href="/admin/companies" className="text-sm text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
-            View all →
+          <CardTitle className="text-lg">Newest companies</CardTitle>
+          <Link href="/admin/companies" className="text-sm text-ink-2 hover:underline transition-colors">
+            See all companies
           </Link>
         </CardHeader>
         <CardContent className="p-0">
           {companies.length === 0 ? (
-            <div className="p-8 text-center text-base text-muted">
+            <div className="p-8 text-center text-base text-ink-2">
               No companies registered yet. Share your registration page to get started.
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
+                <tr className="border-b border-line">
+                  <th className="text-left p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Company</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Plan</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Status</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Usage</th>
+                  <th className="text-right p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Joined</th>
                 </tr>
               </thead>
               <tbody>
                 {companies.map((company) => (
-                  <tr key={company.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
+                  <tr key={company.id} className="border-b border-line/50 hover:bg-hover transition-colors">
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-[#d4ff2e]" />
+                        <Building2 size={14} className="text-ink-2" />
                         <div>
                           <span className="text-base font-medium">{company.name}</span>
-                          <p className="text-xs text-muted">{company.slug}</p>
+                          <p className="text-xs text-ink-2">{company.slug}</p>
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-center">{getPlanBadge(company.plan)}</td>
-                    <td className="p-4 text-center text-base text-muted">{company._count.users}</td>
+                    <td className="p-4 text-center text-base text-ink-2">{company._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
+                      <div className="flex items-center justify-center gap-3 text-xs text-ink-2">
                         <span>{company._count.tasks} tasks</span>
                         <span>{company._count.kras} KRAs</span>
                         <span>{company._count.sops} SOPs</span>
                       </div>
                     </td>
-                    <td className="p-4 text-right text-sm text-muted">
-                      {new Date(company.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    <td className="p-4 text-right text-sm text-ink-2">
+                      {formatDate(company.createdAt, datePrefs, "date")}
                     </td>
                   </tr>
                 ))}

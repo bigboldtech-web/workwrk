@@ -1,11 +1,17 @@
 "use client";
 
+import { formatDate } from "@/lib/format/date";
+
+import { useConsole } from "../../console-context";
+
+import { Dots } from "@/components/ui/dots";
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
-  Building2, Users, CreditCard, TrendingUp, RefreshCw, Target,
-  CheckSquare, BookOpen, Star, BarChart3, ArrowDownRight, Activity, UserMinus,
+  Users, CreditCard, TrendingUp, RefreshCw,
+  BarChart3, ArrowDownRight, Activity, UserMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -64,13 +70,15 @@ const planPrices: Record<string, number> = {
 };
 
 const planColors: Record<string, string> = {
-  STARTER: "bg-gray-500",
-  GROWTH: "bg-[#d4ff2e]",
-  SCALE: "bg-blue-500",
-  ENTERPRISE: "bg-amber-500",
+  // Plan shares are one series: neutral steps, the one blue on the largest tier.
+  STARTER: "bg-line-strong",
+  GROWTH: "bg-ink-3",
+  SCALE: "bg-ink-2",
+  ENTERPRISE: "bg-brand",
 };
 
 export default function AdminAnalyticsPage() {
+  const { datePrefs } = useConsole();
   const [stats, setStats] = useState<Stats | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,7 +107,7 @@ export default function AdminAnalyticsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
+        <Dots variant="pending" label="Loading" />
       </div>
     );
   }
@@ -127,11 +135,10 @@ export default function AdminAnalyticsPage() {
   const avgUsers = stats && stats.totalOrgs > 0 ? Math.round(stats.totalUsers / stats.totalOrgs) : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Platform Analytics</h1>
-          <p className="text-muted text-base mt-1">Revenue, usage, and growth metrics</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
         </div>
         <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw size={14} className="mr-2" /> Refresh
@@ -142,32 +149,32 @@ export default function AdminAnalyticsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Monthly Recurring Revenue</p>
-            <p className="text-2xl font-semibold text-green-400">{formatCurrency(stats?.mrr ?? 0)}</p>
-            <p className="text-xs text-muted mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
+            <p className="text-sm text-ink-2 mb-1">Monthly Recurring Revenue</p>
+            <p className="text-2xl font-semibold text-success-text">{formatCurrency(stats?.mrr ?? 0)}</p>
+            <p className="text-xs text-ink-2 mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Avg. Revenue Per Org</p>
-            <p className="text-2xl font-semibold text-[#d4ff2e]">
-              {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "—"}
+            <p className="text-sm text-ink-2 mb-1">Avg. Revenue Per Org</p>
+            <p className="text-2xl font-semibold text-ink-2">
+              {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "None"}
             </p>
-            <p className="text-xs text-muted mt-1">ARPU across all plans</p>
+            <p className="text-xs text-ink-2 mt-1">ARPU across all plans</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Avg. Users Per Org</p>
-            <p className="text-2xl font-semibold text-blue-400">{avgUsers}</p>
-            <p className="text-xs text-muted mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
+            <p className="text-sm text-ink-2 mb-1">Avg. Users Per Org</p>
+            <p className="text-2xl font-semibold text-ink-2">{avgUsers}</p>
+            <p className="text-xs text-ink-2 mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-muted mb-1">Trial Conversion Pipeline</p>
-            <p className="text-2xl font-semibold text-orange-400">{stats?.trialOrgs ?? 0}</p>
-            <p className="text-xs text-muted mt-1">Organizations currently on trial</p>
+            <p className="text-sm text-ink-2 mb-1">Trial Conversion Pipeline</p>
+            <p className="text-2xl font-semibold text-ink-2">{stats?.trialOrgs ?? 0}</p>
+            <p className="text-xs text-ink-2 mt-1">Organizations currently on trial</p>
           </CardContent>
         </Card>
       </div>
@@ -177,21 +184,21 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Activity size={16} className="text-green-400" /> MRR — last 12 months
+              <Activity size={16} className="text-success-text" /> MRR, last 12 months
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-56 w-full">
               <ResponsiveContainer>
                 <LineChart data={stats.mrrOverTime} margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#888" }} stroke="#444" />
-                  <YAxis tick={{ fontSize: 10, fill: "#888" }} stroke="#444" tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <CartesianGrid stroke="var(--os-line)" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--os-ink-2)" }} stroke="var(--os-line)" />
+                  <YAxis tick={{ fontSize: 11, fill: "var(--os-ink-2)" }} stroke="var(--os-line)" tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
                   <Tooltip
                     formatter={(v) => formatCurrency(typeof v === "number" ? v : Number(v) || 0)}
-                    contentStyle={{ background: "#0f0f0f", border: "1px solid #2a2a2a", fontSize: 12 }}
+                    contentStyle={{ background: "var(--os-surface)", border: "1px solid var(--os-line)", color: "var(--os-ink)", fontSize: 12 }}
                   />
-                  <Line type="monotone" dataKey="mrr" stroke="#d4ff2e" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="mrr" stroke="var(--os-brand)" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -204,7 +211,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <ArrowDownRight size={16} className="text-blue-400" /> Signup funnel — last {stats.funnel.windowDays} days
+              <ArrowDownRight size={16} className="text-ink-2" /> Signup funnel, last {stats.funnel.windowDays} days
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -227,11 +234,11 @@ export default function AdminAnalyticsPage() {
                         <div className="flex items-center justify-between text-base">
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{step.label}</span>
-                            <span className="text-muted text-sm">{step.hint}</span>
+                            <span className="text-ink-2 text-sm">{step.hint}</span>
                           </div>
                           <div className="flex items-center gap-3">
                             {conv !== null && (
-                              <span className="text-sm text-muted font-mono">{conv}%</span>
+                              <span className="text-sm text-ink-2 font-mono">{conv}%</span>
                             )}
                             <span className="font-mono text-base">{step.count}</span>
                           </div>
@@ -251,20 +258,20 @@ export default function AdminAnalyticsPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
-            <CreditCard size={16} className="text-green-400" /> Revenue by Plan
+            <CreditCard size={16} className="text-success-text" /> Revenue by Plan
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {revenueByPlan.length === 0 ? (
-            <p className="text-base text-muted">No revenue data yet.</p>
+            <p className="text-base text-ink-2">No revenue data yet.</p>
           ) : (
             revenueByPlan.map((p) => (
               <div key={p.plan} className="space-y-1">
                 <div className="flex items-center justify-between text-base">
                   <div className="flex items-center gap-2">
-                    <div className={`h-2.5 w-2.5 rounded-full ${planColors[p.plan] || "bg-gray-500"}`} />
+                    <div className={`h-2.5 w-2.5 rounded-full ${planColors[p.plan] || "bg-line-strong"}`} />
                     <span className="font-medium">{p.plan}</span>
-                    <span className="text-muted text-sm">({p.count} orgs)</span>
+                    <span className="text-ink-2 text-sm">({p.count} orgs)</span>
                   </div>
                   <span className="font-mono text-base">{formatCurrency(p.revenue)}</span>
                 </div>
@@ -280,17 +287,17 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Users size={16} className="text-blue-400" /> Largest Organizations
+              <Users size={16} className="text-ink-2" /> Largest Organizations
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {topByUsers.map((c, i) => (
               <div key={c.id} className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-muted w-4">{i + 1}</span>
+                <span className="text-sm font-semibold text-ink-2 w-4">{i + 1}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-base font-medium">{c.name}</span>
-                    <span className="text-sm text-muted">{c._count.users} users</span>
+                    <span className="text-sm text-ink-2">{c._count.users} users</span>
                   </div>
                   <Progress value={(c._count.users / maxUsers) * 100} className="h-1.5" />
                 </div>
@@ -303,17 +310,17 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <BarChart3 size={16} className="text-[#d4ff2e]" /> Most Active Organizations
+              <BarChart3 size={16} className="text-ink-2" /> Most Active Organizations
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {topByActivity.map((c, i) => (
               <div key={c.id} className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-muted w-4">{i + 1}</span>
+                <span className="text-sm font-semibold text-ink-2 w-4">{i + 1}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-base font-medium">{c.name}</span>
-                    <span className="text-sm text-muted">{c.totalActivity} items</span>
+                    <span className="text-sm text-ink-2">{c.totalActivity} items</span>
                   </div>
                   <Progress value={(c.totalActivity / maxActivity) * 100} className="h-1.5" />
                 </div>
@@ -327,26 +334,26 @@ export default function AdminAnalyticsPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp size={16} className="text-orange-400" /> Growth Snapshot
+            <TrendingUp size={16} className="text-ink-2" /> Growth Snapshot
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-[#d4ff2e]">+{stats?.newOrgsThisMonth ?? 0}</p>
-              <p className="text-xs text-muted mt-1">New orgs this month</p>
+            <div className="rounded-lg bg-hover p-4 text-center">
+              <p className="text-2xl font-semibold text-ink-2">+{stats?.newOrgsThisMonth ?? 0}</p>
+              <p className="text-xs text-ink-2 mt-1">New orgs this month</p>
             </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-blue-400">+{stats?.newUsersThisMonth ?? 0}</p>
-              <p className="text-xs text-muted mt-1">New users this month</p>
+            <div className="rounded-lg bg-hover p-4 text-center">
+              <p className="text-2xl font-semibold text-ink-2">+{stats?.newUsersThisMonth ?? 0}</p>
+              <p className="text-xs text-ink-2 mt-1">New users this month</p>
             </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-green-400">{stats?.activeRate ?? 0}%</p>
-              <p className="text-xs text-muted mt-1">Active rate</p>
+            <div className="rounded-lg bg-hover p-4 text-center">
+              <p className="text-2xl font-semibold text-success-text">{stats?.activeRate ?? 0}%</p>
+              <p className="text-xs text-ink-2 mt-1">Active rate</p>
             </div>
-            <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-semibold text-amber-400">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
-              <p className="text-xs text-muted mt-1">Projected ARR</p>
+            <div className="rounded-lg bg-hover p-4 text-center">
+              <p className="text-2xl font-semibold text-warning-text">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
+              <p className="text-xs text-ink-2 mt-1">Projected ARR</p>
             </div>
           </div>
         </CardContent>
@@ -357,14 +364,14 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Users size={16} className="text-blue-400" /> Cohort retention — last 6 months
+              <Users size={16} className="text-ink-2" /> Cohort retention, last 6 months
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-base">
                 <thead>
-                  <tr className="text-left text-sm text-muted">
+                  <tr className="text-left text-sm text-ink-2">
                     <th className="pb-2 font-normal">Cohort</th>
                     <th className="pb-2 font-normal">Size</th>
                     <th className="pb-2 font-normal">Active</th>
@@ -377,16 +384,16 @@ export default function AdminAnalyticsPage() {
                   {stats.cohorts.map((c) => {
                     const retention = c.size > 0 ? Math.round((c.active / c.size) * 100) : 0;
                     return (
-                      <tr key={c.month} className="border-t border-white/5">
+                      <tr key={c.month} className="border-t border-line">
                         <td className="py-2 font-mono text-sm">{c.month}</td>
                         <td className="py-2">{c.size}</td>
-                        <td className="py-2 text-green-400">{c.active}</td>
-                        <td className="py-2 text-[#d4ff2e]">{c.paying}</td>
-                        <td className="py-2 text-red-400">{c.churned}</td>
+                        <td className="py-2 text-success-text">{c.active}</td>
+                        <td className="py-2 text-ink-2">{c.paying}</td>
+                        <td className="py-2 text-ink">{c.churned}</td>
                         <td className="py-2">
                           <div className="flex items-center gap-2">
                             <Progress value={retention} className="h-1.5 w-16" />
-                            <span className="text-sm text-muted font-mono w-9">{retention}%</span>
+                            <span className="text-sm text-ink-2 font-mono w-9">{retention}%</span>
                           </div>
                         </td>
                       </tr>
@@ -404,7 +411,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <UserMinus size={16} className="text-red-400" /> Recent cancellations
+              <UserMinus size={16} className="text-ink-2" /> Recent cancellations
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -416,10 +423,10 @@ export default function AdminAnalyticsPage() {
                 >
                   <div className="flex items-center gap-3">
                     <span className="font-medium">{c.orgName}</span>
-                    <span className="text-sm text-muted">{c.plan}</span>
+                    <span className="text-sm text-ink-2">{c.plan}</span>
                   </div>
-                  <span className="text-sm text-muted">
-                    {c.canceledAt ? new Date(c.canceledAt).toLocaleDateString() : "—"}
+                  <span className="text-sm text-ink-2">
+                    {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
                   </span>
                 </li>
               ))}

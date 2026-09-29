@@ -71,15 +71,15 @@ export function TypedConfirmDialog({
             }}
           >
             <div className="flex items-center gap-2.5">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-[#E2445C]/15">
-                <AlertTriangle size={15} className="text-[#E2445C]" />
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+                <AlertTriangle size={15} className="text-danger-text" />
               </span>
               <DialogTitle className="text-base leading-none">{request.title}</DialogTitle>
             </div>
-            <p className="mt-2.5 text-base leading-relaxed text-muted">{request.body}</p>
-            {request.note ? <p className="mt-2 text-sm leading-relaxed text-muted">{request.note}</p> : null}
-            <label className="mt-4 block text-sm text-muted" htmlFor="typed-confirm-input">
-              Type {request.matchLabel} to confirm: <span className="font-medium text-foreground">{request.match}</span>
+            <p className="mt-2.5 text-base leading-relaxed text-ink-2">{request.body}</p>
+            {request.note ? <p className="mt-2 text-sm leading-relaxed text-ink-2">{request.note}</p> : null}
+            <label className="mt-4 block text-sm text-ink-2" htmlFor="typed-confirm-input">
+              Type {request.matchLabel} to confirm: <span className="font-medium text-ink">{request.match}</span>
             </label>
             <Input
               id="typed-confirm-input"
