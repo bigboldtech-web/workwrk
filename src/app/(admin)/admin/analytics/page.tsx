@@ -47,6 +47,7 @@ interface RevenueLineOut {
   arr: number;
   arpu: number | null;
   subscriptions: number;
+  companies: number;
   series: number[] | null;
 }
 
@@ -62,8 +63,8 @@ interface Analytics {
   revenue: Revenue;
   growth: { newCompanies: number; newPeople: number; onTrial: number; byBucket: number[]; avgPeoplePerCompany: number; totalPeople: number; totalCompanies: number };
   funnel: { signedUp: number; finishedSetup: number; createdSomething: number; paying: number; windowDays: number };
-  retention: { cohorts: CohortRow[] };
-  cancellations: { id: string; name: string; plan: string; canceledAt: string | null }[];
+  retention: { cohorts: CohortRow[]; from: string; partialFirst: boolean };
+  cancellations: { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" }[];
   biggest: RankedCompany[];
   busiest: RankedCompany[];
   plans: { plan: string; count: number }[];
@@ -88,7 +89,9 @@ function AnalyticsInner() {
   const sp = useSearchParams();
   const range = parseRange(sp.get("range"));
   const [data, setData] = useState<Analytics | null>(null);
-  const [failed, setFailed] = useState(false);
+  // The range whose last load failed, so a new range starts on its skeleton
+  // rather than on the old range's failure.
+  const [failedRange, setFailedRange] = useState<AnalyticsRange | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -96,11 +99,11 @@ function AnalyticsInner() {
     const res = await apiFetch<Analytics>(`/api/admin/analytics?range=${r}`);
     if (res.ok) {
       setData(res.data);
-      setFailed(false);
+      setFailedRange(null);
       setLoadedAt(Date.now());
       rememberCompanyNames([...res.data.biggest, ...res.data.busiest, ...res.data.cancellations]);
     } else if (res.status !== 401) {
-      setFailed(true);
+      setFailedRange(r);
     }
   }, []);
   useEffect(() => {
@@ -120,15 +123,18 @@ function AnalyticsInner() {
   // A range change keeps the last numbers until the new ones arrive, but a
   // card never presents another range's numbers as this one's.
   const current = data && data.range === range ? data : null;
+  const failed = failedRange === range;
   const loading = !current && !failed;
   const broken = !current && failed;
   const lang = datePrefs.language;
+  // A brand-new install: every card shows its own quiet block (spec 2.5 empty).
+  const nothing = !!current && current.growth.totalCompanies === 0;
 
   return (
     <>
       <OsPageHeader
         title="Analytics"
-        actions={<NumbersMeta at={loadedAt} failed={failed} prefs={datePrefs} onRetry={retry} />}
+        actions={<NumbersMeta at={loadedAt} failed={failedRange !== null} prefs={datePrefs} onRetry={retry} />}
         toolbar={{
           left: (
             <SegmentedControl<AnalyticsRange>
@@ -146,47 +152,41 @@ function AnalyticsInner() {
         }}
       />
       <div className="os-chrome flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6 pt-2">
-        {current && current.growth.totalCompanies === 0 ? (
-          <NumbersCard ariaLabel="Nothing to measure">
-            <QuietBlock sentence="Nothing to measure yet" arrangement="grid" height={200} />
-          </NumbersCard>
-        ) : (
-          <>
-            <RevenueCard data={current} loading={loading} broken={broken} onRetry={retry} language={lang} runbookUrl={runbookUrl} datePrefs={datePrefs} />
-            <GrowthCard data={current} loading={loading} broken={broken} onRetry={retry} language={lang} />
-            <FunnelCard data={current} loading={loading} broken={broken} onRetry={retry} />
-            <RetentionCard data={current} loading={loading} broken={broken} onRetry={retry} language={lang} />
-            <CancellationsCard data={current} loading={loading} broken={broken} onRetry={retry} datePrefs={datePrefs} />
-            <div className="grid grid-cols-1 gap-4 min-[1280px]:grid-cols-2">
-              <RankCard
-                title="Biggest workspaces"
-                rows={current?.biggest ?? null}
-                loading={loading}
-                broken={broken}
-                onRetry={retry}
-                unit={(v) => `${n(v)} ${v === 1 ? "person" : "people"}`}
-                note="Top five by people"
-              />
-              <RankCard
-                title="Busiest workspaces"
-                rows={current?.busiest ?? null}
-                loading={loading}
-                broken={broken}
-                onRetry={retry}
-                unit={(v) => `${n(v)} ${v === 1 ? "action" : "actions"}`}
-                note={`Actions recorded in the last ${RANGE_LABEL[range]}`}
-              />
-            </div>
-            <PlansCard data={current} loading={loading} broken={broken} onRetry={retry} />
-          </>
-        )}
+        <RevenueCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} runbookUrl={runbookUrl} datePrefs={datePrefs} />
+        <GrowthCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} />
+        <FunnelCard data={current} range={range} loading={loading} broken={broken} nothing={nothing} onRetry={retry} />
+        <RetentionCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} language={lang} datePrefs={datePrefs} />
+        <CancellationsCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} datePrefs={datePrefs} />
+        <div className="grid grid-cols-1 gap-4 min-[1280px]:grid-cols-2">
+          <RankCard
+            title="Biggest workspaces"
+            rows={current?.biggest ?? null}
+            loading={loading}
+            broken={broken}
+            nothing={nothing}
+            onRetry={retry}
+            unit={(v) => `${n(v)} ${v === 1 ? "person" : "people"}`}
+            note="Top five by people"
+          />
+          <RankCard
+            title="Busiest workspaces"
+            rows={current?.busiest ?? null}
+            loading={loading}
+            broken={broken}
+            nothing={nothing}
+            onRetry={retry}
+            unit={(v) => `${n(v)} ${v === 1 ? "action" : "actions"}`}
+            note={`Actions by people in each workspace in the last ${RANGE_LABEL[range]}, not counting signing in or out`}
+          />
+        </div>
+        <PlansCard data={current} loading={loading} broken={broken} nothing={nothing} onRetry={retry} />
       </div>
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Analytics">
         Whether the business is growing. Revenue is what Stripe charged; everything else is counted from companies, people
-        and recorded activity in the range you pick. Monthly revenue is every active Stripe subscription at Stripe&apos;s own
-        price, before discounts, one line per currency and never converted. The chart is what paid invoices took in each
-        period. Stripe figures are refreshed at most once an hour.
+        and recorded activity in the range you pick. Monthly revenue is every WorkwrK Stripe subscription that is active or
+        past due, at Stripe&apos;s own price after its discounts, one line per currency and never converted. The chart is
+        what paid invoices took in each period, before refunds. Stripe figures are refreshed at most once an hour.
       </AboutDialog>
     </>
   );
@@ -196,18 +196,59 @@ interface CardProps {
   data: Analytics | null;
   loading: boolean;
   broken: boolean;
+  /** No companies at all: the card shows its own quiet block. */
+  nothing: boolean;
   onRetry: () => void;
 }
 
-function CardState({ loading, broken, onRetry, height, children }: { loading: boolean; broken: boolean; onRetry: () => void; height: number; children: () => React.ReactNode }) {
+const NOTHING = "Nothing to measure yet";
+
+/**
+ * A card's body by state. Loading: a chart card draws its plot frame with a
+ * skeleton plot area (`plot` is the plot's height), a list card skeleton
+ * rows, each at the card's own height. Empty install: the quiet block of the
+ * card's family (four-dot 2x2 for charts, a row for lists).
+ */
+function CardState({
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  height,
+  plot,
+  children,
+}: {
+  loading: boolean;
+  broken: boolean;
+  nothing: boolean;
+  onRetry: () => void;
+  height: number;
+  plot?: number;
+  children: () => React.ReactNode;
+}) {
   if (loading) {
+    if (plot) {
+      return (
+        <div className="flex flex-col gap-3" style={{ minHeight: height }} aria-busy="true">
+          <SkeletonBars rows={1} height={14} />
+          <div className="relative w-full border-b border-l border-line" style={{ height: plot }} aria-hidden>
+            {[0.25, 0.5, 0.75].map((f) => (
+              <div key={f} className="absolute inset-x-0 border-t border-[var(--os-line-soft)]" style={{ top: `${f * 100}%` }} />
+            ))}
+            <div className="absolute inset-2 animate-pulse rounded bg-[var(--os-skeleton)] opacity-40" style={{ animationDuration: "1.6s" }} />
+          </div>
+          <SkeletonBars rows={2} height={12} />
+        </div>
+      );
+    }
     return (
-      <div style={{ minHeight: height }}>
+      <div style={{ minHeight: height }} aria-busy="true">
         <SkeletonBars rows={3} height={14} gap={12} />
       </div>
     );
   }
   if (broken) return <CardRetry onRetry={onRetry} />;
+  if (nothing) return <QuietBlock sentence={NOTHING} arrangement={plot ? "grid" : "row"} height={plot ? Math.min(height, 200) : 96} />;
   return <>{children()}</>;
 }
 
@@ -217,6 +258,7 @@ function RevenueCard({
   data,
   loading,
   broken,
+  nothing,
   onRetry,
   language,
   runbookUrl,
@@ -228,7 +270,7 @@ function RevenueCard({
       title="Revenue"
       meta={rev?.source === "stripe" ? <span title={formatDateTitle(rev.asOf, datePrefs)}>Stripe figures from {formatDate(rev.asOf, datePrefs, "time")}</span> : null}
     >
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={300}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={300} plot={224}>
         {() => {
           if (!data || !rev) return null;
           if (rev.source === "unavailable") {
@@ -242,18 +284,19 @@ function RevenueCard({
             <div className="flex flex-col gap-5">
               {rev.lines.map((line, i) => (
                 <div key={line.currency} className={i > 0 ? "border-t border-line pt-5" : undefined}>
-                  <RevenueLineBlock line={line} data={data} seriesFailed={rev.seriesFailed} onRetry={onRetry} language={language} multi={rev.lines.length > 1} />
+                  <RevenueLineBlock line={line} data={data} seriesFailed={rev.seriesFailed} onRetry={onRetry} language={language} />
                 </div>
               ))}
               {rev.uncounted > 0 ? (
                 <p className="m-0 text-sm text-ink-2">
-                  {n(rev.uncounted)} {rev.uncounted === 1 ? "subscription has" : "subscriptions have"} a tiered or metered price and{" "}
-                  {rev.uncounted === 1 ? "is" : "are"} not counted.
+                  {n(rev.uncounted)} {rev.uncounted === 1 ? "subscription has" : "subscriptions have"} a tiered or metered price, or a
+                  discount Stripe gave no exact amount for, and {rev.uncounted === 1 ? "is" : "are"} not counted.
                 </p>
               ) : null}
-              {rev.truncated ? <p className="m-0 text-sm text-ink-2">Counted from the first 10,000 Stripe records, so the real figure is higher.</p> : null}
+              {rev.truncated ? <p className="m-0 text-sm text-ink-2">Stripe stopped answering before every record was read, so the real figure is higher.</p> : null}
               <p className="m-0 text-sm text-ink-2">
-                From Stripe subscriptions only, at their prices before discounts. Lifetime deals and companies on manual invoices are not counted.
+                From WorkwrK&apos;s Stripe subscriptions only, active or past due, after their discounts; the chart is before refunds.
+                Lifetime deals and companies on manual invoices are not counted.
               </p>
             </div>
           );
@@ -269,14 +312,12 @@ function RevenueLineBlock({
   seriesFailed,
   onRetry,
   language,
-  multi,
 }: {
   line: RevenueLineOut;
   data: Analytics;
   seriesFailed: boolean;
   onRetry: () => void;
   language?: string | null;
-  multi: boolean;
 }) {
   const per = data.window.granularity === "month" ? "per month" : "per 5 days";
   const points = useMemo(
@@ -296,7 +337,7 @@ function RevenueLineBlock({
   return (
     <div className="flex flex-col gap-3">
       <p className="m-0 text-sm font-medium text-ink-2">
-        {multi ? `${line.currency}: ` : ""}What Stripe was paid, {per} ({line.currency})
+        What Stripe was paid, {per} ({line.currency})
       </p>
       {seriesFailed || !line.series ? (
         <div style={{ minHeight: 224 }} className="flex items-center">
@@ -366,10 +407,10 @@ function RevenueLineBlock({
 
 /* ───────────────────────── 2. Growth ───────────────────────── */
 
-function GrowthCard({ data, loading, broken, onRetry, language }: CardProps & { language?: string | null }) {
+function GrowthCard({ data, loading, broken, nothing, onRetry, language }: CardProps & { language?: string | null }) {
   return (
     <NumbersCard title="Growth">
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={240}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={240} plot={168}>
         {() => {
           if (!data) return null;
           const g = data.growth;
@@ -423,18 +464,19 @@ function GrowthCard({ data, loading, broken, onRetry, language }: CardProps & { 
 
 /* ───────────────────────── 3. Signup funnel ───────────────────────── */
 
-function FunnelCard({ data, loading, broken, onRetry }: CardProps) {
+function FunnelCard({ data, range, loading, broken, nothing, onRetry }: CardProps & { range: AnalyticsRange }) {
+  // The range the person picked, in the same words as the Range control.
   return (
-    <NumbersCard title={data ? `Signup funnel · last ${n(data.funnel.windowDays)} days` : "Signup funnel"}>
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={180}>
+    <NumbersCard title={`Signup funnel · last ${RANGE_LABEL[range]}`}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={180}>
         {() => {
           if (!data) return null;
           const f = data.funnel;
           const steps = [
             { label: "Signed up", hint: "A company was created", count: f.signedUp },
             { label: "Finished setup", hint: "They completed the setup wizard", count: f.finishedSetup },
-            { label: "Created something", hint: "At least one SOP, KRA or task", count: f.createdSomething },
-            { label: "Paying", hint: "An active subscription", count: f.paying },
+            { label: "Created something", hint: "Of those, at least one SOP, KRA or task", count: f.createdSomething },
+            { label: "Paying", hint: "Of those, an active or past-due subscription", count: f.paying },
           ];
           if (f.signedUp === 0) return <p className="m-0 text-row text-ink-2">No companies signed up in this range.</p>;
           return (
@@ -463,10 +505,18 @@ function FunnelCard({ data, loading, broken, onRetry }: CardProps) {
 
 /* ───────────────────────── 4. Retention ───────────────────────── */
 
-function RetentionCard({ data, loading, broken, onRetry, language }: CardProps & { language?: string | null }) {
+function RetentionCard({
+  data,
+  loading,
+  broken,
+  nothing,
+  onRetry,
+  language,
+  datePrefs,
+}: CardProps & { language?: string | null; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
   return (
     <NumbersCard title="Retention">
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={200}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={200}>
         {() => {
           if (!data) return null;
           // A month nobody signed up in is not a cohort: twelve rows of zeros
@@ -507,8 +557,14 @@ function RetentionCard({ data, loading, broken, onRetry, language }: CardProps &
                 </table>
               </div>
               <div className="flex flex-col gap-0.5 text-sm text-ink-2">
-                <span>Still active means somebody in that workspace did something in the last 30 days.</span>
-                <span>Paying means an active subscription today.</span>
+                <span>Still active means somebody in that workspace did something in the last 30 days. Signing in or out does not count.</span>
+                <span>Paying means an active or past-due subscription today.</span>
+                {data.retention.partialFirst && rows[rows.length - 1]?.month === data.retention.from.slice(0, 7) ? (
+                  <span>
+                    {monthKeyLabel(rows[rows.length - 1].month, language)} counts only the companies that signed up from{" "}
+                    {formatDate(data.retention.from, datePrefs, "date")}.
+                  </span>
+                ) : null}
               </div>
             </div>
           );
@@ -524,20 +580,21 @@ function PlanChip({ plan }: { plan: string }) {
   return <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(plan)}</Chip>;
 }
 
-function CancellationsCard({ data, loading, broken, onRetry, datePrefs }: CardProps & { datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
+function CancellationsCard({ data, loading, broken, nothing, onRetry, datePrefs }: CardProps & { datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
   return (
     <NumbersCard title="Cancellations">
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={120}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={120}>
         {() => {
           if (!data) return null;
           if (data.cancellations.length === 0) return <p className="m-0 text-row text-ink-2">No cancellations in this range.</p>;
           return (
             <ul className="m-0 -mx-2 flex list-none flex-col p-0">
               {data.cancellations.map((c) => (
-                <li key={`${c.id}-${c.canceledAt ?? ""}`} className="flex h-9 min-w-0 items-center gap-3 px-2">
+                <li key={`${c.id}-${c.what}-${c.canceledAt ?? ""}`} className="flex h-9 min-w-0 items-center gap-3 px-2">
                   <Link href={`/admin/companies/${c.id}`} className="min-w-0 truncate text-row text-ink hover:underline">{c.name}</Link>
                   <PlanChip plan={c.plan} />
                   <span className="flex-1" />
+                  <span className="shrink-0 text-sm text-ink-2">{c.what === "workspace" ? "Workspace cancelled" : "Subscription cancelled"}</span>
                   <span className="shrink-0 text-sm tabular-nums text-ink-2" title={c.canceledAt ? formatDateTitle(c.canceledAt, datePrefs) : undefined}>
                     {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
                   </span>
@@ -558,6 +615,7 @@ function RankCard({
   rows,
   loading,
   broken,
+  nothing,
   onRetry,
   unit,
   note,
@@ -566,13 +624,14 @@ function RankCard({
   rows: RankedCompany[] | null;
   loading: boolean;
   broken: boolean;
+  nothing: boolean;
   onRetry: () => void;
   unit: (v: number) => string;
   note: string;
 }) {
   return (
     <NumbersCard title={title}>
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={200}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={200}>
         {() => {
           if (!rows) return null;
           const max = rows[0]?.value ?? 0;
@@ -605,10 +664,10 @@ function RankCard({
 
 /* ───────────────────────── 7. Plans ───────────────────────── */
 
-function PlansCard({ data, loading, broken, onRetry }: CardProps) {
+function PlansCard({ data, loading, broken, nothing, onRetry }: CardProps) {
   return (
     <NumbersCard title="Plans">
-      <CardState loading={loading} broken={broken} onRetry={onRetry} height={160}>
+      <CardState loading={loading} broken={broken} nothing={nothing} onRetry={onRetry} height={160}>
         {() => {
           if (!data) return null;
           const max = Math.max(0, ...data.plans.map((p) => p.count));

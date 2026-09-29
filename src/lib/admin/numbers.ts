@@ -206,11 +206,32 @@ export interface StripeItemLite {
   interval: string | null;
   intervalCount: number | null;
   metered: boolean;
+  /** The price's product id, for a coupon that applies to some products only. */
+  product?: string | null;
+  /** Coupon ids of the discounts on this item; null where Stripe gave no coupon. */
+  discounts?: (string | null)[];
 }
 
 export interface StripeSubscriptionLite {
   id: string;
+  /** The Stripe customer: one per company (services/billing.ts ensureStripeCustomer). */
+  customer?: string | null;
   items: StripeItemLite[];
+  /** Coupon ids of the discounts on the whole subscription; null where Stripe gave no coupon. */
+  discounts?: (string | null)[];
+}
+
+/** The part of a Stripe coupon a discount's amount depends on. */
+export interface CouponLite {
+  id: string;
+  percentOff: number | null;
+  /** Minor units, in `currency`. */
+  amountOff: number | null;
+  currency: string | null;
+  /** amount_off in other currencies (Stripe's currency_options), minor units, keyed by upper-case code. */
+  currencyOptions?: Record<string, number>;
+  /** Product ids the coupon is limited to; null when it applies to every product. */
+  products: string[] | null;
 }
 
 export interface RevenueLine {
@@ -220,35 +241,142 @@ export interface RevenueLine {
   monthly: number;
   /** Subscriptions counted in this line. */
   subscriptions: number;
+  /** Distinct Stripe customers (companies) counted in this line. */
+  companies?: number;
+}
+
+function couponAmountOff(c: CouponLite, currency: string): number | null {
+  if (c.amountOff === null) return null;
+  const cur = currency.toUpperCase();
+  if (c.currency && c.currency.toUpperCase() === cur) return c.amountOff;
+  const opt = c.currencyOptions?.[cur];
+  return typeof opt === "number" ? opt : null;
+}
+
+function couponApplies(c: CouponLite, product: string | null | undefined): boolean {
+  return c.products === null || (!!product && c.products.includes(product));
 }
 
 /**
- * Monthly revenue, one line per currency, largest first. A subscription
- * with any item that has no single price (tiered, metered) is left out
- * whole and counted in `uncounted`, so the page can say how many were not
- * counted rather than show a quietly low number.
+ * What one subscription charges per month after its discounts, in minor
+ * units and one currency, or null when that cannot be read exactly (a
+ * tiered or metered price, items in two currencies or two intervals, or a
+ * discount whose coupon is unknown or has no amount in this currency), so
+ * the subscription is left out and counted rather than guessed.
+ *
+ * Stripe's order: item discounts first, then the subscription's. A percent
+ * coupon takes its share of every item it applies to; an amount coupon takes
+ * its amount off once per billing interval (off the item, or off the items
+ * it applies to), never below zero.
  */
-export function revenueLines(subs: readonly StripeSubscriptionLite[]): { lines: RevenueLine[]; uncounted: number } {
-  const by = new Map<string, { monthly: number; subs: Set<string> }>();
+export function subscriptionMonthly(
+  s: StripeSubscriptionLite,
+  coupons?: ReadonlyMap<string, CouponLite>,
+): { currency: string; monthly: number } | null {
+  if (s.items.length === 0) return null;
+  const currency = s.items[0].currency.toUpperCase();
+  const interval = s.items[0].interval;
+  const count = s.items[0].intervalCount ?? 1;
+  if (!interval || !(interval in MONTHS_PER)) return null;
+  const lookup = (id: string | null): CouponLite | null => (id && coupons ? coupons.get(id) ?? null : null);
+
+  const amounts: { amount: number; product: string | null | undefined }[] = [];
+  for (const it of s.items) {
+    if (it.currency.toUpperCase() !== currency || it.interval !== interval || (it.intervalCount ?? 1) !== count) return null;
+    // monthlyMinor is the one check for a price with no single amount.
+    if (monthlyMinor(it) === null) return null;
+    const qty = typeof it.quantity === "number" && it.quantity >= 0 ? it.quantity : 1;
+    let amount = (it.unitAmount as number) * qty;
+    for (const id of it.discounts ?? []) {
+      const c = lookup(id);
+      if (!c) return null;
+      if (c.percentOff !== null) amount = amount * (1 - c.percentOff / 100);
+      else {
+        const off = couponAmountOff(c, currency);
+        if (off === null) return null;
+        amount = Math.max(0, amount - off);
+      }
+    }
+    amounts.push({ amount, product: it.product });
+  }
+  for (const id of s.discounts ?? []) {
+    const c = lookup(id);
+    if (!c) return null;
+    const eligible = amounts.filter((a) => couponApplies(c, a.product));
+    if (c.percentOff !== null) {
+      for (const a of eligible) a.amount = a.amount * (1 - c.percentOff / 100);
+    } else {
+      let off = couponAmountOff(c, currency);
+      if (off === null) return null;
+      for (const a of eligible) {
+        const take = Math.min(a.amount, off);
+        a.amount -= take;
+        off -= take;
+      }
+    }
+  }
+  const perInterval = amounts.reduce((t, a) => t + a.amount, 0);
+  const months = MONTHS_PER[interval as BillingInterval] * (count > 0 ? count : 1);
+  return { currency, monthly: Math.round(perInterval / months) };
+}
+
+/**
+ * Monthly revenue, one line per currency, largest first, after each
+ * subscription's own discounts. A subscription whose charge cannot be read
+ * exactly (see subscriptionMonthly) is left out whole and counted in
+ * `uncounted`, so the page can say how many were not counted rather than
+ * show a quietly wrong number.
+ */
+export function revenueLines(
+  subs: readonly StripeSubscriptionLite[],
+  coupons?: ReadonlyMap<string, CouponLite>,
+): { lines: RevenueLine[]; uncounted: number } {
+  const by = new Map<string, { monthly: number; subs: Set<string>; customers: Set<string> }>();
   let uncounted = 0;
   for (const s of subs) {
-    const priced = s.items.map((it) => ({ it, m: monthlyMinor(it) }));
-    if (priced.length === 0 || priced.some((p) => p.m === null)) {
+    const m = subscriptionMonthly(s, coupons);
+    if (!m) {
       uncounted++;
       continue;
     }
-    for (const { it, m } of priced) {
-      const cur = it.currency.toUpperCase();
-      const row = by.get(cur) ?? { monthly: 0, subs: new Set<string>() };
-      row.monthly += m as number;
-      row.subs.add(s.id);
-      by.set(cur, row);
-    }
+    const row = by.get(m.currency) ?? { monthly: 0, subs: new Set<string>(), customers: new Set<string>() };
+    row.monthly += m.monthly;
+    row.subs.add(s.id);
+    row.customers.add(s.customer ?? s.id);
+    by.set(m.currency, row);
   }
   const lines = [...by.entries()]
-    .map(([currency, r]) => ({ currency, monthly: r.monthly, subscriptions: r.subs.size }))
+    .map(([currency, r]) => ({ currency, monthly: r.monthly, subscriptions: r.subs.size, companies: r.customers.size }))
     .sort((a, b) => b.subscriptions - a.subscriptions || a.currency.localeCompare(b.currency));
   return { lines, uncounted };
+}
+
+/** What the console knows is WorkwrK's in a Stripe account that may bill other things too. */
+export interface WorkwrkStripeKeys {
+  /** The priceCatalog price ids (services/billing.ts). */
+  priceIds: ReadonlySet<string>;
+  /** Subscription.stripeCustomerId values in our database. */
+  customers: ReadonlySet<string>;
+  /** Subscription.stripeSubscriptionId values in our database. */
+  subscriptions: ReadonlySet<string>;
+  /** Organization ids that exist, for Stripe metadata.organizationId (set by checkout). */
+  organizationIds: ReadonlySet<string>;
+}
+
+/**
+ * Whether a Stripe subscription or invoice is WorkwrK's: one of our price
+ * ids, a customer or subscription our database holds, or checkout's
+ * metadata naming a company that exists. Anything else in the account
+ * (another product, a test subscription) is not WorkwrK revenue.
+ */
+export function isWorkwrkStripe(
+  x: { subscriptionId?: string | null; customer?: string | null; priceIds?: readonly (string | null | undefined)[]; organizationId?: string | null },
+  k: WorkwrkStripeKeys,
+): boolean {
+  if (x.subscriptionId && k.subscriptions.has(x.subscriptionId)) return true;
+  if (x.customer && k.customers.has(x.customer)) return true;
+  if (x.organizationId && k.organizationIds.has(x.organizationId)) return true;
+  return (x.priceIds ?? []).some((p) => !!p && k.priceIds.has(p));
 }
 
 export interface PaidInvoiceLite {
@@ -274,19 +402,64 @@ export function chargedSeries(invoices: readonly PaidInvoiceLite[], w: Pick<Rang
 
 /** Monthly revenue, Annual run rate (monthly x 12) and Average per paying company for one currency. */
 export function derivedRevenue(line: RevenueLine): { monthly: number; arr: number; arpu: number | null } {
+  // A company is a Stripe customer; a line built before customers were read divides by subscriptions.
+  const payers = line.companies ?? line.subscriptions;
   return {
     monthly: line.monthly,
     arr: line.monthly * 12,
-    arpu: line.subscriptions > 0 ? Math.round(line.monthly / line.subscriptions) : null,
+    arpu: payers > 0 ? Math.round(line.monthly / payers) : null,
   };
+}
+
+/* ───────────────────────── workspace use ───────────────────────── */
+
+/**
+ * ActivityLog rows that are not somebody using the workspace, so "Still
+ * active" and "Busiest workspaces" never count them: the signup row itself,
+ * signing in and out, switching between workspaces (written to the company a
+ * person LEFT as well as the one they entered), a person's own security
+ * settings, data migrations, and every row WorkwrK staff cause. The rest of
+ * the rule is in lib/admin/workspace-use.ts: the actor must be a person who
+ * belongs to that workspace.
+ */
+export const NOT_USE_TYPES = [
+  "organization_created",
+  "login",
+  "logout",
+  "session.idle",
+  "password_changed",
+  "mfa_enabled",
+  "mfa_disabled",
+  "signed_out_all_devices",
+  "legacy_marketing_imported",
+] as const;
+
+/** SQL LIKE patterns for families of the same kind. */
+export const NOT_USE_PATTERNS = ["org.switch.%", "staff.%", "admin.%", "%_migrated", "%.migrated"] as const;
+
+/** The same rule in code, for tests and for any caller that already holds the rows. */
+export function isWorkspaceUseType(type: string): boolean {
+  if ((NOT_USE_TYPES as readonly string[]).includes(type)) return false;
+  return !NOT_USE_PATTERNS.some((p) => {
+    const body = p.replace(/%/g, "");
+    if (p.startsWith("%") && p.endsWith("%")) return type.includes(body);
+    if (p.startsWith("%")) return type.endsWith(body);
+    if (p.endsWith("%")) return type.startsWith(body);
+    return type === p;
+  });
 }
 
 /* ───────────────────────── funnel, cohorts, lists ───────────────────────── */
 
-/** Whole-percent conversion from the step above; null when the step above is zero. */
+/**
+ * Whole-percent conversion from the step above; null when the step above is
+ * zero. The funnel's steps are nested (each counts only companies that did
+ * the step above), so this never passes 100; it is capped anyway, so a
+ * miscount can never print "300%".
+ */
 export function conversionPct(count: number, previous: number | null): number | null {
   if (previous === null || !(previous > 0)) return null;
-  return Math.round((count / previous) * 100);
+  return Math.min(100, Math.round((count / previous) * 100));
 }
 
 /** A 4px bar's fill relative to the largest value, 0 to 100. */
@@ -315,7 +488,7 @@ export interface CohortRow {
  * One row per calendar month from the window's first month to now, newest
  * first. Still active = somebody in that workspace did something in the
  * last 30 days (not the billing status, which a staff member sets). Paying =
- * an active subscription today. Cancelled = the workspace was cancelled or
+ * a Stripe subscription that is active or past due today. Cancelled = the workspace was cancelled or
  * its subscription was.
  */
 export function buildCohorts(

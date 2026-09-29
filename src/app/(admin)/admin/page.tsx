@@ -16,6 +16,7 @@ import { AlarmClock, ChevronRight, CreditCard, Info, KeyRound, PauseCircle, Refr
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatTile, StatTileSkeleton } from "@/components/ui/stat-tile";
 import { StatusChip, Chip } from "@/components/ui/chip";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
@@ -112,8 +113,9 @@ export default function OverviewPage() {
         ]}
       />
       <div className="os-chrome flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6 pt-2">
-        {/* 1. Numbers: four cards, two per row below 1024. */}
-        <div className="grid grid-cols-2 gap-4 min-[1024px]:grid-cols-4">
+        {/* 1. Numbers: four cards, two per row below 1280, so a card's context
+            sentence always has room at 1024 (a 760px body). */}
+        <div className="grid grid-cols-2 gap-4 min-[1280px]:grid-cols-4">
           <Stat label="Companies" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.companies.total) : null} context={data ? `+${n(data.companies.newIn30)} in the last 30 days` : null} />
           <Stat label="People" loading={loading} broken={broken} onRetry={retry} value={data ? n(data.people.total) : null} context={data ? `+${n(data.people.newIn30)} in the last 30 days` : null} />
           <Stat
@@ -176,19 +178,11 @@ export default function OverviewPage() {
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Overview">
         Today&apos;s numbers and what needs a person. Everything here counts companies, plans and dates; no customer&apos;s
-        work is ever read to make a number on this page. Monthly revenue is what Stripe charges for active subscriptions,
-        at Stripe&apos;s own prices, one line per currency and never converted.
+        work is ever read to make a number on this page. Paying and Monthly revenue both count WorkwrK Stripe subscriptions
+        that are active or past due; revenue is at Stripe&apos;s own prices after their discounts, one line per currency and
+        never converted.
       </AboutDialog>
     </>
-  );
-}
-
-function StatShell({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section aria-label={label} className="os-chrome min-w-0 rounded-lg border border-line bg-raised p-4">
-      <p className="m-0 text-sm font-medium text-ink-2">{label}</p>
-      {children}
-    </section>
   );
 }
 
@@ -207,23 +201,19 @@ function Stat({
   broken: boolean;
   onRetry: () => void;
 }) {
-  return (
-    <StatShell label={label}>
-      {loading ? (
-        <div className="mt-2">
-          <SkeletonBars rows={2} height={14} gap={10} />
-        </div>
-      ) : broken || value === null ? (
+  if (loading) return <StatTileSkeleton />;
+  if (broken || value === null) {
+    return (
+      <StatTile label={label}>
         <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
-      ) : (
-        <>
-          <p className="m-0 mt-1 text-xl font-semibold tabular-nums text-ink">{value}</p>
-          {context ? <p className="m-0 mt-0.5 truncate text-sm text-ink-2">{context}</p> : null}
-        </>
-      )}
-    </StatShell>
-  );
+      </StatTile>
+    );
+  }
+  return <StatTile label={label} value={value} hint={context ?? undefined} hintWraps />;
 }
+
+const untold = (v: number) =>
+  `${plural(v, "subscription has", "subscriptions have")} a tiered or metered price, or a discount with no exact amount, and ${v === 1 ? "is" : "are"} not counted`;
 
 function RevenueStat({
   revenue,
@@ -241,26 +231,20 @@ function RevenueStat({
   runbookUrl: string | null;
 }) {
   const label = "Monthly revenue";
-  if (loading) {
-    return (
-      <StatShell label={label}>
-        <div className="mt-2"><SkeletonBars rows={2} height={14} gap={10} /></div>
-      </StatShell>
-    );
-  }
+  if (loading) return <StatTileSkeleton />;
   if (broken || !revenue || revenue.source === "error") {
     return (
-      <StatShell label={label}>
+      <StatTile label={label}>
         <div className="mt-2"><CardRetry onRetry={onRetry} /></div>
-      </StatShell>
+      </StatTile>
     );
   }
   if (revenue.source === "unavailable") {
     const link = connectLink(runbookUrl);
     return (
-      <StatShell label={label}>
+      <StatTile label={label}>
         <p className="m-0 mt-1 text-row text-ink-2">Not connected</p>
-        <p className="m-0 mt-0.5 text-sm text-ink-2">
+        <p className="m-0 mt-1 text-xs text-ink-2">
           Billing is not connected yet.
           {link ? (
             <>
@@ -269,39 +253,40 @@ function RevenueStat({
             </>
           ) : null}
         </p>
-      </StatShell>
+      </StatTile>
     );
   }
   if (revenue.lines.length === 0) {
-    // Connected, and nothing active: zero is the true answer here, in no currency.
+    // Connected, and nothing paying: zero is the true answer here, in no currency.
+    return <StatTile label={label} value="0" hint={revenue.uncounted > 0 ? untold(revenue.uncounted) : "No active or past-due Stripe subscriptions"} hintWraps />;
+  }
+  if (revenue.lines.length === 1) {
+    const [only] = revenue.lines;
     return (
-      <StatShell label={label}>
-        <p className="m-0 mt-1 text-xl font-semibold tabular-nums text-ink">0</p>
-        <p className="m-0 mt-0.5 text-sm text-ink-2">
-          {revenue.uncounted > 0
-            ? `${plural(revenue.uncounted, "subscription has", "subscriptions have")} a tiered or metered price and ${revenue.uncounted === 1 ? "is" : "are"} not counted`
-            : "No active Stripe subscriptions"}
-        </p>
-      </StatShell>
+      <StatTile
+        label={label}
+        value={formatMoney(only.monthly, only.currency, language)}
+        hint={`from ${plural(only.subscriptions, "Stripe subscription", "Stripe subscriptions")}${revenue.uncounted > 0 ? `; ${untold(revenue.uncounted)}` : ""}`}
+        hintWraps
+      />
     );
   }
-  // One line per currency, never a grand total across them.
-  const [first, ...rest] = revenue.lines;
+  // One line per currency, every line the same size: no currency is the
+  // headline and nothing is added across them.
   return (
-    <StatShell label={label}>
-      <p className="m-0 mt-1 truncate text-xl font-semibold tabular-nums text-ink" title={formatMoney(first.monthly, first.currency, language)}>
-        {formatMoney(first.monthly, first.currency, language)}
-      </p>
-      <p className="m-0 mt-0.5 truncate text-sm text-ink-2">from {plural(first.subscriptions, "Stripe subscription", "Stripe subscriptions")}</p>
-      {rest.map((l) => (
-        <p key={l.currency} className="m-0 mt-1 truncate text-sm tabular-nums text-ink">
-          {formatMoney(l.monthly, l.currency, language)} <span className="text-ink-2">from {plural(l.subscriptions, "subscription", "subscriptions")}</span>
-        </p>
-      ))}
-      {revenue.uncounted > 0 ? (
-        <p className="m-0 mt-1 text-sm text-ink-2">{plural(revenue.uncounted, "subscription has", "subscriptions have")} a tiered or metered price and {revenue.uncounted === 1 ? "is" : "are"} not counted.</p>
-      ) : null}
-    </StatShell>
+    <StatTile label={label}>
+      <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+        {revenue.lines.map((l) => (
+          <li key={l.currency} className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-row font-semibold tabular-nums text-ink" title={formatMoney(l.monthly, l.currency, language)}>
+              {formatMoney(l.monthly, l.currency, language)}
+            </span>
+            <span className="shrink-0 text-xs text-ink-2">{plural(l.subscriptions, "subscription", "subscriptions")}</span>
+          </li>
+        ))}
+      </ul>
+      {revenue.uncounted > 0 ? <p className="m-0 mt-1 text-xs text-ink-2">{untold(revenue.uncounted)}.</p> : null}
+    </StatTile>
   );
 }
 
@@ -318,9 +303,9 @@ function AttentionRows({ a }: { a: Overview["attention"] }) {
   // count is not repeated inside the sentence, so each fact is read once.
   const one = (v: number, single: string, many: string) => (v === 1 ? single : many);
   const rows: AttentionRow[] = [
-    { key: "trials", count: a.trialsEndingIn7, icon: AlarmClock, sentence: one(a.trialsEndingIn7, "Trial ends in the next 7 days", "Trials end in the next 7 days"), href: "/admin/companies?view=trials" },
+    { key: "trials", count: a.trialsEndingIn7, icon: AlarmClock, sentence: one(a.trialsEndingIn7, "Trial ends in the next 7 days", "Trials end in the next 7 days"), href: "/admin/companies?view=trials&trial_ends=7d" },
     { key: "pastdue", count: a.pastDue, icon: CreditCard, sentence: one(a.pastDue, "Subscription is past due", "Subscriptions are past due"), href: "/admin/companies?view=paying&subscription=past_due" },
-    { key: "owners", count: a.withoutOwner, icon: ShieldOff, sentence: one(a.withoutOwner, "Workspace has nobody with Owner access", "Workspaces have nobody with Owner access"), href: "/admin/companies?view=all&owners=0" },
+    { key: "owners", count: a.withoutOwner, icon: ShieldOff, sentence: one(a.withoutOwner, "Workspace has nobody with Owner access", "Workspaces have nobody with Owner access"), href: "/admin/companies?owners=0&status=ACTIVE,TRIAL,SUSPENDED" },
     { key: "suspended", count: a.suspended, icon: PauseCircle, sentence: one(a.suspended, "Workspace is suspended", "Workspaces are suspended"), href: "/admin/companies?view=suspended" },
     { key: "codes", count: a.codesRedeemedIn7, icon: KeyRound, sentence: one(a.codesRedeemedIn7, "AppSumo code was redeemed this week", "AppSumo codes were redeemed this week"), href: `/admin/appsumo?view=redeemed&redeemed_from=${a.codesSince}` },
   ].filter((r) => r.count > 0);

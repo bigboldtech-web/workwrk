@@ -11,13 +11,17 @@ import {
   derivedRevenue,
   formatMoney,
   fromMinor,
+  isWorkspaceUseType,
+  isWorkwrkStripe,
   minorUnitExponent,
   monthKeyLabel,
   monthlyMinor,
   parseRange,
   rangeWindow,
   revenueLines,
+  subscriptionMonthly,
   topCompanies,
+  type CouponLite,
 } from "./numbers";
 
 const NOW = new Date("2026-09-29T15:30:00.000Z");
@@ -131,8 +135,8 @@ describe("revenueLines", () => {
     ]);
     expect(uncounted).toBe(0);
     expect(lines).toEqual([
-      { currency: "USD", monthly: 9000, subscriptions: 2 },
-      { currency: "EUR", monthly: 4500, subscriptions: 1 },
+      { currency: "USD", monthly: 9000, subscriptions: 2, companies: 2 },
+      { currency: "EUR", monthly: 4500, subscriptions: 1, companies: 1 },
     ]);
   });
   it("leaves out a subscription whose price has no single amount, and counts it", () => {
@@ -142,11 +146,120 @@ describe("revenueLines", () => {
       { id: "c", items: [item("usd", 100)] },
     ]);
     expect(uncounted).toBe(2);
-    expect(lines).toEqual([{ currency: "USD", monthly: 100, subscriptions: 1 }]);
+    expect(lines).toEqual([{ currency: "USD", monthly: 100, subscriptions: 1, companies: 1 }]);
   });
   it("counts a subscription with two items once", () => {
     const { lines } = revenueLines([{ id: "a", items: [item("usd", 100), item("usd", 200)] }]);
-    expect(lines[0]).toEqual({ currency: "USD", monthly: 300, subscriptions: 1 });
+    expect(lines[0]).toEqual({ currency: "USD", monthly: 300, subscriptions: 1, companies: 1 });
+  });
+  it("counts a company once when its customer has two subscriptions", () => {
+    const { lines } = revenueLines([
+      { id: "a", customer: "cus_1", items: [item("usd", 100)] },
+      { id: "b", customer: "cus_1", items: [item("usd", 200)] },
+    ]);
+    expect(lines[0]).toEqual({ currency: "USD", monthly: 300, subscriptions: 2, companies: 1 });
+    expect(derivedRevenue(lines[0]).arpu).toBe(300);
+  });
+});
+
+describe("subscriptionMonthly (what Stripe charges, after discounts)", () => {
+  const coupon = (id: string, over: Partial<CouponLite>): CouponLite => ({ id, percentOff: null, amountOff: null, currency: null, products: null, ...over });
+  const coupons = new Map<string, CouponLite>([
+    ["half", coupon("half", { percentOff: 50 })],
+    ["comp", coupon("comp", { percentOff: 100 })],
+    ["ten", coupon("ten", { amountOff: 1000, currency: "usd" })],
+    ["ten_multi", coupon("ten_multi", { amountOff: 1000, currency: "usd", currencyOptions: { EUR: 900 } })],
+    ["prod_a_only", coupon("prod_a_only", { percentOff: 50, products: ["prod_a"] })],
+  ]);
+  const it1 = (unitAmount: number, qty = 1, extra: Record<string, unknown> = {}) => ({
+    currency: "usd",
+    unitAmount,
+    quantity: qty,
+    interval: "month",
+    intervalCount: 1,
+    metered: false,
+    ...extra,
+  });
+  it("takes a percent coupon off the subscription", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(800, 10)], discounts: ["half"] }, coupons)).toEqual({ currency: "USD", monthly: 4000 });
+  });
+  it("a 100% coupon charges nothing, so a comped pilot adds nothing", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(5000)], discounts: ["comp"] }, coupons)?.monthly).toBe(0);
+  });
+  it("takes an amount coupon once per interval and never below zero", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(3000)], discounts: ["ten"] }, coupons)?.monthly).toBe(2000);
+    expect(subscriptionMonthly({ id: "s", items: [it1(500)], discounts: ["ten"] }, coupons)?.monthly).toBe(0);
+    // A yearly price: 1,000 off a 12,000 year is 11,000 a year, 917 a month.
+    expect(subscriptionMonthly({ id: "s", items: [it1(12000, 1, { interval: "year" })], discounts: ["ten"] }, coupons)?.monthly).toBe(917);
+  });
+  it("uses the coupon's amount in the subscription's currency, or leaves it out", () => {
+    const eur = { ...it1(3000), currency: "eur" };
+    expect(subscriptionMonthly({ id: "s", items: [eur], discounts: ["ten_multi"] }, coupons)).toEqual({ currency: "EUR", monthly: 2100 });
+    expect(subscriptionMonthly({ id: "s", items: [eur], discounts: ["ten"] }, coupons)).toBeNull();
+  });
+  it("applies item discounts, and a coupon limited to some products only to those", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000, 1, { discounts: ["half"] }), it1(1000)] }, coupons)?.monthly).toBe(1500);
+    expect(
+      subscriptionMonthly({ id: "s", items: [it1(1000, 1, { product: "prod_a" }), it1(1000, 1, { product: "prod_b" })], discounts: ["prod_a_only"] }, coupons)?.monthly,
+    ).toBe(1500);
+  });
+  it("leaves out a discount it cannot read rather than guess", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000)], discounts: [null] }, coupons)).toBeNull();
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000)], discounts: ["gone"] }, coupons)).toBeNull();
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000)], discounts: ["half"] })).toBeNull();
+    const { lines, uncounted } = revenueLines([{ id: "s", items: [it1(1000)], discounts: ["gone"] }], coupons);
+    expect(lines).toEqual([]);
+    expect(uncounted).toBe(1);
+  });
+  it("leaves out items in two currencies or two intervals", () => {
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000), { ...it1(1000), currency: "eur" }] }, coupons)).toBeNull();
+    expect(subscriptionMonthly({ id: "s", items: [it1(1000), it1(1000, 1, { interval: "year" })] }, coupons)).toBeNull();
+  });
+});
+
+describe("isWorkwrkStripe", () => {
+  const keys = {
+    priceIds: new Set(["price_growth"]),
+    customers: new Set(["cus_ours"]),
+    subscriptions: new Set(["sub_ours"]),
+    organizationIds: new Set(["org_1"]),
+  };
+  it("counts only what WorkwrK can name as its own", () => {
+    expect(isWorkwrkStripe({ subscriptionId: "sub_ours" }, keys)).toBe(true);
+    expect(isWorkwrkStripe({ customer: "cus_ours" }, keys)).toBe(true);
+    expect(isWorkwrkStripe({ organizationId: "org_1" }, keys)).toBe(true);
+    expect(isWorkwrkStripe({ priceIds: ["price_other", "price_growth"] }, keys)).toBe(true);
+    // Another product in the same Stripe account, or checkout metadata naming no company that exists.
+    expect(isWorkwrkStripe({ subscriptionId: "sub_x", customer: "cus_x", organizationId: "org_gone", priceIds: ["price_other"] }, keys)).toBe(false);
+    expect(isWorkwrkStripe({}, keys)).toBe(false);
+  });
+});
+
+describe("isWorkspaceUseType", () => {
+  it("never counts signup, signing in or out, switching, security, migrations or staff rows as use", () => {
+    for (const t of [
+      "organization_created",
+      "login",
+      "logout",
+      "session.idle",
+      "org.switch.in",
+      "org.switch.out",
+      "password_changed",
+      "mfa_enabled",
+      "staff.status.changed",
+      "staff.plan.changed",
+      "admin.org.plan_changed",
+      "work.tasks_migrated",
+      "access.settings.migrated",
+      "legacy_marketing_imported",
+    ]) {
+      expect(isWorkspaceUseType(t)).toBe(false);
+    }
+  });
+  it("counts what people do in the workspace", () => {
+    for (const t of ["task_created", "sop_created", "table.create", "okr_check_in", "kudos_given", "user.invited", "access.granted"]) {
+      expect(isWorkspaceUseType(t)).toBe(true);
+    }
   });
 });
 
@@ -181,6 +294,9 @@ describe("funnel and bars", () => {
     expect(conversionPct(1, 3)).toBe(33);
     expect(conversionPct(0, 0)).toBeNull();
     expect(conversionPct(4, null)).toBeNull();
+  });
+  it("never prints more than 100%", () => {
+    expect(conversionPct(5, 1)).toBe(100);
   });
   it("bars are relative to the largest and clamp", () => {
     expect(barPct(5, 10)).toBe(50);

@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
-import { companyViewWhere, hasOwnerWhere } from "@/lib/admin/companies-list";
+import { companyViewWhere, hasOwnerWhere, trialEndsWithinWhere } from "@/lib/admin/companies-list";
 import { DAY_MS } from "@/lib/admin/numbers";
-import { readMonthlyRevenue } from "@/lib/admin/stripe-revenue";
+import { readMonthlyRevenue, withStripeDeadline } from "@/lib/admin/stripe-revenue";
 
 /**
  * GET /api/admin/overview: the Staff console's Overview (spec-admin-backoffice
@@ -13,10 +13,16 @@ import { readMonthlyRevenue } from "@/lib/admin/stripe-revenue";
  *   people     every person not deleted, across every company, and new in 30 days
  *   paying     companies on a Stripe subscription that is active or past due
  *              (the Companies list's Paying view, so the two always agree)
- *   revenue    what Stripe charges per month, one line per currency, never
- *              converted; "unavailable" when billing is not connected and
- *              "error" when Stripe did not answer. Never a price list.
- *   attention  each count is exactly what its link on the page opens
+ *   revenue    what Stripe charges per month for WorkwrK's subscriptions
+ *              (active or past due, after their discounts), one line per
+ *              currency, never converted; "unavailable" when billing is not
+ *              connected and "error" when Stripe did not answer in time (the
+ *              database numbers never wait on Stripe for more than a few
+ *              seconds). Never a price list.
+ *   attention  each count is exactly what its link on the page opens: the
+ *              trials row opens Trials filtered to "Ends in the next 7 days",
+ *              and the no-Owner row leaves cancelled companies out on both
+ *              sides (nothing is left to act on in one)
  *   newest     the eight most recent companies
  *
  * Counts, plans, statuses and dates only: no customer's work is read.
@@ -34,7 +40,6 @@ export async function GET() {
   // the count is exactly what /admin/appsumo?view=redeemed&redeemed_from=
   // (a whole-day filter) opens.
   const codesSince = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 6 * DAY_MS);
-  const in7 = new Date(now.getTime() + 7 * DAY_MS);
 
   const [
     companiesTotal,
@@ -55,14 +60,13 @@ export async function GET() {
     prisma.user.count({ where: { deletedAt: null } }),
     prisma.user.count({ where: { deletedAt: null, createdAt: { gte: ago30 } } }),
     prisma.organization.count({ where: companyViewWhere("paying") }),
-    // A company in the Trials view whose trial ends within the week.
-    prisma.organization.count({
-      where: { AND: [companyViewWhere("trials"), { subscription: { is: { trialEndsAt: { gte: now, lte: in7 } } } }] },
-    }),
+    // The Trials view with the Filter panel's "Ends in the next 7 days" (?trial_ends=7d).
+    prisma.organization.count({ where: { AND: [companyViewWhere("trials"), trialEndsWithinWhere(now)] } }),
     // Past due is a Subscription value (the link opens Paying with the
     // Subscription filter at Past due), counted the way that list counts it.
     prisma.organization.count({ where: { AND: [companyViewWhere("paying"), { subscription: { is: { status: "PAST_DUE" } } }] } }),
-    prisma.organization.count({ where: { NOT: hasOwnerWhere() } }),
+    // Opened as ?owners=0&status=ACTIVE,TRIAL,SUSPENDED: every status but Cancelled.
+    prisma.organization.count({ where: { AND: [{ status: { not: "CANCELLED" } }, { NOT: hasOwnerWhere() }] } }),
     prisma.organization.count({ where: companyViewWhere("suspended") }),
     prisma.appsumoCode.count({ where: { redeemedAt: { gte: codesSince }, refundedAt: null } }),
     prisma.organization.findMany({
@@ -77,7 +81,7 @@ export async function GET() {
         _count: { select: { users: { where: { deletedAt: null } } } },
       },
     }),
-    readMonthlyRevenue(),
+    withStripeDeadline(readMonthlyRevenue()),
   ]);
 
   return jsonSuccess(

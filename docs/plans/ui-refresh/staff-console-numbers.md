@@ -25,7 +25,7 @@ The old number was `plan price x number of companies on that plan`, summed over 
 
 ## What the numbers mean now
 
-**Monthly revenue** is every active Stripe subscription, at Stripe's own price object for each item times its quantity, spread over the price's interval (a yearly price counts one twelfth per month). It is reported **one line per currency** and never converted or added across currencies. Prices are before any discount or coupon. A subscription whose price has no single amount (tiered or metered) is not guessed: it is left out and the page says how many were left out. Lifetime deals and manual invoices are not counted.
+**Monthly revenue** is every WorkwrK Stripe subscription that is active or past due (the same "Paying" the Companies list counts), at Stripe's own price object for each item times its quantity, after the discounts on the item and on the subscription, spread over the price's interval (a yearly price counts one twelfth per month). It is reported **one line per currency** and never converted or added across currencies. "WorkwrK's" means one of the priceCatalog price ids, a customer or subscription our database holds, or checkout's metadata naming a company that exists; anything else in the same Stripe account is not counted. A subscription whose price has no single amount (tiered or metered), or whose discount has no exact amount in its currency, is not guessed: it is left out and the page says how many were left out. Lifetime deals and manual invoices are not counted. The chart is what paid invoices of those subscriptions took, by the day they were paid, before refunds. A page never waits on Stripe for more than six seconds: past that the card offers Retry while the read finishes and fills the hour's cache.
 
 **Annual run rate** is monthly revenue times 12. **Average per paying company** is monthly revenue divided by the number of Stripe subscriptions in that currency.
 
@@ -35,11 +35,11 @@ Stripe is asked at most once an hour; the Revenue card says when the figures are
 
 **Paying** (Overview) is companies on a Stripe subscription that is active or past due: exactly the Companies list's Paying view.
 
-**Still active** (Retention) means somebody in that workspace did something recorded in its activity log in the last 30 days. It is no longer the billing status.
+**Still active** (Retention) means somebody in that workspace did something recorded in its activity log in the last 30 days. It is no longer the billing status. "Somebody in that workspace" is a person whose home workspace or membership is that company; the signup row, signing in and out, switching workspaces, a person's own security settings, data migrations and every staff row do not count (lib/admin/workspace-use.ts). Cohorts hold only companies that signed up inside the range.
 
-**Signup funnel** counts one group of companies, those that signed up in the range, through every step: finished setup, created at least one SOP, KRA or task (board tasks included), and paying. The old funnel counted "created something" across every company in the product, so that step could be larger than the number who signed up.
+**Signup funnel** counts one group of companies, those that signed up in the range, through nested steps: finished setup; of those, created at least one SOP, KRA or task (board tasks included); of those, paying. No step can exceed the one above. The old funnel counted "created something" across every company in the product, so that step could be larger than the number who signed up.
 
-**Busiest workspaces** counts recorded actions in the selected range only.
+**Busiest workspaces** counts recorded actions in the selected range only, by the same rule as Still active.
 
 **Plans** counts every company that is not cancelled, per plan. There is no revenue per plan, because Stripe does not know our plan names.
 

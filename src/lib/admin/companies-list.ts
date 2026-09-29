@@ -61,6 +61,14 @@ export function companyViewWhere(view: CompanyView): Prisma.OrganizationWhereInp
 
 /* ───────────────────────── filters ───────────────────────── */
 
+/** "Trial ends in the next 7 days": the one trial-end window the console asks about (Overview's Needs attention). */
+export const TRIAL_ENDS_DAYS = 7;
+
+/** A subscription trial that ends between now and `days` from now. */
+export function trialEndsWithinWhere(now: Date, days = TRIAL_ENDS_DAYS): Prisma.OrganizationWhereInput {
+  return { subscription: { is: { trialEndsAt: { gte: now, lte: new Date(now.getTime() + days * 24 * 60 * 60 * 1000) } } } };
+}
+
 export const SUBSCRIPTION_FILTERS = ["stripe", "lifetime", "none", "past_due"] as const;
 export type SubscriptionFilter = (typeof SUBSCRIPTION_FILTERS)[number];
 export const SUBSCRIPTION_FILTER_LABEL: Record<SubscriptionFilter, string> = {
@@ -87,6 +95,8 @@ export interface CompanyListParams {
   /** Module app keys (MODULES[].appKey): "chat", "tables". Every one named must be on. */
   modules: string[];
   owners: "has" | "none" | null;
+  /** "7d": the trial ends in the next 7 days. */
+  trialEnds: "7d" | null;
   peopleMin: number | null;
   peopleMax: number | null;
   /** YYYY-MM-DD, inclusive. */
@@ -137,6 +147,7 @@ export function parseCompanyListParams(sp: URLSearchParams): CompanyListParams {
     // "0" is the spelling spec 2.1's "Needs attention" link uses
     // (?owners=0), read as "none" so that link never opens an unfiltered list.
     owners: owners === "has" || owners === "none" ? owners : owners === "0" ? "none" : null,
+    trialEnds: sp.get("trial_ends") === "7d" ? "7d" : null,
     peopleMin: parseCount(sp.get("people_min")),
     peopleMax: parseCount(sp.get("people_max")),
     signedFrom: parseDay(sp.get("signed_from")),
@@ -156,6 +167,7 @@ export function activeCompanyFilterCount(p: CompanyListParams): number {
     p.subscriptions.length > 0,
     p.modules.length > 0,
     p.owners !== null,
+    p.trialEnds !== null,
     p.peopleMin !== null || p.peopleMax !== null,
     p.signedFrom !== null || p.signedTo !== null,
   ].filter(Boolean).length;
@@ -200,7 +212,7 @@ function subscriptionFilterWhere(f: SubscriptionFilter): Prisma.OrganizationWher
  */
 export function companyFilterWhere(
   p: CompanyListParams,
-  opts: { peopleIds?: string[] | null } = {},
+  opts: { peopleIds?: string[] | null; now?: Date } = {},
 ): Prisma.OrganizationWhereInput {
   const and: Prisma.OrganizationWhereInput[] = [];
   if (p.search) and.push(companySearchWhere(p.search));
@@ -213,6 +225,7 @@ export function companyFilterWhere(
   }
   if (p.owners === "has") and.push(hasOwnerWhere());
   if (p.owners === "none") and.push({ NOT: hasOwnerWhere() });
+  if (p.trialEnds === "7d") and.push(trialEndsWithinWhere(opts.now ?? new Date()));
   if (opts.peopleIds) {
     const zeroAllowed = (p.peopleMin ?? 0) <= 0;
     and.push({
@@ -256,6 +269,7 @@ export function companyListQuery(p: Partial<CompanyListParams>): string {
   if (p.subscriptions?.length) q.set("subscription", p.subscriptions.join(","));
   if (p.modules?.length) q.set("modules", p.modules.join(","));
   if (p.owners) q.set("owners", p.owners);
+  if (p.trialEnds) q.set("trial_ends", p.trialEnds);
   if (p.peopleMin != null) q.set("people_min", String(p.peopleMin));
   if (p.peopleMax != null) q.set("people_max", String(p.peopleMax));
   if (p.signedFrom) q.set("signed_from", p.signedFrom);

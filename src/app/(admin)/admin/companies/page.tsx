@@ -191,7 +191,7 @@ export default function CompaniesPage() {
     setPeopleOn(false);
     setSignedOn(false);
     setParams({
-      search: "", plans: [], statuses: [], subscriptions: [], modules: [], owners: null,
+      search: "", plans: [], statuses: [], subscriptions: [], modules: [], owners: null, trialEnds: null,
       peopleMin: null, peopleMax: null, signedFrom: null, signedTo: null,
       ...extra,
     });
@@ -394,6 +394,9 @@ export default function CompaniesPage() {
           <FilterGroup label="Owners">
             <FilterRow label="Has an Owner" checked={params.owners === "has"} onCheckedChange={(on) => setParams({ owners: on ? "has" : null })} />
             <FilterRow label="Has nobody" checked={params.owners === "none"} onCheckedChange={(on) => setParams({ owners: on ? "none" : null })} />
+          </FilterGroup>
+          <FilterGroup label="Trial">
+            <FilterRow label="Ends in the next 7 days" checked={params.trialEnds === "7d"} onCheckedChange={(on) => setParams({ trialEnds: on ? "7d" : null })} />
           </FilterGroup>
           <FilterGroup label="People">
             <FilterRow

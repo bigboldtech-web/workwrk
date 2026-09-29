@@ -19,7 +19,9 @@ import {
   type AnalyticsRange,
   type RankedCompany,
 } from "@/lib/admin/numbers";
-import { readChargedSeries, readMonthlyRevenue } from "@/lib/admin/stripe-revenue";
+import { readChargedSeries, readMonthlyRevenue, withStripeDeadline } from "@/lib/admin/stripe-revenue";
+import { busiestByUse, usedCompanyIds } from "@/lib/admin/workspace-use";
+import { VALID_PLANS } from "@/lib/admin/company-patch-rules";
 import { planLabel } from "@/lib/staff-audit-helpers";
 
 /**
@@ -27,22 +29,27 @@ import { planLabel } from "@/lib/staff-audit-helpers";
  * (spec-admin-backoffice 2.5). Platform staff only. `&format=csv` downloads
  * the same numbers for the same range.
  *
- *   revenue       what Stripe charges per month (active subscriptions at
- *                 Stripe's own prices) and what paid invoices took per
- *                 bucket, ONE LINE PER CURRENCY, never converted, with the
- *                 Annual run rate (monthly x 12) and the average per paying
- *                 company derived from it. "unavailable" when billing is not
- *                 connected, "error" when Stripe did not answer.
+ *   revenue       what Stripe charges per month for WorkwrK's subscriptions
+ *                 (active or past due, after their discounts) and what their
+ *                 paid invoices took per bucket, ONE LINE PER CURRENCY, never
+ *                 converted, with the Annual run rate (monthly x 12) and the
+ *                 average per paying company derived from it (see
+ *                 lib/admin/stripe-revenue.ts). "unavailable" when billing is
+ *                 not connected, "error" when Stripe did not answer in time.
  *   growth        new companies and new people in the range, companies per
  *                 bucket, on trial now, average people per company
  *   funnel        of the companies that signed up in the range: finished
- *                 setup, created something, paying (every step counts the
- *                 same companies, so no step can exceed the one above)
- *   retention     a cohort per signup month; Still active = recorded activity
- *                 in the last 30 days, not a billing flag
- *   cancellations the last ten subscription cancellations in the range
- *   biggest       top five by people; busiest = top five by recorded actions
- *                 in the range
+ *                 setup; of those, created something; of those, paying. The
+ *                 steps are nested, so no step can exceed the one above.
+ *   retention     a cohort per signup month, counting only companies that
+ *                 signed up inside the range; Still active = somebody in that
+ *                 workspace did something in the last 30 days
+ *                 (lib/admin/workspace-use.ts), not a billing flag and not a
+ *                 sign-in, a signup row or a staff change
+ *   cancellations the last ten in the range: a Stripe subscription cancelled,
+ *                 or a workspace a staff member set to Cancelled
+ *   biggest       top five by people; busiest = top five by use in the range
+ *                 (the same definition as Still active)
  *   plans         companies per plan (cancelled companies not counted); no
  *                 revenue per plan, because Stripe does not know our plans
  *
@@ -50,8 +57,13 @@ import { planLabel } from "@/lib/staff-audit-helpers";
  * price list: see docs/plans/ui-refresh/staff-console-numbers.md.
  */
 
-/** A window never asks Prisma for an unbounded id list. */
+/** A window never reads an unbounded list of companies into memory. */
 const WINDOW_COMPANY_CAP = 50_000;
+
+/** Signed up in the range, as a where clause (no id list, so no bind-parameter limit). */
+const signedUpSince = (start: Date) => ({ createdAt: { gte: start } });
+const SETUP_DONE = { settings: { path: ["setupCompleted"], equals: true } };
+const CREATED_SOMETHING = { OR: [{ sops: { some: {} } }, { kras: { some: {} } }, { tasks: { some: {} } }, { items: { some: {} } }] };
 
 async function namesFor(ids: string[]): Promise<Map<string, string>> {
   if (ids.length === 0) return new Map();
@@ -70,7 +82,10 @@ async function ranked(groups: { organizationId: string | null; n: number }[]): P
 
 async function computeAnalytics(range: AnalyticsRange, now: Date) {
   const w = rangeWindow(range, now);
-  const cohortStart = startOfMonthUTC(w.start);
+  // Cohorts hold only companies that signed up inside the range, so every
+  // card on the page counts the same companies. On 30 days the first month's
+  // cohort is partial, and the page says so.
+  const cohortStart = w.start;
   const ago30 = new Date(now.getTime() - 30 * DAY_MS);
 
   const [
@@ -78,9 +93,10 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     totalPeople,
     newPeople,
     onTrial,
+    newCompanies,
     windowCompanies,
-    cohortCompanies,
     cancellationRows,
+    staffCancellations,
     peopleGroups,
     actionGroups,
     planGroups,
@@ -91,15 +107,12 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     prisma.user.count({ where: { deletedAt: null } }),
     prisma.user.count({ where: { deletedAt: null, createdAt: { gte: w.start } } }),
     prisma.organization.count({ where: companyViewWhere("trials") }),
+    prisma.organization.count({ where: signedUpSince(w.start) }),
+    // The companies behind the growth bars and the cohorts (the same ones).
     prisma.organization.findMany({
-      where: { createdAt: { gte: w.start } },
-      select: { id: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-      take: WINDOW_COMPANY_CAP,
-    }),
-    prisma.organization.findMany({
-      where: { createdAt: { gte: cohortStart } },
+      where: signedUpSince(cohortStart),
       select: { id: true, createdAt: true, status: true, subscription: { select: { status: true } } },
+      orderBy: { createdAt: "asc" },
       take: WINDOW_COMPANY_CAP,
     }),
     prisma.subscription.findMany({
@@ -108,6 +121,19 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       take: 10,
       select: { canceledAt: true, plan: true, organization: { select: { id: true, name: true } } },
     }),
+    // A workspace a staff member cancelled on its company page: Stripe never
+    // hears of it (a lifetime deal, a trial), so its record is the StaffAction.
+    prisma.staffAction.findMany({
+      where: {
+        action: "admin.org.status_changed",
+        createdAt: { gte: w.start, lte: now },
+        targetCompanyId: { not: null },
+        after: { path: ["status"], equals: "CANCELLED" },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      select: { createdAt: true, targetCompany: { select: { id: true, name: true, plan: true } } },
+    }),
     prisma.user.groupBy({
       by: ["organizationId"],
       where: { deletedAt: null },
@@ -115,55 +141,35 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       orderBy: { _count: { organizationId: "desc" } },
       take: 12,
     }),
-    prisma.activityLog.groupBy({
-      by: ["organizationId"],
-      where: { createdAt: { gte: w.start } },
-      _count: { _all: true },
-      orderBy: { _count: { organizationId: "desc" } },
-      take: 12,
-    }),
+    busiestByUse(w.start),
     prisma.organization.groupBy({ by: ["plan"], where: { status: { not: "CANCELLED" } }, _count: { _all: true } }),
-    readMonthlyRevenue(),
-    readChargedSeries(w),
+    withStripeDeadline(readMonthlyRevenue()),
+    withStripeDeadline(readChargedSeries(w)),
   ]);
 
-  const windowIds = windowCompanies.map((c) => c.id);
-  const cohortIds = cohortCompanies.map((c) => c.id);
-
+  const signedUp = signedUpSince(w.start);
+  // Nested: each step counts only the companies that did every step above it.
   const [finishedSetup, createdSomething, payingInWindow, activeRecently, payingCohort] = await Promise.all([
-    windowIds.length
-      ? prisma.organization.count({ where: { id: { in: windowIds }, settings: { path: ["setupCompleted"], equals: true } } })
-      : 0,
-    windowIds.length
-      ? prisma.organization.count({
-          where: {
-            id: { in: windowIds },
-            OR: [{ sops: { some: {} } }, { kras: { some: {} } }, { tasks: { some: {} } }, { items: { some: {} } }],
-          },
-        })
-      : 0,
-    windowIds.length ? prisma.organization.count({ where: { AND: [{ id: { in: windowIds } }, companyViewWhere("paying")] } }) : 0,
-    cohortIds.length
-      ? prisma.activityLog.groupBy({ by: ["organizationId"], where: { organizationId: { in: cohortIds }, createdAt: { gte: ago30 } } })
-      : [],
-    cohortIds.length
-      ? prisma.organization.findMany({ where: { AND: [{ id: { in: cohortIds } }, companyViewWhere("paying")] }, select: { id: true } })
-      : [],
+    prisma.organization.count({ where: { AND: [signedUp, SETUP_DONE] } }),
+    prisma.organization.count({ where: { AND: [signedUp, SETUP_DONE, CREATED_SOMETHING] } }),
+    prisma.organization.count({ where: { AND: [signedUp, SETUP_DONE, CREATED_SOMETHING, companyViewWhere("paying")] } }),
+    usedCompanyIds(ago30, cohortStart),
+    prisma.organization.findMany({ where: { AND: [signedUpSince(cohortStart), companyViewWhere("paying")] }, select: { id: true }, take: WINDOW_COMPANY_CAP }),
   ]);
 
   const cohorts = buildCohorts(
-    cohortCompanies,
+    windowCompanies,
     {
-      active: new Set(activeRecently.map((r) => r.organizationId)),
+      active: new Set(activeRecently),
       paying: new Set(payingCohort.map((r) => r.id)),
-      cancelled: new Set(cohortCompanies.filter((c) => c.status === "CANCELLED" || c.subscription?.status === "CANCELED").map((c) => c.id)),
+      cancelled: new Set(windowCompanies.filter((c) => c.status === "CANCELLED" || c.subscription?.status === "CANCELED").map((c) => c.id)),
     },
     w,
   );
 
   const [biggest, busiest] = await Promise.all([
     ranked(peopleGroups.map((g) => ({ organizationId: g.organizationId, n: g._count._all }))),
-    ranked(actionGroups.map((g) => ({ organizationId: g.organizationId, n: g._count._all }))),
+    ranked(actionGroups),
   ]);
 
   // One line per currency: every currency with an active subscription or a
@@ -173,7 +179,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     | { source: "error" }
     | {
         source: "stripe";
-        lines: { currency: string; monthly: number; arr: number; arpu: number | null; subscriptions: number; series: number[] | null }[];
+        lines: { currency: string; monthly: number; arr: number; arpu: number | null; subscriptions: number; companies: number; series: number[] | null }[];
         seriesFailed: boolean;
         uncounted: number;
         truncated: boolean;
@@ -185,7 +191,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     const series = charged.source === "stripe" ? charged.series : new Map<string, number[]>();
     const currencies = new Set<string>([...monthly.lines.map((l) => l.currency), ...series.keys()]);
     const lines = [...currencies].map((currency) => {
-      const line = monthly.lines.find((l) => l.currency === currency) ?? { currency, monthly: 0, subscriptions: 0 };
+      const line = monthly.lines.find((l) => l.currency === currency) ?? { currency, monthly: 0, subscriptions: 0, companies: 0 };
       const d = derivedRevenue(line);
       return {
         currency,
@@ -193,6 +199,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
         arr: d.arr,
         arpu: d.arpu,
         subscriptions: line.subscriptions,
+        companies: line.companies ?? line.subscriptions,
         series: charged.source === "stripe" ? series.get(currency) ?? w.buckets.map(() => 0) : null,
       };
     });
@@ -203,7 +210,8 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       seriesFailed: charged.source !== "stripe",
       uncounted: monthly.uncounted,
       truncated: monthly.truncated || (charged.source === "stripe" && charged.truncated),
-      asOf: monthly.asOf,
+      // The older of the two reads, so the card never claims fresher figures than it shows.
+      asOf: charged.source === "stripe" && charged.asOf < monthly.asOf ? charged.asOf : monthly.asOf,
     };
   }
 
@@ -219,7 +227,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     },
     revenue,
     growth: {
-      newCompanies: windowCompanies.length,
+      newCompanies,
       newPeople,
       onTrial,
       byBucket: countByBucket(
@@ -231,27 +239,53 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       totalCompanies,
     },
     funnel: {
-      signedUp: windowCompanies.length,
+      signedUp: newCompanies,
       finishedSetup,
       createdSomething,
       paying: payingInWindow,
       windowDays: w.windowDays,
     },
-    retention: { cohorts },
-    cancellations: cancellationRows.map((r) => ({
-      id: r.organization.id,
-      name: r.organization.name,
-      plan: r.plan,
-      canceledAt: r.canceledAt?.toISOString() ?? null,
-    })),
+    retention: { cohorts, from: cohortStart.toISOString(), partialFirst: cohortStart.getTime() !== startOfMonthUTC(cohortStart).getTime() },
+    cancellations: mergeCancellations(
+      cancellationRows.map((r) => ({
+        id: r.organization.id,
+        name: r.organization.name,
+        plan: r.plan as string,
+        canceledAt: r.canceledAt?.toISOString() ?? null,
+        what: "subscription" as const,
+      })),
+      staffCancellations.flatMap((r) =>
+        r.targetCompany
+          ? [{ id: r.targetCompany.id, name: r.targetCompany.name, plan: r.targetCompany.plan as string, canceledAt: r.createdAt.toISOString(), what: "workspace" as const }]
+          : [],
+      ),
+    ),
     biggest,
     busiest,
-    plans: ["STARTER", "GROWTH", "SCALE", "ENTERPRISE"].map((plan) => ({
+    // Every plan the product sells, plus any value the database holds that
+    // this list does not know yet, so a new plan is never silently left out.
+    plans: [...new Set<string>([...VALID_PLANS, ...planGroups.map((g) => g.plan as string)])].map((plan) => ({
       plan,
       count: planGroups.find((g) => g.plan === plan)?._count._all ?? 0,
     })),
     generatedAt: now.toISOString(),
   };
+}
+
+type Cancellation = { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" };
+
+/** Newest first, the last ten, one row per company and kind of cancellation. */
+function mergeCancellations(a: Cancellation[], b: Cancellation[]): Cancellation[] {
+  const seen = new Set<string>();
+  return [...a, ...b]
+    .sort((x, y) => (y.canceledAt ?? "").localeCompare(x.canceledAt ?? ""))
+    .filter((c) => {
+      const k = `${c.id}:${c.what}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 10);
 }
 
 type Analytics = Awaited<ReturnType<typeof computeAnalytics>>;
@@ -285,9 +319,10 @@ function analyticsCsv(a: Analytics): string {
     rows.push(["Retention", `${monthKeyLabel(c.month, "en-GB")} paying`, c.paying, ""]);
     rows.push(["Retention", `${monthKeyLabel(c.month, "en-GB")} cancelled`, c.cancelled, ""]);
   }
-  for (const c of a.cancellations) rows.push(["Cancellations", c.name, `${planLabel(c.plan)} ${c.canceledAt?.slice(0, 10) ?? ""}`.trim(), ""]);
+  for (const c of a.cancellations)
+    rows.push(["Cancellations", c.name, `${c.what === "workspace" ? "Workspace" : "Subscription"} ${planLabel(c.plan)} ${c.canceledAt?.slice(0, 10) ?? ""}`.trim(), ""]);
   for (const c of a.biggest) rows.push(["Biggest workspaces (people)", c.name, c.value, ""]);
-  for (const c of a.busiest) rows.push(["Busiest workspaces (actions)", c.name, c.value, ""]);
+  for (const c of a.busiest) rows.push(["Busiest workspaces (actions by people in the workspace)", c.name, c.value, ""]);
   for (const p of a.plans) rows.push(["Plans (companies)", planLabel(p.plan), p.count, ""]);
   return toCsv(rows);
 }

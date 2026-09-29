@@ -45,6 +45,17 @@ describe("parseCompanyListParams", () => {
     expect(p.peopleMin).toBeNull();
     expect(p.signedFrom).toBeNull();
   });
+  it("reads Trial ends in the next 7 days as a counted filter, and writes it back", () => {
+    const p = parseCompanyListParams(sp("view=trials&trial_ends=7d"));
+    expect(p.trialEnds).toBe("7d");
+    expect(activeCompanyFilterCount(p)).toBe(1);
+    expect(companyListQuery(p)).toBe("?view=trials&trial_ends=7d");
+    expect(parseCompanyListParams(sp("trial_ends=30d")).trialEnds).toBeNull();
+    const now = new Date("2026-09-29T00:00:00.000Z");
+    expect(companyFilterWhere(p, { now })).toEqual({
+      AND: [{ subscription: { is: { trialEndsAt: { gte: now, lte: new Date("2026-10-06T00:00:00.000Z") } } } }],
+    });
+  });
   it("counts the name search as a filter, so Clear all clears it", () => {
     expect(activeCompanyFilterCount(parseCompanyListParams(sp("search=acme")))).toBe(1);
   });

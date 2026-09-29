@@ -38,7 +38,7 @@ import { MODULES } from "@/lib/modules";
  *   &search=   name, slug or sign-in domain (the same match Search uses)
  *   &plan=STARTER,GROWTH  &status=ACTIVE,TRIAL
  *   &subscription=stripe,lifetime,none,past_due
- *   &modules=chat,tables  &owners=has|none
+ *   &modules=chat,tables  &owners=has|none  &trial_ends=7d (the trial ends in the next 7 days)
  *   &people_min=&people_max=  &signed_from=&signed_to= (YYYY-MM-DD)
  *   &sort=newest|oldest|people|name  &page=&limit= (at most 100)
  *   &format=csv   the same rows as a download (at most 5,000)

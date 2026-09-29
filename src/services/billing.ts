@@ -39,6 +39,11 @@ const priceCatalog: Record<BillingKey, string | undefined> = {
   "scale-flat": process.env.STRIPE_PRICE_SCALE_FLAT,
 };
 
+/** Every configured WorkwrK price id (the Staff console counts only these subscriptions as ours). */
+export function workwrkPriceIds(): string[] {
+  return Object.values(priceCatalog).filter((v): v is string => !!v);
+}
+
 export function getPriceId(key: BillingKey): string {
   const id = priceCatalog[key];
   if (!id) throw new Error(`Stripe price not configured for "${key}"`);
