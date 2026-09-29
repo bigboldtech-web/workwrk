@@ -311,36 +311,53 @@ export async function replayOwedTenantRows(opts: { batch?: number } = {}): Promi
  * from the row's creation. A repeat inside the window bumps `hits` and
  * refreshes the IP; a script hammering the host cannot flood the log.
  * Fire and forget: never throws, never blocks the page.
+ *
+ * The find and the write run in one transaction under an advisory lock keyed
+ * on the email. Without it a parallel burst with no open row yet (the exact
+ * case the sampling exists for) had every request miss the findFirst at once
+ * and each create its own row. With it the requests for one email queue on
+ * the lock: the first creates the row, and the rest, reading after it has
+ * committed, bump its hits. A unique key cannot express a ten-minute window,
+ * so the lock is the guard; other emails never wait on each other.
  */
 export async function recordDeniedAccess(input: { email: string; userId?: string | null; ip?: string | null }): Promise<void> {
   const email = input.email.trim().toLowerCase() || "unknown";
   try {
-    const now = new Date();
-    const open = await prisma.staffAction.findFirst({
-      where: {
-        action: "admin.access.denied",
-        actorEmail: email,
-        createdAt: { gt: new Date(now.getTime() - DENIAL_WINDOW_MS) },
+    // maxWait and timeout above Prisma's 2s and 5s defaults: a burst queues
+    // one short transaction per request on the same lock, and a request that
+    // gave up waiting would drop its hit.
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"admin.access.denied:" + email}))`;
+        const now = new Date();
+        const open = await tx.staffAction.findFirst({
+          where: {
+            action: "admin.access.denied",
+            actorEmail: email,
+            createdAt: { gt: new Date(now.getTime() - DENIAL_WINDOW_MS) },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, createdAt: true },
+        });
+        if (open && isWithinDenialWindow(open.createdAt, now)) {
+          await tx.staffAction.update({
+            where: { id: open.id },
+            data: { hits: { increment: 1 }, ip: input.ip ?? undefined },
+          });
+          return;
+        }
+        await tx.staffAction.create({
+          data: {
+            action: "admin.access.denied",
+            actorUserId: input.userId ?? null,
+            actorEmail: email,
+            summary: `${email} tried to open the Staff console and is not on the staff list`,
+            ip: input.ip ?? null,
+          },
+        });
       },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, createdAt: true },
-    });
-    if (open && isWithinDenialWindow(open.createdAt, now)) {
-      await prisma.staffAction.update({
-        where: { id: open.id },
-        data: { hits: { increment: 1 }, ip: input.ip ?? undefined },
-      });
-      return;
-    }
-    await prisma.staffAction.create({
-      data: {
-        action: "admin.access.denied",
-        actorUserId: input.userId ?? null,
-        actorEmail: email,
-        summary: `${email} tried to open the Staff console and is not on the staff list`,
-        ip: input.ip ?? null,
-      },
-    });
+      { maxWait: 10_000, timeout: 15_000 },
+    );
   } catch (err) {
     console.error("[staff-audit] failed to record a denied access:", err);
   }
