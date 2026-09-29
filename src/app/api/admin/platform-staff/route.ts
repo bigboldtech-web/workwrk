@@ -40,6 +40,11 @@ function who(name: string | null, email: string): string {
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+/** Prisma's unique-constraint violation (P2002). */
+function isUniqueViolation(err: unknown): boolean {
+  return !!err && typeof err === "object" && (err as { code?: unknown }).code === "P2002";
+}
+
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -95,30 +100,43 @@ export async function POST(req: NextRequest) {
   const actor = staffActorFromSession(session);
   const ip = requestIp(req);
 
-  const outcome = await prisma.$transaction(async (tx) => {
-    const existing = await tx.platformAdmin.findUnique({ where: { email }, select: { id: true } });
-    if (existing) return { duplicate: true as const };
+  let outcome;
+  try {
+    outcome = await prisma.$transaction(async (tx) => {
+      const existing = await tx.platformAdmin.findUnique({ where: { email }, select: { id: true } });
+      if (existing) return { duplicate: true as const };
 
-    const created = await tx.platformAdmin.create({
-      data: { email, name },
-      select: { id: true, email: true, name: true, createdAt: true },
+      const created = await tx.platformAdmin.create({
+        data: { email, name },
+        select: { id: true, email: true, name: true, createdAt: true },
+      });
+      await logStaffAction({
+        db: tx,
+        action: "admin.staff.added",
+        actor,
+        ip,
+        targetLabel: email,
+        summary: `Added ${name ? `${name} (${email})` : email} to the staff list`,
+        after: { email, name },
+      });
+      // Everyone on the list at the moment of the add, minus the newcomer.
+      const others = await tx.platformAdmin.findMany({
+        where: { email: { not: email } },
+        select: { email: true },
+      });
+      return { duplicate: false as const, created, notify: others.map((o) => o.email) };
     });
-    await logStaffAction({
-      db: tx,
-      action: "admin.staff.added",
-      actor,
-      ip,
-      targetLabel: email,
-      summary: `Added ${name ? `${name} (${email})` : email} to the staff list`,
-      after: { email, name },
-    });
-    // Everyone on the list at the moment of the add, minus the newcomer.
-    const others = await tx.platformAdmin.findMany({
-      where: { email: { not: email } },
-      select: { email: true },
-    });
-    return { duplicate: false as const, created, notify: others.map((o) => o.email) };
-  });
+  } catch (err) {
+    // Two adds of the same email at the same moment both pass the findUnique
+    // above (nothing is locked for a row that does not exist yet), and the
+    // loser hits the unique index on email. That is the same duplicate, so it
+    // gets the same 409 as a sequential one instead of a bare 500. The whole
+    // transaction rolled back, so no stray StaffAction row is left behind.
+    // The code is duck-typed, the idiom elsewhere in src/app/api, so the check
+    // does not depend on which Prisma module instance threw it.
+    if (isUniqueViolation(err)) outcome = { duplicate: true as const };
+    else throw err;
+  }
 
   if (outcome.duplicate) return jsonError("That email is already on the staff list", 409);
 
