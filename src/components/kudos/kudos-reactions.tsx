@@ -33,10 +33,11 @@ export function toggleReaction(
   };
 }
 
-/** Whether a Try again still has to send anything. The route is a toggle,
- *  so a retry must not blindly resend: if the person already got to the
- *  state they wanted (they clicked the chip again by hand before pressing
- *  Try again), one more POST would undo their reaction instead of saving it. */
+/** Whether a Try again still has to send anything: if the person already
+ *  got to the state they wanted (they clicked the chip again by hand before
+ *  pressing Try again) there is nothing left to save. The request itself
+ *  carries the wanted state ({ emoji, on }), so even a resend could not undo
+ *  a reaction; this only spares the round trip. */
 export function reactionRetryNeeded(mine: readonly string[], emoji: string, wantOn: boolean): boolean {
   return mine.includes(emoji) !== wantOn;
 }
@@ -64,7 +65,12 @@ export function KudosReactions({
   const countsRef = useRef<ReactionCount[]>(initialCounts);
   const mineRef = useRef<string[]>(initialMine);
   const busyRef = useRef(false);
-  const toastKey = `kudos-react-${kudosId}`;
+  // The save in flight, so a Try again pressed meanwhile waits for it and
+  // then really sends instead of being dropped by the busy guard.
+  const inflightRef = useRef<Promise<void> | null>(null);
+  // One toast slot per kudos AND emoji: a 🙌 that saves must not take down
+  // the failure (and its Try again) of the 🔥 that did not.
+  const toastKeyFor = (emoji: string) => `kudos-react-${kudosId}-${emoji}`;
 
   const show = (nextCounts: ReactionCount[], nextMine: string[]) => {
     countsRef.current = nextCounts;
@@ -88,7 +94,12 @@ export function KudosReactions({
   // that failed (add or remove), so a retry repeats that intent rather than
   // toggling whatever the row happens to show by then.
   const react = async (emoji: string, wantOn?: boolean) => {
-    if (busyRef.current) return;
+    // A click on a chip or the picker is disabled while a save runs, so a
+    // busy click is only a double click landing before the re-render. A Try
+    // again is different: the person asked for it, so it waits its turn.
+    if (wantOn === undefined && busyRef.current) return;
+    while (busyRef.current) await (inflightRef.current ?? Promise.resolve());
+    const toastKey = toastKeyFor(emoji);
     const hadIt = mineRef.current.includes(emoji);
     const intent = wantOn ?? !hadIt;
     if (!reactionRetryNeeded(mineRef.current, emoji, intent)) {
@@ -97,6 +108,8 @@ export function KudosReactions({
     }
     busyRef.current = true;
     setBusy(true);
+    let settle: () => void = () => {};
+    inflightRef.current = new Promise<void>((resolve) => { settle = resolve; });
 
     // Optimistic update
     const prevCounts = countsRef.current;
@@ -111,7 +124,9 @@ export function KudosReactions({
       const res = await fetch(`/api/kudos/${kudosId}/react`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emoji }),
+        // The wanted state, not a toggle: a resend of a save that landed
+        // but answered with an error keeps the reaction instead of undoing it.
+        body: JSON.stringify({ emoji, on: intent }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -140,6 +155,7 @@ export function KudosReactions({
       busyRef.current = false;
       setBusy(false);
       setPickerOpen(false);
+      settle();
     }
   };
 

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { reactionRetryNeeded, toggleReaction } from "./kudos-reactions";
 
-// The react route is a toggle, so what the row shows mid-flight and whether
-// a Try again still has to send anything are the two things a failed
-// reaction can get wrong: a retry that resends when the person already got
-// where they wanted would undo their reaction instead of saving it.
+// What the row shows mid-flight and whether a Try again still has to send
+// anything are the two things a failed reaction can get wrong. The request
+// carries the wanted state (see src/lib/kudos-reaction.test.ts), so a resend
+// cannot undo a reaction; skipping one the person already made by hand just
+// spares the round trip.
 
 describe("toggleReaction", () => {
   it("adds my reaction and bumps the chip", () => {
