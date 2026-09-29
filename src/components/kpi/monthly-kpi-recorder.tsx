@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import {
   Target,
@@ -17,7 +18,8 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
-import { useAutosave } from "@/hooks/use-autosave";
+import { readAutosaveBackup, useAutosave } from "@/hooks/use-autosave";
+import { keepaliveFits } from "@/lib/api-fetch";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 import {
   getCurrentPeriod,
@@ -87,16 +89,32 @@ interface Props {
    * a manager writes `managerNotes`.
    */
   self?: boolean;
+  /**
+   * Open straight on this "YYYY-MM" month instead of the month picker (the
+   * KRAs tab's "Update my number" on a number the manager sent back).
+   */
+  initialPeriod?: string | null;
+  /**
+   * A save landed (Save all or an autosave). The page around the recorder
+   * reloads what it shows from the same records, so its rows and History do
+   * not keep saying "No reading" for a number just saved.
+   */
+  onSaved?: () => void;
 }
 
-export function MonthlyKpiRecorder({ userId, self = false }: Props) {
-  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+/** Where an unsaved edit for this person and month is kept on this device. */
+function recorderBackupKey(userId: string, period: string, self: boolean): string {
+  return `workwrk:kpi-recorder:${self ? "self" : "mgr"}:${userId}:${period}`;
+}
+
+export function MonthlyKpiRecorder({ userId, self = false, initialPeriod = null, onSaved }: Props) {
+  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(initialPeriod);
   const [kras, setKras] = useState<KraGroup[]>([]);
   const [totalKpis, setTotalKpis] = useState(0);
-  const [recordedKpis, setRecordedKpis] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<RecordFormData>({});
+  const pendingRestoreRef = useRef<RecordFormData | null>(null);
   const [expandedKras, setExpandedKras] = useState<Set<string>>(new Set());
   const [showNotes, setShowNotes] = useState<Set<string>>(new Set());
   const { success: toastSuccess, error: toastError } = useToast();
@@ -113,7 +131,6 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
       const result = data.data || data;
       setKras(result.kras || []);
       setTotalKpis(result.totalKpis || 0);
-      setRecordedKpis(result.recordedKpis || 0);
 
       // Initialize form data from existing records
       const fd: RecordFormData = {};
@@ -127,10 +144,24 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           };
         }
       }
+      // An edit that never reached the server (the tab closed mid-save, or
+      // every retry failed) is kept locally under this person and month. It
+      // is applied once the server's values are the autosave baseline (the
+      // effect below useAutosave), so it reads as unsaved and is sent.
+      const backup = readAutosaveBackup<RecordFormData>(recorderBackupKey(userId, period, self));
+      pendingRestoreRef.current = backup?.data && typeof backup.data === "object" ? backup.data : null;
       setFormData(fd);
 
       // Auto-expand all KRAs
       setExpandedKras(new Set((result.kras || []).map((k: KraGroup) => k.kraId)));
+      // A number the manager sent back opens with its notes showing, so the
+      // person reads what was asked right where they answer it.
+      if (self) {
+        const sentBack = (result.kras || []).flatMap((k: KraGroup) => k.kpis)
+          .filter((k: KpiEntry) => k.existingRecord?.status === "REJECTED" && k.existingRecord.managerNotes?.trim())
+          .map((k: KpiEntry) => k.kpiId);
+        if (sentBack.length) setShowNotes((prev) => new Set([...prev, ...sentBack]));
+      }
     } catch {
       toastError("Failed to load KPIs");
     } finally {
@@ -151,7 +182,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     }));
   };
 
-  // Shared save core — called both by the explicit "Save All" button
+  // Shared save core, called both by the explicit "Save all" button
   // and by the debounced autosave. `silent=true` skips the success toast
   // (autosave fires often; the indicator next to the button is feedback
   // enough) and skips the post-save refetch since the user is likely
@@ -166,29 +197,45 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           ? { notes: data.managerNotes || null }
           : { managerNotes: data.managerNotes || null }),
       }));
+      const body = JSON.stringify(
+        self
+          ? { period: selectedPeriod, records }
+          : { userId, period: selectedPeriod, records },
+      );
+      // keepalive so a save begun as the tab closes still lands, when the
+      // body fits the browser's keepalive budget.
       const res = await fetch(self ? "/api/kpi-records/self-report" : "/api/kpi-records/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          self
-            ? { period: selectedPeriod, records }
-            : { userId, period: selectedPeriod, records },
-        ),
+        body,
+        keepalive: keepaliveFits(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        // Throw so useAutosave's catch flips status to "error" — toast
+        // Throw so useAutosave's catch flips status to "error", toast
         // only when the user explicitly hit the button.
         if (!silent) toastError(err.error || "Failed to save");
         throw new Error(err.error || "Failed to save");
       }
       if (!silent) {
         const result = await res.json();
-        toastSuccess(`Saved ${(result.data || result).saved} KPI records for ${formatPeriodLabel(selectedPeriod)}`);
+        // The routes count only the rows a save changed (an unchanged number
+        // keeps its status and is not rewritten).
+        const saved = Number((result.data || result).saved ?? 0);
+        const skipped = Number((result.data || result).skipped ?? 0);
+        const typed = Object.values(snapshot).some((d) => d.actualValue !== "" || d.managerNotes.trim() !== "");
+        if (skipped > 0) {
+          // A KPI that left this person's assignments (a job title change
+          // mid-month) takes no number: say so rather than "already saved".
+          toastError(`${skipped} ${skipped === 1 ? "number was" : "numbers were"} not saved: ${skipped === 1 ? "that KPI is" : "those KPIs are"} no longer assigned.`);
+        } else {
+          toastSuccess(saved ? `Saved ${saved} KPI ${saved === 1 ? "record" : "records"} for ${formatPeriodLabel(selectedPeriod)}` : typed ? "Nothing changed, your numbers are already saved" : "Nothing to save yet, enter a number first");
+        }
         fetchKpis(selectedPeriod);
       }
+      onSaved?.();
     },
-    [selectedPeriod, userId, self, toastError, toastSuccess, fetchKpis],
+    [selectedPeriod, userId, self, toastError, toastSuccess, fetchKpis, onSaved],
   );
 
   const handleSaveAll = async () => {
@@ -212,7 +259,31 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     enabled: autosaveEnabled,
     delay: 2000,
     save: (snapshot) => saveCore(snapshot, true),
+    // A local copy of an unsaved edit, restored by fetchKpis above; the hook
+    // clears it on a successful save.
+    localKey: selectedPeriod ? recorderBackupKey(userId, selectedPeriod, self) : undefined,
   });
+
+  // Declared after useAutosave on purpose: its baseline effect has already
+  // taken the server's values in this commit, so the restored edit is a real
+  // change that autosaves. Only KPIs still on the form take a value.
+  useEffect(() => {
+    if (loading || !autosaveEnabled) return;
+    const restore = pendingRestoreRef.current;
+    if (!restore) return;
+    pendingRestoreRef.current = null;
+    setFormData((prev) => {
+      const next = { ...prev };
+      for (const [kpiId, v] of Object.entries(restore)) {
+        if (!next[kpiId] || !v || typeof v !== "object") continue;
+        next[kpiId] = {
+          actualValue: typeof v.actualValue === "string" ? v.actualValue : next[kpiId].actualValue,
+          managerNotes: typeof v.managerNotes === "string" ? v.managerNotes : next[kpiId].managerNotes,
+        };
+      }
+      return next;
+    });
+  }, [loading, autosaveEnabled]);
 
   const toggleKra = (kraId: string) => {
     setExpandedKras((prev) => {
@@ -232,24 +303,24 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     });
   };
 
-  // No period selected — show selection buttons
+  // No period selected, show selection buttons
   if (!selectedPeriod) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-[color:var(--accent-strong)] mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Record Monthly KPIs</h3>
-          <p className="text-xs text-muted mb-6">
+          <Target size={40} className="mx-auto text-brand-deep mb-4" />
+          <h3 className="text-lg font-semibold mb-2">Record monthly KPIs</h3>
+          <p className="text-xs text-ink-2 mb-6">
             Select a period to record or update KPI scores
           </p>
           <div className="flex items-center justify-center gap-3">
             <Button onClick={() => setSelectedPeriod(lastPeriod)} variant="outline" className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(lastPeriod)}
-              <Badge variant="secondary" className="text-xs">Last Month</Badge>
+              <Badge variant="secondary" className="text-xs">Last month</Badge>
             </Button>
             <Button onClick={() => setSelectedPeriod(currentPeriod)} className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(currentPeriod)}
-              <Badge variant="secondary" className="text-xs">This Month</Badge>
+              <Badge variant="secondary" className="text-xs">This month</Badge>
             </Button>
           </div>
         </CardContent>
@@ -261,9 +332,10 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-8 text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0073EA] border-t-transparent mx-auto" />
-          <p className="text-xs text-muted mt-3">Loading KPIs...</p>
+        <CardContent className="p-4">
+          <div aria-busy="true" aria-label="Loading your KPIs">
+            <SkeletonRows rows={3} />
+          </div>
         </CardContent>
       </Card>
     );
@@ -274,13 +346,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-muted mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No KPIs Assigned</h3>
-          <p className="text-xs text-muted">
+          <Target size={40} className="mx-auto text-ink-2 mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No KPIs assigned</h3>
+          <p className="text-xs text-ink-2">
             Assign KRAs with KPIs to this person first, then come back to record scores.
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => setSelectedPeriod(null)}>
-            Go Back
+            Go back
           </Button>
         </CardContent>
       </Card>
@@ -299,11 +371,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="sm" onClick={() => setSelectedPeriod(null)} className="text-xs">
-                Change Period
+                Change period
               </Button>
               <div>
                 <h3 className="text-xs font-semibold">{formatPeriodLabel(selectedPeriod)}</h3>
-                <p className="text-xs text-muted">
+                <p className="text-xs text-ink-2">
                   {filledCount} of {totalKpis} KPIs recorded
                 </p>
               </div>
@@ -311,13 +383,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2 min-w-[120px]">
                 <Progress value={overallProgress} className="h-2 flex-1" />
-                <span className="text-xs font-mono text-[color:var(--accent-strong)]">{overallProgress}%</span>
+                <span className="text-xs font-mono text-brand-deep">{overallProgress}%</span>
               </div>
               {autosaveEnabled && (
                 <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} />
               )}
               <Button onClick={handleSaveAll} disabled={saving} className="gap-1.5">
-                <Save size={14} /> {saving ? "Saving..." : "Save All"}
+                <Save size={14} /> {saving ? "Saving" : "Save all"}
               </Button>
             </div>
           </div>
@@ -333,20 +405,20 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           <Card key={kra.kraId} className="overflow-hidden">
             <button
               onClick={() => toggleKra(kra.kraId)}
-              className="w-full flex items-center justify-between p-4 hover:bg-surface-2 transition-colors"
+              className="w-full flex items-center justify-between p-4 hover:bg-hover transition-colors"
             >
               <div className="flex items-center gap-3">
-                {isExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
+                {isExpanded ? <ChevronDown size={16} className="text-ink-2" /> : <ChevronRight size={16} className="text-ink-2" />}
                 <div className="text-left">
                   <p className="text-xs font-medium">{kra.kraName}</p>
-                  <p className="text-xs text-muted-2">{kraFilled}/{kra.kpis.length} KPIs filled</p>
+                  <p className="text-xs text-ink-3">{kraFilled}/{kra.kpis.length} KPIs filled</p>
                 </div>
               </div>
               <Badge variant="outline" className="text-xs">{kra.kpis.length} KPIs</Badge>
             </button>
 
             {isExpanded && (
-              <div className="border-t border-border">
+              <div className="border-t border-line">
                 {kra.kpis.map((kpi) => {
                   const fd = formData[kpi.kpiId] || { actualValue: "", managerNotes: "" };
                   const actual = fd.actualValue ? Number(fd.actualValue) : null;
@@ -372,7 +444,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                   // Cadence chip + helper copy. The recorder always
                   // works in monthly periods, so a quarterly KPI is
-                  // tracked here as "1/3 of a quarter" — the score
+                  // tracked here as "1/3 of a quarter", the score
                   // uses the prorated monthly target, and the row
                   // says so plainly to avoid the "is this monthly
                   // or quarterly?" confusion.
@@ -380,13 +452,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                   const isMonthly = definedFreq === "MONTHLY";
                   const cadenceLabel = definedFreq.charAt(0) + definedFreq.slice(1).toLowerCase();
                   const cadenceChipColor =
-                    definedFreq === "MONTHLY" ? "bg-surface-2 text-muted" :
-                    definedFreq === "WEEKLY" ? "bg-cyan-500/10 text-cyan-400" :
-                    definedFreq === "DAILY" ? "bg-blue-500/10 text-blue-400" :
-                    definedFreq === "QUARTERLY" ? "bg-blue-500/10 text-blue-600" :
-                    "bg-amber-500/10 text-amber-400"; // ANNUALLY
+                    // One neutral chip for every cadence: the label carries the meaning,
+                    // a hue per cadence would read as a status.
+                    "bg-subtle text-ink-2";
                   return (
-                    <div key={kpi.kpiId} className="border-b border-surface-2 last:border-b-0 px-4 py-3">
+                    <div key={kpi.kpiId} className="border-b border-line-soft last:border-b-0 px-4 py-3">
                       <div className="flex items-center gap-4">
                         {/* KPI Name */}
                         <div className="flex-1 min-w-0">
@@ -394,38 +464,38 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                             <p className="text-xs">{kpi.name}</p>
                             <span
                               className={`text-micro px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
-                              title={isMonthly ? "Monthly KPI" : `Defined ${cadenceLabel.toLowerCase()} — recording the monthly slice`}
+                              title={isMonthly ? "Monthly KPI" : `Defined ${cadenceLabel.toLowerCase()}, recording the monthly slice`}
                             >
                               {cadenceLabel}
                             </span>
                             {hasExisting && (
-                              <CheckCircle2 size={12} className="text-green-400 shrink-0" />
+                              <CheckCircle2 size={12} className="text-success-text shrink-0" />
                             )}
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
                             {kpi.unit && (
-                              <span className="text-xs text-muted-2">Unit: {kpi.unit}</span>
+                              <span className="text-xs text-ink-3">Unit: {kpi.unit}</span>
                             )}
                             {kpi.lowerIsBetter && (
-                              <span className="text-xs text-amber-400">Lower is better</span>
+                              <span className="text-xs text-warning-text">Lower is better</span>
                             )}
                             {!isMonthly && (
-                              <span className="text-xs text-muted-2">
+                              <span className="text-xs text-ink-3">
                                 {definedFreq === "QUARTERLY" || definedFreq === "ANNUALLY"
-                                  ? `Tracked ${cadenceLabel.toLowerCase()} — enter this month's contribution`
-                                  : `Tracked ${cadenceLabel.toLowerCase()} — enter the month's rolled-up actual`}
+                                  ? `Tracked ${cadenceLabel.toLowerCase()}, enter this month's contribution`
+                                  : `Tracked ${cadenceLabel.toLowerCase()}, enter the month's rolled-up actual`}
                               </span>
                             )}
                           </div>
                         </div>
 
                         {isQualitative ? (
-                          /* Qualitative — a 1..5 rubric rating. The rung
+                          /* Qualitative, a 1..5 rubric rating. The rung
                              labels (anchors) tell the rater what each level
                              means; the record stores rating / ceiling · 100
                              as its score. */
                           <div className="min-w-[220px]">
-                            <p className="text-micro text-muted-2 uppercase">
+                            <p className="text-micro text-ink-3 uppercase">
                               Rating
                               {kpi.targetValue && kpi.targetValue > 0 ? ` · target ${kpi.targetValue}` : ""}
                             </p>
@@ -439,11 +509,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                     onClick={() => updateField(kpi.kpiId, "actualValue", selected ? "" : String(n))}
                                     title={RATING_ANCHORS[n]}
                                     aria-pressed={selected}
-                                    aria-label={`${n} — ${RATING_ANCHORS[n]}`}
+                                    aria-label={`${n}, ${RATING_ANCHORS[n]}`}
                                     className={`h-7 w-7 rounded-md text-xs font-medium border transition-colors ${
                                       selected
-                                        ? "bg-[#0073EA] text-white border-[#0073EA]"
-                                        : "bg-transparent border-border text-muted hover:border-[#0073EA]/50"
+                                        ? "bg-brand text-ink-inv border-brand"
+                                        : "bg-transparent border-line text-ink-2 hover:border-brand"
                                     }`}
                                   >
                                     {n}
@@ -451,23 +521,23 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                 );
                               })}
                             </div>
-                            <p className="text-xs text-muted-2 mt-0.5 h-3 leading-3">
+                            <p className="text-xs text-ink-3 mt-0.5 h-3 leading-3">
                               {actual != null && RATING_ANCHORS[actual] ? RATING_ANCHORS[actual] : " "}
                             </p>
                           </div>
                         ) : (
                           <>
-                            {/* Target — auto-converted to a monthly figure if
+                            {/* Target, auto-converted to a monthly figure if
                                 the KPI is defined at a different cadence so the
                                 number you enter under Actual compares apples
                                 to apples. */}
                             <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
-                              <p className="text-micro text-muted-2 uppercase">Target / month</p>
+                              <p className="text-micro text-ink-3 uppercase">Target / month</p>
                               <p className="text-xs font-mono font-semibold">
-                                {adjTarget != null ? adjTarget : "—"}
+                                {adjTarget != null ? adjTarget : <span className="font-sans font-normal text-ink-3">No target</span>}
                               </p>
                               {targetHint && (
-                                <p className="text-micro text-muted-2 leading-tight">
+                                <p className="text-micro text-ink-3 leading-tight">
                                   from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
                                 </p>
                               )}
@@ -475,13 +545,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                             {/* Actual Value Input */}
                             <div className="min-w-[100px]">
-                              <p className="text-micro text-muted-2 uppercase">Actual</p>
+                              <p className="text-micro text-ink-3 uppercase">Actual</p>
                               <Input
                                 type="number"
                                 value={fd.actualValue}
                                 onChange={(e) => updateField(kpi.kpiId, "actualValue", e.target.value)}
                                 placeholder="0"
-                                className="h-8 text-xs bg-transparent border-border w-full"
+                                className="h-8 text-xs bg-transparent border-line w-full"
                               />
                             </div>
                           </>
@@ -489,15 +559,15 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                         {/* Score */}
                         <div className="text-center min-w-[60px]">
-                          <p className="text-micro text-muted-2 uppercase">Score</p>
+                          <p className="text-micro text-ink-3 uppercase">Score</p>
                           <p className={`text-xs font-mono font-semibold ${
-                            score == null ? "text-muted-2"
-                            : score >= 90 ? "text-green-400"
-                            : score >= 70 ? "text-[color:var(--accent-strong)]"
-                            : score >= 50 ? "text-orange-400"
-                            : "text-red-400"
+                            score == null ? "text-ink-3"
+                            : score >= 90 ? "text-success-text"
+                            : score >= 70 ? "text-brand-deep"
+                            : score >= 50 ? "text-warning-text"
+                            : "text-danger-text"
                           }`}>
-                            {score != null ? `${score}%` : "—"}
+                            {score != null ? `${score}%` : <span className="font-sans font-normal">Not scored</span>}
                           </p>
                         </div>
 
@@ -505,7 +575,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-muted hover:text-foreground shrink-0"
+                          className="h-7 w-7 text-ink-2 hover:text-ink shrink-0"
                           onClick={() => toggleNotes(kpi.kpiId)}
                           title={self ? "Add a note for your manager" : "Manager feedback"}
                         >
@@ -516,12 +586,21 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                       {/* Manager Notes (expandable) */}
                       {isNoteOpen && (
                         <div className="mt-2 pl-0">
+                          {/* Self only: what the manager asked when they sent
+                              this number back, read-only above the person's
+                              own note (the box below edits `notes`). */}
+                          {self && kpi.existingRecord?.status === "REJECTED" && kpi.existingRecord.managerNotes?.trim() ? (
+                            <div className="mb-2 rounded-md border border-line-soft bg-subtle px-3 py-2 text-xs text-ink">
+                              <span className="font-medium">Your manager asked: </span>
+                              <span className="whitespace-pre-wrap break-words">{kpi.existingRecord.managerNotes}</span>
+                            </div>
+                          ) : null}
                           <Textarea
                             value={fd.managerNotes}
                             onChange={(e) => updateField(kpi.kpiId, "managerNotes", e.target.value)}
                             placeholder={self ? "Context for your manager (what drove this number)..." : "Manager feedback / notes..."}
                             rows={2}
-                            className="bg-transparent border-border text-xs"
+                            className="bg-transparent border-line text-xs"
                           />
                         </div>
                       )}

@@ -7,6 +7,8 @@ import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
 import { apiFetch } from "@/lib/api-fetch";
+import { leaveThen } from "@/lib/dirty-guard";
+import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import { readLastAppPath, recordLastAppPath, serverLastAppPath, subscribeLastAppPath } from "@/lib/settings-nav";
 import { deepMergePatch, type PreferencesPatch } from "@/lib/preferences-schema";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
@@ -27,7 +29,16 @@ function readPanelFits() {
 }
 
 /** The folded keys whose launcher entry follows APP_RULES rather than a tier. */
-const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation"]);
+const AUDIENCE_KEYS: ReadonlySet<string> = new Set(["tools", "assets", "build", "store", "automation", "reviews", "candor", "surveys"]);
+
+/** The launcher rule of an audience-gated key: APP_RULES, plus the two respondent doors (the Teams rows' rule). */
+function launcherAudienceAllows(key: string, v: { orgRole: string; peopleTeam?: boolean; hasReports?: boolean; candorInvited?: boolean; surveyTargeted?: boolean }): boolean {
+  if (appAudienceAllows(key as AppKey, v)) return true;
+  if (v.orgRole === "GUEST") return false;
+  if (key === "candor") return v.candorInvited === true;
+  if (key === "surveys") return v.surveyTargeted === true;
+  return false;
+}
 
 /**
  * LayerStack (spec-shell.md sections 1.5 and 2.1): every open overlay
@@ -121,6 +132,8 @@ export type PresenceStatus = {
 };
 
 export const DEFAULT_PRESENCE: PresenceStatus = { emoji: null, label: "Online", expiresAt: null };
+/** Do not disturb: a status everyone sees on the dot (presence.ts draws it busy). */
+export const DND_PRESENCE: PresenceStatus = { emoji: "⛔", label: "Do not disturb", expiresAt: null };
 
 export type OpenItem = {
   moduleId: string;
@@ -501,8 +514,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     const width = typeof window === "undefined" ? 1440 : window.innerWidth;
     const target = askAiTarget({ width, pathname: pathnameRef.current, prompt: initialPrompt });
     if (target.kind === "navigate") {
-      setSidekickOpen(false);
-      router.push(target.href);
+      // Below 1024 Ask AI is a page: unsaved work asks first.
+      void leaveThen(() => {
+        setSidekickOpen(false);
+        router.push(target.href);
+      });
       return;
     }
     if (target.kind === "focus-page") {
@@ -608,7 +624,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // team and Admin"), so the palette never offers a page that would 404.
   const launcherApps = useMemo<AppEntry[]>(
     () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys), includeFolded: true })
-      .filter((a) => !AUDIENCE_KEYS.has(a.key) || appAudienceAllows(a.key as AppKey, boot.viewer)),
+      .filter((a) => !AUDIENCE_KEYS.has(a.key) || launcherAudienceAllows(a.key, boot.viewer)),
     [railConfig, accessLevel, activeModuleKeys, boot.viewer],
   );
   const askAiVisible = useMemo(
@@ -625,12 +641,13 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const manageableOffModules = boot.manageableOffModules;
   const canCreateSpace = accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
   const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
-  // sidebar-map section 5: RESOURCING > Tools is a row for every Member, and
-  // the Teams sidebar already renders a Member branch (My profile, Tools). A
-  // Member does not hold the Teams pill (its landing /people is manager-gated),
-  // so on a Teams URL they get that branch with no "+" (every TeamsCreateMenu
-  // row is a manager or People-team create) and a landing of their own career
-  // home. Guests never see this hub (sidebar-map 5).
+  // sidebar-map section 5: the Teams hub lands on /people for every Member.
+  // This branch is only for a viewer whose rail does NOT carry Teams (an
+  // Admin hid or floored it in Apps config): /people reads the same app row,
+  // so their landing is their own record (/people/me, never gated) rather
+  // than a page that may refuse them. The "+" stays: TeamsCreateMenu renders
+  // only the rows this viewer's create would pass (Give kudos for every
+  // Member), so it never offers a dead door. Guests never see this hub.
   const memberTeamsHub = !railKeys.has("teams") && boot.viewer.orgRole !== "GUEST";
   const hubHref = useCallback(
     (appKey: string): string => {
@@ -652,7 +669,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const memberTeamsApp = useMemo<AppEntry | null>(() => {
     if (!memberTeamsHub) return null;
     const teams = getApp("teams");
-    return teams ? { ...teams, defaultHref: "/people/me", CreateMenu: undefined, createActions: undefined } : null;
+    return teams ? { ...teams, defaultHref: "/people/me" } : null;
   }, [memberTeamsHub]);
   const hubSidebarApp = useCallback(
     (hub: HubKey): AppEntry => {
@@ -671,6 +688,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const setPresenceStatus = useCallback((s: PresenceStatus) => {
     setPresenceStatusState(s);
     try { window.localStorage.setItem(PRESENCE_KEY, JSON.stringify(s)); } catch {}
+    // Shared with everyone else too (User.presenceStatus), so the dots on
+    // the Directory, the Org chart and the record show it. The write queue
+    // retries a dropped connection; "Online" clears the dot.
+    const shared = s.label === DEFAULT_PRESENCE.label ? null : s.label;
+    void recordWriteQueue().write("PUT", "/api/me/presence", { status: shared, until: shared ? s.expiresAt : null });
   }, []);
   const openStatusModal = useCallback(() => setStatusModalOpen(true), []);
   const closeStatusModal = useCallback(() => setStatusModalOpen(false), []);

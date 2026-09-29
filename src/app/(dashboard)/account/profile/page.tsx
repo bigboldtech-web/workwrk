@@ -182,7 +182,7 @@ export default function AccountProfilePage() {
         <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Profile</h1>
       </header>
       <p className="mb-5 max-w-2xl text-base text-zinc-500">
-        Your personal details. Update your name and photo — everyone manages their own profile.
+        Your personal details. Update your name and photo. Everyone manages their own profile.
       </p>
 
       {!loaded ? (

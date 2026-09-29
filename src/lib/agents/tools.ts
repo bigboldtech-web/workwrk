@@ -22,6 +22,12 @@ import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
 import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
 import { legacyIsManagerLevel, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { goalVisibilityOr } from "@/lib/goal-audience";
+import { goalRightsActor } from "@/lib/alignment-scope";
+import { mayEditGoal } from "@/lib/goals/goal-rights";
+import { persistGoalRollupChain } from "@/lib/alignment";
+import { logActivity } from "@/lib/activity";
+import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 
 export interface ToolContext {
   orgId: string;
@@ -55,6 +61,14 @@ async function callerLevel(ctx: ToolContext): Promise<string | null> {
     select: { accessLevel: true },
   });
   return row?.accessLevel ?? null;
+}
+
+/** The caller shaped like a session, for the shared goal rules (canSeeGoal,
+ *  goalRightsActor), so a goal tool reads and writes exactly as the person
+ *  could on the Goals pages. Null when the person is not in this org. */
+async function callerSession(ctx: ToolContext): Promise<{ user: { id: string; organizationId: string; accessLevel: string } } | null> {
+  const level = await callerLevel(ctx);
+  return level ? { user: { id: ctx.userId, organizationId: ctx.orgId, accessLevel: level } } : null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -479,9 +493,17 @@ const searchOkrs: ToolDefinition = {
   },
   handler: async (ctx, input) => {
     const limit = Math.min(50, Number(input.limit ?? 20));
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, okrs: [] };
+    // Only goals the person could open on the Goals pages: an Individual goal
+    // is not org public, and asking the assistant must never be a way round
+    // that. The Goals list's own visibility rule, in the query, so nothing
+    // visible is missed and nothing hidden is read.
+    const visible = await goalVisibilityOr(session);
     const okrs = await prisma.oKR.findMany({
       where: {
         organizationId: ctx.orgId,
+        ...(visible ? { AND: [{ OR: visible }] } : {}),
         ...(input.level ? { level: toGoalLevel(input.level) } : {}),
         ...(input.status ? { status: input.status as string } : {}),
         ...(input.quarter ? { quarter: input.quarter as string } : {}),
@@ -633,6 +655,18 @@ const createOkr: ToolDefinition = {
     required: ["title"],
   },
   handler: async (ctx, input) => {
+    const session = await callerSession(ctx);
+    if (!session) return { error: "You are not a member of this organization." };
+    // The same rules as POST /api/okrs: a Member makes Individual goals for
+    // themselves only; a manager may choose the owner and the level; and a
+    // Company goal needs the Company-goal right (Owner/Admin, the People team,
+    // or owning it), so nobody makes one through the assistant that they
+    // could not make, fix or remove on the Goals page.
+    const manager = legacyIsManagerLevel(session.user.accessLevel);
+    const level = toGoalLevel(input.level ?? "INDIVIDUAL");
+    if (!manager && level !== "INDIVIDUAL") {
+      return { error: "Only managers can create Company or Department goals. I can create an Individual goal for you instead." };
+    }
     let ownerId = ctx.userId;
     if (input.ownerEmail) {
       const owner = await prisma.user.findFirst({
@@ -640,7 +674,16 @@ const createOkr: ToolDefinition = {
         select: { id: true },
       });
       if (!owner) return { error: `Owner with email '${input.ownerEmail}' not found in this org` };
+      if (!manager && owner.id !== ctx.userId) {
+        return { error: "You can only create goals you own. Ask your manager to set a goal for someone else." };
+      }
       ownerId = owner.id;
+    }
+    if (level === "COMPANY") {
+      const actor = await goalRightsActor(session);
+      if (!mayEditGoal(actor, { level: "COMPANY", ownerId, creatorId: ctx.userId })) {
+        return { error: "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin." };
+      }
     }
 
     const krs = Array.isArray(input.keyResults) ? (input.keyResults as Array<{ title: string; unit?: string; startValue?: number; targetValue: number }>) : [];
@@ -650,7 +693,7 @@ const createOkr: ToolDefinition = {
         organizationId: ctx.orgId,
         title: input.title as string,
         description: (input.description as string) ?? null,
-        level: toGoalLevel(input.level ?? "INDIVIDUAL"),
+        level,
         quarter: (input.quarter as string) ?? null,
         startDate: input.startIsoDate ? new Date(input.startIsoDate as string) : null,
         endDate: input.endIsoDate ? new Date(input.endIsoDate as string) : null,
@@ -667,6 +710,19 @@ const createOkr: ToolDefinition = {
       },
       select: { id: true, title: true, level: true, status: true, quarter: true, keyResults: { select: { id: true, title: true, targetValue: true, unit: true } } },
     });
+    // As POST /api/okrs does: the stored progress is honest from the first
+    // read, the creator is on record (the edit rule reads okr_created), and
+    // someone given a goal hears about it.
+    await persistGoalRollupChain(okr.id);
+    logActivity({
+      type: "okr_created",
+      actorId: ctx.userId,
+      organizationId: ctx.orgId,
+      description: `Created OKR "${okr.title}" (${level}) with Ask AI`,
+      targetId: okr.id,
+      targetType: "okr",
+    });
+    if (ownerId !== ctx.userId) await notifyGoalAssigned(ownerId, okr);
     return { ok: true, okr };
   },
 };

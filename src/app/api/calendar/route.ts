@@ -211,7 +211,7 @@ export async function GET(req: Request) {
     kind: "WEEKLY_REVIEW",
     ownerId: r.userId,
     ownerName: nameById.get(r.userId) ?? null,
-    url: r.userId === c.userId ? "/me/weekly-review" : `/team/reviews?user=${r.userId}`,
+    url: r.userId === c.userId ? "/me/weekly-review" : `/team/reviews?person=${r.userId}`,
   }));
 
   // ── 3. SOP assignments ──────────────────────────────────────────

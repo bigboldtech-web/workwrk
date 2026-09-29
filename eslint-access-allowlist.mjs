@@ -104,6 +104,27 @@
 //
 // Both leave together, with their siblings, when the access engine's step 6
 // turns these gates into can() / accessibleIds().
+// Phase 6 Stage C (2026-09-27) NET SHRINK of two. /team and /team/workload
+// became clients over three /api/team routes that read Lists through the
+// engine's Viewer (src/lib/people/team-boards.server.ts), so the two pages
+// and /api/team/members-work leave this list. One entry MOVED rather than
+// grew: the Unassigned bucket's "Lists the team belongs to" read of
+// BoardMember left team/workload/page.tsx for /api/team/workload unchanged,
+// so that route carries the entry now.
+// Phase 6 Stage F (2026-09-28) NET SHRINK of thirty-one. The People,
+// Performance and Goals rebuilds (Stages A to E) moved their pages and routes
+// onto the engine's Viewer and the shared gates (person-access, team-gate,
+// review-cycle-access, culture-gate, gatePage), so these files no longer read
+// accessLevel, call a tier predicate or touch a member table. Each one was
+// linted with the G7 rule and no allow-list before it left: the directory,
+// person page, org chart, cycle detail, survey pages, the four /team pages,
+// /api/candor, /api/departments, /api/roles, /api/reviews and its launch,
+// calibration, finalize, manager-review and peer-feedback routes, the cycle
+// export, /api/pulse-surveys and [id], /api/talent-assessment,
+// /api/team/weekly-reviews, /api/users/[id]/handover, /api/people/bulk-update
+// and /api/kpi-records/[id]/manager-review. The unit files still listed below
+// keep a real legacy read (an isManager or accessLevel check) that changes
+// behaviour if removed; they leave with access step 6.
 export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/calls/status/route.ts",
   "src/app/api/people/pick/route.ts",
@@ -123,16 +144,9 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/everything/page.tsx",
   "src/app/(dashboard)/folders/\\[id\\]/page.tsx",
   "src/app/(dashboard)/okrs/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/organization/org-chart-client.tsx",
-  "src/app/(dashboard)/people/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/people/\\[id\\]/profile-client.tsx",
-  "src/app/(dashboard)/people/departments/departments-client.tsx",
-  "src/app/(dashboard)/people/directory-client.tsx",
   "src/app/(dashboard)/people/roles/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/reviews/\\[id\\]/review-detail-client.tsx",
   "src/app/(dashboard)/settings/api/page.tsx",
   "src/app/(dashboard)/settings/billing/page.tsx",
-  "src/app/(dashboard)/settings/hierarchy/page.tsx",
   "src/app/(dashboard)/settings/identity/page.tsx",
   "src/app/(dashboard)/settings/locale/page.tsx",
   "src/app/(dashboard)/settings/members/page.tsx",
@@ -141,15 +155,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/settings/structure/page.tsx",
   "src/app/(dashboard)/spaces/\\[slug\\]/page.tsx",
   "src/app/(dashboard)/spaces/page.tsx",
-  "src/app/(dashboard)/surveys/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/surveys/_components/survey-builder.tsx",
   "src/app/(dashboard)/tables/layout.tsx",
-  "src/app/(dashboard)/team/alignment/page.tsx",
-  "src/app/(dashboard)/team/kpi-reviews/page.tsx",
-  "src/app/(dashboard)/team/page.tsx",
-  "src/app/(dashboard)/team/reviews/page.tsx",
-  "src/app/(dashboard)/team/rollup/page.tsx",
-  "src/app/(dashboard)/team/workload/page.tsx",
   "src/app/(dashboard)/tlk/layout.tsx",
   "src/app/(dashboard)/today/page.tsx",
   "src/app/api/accounting-periods/\\[id\\]/route.ts",
@@ -212,13 +218,9 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/bulk-decide/route.ts",
   "src/app/api/calendar/meetings/route.ts",
   "src/app/api/calendar/route.ts",
-  "src/app/api/candor/\\[id\\]/results/route.ts",
-  "src/app/api/candor/route.ts",
   "src/app/api/cron/review-cycles/route.ts",
   "src/app/api/cron/run-due-agents/route.ts",
   "src/app/api/dashboard/team-dashboard/route.ts",
-  "src/app/api/departments/\\[id\\]/route.ts",
-  "src/app/api/departments/route.ts",
   "src/app/api/docs/\\[id\\]/ask/route.ts",
   "src/app/api/docs/\\[id\\]/comments/route.ts",
   "src/app/api/docs/\\[id\\]/duplicate/route.ts",
@@ -248,7 +250,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/export/\\[type\\]/route.ts",
   "src/app/api/export/all/route.ts",
   "src/app/api/export/people/route.ts",
-  "src/app/api/export/reviews/\\[cycleId\\]/route.ts",
   "src/app/api/files/\\[id\\]/route.ts",
   "src/app/api/files/route.ts",
   "src/app/api/financial-reports/route.ts",
@@ -280,7 +281,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/journal-entries/\\[id\\]/route.ts",
   "src/app/api/journal-entries/route.ts",
   "src/app/api/keys/route.ts",
-  "src/app/api/kpi-records/\\[id\\]/manager-review/route.ts",
   "src/app/api/kpi-records/batch/route.ts",
   "src/app/api/kpis/route.ts",
   "src/app/api/kra-assignments/\\[id\\]/route.ts",
@@ -331,7 +331,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/ownership-areas/route.ts",
   "src/app/api/people/backfill-role-defs/route.ts",
   "src/app/api/people/bulk-import/route.ts",
-  "src/app/api/people/bulk-update/route.ts",
   "src/app/api/performance-scores/recalculate/route.ts",
   "src/app/api/permissions/route.ts",
   "src/app/api/plan-lines/route.ts",
@@ -369,23 +368,12 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/products/installations/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/export/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/route.ts",
-  "src/app/api/pulse-surveys/\\[id\\]/route.ts",
-  "src/app/api/pulse-surveys/route.ts",
   "src/app/api/purchase-orders/\\[id\\]/route.ts",
   "src/app/api/purchase-orders/route.ts",
-  "src/app/api/reviews/\\[id\\]/calibration/route.ts",
-  "src/app/api/reviews/\\[id\\]/finalize/route.ts",
-  "src/app/api/reviews/\\[id\\]/launch/route.ts",
-  "src/app/api/reviews/\\[id\\]/manager-review/route.ts",
-  "src/app/api/reviews/\\[id\\]/peer-feedback/route.ts",
-  "src/app/api/reviews/\\[id\\]/route.ts",
-  "src/app/api/reviews/route.ts",
   "src/app/api/role-boundaries/\\[id\\]/route.ts",
   "src/app/api/role-boundaries/route.ts",
   "src/app/api/role-instances/\\[id\\]/route.ts",
   "src/app/api/role-instances/route.ts",
-  "src/app/api/roles/\\[id\\]/route.ts",
-  "src/app/api/roles/route.ts",
   "src/app/api/scim-tokens/\\[id\\]/route.ts",
   "src/app/api/scim-tokens/route.ts",
   "src/app/api/scim/v2/Users/route.ts",
@@ -439,11 +427,9 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/tag-assignments/route.ts",
   "src/app/api/tags/\\[id\\]/route.ts",
   "src/app/api/tags/route.ts",
-  "src/app/api/talent-assessment/route.ts",
   "src/app/api/tasks/route.ts",
   "src/app/api/tasks/workload/route.ts",
-  "src/app/api/team/members-work/route.ts",
-  "src/app/api/team/weekly-reviews/route.ts",
+  "src/app/api/team/workload/route.ts",
   "src/app/api/template-center/\\[id\\]/apply/route.ts",
   "src/app/api/template-center/save-as/route.ts",
   "src/app/api/templates/\\[slug\\]/apply/route.ts",
@@ -458,7 +444,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/trash/\\[id\\]/restore/route.ts",
   "src/app/api/trash/\\[id\\]/route.ts",
   "src/app/api/trash/route.ts",
-  "src/app/api/users/\\[id\\]/handover/route.ts",
   "src/app/api/users/\\[id\\]/route.ts",
   "src/app/api/users/\\[id\\]/seed-alignment/route.ts",
   "src/app/api/users/route.ts",
@@ -532,6 +517,14 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/hr-segment.ts",
   "src/lib/itsm/auth.ts",
   "src/lib/page-gates.ts",
+  // Phase 6 Stage B: the Teams hub's people routes read the viewer's reach
+  // through these three files and nowhere else (the two deleted people
+  // clients above left this list the same day). They carry the legacy
+  // org-wide and manager-tier reach so nobody loses a record they could open
+  // yesterday, and leave this list at access step 6 with the rest.
+  "src/lib/people/person-access.server.ts",
+  "src/lib/people/directory-list.server.ts",
+  "src/lib/people/department-access.server.ts",
   "src/lib/permissions.ts",
   "src/lib/platform-admin.ts",
   "src/lib/item-gate.ts",

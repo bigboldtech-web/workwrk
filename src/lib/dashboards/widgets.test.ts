@@ -363,3 +363,27 @@ describe("a field keyed like a built-in", () => {
     expect(cardVisibility(card, ctx)).toEqual({ kind: "partial", hiddenListIds: ["P"], hiddenRules: [{ field: "field:secret", operator: "isSet", value: "" }] });
   });
 });
+
+describe("the Workload by person card", () => {
+  const layout = { x: 0, y: 0, w: 6, h: 7 };
+  it("round-trips its window and mode, and reads a bad value as the default", () => {
+    const stored = [{ id: "wl", kind: "workload", title: "Team load", source: { kind: "space", spaceId: "S" }, filter: { connector: "AND", rules: [], hideDone: true }, windowDays: 28, mode: "hours", layout }];
+    const parsed = parseWidgets(stored);
+    expect(parsed[0]).toMatchObject({ kind: "workload", windowDays: 28, mode: "hours", title: "Team load" });
+    expect(serializeWidgets(parsed)).toEqual([{ ...stored[0] }]);
+    const odd = parseWidgets([{ ...stored[0], windowDays: 9, mode: "points" }]);
+    expect(odd[0]).toMatchObject({ kind: "workload", windowDays: 14, mode: "tasks" });
+  });
+  it("is a write shape the schema accepts, with defaults filled on save", () => {
+    const input = { id: "wl", kind: "workload", title: "Workload by person", source: { kind: "space", spaceId: "S" }, layout } as const;
+    expect(widgetInputSchema.safeParse(input).success).toBe(true);
+    expect(widgetInputSchema.safeParse({ ...input, windowDays: 10 }).success).toBe(false);
+    const r = resolvePassthrough([input as WidgetInput], []);
+    expect(r.ok && r.widgets[0]).toMatchObject({ kind: "workload", windowDays: 14, mode: "tasks" });
+  });
+  it("is hidden from a reader who cannot read its Space, like every data card", () => {
+    const [w] = parseWidgets([{ id: "wl", kind: "workload", title: "Load", source: { kind: "space", spaceId: "S" }, layout }]);
+    const ctx: RedactContext = { readableListsFor: () => null, fieldKeysByList: new Map() };
+    expect(redactWidgetsForReader([w], ctx)[0]).toEqual({ id: "wl", kind: "hidden", layout });
+  });
+});

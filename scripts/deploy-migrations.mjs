@@ -132,6 +132,13 @@ const SQL_MANIFEST = [
   // order is free: the catalogue reads zero counts and the request routes
   // answer a named 503 while the tables are absent.
   "2026-09-24-phase7-requests.sql",
+  // Phase 6, people. ADD COLUMN IF NOT EXISTS on User, Threshold, KPIRecord,
+  // ReviewCycle, Review, TalentAssessment and PulseSurvey (every one nullable
+  // or defaulted) plus the new "CandorRespondent" table. The new scalar
+  // columns are on the Prisma models, so a findMany with no select asks for
+  // them: this file MUST be applied before the release starts, which is what
+  // this manifest does. The backfills are separate dry-run scripts.
+  "2026-09-26-phase6-people.sql",
   // Phase 7, stage C review: "AutomationCronTick" (one row per cron endpoint,
   // stamped on every tick, read by the trigger catalog so the two time
   // triggers show "Not live yet" until the automation-schedule cron row

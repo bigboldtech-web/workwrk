@@ -1,58 +1,39 @@
-// /team/reviews — manager queue for weekly reviews.
+// Teams > Weekly reviews (spec-teams-performance /team/reviews): read the
+// weekly reviews your people wrote and approve them or ask for changes.
 //
-// Two sections:
-//   1. Awaiting your review (status=SUBMITTED, managerStatus=PENDING)
-//      — each card expands to show body + Approve / Request changes
-//   2. Recently acted (status=ACKNOWLEDGED, last 30 days)
-//      — read-only summary of what was decided
+// Gate: the `weekly-reviews` APP_RULES row, anyone with reports (solid or
+// dotted, any depth) over their chain, the People team and Admin over the
+// org; anyone else gets the in-shell 404 (an app-key denial, access 5.5
+// rule 6). Their own weekly review lives at /me/weekly-review.
+//
+// The page is the standard header stack over a TableCard (views Waiting on
+// you, Acted and All; Filter, Sort, Group), and a review opens in a drawer at
+// ?review={id}. Everything reads GET /api/weekly-reviews and
+// GET /api/weekly-reviews/[id]; a decision is the one PATCH the Alignment
+// board writes too (PO-1).
 
-import { notFound, redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { resolveAccess, meets } from "@/lib/access";
-import { listReviewsForManager } from "@/lib/weekly-review";
-import { TeamReviewsClient } from "@/components/team/team-reviews-client";
-import Link from "next/link";
-import { ClipboardCheck } from "lucide-react";
+import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { gatePage } from "@/lib/access/gate";
+import { weeklyQueueCtx } from "@/lib/people/weekly-queue.server";
+import { WeeklyReviewsView } from "@/components/team/weekly-reviews-view";
 
 export const dynamic = "force-dynamic";
 
 export default async function TeamReviewsPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
-  if (!u.id || !u.organizationId) redirect("/login");
-
-  const decision = await resolveAccess(
-    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
-    { type: "module", name: "team/reviews" },
-  );
-  if (!meets(decision, "read")) notFound();
-
-  const [pending, acted] = await Promise.all([
-    listReviewsForManager(u.id, { status: "SUBMITTED", take: 50 }),
-    listReviewsForManager(u.id, { status: "ACKNOWLEDGED", take: 30 }),
-  ]);
-
+  await gatePage("view", { type: "app", key: "weekly-reviews" }, { callbackUrl: "/team/reviews" });
+  const ctx = await weeklyQueueCtx();
+  if (!ctx) redirect("/login?callbackUrl=%2Fteam%2Freviews");
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
-          <span className="text-zinc-300">/</span>
-          <span>Reviews</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#dc2626]/10 shrink-0">
-            <ClipboardCheck className="h-5 w-5 text-[#dc2626]" />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900">Reviews</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">weekly reviews from your reports — approve or request changes</span>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
-        <TeamReviewsClient pending={pending} acted={acted} />
-      </div>
+    <div className="flex h-full flex-col bg-raised">
+      <Suspense>
+        <WeeklyReviewsView
+          viewerId={ctx.userId}
+          hasReports={ctx.hasReports}
+          canExportAll={ctx.peopleTeamOrAdmin}
+          isAgent={ctx.isAgent}
+        />
+      </Suspense>
     </div>
   );
 }

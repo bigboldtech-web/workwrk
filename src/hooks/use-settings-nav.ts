@@ -4,7 +4,7 @@
 // (settings-architecture.md section 8.3).
 //
 //   const { openSettings, closeSettings } = useSettingsNav();
-//   openSettings("/settings/members");   // records where you came from, then navigates
+//   openSettings("/settings/members");   // asks about unsaved work, records where you came from, then navigates
 //   closeSettings();                     // returnTo, else lastAppPath, else /today
 //
 // `closeSettings` runs the dirty guard first, so a Save-bar page with unsaved
@@ -12,7 +12,7 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { confirmLeave } from "@/lib/dirty-guard";
+import { confirmLeave, leaveThen } from "@/lib/dirty-guard";
 import { clearSettingsReturn, closeSettingsTarget, rememberSettingsOrigin } from "@/lib/settings-nav";
 
 export function useSettingsNav() {
@@ -20,8 +20,12 @@ export function useSettingsNav() {
 
   const openSettings = useCallback(
     (href: string) => {
-      rememberSettingsOrigin();
-      router.push(href);
+      // Unsaved work on the page asks first; the origin is remembered only
+      // when the person really leaves, so Keep editing records nothing.
+      void leaveThen(() => {
+        rememberSettingsOrigin();
+        router.push(href);
+      });
     },
     [router],
   );

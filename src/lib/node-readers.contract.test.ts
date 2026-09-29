@@ -106,10 +106,12 @@ describe("access activity stays out of the feeds", () => {
     it(`${file} excludes ACCESS_ACTIVITY_TYPES from every activity read`, () => {
       const src = stripComments(read(file));
       expect(src).toMatch(/import\s*\{[^}]*\bACCESS_ACTIVITY_TYPES\b[^}]*\}\s*from\s*"@\/lib\/access\/access-activity"/);
-      const reads = [...src.matchAll(/activityLog\.findMany\(/g)];
+      // findMany and groupBy both read rows (My team's "Last active" is a
+      // groupBy), so both must leave the access records out.
+      const reads = [...src.matchAll(/activityLog\.(?:findMany|groupBy)\(/g)];
       expect(reads.length, `${file} reads no activity`).toBeGreaterThan(0);
       for (const r of reads) {
-        const call = argsFrom(src, (r.index ?? 0) + "activityLog.findMany".length);
+        const call = argsFrom(src, (r.index ?? 0) + r[0].length - 1);
         expect(call).toMatch(/type:\s*\{\s*notIn:\s*\[\s*\.\.\.ACCESS_ACTIVITY_TYPES\s*\]\s*\}/);
       }
     });

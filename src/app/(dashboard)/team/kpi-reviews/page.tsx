@@ -1,54 +1,57 @@
-// /team/kpi-reviews — manager queue for submitted KPI scores. Sibling of
-// /team/reviews (weekly reviews). Two sections: "Awaiting your approval"
-// (SUBMITTED) with inline Approve / Request-changes, and "Recently acted".
+// /team/kpi-reviews: KPI reviews, the manager's one KPI page (spec-goals
+// section 2). Per person, per month: approve what they recorded, ask for a
+// change, or record the number yourself. It absorbed the two pages that did
+// this job: /kra-kpi/review (the typing page, which 308s here carrying
+// ?period=) and the old approval queue (the "Awaiting approval" cards and
+// the retired ?view=record tab, both this one table now).
+//
+// Gate: the `kpi-reviews` APP_RULES row (anyone with reports over their
+// chain, the People team and Admin over the org); anyone else gets the
+// in-shell 404. ?person= outside the viewer's reach is a 404 too, so the
+// page never confirms who else exists. ?period=YYYY-MM picks the month (a
+// future or malformed month falls back to the current one).
 
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { resolveAccess, meets } from "@/lib/access";
-import { listKpiReviewsForManager } from "@/lib/kpi-record";
-import { KpiReviewsClient } from "@/components/team/kpi-reviews-client";
-import Link from "next/link";
-import { Award } from "lucide-react";
+import { gatePage } from "@/lib/access/gate";
+import { currentKpiPeriod, resolveKpiPeriod } from "@/lib/kpi-period";
+import { kpiActorCtx, listAwaitingKpiNumbers, mayActOnKpisOf, listRecentKpiDecisions } from "@/lib/kpi-review.server";
+import { KpiReviewsView } from "@/components/team/kpi-reviews-view";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamKpiReviewsPage() {
+export default async function TeamKpiReviewsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
+  const u = session.user as { id?: string; organizationId?: string };
   if (!u.id || !u.organizationId) redirect("/login");
+  await gatePage("view", { type: "app", key: "kpi-reviews" }, { callbackUrl: "/team/kpi-reviews" });
 
-  const decision = await resolveAccess(
-    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
-    { type: "module", name: "team/kpi-reviews" },
-  );
-  if (!meets(decision, "read")) notFound();
+  const sp = await searchParams;
+  const period = resolveKpiPeriod(typeof sp.period === "string" ? sp.period : undefined);
+  const person = typeof sp.person === "string" && sp.person ? sp.person : null;
+  const ctx = await kpiActorCtx();
+  if (!ctx) redirect("/login");
+  if (person && (person === u.id || !mayActOnKpisOf(ctx, person))) notFound();
 
-  const [pending, acted] = await Promise.all([
-    listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED", take: 50 }),
-    listKpiReviewsForManager(u.id, u.organizationId, { statuses: ["APPROVED", "REJECTED"], take: 30 }),
-  ]);
+  // Submitted numbers from any month for the people this page lists (the
+  // sidebar badge's own list), so a number sent in for last month is never
+  // hidden behind the month control.
+  const [waiting, recent] = await Promise.all([listAwaitingKpiNumbers(ctx), listRecentKpiDecisions(ctx)]);
+  const byMonth = new Map<string, number>();
+  for (const w of waiting) byMonth.set(w.period, (byMonth.get(w.period) ?? 0) + 1);
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
-          <span className="text-zinc-300">/</span>
-          <span>KPI approvals</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#f59e0b]/10 shrink-0">
-            <Award className="h-5 w-5 text-[#f59e0b]" />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900">KPI approvals</h1>
-          <span className="text-xs text-zinc-400 hidden sm:inline">sign off on reported KPI scores, or send back for changes</span>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
-        <KpiReviewsClient pending={pending} acted={acted} />
-      </div>
+    <div className="flex h-full flex-col bg-raised">
+      <KpiReviewsView
+        initialPeriod={period}
+        currentPeriod={currentKpiPeriod()}
+        initialPerson={person}
+        otherMonths={[...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([p, count]) => ({ period: p, count }))}
+        viewerId={u.id}
+        recentDecisions={recent}
+      />
     </div>
   );
 }

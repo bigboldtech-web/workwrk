@@ -9,24 +9,34 @@ import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
+import { orgRoleOf } from "@/lib/access/org-role";
+import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
+import { directoryList } from "@/lib/people/directory-list.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
+  // The Directory and the Org chart (Phase 6, spec-teams-people /people and
+  // /organization): every Member reads the whole org's directory cards, with
+  // server filters, sort and pagination, and people data only for the people
+  // the viewer may read. The other scopes below keep their callers' contract.
+  if (searchParams.get("scope") === "directory" || searchParams.get("fields") === "chart") {
+    return directoryList(req);
+  }
   const departmentId = searchParams.get("departmentId");
   const status = searchParams.get("status");
   const accessLevel = searchParams.get("accessLevel");
   // scope:
-  //   "team" — only the caller's reports + themselves
-  //   "all"  — every active user in the org (org-wide levels only)
+  //   "team": only the caller's reports + themselves
+  //   "all" : every active user in the org (org-wide levels only)
   // Default: org-wide levels get "all", everyone else gets "team".
-  // The door is ORG_WIDE_ALIGNMENT_LEVELS — the same ladder the rest of
-  // Teams uses — so a Director/VP/HR sees the same org here as elsewhere.
+  // The door is ORG_WIDE_ALIGNMENT_LEVELS: the same ladder the rest of
+  // Teams uses: so a Director/VP/HR sees the same org here as elsewhere.
   const requestedScope = searchParams.get("scope");
-  // ?tagIds=a,b — narrow to people carrying ANY of these person-tags. Resolved
+  // ?tagIds=a,b: narrow to people carrying ANY of these person-tags. Resolved
   // live from TagAssignment, ANDed with the scope/other filters below.
   const tagIdsParam = searchParams.get("tagIds");
   const tagIds = tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -42,12 +52,31 @@ export async function GET(req: NextRequest) {
   if (!includeDeleted) where.deletedAt = null;
   if (departmentId) where.departmentId = departmentId;
   if (status) where.status = status as UserStatus;
-  if (accessLevel) where.accessLevel = accessLevel as AccessLevel;
+  // The directory card carries no access level, so it cannot be filtered on
+  // one either (a filter is a read).
+  if (accessLevel && !(searchParams.get("scope") === "directory" && !ORG_WIDE_ALIGNMENT_LEVELS.has((session.user as { accessLevel?: string }).accessLevel ?? ""))) {
+    where.accessLevel = accessLevel as AccessLevel;
+  }
+
+  // scope=directory (Phase 6, spec-teams-people section 1 Access): the
+  // Directory and the Org chart are open to every Member (person_card VIEW
+  // org-wide, access 3.5 and 9 `people.view`), so any Member may list the
+  // whole org, but a caller who is not org-wide gets the directory CARD only
+  // (below): no phone, no access level, no KRA count, and never a removed
+  // person. Guests never list the directory (access 11 invariant 3).
+  const callerRole = orgRoleOf({ accessLevel: callerLevel || null });
+  const directoryCard = requestedScope === "directory" && !orgWide;
+  if (requestedScope === "directory" && callerRole === "GUEST") return jsonError("Not found", 404);
+  if (directoryCard) where.deletedAt = null;
 
   // Enforce scope. Non-org-wide callers can never escape team scope,
-  // regardless of what they pass. Stops a line manager from seeing
-  // org-wide data.
-  const effectiveScope = orgWide ? (requestedScope || "all") : "team";
+  // regardless of what they pass, except into the directory card above.
+  // Stops a line manager from seeing org-wide people data.
+  const effectiveScope = orgWide
+    ? (requestedScope === "directory" ? "all" : requestedScope || "all")
+    : directoryCard
+      ? "directory"
+      : "team";
   if (effectiveScope === "team") {
     const teamIds = await getTeamUserIds(orgId, callerId);
     where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
@@ -60,7 +89,7 @@ export async function GET(req: NextRequest) {
     ];
   }
 
-  // Tag filter — ANDed with scope via `AND` so it composes with the existing
+  // Tag filter: ANDed with scope via `AND` so it composes with the existing
   // `where.id` (team scope) instead of clobbering it. An empty resolved set
   // (a tag nobody has) correctly yields no rows.
   if (tagIds.length > 0) {
@@ -70,9 +99,11 @@ export async function GET(req: NextRequest) {
     where.AND = andClause;
   }
 
-  const orderBy: Prisma.UserOrderByWithRelationInput = pagination.sortBy
-    ? ({ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput)
-    : { firstName: "asc" };
+  // id breaks ties so page N and page N+1 never overlap or skip a person
+  // (fetch-all-pages.ts walks every page for the directory and org chart).
+  const orderBy: Prisma.UserOrderByWithRelationInput[] = pagination.sortBy
+    ? [{ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput, { id: "asc" }]
+    : [{ firstName: "asc" }, { id: "asc" }];
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({
@@ -83,17 +114,17 @@ export async function GET(req: NextRequest) {
         lastName: true,
         email: true,
         avatar: true,
-        phone: true,
+        phone: !directoryCard,
         status: true,
-        accessLevel: true,
+        accessLevel: !directoryCard,
         managerId: true,
         joinDate: true,
         deletedAt: true,
         department: { select: { id: true, name: true } },
         role: { select: { id: true, title: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
-        // Filtered count — soft-deleted reports don't inflate "N reports".
-        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: true } },
+        // Filtered count: soft-deleted reports don't inflate "N reports".
+        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
       },
       orderBy,
       ...skipTake(pagination),
@@ -125,6 +156,10 @@ export async function POST(req: NextRequest) {
     return jsonError("First name, last name, and email are required");
   }
 
+  // Never take the level from the body on trust (grantable-level.ts).
+  const level = grantableAccessLevel((session.user as { accessLevel?: string }).accessLevel, accessLevel);
+  if (!level) return jsonError("You can't give that access level. An admin sets it in Members.", 403);
+
   const existing = await prisma.user.findFirst({
     where: { email, organizationId: getOrgId(session) },
   });
@@ -140,7 +175,7 @@ export async function POST(req: NextRequest) {
       passwordHash,
       departmentId,
       roleId,
-      accessLevel: accessLevel || "EMPLOYEE",
+      accessLevel: level,
       managerId,
       organizationId: getOrgId(session),
     },

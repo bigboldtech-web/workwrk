@@ -2464,7 +2464,9 @@ describe("spec 5.2.1: the app rule table", () => {
   it("has a row for every app key, and the key list is the union of hubs, folded apps and the four route-only keys", () => {
     // 31 in the access spec's own table, plus `templates`, which
     // spec-spaces-lists section 1 adds as the one APP_RULES row that unit owns.
-    expect(APP_KEYS.length).toBe(34);
+    // Phase 6 adds the six Teams-hub route pages (team, workload,
+    // weekly-reviews, kra-kpi, alignment, kpi-reviews).
+    expect(APP_KEYS.length).toBe(40);
     for (const key of APP_KEYS) expect(APP_RULES[key]).toBeTruthy();
     expect(APP_RULES.templates).toEqual({ hub: "home", audience: "member", guest: "none" });
   });
@@ -2495,7 +2497,10 @@ describe("spec 5.2.1: the app rule table", () => {
   it("opens the people-ops apps to anyone with reports, the People team and admins, and nobody else", () => {
     const peopleOps = APP_KEYS.filter((k) => APP_RULES[k].audience === "reports-people-team-admin");
     expect(peopleOps).toEqual(
-      expect.arrayContaining(["reviews", "talent", "analytics", "rollup", "candor", "assets"]),
+      expect.arrayContaining([
+        "reviews", "talent", "analytics", "rollup", "candor", "assets",
+        "team", "workload", "weekly-reviews", "alignment", "kpi-reviews",
+      ]),
     );
     for (const key of peopleOps) {
       expect(decide(facts({ viewer: member, app: key }), "view").allowed).toBe(false);
@@ -2504,6 +2509,20 @@ describe("spec 5.2.1: the app rule table", () => {
         decide(facts({ viewer: peopleTeamMember, app: key, peopleTeamIds: ["u_pt"] }), "view").allowed,
       ).toBe(true);
       expect(decide(facts({ viewer: owner, app: key }), "view").allowed).toBe(true);
+    }
+  });
+
+  it("opens the KRAs & KPIs library to every Member and never to a Guest (spec-goals section 0)", () => {
+    expect(APP_RULES["kra-kpi"]).toEqual({ hub: "teams", audience: "member", guest: "none" });
+    expect(decide(facts({ viewer: member, app: "kra-kpi" }), "view").allowed).toBe(true);
+    expect(decide(facts({ viewer: guest, app: "kra-kpi" }), "view").allowed).toBe(false);
+  });
+
+  it("gives the six Phase 6 Teams route pages rows of their own, all in the Teams hub", () => {
+    for (const key of ["team", "workload", "weekly-reviews", "kra-kpi", "alignment", "kpi-reviews"] as AppKey[]) {
+      expect(APP_RULES[key].hub).toBe("teams");
+      expect(APP_RULES[key].guest).toBe("none");
+      expect(ENFORCED_AT[`app.${key}` as keyof typeof ENFORCED_AT]).toBeTruthy();
     }
   });
 

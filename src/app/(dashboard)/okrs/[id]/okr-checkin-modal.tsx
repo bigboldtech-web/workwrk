@@ -1,27 +1,19 @@
 "use client";
 
-// OkrCheckInModal — ClickUp-style target check-in dialog (Mobbin ref
-// 5bbde02d-26f6-45ba-9fa5-c90651de8449). Replaces the old inline
-// okr-checkin-form on the goal detail Targets card. Layout mirrors
-// ClickUp: target title header, progress bar, Start / Current / Target
-// caption row (Current boxed), a Decrease|Increase toggle that signs the
-// entered delta against the current value, value input (native spinners
-// hidden), optional Note, "Save update" on brand blue.
-//
-// Mechanics unchanged: POST /api/okrs/[id]/check-in with
-// { keyResultId, value, note } where value is the absolute NEW value
-// (current ± delta). Direction-aware progress math stays server-side
-// (inferKeyResultDirection). A KPI-linked target is measured BY its
-// gauge: the server refuses hand check-ins with 409, so the modal shows
-// that copy up front for derived targets and renders any 409 response
-// in the same amber notice.
+// Check in on a target (spec-goals /okrs/[id], the 400 modal). The person
+// either sets the new value, or adds to or subtracts from the current one
+// (the old Decrease / Increase toggle); a live line previews "42 to 58 units
+// · 58%" before anything is saved. POST /api/okrs/[id]/check-in with the
+// ABSOLUTE new value, the API contract since the check-in route shipped;
+// direction-aware progress math stays server-side. A target fed by a KPI is
+// measured by the KPI: the server refuses a hand check-in with 409, so the
+// modal says so up front and shows any 409 the same way.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useOsToast } from "@/components/layout/os/toast";
 import type { TargetRowData } from "./goal-targets";
 
@@ -29,216 +21,115 @@ function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 }
 
-/** Amber notice shared by the derived-target hint and the 409 response. */
-function KpiNotice({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      role="status"
-      className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-base leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-    >
-      {children}
-    </div>
-  );
+type Mode = "set" | "add" | "subtract";
+
+export function previewProgress(start: number, target: number, value: number): number {
+  if (target === start) return value >= target ? 100 : 0;
+  return Math.max(0, Math.min(100, Math.round(((value - start) / (target - start)) * 100)));
 }
 
 export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
   okrId: string;
   target: TargetRowData;
-  /** canEditOkrOwner — the same gate the check-in route enforces. */
+  /** May check in (owner, contributors, manager chain, People team, Admin). */
   canEdit: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const [mode, setMode] = useState<"increase" | "decrease">("increase");
+  const [mode, setMode] = useState<Mode>("set");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<{ kind: "kpi" | "plain"; text: string } | null>(null);
 
   const unit = target.unit?.trim() ?? "";
-  const pct = Math.max(0, Math.min(100, target.progress));
-  const delta = Number(amount);
-  const hasDelta = amount.trim() !== "" && !Number.isNaN(delta);
-  const next = hasDelta
-    ? (mode === "increase" ? target.currentValue + delta : target.currentValue - delta)
-    : null;
+  const n = Number(amount);
+  const valid = amount.trim() !== "" && Number.isFinite(n);
+  const next = !valid ? null : mode === "set" ? n : mode === "add" ? target.currentValue + n : target.currentValue - n;
+  const writable = canEdit && !target.isDerived;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (next == null || saving) return;
+    if (next == null || saving || !writable) return;
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/okrs/${okrId}/check-in`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Payload shape is the API contract: absolute new value, not the delta.
         body: JSON.stringify({ keyResultId: target.id, value: next, note: note.trim() || null }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError({
-          kind: res.status === 409 ? "kpi" : "plain",
-          text: typeof data?.error === "string" ? data.error : "Check-in failed",
-        });
+        setError({ kind: res.status === 409 ? "kpi" : "plain", text: typeof data?.error === "string" ? data.error : "Couldn't save the check-in" });
         return;
       }
       toast("Check-in saved");
       onClose();
       router.refresh();
     } catch {
-      setError({ kind: "plain", text: "Check-in failed" });
+      setError({ kind: "plain", text: "Couldn't save the check-in. Check your connection and try again." });
     } finally {
       setSaving(false);
     }
   }
 
-  const segBtn = (active: boolean) =>
-    `h-7 rounded-md text-sm font-semibold transition-colors ${
-      active
-        ? "bg-[#0073EA] text-white"
-        : "bg-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-    }`;
-
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="block max-w-[440px] gap-0 p-0">
-        {/* ── Header: title + progress + Start / Current / Target ── */}
-        <div className="px-6 pb-4 pt-6 text-center">
-          <DialogTitle className="px-6 text-base font-semibold leading-snug">
-            {target.title}
-          </DialogTitle>
-
-          <div className="mt-4" aria-hidden>
-            <div className="mb-1.5 text-xs font-semibold tabular-nums text-zinc-500">{pct}%</div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-[#0073EA] transition-[width] duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between gap-2 text-sm text-zinc-500">
-            <span>
-              Start: <strong className="font-semibold text-zinc-700">{fmtNum(target.startValue)}{unit}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 dark:border-zinc-700">
-              Current: <strong className="font-semibold tabular-nums text-zinc-700">
-                {fmtNum(next ?? target.currentValue)}{unit}
-              </strong>
-            </span>
-            <span>
-              Target: <strong className="font-semibold text-zinc-700">{fmtNum(target.targetValue)}{unit}</strong>
-            </span>
-          </div>
-        </div>
-
-        {target.isDerived ? (
-          /* Measured by a KPI gauge: mirror the 409 the server would send. */
-          <div className="border-t border-zinc-100 px-6 py-5">
-            <KpiNotice>
-              This target is measured by the KPI{" "}
-              <strong className="font-semibold">{target.kpiName ?? "linked to it"}</strong>.
-              Record the KPI reading instead of checking in here; the number lands automatically.
-            </KpiNotice>
-          </div>
-        ) : !canEdit ? (
-          <div className="border-t border-zinc-100 px-6 py-5">
-            <p className="text-center text-base leading-relaxed text-zinc-500">
-              Only the goal&apos;s owner or their manager can check in on this target.
+      <DialogContent className="max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{writable ? `Check in on ${target.title}` : target.title}</DialogTitle>
+        </DialogHeader>
+        <form id="okr-checkin" onSubmit={submit} className="flex flex-col gap-3">
+          <p className="m-0 text-sm tabular-nums text-ink-2">
+            Start {fmtNum(target.startValue)} · Now {fmtNum(target.currentValue)} · Target {fmtNum(target.targetValue)}{unit ? ` ${unit}` : ""}
+          </p>
+          {target.isDerived ? (
+            <p role="status" className="m-0 rounded-md border border-line bg-subtle px-3 py-2 text-sm text-ink">
+              This target is measured by the KPI {target.kpiName ?? "it is linked to"}. Its number comes from the KPI, so there is nothing to check in here.
             </p>
-          </div>
-        ) : (
-          <form onSubmit={submit}>
-            <div className="border-t border-zinc-100 px-6 py-5">
-              {/* Decrease | Increase signs the delta against the current value. */}
-              <div
-                className="mx-auto mb-4 grid w-[248px] grid-cols-2 gap-0.5 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
-                role="group"
-                aria-label="Direction of change"
-              >
-                <button
-                  type="button"
-                  className={segBtn(mode === "decrease")}
-                  aria-pressed={mode === "decrease"}
-                  onClick={() => setMode("decrease")}
-                >
-                  Decrease
-                </button>
-                <button
-                  type="button"
-                  className={segBtn(mode === "increase")}
-                  aria-pressed={mode === "increase"}
-                  onClick={() => setMode("increase")}
-                >
-                  Increase
-                </button>
-              </div>
-
-              <label className="flex h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 transition-colors focus-within:border-[#0073EA] dark:border-zinc-700">
-                <span className="text-base font-semibold text-zinc-400" aria-hidden>
-                  {unit || "#"}
+          ) : !canEdit ? (
+            <p role="status" className="m-0 text-sm text-ink-2">You need Can edit on this goal to check in.</p>
+          ) : (
+            <>
+              <SegmentedControl label="How to change the value" value={mode} onChange={setMode}
+                options={[{ value: "set", label: "Set value" }, { value: "add", label: "Add" }, { value: "subtract", label: "Subtract" }]} />
+              <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+                <span>{mode === "set" ? "Current value" : mode === "add" ? "Add" : "Subtract"}</span>
+                <span className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="number"
+                    step="any"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="h-9 min-w-0 flex-1 rounded-md border border-line bg-raised px-3 text-base font-normal tabular-nums text-ink focus:border-brand focus:outline-none"
+                  />
+                  {unit ? <span className="text-sm font-normal text-ink-2">{unit}</span> : null}
                 </span>
-                <input
-                  type="number"
-                  step="any"
-                  autoFocus
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  aria-label={mode === "increase" ? "Amount to increase by" : "Amount to decrease by"}
-                  className="w-full bg-transparent text-base font-medium text-zinc-900 outline-none placeholder:text-zinc-300 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
               </label>
-
-              {next != null && (
-                <p className="mt-2 text-center text-xs tabular-nums text-zinc-400">
-                  {fmtNum(target.currentValue)}{unit} → <strong className="font-semibold text-zinc-600">{fmtNum(next)}{unit}</strong>
-                </p>
-              )}
-
-              {error && (
-                <div className="mt-3">
-                  {error.kind === "kpi" ? (
-                    <KpiNotice>{error.text}</KpiNotice>
-                  ) : (
-                    <p role="alert" className="text-center text-sm text-[#E2445C]">{error.text}</p>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-4 flex justify-center">
-                <Button type="submit" disabled={saving || !hasDelta} className="h-9 px-6">
-                  {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Save update
-                </Button>
-              </div>
-            </div>
-
-            {/* ── Note (optional) — the API stores it on the KRCheckIn row ── */}
-            <div className="border-t border-zinc-100 px-6 pb-5 pt-4">
-              <div className="mb-1 flex items-baseline justify-between">
-                <label
-                  htmlFor="okr-ci-note"
-                  className="text-xs font-semibold uppercase tracking-wide text-zinc-400"
-                >
-                  Note <span className="font-medium normal-case">(optional)</span>
-                </label>
-                <span className="text-xs text-zinc-300 dark:text-zinc-600">Max 2000 characters</span>
-              </div>
-              <Textarea
-                id="okr-ci-note"
-                value={note}
-                maxLength={2000}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Add context for this update…"
-                className="min-h-[56px] border-0 bg-transparent px-0 py-1 shadow-none hover:border-0 focus-visible:ring-0 dark:bg-transparent"
-              />
-            </div>
-          </form>
-        )}
+              <p className="m-0 text-sm tabular-nums text-ink-2" aria-live="polite">
+                {next != null
+                  ? `${fmtNum(target.currentValue)} to ${fmtNum(next)}${unit ? ` ${unit}` : ""} · ${previewProgress(target.startValue, target.targetValue, next)}%`
+                  : "Type a number to see the new progress."}
+              </p>
+              <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+                <span>Note <span className="font-normal text-ink-2">(optional)</span></span>
+                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={2000}
+                  className="rounded-md border border-line bg-raised px-3 py-2 text-base font-normal text-ink focus:border-brand focus:outline-none" />
+              </label>
+            </>
+          )}
+          {error ? (
+            <p role="alert" className={error.kind === "kpi" ? "m-0 rounded-md border border-line bg-subtle px-3 py-2 text-sm text-ink" : "m-0 text-sm text-danger-text"}>{error.text}</p>
+          ) : null}
+        </form>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>{writable ? "Cancel" : "Close"}</Button>
+          {writable ? <Button type="submit" form="okr-checkin" disabled={next == null || saving}>{saving ? "Saving" : "Save check-in"}</Button> : null}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

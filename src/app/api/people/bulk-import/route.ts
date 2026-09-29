@@ -1,110 +1,176 @@
-import { NextRequest } from "next/server";
+// Import people (spec-teams-people section 3, PeopleImport; T7).
+//
+// POST { rows, dryRun } turns each CSV row into an INVITATION, never a user
+// with a known password: the shared "Welcome@123" hash is gone, and so is
+// any access level from the file (every row joins as a Member; an Admin
+// promotes in Members afterwards). Job title, department and office are
+// matched by name; "Reports to" is an email resolved to a current person
+// (their managerId is set when the invitation is accepted); the workspace's
+// domain lock applies. The dry run returns the staging report the modal
+// shows: ready rows, rows with errors, and people who are already members or
+// already invited, so nothing is created twice. Owner and Admin only.
+//
+// GET serves the CSV template.
+
+import { NextResponse, type NextRequest } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import bcrypt from "bcryptjs";
+import { sendEmail } from "@/lib/email";
+import { invitationTemplate } from "@/lib/email-templates";
+import { peopleCtx } from "@/lib/people/person-access.server";
+import { IMPORT_TEMPLATE_CSV } from "@/lib/people/people-csv";
+
+const err = (status: number, error: string) => NextResponse.json({ error }, { status });
+
+type InRow = Record<string, unknown>;
+type Outcome = { row: number; email: string; status: "ready" | "error" | "member" | "invited"; message?: string; field?: string };
+
+const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  const ctx = await peopleCtx();
+  if (!ctx) return err(401, "Unauthorized");
+  if (!ctx.isAdmin) return err(403, "Only an Admin can import people.");
+  const body = (await req.json().catch(() => null)) as { rows?: unknown; dryRun?: unknown } | null;
+  const rows = Array.isArray(body?.rows) ? (body!.rows as InRow[]) : [];
+  const dryRun = body?.dryRun !== false;
+  if (rows.length === 0) return err(400, "No rows provided");
+  if (rows.length > 1000) return err(400, "Up to 1,000 people per import");
 
-  const orgId = getOrgId(session);
-  const actorId = getUserId(session);
-  const body = await req.json();
-  const { rows, dryRun } = body;
-
-  if (!Array.isArray(rows) || rows.length === 0) return jsonError("No rows provided");
-  if (rows.length > 1000) return jsonError("Maximum 1000 rows per import");
-
-  // Get existing data for validation
-  const [existingUsers, departments, roles] = await Promise.all([
-    prisma.user.findMany({ where: { organizationId: orgId }, select: { email: true } }),
+  const orgId = ctx.organizationId;
+  const [org, members, pending, departments, roles, offices] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true } }),
+    prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
+    // Only LIVE invitations block a row: a person whose invite expired can be
+    // imported again (the expired row stays, untouched).
+    prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } }, select: { email: true } }),
     prisma.department.findMany({ where: { organizationId: orgId }, select: { id: true, name: true } }),
     prisma.role.findMany({ where: { organizationId: orgId }, select: { id: true, title: true } }),
+    prisma.office.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, city: true } }),
   ]);
+  const me = members.find((m) => m.id === ctx.userId);
+  const domain = (org?.domain?.trim() || me?.email.split("@")[1] || "").toLowerCase();
+  const memberByEmail = new Map(members.map((m) => [m.email.toLowerCase(), m]));
+  const invited = new Set(pending.map((p) => p.email.toLowerCase()));
+  const dept = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
+  const role = new Map(roles.map((r) => [(r.title || "").trim().toLowerCase(), r.id]));
+  const office = new Map<string, string>();
+  for (const o of offices) {
+    office.set(o.name.trim().toLowerCase(), o.id);
+    if (o.city) office.set(o.city.trim().toLowerCase(), o.id);
+  }
 
-  const existingEmails = new Set(existingUsers.map((u) => u.email.toLowerCase()));
-  const deptMap = new Map(departments.map((d) => [d.name.toLowerCase(), d.id]));
-  const roleMap = new Map(roles.map((r) => [(r.title || "").toLowerCase(), r.id]));
-
-  const errors: { row: number; field: string; message: string }[] = [];
-  const validRows: any[] = [];
-  const seenEmails = new Set<string>();
-  const passwordHash = await bcrypt.hash("Welcome@123", 12);
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+  const outcomes: Outcome[] = [];
+  const ready: Array<{ email: string; firstName: string; lastName: string; phone: string | null; departmentId: string | null; roleId: string | null; officeId: string | null; managerId: string | null }> = [];
+  const seen = new Set<string>();
+  rows.forEach((r, i) => {
     const rowNum = i + 1;
+    const email = s(r.email).toLowerCase();
+    const fail = (field: string, message: string) => outcomes.push({ row: rowNum, email, status: "error", field, message });
+    if (!s(r.firstName)) return fail("firstName", "First name is missing");
+    if (!s(r.lastName)) return fail("lastName", "Last name is missing");
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail("email", "Not an email address");
+    if (seen.has(email)) return fail("email", "This email is in the file twice");
+    seen.add(email);
+    if (domain && email.split("@")[1] !== domain) return fail("email", `Only @${domain} addresses can join`);
+    const existing = memberByEmail.get(email);
+    if (existing) {
+      outcomes.push({ row: rowNum, email, status: "member", message: existing.deletedAt ? "Removed member: restore them from the Directory" : "Already a member" });
+      return;
+    }
+    if (invited.has(email)) { outcomes.push({ row: rowNum, email, status: "invited", message: "Already invited" }); return; }
+    const deptName = s(r.department).toLowerCase();
+    const titleName = s(r.jobTitle ?? r.role).toLowerCase();
+    const officeName = s(r.office).toLowerCase();
+    const departmentId = deptName ? dept.get(deptName) ?? null : null;
+    const roleId = titleName ? role.get(titleName) ?? null : null;
+    const officeId = officeName ? office.get(officeName) ?? null : null;
+    if (deptName && !departmentId) return fail("department", `No department named "${s(r.department)}"`);
+    if (titleName && !roleId) return fail("jobTitle", `No job title named "${s(r.jobTitle ?? r.role)}"`);
+    if (officeName && !officeId) return fail("office", `No office named "${s(r.office)}"`);
+    let managerId: string | null = null;
+    const reportsTo = s(r.reportsTo).toLowerCase();
+    if (reportsTo) {
+      const m = memberByEmail.get(reportsTo);
+      if (!m || m.deletedAt) return fail("reportsTo", `Nobody here has the email ${reportsTo}`);
+      if (m.accessLevel === "AGENT") return fail("reportsTo", "An Agent can't be anyone's manager");
+      managerId = m.id;
+    }
+    outcomes.push({ row: rowNum, email, status: "ready" });
+    const phone = s(r.phone).slice(0, 40) || null;
+    ready.push({ email, firstName: s(r.firstName).slice(0, 80), lastName: s(r.lastName).slice(0, 80), phone, departmentId, roleId, officeId, managerId });
+  });
 
-    if (!row.firstName?.trim()) { errors.push({ row: rowNum, field: "firstName", message: "First name required" }); continue; }
-    if (!row.lastName?.trim()) { errors.push({ row: rowNum, field: "lastName", message: "Last name required" }); continue; }
-    if (!row.email?.trim() || !row.email.includes("@")) { errors.push({ row: rowNum, field: "email", message: "Valid email required" }); continue; }
+  const summary = {
+    total: rows.length,
+    ready: ready.length,
+    errors: outcomes.filter((o) => o.status === "error").length,
+    members: outcomes.filter((o) => o.status === "member").length,
+    invited: outcomes.filter((o) => o.status === "invited").length,
+  };
+  if (dryRun) return NextResponse.json({ dryRun: true, summary, rows: outcomes });
+  if (ready.length === 0) return err(400, "No rows are ready to import");
 
-    const email = row.email.trim().toLowerCase();
-    if (existingEmails.has(email)) { errors.push({ row: rowNum, field: "email", message: "Email already exists" }); continue; }
-    if (seenEmails.has(email)) { errors.push({ row: rowNum, field: "email", message: "Duplicate email in import" }); continue; }
-    seenEmails.add(email);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const created = await prisma.$transaction(
+    ready.map((r) =>
+      prisma.invitation.create({
+        data: {
+          email: r.email,
+          // Kept on the invitation so the invitee's form starts filled and the
+          // imported phone lands on their record when they join.
+          firstName: r.firstName || null,
+          lastName: r.lastName || null,
+          phone: r.phone,
+          accessLevel: "EMPLOYEE",
+          token: crypto.randomBytes(32).toString("hex"),
+          expiresAt,
+          organizationId: orgId,
+          departmentId: r.departmentId,
+          roleId: r.roleId,
+          officeId: r.officeId,
+          managerId: r.managerId,
+        },
+        select: { id: true, email: true, token: true },
+      }),
+    ),
+  );
 
-    const deptId = row.department ? deptMap.get(row.department.trim().toLowerCase()) : undefined;
-    const roleId = row.role ? roleMap.get(row.role.trim().toLowerCase()) : undefined;
+  // Emails go out after the rows exist; a failed send leaves a pending
+  // invitation the Members page can resend, never a lost person.
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  void (async () => {
+    for (const inv of created) {
+      try {
+        const { subject, html } = invitationTemplate({ companyName: org?.name || "Your team", inviteLink: `${baseUrl}/register?token=${inv.token}`, accessLevel: "EMPLOYEE" });
+        await sendEmail({ to: inv.email, subject, html, template: "invitation", variables: { companyName: org?.name }, organizationId: orgId, category: "invitation" });
+      } catch (e) {
+        console.error("[bulk-import] invitation email failed", e);
+      }
+    }
+  })();
 
-    validRows.push({
-      firstName: row.firstName.trim(),
-      lastName: row.lastName.trim(),
-      email,
-      phone: row.phone?.trim() || null,
-      passwordHash,
-      departmentId: deptId || null,
-      roleId: roleId || null,
-      accessLevel: row.accessLevel || "EMPLOYEE",
-      organizationId: orgId,
-    });
-  }
-
-  if (dryRun) {
-    return jsonSuccess({
-      valid: validRows.length,
-      errors: errors.length,
-      errorDetails: errors,
-      total: rows.length,
-    });
-  }
-
-  // Actually import
-  if (validRows.length === 0) return jsonError("No valid rows to import");
-
-  const result = await prisma.user.createMany({ data: validRows, skipDuplicates: true });
-
-  logActivity({
+  void logActivity({
     type: "bulk_import",
-    actorId,
+    actorId: ctx.userId,
     organizationId: orgId,
-    description: `Bulk imported ${result.count} employees`,
+    description: `Invited ${created.length} people from a file`,
     severity: "warning",
+    metadata: { ...summary },
   });
 
-  return jsonSuccess({
-    imported: result.count,
-    skipped: rows.length - validRows.length,
-    errors: errors.length,
-    errorDetails: errors.slice(0, 50),
-  });
+  return NextResponse.json({ dryRun: false, summary: { ...summary, created: created.length }, rows: outcomes });
 }
 
-// GET: Download CSV template
 export async function GET() {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-
-  const csv = `firstName,lastName,email,phone,department,role,accessLevel
-John,Doe,john@example.com,+1234567890,Engineering,Software Engineer,EMPLOYEE
-Jane,Smith,jane@example.com,+1234567891,Marketing,Marketing Manager,MANAGER`;
-
-  return new Response(csv, {
+  const ctx = await peopleCtx();
+  if (!ctx) return err(401, "Unauthorized");
+  if (!ctx.isAdmin) return err(403, "Only an Admin can import people.");
+  return new Response(IMPORT_TEMPLATE_CSV, {
     headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": "attachment; filename=employee-import-template.csv",
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": "attachment; filename=import-people-template.csv",
     },
   });
 }

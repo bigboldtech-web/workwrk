@@ -1,16 +1,18 @@
+import { orgRoleOf } from "@/lib/access/org-role";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
+import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { logActivity } from "@/lib/activity";
 import { KPI_ORDER } from "@/lib/alignment";
 import type { Prisma } from "@/generated/prisma";
 
 // Soft over-100 signal for a job title's KRA weights. Sums the role-level
 // KRA.weight across every KRA on the role and flags a breach WITHOUT
-// rejecting — an existing >100 role must stay editable so someone can
+// rejecting, an existing >100 role must stay editable so someone can
 // rebalance it. `roleWeightTotal` is the running sum; `weightWarning` is
 // advisory copy the UI can surface. Best-effort: never fails the write.
 async function roleWeightSignal(
@@ -28,7 +30,7 @@ async function roleWeightSignal(
       roleWeightTotal,
       weightWarning:
         roleWeightTotal > 100
-          ? `This job title's KRA weights now total ${roleWeightTotal}% — over the 100% budget. Saved; trim a KRA weight to rebalance.`
+          ? `This job title's KRA weights now total ${roleWeightTotal}%, over the 100% budget. Saved; trim a KRA weight to rebalance.`
           : null,
     };
   } catch {
@@ -45,9 +47,9 @@ export async function GET(req: NextRequest) {
   // Job-title-first workspace: one role's KRAs only.
   const roleId = searchParams.get("roleId");
   // scope:
-  //   "all"  — every KRA in the org (admins / execs / HR)
-  //   "team" — KRAs assigned to anyone in my recursive team
-  //   "own"  — KRAs assigned to me
+  //   "all" , every KRA in the org (admins / execs / HR)
+  //   "team", KRAs assigned to anyone in my recursive team
+  //   "own" , KRAs assigned to me
   // Default: admins+execs → "all", managers/team-leads → "team",
   // everyone else → "own". Non-admins can never escape their scope.
   const requestedScope = searchParams.get("scope");
@@ -56,19 +58,30 @@ export async function GET(req: NextRequest) {
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
   const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
-  const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
-  const isOrgWide = orgWideRoles.has(callerLevel);
+  // The one org-wide ladder (alignment-scope), not a local copy of it.
+  const isOrgWide = ORG_WIDE_ALIGNMENT_LEVELS.has(callerLevel);
   const isManagerLevel = isManager(session);
 
   const where: Prisma.KRAWhereInput = { organizationId: orgId };
   if (category) where.category = category;
   if (roleId) where.roleId = roleId;
 
-  const effectiveScope = isOrgWide
-    ? (requestedScope || "all")
-    : isManagerLevel
-      ? "team"
-      : "own";
+  // scope=library (Phase 6, spec-goals section 0): the KRAs & KPIs library
+  // by job title. KRA and KPI DEFINITIONS are Can view for every Member
+  // (access section 9 `kras.view`), so any Member may read every definition
+  // in the org through this scope. It carries definitions only (names,
+  // descriptions, KPI targets as defined on the job title), never a
+  // person's KPI number, which stays behind /api/kpi-records.
+  if (requestedScope === "library" && orgRoleOf({ accessLevel: callerLevel || null }) === "GUEST") {
+    return jsonError("Not found", 404);
+  }
+  const effectiveScope = requestedScope === "library"
+    ? "all"
+    : isOrgWide
+      ? (requestedScope || "all")
+      : isManagerLevel
+        ? "team"
+        : "own";
 
   if (effectiveScope !== "all") {
     const userIds =
@@ -100,7 +113,7 @@ export async function GET(req: NextRequest) {
         },
         _count: { select: { assignments: true } },
       },
-      orderBy: { name: "asc" },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       ...skipTake(pagination),
     }),
     prisma.kRA.count({ where }),
@@ -129,7 +142,7 @@ export async function POST(req: NextRequest) {
   // orphans (roleId null) stay readable and fixable via PATCH, but no
   // new orphan can ever be born.
   if (!roleId || typeof roleId !== "string") {
-    return jsonError("KRA must belong to a job title — pick a role (roleId) first.");
+    return jsonError("KRA must belong to a job title. Pick a role (roleId) first.");
   }
   const role = await prisma.role.findFirst({
     where: { id: roleId, organizationId: getOrgId(session) },
@@ -149,7 +162,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Everyone already holding this job title inherits the new KRA at
-  // once — a role and its holders must never drift apart. Best-effort:
+  // once, a role and its holders must never drift apart. Best-effort:
   // a seeding hiccup must not fail the KRA creation.
   try {
     await seedKraToRoleHolders({ kraId: kra.id, roleId, organizationId: getOrgId(session) });
@@ -157,7 +170,7 @@ export async function POST(req: NextRequest) {
     console.error("seedKraToRoleHolders failed", e);
   }
 
-  // KRAs anchor performance / KPI tracking — every creation should
+  // KRAs anchor performance / KPI tracking, every creation should
   // show up in the org's history of "how did we measure people."
   logActivity({
     type: "kra.create",
@@ -205,7 +218,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Changing the role-level weight never rewrites existing holders'
-  // weightage — per-person overrides stay put; only NEW seeds (and the
+  // weightage, per-person overrides stay put; only NEW seeds (and the
   // zero-value backfill script) pick the new default up.
   const kra = await prisma.kRA.update({
     where: { id },
@@ -230,7 +243,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Editing a weight (or re-homing the KRA) can tip the job title over its
-  // 100% budget — surface the running total; never block the save.
+  // 100% budget, surface the running total; never block the save.
   const signal = await roleWeightSignal(kra.roleId, getOrgId(session));
   return jsonSuccess({ ...kra, ...signal });
 }

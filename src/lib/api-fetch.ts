@@ -91,6 +91,26 @@ function dispatch(name: string, detail?: unknown) {
   window.dispatchEvent(new CustomEvent(name, { detail }));
 }
 
+/**
+ * Chrome caps the bodies of in-flight keepalive requests at 64KiB in total.
+ * 60,000 bytes leaves room for a small keepalive already on its way.
+ */
+export const KEEPALIVE_MAX_BYTES = 60_000;
+
+/** True when a body is small enough to be sent with keepalive. */
+export function keepaliveFits(body: BodyInit | null | undefined): boolean {
+  if (body === null || body === undefined) return true;
+  if (typeof body === "string") return new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return body.size <= KEEPALIVE_MAX_BYTES;
+  if (body instanceof ArrayBuffer) return body.byteLength <= KEEPALIVE_MAX_BYTES;
+  if (ArrayBuffer.isView(body)) return body.byteLength <= KEEPALIVE_MAX_BYTES;
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    return new TextEncoder().encode(body.toString()).length <= KEEPALIVE_MAX_BYTES;
+  }
+  // FormData and streams have no cheap size; never risk the browser refusing them.
+  return false;
+}
+
 export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}): Promise<ApiResult<T>> {
   const { json, allowWhenExpired, headers, body, ...rest } = init;
 
@@ -105,9 +125,15 @@ export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}
     finalBody = JSON.stringify(json);
   }
 
+  // keepalive has a 64KB body budget; the browser rejects a body over it
+  // before it leaves, so a long self review or survey answer could never be
+  // saved and every Retry failed the same way. A body that cannot fit goes out
+  // as an ordinary request instead (it still completes while the page is open;
+  // the callers' local backups and unload prompts cover a hard close).
+  const keepalive = rest.keepalive === true ? keepaliveFits(finalBody) : rest.keepalive;
   let res: Response;
   try {
-    res = await fetch(url, { ...rest, headers: finalHeaders, body: finalBody, credentials: rest.credentials ?? "same-origin" });
+    res = await fetch(url, { ...rest, keepalive, headers: finalHeaders, body: finalBody, credentials: rest.credentials ?? "same-origin" });
   } catch {
     if (!wasOffline) {
       wasOffline = true;

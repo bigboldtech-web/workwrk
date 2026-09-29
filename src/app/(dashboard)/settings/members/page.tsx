@@ -74,6 +74,16 @@ export default function MembersPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("invite") === "1") setInviteOpen(true);
   }, []);
+  // `?open=<userId>` (the person record's "Manage in Members") lands on
+  // that one person: the list is narrowed to them once it loads, so the
+  // admin changes their org role or access without hunting for the row.
+  const [openId] = useState<string | null>(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("open")));
+  const [openApplied, setOpenApplied] = useState(false);
+  if (!openApplied && openId && members) {
+    const m = members.find((x) => x.id === openId);
+    setOpenApplied(true);
+    if (m?.email) setQ(m.email);
+  }
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
@@ -96,6 +106,12 @@ export default function MembersPage() {
       .catch(() => setInvites([]));
   }, []);
   useEffect(() => { loadInvites(); }, [loadInvites]);
+  // #pending-invites (the People import's result step links here): the
+  // section renders after its fetch, so scroll once it exists.
+  useEffect(() => {
+    if (invites.length === 0 || window.location.hash !== "#pending-invites") return;
+    document.getElementById("pending-invites")?.scrollIntoView({ block: "start" });
+  }, [invites.length]);
 
   const revoke = async (inv: PendingInvite) => {
     setRevokingId(inv.id);
@@ -168,7 +184,7 @@ export default function MembersPage() {
       </header>
       <p className="mb-4 text-sm text-zinc-500">
         Set each person’s access level and who they report to.
-        {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
+        {canEdit ? "" : " You need Company Admin to make changes. This view is read-only."}
       </p>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -250,7 +266,7 @@ export default function MembersPage() {
                       onChange={(e) => patch(m.id, { managerId: e.target.value || null })}
                       className="h-8 max-w-[200px] rounded-md border border-zinc-200 bg-white px-2 text-base text-zinc-800 disabled:opacity-60"
                     >
-                      <option value="">— None —</option>
+                      <option value="">No manager</option>
                       {(members ?? [])
                         .filter((o) => o.id !== m.id)
                         .map((o) => (
@@ -275,7 +291,7 @@ export default function MembersPage() {
       )}
 
       {invites.length > 0 ? (
-        <section className="mt-6">
+        <section id="pending-invites" className="mt-6">
           <h2 className="mb-2 text-base font-semibold text-zinc-900">
             Pending invites <span className="font-normal text-zinc-400">({invites.length})</span>
           </h2>

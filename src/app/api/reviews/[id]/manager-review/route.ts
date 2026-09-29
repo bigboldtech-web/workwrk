@@ -1,20 +1,92 @@
+// /api/reviews/[id]/manager-review: the Manager review (spec-teams-performance
+// /reviews/[id] Team and the manager review drawer).
+//
+// GET            the reviews the caller writes in this cycle (reviewerId =
+//                caller), kept for API callers.
+// GET ?subjectId= one person's review for the drawer: the review, their self
+//                review, their peer feedback (anonymous to everyone but the
+//                People team and Admin; a peer's written answers are shown
+//                to the manager, never to the subject), their KRAs, the
+//                numbers the system already knows for the cycle window,
+//                and `canWrite`. Readers: the reviewer, anyone above the
+//                subject in the chain, the People team and Admin. Never the
+//                subject (their own review lives in My review).
+// PATCH          { reviewId, managerAssessment, managerComments, outcome?,
+//                submit }: the reviewer only. Ratings are 1 to 5, the
+//                outcome one of the five (Exit recommendation included), and
+//                a submitted review is frozen once calibration starts
+//                (review-cycle.ts managerMayWrite).
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { cycleViewerCtx, orgScoring, reviewMetrics } from "@/lib/performance/review-cycle.server";
+import { cleanManagerAssessment, effectiveReviewerId, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
 
-// GET: Get all reviews where current user is the reviewer (team reviews)
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const { id: cycleId } = await params;
   const userId = getUserId(session);
+  const orgId = getOrgId(session);
+  const subjectId = new URL(req.url).searchParams.get("subjectId");
+
+  if (subjectId) {
+    const ctx = await cycleViewerCtx();
+    if (!ctx || ctx.isGuest) return jsonError("Not found", 404);
+    const review = await prisma.review.findFirst({
+      where: { cycleId, subjectId, cycle: { organizationId: orgId } },
+      include: {
+        cycle: { select: { id: true, name: true, status: true, startDate: true, endDate: true } },
+        subject: {
+          select: {
+            id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true,
+            department: { select: { name: true } },
+            role: { select: { title: true } },
+          },
+        },
+        reviewer: { select: { id: true, firstName: true, lastName: true } },
+        peerFeedback: {
+          select: {
+            id: true, status: true, anonymous: true, rating: true, collaborationRating: true,
+            strengths: true, improvements: true, comments: true,
+            giver: { select: { id: true, firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+    if (!review || subjectId === ctx.userId) return jsonError("Not found", 404);
+    // The writer of an open review is whoever the subject reports to NOW
+    // (review-cycle.ts effectiveReviewerId): a former manager keeps no
+    // reach through the stamp launch left behind.
+    const writer = effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: review.subject.managerId, cycleStatus: review.cycle.status, reviewStatus: review.status });
+    const allowed = ctx.peopleTeamOrAdmin || writer === ctx.userId || ctx.chain.has(subjectId);
+    if (!allowed) return jsonError("Not found", 404);
+
+    const [kras, metrics, scoring] = await Promise.all([
+      prisma.kRAAssignment.findMany({
+        where: { userId: subjectId, status: "ACTIVE", kra: { organizationId: orgId } },
+        select: { weightage: true, kra: { select: { id: true, name: true, weight: true } } },
+        orderBy: { kra: { name: "asc" } },
+      }),
+      reviewMetrics(subjectId, orgId, { start: review.cycle.startDate, end: review.cycle.endDate }),
+      orgScoring(orgId),
+    ]);
+    const submittedPeers = review.peerFeedback.filter((pf) => pf.status === "SUBMITTED");
+    return jsonSuccess({
+      review: { ...review, reviewerId: writer, subject: { ...review.subject, managerId: undefined }, peerFeedback: undefined },
+      peerFeedback: submittedPeers.map((pf) => (pf.anonymous && !ctx.peopleTeamOrAdmin ? { ...pf, giver: null } : pf)),
+      peersAsked: review.peerFeedback.length,
+      kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
+      metrics,
+      scale: scoring.scale,
+      canWrite: writer === ctx.userId && managerMayWrite(review.cycle.status, review.status),
+    });
+  }
 
   const reviews = await prisma.review.findMany({
-    where: { cycleId, reviewerId: userId },
+    where: { cycleId, reviewerId: userId, cycle: { organizationId: orgId } },
     include: {
       subject: {
         select: {
@@ -35,74 +107,91 @@ export async function GET(
     orderBy: { subject: { firstName: "asc" } },
   });
 
-  return jsonSuccess(reviews);
+  // An anonymous peer stays anonymous to the manager too.
+  return jsonSuccess(
+    reviews.map((r) => ({
+      ...r,
+      peerFeedback: r.peerFeedback.map((pf) => (pf.anonymous ? { ...pf, giver: null } : pf)),
+    })),
+  );
 }
 
-// PATCH: Submit manager review for a specific reviewee
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // The gate is the row itself: only the reviewer recorded on this review
+  // (the subject's manager at launch) may write it, whatever their access
+  // level.
 
   const { id: cycleId } = await params;
   const userId = getUserId(session);
 
-  const body = await req.json();
-  const { reviewId, managerAssessment, managerRating, managerComments, outcome, submit } = body;
-
+  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  const reviewId = typeof body.reviewId === "string" ? body.reviewId : "";
+  const submit = body.submit === true;
   if (!reviewId) return jsonError("reviewId is required");
+  if (body.outcome !== undefined && body.outcome !== null && body.outcome !== "" && !isOutcome(body.outcome)) {
+    return jsonError("Unknown outcome", 400);
+  }
 
-  const review = await prisma.review.findFirst({
-    where: { id: reviewId, cycleId, reviewerId: userId },
+  const found = await prisma.review.findFirst({
+    where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
+    include: { cycle: { select: { status: true, name: true } }, subject: { select: { managerId: true } } },
   });
-
+  // Only the reviewer the reporting line names today writes it (review-cycle.ts
+  // effectiveReviewerId); the stamp is healed to them on this write.
+  const review = found && effectiveReviewerId({ reviewerId: found.reviewerId, subjectManagerId: found.subject.managerId, cycleStatus: found.cycle.status, reviewStatus: found.status }) === userId
+    ? found
+    : null;
   if (!review) return jsonError("Review not found or you are not the reviewer", 404);
-  if (review.status === "COMPLETED") {
-    return jsonError("Review already completed");
+  if (!managerMayWrite(review.cycle.status, review.status)) {
+    return jsonError(
+      review.status === "COMPLETED" || review.cycle.status === "COMPLETED" || review.cycle.status === "CANCELLED"
+        ? "This review is closed"
+        : "Calibration has started, so a submitted manager review can no longer change",
+      409,
+    );
   }
 
-  // managerAssessment: {
-  //   kraRatings: [{kraId, kraName, rating, comments}],
-  //   behavioral: {quality, reliability, collaboration, initiative, growth},
-  //   overallComments: string,
-  //   recommendation: string
-  // }
-
-  // Calculate average of behavioral ratings if provided
-  let avgManagerRating = managerRating;
-  if (!avgManagerRating && managerAssessment?.behavioral) {
-    const b = managerAssessment.behavioral;
-    const ratings = [b.quality, b.reliability, b.collaboration, b.initiative, b.growth].filter((r: any) => r != null);
-    if (ratings.length > 0) {
-      avgManagerRating = Math.round((ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length) * 20); // Convert 1-5 to 0-100
-    }
+  // Never overwrite a stored manager draft with nothing (review-cycle.ts isReviewDraft).
+  if (!isReviewDraft(body.managerAssessment)) return jsonError("Nothing to save: the review did not arrive. Your draft is unchanged.", 400);
+  const assessment = cleanManagerAssessment(body.managerAssessment);
+  if (wouldBlankDraft(review.managerAssessment, { ...assessment, overallComments: typeof body.managerComments === "string" ? body.managerComments : assessment.overallComments }, body.allowEmpty === true)) {
+    return jsonError("Nothing to save: this would empty the written review. It is unchanged.", 400);
   }
+  const outcome = isOutcome(body.outcome) ? (body.outcome as string) : assessment.recommendation || null;
+  if (submit && !outcome) return jsonError("Pick an outcome before you submit", 400);
+  const managerRating = managerRatingFrom(assessment.behavioral);
+  const comments = typeof body.managerComments === "string" ? body.managerComments.slice(0, 10_000) : assessment.overallComments;
 
+  const nextStatus = submit ? "MANAGER_REVIEW" : review.status;
   const updated = await prisma.review.update({
     where: { id: reviewId },
     data: {
-      managerAssessment: managerAssessment ?? undefined,
-      managerRating: avgManagerRating ?? undefined,
-      managerComments: managerComments ?? undefined,
-      outcome: submit ? (outcome ?? undefined) : undefined,
-      status: submit ? "MANAGER_REVIEW" : review.status,
+      managerAssessment: { ...assessment, overallComments: comments, recommendation: outcome ?? "" },
+      // The assessment is replaced whole, so the rating follows it: behaviours
+      // cleared means no rating (null), never a stale number the composite
+      // and calibration would keep reading.
+      managerRating: managerRating ?? null,
+      managerComments: comments,
+      ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
+      status: nextStatus,
+      ...(review.reviewerId !== userId ? { reviewerId: userId } : {}),
     },
   });
 
-  // Notify employee if submitted
-  if (submit) {
+  // The subject learns that it is written, never what (they read it once
+  // the cycle is finalized).
+  if (submit && review.status !== "MANAGER_REVIEW" && review.subjectId !== userId) {
     await prisma.notification.create({
       data: {
-        title: "Manager Review Submitted",
-        message: `Your manager has completed their review for ${review.cycleId}.`,
+        title: `Your manager review for ${review.cycle.name} is in`,
+        message: "You will see the result when the cycle is finalized.",
         type: "review",
         link: `/reviews/${cycleId}`,
         userId: review.subjectId,
       },
-    });
+    }).catch((e: unknown) => console.error("manager review notification", e));
   }
 
   return jsonSuccess(updated);

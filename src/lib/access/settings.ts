@@ -146,7 +146,8 @@ export interface AppRule {
 /**
  * One row per app key. The 8 hubs and the 21 keys of FOLDED_APP_HUB
  * (src/lib/nav/route-hub.ts), plus `talent`, `analytics`, `rollup` and
- * `integrations`, which are routes rather than catalog entries. 33 rows.
+ * `integrations`, which are routes rather than catalog entries, plus the six
+ * Phase 6 Teams-hub route pages. 40 rows.
  *
  * Phase 4 added `meetings` and `clock`, the two Planner routes that had no
  * key at all.
@@ -198,6 +199,19 @@ export const APP_RULES: Record<AppKey, AppRule> = {
   surveys: { hub: "teams", audience: "people-team-admin", guest: "none" },
   tools: { hub: "teams", audience: "member", guest: "none" },
   assets: { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
+  // Phase 6: the six Teams-hub route pages (spec-teams-people section 0,
+  // spec-goals section 0, spec-teams-performance section 0). The wording of
+  // every /team/* row is copied from `rollup` so the pages read alike: anyone
+  // with reports (solid or dotted) over their chain, the People team and
+  // Admin over the org. KRA definitions are Can view for every Member
+  // (access section 9 kras.view), so /kra-kpi opens to every Member and
+  // only the edit controls are role-gated inside the page.
+  team: { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
+  workload: { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
+  "weekly-reviews": { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
+  "kra-kpi": { hub: "teams", audience: "member", guest: "none" },
+  alignment: { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
+  "kpi-reviews": { hub: "teams", audience: "reports-people-team-admin", guest: "none" },
   // Talk
   announcements: { hub: "chat", audience: "member", guest: "none" },
   // Tables hub. Forms is CORE (founder decision D15, 2026-09): every Member

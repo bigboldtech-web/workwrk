@@ -1,4 +1,4 @@
-// Review cadence — single source of truth for the four review rhythms
+// Review cadence, single source of truth for the four review rhythms
 // (weekly check-in, monthly pulse, quarterly review, annual appraisal),
 // their org-level configuration, and the period-key math that buckets a
 // date into the right cadence window.
@@ -13,7 +13,7 @@
 
 // NOTE: keep this module dependency-free (no prisma, no server-only
 // imports) so the client Settings editor can import its types/defaults.
-// The week math is duplicated from weekly-review.ts on purpose — that
+// The week math is duplicated from weekly-review.ts on purpose, that
 // file imports prisma and must not leak into a client bundle.
 
 /** Monday 00:00 UTC of the ISO week the date falls in (Sun = prev week). */
@@ -172,7 +172,7 @@ export function yearKeyFor(date: Date = new Date()): string {
   return String(date.getUTCFullYear());
 }
 
-/** The current period key for a cadence — what a record/cycle is bucketed under. */
+/** The current period key for a cadence, what a record/cycle is bucketed under. */
 export function currentPeriodKey(cadence: CadenceKey, date: Date = new Date()): string {
   switch (cadence) {
     case "weekly": return weekKeyFor(date);
@@ -232,7 +232,7 @@ export function anchorReached(cadence: CadenceKey, anchor: number, now: Date = n
     const dayOfQuarter = Math.floor((now.getTime() - start.getTime()) / 86_400_000) + 1;
     return dayOfQuarter >= anchor;
   }
-  // annual — anchor is the month-of-year (1..12) the appraisal opens.
+  // annual, anchor is the month-of-year (1..12) the appraisal opens.
   return now.getUTCMonth() + 1 >= anchor;
 }
 

@@ -19,7 +19,7 @@
 import { gatePage } from "@/lib/access/gate";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getOrCreateWeeklyReview } from "@/lib/weekly-review";
+import { findWeeklyReview } from "@/lib/weekly-review";
 import { isCurrentWeek, parseWeekKey, weekKey, weekOptions, weekStartOf } from "@/lib/weeks";
 import { WeeklyReviewClient } from "./weekly-review-client";
 
@@ -30,21 +30,29 @@ const PILL_COUNT = 8;
 export default async function WeeklyReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<{ week?: string; review?: string }>;
 }) {
   const { viewer } = await gatePage("view", { type: "app", key: "home" }, { callbackUrl: "/me/weekly-review" });
   // A Guest has no KRAs, no manager chain and no heartbeat to file.
   if (viewer.orgRole === "GUEST") notFound();
 
   const sp = await searchParams;
-  const asked = parseWeekKey(sp.week) ?? weekStartOf(new Date());
+  // ?review=<id> (the Inbox row of a manager's decision) opens that
+  // review's own week. Only the viewer's own review resolves; anything else
+  // falls back to ?week= or this week, never another person's row.
+  const linked = !sp.week && sp.review
+    ? await prisma.weeklyReview
+        .findFirst({ where: { id: sp.review, userId: viewer.userId }, select: { periodStart: true } })
+        .catch(() => null)
+    : null;
+  const asked = linked ? weekStartOf(linked.periodStart) : parseWeekKey(sp.week) ?? weekStartOf(new Date());
   const askedKey = weekKey(asked);
   const current = isCurrentWeek(askedKey);
 
   const review = current
-    ? await getOrCreateWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId })
+    ? await findWeeklyReview({ userId: viewer.userId }).catch(() => null)
     : await prisma.weeklyReview
-        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: asked } } })
+        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: linked?.periodStart ?? asked } } })
         .then((row) => (row ? JSON.parse(JSON.stringify(row)) : null))
         .catch(() => null);
 
@@ -55,10 +63,17 @@ export default async function WeeklyReviewPage({
   const rows = await prisma.weeklyReview
     .findMany({
       where: { userId: viewer.userId, periodStart: { gte: oldest } },
-      select: { periodStart: true, status: true },
+      select: { periodStart: true, status: true, managerStatus: true },
     })
     .catch(() => []);
-  const byWeek = new Map(rows.map((r) => [weekKey(r.periodStart), r.status]));
+  const byWeek = new Map(rows.map((r) => [weekKey(r.periodStart), r]));
+  // A week the manager sent back is ACKNOWLEDGED too, but it is not done:
+  // its pill must not wear the same check as an approved week.
+  const isDone = (key: string) => {
+    const r = byWeek.get(key);
+    if (!r || r.managerStatus === "CHANGES_REQUESTED") return false;
+    return r.status === "SUBMITTED" || r.status === "ACKNOWLEDGED";
+  };
 
   const assignments = await prisma.kRAAssignment.findMany({
     where: { userId: viewer.userId, status: "ACTIVE" },
@@ -79,7 +94,7 @@ export default async function WeeklyReviewPage({
       weeks={pills.map((p) => ({
         ...p,
         hasReview: byWeek.has(p.key),
-        submitted: byWeek.get(p.key) === "SUBMITTED" || byWeek.get(p.key) === "ACKNOWLEDGED",
+        submitted: isDone(p.key),
       }))}
       review={review}
       editable={current}

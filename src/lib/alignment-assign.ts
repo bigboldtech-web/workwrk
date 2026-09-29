@@ -1,4 +1,4 @@
-// Hybrid role-template assignment — when a user is hired into or moved to
+// Hybrid role-template assignment, when a user is hired into or moved to
 // a Role, seed their alignment (KRAs + the SOPs that sit under those KRAs)
 // from the role's templates. Everything stays editable per-person
 // afterward; this only fills the defaults.
@@ -37,7 +37,7 @@ export async function seedAlignmentForUser(args: {
   if (kraIds.length === 0) return { krasSeeded: 0, sopsSeeded: 0 };
 
   // 2. Seed KRA assignments (skip ones the person already has). Each
-  //    assignment inherits the KRA's role-level weight — leaving the 0
+  //    assignment inherits the KRA's role-level weight, leaving the 0
   //    default here is what produced people with five KRAs all at 0%.
   const kraRes = await prisma.kRAAssignment.createMany({
     data: kras.map((k) => ({ userId, kraId: k.id, weightage: k.weight })),
@@ -66,7 +66,7 @@ export async function seedAlignmentForUser(args: {
  * The mirror of seedAlignmentForUser: when a KRA is added to a job title
  * (or re-homed onto one), everyone who ALREADY holds that title inherits
  * it immediately. Without this, inheritance only ran at hire/assignment
- * time, so a KRA added to a role later reached nobody — the job title
+ * time, so a KRA added to a role later reached nobody, the job title
  * and its holders silently drifted apart.
  *
  * Idempotent: KRAAssignment @@unique([userId, kraId]) + skipDuplicates,
@@ -83,7 +83,7 @@ export async function seedKraToRoleHolders(args: {
       where: { roleId, organizationId, status: "ACTIVE" },
       select: { id: true },
     }),
-    // The KRA's role-level weight — every holder inherits it as their
+    // The KRA's role-level weight, every holder inherits it as their
     // starting weightage (still editable per-person afterwards).
     prisma.kRA.findFirst({
       where: { id: kraId, organizationId },

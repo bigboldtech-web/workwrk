@@ -29,10 +29,11 @@ import { getEffectivePreferences, type EffectivePreferences } from "@/lib/prefer
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
-import { orgRoleOf, isAgentOf } from "@/lib/access/org-role";
+import { orgRoleOf, isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
 import { parseAccessSettings } from "@/lib/access/settings";
-import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { ActiveTimer } from "@/lib/realtime-events";
+import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,22 @@ export interface BootCounts {
   mySops: number;
   /** Policies awaiting the viewer's acknowledgement. Drives the Policies badge. */
   policiesToAck: number;
+  /**
+   * Phase 6, the Teams hub badges (spec-teams-performance section 1
+   * "Counts", spec-goals section 1, spec-teams-people section 1): weekly
+   * reviews awaiting my decision, review forms awaiting me, open candor
+   * sessions and surveys I have not answered, KPI numbers awaiting my
+   * approval, and my own KPIs this month with no number yet. Computed in this
+   * same pass by src/lib/people/teams-counts.ts, through the same helpers
+   * the pages use.
+   */
+  weeklyReviews: TeamsCounts["weeklyReviews"];
+  weeklyReviewsChain: TeamsCounts["weeklyReviewsChain"];
+  reviewForms: TeamsCounts["reviewForms"];
+  candorOpen: TeamsCounts["candorOpen"];
+  surveysOpen: TeamsCounts["surveysOpen"];
+  kpiReviews: TeamsCounts["kpiReviews"];
+  myKpisDue: TeamsCounts["myKpisDue"];
 }
 
 export interface BootPayload {
@@ -64,14 +81,25 @@ export interface BootPayload {
     active: boolean;
     /** Empty until the access track writes the column. */
     adminScopes: string[];
+    /** Reports, solid or dotted (the access engine's rule). */
     hasReports: boolean;
     peopleTeam: boolean;
+    /**
+     * Phase 6: in scope of an open candor session, or answered one, or an
+     * organiser by the legacy manager tier (the Candor row). The organiser
+     * part is the same predicate the /candor page gate and POST /api/candor
+     * read (culture-gate.ts isCultureOrganiser), so the row, the palette and
+     * the page never disagree.
+     */
+    candorInvited: TeamsViewerFacts["candorInvited"];
+    /** Phase 6: targeted by an open survey, or answered one, or an organiser by the legacy manager tier (the Surveys row). */
+    surveyTargeted: TeamsViewerFacts["surveyTargeted"];
     name: string;
     firstName: string | null;
     lastName: string | null;
     email: string | null;
     avatar: string | null;
-    /** Null until the presence columns exist (settings spec 9.5). */
+    /** The viewer's status (settings spec 9.5); null when none, expired, or the columns are absent. */
     presenceStatus: string | null;
     presenceUntil: string | null;
   };
@@ -112,8 +140,21 @@ export interface BootPayload {
 const SPLASH_VALUES: ReadonlySet<string> = new Set(["every-open", "first-open-daily", "off"]);
 
 async function counts(userId: string, orgId: string): Promise<BootCounts> {
+  return (await countsAndFacts(userId, orgId)).counts;
+}
+
+const NO_TEAMS_FACTS: TeamsViewerFacts = { hasReports: false, candorInvited: false, surveyTargeted: false };
+
+async function countsAndFacts(userId: string, orgId: string): Promise<{ counts: BootCounts; teams: TeamsViewerFacts }> {
   const now = new Date();
-  const [inboxUnread, remindersDue, talkRows, mySops, policiesToAck] = await Promise.all([
+  const teamsPass = prisma.user
+    .findUnique({ where: { id: userId }, select: { officeId: true, departmentId: true } })
+    .then((me) => teamsFactsAndCounts(userId, orgId, { officeId: me?.officeId ?? null, departmentId: me?.departmentId ?? null }, now))
+    .catch((e: unknown) => {
+      console.error("boot counts: teams", e);
+      return { facts: NO_TEAMS_FACTS, counts: EMPTY_TEAMS_COUNTS };
+    });
+  const [[inboxUnread, remindersDue, talkRows, mySops, policiesToAck], teams] = await Promise.all([Promise.all([
     // The SAME clause as /api/inbox/count and as the Inbox's Primary + Other
     // tabs, from src/lib/inbox-query.ts. Three files used to run this query
     // by hand, which is how the sidebar badge and the Inbox tabs came to
@@ -161,13 +202,17 @@ async function counts(userId: string, orgId: string): Promise<BootCounts> {
     // (lib/policies-to-ack), so the badge and the pill never disagree.
     countPoliciesToAck(userId, orgId)
       .catch((e: unknown) => { console.error("boot counts: policiesToAck", e); return 0; }),
-  ]);
+  ]), teamsPass]);
   return {
-    inboxUnread,
-    remindersDue,
-    talkUnread: Number(talkRows[0]?.n ?? 0),
-    mySops,
-    policiesToAck,
+    counts: {
+      inboxUnread,
+      remindersDue,
+      talkUnread: Number(talkRows[0]?.n ?? 0),
+      mySops,
+      policiesToAck,
+      ...teams.counts,
+    },
+    teams: teams.facts,
   };
 }
 
@@ -245,7 +290,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ counts: await counts(userId, orgId) }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    const [org, user, prefs, reportCount, c, timer, idle] = await Promise.all([
+    const [org, user, prefs, cf, timer, idle, presence] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: orgId },
         select: { id: true, name: true, logo: true, plan: true, settings: true },
@@ -255,10 +300,14 @@ export async function GET(req: NextRequest) {
         select: { id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, deletedAt: true },
       }),
       getEffectivePreferences(userId, orgId),
-      prisma.user.count({ where: { managerId: userId, deletedAt: null } }),
-      counts(userId, orgId),
+      countsAndFacts(userId, orgId),
       activeTimer(userId, orgId),
       idleUntil(req),
+      // Its own query, so a database without the Phase 6 presence columns
+      // yet answers "no status" instead of failing boot.
+      prisma.user
+        .findUnique({ where: { id: userId }, select: { presenceStatus: true, presenceUntil: true } })
+        .catch(() => null),
     ]);
 
     if (!org || !user || user.deletedAt) {
@@ -277,13 +326,16 @@ export async function GET(req: NextRequest) {
       : [];
     const splash: SplashPolicy =
       typeof profile.splash === "string" && SPLASH_VALUES.has(profile.splash) ? (profile.splash as SplashPolicy) : "first-open-daily";
-    // The same People team the server gates resolve (src/lib/access/facts.ts
-    // loadOrgFacts): access.peopleTeamUserIds when configured, else every HR
-    // user. The viewer is in that seeded set exactly when they are at HR.
-    const configuredPeopleTeam = parseAccessSettings(settings.access).peopleTeamUserIds;
-    const peopleTeam = configuredPeopleTeam.length > 0
-      ? configuredPeopleTeam.includes(userId)
-      : user.accessLevel === "HR";
+    // The engine's rule, both halves of it (src/lib/access/resolve.ts
+    // isPeopleTeam): the configured People team (access.peopleTeamUserIds,
+    // read through parseAccessSettings as src/lib/access/facts.ts
+    // loadOrgFacts does), OR an HR-level user, whom viewer.ts hydrate always
+    // counts (spec 10 step 0 "People team = users at HR until toggle 6
+    // exists"). Boot used to read a stale key alone, so an HR person's chrome
+    // disagreed with every server gate that let them in.
+    const peopleTeam =
+      parseAccessSettings(settings.access).peopleTeamUserIds.includes(userId) ||
+      isSeededPeopleTeam(user.accessLevel ?? null);
 
     const accessLevel = user.accessLevel ?? null;
     const activeModules = new Set(prefs.modules.activeAppKeys);
@@ -305,15 +357,19 @@ export async function GET(req: NextRequest) {
         isAgent: isAgentOf(accessLevel),
         active: user.status === "ACTIVE",
         adminScopes: [],
-        hasReports: reportCount > 0,
+        hasReports: cf.teams.hasReports,
         peopleTeam,
+        candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
+        surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
         firstName: user.firstName ?? null,
         lastName: user.lastName ?? null,
         email: user.email ?? null,
         avatar: user.avatar ?? null,
-        presenceStatus: null,
-        presenceUntil: null,
+        // An expired status (presenceUntil in the past) reads as none.
+        ...(presence?.presenceStatus && (!presence.presenceUntil || presence.presenceUntil.getTime() > Date.now())
+          ? { presenceStatus: presence.presenceStatus, presenceUntil: presence.presenceUntil?.toISOString() ?? null }
+          : { presenceStatus: null, presenceUntil: null }),
       },
       apps,
       launcherApps,
@@ -329,7 +385,7 @@ export async function GET(req: NextRequest) {
         aiEnabled: aiEnabledFromSettings(settings),
         currency: orgCurrencyFromSettings(settings),
       },
-      counts: c,
+      counts: cf.counts,
       timer,
       session: { idleUntil: idle },
     };

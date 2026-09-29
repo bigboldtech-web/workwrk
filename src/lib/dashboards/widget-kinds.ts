@@ -5,14 +5,15 @@
 // here (label, description, default size, the surfaces it may be added to), a
 // renderer in src/components/dashboards/widget-registry.tsx, and its server
 // shape in widgets.ts, widget-data.ts and report-server.ts's sectionFor.
-// Phase 6's people widgets (workload by person, headcount) append here with
-// surfaces ["space-overview"].
+// Phase 6's people widget, Workload by person (decision b), is the
+// "workload" row: Space Overview only, computed under the viewer's access
+// like every other card (widget-data.ts).
 //
 // Pure: type-only imports.
 
 import type { StatScope, WidgetInput, WidgetLayout } from "./widgets";
 
-export type WidgetKind = "stat" | "chart" | "list" | "notes";
+export type WidgetKind = "stat" | "chart" | "list" | "workload" | "notes";
 export type WidgetSurface = "dashboard" | "space-overview";
 
 export interface WidgetKindMeta {
@@ -44,6 +45,13 @@ export const WIDGET_KIND_META: ReadonlyArray<WidgetKindMeta> = [
     description: "The first tasks that match a filter",
     defaultSize: { w: 6, h: 7 },
     surfaces: ["dashboard", "space-overview"],
+  },
+  {
+    kind: "workload",
+    label: "Workload by person",
+    description: "Each person's open work over the next weeks, against their capacity",
+    defaultSize: { w: 6, h: 7 },
+    surfaces: ["space-overview"],
   },
   {
     kind: "notes",
@@ -131,6 +139,9 @@ export function defaultWidgetTitle(input: WidgetInput, fieldLabels: ReadonlyMap<
     }
     case "list":
       title = SORT_TITLES[input.sort ?? "updated"] ?? "Tasks";
+      break;
+    case "workload":
+      title = "Workload by person";
       break;
     case "notes":
       title = "Text";
@@ -342,7 +353,7 @@ export function withEditorTitle(
   draft: WidgetInput,
   o: { state: TitleState; labels: ReadonlyMap<string, string>; labelsReady: boolean },
 ): WidgetInput {
-  if (draft.kind !== "stat" && draft.kind !== "chart" && draft.kind !== "list") return draft;
+  if (draft.kind !== "stat" && draft.kind !== "chart" && draft.kind !== "list" && draft.kind !== "workload") return draft;
   const key = titleFieldKey(draft);
   const waiting = !o.labelsReady && key !== null && !o.labels.get(key)?.trim();
   const title = o.state.follows && !waiting ? defaultWidgetTitle(draft, o.labels) : draft.title;
@@ -373,6 +384,9 @@ export function newWidgetInput(
       break;
     case "list":
       input = { id: ctx.id, kind: "list", title: "", source, filter: { ...filter, hideDone: true }, sort: "updated", limit: 10, layout };
+      break;
+    case "workload":
+      input = { id: ctx.id, kind: "workload", title: "", source, filter: { ...filter, hideDone: true }, windowDays: 14, mode: "tasks", layout };
       break;
     case "notes":
       input = { id: ctx.id, kind: "notes", title: "", text: "", layout };

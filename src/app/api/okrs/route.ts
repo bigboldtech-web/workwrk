@@ -1,7 +1,8 @@
+import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { isOrgAdminLevel, isOrgWideAlignment } from "@/lib/alignment-scope";
+import { goalCreatorIds, goalRightsActor, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import {
   computeGoalRollups,
@@ -9,30 +10,63 @@ import {
   enrichKeyResults,
   goalRollupFor,
   KR_KPI_SELECT,
+  okrStatusFor,
   persistGoalRollupChain,
 } from "@/lib/alignment";
 import {
   addGoalAssignees,
+  canSeeGoal,
   memberVisibilityOr,
+  seesUnownedGoals,
   summarizeGoalAudiences,
   syncGoalAssignees,
   teamAudienceVisibilityOr,
   validateGoalAssignees,
   type GoalAudienceRef,
+  goalVisibilityOr,
 } from "@/lib/goal-audience";
+import { GOAL_EDIT_REFUSED, mayDeleteGoal, mayEditGoal, mayLinkUnderGoal, mayUnlinkFromGoal, type GoalRightsActor } from "@/lib/goals/goal-rights";
 import { getUserTagIds } from "@/lib/user-tags";
 import { logActivity } from "@/lib/activity";
+import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { GoalLevel, Prisma } from "@/generated/prisma";
+import { filterGoals, orderGoals, paginate, parseGoalsListQuery } from "@/lib/goals/goal-list";
+import { rollupVerdict, verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
+import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/lib/goal-effort";
+import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
-// clients may still send "TEAM" — map it to DEPARTMENT, mirroring the
+// clients may still send "TEAM", map it to DEPARTMENT, mirroring the
 // goal_audience_kra_weight migration; anything unrecognised is null.
 function normalizeGoalLevel(v: unknown): GoalLevel | null {
   const s = typeof v === "string" ? v.toUpperCase() : v;
   if (s === "TEAM") return "DEPARTMENT";
   return s === "COMPANY" || s === "DEPARTMENT" || s === "INDIVIDUAL" ? (s as GoalLevel) : null;
+}
+
+const COMPANY_LEVEL_REFUSED =
+  "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin.";
+
+const ATTACH_REFUSED =
+  "You can only make this part of a goal you can edit, or line a Department goal you run up under a Company goal. Ask that goal's owner or your manager to link it.";
+
+/** The parent's activity records every link and unlink, and who made it, so
+ *  a goal that moves a Company goal's progress is never a silent change. The
+ *  child is kept by id only, never by title: an activity feed (a manager's
+ *  team, the People team's everyone) reads these rows without asking whether
+ *  the reader may open the child. */
+function logGoalLink(kind: "linked" | "unlinked", opts: { orgId: string; actorId: string; parentId: string; childId: string }) {
+  logActivity({
+    type: kind === "linked" ? "okr_child_linked" : "okr_child_unlinked",
+    actorId: opts.actorId,
+    organizationId: opts.orgId,
+    description: kind === "linked" ? "Made a goal part of this one" : "Took a goal out of this one",
+    targetId: opts.parentId,
+    targetType: "okr",
+    metadata: { childId: opts.childId },
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -41,25 +75,23 @@ export async function GET(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const url = new URL(req.url);
-  const level = url.searchParams.get("level");
+  const q = parseGoalsListQuery(url.searchParams);
   const quarter = url.searchParams.get("quarter");
   const ownerId = url.searchParams.get("ownerId");
-  // ?mine=1 — only goals the CALLER personally carries: owned by them, or
-  // where they are a resolved audience member (their user row, their
-  // department, their role). A filter WITHIN visibility, not a new door —
-  // org-wide viewers get the same narrowing. Backs /okrs?mine=1.
-  const mineOnly = url.searchParams.get("mine") === "1";
-  // ?team=1 — a manager's report tree: goals owned by (or audience-covering) a
-  // team member. Managers/org-wide only; a non-manager gets their normal view.
-  const teamOnly = url.searchParams.get("team") === "1";
-  // ?withEffort=1 — attach a lightweight per-goal effort summary (hours / open
-  // tasks / last activity) derived from linked-KRA tasks. Used by Team Goals.
+  // Views (spec-goals /okrs): My goals = goals the caller owns or is a
+  // resolved contributor on (their user row, department, job title, tags),
+  // plus their department's goals; Team goals = the report tree (the org for
+  // org-wide levels); Company goals = level COMPANY. The retired ?mine=1,
+  // ?team=1 and ?level=company map onto them (parseGoalsListQuery).
+  const mineOnly = q.view === "mine";
+  const teamOnly = q.view === "team";
+  // ?withEffort=1: attach the per-goal effort summary (hours, open tasks,
+  // last activity) from every piece of linked work. Team goals reads it.
   const withEffort = url.searchParams.get("withEffort") === "1";
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
-  const levelFilter = normalizeGoalLevel(level);
-  if (levelFilter) where.level = levelFilter;
+  if (q.view === "company") where.level = "COMPANY";
   if (quarter) {
     and.push({ OR: [{ quarter }, { quarter: null }, { quarter: "" }] });
   }
@@ -68,186 +100,304 @@ export async function GET(req: NextRequest) {
   const callerId = getUserId(session);
   const orgWide = isOrgWideAlignment(session);
   // departmentId + roleId feed audience resolution for the three-door
-  // filter AND ?mine=1 — fetched once when either needs it.
+  // filter AND My goals, fetched once when either needs it.
   const me = !orgWide || mineOnly
     ? await prisma.user.findUnique({
         where: { id: callerId },
         select: { departmentId: true, roleId: true },
       })
     : null;
-  // The caller's own person-tags — goals targeting any of them are visible.
+  // The caller's own person-tags: goals targeting any of them are visible.
   const myTagIds = !orgWide || mineOnly ? await getUserTagIds(orgId, callerId) : [];
+  const treeIds = await getTeamUserIds(orgId, callerId);
+  const hasTree = isManager(session) || treeIds.length > 1;
 
   // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
   // is not org-public: everyone sees COMPANY objectives and their own
-  // department's TEAM objectives; a person always sees their own — owned
-  // OR resolved-member via the goal's audience (their user row, their
-  // department, their role — resolved at read time, so new hires inherit
-  // and leavers drop out); a manager additionally sees their report
-  // tree's (owned or audience-covered, plus unowned objectives, which
-  // managers create); admin / exec / HR see the org.
-  if (!orgWide) {
-    const visible: Prisma.OKRWhereInput[] = [
-      { level: "COMPANY" },
-      { ownerId: callerId },
-    ];
-    if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
-    visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
-    if (isManager(session)) {
-      const teamIds = await getTeamUserIds(orgId, callerId);
-      visible.push({ ownerId: { in: teamIds } });
-      visible.push({ ownerId: null });
-      visible.push(...(await teamAudienceVisibilityOr(teamIds)));
-    }
-    and.push({ OR: visible });
-  }
+  // department's objectives; a person always sees their own (owned or a
+  // resolved member through the goal's audience, resolved at read time, so
+  // new hires inherit and leavers drop out); a manager additionally sees
+  // their report tree's (owned or audience-covered, plus unowned
+  // objectives, which managers create); admin, exec and HR see the org.
+  // Kept for the child lists below: the same three doors, without the view
+  // filters, decide which goals under a listed goal may be named.
+  // One helper for every goal list (goalVisibilityOr, the Ask AI search reads
+  // it too); canSeeGoal reads the same rule for a single goal.
+  const visibilityOr = orgWide ? null : await goalVisibilityOr(session, { me: me ?? null, tagIds: myTagIds, treeIds });
+  if (visibilityOr) and.push({ OR: visibilityOr });
   if (mineOnly) {
+    // My goals also carries the viewer's own department's DEPARTMENT goals:
+    // until the department-goal GoalAssignee backfill has run in an org,
+    // those goals have no audience row, and dropping them here would lose
+    // them from the one view that should carry them.
     and.push({
       OR: [
         { ownerId: callerId },
+        ...(me?.departmentId ? [{ level: "DEPARTMENT" as const, departmentId: me.departmentId }] : []),
         ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }),
       ],
     });
   }
-  if (teamOnly && (isManager(session) || orgWide)) {
-    const teamIds = await getTeamUserIds(orgId, callerId);
-    and.push({ OR: [{ ownerId: { in: teamIds } }, ...(await teamAudienceVisibilityOr(teamIds))] });
+  if (teamOnly && orgWide) {
+    // Team goals for an org-wide level is the org (spec-goals section 1:
+    // "People team and Admin over the org"). No narrowing beyond visibility.
+  } else if (teamOnly && hasTree) {
+    // The report tree, never the viewer's own goals (those are My goals).
+    // Unowned Department and Individual goals stay in the manager tier's
+    // view: they create them, and no other view lists them. Company goals
+    // never do (they have their own tab), and someone who only has a
+    // report gets their reports' goals, not the org's ownerless ones.
+    const reports = treeIds.filter((id) => id !== callerId);
+    const unowned: Prisma.OKRWhereInput[] = seesUnownedGoals({ manager: isManager(session) })
+      ? [{ ownerId: null, level: { not: "COMPANY" } }]
+      : [];
+    and.push({ OR: [{ ownerId: { in: reports } }, ...unowned, ...(await teamAudienceVisibilityOr(reports))] });
+  } else if (teamOnly) {
+    // Team goals for someone nobody reports to is empty, never their own
+    // visible goals under a Team title (the page shows My goals instead).
+    and.push({ id: { in: [] } });
   }
   if (and.length > 0) where.AND = and;
 
-  const okrs = await prisma.oKR.findMany({
+  // Every visible goal, uncapped: the verdict filter and sort need them
+  // all, and the page is sliced after (the retired take: 100 silently
+  // dropped goals in larger orgs).
+  const all = await prisma.oKR.findMany({
     where,
-    include: {
-      keyResults: {
-        include: {
-          _count: { select: { checkIns: true } },
-          // The role-level gauge this KR pushes, when linked.
-          kpi: { select: KR_KPI_SELECT },
-        },
-        orderBy: { createdAt: "asc" },
-      },
-      children: { select: { id: true, title: true, progress: true, level: true, ownerId: true } },
+    select: {
+      id: true, title: true, level: true, ownerId: true, status: true, progress: true, startDate: true, endDate: true,
+      createdAt: true, completedAt: true, checkInCadence: true,
+      keyResults: { select: { id: true, kpiId: true } },
     },
     orderBy: [{ level: "asc" }, { createdAt: "desc" }],
-    take: 100,
   });
 
-  // Derivation is read-side: a KR linked to a KPI reports the gauge's latest
-  // reading, not the hand-typed number still sitting on its row. Objective
-  // progress/status then roll up through the org-wide goal graph — a leaf
-  // from its live KRs, a parent from its KRs + measured children — via
-  // computeGoalRollups, the ONE rollup implementation, so this list shows
-  // exactly the number the detail page / dashboard / profile hero show.
-  // ownerId is a bare column (no Prisma relation), so resolve the single
-  // accountable owner per goal in ONE batch query — the list card renders
-  // the real person (avatar + name), never a bare id or "Unassigned".
-  const ownerIds = Array.from(
-    new Set(okrs.map((o) => o.ownerId).filter((v): v is string => Boolean(v))),
-  );
-  const [groups, audiences, rollupCtx, owners] = await Promise.all([
-    enrichKeyResultGroups(
-      okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
-    ),
-    // Resolved assignee summaries — avatars + overflow count, never raw
-    // join rows. Resolution happens here, at read time.
-    summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+  const [rollupCtx, linked, lastCheckIns, fiscal] = await Promise.all([
     computeGoalRollups(orgId),
-    ownerIds.length > 0
-      ? prisma.user.findMany({
-          where: { id: { in: ownerIds } },
-          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+    goalsWithLinkedWork(orgId, all.map((o) => o.id)),
+    all.length
+      ? prisma.kRCheckIn.groupBy({
+          by: ["keyResultId"],
+          where: { keyResultId: { in: all.flatMap((o) => o.keyResults.map((k) => k.id)) } },
+          _max: { createdAt: true },
         })
-      : Promise.resolve([]),
+      : Promise.resolve([] as Array<{ keyResultId: string; _max: { createdAt: Date | null } }>),
+    prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
   ]);
-  const ownerById = new Map(owners.map((u) => [u.id, u]));
+  const lastByKr = new Map(lastCheckIns.map((r) => [r.keyResultId, r._max.createdAt]));
+  const now = new Date();
+  const fiscalStart = (fiscal?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
 
-  // Per-goal Delete gate, resolved ONCE for the whole list (not N tree
-  // walks): org admins delete anything; a manager deletes their report
-  // tree's goals plus unowned ones; everyone else only their own. This is
-  // the exact rule DELETE /api/okrs/[id] enforces (canDeleteGoal), so the
-  // row's "…"/right-click Delete only appears when the API will honor it.
-  const deleteCallerId = getUserId(session);
-  const deleteOrgAdmin = isOrgAdminLevel(session);
-  const deleteTeamIds =
-    !deleteOrgAdmin && isManager(session)
-      ? new Set(await getTeamUserIds(orgId, deleteCallerId))
-      : null;
-  const canDeleteOkr = (ownerId: string | null): boolean => {
-    if (deleteOrgAdmin) return true;
-    if (ownerId === deleteCallerId) return true;
-    if (deleteTeamIds === null) return false; // not a manager
-    if (!ownerId) return true; // unowned objectives are manager-owned
-    return deleteTeamIds.has(ownerId);
-  };
-  // Per-goal Edit gate — the exact rule PATCH /api/okrs enforces (owner /
-  // tree-manager / org-wide alignment levels, canEditOkrOwner's ladder),
-  // so the row's Edit affordance only appears when the API will honor it.
-  // Edit is deliberately broader than Delete: DIRECTOR/VP/C_LEVEL/HR may
-  // edit any goal but not wipe it. deleteTeamIds is reusable here — it is
-  // null only for org admins (orgWideEdit covers them) or non-managers.
-  const orgWideEdit = isOrgWideAlignment(session);
-  const canEditOkr = (ownerId: string | null): boolean => {
-    if (orgWideEdit) return true;
-    if (ownerId === deleteCallerId) return true;
-    if (deleteTeamIds === null) return false; // not a manager
-    if (!ownerId) return true; // unowned objectives are manager-editable
-    return deleteTeamIds.has(ownerId);
+  const ownerIdsAll = Array.from(new Set(all.map((o) => o.ownerId).filter((v): v is string => Boolean(v))));
+  const ownersAll = ownerIdsAll.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIdsAll } },
+        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+      })
+    : [];
+  const ownerById = new Map(ownersAll.map((u) => [u.id, u]));
+  const nameOf = (id: string | null) => {
+    const u = id ? ownerById.get(id) : null;
+    return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email : "";
   };
 
-  // Batched effort (Team Goals): 2 queries for the whole list. Sum hours + open
-  // tasks + last activity from the Tasks under each goal's linked KRAs.
-  const effortByGoal = new Map<string, { totalHours: number; tasksOpen: number; lastActivityAt: Date | null }>();
-  if (withEffort && okrs.length > 0) {
-    const links = await prisma.entityLink.findMany({
-      where: { organizationId: orgId, sourceType: "OKR", sourceId: { in: okrs.map((o) => o.id) }, targetType: "KRA" },
-      select: { sourceId: true, targetId: true },
-    });
-    const kraToGoals = new Map<string, string[]>();
-    for (const l of links) kraToGoals.set(l.targetId, [...(kraToGoals.get(l.targetId) ?? []), l.sourceId]);
-    const kraIds = [...kraToGoals.keys()];
-    if (kraIds.length > 0) {
-      const tasks = await prisma.task.findMany({
-        where: { organizationId: orgId, kraId: { in: kraIds } },
-        select: { kraId: true, hoursSpent: true, status: true, completedAt: true, updatedAt: true },
-      });
-      for (const t of tasks) {
-        const act = t.completedAt ?? t.updatedAt;
-        for (const gid of (t.kraId ? kraToGoals.get(t.kraId) ?? [] : [])) {
-          const cur = effortByGoal.get(gid) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null };
-          cur.totalHours += t.hoursSpent ?? 0;
-          if (t.status !== "COMPLETED") cur.tasksOpen += 1;
-          if (act && (!cur.lastActivityAt || act > cur.lastActivityAt)) cur.lastActivityAt = act;
-          effortByGoal.set(gid, cur);
-        }
-      }
-      for (const e of effortByGoal.values()) e.totalHours = Math.round(e.totalHours * 10) / 10;
+  const assessed = all.map((o) => {
+    const rollup = goalRollupFor(rollupCtx, o);
+    const { verdict, signals } = verdictForGoal({
+      goal: o,
+      rollup: { progress: rollup.progress, source: rollup.source },
+      targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: k.kpiId != null })),
+      hasLinkedWork: linked.has(o.id),
+    }, now);
+    let last: Date | null = null;
+    for (const k of o.keyResults) {
+      const d = lastByKr.get(k.id) ?? null;
+      if (d && (!last || d > last)) last = d;
     }
+    return {
+      ...o,
+      progress: rollup.progress,
+      rollupStatus: rollup.status,
+      progressSource: rollup.source,
+      verdict,
+      isStale: signals.isStale,
+      lastCheckInAt: last,
+      ownerName: nameOf(o.ownerId),
+    };
+  });
+
+  // Direct reports (Filter > Direct reports only): solid reports plus dotted.
+  let directIds: Set<string> | null = null;
+  if (teamOnly && q.direct) {
+    const [solid, dotted] = await Promise.all([
+      prisma.user.findMany({ where: { organizationId: orgId, managerId: callerId, deletedAt: null }, select: { id: true } }),
+      prisma.userDottedLine.findMany({ where: { managerId: callerId }, select: { userId: true } }),
+    ]);
+    directIds = new Set([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
   }
 
-  const enriched = okrs.map((okr, i) => {
-    const keyResults = groups[i];
-    const rollup = goalRollupFor(rollupCtx, okr);
+  const filtered = filterGoals(assessed, q, { quarterStart: fiscalQuarterStart(now, fiscalStart), directIds });
+
+  // Team goals group headers, computed over every filtered row (not the
+  // page), so a header's numbers are the person's real totals.
+  const effortAll = teamOnly || withEffort
+    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now, await viewerFromSession())
+    : new Map<string, GoalEffort>();
+  const groupVerdict = new Map<string, GoalVerdict | null>();
+  const groups: Array<{
+    key: string; ownerId: string | null; name: string; avatar: string | null;
+    goals: number; avgProgress: number | null; hoursThisMonth: number; lastMovedAt: Date | null; verdict: GoalVerdict | null;
+  }> = [];
+  if (teamOnly) {
+    const byOwner = new Map<string, typeof filtered>();
+    for (const r of filtered) {
+      const k = r.ownerId ?? "__unowned";
+      byOwner.set(k, [...(byOwner.get(k) ?? []), r]);
+    }
+    for (const [k, rows] of byOwner) {
+      const measured = rows.filter((r) => r.progressSource !== "NONE");
+      const v = rollupVerdict(rows.map((r) => r.verdict));
+      if (k !== "__unowned") groupVerdict.set(k, v);
+      let lastMoved: Date | null = null;
+      let hours = 0;
+      for (const r of rows) {
+        const e = effortAll.get(r.id);
+        hours += e?.hoursThisMonth ?? 0;
+        for (const d of [e?.lastActivityAt ?? null, r.lastCheckInAt]) if (d && (!lastMoved || d > lastMoved)) lastMoved = d;
+      }
+      const owner = k === "__unowned" ? null : ownerById.get(k) ?? null;
+      groups.push({
+        key: k,
+        ownerId: k === "__unowned" ? null : k,
+        name: k === "__unowned" ? "Unassigned" : nameOf(k),
+        avatar: owner?.avatar ?? null,
+        goals: rows.length,
+        avgProgress: measured.length ? Math.round(measured.reduce((s, r) => s + r.progress, 0) / measured.length) : null,
+        hoursThisMonth: Math.round(hours * 10) / 10,
+        lastMovedAt: lastMoved,
+        verdict: v,
+      });
+    }
+  }
+  const ordered = orderGoals(filtered, q.view === "all" ? "mine" : q.view, q.sort, groupVerdict);
+  const paged = q.page != null ? paginate(ordered, q.page, q.pageSize) : { rows: ordered, page: 1, total: ordered.length };
+  const pageIds = paged.rows.map((r) => r.id);
+
+  // The heavier enrichment runs for the rows on this page only.
+  const okrs = pageIds.length
+    ? await prisma.oKR.findMany({
+        where: { id: { in: pageIds } },
+        include: {
+          keyResults: {
+            include: {
+              _count: { select: { checkIns: true } },
+              kpi: { select: KR_KPI_SELECT },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+          children: { select: { id: true, title: true, progress: true, level: true, ownerId: true } },
+        },
+      })
+    : [];
+  const byId = new Map(okrs.map((o) => [o.id, o]));
+  const pageOkrs = pageIds.map((id) => byId.get(id)).filter((o): o is NonNullable<typeof o> => !!o);
+  const assessedById = new Map(paged.rows.map((r) => [r.id, r]));
+
+  const [groupsKr, audiences] = await Promise.all([
+    enrichKeyResultGroups(pageOkrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults }))),
+    summarizeGoalAudiences(orgId, pageOkrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+  ]);
+
+  // Per-goal Edit and Delete gates, resolved ONCE for the whole list (one
+  // chain walk, one creator query): the exact rules PATCH /api/okrs and
+  // DELETE /api/okrs/[id] enforce (src/lib/goals/goal-rights.ts), so a row
+  // only offers what the API will honor. Edit and canLinkTeamGoals are the
+  // Part of rule (mayLinkUnderGoal), so the goal modal's picker offers only
+  // parents the save will accept.
+  const rightsActor: GoalRightsActor = await goalRightsActor(session, treeIds);
+  // Which goals under the listed ones the viewer may open (one query for the
+  // page): a Company goal is listed for everyone, and its child list must
+  // not name Individual goals the viewer could not open. The rest are counted.
+  const childIds = pageOkrs.flatMap((o) => o.children.map((c) => c.id));
+  const visibleChildIds = visibilityOr && childIds.length
+    ? new Set((await prisma.oKR.findMany({ where: { organizationId: orgId, id: { in: childIds }, OR: visibilityOr }, select: { id: true } })).map((r) => r.id))
+    : null;
+  const creators = await goalCreatorIds(orgId, pageIds);
+  const rightsOf = (okr: { id: string; level: string; ownerId: string | null }) => ({
+    level: okr.level,
+    ownerId: okr.ownerId,
+    creatorId: creators.get(okr.id) ?? null,
+  });
+
+  const enriched = pageOkrs.map((okr, i) => {
+    const a = assessedById.get(okr.id)!;
+    const e = effortAll.get(okr.id);
     return {
       ...okr,
-      keyResults,
+      keyResults: groupsKr[i],
       owner: okr.ownerId ? ownerById.get(okr.ownerId) ?? null : null,
-      canDelete: canDeleteOkr(okr.ownerId),
-      canEdit: canEditOkr(okr.ownerId),
-      ...(withEffort ? { effort: effortByGoal.get(okr.id) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
-      progress: rollup.progress,
-      status: rollup.status,
-      // "NONE" = nothing measurable and nothing hand-set — clients show
-      // an honest "—" instead of a fake 0% that reads as "behind".
-      progressSource: rollup.source,
-      children: okr.children.map((c) => {
+      canDelete: mayDeleteGoal(rightsActor, rightsOf(okr)),
+      canEdit: mayEditGoal(rightsActor, rightsOf(okr)),
+      // Whether a Department goal the viewer can edit may be made part of
+      // this one (mayLinkUnderGoal): the goal modal's Part of picker reads it.
+      canLinkTeamGoals: mayLinkUnderGoal(rightsActor, rightsOf(okr), { level: "DEPARTMENT", editable: true }),
+      ...(withEffort || teamOnly ? { effort: e ? { totalHours: e.totalHours, tasksOpen: e.tasksOpen, lastActivityAt: e.lastActivityAt } : { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
+      progress: a.progress,
+      status: a.rollupStatus,
+      verdict: a.verdict,
+      isStale: a.isStale,
+      lastCheckInAt: a.lastCheckInAt,
+      lastMovedAt: [e?.lastActivityAt ?? null, a.lastCheckInAt].reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null),
+      quarterLabel: goalQuarterLabel(okr.endDate, fiscalStart),
+      // "NONE" = nothing measurable and nothing hand-set: clients show
+      // "Not measured" instead of a fake 0%.
+      progressSource: a.progressSource,
+      // A goal's editors see every goal under it (the ones moving its
+      // number are theirs to know about and to unlink); others see only the
+      // ones they may open.
+      children: okr.children.filter((c) => !visibleChildIds || visibleChildIds.has(c.id) || mayEditGoal(rightsActor, rightsOf(okr))).map((c) => {
         const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
-        return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
+        // The same shape GET /api/okrs/[id] gives: no owner, since an
+        // editor sees children they may not open.
+        return { id: c.id, title: c.title, level: c.level, progress: childRoll.progress, progressSource: childRoll.source };
       }),
+      hiddenChildren: visibleChildIds && !mayEditGoal(rightsActor, rightsOf(okr)) ? okr.children.filter((c) => !visibleChildIds.has(c.id)).length : 0,
       audience: audiences.get(okr.id) ?? { members: [], totalMembers: 0, assigneeCount: 0 },
     };
   });
 
-  return jsonSuccess(enriched);
+  // The legacy shape (a bare array) for callers that do not page.
+  if (q.page == null) return jsonSuccess(enriched);
+
+  // Team goals: the people in the chain with no goals at all, named once
+  // under the table (a group needs a row, so they are not groups).
+  let noGoals: Array<{ id: string; firstName: string | null; lastName: string | null; avatar: string | null; email: string }> = [];
+  if (teamOnly && !orgWide && q.verdicts.length === 0 && !q.nudge && !q.q && q.owners.length === 0) {
+    const withGoals = new Set(all.map((o) => o.ownerId).filter(Boolean) as string[]);
+    const pool = (directIds ? [...directIds] : treeIds.filter((id) => id !== callerId)).filter((id) => !withGoals.has(id));
+    noGoals = pool.length
+      ? await prisma.user.findMany({ where: { id: { in: pool }, organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true, firstName: true, lastName: true, avatar: true, email: true }, orderBy: { firstName: "asc" } })
+      : [];
+  }
+
+  return jsonSuccess({
+    data: enriched,
+    pagination: { page: paged.page, pageSize: q.pageSize, total: paged.total },
+    // Group sizes across every filtered row, so a level header's count is
+    // the real one, not the rows on this page.
+    counts: {
+      COMPANY: filtered.filter((r) => r.level === "COMPANY").length,
+      DEPARTMENT: filtered.filter((r) => r.level === "DEPARTMENT").length,
+      INDIVIDUAL: filtered.filter((r) => r.level === "INDIVIDUAL").length,
+    },
+    ...(teamOnly ? { groups, noGoals } : {}),
+    canTeam: orgWide || hasTree,
+    // The owner and level fields: the tier POST and PATCH accept them from.
+    mayAssignOwners: isManager(session),
+    // Whether this viewer may make a Company goal owned by someone else (the
+    // Company-goal right): the goal modal says so before a save, never after.
+    mayMakeCompanyGoals: mayEditGoal(rightsActor, { level: "COMPANY", ownerId: null, creatorId: null }),
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -264,7 +414,7 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim()) return jsonError("Title required");
 
-  // Audience — contributors beside the single accountable owner. Validate
+  // Audience, contributors beside the single accountable owner. Validate
   // BEFORE creating anything: shape, one-subject-per-row, de-dupe, and
   // every id must live inside the caller's organization.
   let audience: GoalAudienceRef[] = [];
@@ -274,7 +424,7 @@ export async function POST(req: NextRequest) {
     audience = parsed.entries;
   }
 
-  // Door 1: an employee's objective is their OWN — they can't file goals
+  // Door 1: an employee's objective is their OWN, they can't file goals
   // under someone else's name. Managers may assign anyone in the org.
   // A cross-org or unknown ownerId is a bad request body → 400.
   const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
@@ -286,7 +436,17 @@ export async function POST(req: NextRequest) {
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
 
-  // departmentId is a real FK since the goals rebuild — a cross-org or
+  // A Company goal is edited only by Owner/Admin, the People team and its
+  // own owner (src/lib/goals/goal-rights.ts). Creating one that the caller
+  // could not then fix or remove would publish an org-wide goal nobody but
+  // an Admin can correct, so it needs that right from the start.
+  const rightsActor = await goalRightsActor(session);
+  if (normalizeGoalLevel(level) === "COMPANY" &&
+      !mayEditGoal(rightsActor, { level: "COMPANY", ownerId: effectiveOwnerId, creatorId: getUserId(session) })) {
+    return jsonError(COMPANY_LEVEL_REFUSED, 403);
+  }
+
+  // departmentId is a real FK since the goals rebuild, a cross-org or
   // unknown id must 400 here, not 500 at the constraint.
   if (departmentId) {
     const dept = await prisma.department.findFirst({
@@ -296,14 +456,24 @@ export async function POST(req: NextRequest) {
     if (!dept) return jsonError("Department not found in this organization", 400);
   }
 
-  // parentId is a real FK too — nesting under another org's goal (or a
+  // parentId is a real FK too, nesting under another org's goal (or a
   // typo'd id) must 400 here, not 500 at the constraint.
   if (parentId) {
     const parent = await prisma.oKR.findFirst({
       where: { id: parentId, organizationId: orgId },
-      select: { id: true },
+      select: { id: true, ownerId: true, level: true },
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
+    // A child re-weights its parent's stored progress, so creating a goal
+    // under one needs the link right (mayLinkUnderGoal): the right to edit
+    // that parent, or a manager lining a Department goal up under a Company
+    // goal. The new goal is theirs to edit when they could fix it after.
+    const parentCreator = (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null;
+    const newLevel = normalizeGoalLevel(level) ?? "INDIVIDUAL";
+    const childEditable = mayEditGoal(rightsActor, { level: newLevel, ownerId: effectiveOwnerId, creatorId: getUserId(session) });
+    if (!mayLinkUnderGoal(rightsActor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator }, { level: newLevel, editable: childEditable })) {
+      return jsonError(ATTACH_REFUSED, 403);
+    }
   }
 
   // NONE is a first-class opt-out: it silences the check-in reminder cron
@@ -356,7 +526,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Audience rows — refs to users/departments/roles, resolved to people
+  // Audience rows, refs to users/departments/roles, resolved to people
   // at read time (one shared goal, one scoreboard; no per-person copies).
   if (audience.length > 0) {
     await addGoalAssignees(okr.id, audience);
@@ -401,18 +571,11 @@ export async function POST(req: NextRequest) {
     targetId: okr.id,
     targetType: "okr",
   });
+  if (okr.parentId) logGoalLink("linked", { orgId, actorId: getUserId(session), parentId: okr.parentId, childId: okr.id });
 
   // Notify owner if assigned to someone else
   if (okr.ownerId && okr.ownerId !== getUserId(session)) {
-    await prisma.notification.create({
-      data: {
-        userId: okr.ownerId,
-        type: "okr_assigned",
-        title: "New OKR Assigned to You",
-        message: okr.title,
-        link: "/okrs",
-      },
-    }).catch((err) => console.error("[OKR] Notification failed:", err));
+    await notifyGoalAssigned(okr.ownerId, okr);
 
     // Email the owner
     try {
@@ -429,7 +592,7 @@ export async function POST(req: NextRequest) {
           itemTitle: okr.title,
           itemDetails: `${body.level || "INDIVIDUAL"} · ${body.quarter || "This quarter"}`,
           actionLabel: "View OKR",
-          actionLink: `${baseUrl}/okrs`,
+          actionLink: `${baseUrl}/okrs/${okr.id}`,
           note: okr.description || undefined,
         });
         sendEmail({
@@ -445,7 +608,7 @@ export async function POST(req: NextRequest) {
   return jsonSuccess(createdPayload, 201);
 }
 
-// Columns a PATCH may touch — an unvalidated spread must never reach
+// Columns a PATCH may touch, an unvalidated spread must never reach
 // prisma (organizationId / id / createdAt are not editable, ever).
 const OKR_PATCH_KEYS = [
   "title", "description", "level", "status", "progress", "quarter",
@@ -466,18 +629,33 @@ export async function PATCH(req: NextRequest) {
   const existing = await prisma.oKR.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("OKR not found", 404);
 
-  // Edit gate: the owner, a manager with the owner in their report tree
-  // (unowned objectives stay manager-editable), or an org-wide level.
-  const callerId = getUserId(session);
-  let canEdit = isOrgWideAlignment(session) || existing.ownerId === callerId;
-  if (!canEdit && isManager(session)) {
-    canEdit = existing.ownerId
-      ? (await getTeamUserIds(orgId, callerId)).includes(existing.ownerId)
-      : true;
+  // Edit gate: mayEditGoal (src/lib/goals/goal-rights.ts), the rule the
+  // list's canEdit flag and the goal page read too.
+  const actor = await goalRightsActor(session);
+  const creatorId = (await goalCreatorIds(orgId, [id])).get(id) ?? null;
+  const childEditable = mayEditGoal(actor, { level: existing.level, ownerId: existing.ownerId, creatorId });
+  // One narrow door for someone who cannot edit this goal: taking it out
+  // from under a parent they can edit (the Unlink on the parent's list of
+  // goals, which names every goal under it to that goal's editors). Nothing
+  // else in the body may ride along.
+  const onlyUnlink = Object.keys(rawUpdates).length === 1 && "parentId" in rawUpdates &&
+    (rawUpdates.parentId === null || rawUpdates.parentId === "") && !!existing.parentId;
+  // Evaluated whether or not the caller can edit the child: a People team
+  // member on the configured list, or a creator whose goal left their tree,
+  // may edit a goal they cannot see, and must still reach this door.
+  let parentEditorUnlink = false;
+  if (onlyUnlink) {
+    const parent = await prisma.oKR.findFirst({ where: { id: existing.parentId!, organizationId: orgId }, select: { id: true, level: true, ownerId: true } });
+    const parentCreator = parent ? (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null : null;
+    parentEditorUnlink = mayUnlinkFromGoal(actor, parent ? { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator } : null, false);
   }
-  if (!canEdit) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+
+  // A goal the caller cannot see answers exactly like a missing one, so a
+  // refused edit never confirms that it exists. The parent's editors are
+  // the exception: their goal's list already names it to them.
+  const childVisible = parentEditorUnlink ? await canSeeGoal(session, existing) : true;
+  if (!parentEditorUnlink && !(await canSeeGoal(session, existing))) return jsonError("OKR not found", 404);
+  if (!childEditable && !parentEditorUnlink) return jsonError(GOAL_EDIT_REFUSED, 403);
 
   const updates: Record<string, unknown> = {};
   for (const key of OKR_PATCH_KEYS) {
@@ -488,18 +666,27 @@ export async function PATCH(req: NextRequest) {
     delete updates.ownerId;
     delete updates.level;
   }
-  // level is an enum now — drop anything that doesn't normalize.
+  // level is an enum now, drop anything that doesn't normalize.
   if ("level" in updates) {
     const lvl = normalizeGoalLevel(updates.level);
     if (lvl) updates.level = lvl;
     else delete updates.level;
   }
-  // checkInCadence is a free String column — only let known values through
+  // checkInCadence is a free String column, only let known values through
   // (NONE opts the goal out of the check-in reminder cron). A garbage value
   // must never reach the column or the cron's cadence lookup.
   if ("checkInCadence" in updates &&
       !["WEEKLY", "BIWEEKLY", "MONTHLY", "NONE"].includes(updates.checkInCadence as string)) {
     delete updates.checkInCadence;
+  }
+  // Raising a goal to Company level needs the Company-goal right on the
+  // result, the same rule POST applies: otherwise a manager could lift a
+  // report's goal onto the org's Company list and lose the right to fix it.
+  if (updates.level === "COMPANY" && existing.level !== "COMPANY") {
+    const nextOwner = "ownerId" in updates ? ((updates.ownerId as string | null) || null) : existing.ownerId;
+    if (!mayEditGoal(actor, { level: "COMPANY", ownerId: nextOwner, creatorId })) {
+      return jsonError(COMPANY_LEVEL_REFUSED, 403);
+    }
   }
   if (typeof updates.ownerId === "string" && updates.ownerId !== existing.ownerId) {
     const owner = await prisma.user.findFirst({
@@ -508,7 +695,7 @@ export async function PATCH(req: NextRequest) {
     });
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
-  // departmentId is a real FK — validate before Prisma hits the constraint.
+  // departmentId is a real FK, validate before Prisma hits the constraint.
   if (typeof updates.departmentId === "string" && updates.departmentId.length > 0) {
     const dept = await prisma.department.findFirst({
       where: { id: updates.departmentId, organizationId: orgId },
@@ -516,14 +703,67 @@ export async function PATCH(req: NextRequest) {
     });
     if (!dept) return jsonError("Department not found in this organization", 400);
   }
-  // parentId is a real FK — same rule, and a goal can never parent itself.
+  // parentId is a real FK, same rule, and a goal can never parent itself.
   if (typeof updates.parentId === "string" && updates.parentId.length > 0) {
     if (updates.parentId === id) return jsonError("A goal can't be its own parent", 400);
     const parent = await prisma.oKR.findFirst({
       where: { id: updates.parentId, organizationId: orgId },
-      select: { id: true },
+      select: { id: true, ownerId: true, level: true },
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
+    // Attaching re-weights the parent's stored progress, so a NEW parent
+    // needs the link right (mayLinkUnderGoal). The modal resends
+    // the unchanged parentId on every save, and keeping a parent the
+    // caller can no longer edit changes nothing, so only a change is
+    // checked. Clearing Part of ("") never reaches here.
+    const parentCreator = (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null;
+    const childLevel = (typeof updates.level === "string" ? updates.level : null) ?? existing.level;
+    if (updates.parentId !== existing.parentId &&
+        !mayLinkUnderGoal(actor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator }, { level: childLevel, editable: childEditable })) {
+      return jsonError(ATTACH_REFUSED, 403);
+    }
+    // Part of can never point below the goal itself: walk up from the new
+    // parent, and refuse when the walk reaches this goal (a cycle would
+    // make both goals roll up into each other).
+    const seen = new Set<string>();
+    let cursor: string | null = updates.parentId;
+    while (cursor && !seen.has(cursor)) {
+      if (cursor === id) return jsonError("That goal is part of this one, so it can't also contain it.", 400);
+      seen.add(cursor);
+      const up: { parentId: string | null } | null = await prisma.oKR.findFirst({ where: { id: cursor, organizationId: orgId }, select: { parentId: true } });
+      cursor = up?.parentId ?? null;
+    }
+  }
+  if (updates.parentId === "") updates.parentId = null;
+  // A level change keeps the goal under its parent, so it must still be a
+  // link the caller could make: otherwise a Department goal lined up under
+  // a Company goal through the manager door could turn Individual and stay.
+  if ("level" in updates && updates.level !== existing.level && !("parentId" in updates && updates.parentId !== existing.parentId) && existing.parentId) {
+    const kept = await prisma.oKR.findFirst({ where: { id: existing.parentId, organizationId: orgId }, select: { id: true, ownerId: true, level: true } });
+    if (kept) {
+      const keptCreator = (await goalCreatorIds(orgId, [kept.id])).get(kept.id) ?? null;
+      if (!mayLinkUnderGoal(actor, { level: kept.level, ownerId: kept.ownerId, creatorId: keptCreator }, { level: String(updates.level), editable: childEditable })) {
+        return jsonError("That level can't stay part of its current goal. Take it out of that goal first, or keep the level.", 403);
+      }
+    }
+  }
+
+  // Mark complete (spec-goals /okrs row menu): status is re-derived from the
+  // targets on every read, so the person's decision lives in completedAt,
+  // which nothing re-derives. `completed: false` (or a status other than
+  // COMPLETED) reopens it.
+  const completedFlag = typeof rawUpdates.completed === "boolean"
+    ? rawUpdates.completed
+    : "status" in updates
+      ? updates.status === "COMPLETED"
+      : undefined;
+  if (completedFlag === true && !existing.completedAt) updates.completedAt = new Date();
+  if (completedFlag === false && existing.completedAt) updates.completedAt = null;
+  if (completedFlag === true) updates.status = "COMPLETED";
+  // Reopening: the stored status goes back to what the progress says (the
+  // rollup below re-derives it again for a measured goal).
+  if (completedFlag === false && existing.status === "COMPLETED" && !("status" in updates)) {
+    updates.status = okrStatusFor(Math.min(99, existing.progress));
   }
 
   // Audience full-replacement: `assignees: [{type, id}]` becomes the
@@ -548,13 +788,24 @@ export async function PATCH(req: NextRequest) {
     await syncGoalAssignees(id, audience);
   }
 
-  // Re-derive stored progress/status for this goal and its ancestors —
+  // Re-derive stored progress/status for this goal and its ancestors,
   // a PATCH can move the goal (parentId), hand-set progress, or change
   // the owner whose KPI readings drive linked KRs. If the goal LEFT a
   // parent, that old chain shrinks too and must be recomputed.
   const rollup = await persistGoalRollupChain(id);
   if (existing.parentId && existing.parentId !== updated.parentId) {
     await persistGoalRollupChain(existing.parentId);
+  }
+  if (existing.parentId !== updated.parentId) {
+    const who = getUserId(session);
+    if (existing.parentId) logGoalLink("unlinked", { orgId, actorId: who, parentId: existing.parentId, childId: id });
+    if (updated.parentId) logGoalLink("linked", { orgId, actorId: who, parentId: updated.parentId, childId: id });
+  }
+
+  // The unlink door is for someone who may not open this goal: they get the
+  // fact that it moved and nothing of its contents.
+  if (parentEditorUnlink && !childVisible) {
+    return jsonSuccess({ id: updated.id, parentId: updated.parentId });
   }
 
   return jsonSuccess({

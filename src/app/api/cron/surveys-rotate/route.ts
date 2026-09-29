@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
@@ -48,7 +49,7 @@ async function resolveAudienceUserIds(s: {
 }): Promise<string[]> {
   // Tags are polymorphic (no User relation), so resolve them separately.
   if (s.audienceType === "TAGS") return resolveUserIdsByTags(s.organizationId, s.tagIds);
-  const where: any = { organizationId: s.organizationId, deletedAt: null };
+  const where: Prisma.UserWhereInput = { organizationId: s.organizationId, deletedAt: null };
   if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
   else if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
   else if (s.audienceType === "USERS") where.id = { in: s.userIds };
@@ -59,7 +60,7 @@ async function resolveAudienceUserIds(s: {
 async function rotateOne(survey: {
   id: string;
   title: string;
-  questions: any;
+  questions: Prisma.JsonValue;
   frequency: string | null;
   audienceType: string;
   officeIds: string[];
@@ -69,6 +70,7 @@ async function rotateOne(survey: {
   anonymous: boolean;
   organizationId: string;
   closesAt: Date | null;
+  createdById?: string | null;
 }): Promise<{ closed: string; spawned?: string }> {
   // Close the current cycle.
   await prisma.pulseSurvey.update({
@@ -87,7 +89,7 @@ async function rotateOne(survey: {
   const child = await prisma.pulseSurvey.create({
     data: {
       title: survey.title,
-      questions: survey.questions,
+      questions: survey.questions as Prisma.InputJsonValue,
       frequency: survey.frequency,
       status: "ACTIVE",
       audienceType: survey.audienceType,
@@ -98,6 +100,8 @@ async function rotateOne(survey: {
       anonymous: survey.anonymous,
       closesAt: nextClose,
       parentSurveyId: survey.id,
+      // The next round belongs to whoever ran this one.
+      createdById: survey.createdById ?? null,
       organizationId: survey.organizationId,
     },
   });
@@ -112,10 +116,11 @@ async function rotateOne(survey: {
     });
     await prisma.notification.createMany({
       data: audience.map((u) => ({
-        title: "New pulse survey",
-        message: `A new pulse survey "${survey.title}" is waiting for your input.`,
-        type: "survey",
-        link: "/surveys",
+        // The survey itself, never the list (MA-6), under the survey_open kind.
+        title: `${child.title} is open`,
+        message: `A new round of ${survey.title} is waiting for you.`,
+        type: "survey_open",
+        link: `/surveys/${child.id}`,
         userId: u.id,
       })),
     });
@@ -188,10 +193,10 @@ async function sendReminders(survey: {
   // In-app notifications in one batch
   await prisma.notification.createMany({
     data: pending.map((u) => ({
-      title: "Survey closing soon",
-      message: `"${survey.title}" closes in about ${closesIn}h — your response is still pending.`,
-      type: "survey",
-      link: "/surveys",
+      title: `${survey.title} closes soon`,
+      message: `It closes in about ${closesIn} hours and you have not answered yet.`,
+      type: "survey_open",
+      link: `/surveys/${survey.id}`,
       userId: u.id,
     })),
   });
@@ -224,6 +229,10 @@ async function sendReminders(survey: {
 
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
+  // Closed, not open, when the secret is missing in production.
+  if (!cronSecret && process.env.NODE_ENV === "production") {
+    return Response.json({ error: "CRON_SECRET is not set, so the cron endpoints are closed" }, { status: 503 });
+  }
   if (cronSecret) {
     const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
     const provided = header?.replace(/^Bearer\s+/i, "");
@@ -242,7 +251,7 @@ export async function POST(req: NextRequest) {
     select: {
       id: true, title: true, questions: true, frequency: true,
       audienceType: true, officeIds: true, departmentIds: true, userIds: true, tagIds: true,
-      anonymous: true, organizationId: true, closesAt: true,
+      anonymous: true, organizationId: true, closesAt: true, createdById: true,
     },
   });
   for (const s of expired) {

@@ -10,13 +10,16 @@
 
 export type CsvCell = string | number | boolean | Date | null | undefined;
 
-export function toCsv(rows: Record<string, CsvCell>[], columns?: string[]): string {
+export function toCsv(rows: Record<string, CsvCell>[], columns?: string[], opts?: { formulaSafe?: boolean }): string {
   if (rows.length === 0 && !columns) return "﻿\n";
   const headers = columns ?? Object.keys(rows[0] ?? {});
   const lines: string[] = [];
+  // formulaSafe: every text cell goes through csvFormulaSafe (text other
+  // people typed: names, highlights, answers). Numbers stay numbers.
+  const cell = (v: CsvCell) => escapeCell(opts?.formulaSafe && typeof v === "string" ? csvFormulaSafe(v) : v);
   lines.push(headers.map(escapeCell).join(","));
   for (const row of rows) {
-    lines.push(headers.map((h) => escapeCell(row[h])).join(","));
+    lines.push(headers.map((h) => cell(row[h])).join(","));
   }
   // BOM + CRLF per RFC 4180. Excel needs the BOM for UTF-8.
   return "﻿" + lines.join("\r\n") + "\r\n";

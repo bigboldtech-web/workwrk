@@ -1,27 +1,33 @@
 "use client";
 
-// Goal modal — ONE surface for create and edit, mirroring ClickUp's
-// create-goal flow: Goal name → Owner ("Who is responsible for this
-// Goal?", a first-class single-person field) → access/sharing (our
-// Contributors = GoalAudiencePicker) → dates → description. ClickUp
-// reuses the same panel for editing; so do we — pass `goal` and the
-// modal opens pre-filled and PATCHes on save.
+// Create / Edit goal (spec-goals /okrs, 560, one surface for both). Fields:
+// Goal name, Owner and Level (only for viewers who may assign goals to
+// others: the manager tier POST and PATCH /api/okrs accept an owner and a
+// level from), Part of (the goal this one supports; the new parent picker,
+// sent as parentId), Start and Due dates, Check-ins, Description.
 //
-// A goal stays ONE record: single accountable owner (ownerId), many
-// contributors (GoalAssignee refs resolved at read time), one shared
-// scoreboard — never per-person copies. ClickUp's purple accents
-// translate to brand blue #0073EA per the design system.
+// Removed from the modal, never from the product:
+//   Quarter        derived from the due date and the org's fiscal year
+//                  (src/lib/fiscal-quarter.ts); OKR.quarter is kept, unwritten
+//   Contributors   added and removed on the goal page's Details row (the
+//                  same GoalAudiencePicker, one surface for one job); an edit
+//                  from here never sends `assignees`, so it cannot wipe them
+//
+// A dirty form confirms before it closes. Errors stay inline.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Loader2 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { GoalAudiencePicker, type AudienceEntry } from "@/components/okrs/goal-audience-picker";
-import { GoalOwnerPicker } from "@/components/okrs/goal-owner-picker";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { DateField } from "@/components/ui/date-field";
+import { Picker } from "@/components/ui/picker";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { legacyIsHrAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { apiFetch } from "@/lib/api-fetch";
 import type { PersonRef } from "@/components/board-view/assignee-picker";
 
 export type GoalLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
@@ -33,21 +39,14 @@ const LEVEL_OPTIONS: { value: GoalLevel; label: string }[] = [
 ];
 
 // "NONE" silences the check-in reminder cron (src/app/api/cron/okr-reminders)
-// for this one goal — a first-class opt-out, not a hidden sentinel.
+// for this one goal: a first-class opt-out, not a hidden sentinel.
 type Cadence = "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "NONE";
 const CADENCE_OPTIONS: { value: Cadence; label: string }[] = [
   { value: "WEEKLY", label: "Weekly" },
-  { value: "BIWEEKLY", label: "Biweekly" },
+  { value: "BIWEEKLY", label: "Every two weeks" },
   { value: "MONTHLY", label: "Monthly" },
   { value: "NONE", label: "None" },
 ];
-
-// Mirrors isManager() server-side (api-helpers): only these levels may
-// assign goals to other people or set non-INDIVIDUAL levels — the API
-// enforces it regardless, this just keeps the UI honest.
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
-]);
 
 /** Everything the modal needs to open pre-filled in edit mode. */
 export interface EditableGoal {
@@ -61,291 +60,308 @@ export interface EditableGoal {
   startDate?: string | null;
   endDate?: string | null;
   checkInCadence?: string | null;
+  parentId?: string | null;
 }
 
 interface CreateGoalModalProps {
   open: boolean;
-  /** Preselected level for CREATE (which section's "Add" was clicked).
-   *  Render with `key={level}` (create) / `key={goal.id}` (edit) so
-   *  reopening remounts with fresh state. */
+  /** Preselected level for CREATE. */
   level: GoalLevel;
   /** EDIT mode: open pre-filled with this goal and PATCH on save. */
   goal?: EditableGoal | null;
   /** Land the user straight in the Owner picker ("Assign owner"). */
   focusOwner?: boolean;
+  /** CREATE: start with this owner (a person record's "Set a goal"). */
+  initialOwner?: PickPerson | null;
+  /** Land the user on the Part of field ("Add" on the goal page). */
+  focusParent?: boolean;
   onClose: () => void;
-  /** Fires after a successful POST (create) or PATCH (edit). */
-  onSaved: () => void;
+  /** Fires after a successful POST (create, with the new id) or PATCH (edit). */
+  onSaved: (id?: string) => void;
 }
 
-/** ISO date → the YYYY-MM-DD an <input type="date"> wants. */
-function toDateInput(iso?: string | null): string {
-  return iso ? iso.slice(0, 10) : "";
+// A parent is offered when the save will take it (mayLinkUnderGoal in
+// src/lib/goals/goal-rights.ts): the list row's canEdit, or, for a
+// Department goal under a Company goal, its canLinkTeamGoals (someone who
+// manages people lines their team's goal up under the company's).
+type ParentOption = { id: string; title: string; level: GoalLevel; canEdit: boolean; canLinkTeamGoals: boolean };
+function attachable(p: ParentOption, childLevel: GoalLevel): boolean {
+  return p.canEdit || (p.level === "COMPANY" && childLevel === "DEPARTMENT" && p.canLinkTeamGoals);
 }
 
-export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSaved }: CreateGoalModalProps) {
+function toDateInput(iso?: string | null): string | null {
+  return iso ? iso.slice(0, 10) : null;
+}
+
+const LEVEL_WORD: Record<GoalLevel, string> = { COMPANY: "Company", DEPARTMENT: "Department", INDIVIDUAL: "Individual" };
+
+/**
+ * May the viewer give a new goal an owner other than themselves? The same
+ * ladder the modal and POST /api/okrs read, for doors that open the modal
+ * with an owner already chosen (a person record's "Set a goal").
+ */
+export function useMayAssignGoalOwner(): boolean {
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  return legacyIsManagerLevel(accessLevel);
+}
+
+export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, initialOwner, onClose, onSaved }: CreateGoalModalProps) {
   const isEdit = Boolean(goal);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isManagerViewer = MANAGER_LEVELS.has(accessLevel);
+  // The one shared ladder: exactly the isManager() tier POST and PATCH
+  // /api/okrs ask before they accept an owner or a non-Individual level, so
+  // the modal never offers a choice the save would silently drop.
+  const mayAssign = legacyIsManagerLevel(accessLevel);
+  const myId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const confirm = useConfirm();
 
   const [title, setTitle] = useState(goal?.title ?? "");
   const [description, setDescription] = useState(goal?.description ?? "");
-  const [selLevel, setSelLevel] = useState<GoalLevel>(goal?.level ?? level);
-  const [owner, setOwner] = useState<PersonRef | null>(goal?.owner ?? null);
-  // Edit mode: only PATCH ownerId when the user actually touched the
-  // field — if the caller couldn't resolve the owner object for a goal
-  // that HAS an ownerId, an untouched save must not silently unassign.
+  const [selLevel, setSelLevel] = useState<GoalLevel>(goal?.level ?? (mayAssign ? level : "INDIVIDUAL"));
+  const [owner, setOwner] = useState<PickPerson | null>(
+    goal?.owner ? { id: goal.owner.id, firstName: goal.owner.firstName ?? null, lastName: goal.owner.lastName ?? null, avatar: goal.owner.avatar ?? null, email: goal.owner.email ?? null } : !goal && initialOwner ? initialOwner : null,
+  );
+  // Edit mode: only PATCH ownerId when the user touched the field, so an
+  // untouched save never silently unassigns.
   const [ownerTouched, setOwnerTouched] = useState(false);
-  const [audience, setAudience] = useState<AudienceEntry[]>([]);
-  // Edit mode: contributors load async from the goal's audience rows —
-  // hold the PATCH's `assignees` until they arrive so a fast save can't
-  // wipe an audience the user never saw.
-  const [audienceLoaded, setAudienceLoaded] = useState(!isEdit);
-  const [startDate, setStartDate] = useState(toDateInput(goal?.startDate));
-  const [endDate, setEndDate] = useState(toDateInput(goal?.endDate));
-  const [quarter, setQuarter] = useState(goal?.quarter ?? "");
+  const [parentId, setParentId] = useState<string | null>(goal?.parentId ?? null);
+  const [parentOpen, setParentOpen] = useState(Boolean(focusParent));
+  const [parents, setParents] = useState<ParentOption[] | null>(null);
+  // The server's own Company-goal right (the People team list included),
+  // read from the same list call; null until it answers.
+  const [mayMakeCompany, setMayMakeCompany] = useState<boolean | null>(null);
+  const [startDate, setStartDate] = useState<string | null>(toDateInput(goal?.startDate));
+  const [endDate, setEndDate] = useState<string | null>(toDateInput(goal?.endDate));
   const [cadence, setCadence] = useState<Cadence>(
-    goal?.checkInCadence === "BIWEEKLY" ||
-    goal?.checkInCadence === "MONTHLY" ||
-    goal?.checkInCadence === "NONE"
+    goal?.checkInCadence === "BIWEEKLY" || goal?.checkInCadence === "MONTHLY" || goal?.checkInCadence === "NONE"
       ? goal.checkInCadence
       : "WEEKLY",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<{ title?: string; endDate?: string }>({});
+  // A Company goal is edited only by Owner/Admin, the People team and its
+  // own owner (src/lib/goals/goal-rights.ts), and POST and PATCH refuse to
+  // make one the saver could not then fix. Say so before the save, not after.
+  const companyBlocked = mayAssign && selLevel === "COMPANY" && goal?.level !== "COMPANY" &&
+    !(mayMakeCompany ?? legacyIsHrAdminLevel(accessLevel)) && (!owner || owner.id !== myId);
 
-  // Edit mode: current contributors come from the goal's audience rows
-  // (labeled entries — the same shape the picker edits).
+  // Part of: goals one level up that the viewer can see (Company goals for
+  // a Department goal; Company or Department goals for an Individual one).
+  const parentLevels = useMemo<GoalLevel[]>(
+    () => (selLevel === "INDIVIDUAL" ? ["COMPANY", "DEPARTMENT"] : ["COMPANY"]),
+    [selLevel],
+  );
   useEffect(() => {
-    if (!isEdit || !goal?.id) return;
-    let active = true;
-    fetch(`/api/okrs/${goal.id}/assignees`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!active || !d) return;
-        const entries = Array.isArray(d?.entries) ? d.entries : [];
-        setAudience(entries);
-        setAudienceLoaded(true);
-      })
-      .catch(() => { if (active) setAudienceLoaded(true); });
-    return () => { active = false; };
-  }, [isEdit, goal?.id]);
+    if (!open) return;
+    let live = true;
+    // Every page, not the first 100: in a large org a later parent must
+    // still be choosable, and the current parent must still read by name.
+    void (async () => {
+      const all: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }> = [];
+      let company: boolean | null = null;
+      for (let page = 1; page <= 200; page += 1) {
+        const qs = new URLSearchParams({ page: String(page), pageSize: "100", level: parentLevels.join(","), sort: "name" });
+        const r = await apiFetch<{ data: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }>; pagination?: { total: number }; mayMakeCompanyGoals?: boolean }>(`/api/okrs?${qs}`, { cache: "no-store" });
+        if (!live) return;
+        if (!r.ok) break;
+        if (company === null && typeof r.data.mayMakeCompanyGoals === "boolean") company = r.data.mayMakeCompanyGoals;
+        all.push(...(r.data.data ?? []));
+        const total = r.data.pagination?.total ?? all.length;
+        if ((r.data.data ?? []).length === 0 || all.length >= total) break;
+      }
+      if (!live) return;
+      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level, canEdit: g.canEdit === true, canLinkTeamGoals: g.canLinkTeamGoals === true })));
+      setMayMakeCompany(company);
+    })();
+    return () => { live = false; };
+  }, [open, parentLevels, goal?.id]);
+  const parentTitle = parents?.find((p) => p.id === parentId)?.title ?? (parentId ? "The current goal" : null);
+  // Offered: the goals the save will accept, plus the goal this one is part
+  // of today (kept readable by name and keepable even when the viewer can
+  // no longer attach to it; the API only checks a changed parent).
+  const parentChoices = (parents ?? []).filter((p) => attachable(p, selLevel) || p.id === goal?.parentId);
+  // A parent picked for one level (a Company goal a Department goal may go
+  // under) goes when the level changes to one it cannot take, before the
+  // save is refused for it. The goal's own current parent is kept.
+  const changeLevel = (next: GoalLevel) => {
+    setSelLevel(next);
+    if (!parents || !parentId || parentId === goal?.parentId) return;
+    const p = parents.find((x) => x.id === parentId);
+    if (p && !attachable(p, next)) setParentId(null);
+  };
+  // The why, shown only when goals one level up exist but none will take
+  // this one (an org with none yet needs no explanation).
+  const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => attachable(p, selLevel));
 
-  function reset() {
-    setError(null);
+  const initial = useMemo(() => JSON.stringify({
+    t: goal?.title ?? "", d: goal?.description ?? "", l: goal?.level ?? level, p: goal?.parentId ?? null,
+    s: toDateInput(goal?.startDate), e: toDateInput(goal?.endDate), c: goal?.checkInCadence ?? "WEEKLY",
+  }), [goal, level]);
+  const dirty = JSON.stringify({ t: title, d: description, l: selLevel, p: parentId, s: startDate, e: endDate, c: cadence }) !== initial || ownerTouched;
+
+  async function tryClose() {
+    if (dirty && !saving) {
+      const ok = await confirm({ title: isEdit ? "Discard your changes?" : "Discard this goal?", description: "What you typed is not saved.", confirmLabel: "Discard", destructive: true });
+      if (!ok) return;
+    }
+    onClose();
   }
 
   async function submit() {
-    if (!title.trim() || saving) return;
+    if (saving) return;
+    const errs: { title?: string; endDate?: string } = {};
+    if (!title.trim()) errs.title = "Give the goal a name.";
+    if (!endDate) errs.endDate = "Pick a due date.";
+    if (startDate && endDate && startDate > endDate) errs.endDate = "The due date is before the start date.";
+    setFieldError(errs);
+    if (errs.title || errs.endDate || companyBlocked) return;
     setSaving(true);
     setError(null);
     const payload: Record<string, unknown> = {
       title: title.trim(),
       description: description.trim() || null,
-      level: selLevel,
-      quarter: quarter.trim() || null,
+      level: mayAssign ? selLevel : isEdit ? goal!.level : "INDIVIDUAL",
       startDate: startDate || null,
       endDate: endDate || null,
       checkInCadence: cadence,
+      parentId: parentId ?? (isEdit ? "" : null),
     };
-    if (isManagerViewer && (!isEdit || ownerTouched)) payload.ownerId = owner?.id ?? null;
-    // Only send the audience once we actually know it (see above).
-    if (audienceLoaded) payload.assignees = audience.map((e) => ({ type: e.type, id: e.id }));
-    try {
-      const res = await fetch("/api/okrs", {
-        method: isEdit ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isEdit ? { id: goal!.id, ...payload } : payload),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-      reset();
-      onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : isEdit ? "Couldn't save the goal" : "Couldn't create the goal");
-    } finally {
-      setSaving(false);
-    }
+    if (mayAssign && (!isEdit || ownerTouched)) payload.ownerId = owner?.id ?? null;
+    const r = await apiFetch<{ id?: string; data?: { id?: string } }>("/api/okrs", {
+      method: isEdit ? "PATCH" : "POST",
+      json: isEdit ? { id: goal!.id, ...payload } : payload,
+    });
+    setSaving(false);
+    if (!r.ok) { setError(r.error || (isEdit ? "Couldn't save the goal" : "Couldn't create the goal")); return; }
+    onSaved(r.data?.id ?? r.data?.data?.id ?? goal?.id);
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) void tryClose(); }}>
+      <DialogContent className="max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit goal" : "New objective"}</DialogTitle>
-          <DialogDescription>
-            One goal, one scoreboard — everyone assigned shares the same progress bar.
-          </DialogDescription>
+          <DialogTitle>{isEdit ? "Edit goal" : "New goal"}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              Goal name
-            </label>
-            <Input
-              autoFocus={!focusOwner}
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+            <span>Goal name</span>
+            <input
+              autoFocus={!focusOwner && !focusParent}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-              placeholder="What do you want to do?"
-              className="h-8 text-base"
+              placeholder="What do you want to achieve?"
+              maxLength={300}
+              aria-invalid={fieldError.title ? true : undefined}
+              className="h-9 rounded-md border border-line bg-raised px-3 text-base font-normal text-ink focus:border-brand focus:outline-none"
             />
-          </div>
+            {fieldError.title ? <span className="text-sm font-normal text-danger-text">{fieldError.title}</span> : null}
+          </label>
 
-          {isManagerViewer && (
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Owner
-              </label>
-              <GoalOwnerPicker
-                value={owner}
-                onChange={(p) => { setOwner(p); setOwnerTouched(true); }}
-                initialOpen={focusOwner}
-              />
-              {/* Helper, not a link — gray like every other field hint (blue
-                  made it read as clickable). */}
-              <p className="mt-1 text-xs text-zinc-400">
-                Who is responsible for this Goal?
-              </p>
-            </div>
-          )}
-
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              Level
-            </label>
-            {/* flex-wrap: three labels + translations must never clip out of a
-                narrow modal — wrap to a second line instead. */}
-            <div className="flex flex-wrap gap-1.5">
-              {LEVEL_OPTIONS.map((o) => {
-                const locked = !isManagerViewer && o.value !== "INDIVIDUAL";
-                return (
-                  <button
-                    key={o.value}
-                    type="button"
-                    disabled={locked}
-                    onClick={() => setSelLevel(o.value)}
-                    className={`h-7 rounded-md border px-2.5 text-sm transition-colors ${
-                      selLevel === o.value
-                        ? "border-[#0073EA] bg-[#0073EA]/10 font-medium text-[#0073EA]"
-                        : locked
-                          ? "border-zinc-100 text-zinc-300 cursor-not-allowed dark:border-zinc-800 dark:text-zinc-600"
-                          : "border-zinc-200 text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              Contributors
-            </label>
-            <GoalAudiencePicker value={audience} onChange={setAudience} />
-            <p className="mt-1 text-xs text-zinc-400">
-              Who can see and push this Goal — departments and roles resolve to their current members.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Start date
-              </label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="h-8 text-base"
+          {mayAssign ? (
+            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>Owner</span>
+              <PeoplePickerField
+                ariaLabel="Owner"
+                value={owner ? [owner.id] : []}
+                people={owner ? [owner] : []}
+                placeholder="No owner"
+                onChange={(_ids, picked) => { setOwner(picked[0] ?? null); setOwnerTouched(true); }}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                End date
-              </label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="h-8 text-base"
+          ) : null}
+
+          {mayAssign ? (
+            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>Level</span>
+              <SegmentedControl label="Level" value={selLevel} options={LEVEL_OPTIONS} onChange={(v) => changeLevel(v)} />
+              {companyBlocked ? (
+                <span className="text-sm font-normal text-ink-2">
+                  Only an Admin, the People team or the goal&apos;s owner can make a Company goal. Make yourself the owner, or ask an Admin.
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+            <span>Part of <span className="font-normal text-ink-2">(optional)</span></span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setParentOpen((x) => !x)}
+                aria-haspopup="listbox"
+                aria-expanded={parentOpen}
+                autoFocus={focusParent}
+                className="inline-flex h-9 w-full items-center rounded-md border border-line bg-raised px-3 text-start text-base font-normal text-ink"
+              >
+                <span className={parentTitle ? "truncate" : "text-ink-3"}>{parentTitle ?? "Not part of another goal"}</span>
+              </button>
+              <Picker
+                open={parentOpen}
+                onClose={() => setParentOpen(false)}
+                ariaLabel="Part of"
+                selected={parentId ?? "__none__"}
+                searchPlaceholder="Search goals"
+                loading={parents === null}
+                emptyLabel="No goals one level up yet"
+                sections={[{
+                  options: [
+                    { value: "__none__", label: "Not part of another goal" },
+                    ...parentChoices.map((p) => ({ value: p.id, label: p.title, hint: LEVEL_WORD[p.level] })),
+                  ],
+                }]}
+                onSelect={(v) => { setParentOpen(false); setParentId(v === "__none__" ? null : v); }}
+                className="absolute start-0 top-10 z-50"
               />
+            </div>
+            {noAttachable ? (
+              <span className="text-sm font-normal text-ink-2">
+                {selLevel === "DEPARTMENT"
+                  ? "A Department goal goes under a goal you can edit, or under a Company goal when you manage people. To link it elsewhere, ask that goal's owner or your manager."
+                  : "This goal goes under a goal you can edit. To link it to another goal, ask that goal's owner or your manager."}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>Start date</span>
+              <DateField value={startDate} onChange={setStartDate} ariaLabel="Start date" placeholder="No start date" />
+            </div>
+            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>Due date</span>
+              <DateField value={endDate} onChange={setEndDate} ariaLabel="Due date" allowClear={false} />
+              {fieldError.endDate ? <span className="text-sm font-normal text-danger-text">{fieldError.endDate}</span> : null}
             </div>
           </div>
 
-          {/* Quarter is a short input but the cadence group is three buttons —
-              side-by-side they overflow a narrow modal (the "Monthly clips out
-              of the box" bug), so the pair stacks below the sm breakpoint.
-              min-w-0 lets the cadence cell actually shrink inside the grid. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Quarter
-              </label>
-              <Input
-                value={quarter}
-                onChange={(e) => setQuarter(e.target.value)}
-                placeholder="e.g. Q3 2026"
-                className="h-8 text-base"
-              />
-            </div>
-            <div className="min-w-0">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Check-in cadence
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {CADENCE_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => setCadence(o.value)}
-                    className={`h-7 rounded-md border px-2 text-sm transition-colors ${
-                      cadence === o.value
-                        ? "border-[#0073EA] bg-[#0073EA]/10 font-medium text-[#0073EA]"
-                        : "border-zinc-200 text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-              {cadence === "NONE" && (
-                <p className="mt-1 text-xs text-zinc-400">
-                  No check-in reminders for this goal.
-                </p>
-              )}
-            </div>
+          <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+            <span>Check-ins</span>
+            <SegmentedControl label="Check-ins" value={cadence} options={CADENCE_OPTIONS} onChange={(v) => setCadence(v)} />
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              Description
-            </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+            <span>Description</span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Why is this Goal set, and how should it be achieved?"
-              rows={2}
-              className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-base text-zinc-800 outline-none placeholder:text-zinc-400 focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+              rows={3}
+              maxLength={5000}
+              className="rounded-md border border-line bg-raised px-3 py-2 text-base font-normal text-ink focus:border-brand focus:outline-none"
             />
-          </div>
+          </label>
 
-          {error && <p className="text-sm text-[#E2445C]">{error}</p>}
+          {error ? <p role="alert" className="text-sm text-danger-text">{error}</p> : null}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => { reset(); onClose(); }} disabled={saving}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => void submit()} disabled={saving || !title.trim()}>
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {isEdit ? "Save changes" : "Create goal"}
+          <Button variant="ghost" onClick={() => void tryClose()}>Cancel</Button>
+          <Button onClick={() => void submit()} disabled={saving}>
+            {saving ? (isEdit ? "Saving" : "Creating") : isEdit ? "Save changes" : "Create goal"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -52,6 +52,9 @@ export async function GET(req: NextRequest) {
   const exclude = (searchParams.get("exclude") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const includeSelf = searchParams.get("includeSelf") === "1";
   const signIn = searchParams.get("reach") === "signin";
+  // ?managers=1 is the Reports to and dotted-line picker: an Agent can never
+  // be anyone's manager (access 2.4), so they are not offered.
+  const managersOnly = searchParams.get("managers") === "1";
 
   let visibleIds: string[] | null = null;
   if (orgRoleOf({ accessLevel }) === "GUEST") {
@@ -82,6 +85,7 @@ export async function GET(req: NextRequest) {
     ...(visibleIds ? [{ id: { in: visibleIds } }] : []),
     ...(includeSelf ? [] : [{ id: { not: userId } }]),
     ...(exclude.length > 0 ? [{ NOT: { id: { in: exclude } } }] : []),
+    ...(managersOnly ? [{ accessLevel: { not: "AGENT" as const } }] : []),
     ...words.map((word) => ({
       OR: [
         { firstName: { contains: word, mode: "insensitive" as const } },

@@ -57,6 +57,13 @@ export function useAutosave<T>({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const retryRef = useRef(false);
+  // Automatic retries after a failed save (the indicator's "Not saved,
+  // retrying" is then true): three, spaced out, reset by any success. Once
+  // they are spent `retriesExhausted` turns true and the caller offers a
+  // Retry link (AutosaveIndicator onRetry).
+  const failRetriesRef = useRef(0);
+  const failTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retriesExhausted, setRetriesExhausted] = useState(false);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -94,10 +101,15 @@ export function useAutosave<T>({
       return;
     }
     inFlightRef.current = true;
-    setStatus("saving");
+    // While automatic retries run after a failure, the indicator keeps its
+    // red "Not saved, retrying" until a save lands (design system: the
+    // error state stays until saved), never flickering back to "Saving".
+    if (failRetriesRef.current === 0) setStatus("saving");
     try {
       await saveRef.current(snapshotRef.current);
       baselineRef.current = currentSerialized;
+      failRetriesRef.current = 0;
+      setRetriesExhausted(false);
       setStatus("saved");
       setLastSavedAt(new Date());
       if (localKey && typeof window !== "undefined") {
@@ -105,6 +117,13 @@ export function useAutosave<T>({
       }
     } catch {
       setStatus("error");
+      if (failRetriesRef.current < AUTOSAVE_FAIL_RETRIES) {
+        failRetriesRef.current += 1;
+        if (failTimerRef.current) clearTimeout(failTimerRef.current);
+        failTimerRef.current = setTimeout(() => { failTimerRef.current = null; void flushRef.current?.(); }, AUTOSAVE_FAIL_RETRY_MS * failRetriesRef.current);
+      } else {
+        setRetriesExhausted(true);
+      }
     } finally {
       inFlightRef.current = false;
       if (retryRef.current) {
@@ -114,6 +133,8 @@ export function useAutosave<T>({
       }
     }
   }, [localKey]);
+  const flushRef = useRef<(() => Promise<void>) | null>(null);
+  flushRef.current = flush;
 
   // Reset baseline whenever enabled toggles. Flipping off also cancels any
   // pending timer — no autosave leaks out of edit mode.
@@ -158,7 +179,7 @@ export function useAutosave<T>({
 
   // beforeunload guard — fires only while something is genuinely unsaved.
   useEffect(() => {
-    const pending = status === "dirty" || status === "saving";
+    const pending = status === "dirty" || status === "saving" || status === "error";
     if (!pending) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -171,13 +192,24 @@ export function useAutosave<T>({
   // Final flush on unmount (best-effort for SPA navigation).
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    if (failTimerRef.current) clearTimeout(failTimerRef.current);
     // Fire and forget — the unmounted component can't await it, but if
     // the user is navigating within the app the request still completes.
     flush();
   }, [flush]);
 
-  return { status, lastSavedAt, flushNow: flush };
+  /** A manual retry after the automatic ones are spent: a fresh budget. */
+  const retryNow = useCallback(() => {
+    failRetriesRef.current = 0;
+    setRetriesExhausted(false);
+    void flush();
+  }, [flush]);
+
+  return { status, lastSavedAt, flushNow: flush, retriesExhausted, retryNow };
 }
+
+const AUTOSAVE_FAIL_RETRIES = 3;
+const AUTOSAVE_FAIL_RETRY_MS = 4000;
 
 function safeSerialize(v: unknown): string {
   try { return JSON.stringify(v); } catch { return ""; }

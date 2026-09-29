@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
@@ -17,7 +18,7 @@ function weightSignal(weightTotal: number): { weightTotal: number; weightWarning
     weightTotal,
     weightWarning:
       weightTotal > 100
-        ? `KRA weights now total ${weightTotal}% for this person — over the 100% budget. Saved; trim another KRA to rebalance.`
+        ? `KRA weights now total ${weightTotal}% for this person, over the 100% budget. Saved; trim another KRA to rebalance.`
         : null,
   };
 }
@@ -93,7 +94,12 @@ export async function GET(req: NextRequest) {
   // self / report-tree / org-wide standing.
   const targetUserId = userId || callerId;
   if (!(await canTouchUserAlignment(session, targetUserId))) {
-    return jsonError("You can only view KRA assignments for yourself or your reports.", 403);
+    // KPI reviews' reach (src/lib/kpi-review.server.ts): dotted-line
+    // managers, the People team and Admin read the people they act on.
+    const ctx = await kpiActorCtx();
+    if (!ctx || !mayActOnKpisOf(ctx, targetUserId)) {
+      return jsonError("You can only view KRA assignments for yourself or your reports.", 403);
+    }
   }
 
   const assignments = await prisma.kRAAssignment.findMany({
@@ -122,6 +128,7 @@ export async function GET(req: NextRequest) {
               targetValue: true,
               targetLabel: true,
               lowerIsBetter: true,
+              direction: true,
               records: {
                 where: { userId: targetUserId },
                 orderBy: { period: "desc" },

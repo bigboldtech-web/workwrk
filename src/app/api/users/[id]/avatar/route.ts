@@ -68,7 +68,7 @@ export async function DELETE(
 
   if (!(await canWriteAvatar(session, id))) return jsonError("Forbidden", 403);
 
-  // updateMany carries the org scope in the WHERE — a raw-id update would
+  // updateMany carries the org scope in the WHERE, a raw-id update would
   // let a valid session clear avatars across org boundaries.
   const result = await prisma.user.updateMany({
     where: { id, organizationId: orgId },

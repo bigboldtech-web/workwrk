@@ -4,6 +4,8 @@ import {
   apiFetchWithRetry,
   backoffDelayMs,
   defaultErrorFor,
+  keepaliveFits,
+  KEEPALIVE_MAX_BYTES,
   parseErrorBody,
   shouldRetry,
   SESSION_EXPIRED_ERROR,
@@ -119,6 +121,23 @@ describe("apiFetch", () => {
     expect((init.headers as Headers).get("content-type")).toBe("application/json");
   });
 
+  it("keeps keepalive on a small body", async () => {
+    const spy = vi.fn(async () => respond(200, "{}"));
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiFetch("/api/x", { method: "PATCH", keepalive: true, json: { a: "short" } });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.keepalive).toBe(true);
+  });
+
+  it("drops keepalive on a body the browser would refuse, so a long answer still saves", async () => {
+    const spy = vi.fn(async () => respond(200, "{}"));
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiFetch("/api/x", { method: "PATCH", keepalive: true, json: { a: "x".repeat(70_000) } });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.keepalive).toBe(false);
+    expect(String(init.body).length).toBeGreaterThan(70_000);
+  });
+
   it("returns a typed failure for a 4xx and keeps the route's message and issues", async () => {
     globalThis.fetch = vi.fn(async () => respond(400, '{"error":"Invalid body","issues":[{"path":["inbox"]}]}')) as typeof fetch;
     const r = await apiFetch("/api/x");
@@ -227,5 +246,19 @@ describe("apiFetchWithRetry", () => {
     expect(r.draft).toBe(draft);
     expect(r.attempts).toBe(1);
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("keepaliveFits", () => {
+  it("measures bytes, not characters", () => {
+    expect(keepaliveFits("a".repeat(KEEPALIVE_MAX_BYTES))).toBe(true);
+    expect(keepaliveFits("a".repeat(KEEPALIVE_MAX_BYTES + 1))).toBe(false);
+    // Three bytes a character in UTF-8: 21k Devanagari characters is over.
+    expect(keepaliveFits("\u0915".repeat(21_000))).toBe(false);
+  });
+  it("allows an empty body and refuses one it cannot size", () => {
+    expect(keepaliveFits(undefined)).toBe(true);
+    expect(keepaliveFits(null)).toBe(true);
+    expect(keepaliveFits(new FormData())).toBe(false);
   });
 });

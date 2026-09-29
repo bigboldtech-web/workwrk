@@ -1,7 +1,9 @@
+import { canSeeGoal } from "@/lib/goal-audience";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
+import { canEditGoal } from "@/lib/alignment-scope";
+import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import {
@@ -26,15 +28,18 @@ export async function POST(
 
   if (!keyResultId || value == null) return jsonError("keyResultId and value required");
 
-  // Checking in is a WRITE on the objective — owner, tree-manager of the
+  // Checking in is a WRITE on the objective, owner, tree-manager of the
   // owner, or org-wide level only (a peer can't move someone else's goal).
   const okrRef = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: getOrgId(session) },
-    select: { ownerId: true },
   });
   if (!okrRef) return jsonError("OKR not found", 404);
-  if (!(await canEditOkrOwner(session, okrRef.ownerId))) {
-    return jsonError("You can only check in on your own goals or your reports' goals.", 403);
+  // A goal the caller cannot see answers exactly like a missing one (the
+  // read routes do the same), so a check-in never confirms that it exists.
+  if (!(await canSeeGoal(session, okrRef))) return jsonError("OKR not found", 404);
+  // Contributors check in too (spec-goals access: Can edit = check in).
+  if (!(await canEditGoal(session, okrRef)) && !(await isGoalContributor(session, okrId))) {
+    return jsonError("You need Can edit on this goal to check in.", 403);
   }
 
   const kr = await prisma.keyResult.findFirst({
@@ -43,12 +48,12 @@ export async function POST(
   });
   if (!kr) return jsonError("Key Result not found", 404);
 
-  // A KR linked to a role KPI is measured BY that gauge — its number comes
+  // A KR linked to a role KPI is measured BY that gauge, its number comes
   // from the KPI's records, not from a hand-typed check-in. Refuse rather
   // than accept a value we would then ignore on read.
   if (kr.kpiId) {
     return jsonError(
-      `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}" — record the KPI reading instead of checking in here.`,
+      `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}". Record the KPI number instead of checking in here.`,
       409,
     );
   }
@@ -77,7 +82,7 @@ export async function POST(
 
   // Roll the objective up from its key results' LIVE numbers (KPI-linked
   // KRs contribute their derived progress) and persist the whole ancestor
-  // chain — a check-in on a child must move its parent goal too.
+  // chain, a check-in on a child must move its parent goal too.
   const rollup = await persistGoalRollupChain(okrId);
   const avgProgress = rollup?.progress ?? progress;
   const status = rollup?.status ?? "ON_TRACK";
@@ -89,7 +94,7 @@ export async function POST(
     type: "okr_check_in",
     actorId: userId,
     organizationId: orgId,
-    description: `Updated OKR progress to ${avgProgress}% — "${okr?.title}"`,
+    description: `Updated goal progress to ${avgProgress}%: "${okr?.title}"`,
     targetId: okrId,
     targetType: "okr",
   });

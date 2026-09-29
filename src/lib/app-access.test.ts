@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_ACCESS } from "./app-access";
+import { APP_ACCESS, APP_ACCESS_BY_KEY } from "./app-access";
 import { visibleRailApps } from "./rail-apps";
 import { WORK_HOME_HREF } from "./nav/route-hub";
 
@@ -77,14 +77,14 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
   it("resolves the same rail through visibleRailApps for the server", () => {
     const asEmployee = { config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS };
     const employee = visibleRailApps({ ...asEmployee, activeModules: new Set(["chat"]) });
-    // No Teams for a Member: the hub's default href /people is a manager
-    // page (requireManagerPage), so the pill would land on the in-shell 404.
+    // Teams for every Member (Phase 6): its default href /people is the
+    // Directory, which every Member holds.
     // Tables module off: the Tables hub stays on the rail for a Member because
     // Forms does (D15, Forms is core; the hub renders the FORMS section alone).
-    expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "tables", "settings"]);
+    expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "teams", "docs", "tables", "settings"]);
     // Talk off: the hub stays on the rail for a Member because Announcements does.
     const employeeTalkOff = visibleRailApps({ ...asEmployee, activeModules: new Set() });
-    expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "tables", "settings"]);
+    expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "teams", "docs", "tables", "settings"]);
     const admin = visibleRailApps({ config: { order: ["settings", "home"] }, accessLevel: "COMPANY_ADMIN", apps: APP_ACCESS, activeModules: new Set(["chat", "tables"]) });
     expect(admin.map((a) => a.key)).toEqual(["settings", "home", "planner", "ai", "chat", "teams", "docs", "tables"]);
     const launcher = visibleRailApps({ ...asEmployee, activeModules: new Set(), includeFolded: true });
@@ -97,6 +97,9 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
     // row 4), so the Talk hub survives on it and the row stays reachable.
     expect(launcher.map((a) => a.key)).toContain("chat");
     expect(launcher.map((a) => a.key)).toContain("announcements");
-    expect(launcher.map((a) => a.key)).not.toContain("reviews"); // hr-admin
+    // Review cycles carries no tier: the palette filters it on APP_RULES
+    // (reports, People team, Admin) in shell-context.tsx, like Assets.
+    expect(APP_ACCESS_BY_KEY.reviews.requiredAccess).toBeUndefined();
+    expect(launcher.map((a) => a.key)).toContain("kudos"); // every Member (Phase 6)
   });
 });

@@ -52,7 +52,9 @@ describe("resolveSettingsPage", () => {
     expect(resolveSettingsPage("/settings/tags")?.key).toBe("tasks");
     expect(resolveSettingsPage("/settings/task-types")?.key).toBe("tasks");
     expect(resolveSettingsPage("/settings/permissions")?.key).toBe("access");
-    expect(resolveSettingsPage("/settings/hierarchy")?.key).toBe("structure");
+    // /settings/hierarchy 308s to /organization (outside Settings), so
+    // Structure no longer claims it (it falls to the Settings root).
+    expect(resolveSettingsPage("/settings/hierarchy")?.key).not.toBe("structure");
     expect(resolveSettingsPage("/settings/modules")?.key).toBe("apps");
     expect(resolveSettingsPage("/settings/notifications")?.key).toBe("account/notifications");
     expect(resolveSettingsPage("/account/appearance")?.key).toBe("account/preferences");

@@ -1,11 +1,11 @@
-// GET /api/kras/orphans — KRAs that belong to no job title (roleId null).
+// GET /api/kras/orphans, KRAs that belong to no job title (roleId null).
 //
 // The role-first spine says a KRA exists only inside a Role; POST
 // /api/kras now enforces that for new KRAs. Legacy orphans are NEVER
-// deleted or silently reassigned — this endpoint SURFACES them so an
+// deleted or silently reassigned, this endpoint SURFACES them so an
 // admin can attach each one to a job title (PATCH /api/kras {id, roleId}).
 // For every orphan we return its active assignees and, when ALL of them
-// hold exactly one distinct job title, that role as `suggestedRole` —
+// hold exactly one distinct job title, that role as `suggestedRole`,
 // a proposal only, never auto-applied. Ambiguous or unassigned orphans
 // ship with `suggestedRole: null` for the admin to decide.
 
@@ -15,7 +15,7 @@ import { getSessionOrFail, getOrgId, jsonSuccess, requirePermission } from "@/li
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  // Fixing an orphan is a KRA edit — same permission gates the report.
+  // Fixing an orphan is a KRA edit, same permission gates the report.
   const denied = await requirePermission(session, "kras", "edit");
   if (denied) return denied;
 
@@ -46,7 +46,7 @@ export async function GET() {
   });
 
   const rows = orphans.map((kra) => {
-    // Distinct job titles held by the active assignees — the best guess.
+    // Distinct job titles held by the active assignees, the best guess.
     const roleById = new Map<string, { id: string; title: string }>();
     for (const a of kra.assignments) {
       if (a.user.role) roleById.set(a.user.role.id, a.user.role);
