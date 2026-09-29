@@ -35,6 +35,32 @@ describe("activeConsoleNav (longest whole-segment prefix)", () => {
     expect(activeConsoleNav("")).toBeNull();
     expect(activeConsoleNav(null)).toBeNull();
   });
+  it("lights nothing on an unclaimed path below a real page, so it agrees with the Not found crumb", () => {
+    expect(activeConsoleNav("/admin/staff/extra")).toBeNull();
+    expect(activeConsoleNav("/admin/audit/extra")).toBeNull();
+    expect(activeConsoleNav("/admin/analytics/x/y")).toBeNull();
+    expect(activeConsoleNav("/admin/appsumo/extra?x=1")).toBeNull();
+    expect(activeConsoleNav("/admin/companies/cmumwko6o0061f5xp3hk4bewo/extra")).toBeNull();
+    // A company page is still Companies.
+    expect(activeConsoleNav("/admin/companies/cmumwko6o0061f5xp3hk4bewo")).toBe("companies");
+    expect(activeConsoleNav("/admin/companies/cmumwko6o0061f5xp3hk4bewo/")).toBe("companies");
+  });
+  it("lights a row exactly when its crumb is not Not found", () => {
+    const paths = [
+      "/admin",
+      "/admin/companies",
+      "/admin/companies/abc123def",
+      "/admin/companies/abc123def/extra",
+      "/admin/staff",
+      "/admin/staff/extra",
+      "/admin/audit/extra",
+      "/admin/nope",
+    ];
+    for (const p of paths) {
+      const notFound = consoleCrumbs(p).at(-1)?.label === "Not found";
+      expect(activeConsoleNav(p) === null, p).toBe(notFound);
+    }
+  });
 });
 
 describe("consoleCrumbs", () => {

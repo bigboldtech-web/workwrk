@@ -52,10 +52,21 @@ function segments(path: string): string[] {
 }
 
 /**
+ * True when a console page really owns `path` under `row`: the path is no
+ * deeper than the row's own href, plus one segment for a company id under
+ * Companies. Anything deeper (/admin/staff/extra, a path below a company id)
+ * renders the console's 404. The sidebar and the breadcrumb both read this
+ * one rule, so the frame never lights Staff while the crumb says Not found.
+ */
+function rowOwnsPath(row: ConsoleNavRow, path: string[]): boolean {
+  return path.length <= segments(row.href).length + (row.key === "companies" ? 1 : 0);
+}
+
+/**
  * The sidebar row a pathname belongs to: the row whose href is the longest
- * whole-segment prefix of the path. `/admin` only matches itself and paths
- * no other row claims (an unknown /admin/xyz lights Overview's parent, i.e.
- * nothing, so it returns null rather than pretend).
+ * whole-segment prefix of the path, and only when that row's page owns the
+ * path (rowOwnsPath). An unknown /admin/xyz, or /admin/staff/extra, lights
+ * nothing and returns null rather than pretend.
  */
 export function activeConsoleNav(pathname: string | null | undefined): ConsoleNavKey | null {
   if (!pathname) return null;
@@ -72,8 +83,10 @@ export function activeConsoleNav(pathname: string | null | undefined): ConsoleNa
     }
   }
   if (!best) return null;
-  // /admin itself is Overview; a deeper path nobody else claims is not.
-  if (best.key === "overview" && path.length > 1) return null;
+  // /admin itself is Overview; a deeper path nobody else claims is not. The
+  // same holds below every other row: a path its page does not own is the
+  // console's 404, so no row lights.
+  if (!rowOwnsPath(best, path)) return null;
   return best.key;
 }
 
@@ -104,12 +117,9 @@ export function consoleCrumbs(
   const path = segments(pathname ?? "");
   // A path no console page owns (a typo, a stale link, a page not shipped
   // yet, or anything below a company id) renders the console's own 404,
-  // (admin)/admin/not-found.tsx, and the crumb says so.
-  const known =
-    row &&
-    !NOT_YET_SHIPPED.has(row.key) &&
-    path.length <= segments(row.href).length + (row.key === "companies" ? 1 : 0);
-  if (!row || !known) {
+  // (admin)/admin/not-found.tsx, and the crumb says so. activeConsoleNav
+  // already returns null for a path its row does not own (rowOwnsPath).
+  if (!row || NOT_YET_SHIPPED.has(row.key)) {
     return [root, { label: NOT_FOUND_LABEL }];
   }
   if (row.key === "companies" && isCompanySegment(path[2]) && path.length === 3) {
