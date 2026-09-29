@@ -34,12 +34,13 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { MODULES, MODULE_SLUGS } from "@/lib/modules";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { SetupCard } from "@/components/settings/setup-card";
 
 // An empty value reads as words, never a dash (the copy rules).
 const NOT_SET = "Not set";
 
 type ApiSettings = {
-  organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null };
+  organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null; logo?: string | null };
   settings?: {
     enabledModules?: string[];
     businessType?: string; industry?: string; teamSize?: string;
@@ -49,6 +50,8 @@ type ApiSettings = {
     scoringBands?: Array<{ label: string; min: number; max: number; color: string }>;
     notifications?: Record<string, unknown>;
     security?: { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean; sessionTimeout?: number; twoFactorEnabled?: boolean };
+    companyProfile?: { mission?: string } | null;
+    console?: unknown;
   };
   usage?: { users?: number; sops?: number; aiQueries?: number };
 };
@@ -273,6 +276,15 @@ export function SettingsOverviewClient() {
       ) : data === null ? (
         <SkeletonRows />
       ) : (
+        <>
+        <SetupCard
+          orgName={org?.name ?? "your workspace"}
+          consoleRaw={set.console}
+          hasLogoOrMission={!!org?.logo || !!set.companyProfile?.mission?.trim()}
+          activeUsers={usage.users ?? 0}
+          activeModules={moduleCount}
+          onChanged={() => { void load(); }}
+        />
         <div className="settings">
           {sections.map((section) => (
             <section key={section.title} className="settings__section">
@@ -305,6 +317,7 @@ export function SettingsOverviewClient() {
             </section>
           ))}
         </div>
+        </>
       )}
     </>
   );

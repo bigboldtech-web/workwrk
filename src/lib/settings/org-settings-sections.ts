@@ -77,9 +77,21 @@ export const securitySectionSchema = z.strictObject({
   twoFactorEnabled: z.boolean().optional(),
 });
 
+/**
+ * The first-run console (settings-architecture 11.2, spec-account-auth
+ * `/onboard`): which wizard step to resume at, and the two one-way flags.
+ * The client never sends a date: `complete` and `dismiss` are stamped by
+ * the server, so a clock on someone's laptop cannot back-date setup.
+ */
+export const consoleSectionSchema = z.strictObject({
+  setupStep: z.number().int().min(1).max(4).optional(),
+  complete: z.literal(true).optional(),
+  dismiss: z.literal(true).optional(),
+});
+
 export const RETIRED_SETTINGS_SECTIONS = ["notifications", "modules"] as const;
 
-export const LIVE_SETTINGS_SECTIONS = ["general", "culture", "scoring", "security", "access", "process"] as const;
+export const LIVE_SETTINGS_SECTIONS = ["general", "culture", "scoring", "security", "access", "process", "console"] as const;
 export type LiveSettingsSection = (typeof LIVE_SETTINGS_SECTIONS)[number];
 
 /** The request envelope. `companyProfile` at the top level is Identity's legacy shape for `culture`. */

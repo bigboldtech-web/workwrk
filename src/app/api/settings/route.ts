@@ -21,9 +21,11 @@ import {
   describeIssue,
   generalSectionSchema,
   parseSettingsEnvelope,
+  consoleSectionSchema,
   scoringSectionSchema,
   securitySectionSchema,
 } from "@/lib/settings/org-settings-sections";
+import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
 /** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
@@ -122,6 +124,9 @@ export async function GET() {
         // The process taxonomies and acknowledgement defaults (Organize).
         // Seeding on first read happens in GET /api/settings/process.
         process: parseProcessSettings(settings.process).value,
+        // The first-run console (step to resume at, Finish and Finish
+        // later), with the old setupCompleted boolean read as completed.
+        console: readConsole(settings),
       },
       usage: {
         users: org._count.users,
@@ -332,6 +337,18 @@ export async function PATCH(req: Request) {
         const merged = { ...parseProcessSettings(currentSettings.process).value, ...partial.data };
         await writeOrgSettingsKeys(orgId, { process: merged });
         changedKeys = Object.keys(partial.data);
+        break;
+      }
+
+      case "console": {
+        // The first-run console (spec-account-auth `/onboard`): the step to
+        // resume at, and Finish / Finish later. Admin only, like every
+        // section but process and scoring. The server stamps the dates.
+        const parsed = consoleSectionSchema.safeParse(data ?? {});
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "console"), issues: parsed.error.issues }, { status: 400 });
+        const next = nextConsole(currentSettings.console, parsed.data);
+        await writeOrgSettingsKeys(orgId, { console: next.console, ...(next.setupCompleted ? { setupCompleted: true } : {}) });
+        changedKeys = Object.keys(parsed.data);
         break;
       }
 

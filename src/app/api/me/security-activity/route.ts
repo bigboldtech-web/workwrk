@@ -8,6 +8,7 @@ const SECURITY_TYPES = [
   "login",
   "logout",
   "password_changed",
+  "password_reset",
   "mfa_enabled",
   "mfa_disabled",
   "signed_out_all_devices",

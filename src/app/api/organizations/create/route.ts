@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
 import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { seedOrgDefaults, seedStarterSpace } from "@/lib/org/seed-org-defaults";
 
 // POST /api/organizations/create  { name }
 // Create a brand-new workspace (Organization) and make the caller its admin
@@ -26,16 +27,18 @@ export async function POST(req: NextRequest) {
     const organization = await tx.organization.create({
       data: { name, slug, status: "TRIAL" },
     });
-    await tx.department.createMany({
-      data: ["Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"]
-        .map((n) => ({ name: n, organizationId: organization.id })),
-    });
+    // The same defaults a self-serve signup gets (settings-architecture
+    // 11.1): departments, locale, password rules, access toggles, retention
+    // and the setup console, so a workspace made here is complete too.
+    await seedOrgDefaults(tx, { organizationId: organization.id });
     // The creator owns/admins the new workspace.
     await tx.organizationMembership.create({
       data: { userId, organizationId: organization.id, role: "COMPANY_ADMIN", isPrimary: false },
     });
     return organization;
   });
+
+  await seedStarterSpace({ organizationId: org.id, userId });
 
   logAuditEvent({
     type: "organization_created",

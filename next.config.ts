@@ -376,9 +376,11 @@ const nextConfig: NextConfig = {
       { source: "/settings/notifications", destination: "/account/notifications", permanent: true },
       { source: "/account/appearance", destination: "/account/preferences?tab=appearance", permanent: true },
       // The avatar menu's two old query rows. The matched `tab` rides along
-      // (Next appends the source query), and the target page's own `tab`
-      // wins because it comes first; /settings/page.tsx answers the same
-      // two rows with a clean URL on a server that has not re-read this file.
+      // (Next appends the source query). On the themes row the target's own
+      // `tab=appearance` comes first and wins; on the shortcuts row the
+      // carried `tab=shortcuts` is inert (/account/shortcuts has no tabs).
+      // /settings/page.tsx answers the same two rows on a server that has
+      // not re-read this file.
       { source: "/settings", has: [{ type: "query", key: "tab", value: "themes" }], destination: "/account/preferences?tab=appearance", permanent: true },
       { source: "/settings", has: [{ type: "query", key: "tab", value: "shortcuts" }], destination: "/account/shortcuts", permanent: true },
       // Phase 6, spec-goals section 0. /goals was a dead path the nav config
@@ -423,6 +425,13 @@ const nextConfig: NextConfig = {
       // twin that answers under hot reload.
       { source: "/register", has: [{ type: "query", key: "token" }], destination: "/join", permanent: true },
       { source: "/register", destination: "/signup", permanent: true },
+      // Phase 8 Stage B: the two old wizards are the one at /onboard, which
+      // renders the wizard for an Owner or Admin of a workspace still being
+      // set up and "Nothing to set up" (with its way on to Work home) for
+      // everyone else. Route-handler twins at (auth)/welcome/route.ts and
+      // setup/route.ts answer under hot reload.
+      { source: "/welcome", destination: "/onboard", permanent: true },
+      { source: "/setup", destination: "/onboard", permanent: true },
       //
       // Phase 7 (spec-ai-automation.md section 0). The two static AI mocks
       // are deleted and their addresses land on the real surfaces. Next

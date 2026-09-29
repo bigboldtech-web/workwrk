@@ -1,22 +1,21 @@
-import { baseLayout } from "./base";
+import { baseLayout, emailButton } from "./base";
+import { escapeHtml, safeHref } from "./escape";
 
 interface ReminderVars {
   itemType: string; // "Task", "SOP", "Review"
   itemTitle: string;
   dueInfo: string; // "tomorrow", "in 2 days", "overdue by 3 days"
+  /** The item's own page (an app-host URL that exists: /item/[id], /sops/[id], ...). */
   itemLink: string;
 }
 
 export function reminderTemplate(vars: ReminderVars): { subject: string; html: string } {
   const isOverdue = vars.dueInfo.includes("overdue");
-
+  const type = escapeHtml(vars.itemType);
   const html = baseLayout(`
-    <h1>${isOverdue ? "Overdue" : "Reminder"}: ${vars.itemType}</h1>
-    <p>Your ${vars.itemType.toLowerCase()} <span class="highlight">"${vars.itemTitle}"</span> is ${vars.dueInfo}.</p>
-    <hr class="divider" />
-    <p style="text-align: center;">
-      <a href="${vars.itemLink}" class="btn">View ${vars.itemType}</a>
-    </p>
+    <h1>${isOverdue ? "Overdue" : "Reminder"}: ${type}</h1>
+    <p>Your ${escapeHtml(vars.itemType.toLowerCase())} <span class="highlight">${escapeHtml(vars.itemTitle)}</span> is ${escapeHtml(vars.dueInfo)}.</p>
+    <p style="margin:24px 0 8px;">${emailButton(safeHref(vars.itemLink), `Open ${type}`)}</p>
   `);
 
   return {

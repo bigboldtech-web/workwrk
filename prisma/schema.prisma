@@ -498,6 +498,17 @@ model User {
   verifyToken     String?   @unique
   verifyExpiresAt DateTime?
 
+  // Phase 8 (prisma/sql/2026-09-30-phase8-settings-access.sql). Nullable and
+  // additive; null reads as "not recorded" (every account made before the
+  // column existed).
+  //   termsAcceptedAt: when this person agreed to the Terms and the Privacy
+  //     Policy at /signup (the consent line); the policy version rides on the
+  //     `terms.accepted` ActivityLog row written with it.
+  //   passwordChangedAt: the last time a password was chosen (signup, join,
+  //     reset, change password), for the password age row and policy.
+  termsAcceptedAt   DateTime?
+  passwordChangedAt DateTime?
+
   // MFA — TOTP (Google Authenticator / Authy / 1Password).
   // Secret stored base32-encoded, only persisted when enrolment completes.
   mfaEnabled     Boolean  @default(false)

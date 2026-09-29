@@ -8,24 +8,24 @@ interface OverdueManagerVars {
 
 export function overdueManagerTemplate(vars: OverdueManagerVars): { subject: string; html: string } {
   const rows = vars.items.map((item) =>
-    `<tr style="border-bottom:1px solid #1f1f1f;">
-      <td style="padding:8px 0;font-size:13px;color:#fafafa;">${item.personName}</td>
-      <td style="padding:8px 0;font-size:13px;color:#a0a0a0;">${item.type}</td>
-      <td style="padding:8px 0;font-size:13px;color:#a0a0a0;">${item.title}</td>
-      <td style="padding:8px 0;font-size:13px;color:#FF6B6B;text-align:right;">${item.daysOverdue}d overdue</td>
+    `<tr style="border-bottom:1px solid #E4E7EC;">
+      <td style="padding:8px 0;font-size:13px;color:#1F2430;">${item.personName}</td>
+      <td style="padding:8px 0;font-size:13px;color:#5C6779;">${item.type}</td>
+      <td style="padding:8px 0;font-size:13px;color:#5C6779;">${item.title}</td>
+      <td style="padding:8px 0;font-size:13px;color:#B42318;text-align:right;">${item.daysOverdue}d overdue</td>
     </tr>`
   ).join("");
 
   const html = baseLayout(`
-    <h1>Overdue Items — Your Team</h1>
+    <h1>Overdue items: your team</h1>
     <p>Hi ${vars.managerName}, the following items from your team are overdue:</p>
     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
       <thead>
-        <tr style="border-bottom:1px solid #1f1f1f;">
-          <th style="text-align:left;padding:6px 0;font-size:11px;color:#707070;text-transform:uppercase;">Person</th>
-          <th style="text-align:left;padding:6px 0;font-size:11px;color:#707070;text-transform:uppercase;">Type</th>
-          <th style="text-align:left;padding:6px 0;font-size:11px;color:#707070;text-transform:uppercase;">Item</th>
-          <th style="text-align:right;padding:6px 0;font-size:11px;color:#707070;text-transform:uppercase;">Status</th>
+        <tr style="border-bottom:1px solid #E4E7EC;">
+          <th style="text-align:left;padding:6px 0;font-size:11px;color:#667085;text-transform:uppercase;">Person</th>
+          <th style="text-align:left;padding:6px 0;font-size:11px;color:#667085;text-transform:uppercase;">Type</th>
+          <th style="text-align:left;padding:6px 0;font-size:11px;color:#667085;text-transform:uppercase;">Item</th>
+          <th style="text-align:right;padding:6px 0;font-size:11px;color:#667085;text-transform:uppercase;">Status</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>

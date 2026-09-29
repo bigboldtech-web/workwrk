@@ -134,9 +134,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // rail switch-over to can() at step 6, together with the client rail.
   "src/app/api/boot/route.ts",
   "src/app/(admin)/layout.tsx",
-  // Phase 8 Stage A: moved from src/app/(auth)/register/page.tsx unchanged
-  // (it reads the invitation's accessLevel for its heading).
-  "src/components/auth/register-form.tsx",
   "src/app/(dashboard)/account/profile/page.tsx",
   "src/app/(dashboard)/account/security/page.tsx",
   "src/app/(dashboard)/announcements/page.tsx",
@@ -380,7 +377,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/search/route.ts",
   "src/app/api/settings/logo/route.ts",
   "src/app/api/settings/route.ts",
-  "src/app/api/setup/route.ts",
   "src/app/api/sop-assignments/\\[id\\]/route.ts",
   "src/app/api/sop-assignments/compliance/route.ts",
   "src/app/api/sop-assignments/route.ts",
@@ -465,7 +461,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/workflows/route.ts",
   "src/app/api/workspaces/\\[id\\]/members/route.ts",
   "src/app/api/workspaces/route.ts",
-  "src/app/onboard/page.tsx",
   "src/components/layout/os/access-tiers.ts",
   "src/components/layout/os/apps-catalog.tsx",
   "src/components/layout/os/hub-sidebar.tsx",

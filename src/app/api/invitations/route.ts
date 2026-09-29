@@ -8,7 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
-import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 
 export async function GET() {
@@ -51,14 +51,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const orgId = (session.user as { organizationId: string }).organizationId;
 
     const allowed = await hasPermission(session, "people", "create");
     if (!allowed) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: requestedLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+    const { email, accessLevel: levelField, role: roleField, isAgent, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+
+    // The setup wizard asks in the four-role words ({ role, isAgent }); the
+    // Members page and API callers still send a level. Either way the level
+    // rule below decides.
+    let requestedLevel: unknown = levelField;
+    if (levelField === undefined && roleField !== undefined) {
+      const mapped = levelForInviteRole(roleField, isAgent);
+      if (!mapped.ok) return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      requestedLevel = mapped.level;
+    }
 
     // The level an invitation may carry (src/lib/access/invite-level.ts):
     // never WorkwrK staff, an Admin only from an Admin, and otherwise at or
@@ -85,7 +95,7 @@ export async function POST(req: Request) {
       where: { id: orgId },
       select: { domain: true },
     });
-    const inviterEmail = (session.user as any).email as string | undefined;
+    const inviterEmail = (session.user as { email?: string }).email;
     const allowedDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
     const inviteDomain = String(email).split("@")[1]?.toLowerCase() ?? "";
     if (allowedDomain && inviteDomain !== allowedDomain) {
@@ -151,10 +161,13 @@ export async function POST(req: Request) {
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const inviteLink = `${baseUrl}/join?token=${invitation.token}`;
+    const inviter = session.user as { firstName?: string; lastName?: string; name?: string | null };
+    const inviterName = `${inviter.firstName ?? ""} ${inviter.lastName ?? ""}`.trim() || inviter.name || undefined;
     const { subject, html } = invitationTemplate({
       companyName: org?.name || "Your team",
       inviteLink,
       accessLevel: inviteLevel || "EMPLOYEE",
+      inviterName,
       personalMessage,
     });
 
@@ -183,15 +196,21 @@ export async function POST(req: Request) {
     // to see in their access review reports.
     logAuditEvent({
       type: "user.invited",
-      actorId: (session.user as any).id,
+      actorId: (session.user as { id: string }).id,
       organizationId: orgId,
       description: `Invited ${email} as ${inviteLevel || "EMPLOYEE"}`,
       targetId: invitation.id,
       targetType: "Invitation",
-      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId, kraCount: cleanKraIds.length, sopCount: cleanSopIds.length },
+      // The personal message is kept here (Invitation has no column for it)
+      // so /join can show the invitee what the inviter wrote.
+      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId, kraCount: cleanKraIds.length, sopCount: cleanSopIds.length, ...(personalMessage ? { message: personalMessage } : {}) },
     });
 
-    return NextResponse.json(invitation, { status: 201 });
+    // The raw token is the invitation (see GET): it goes to the invitee by
+    // email and never back to the caller.
+    const { token: _t, ...created } = invitation;
+    void _t;
+    return NextResponse.json(created, { status: 201 });
   } catch (error) {
     console.error("Invitations POST error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -205,7 +224,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const orgId = (session.user as { organizationId: string }).organizationId;
 
     const allowed = await hasPermission(session, "people", "create");
     if (!allowed) {
@@ -235,7 +254,7 @@ export async function DELETE(req: Request) {
 
     logAuditEvent({
       type: "user.invitation.revoked",
-      actorId: (session.user as any).id,
+      actorId: (session.user as { id: string }).id,
       organizationId: orgId,
       description: `Revoked invitation for ${invitation.email}`,
       targetId: id,

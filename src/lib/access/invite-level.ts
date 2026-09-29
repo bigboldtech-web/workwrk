@@ -83,3 +83,18 @@ export function resolveGrantLevel(
 export function resolveInviteLevel(inviterLevel: string | null | undefined, requested: unknown): InviteLevelResult {
   return resolveGrantLevel(inviterLevel, requested, "invite");
 }
+
+/**
+ * An invitation asked for in the four-role words (the setup wizard's Role
+ * picker: Admin, or Member with the Agent flag), as the level it stores
+ * until User.orgRole exists. Guest is not a level: a Guest is invited from a
+ * share dialog on the thing shared, so the org-wide invite refuses it with a
+ * sentence that says where to go. The level rule above still decides whether
+ * the inviter may give the level this returns.
+ */
+export function levelForInviteRole(role: unknown, isAgent: unknown): InviteLevelResult {
+  if (role === "ADMIN") return { ok: true, level: "COMPANY_ADMIN" };
+  if (role === "MEMBER") return { ok: true, level: isAgent === true ? "AGENT" : "EMPLOYEE" };
+  if (role === "GUEST") return { ok: false, status: 400, error: "Invite a Guest from the share dialog on what you want to share with them" };
+  return { ok: false, status: 400, error: `Unknown role: ${String(role)}` };
+}

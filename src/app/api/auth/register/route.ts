@@ -7,6 +7,15 @@ import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword } from "@/lib/password-policy";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
 import { isReservedStaffAddress } from "@/lib/platform-admin";
+import { seedOrgDefaults, seedStarterSpace } from "@/lib/org/seed-org-defaults";
+import { sendVerificationEmail, appBaseUrl } from "@/lib/auth/send-verification";
+import { logAuditEvent } from "@/lib/activity";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+
+// The Terms and Privacy Policy version a signup agrees to (the consent line
+// on /signup). Bumped when either document changes; recorded on the
+// `terms.accepted` ActivityLog row next to User.termsAcceptedAt.
+const TERMS_VERSION = "2026-09";
 
 export async function POST(req: Request) {
   try {
@@ -20,7 +29,8 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { organizationName: rawOrgName, firstName: rawFirst, lastName: rawLast, email, password } = body;
+    const { organizationName: rawOrgName, firstName: rawFirst, lastName: rawLast, email: rawEmail, password, timezone, template } = body;
+    const email = typeof rawEmail === "string" ? rawEmail.trim() : rawEmail;
 
     // Public endpoint — probe traffic has submitted HTML payloads as org
     // names (found in prod 2026-08-27). Names are PLAIN TEXT: strip angle
@@ -32,7 +42,7 @@ export async function POST(req: Request) {
     const firstName = cleanName(rawFirst, 60);
     const lastName = cleanName(rawLast, 60);
 
-    if (!organizationName || !firstName || !lastName || !email || !password) {
+    if (!organizationName || !firstName || !lastName || !email || !password || typeof email !== "string" || !email.includes("@")) {
       return NextResponse.json(
         { error: "All fields are required" },
         { status: 400 }
@@ -52,13 +62,16 @@ export async function POST(req: Request) {
       slug = `${slug}-${Date.now().toString(36)}`;
     }
 
-    // Check if user already exists in any org with this email
+    // Check if user already exists in any org with this email. Case does
+    // not make a second person: "Priya@Co.com" and "priya@co.com" are one
+    // mailbox, and a second row for it would make log in ambiguous.
     const existingUser = await prisma.user.findFirst({
-      where: { email },
+      where: { email: { equals: email, mode: "insensitive" } },
+      select: { id: true },
     });
     if (existingUser) {
       return NextResponse.json(
-        { error: "An account with this email already exists" },
+        { error: "An account with this email already exists", field: "email", code: "email_in_use" },
         { status: 400 }
       );
     }
@@ -67,7 +80,7 @@ export async function POST(req: Request) {
     // public: the refusal reads exactly like the existing-account one above,
     // so it never confirms that an address is on the WorkwrK staff list.
     if (typeof email === "string" && (await isReservedStaffAddress(email))) {
-      return NextResponse.json({ error: "An account with this email already exists" }, { status: 400 });
+      return NextResponse.json({ error: "An account with this email already exists", field: "email", code: "email_in_use" }, { status: 400 });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -82,6 +95,7 @@ export async function POST(req: Request) {
         },
       });
 
+      const now = new Date();
       const user = await tx.user.create({
         data: {
           email,
@@ -90,25 +104,51 @@ export async function POST(req: Request) {
           lastName,
           organizationId: organization.id,
           accessLevel: "COMPANY_ADMIN",
+          termsAcceptedAt: now,
+          passwordChangedAt: now,
         },
       });
 
-      // Create default departments in one round-trip
-      const defaultDepts = ["Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"];
-      await tx.department.createMany({
-        data: defaultDepts.map((name) => ({ name, organizationId: organization.id })),
-      });
+      // Everything a new workspace needs to be complete the moment it
+      // exists (settings-architecture 11.1): the six departments, the
+      // locale, the password rules, the access toggles, retention and the
+      // setup console. The wizard is an offer from here on, never a gate.
+      await seedOrgDefaults(tx, { organizationId: organization.id, timezone: typeof timezone === "string" ? timezone : null });
 
       return { organization, user };
     });
 
+    // The General Space and its first List, through the same code the
+    // Spaces API uses. Best effort: the workspace is complete without it.
+    await seedStarterSpace({ organizationId: result.organization.id, userId: result.user.id });
+
+    logAuditEvent({
+      type: "terms.accepted",
+      actorId: result.user.id,
+      organizationId: result.organization.id,
+      description: "Agreed to the Terms and the Privacy Policy at sign-up",
+      targetType: "User",
+      targetId: result.user.id,
+      metadata: { version: TERMS_VERSION, template: typeof template === "string" ? template.slice(0, 80) : null },
+      ipAddress: ipFromRequest(req),
+      userAgent: req.headers.get("user-agent"),
+    }).catch(() => {});
+
+    // The first verification email (B11: none was ever sent at signup).
+    // Verification is not a gate; the account works either way.
+    try {
+      await sendVerificationEmail({ id: result.user.id, email, firstName, organizationId: result.organization.id });
+    } catch (verifyErr) {
+      console.error("[Register] Verification email failed:", verifyErr);
+    }
+
     // Send welcome email
     try {
-      const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
       const { subject, html } = welcomeTemplate({
         firstName,
         organizationName,
-        loginLink: `${baseUrl}/login`,
+        loginLink: `${appBaseUrl()}${WORK_HOME_HREF}`,
+        isCreator: true,
       });
       await sendEmail({
         to: email,

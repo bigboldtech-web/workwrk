@@ -1,4 +1,6 @@
 export { invitationTemplate } from "./invitation";
+export { verifyEmailTemplate } from "./verify-email";
+export { escapeHtml, safeHref } from "./escape";
 export { reviewPendingTemplate } from "./review-pending";
 export { reviewCompletedTemplate } from "./review-completed";
 export { sopAssignedTemplate } from "./sop-assigned";

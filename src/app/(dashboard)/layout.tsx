@@ -8,12 +8,11 @@
 // density, chrome and rail on its first frame and nothing below it has to
 // fetch its own copy at boot.
 //
-// Exactly two redirects live here, both about who you are: no session sends
-// you to /login?callbackUrl=<current>, and a signed-in person whose org has
-// not finished setup goes to /onboard. A failed boot is neither: it renders
-// the boot ErrorState on navy with Try again and Log out, and it never
-// silently treats itself as "setup complete" the way the old /api/setup
-// branch did.
+// Exactly one redirect lives here, about who you are: no session sends you
+// to /login?callbackUrl=<current>. The old second one (an unfinished setup
+// sent Owners and Admins to /onboard) is gone: the wizard is an offer, not
+// a gate. A failed boot renders the boot ErrorState on navy with Try again
+// and Log out.
 
 import { OsShell } from "@/components/layout/os/os-shell";
 import { BootProvider, type BootPayload } from "@/components/layout/os/boot-context";
@@ -73,16 +72,11 @@ export default function DashboardLayout({
         if (r.status !== 401) setBootError(r.error || "Couldn't open WorkwrK");
         return;
       }
-      // Only an Owner or Admin is sent to the setup wizard: org setup is
-      // theirs to run (POST /api/setup answers Admins only), so sending a
-      // Member or Guest there would trap them in a wizard they cannot
-      // finish. Everyone else goes straight in. The spec (spec-account-auth
-      // A3) retires this redirect entirely once seedOrgDefaults exists.
-      const role = r.data.viewer?.orgRole;
-      if (!r.data.setupCompleted && (role === "OWNER" || role === "ADMIN")) {
-        router.push("/onboard");
-        return;
-      }
+      // No setup gate (spec-account-auth A3, access correction 2): a new
+      // workspace is complete the moment it exists (seedOrgDefaults), and
+      // the wizard at /onboard is an offer, reached from /signup and from
+      // the Workspace settings Overview card, never a redirect from here.
+      // `setupCompleted` in the boot payload stays informational.
       setBoot(r.data);
     });
     return () => {

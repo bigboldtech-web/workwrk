@@ -92,6 +92,10 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   action_item: k("action_item", "Action item from a meeting", "ListChecks", "primary", "tasks"),
   boundary_request: k("boundary_request", "Needs your approval", "ShieldCheck", "primary", "requests"),
   access_request: k("access_request", "Access request", "KeyRound", "primary", "requests"),
+  // Written by POST /api/invitations/request-resend when someone opens an
+  // expired invitation on /join and asks for a new one: the inviter and the
+  // Owners and Admins, linked to Pending invites.
+  invite_resend_request: k("invite_resend_request", "Invitation needs resending", "Mail", "primary", "requests"),
   // Written by src/lib/access/grants.ts when someone gives you a role on a
   // Space, Folder, List, doc, table, canvas or form, or raises yours (never
   // for a downgrade, a removal or a change you made yourself).

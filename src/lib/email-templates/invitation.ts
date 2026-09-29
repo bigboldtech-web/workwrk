@@ -1,42 +1,54 @@
-import { baseLayout } from "./base";
+import { baseLayout, emailButton } from "./base";
+import { escapeHtml, safeHref } from "./escape";
 
 interface InvitationVars {
   companyName: string;
+  /** /join?token=... on the app host (spec-account-auth `/join`). */
   inviteLink: string;
-  accessLevel: string;
-  /** Optional note from the inviter — rendered as a quoted block. */
+  /**
+   * The role in the four-role words ("Admin", "Member"), from
+   * src/lib/access/labels.ts. A raw AccessLevel ("COMPANY_ADMIN") is mapped
+   * to its label here so an older caller never prints an enum.
+   */
+  accessLevel?: string;
+  /** The same thing in the four-role words, preferred over accessLevel by new callers. */
+  role?: string;
+  /** Who sent it, when known. */
+  inviterName?: string;
+  /** Optional note from the inviter, rendered as a quoted block. */
   personalMessage?: string;
+  /** Days until the link expires (the invitation rows live 7 days). */
+  expiresInDays?: number;
 }
 
-// Personal messages are free-form user input headed into an HTML email —
-// escape them so nobody can smuggle markup into the invite.
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const LEVEL_WORDS: Record<string, string> = {
+  SUPER_ADMIN: "Admin",
+  COMPANY_ADMIN: "Admin",
+};
+
+function roleWords(level: string): string {
+  if (LEVEL_WORDS[level]) return LEVEL_WORDS[level];
+  if (/^[A-Z_]+$/.test(level)) return "Member";
+  return level;
 }
 
 export function invitationTemplate(vars: InvitationVars): { subject: string; html: string } {
-  const messageBlock = vars.personalMessage?.trim()
-    ? `<p style="border-left: 3px solid #0073EA; padding: 8px 12px; background: #f4f6f8; border-radius: 4px; white-space: pre-wrap;">${escapeHtml(vars.personalMessage.trim())}</p>`
-    : "";
+  const company = escapeHtml(vars.companyName);
+  const role = escapeHtml(roleWords(vars.role ?? vars.accessLevel ?? "EMPLOYEE"));
+  const inviter = vars.inviterName?.trim() ? escapeHtml(vars.inviterName.trim()) : null;
+  const days = vars.expiresInDays ?? 7;
+  const messageBlock = vars.personalMessage?.trim() ? `<p class="quote">${escapeHtml(vars.personalMessage.trim())}</p>` : "";
+  const href = safeHref(vars.inviteLink);
   const html = baseLayout(`
-    <h1>You've been invited!</h1>
-    <p><span class="highlight">${vars.companyName}</span> has invited you to join their team on WorkwrK as <strong>${vars.accessLevel.replace(/_/g, " ")}</strong>.</p>
+    <h1>Join ${company} on WorkwrK</h1>
+    <p>${inviter ? `<span class="highlight">${inviter}</span> invited you` : "You are invited"} to join <span class="highlight">${company}</span> as a <strong>${role}</strong>.</p>
     ${messageBlock}
-    <p>WorkwrK is a Business Operating System that helps teams manage performance, tasks, SOPs, and more — all in one place.</p>
-    <hr class="divider" />
-    <p style="text-align: center;">
-      <a href="${vars.inviteLink}" class="btn">Accept Invitation</a>
-    </p>
-    <p class="meta">This invitation expires in 7 days. If the button doesn't work, copy and paste this link into your browser:<br/>${vars.inviteLink}</p>
+    <p style="margin:24px 0 8px;">${emailButton(href, `Join ${company}`)}</p>
+    <p class="meta">This invitation works for ${days} days. If the button does not work, paste this link into your browser:<br/><span class="url" style="word-break:break-all;">${href}</span></p>
   `);
 
   return {
-    subject: `You've been invited to join ${vars.companyName} on WorkwrK`,
+    subject: `${vars.inviterName?.trim() ? `${vars.inviterName.trim()} invited you` : "You are invited"} to join ${vars.companyName} on WorkwrK`,
     html,
   };
 }

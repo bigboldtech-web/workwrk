@@ -152,6 +152,12 @@ const SQL_MANIFEST = [
   // ON DELETE SET NULL, one ADD COLUMN IF NOT EXISTS. Deploy order is free:
   // nothing in the running release names either object.
   "2026-09-27-staff-console.sql",
+  // Phase 8, the one schema file for the phase. Stage B adds two nullable
+  // columns, "User"."termsAcceptedAt" and "User"."passwordChangedAt", with
+  // ADD COLUMN IF NOT EXISTS. Applied here, before the reload, because the
+  // new release writes both on signup, join and reset. Later Phase 8 stages
+  // append guarded statements to the same file.
+  "2026-09-30-phase8-settings-access.sql",
 ];
 
 /**

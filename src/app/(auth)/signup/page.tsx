@@ -3,10 +3,15 @@
 // (src/components/marketing/config.ts routes.signup), with ?utm_content= and
 // ?template= intact. /register 308s here.
 import type { Metadata } from "next";
-import { RegisterForm } from "@/components/auth/register-form";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { SignupForm } from "./signup-form";
 
 export const metadata: Metadata = { title: "Start your workspace | WorkwrK" };
 
 export default function SignupPage() {
-  return <RegisterForm mode="signup" />;
+  return (
+    <AuthShell panel="proof">
+      <SignupForm />
+    </AuthShell>
+  );
 }

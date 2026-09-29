@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   const passwordHash = await bcrypt.hash(newPassword, 12);
   const bumped = await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash, tokenVersion: { increment: 1 } },
+    data: { passwordHash, tokenVersion: { increment: 1 }, passwordChangedAt: new Date() },
     select: { tokenVersion: true },
   });
   const tokenVersionProof = issueTokenVersionProof(userId, bumped.tokenVersion - 1, bumped.tokenVersion);

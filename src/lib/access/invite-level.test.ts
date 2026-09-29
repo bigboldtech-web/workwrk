@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveGrantLevel, resolveInviteLevel } from "./invite-level";
+import { levelForInviteRole, resolveGrantLevel, resolveInviteLevel } from "./invite-level";
 
 describe("resolveInviteLevel", () => {
   it("defaults to Employee and names an unknown level", () => {
@@ -59,5 +59,19 @@ describe("resolveGrantLevel: one rule for invite and direct create", () => {
   it("the agent tool's worst case: a Manager asking for C_LEVEL or an Admin is refused", () => {
     expect(resolveInviteLevel("MANAGER", "C_LEVEL")).toMatchObject({ ok: false, status: 403 });
     expect(resolveInviteLevel("MANAGER", "COMPANY_ADMIN")).toMatchObject({ ok: false, status: 403 });
+  });
+});
+
+describe("levelForInviteRole", () => {
+  it("maps the wizard's four-role words onto the stored level", () => {
+    expect(levelForInviteRole("ADMIN", false)).toEqual({ ok: true, level: "COMPANY_ADMIN" });
+    expect(levelForInviteRole("MEMBER", false)).toEqual({ ok: true, level: "EMPLOYEE" });
+    expect(levelForInviteRole("MEMBER", true)).toEqual({ ok: true, level: "AGENT" });
+    expect(levelForInviteRole("ADMIN", true)).toEqual({ ok: true, level: "COMPANY_ADMIN" });
+  });
+  it("refuses Guest and anything unknown with a 400, never Owner", () => {
+    expect(levelForInviteRole("GUEST", false)).toMatchObject({ ok: false, status: 400 });
+    expect(levelForInviteRole("OWNER", false)).toMatchObject({ ok: false, status: 400 });
+    expect(levelForInviteRole(undefined, false)).toMatchObject({ ok: false, status: 400 });
   });
 });

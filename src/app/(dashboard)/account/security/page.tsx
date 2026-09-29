@@ -50,6 +50,7 @@ const EVENT_META: Record<string, { Icon: typeof Key; label: string; warn?: boole
   login: { Icon: LogIn, label: "Signed in" },
   logout: { Icon: LogOut, label: "Signed out" },
   password_changed: { Icon: KeyRound, label: "Password changed", warn: true },
+  password_reset: { Icon: KeyRound, label: "Password reset from an emailed link", warn: true },
   mfa_enabled: { Icon: ShieldCheck, label: "Two-factor enabled", warn: true },
   mfa_disabled: { Icon: ShieldAlert, label: "Two-factor disabled", warn: true },
   signed_out_all_devices: { Icon: RotateCcw, label: "Signed out of all devices", warn: true },
