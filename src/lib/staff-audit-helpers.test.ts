@@ -3,6 +3,7 @@ import {
   DENIAL_WINDOW_MS,
   STAFF_ACTIONS,
   STAFF_ACTOR_LABEL,
+  escapeHtml,
   isWithinDenialWindow,
   planLabel,
   requestIp,
@@ -125,5 +126,12 @@ describe("tenantEventFor: the customer's sentence names WorkwrK Support, never a
       const e = tenantEventFor(a, { plan: "STARTER", status: "ACTIVE", seats: 1 }, { plan: "GROWTH", status: "TRIAL", seats: 2, label: "X", enabled: true, name: "Y" });
       if (e) expect(e.description.startsWith(STAFF_ACTOR_LABEL)).toBe(true);
     }
+  });
+});
+
+describe("escapeHtml", () => {
+  it("never lets a staff name or email become markup", () => {
+    expect(escapeHtml(`<img/src=x>@a.b "x" & 'y'`)).toBe("&lt;img/src=x&gt;@a.b &quot;x&quot; &amp; &#39;y&#39;");
+    expect(escapeHtml("plain@workwrk.com")).toBe("plain@workwrk.com");
   });
 });

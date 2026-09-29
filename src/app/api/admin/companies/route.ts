@@ -3,7 +3,22 @@ import { prisma } from "@/lib/prisma";
 import type { OrgStatus, Plan, Prisma } from "@/generated/prisma";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
-import { applyCompanyPatch, validateCompanyPatch, VALID_PLANS, VALID_STATUSES } from "@/lib/admin/company-patch";
+import {
+  applyCompanyPatch,
+  statusRevokesSessions,
+  validateCompanyPatch,
+  VALID_PLANS,
+  VALID_STATUSES,
+} from "@/lib/admin/company-patch";
+
+const LIST_REVOKE_REFUSAL =
+  "Suspend or cancel a company from its company page, which asks you to type the company name first.";
+
+function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
 import { requestIp, staffActorFromSession } from "@/lib/staff-audit";
 
 export async function GET(req: NextRequest) {
@@ -16,8 +31,10 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get("search") || "";
   const plan = url.searchParams.get("plan") || "";
   const status = url.searchParams.get("status") || "";
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+  // Bounded and NaN-safe: page=abc used to make skip NaN (a Prisma 500) and
+  // limit had no ceiling.
+  const page = boundedInt(url.searchParams.get("page"), 1, 1, 100_000);
+  const limit = boundedInt(url.searchParams.get("limit"), 20, 1, 100);
   const skip = (page - 1) * limit;
 
   const where: Prisma.OrganizationWhereInput = {};
@@ -34,7 +51,17 @@ export async function GET(req: NextRequest) {
   const [companies, total] = await Promise.all([
     prisma.organization.findMany({
       where,
-      include: {
+      // Only what the list shows. Never the settings JSON: the console
+      // shows counts, never a company's own content.
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        domain: true,
+        plan: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
         _count: {
           select: {
             users: true,
@@ -61,7 +88,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// Update a company (plan, status) from the list's quick edit. Body: { id, plan?, status? }.
+// Update a company (plan, Active or Trial) from the list's quick edit. Body: { id, plan?, status? }.
 // The same validated, transactional, audited path as PATCH /api/admin/companies/[id]
 // (src/lib/admin/company-patch.ts): this endpoint used to write whatever
 // strings arrived with no audit row and no session revocation.
@@ -77,6 +104,12 @@ export async function PATCH(req: NextRequest) {
 
   const validated = validateCompanyPatch(body);
   if (!validated.ok) return jsonError(validated.error);
+  // Suspending or cancelling signs everyone at the company out. It happens
+  // only on the company page, behind its typed confirmation; the quick edit
+  // must never be the way around that.
+  if (validated.patch.status && statusRevokesSessions(validated.patch.status)) {
+    return jsonError(LIST_REVOKE_REFUSAL);
+  }
 
   const result = await applyCompanyPatch({
     id,

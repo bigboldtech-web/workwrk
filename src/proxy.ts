@@ -169,6 +169,9 @@ export function proxy(req: NextRequest) {
         path.startsWith("/api/admin") ||
         path.startsWith("/api/auth") ||
         path === "/login" ||
+        // The login page's "Forgot password" link: staff reset from here too
+        // (the emailed link opens on the app host, NEXTAUTH_URL).
+        path === "/forgot-password" ||
         path.startsWith("/_next") ||
         path === "/favicon.ico";
 

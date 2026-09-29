@@ -46,10 +46,21 @@ export async function authenticateScim(req: NextRequest): Promise<ScimAuthResult
   const hash = hashScimToken(raw);
   const token = await prisma.scimToken.findUnique({
     where: { tokenHash: hash },
-    select: { id: true, organizationId: true, revokedAt: true, expiresAt: true },
+    select: {
+      id: true,
+      organizationId: true,
+      revokedAt: true,
+      expiresAt: true,
+      organization: { select: { status: true } },
+    },
   });
   if (!token) return { ok: false, response: scimError(401, "Invalid token") };
   if (token.revokedAt) return { ok: false, response: scimError(401, "Token revoked") };
+  // A suspended or cancelled workspace provisions nobody: suspension means
+  // nobody there can work, and the identity provider acts for them.
+  if (token.organization.status === "SUSPENDED" || token.organization.status === "CANCELLED") {
+    return { ok: false, response: scimError(403, "This workspace is suspended. Please contact WorkwrK support.") };
+  }
   if (token.expiresAt && token.expiresAt < new Date()) {
     return { ok: false, response: scimError(401, "Token expired") };
   }

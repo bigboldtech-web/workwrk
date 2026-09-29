@@ -222,6 +222,9 @@ export async function GET() {
     trialOrgs,
     mrr,
     activeRate,
+    // Companies with an ACTIVE subscription row right now: a real count,
+    // unlike mrr, which multiplies a price list (Overview no longer shows it).
+    payingOrgs: payingByOrg.size,
     newOrgsThisMonth: recentOrgs,
     newUsersThisMonth: recentUsers,
     planBreakdown: orgsByPlan.map((g) => ({ plan: g.plan, count: g._count.id })),

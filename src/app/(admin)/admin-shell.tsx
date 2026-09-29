@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { LayoutDashboard, Building2, BarChart3, Shield, LogOut, Sparkles, ShieldCheck } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { ToastProvider } from "@/components/ui/toast";
+import { DialogProvider } from "@/components/ui/dialog-provider";
 
 const adminNav = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -80,7 +81,11 @@ export function AdminShell({
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-6">
-          <ToastProvider>{children}</ToastProvider>
+          {/* DialogProvider: useConfirm and usePrompt throw without it, which
+              is what crashed /admin/appsumo on render since 2026-05-06. */}
+          <ToastProvider>
+            <DialogProvider>{children}</DialogProvider>
+          </ToastProvider>
         </main>
       </div>
     </div>

@@ -181,7 +181,12 @@ export interface LockedPageProps {
    * to request.
    */
   admins?: OrgAdmin[];
-  back: BackTarget;
+  /**
+   * Optional only for the Staff console's denial on a host with no app URL
+   * configured: there a relative back link would bounce to /admin and render
+   * this same page again, so no back link is better than a loop.
+   */
+  back?: BackTarget;
 }
 
 export function LockedPage({ name, sentence, owner, requestAccess, joinChannelId, primaryLabel, glyph, ownerAvatar, elsewhere, admins, back }: LockedPageProps) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch } from "./company-patch-rules";
+import { deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch } from "./company-patch-rules";
 
 describe("validateCompanyPatch", () => {
   it("accepts a valid plan, status and feature together", () => {
@@ -44,5 +44,21 @@ describe("FEATURE_LABELS", () => {
     expect(FEATURE_LABELS.byok).toBe("Bring your own AI key");
     expect(FEATURE_LABELS.whiteLabel).toBe("White label");
     expect(Object.keys(FEATURE_LABELS)).toHaveLength(3);
+  });
+});
+
+describe("deletionSchedule", () => {
+  it("is null when no deletion key is present", () => {
+    expect(deletionSchedule(null)).toBeNull();
+    expect(deletionSchedule({ features: { byok: true } })).toBeNull();
+    expect(deletionSchedule([])).toBeNull();
+  });
+  it("reads a self-service schedule so a staff status change can clear it", () => {
+    expect(
+      deletionSchedule({ cancelledAt: "2026-08-01T00:00:00.000Z", cancelledById: "u1", scheduledHardDeleteAt: "2026-08-31T00:00:00.000Z" }),
+    ).toEqual({ cancelledAt: "2026-08-01T00:00:00.000Z", cancelledById: "u1", scheduledHardDeleteAt: "2026-08-31T00:00:00.000Z" });
+  });
+  it("still reports a stray key so it is cleared too", () => {
+    expect(deletionSchedule({ scheduledHardDeleteAt: 42 })).toEqual({ cancelledAt: null, cancelledById: null, scheduledHardDeleteAt: null });
   });
 });

@@ -3,10 +3,8 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Building2, Users, CreditCard, TrendingUp, AlertTriangle, Activity,
-  RefreshCw,
-} from "lucide-react";
+import Link from "next/link";
+import { Building2, Users, CreditCard, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Stats {
@@ -14,8 +12,7 @@ interface Stats {
   totalUsers: number;
   activeOrgs: number;
   trialOrgs: number;
-  mrr: number;
-  activeRate: number;
+  payingOrgs: number;
   newOrgsThisMonth: number;
   newUsersThisMonth: number;
   planBreakdown: { plan: string; count: number }[];
@@ -35,14 +32,6 @@ interface Company {
     reviewCycles: number;
     kras: number;
   };
-}
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
 }
 
 function getStatusBadge(status: string) {
@@ -126,21 +115,17 @@ export default function AdminDashboard() {
       color: "text-blue-400",
       bg: "bg-blue-500/10",
     },
+    // No revenue tile and no "Active rate" here: the old revenue figure
+    // multiplied a hard-coded price list and the rate measured billing
+    // status, not activity, so neither was a fact. Revenue returns with
+    // the Overview rebuild, read from what Stripe actually charged.
     {
-      title: "Monthly Revenue",
-      value: formatCurrency(stats?.mrr ?? 0),
-      change: `${stats?.activeOrgs ?? 0} paying orgs`,
+      title: "Paying",
+      value: stats?.payingOrgs ?? 0,
+      change: `${stats?.trialOrgs ?? 0} on trial`,
       icon: CreditCard,
       color: "text-green-400",
       bg: "bg-green-500/10",
-    },
-    {
-      title: "Active Rate",
-      value: `${stats?.activeRate ?? 0}%`,
-      change: `${stats?.trialOrgs ?? 0} on trial`,
-      icon: TrendingUp,
-      color: "text-orange-400",
-      bg: "bg-orange-500/10",
     },
   ];
 
@@ -157,7 +142,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {statCards.map((stat) => (
           <Card key={stat.title}>
             <CardContent className="p-5">
@@ -197,9 +182,9 @@ export default function AdminDashboard() {
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-lg">Subscriber Companies</CardTitle>
-          <a href="/admin/companies" className="text-sm text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
+          <Link href="/admin/companies" className="text-sm text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
             View all →
-          </a>
+          </Link>
         </CardHeader>
         <CardContent className="p-0">
           {companies.length === 0 ? (
@@ -251,32 +236,6 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
-      {/* Quick Info */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Activity size={16} className="text-[#d4ff2e]" /> System Info
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-base text-muted">
-          <div className="flex justify-between">
-            <span>Platform</span>
-            <span className="text-foreground font-medium">WorkwrK v1.0</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Environment</span>
-            <span className="text-foreground font-medium">{process.env.NODE_ENV === "production" ? "Production" : "Development"}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Organizations</span>
-            <span className="text-foreground font-medium">{stats?.totalOrgs ?? 0}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Users</span>
-            <span className="text-foreground font-medium">{stats?.totalUsers ?? 0}</span>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

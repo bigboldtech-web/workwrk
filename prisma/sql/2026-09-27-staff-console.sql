@@ -18,9 +18,12 @@
 --     density) are never copied here.
 --
 -- No existing row is read or written. No backfill: no staff history exists
--- to recover. Deploy order is free: the currently running release never
--- names either object, and the new release's readers of "consolePrefs" read
--- null as the defaults.
+-- to recover. APPLY THIS BEFORE THE CODE: the currently running release
+-- never names either object, so applying it early is safe, but the new
+-- release writes a StaffAction row inside every staff write's transaction,
+-- so until this file lands every staff write fails closed with a 500 (no
+-- data is changed or lost; the write just does not happen). Readers of
+-- "consolePrefs" read null as the defaults.
 --
 -- Idempotent: every statement is guarded, so running this file twice is a
 -- no-op.

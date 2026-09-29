@@ -35,6 +35,8 @@ interface Company {
 
 const plans = ["STARTER", "GROWTH", "SCALE", "ENTERPRISE"];
 const statuses = ["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"];
+/** Statuses that sign everyone out: set only from the company page. */
+const REVOKING = ["SUSPENDED", "CANCELLED"];
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -104,24 +106,43 @@ export default function AdminCompaniesPage() {
     setEditStatus(company.status);
   };
 
+  // Quick edit changes the plan, and moves a company between Active and
+  // Trial. Suspending or cancelling signs everyone at the company out, so it
+  // happens only on the company page, behind a typed confirmation; the list
+  // endpoint refuses it too (src/app/api/admin/companies/route.ts), so this
+  // dialog is never the way around that confirm.
   const handleUpdate = async () => {
     if (!selected) return;
+    const body: Record<string, string> = { id: selected.id };
+    if (editPlan !== selected.plan) body.plan = editPlan;
+    if (editStatus !== selected.status) body.status = editStatus;
+    if (!body.plan && !body.status) {
+      toastSuccess("Nothing changed");
+      setSelected(null);
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/admin/companies", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selected.id, plan: editPlan, status: editStatus }),
+        body: JSON.stringify(body),
       });
+      const d = await res.json().catch(() => ({}));
       if (res.ok) {
-        toastSuccess("Company updated successfully");
+        const changed: string[] = Array.isArray(d?.changed) ? d.changed : [];
+        toastSuccess(
+          changed.length === 0
+            ? "Nothing changed"
+            : `${selected.name}: ${changed.map((c) => (c === "plan" ? "plan" : "status")).join(" and ")} updated`,
+        );
         setSelected(null);
         fetchCompanies();
       } else {
-        toastError("Failed to update company");
+        toastError("Couldn't update the company", typeof d?.error === "string" ? d.error : "Please try again.");
       }
     } catch {
-      toastError("Failed to update company");
+      toastError("Couldn't update the company", "Network error. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -321,11 +342,22 @@ export default function AdminCompaniesPage() {
                   <Select value={editStatus} onValueChange={setEditStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {statuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      {statuses.map((s) => (
+                        <SelectItem key={s} value={s} disabled={REVOKING.includes(s) && s !== selected.status}>
+                          {s}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+              <p className="text-sm text-muted">
+                To suspend or cancel this company, open{" "}
+                <a href={`/admin/companies/${selected.id}`} className="underline underline-offset-4 hover:text-foreground">
+                  its company page
+                </a>
+                , which asks you to type the company name first.
+              </p>
             </div>
           )}
 

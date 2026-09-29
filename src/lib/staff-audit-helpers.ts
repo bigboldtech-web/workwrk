@@ -177,3 +177,13 @@ export function tenantEventFor(action: StaffActionKey, before: Rec, after: Rec):
       return null;
   }
 }
+
+/** Text into an email's HTML: a staff name or email never becomes markup. */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}

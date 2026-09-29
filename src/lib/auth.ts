@@ -339,7 +339,8 @@ export const authOptions: NextAuthOptions = {
             status: true,
             accessLevel: true,
             tokenVersion: true,
-            organization: { select: { status: true } },
+            organizationId: true,
+            organization: { select: { status: true, name: true } },
           },
         });
         token.checkedAt = Date.now();
@@ -363,24 +364,48 @@ export const authOptions: NextAuthOptions = {
           // the rest of every token's life. Same rule and same fallback as
           // authorize(): someone who also belongs to a healthy workspace is
           // moved into it rather than locked out; everyone else is revoked.
-          const orgStatus = account_.organization?.status;
-          if (orgStatus === "SUSPENDED" || orgStatus === "CANCELLED") {
-            const alt = await prisma.organizationMembership.findFirst({
-              where: {
-                userId: token.id as string,
-                organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
-              },
-              select: { organizationId: true, organization: { select: { name: true } } },
-              orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-            });
-            if (alt) {
-              await prisma.user
-                .update({ where: { id: token.id as string }, data: { organizationId: alt.organizationId } })
-                .catch(() => {});
-              token.organizationId = alt.organizationId;
-              token.organizationName = alt.organization.name;
+          //
+          // The workspace checked is the one THIS TOKEN acts in
+          // (token.organizationId), not only the anchored one: after a switch
+          // on another device the two differ, and a token still acting in a
+          // suspended company must not keep working there.
+          const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
+          const actingOrgId =
+            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          const actingStatus =
+            actingOrgId === account_.organizationId
+              ? account_.organization?.status
+              : (await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true } }))?.status;
+          if (unhealthy(actingStatus)) {
+            if (actingOrgId !== account_.organizationId && !unhealthy(account_.organization?.status)) {
+              // Acting in a stale workspace while the anchored one is healthy:
+              // come back to the anchored one; the database already says so.
+              token.organizationId = account_.organizationId;
+              token.organizationName = account_.organization?.name;
             } else {
-              token.revoked = true;
+              const alt = await prisma.organizationMembership.findFirst({
+                where: {
+                  userId: token.id as string,
+                  organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
+                },
+                select: { organizationId: true, organization: { select: { name: true } } },
+                orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+              });
+              const moved = alt
+                ? await prisma.user
+                    .update({ where: { id: token.id as string }, data: { organizationId: alt.organizationId } })
+                    .then(() => true)
+                    .catch(() => false)
+                : false;
+              if (alt && moved) {
+                token.organizationId = alt.organizationId;
+                token.organizationName = alt.organization.name;
+              } else {
+                // No healthy workspace, or the move did not save (the token
+                // and the database must agree on the workspace). Revoked
+                // for now; the next check, five minutes on, tries again.
+                token.revoked = true;
+              }
             }
           }
         }

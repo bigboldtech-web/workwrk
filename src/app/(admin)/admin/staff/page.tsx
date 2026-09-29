@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ShieldCheck, Trash2, RefreshCw, UserPlus, Loader2 } from "lucide-react";
+import { TypedConfirmDialog, type TypedConfirmRequest } from "../../typed-confirm-dialog";
 
 interface Staff {
   id: string;
@@ -22,6 +23,10 @@ export default function PlatformStaffPage() {
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [you, setYou] = useState<string | null>(null);
+  // Remove waits for the person's email to be typed (a destructive staff
+  // action is always typed), and says so in words when it is yourself.
+  const [confirming, setConfirming] = useState<Staff | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,6 +34,7 @@ export default function PlatformStaffPage() {
       const res = await fetch("/api/admin/platform-staff");
       const d = await res.json();
       setStaff(Array.isArray(d?.staff) ? d.staff : []);
+      setYou(typeof d?.you === "string" ? d.you : null);
     } catch {
       toast.error("Couldn't load staff", "Please refresh.");
     } finally {
@@ -79,6 +85,13 @@ export default function PlatformStaffPage() {
         return;
       }
       toast.success("Staff removed", s.email);
+      setConfirming(null);
+      if (you && s.email.toLowerCase() === you.toLowerCase()) {
+        // You removed yourself: the console is gone for you, so show the
+        // staff-only page now rather than a list that can no longer load.
+        window.location.assign("/admin");
+        return;
+      }
       await load();
     } catch {
       toast.error("Couldn't remove", "Network error.");
@@ -160,26 +173,52 @@ export default function PlatformStaffPage() {
                     <div className="text-base font-medium truncate">{s.email}</div>
                     {s.name ? <div className="text-sm text-muted truncate">{s.name}</div> : null}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => remove(s)}
-                    disabled={removingId === s.id || staff.length <= 1}
-                    title={staff.length <= 1 ? "Can't remove the last staff member" : "Remove"}
-                    className="text-red-400 hover:text-red-300 shrink-0"
-                  >
-                    {removingId === s.id ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
+                  {staff.length > 1 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirming(s)}
+                      disabled={removingId === s.id}
+                      title="Remove"
+                      aria-label={`Remove ${s.email}`}
+                      className="text-red-400 hover:text-red-300 shrink-0"
+                    >
                       <Trash2 size={14} />
-                    )}
-                  </Button>
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>
           )}
+          {!loading && staff.length === 1 ? (
+            <p className="text-sm text-muted mt-2">You cannot remove the last staff member.</p>
+          ) : null}
         </CardContent>
       </Card>
+
+      <TypedConfirmDialog
+        request={confirmRequest(confirming, you)}
+        busy={!!confirming && removingId === confirming.id}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming) void remove(confirming);
+        }}
+      />
     </div>
   );
+}
+
+function confirmRequest(target: Staff | null, you: string | null): TypedConfirmRequest | null {
+  if (!target) return null;
+  const self = !!you && target.email.toLowerCase() === you.toLowerCase();
+  return {
+    title: `Remove ${target.email}?`,
+    body: self
+      ? "You are removing yourself. You will lose this console as soon as you confirm."
+      : "They lose the staff console immediately. Their WorkwrK login is not touched.",
+    note: "Everyone still on the staff list is emailed about it.",
+    match: target.email,
+    matchLabel: self ? "your email" : "their email",
+    confirmLabel: "Remove",
+  };
 }

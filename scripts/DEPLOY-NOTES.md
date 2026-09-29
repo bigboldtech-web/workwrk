@@ -40,7 +40,12 @@ seeds; every later one is added from Staff console › Staff.
 ## The Staff console's schema
 
 `prisma/sql/2026-09-27-staff-console.sql` (in the deploy manifest) adds the
-`StaffAction` table and `PlatformAdmin.consolePrefs`. Deploy order is free.
+`StaffAction` table and `PlatformAdmin.consolePrefs`. Apply it BEFORE the
+code: the running release never names either object, but the new release
+logs a StaffAction row inside every staff write's transaction, so until the
+file lands every staff write fails closed with a 500 (nothing changes, nothing
+is lost). Apply it with `prisma db execute --file <file>`: this Prisma 7 CLI
+rejects `--schema` on `db execute`.
 Every write a staff member makes is recorded there in the same transaction,
 so a change that cannot record itself does not happen; do not drop or
 truncate the table, it is the record a customer is shown when they ask who

@@ -62,3 +62,28 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
 export function statusRevokesSessions(status: CompanyStatus): boolean {
   return status === "SUSPENDED" || status === "CANCELLED";
 }
+
+export type DeletionSchedule = {
+  cancelledAt: string | null;
+  cancelledById: string | null;
+  scheduledHardDeleteAt: string | null;
+};
+
+const DELETION_KEYS = ["cancelledAt", "cancelledById", "scheduledHardDeleteAt"] as const;
+
+/**
+ * The self-service deletion keys held in Organization.settings (written by
+ * /api/organizations/delete, read by /api/cron/org-hard-delete), or null
+ * when none of the three keys is present.
+ */
+export function deletionSchedule(settings: unknown): DeletionSchedule | null {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+  const s = settings as Record<string, unknown>;
+  if (!DELETION_KEYS.some((k) => k in s)) return null;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return {
+    cancelledAt: str(s.cancelledAt),
+    cancelledById: str(s.cancelledById),
+    scheduledHardDeleteAt: str(s.scheduledHardDeleteAt),
+  };
+}

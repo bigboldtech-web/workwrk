@@ -11,7 +11,8 @@
 // to /admin. So this file never redirects to a relative app path: an
 // unauthenticated person goes to /login (allowed on the admin host, with
 // callbackUrl bringing them back), and a signed-in person who is not staff
-// gets a rendered denial, whose only link is the ABSOLUTE app URL.
+// gets a rendered denial, whose links are the ABSOLUTE app URL (only when
+// NEXT_PUBLIC_APP_URL is set) and /login, which the admin host allows.
 
 import "@/app/(dashboard)/tokens.css";
 import "@/app/(dashboard)/os.css";
@@ -47,11 +48,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           glyph="shield"
           name="This console is for WorkwrK staff"
           sentence={`You are signed in as ${email}. That account is not on the WorkwrK staff list.`}
-          back={{
-            // Absolute on purpose: the admin host bounces relative paths to /admin.
-            fallbackHref: appUrl ? `${appUrl}${WORK_HOME_HREF}` : WORK_HOME_HREF,
-            label: "WorkwrK",
-          }}
+          // Absolute on purpose: the admin host bounces relative paths to
+          // /admin, so with no NEXT_PUBLIC_APP_URL there is no back link at
+          // all rather than one that loops to this page.
+          back={appUrl ? { fallbackHref: `${appUrl}${WORK_HOME_HREF}`, label: "WorkwrK" } : undefined}
+          // A staff member signed in with their customer account (the
+          // session cookie is shared across subdomains) switches here.
+          elsewhere={{ href: "/login?callbackUrl=/admin", label: "Sign in with a different account" }}
         />
       </div>
     );

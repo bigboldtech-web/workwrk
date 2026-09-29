@@ -51,6 +51,7 @@ export {
   staffActorFromSession,
   isWithinDenialWindow,
   tenantEventFor,
+  escapeHtml,
   type StaffActionKey,
   type StaffActor,
   type TenantEvent,

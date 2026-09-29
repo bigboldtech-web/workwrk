@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/toast";
 import { Building2, Crown, Sparkles, Palette, Globe2, type LucideIcon } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
+import { TypedConfirmDialog, type TypedConfirmRequest } from "../../../typed-confirm-dialog";
 
 interface Company {
   id: string;
@@ -30,6 +31,9 @@ export default function CompanyDetailPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  // Suspended and Cancelled sign everyone out, so they wait for a typed
+  // confirmation of the company name (spec-admin-backoffice 2.3 card 2).
+  const [pendingStatus, setPendingStatus] = useState<"SUSPENDED" | "CANCELLED" | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,7 +55,12 @@ export default function CompanyDetailPage() {
         body: JSON.stringify(body),
       });
       if (res.ok) {
-        toastSuccess(`${label} updated`);
+        const d = await res.json().catch(() => ({}));
+        const signedOut = typeof d?.signedOut === "number" ? d.signedOut : 0;
+        toastSuccess(
+          `${label} updated`,
+          signedOut > 0 ? `${signedOut} ${signedOut === 1 ? "person is" : "people are"} signed out within five minutes.` : undefined,
+        );
         await load();
       } else {
         const err = await res.json().catch(() => ({}));
@@ -71,6 +80,24 @@ export default function CompanyDetailPage() {
   }
 
   const isEnterprise = company.plan === "ENTERPRISE";
+
+  // Says only what the build does: the write bumps every anchored member's
+  // tokenVersion, the session check revokes on the workspace status (moving
+  // anyone with another healthy workspace into it), and a staff status
+  // change never schedules or keeps a deletion.
+  const statusConfirm: TypedConfirmRequest | null = pendingStatus
+    ? {
+        title: pendingStatus === "SUSPENDED" ? `Suspend ${company.name}?` : `Set ${company.name} to Cancelled?`,
+        body:
+          pendingStatus === "SUSPENDED"
+            ? "Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time."
+            : "Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted: this console never deletes a company. Set it back to Active to restore it at any time.",
+        note: "Anyone who also belongs to another WorkwrK workspace can sign back in to that one.",
+        match: company.name,
+        matchLabel: "the company name",
+        confirmLabel: pendingStatus === "SUSPENDED" ? "Suspend" : "Set to Cancelled",
+      }
+    : null;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-5 animate-fade-in">
@@ -126,17 +153,8 @@ export default function CompanyDetailPage() {
             <Select
               value={company.status}
               onValueChange={(v) => {
-                // Says only what the build does: the write bumps every
-                // member's tokenVersion and the session check revokes on the
-                // workspace status, so live sessions end within five minutes.
-                if (
-                  (v === "SUSPENDED" || v === "CANCELLED") &&
-                  !window.confirm(
-                    v === "SUSPENDED"
-                      ? `Suspend ${company.name}? Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time. Anyone who also belongs to another WorkwrK workspace can sign back in to that one.`
-                      : `Schedule ${company.name} for deletion? Nobody there can sign in, and everyone signed in now is signed out within five minutes. It stays recoverable for 30 days by setting it back to Active. Anyone who also belongs to another WorkwrK workspace can sign back in to that one.`,
-                  )
-                ) {
+                if (v === "SUSPENDED" || v === "CANCELLED") {
+                  setPendingStatus(v);
                   return;
                 }
                 patch({ status: v }, "Status");
@@ -201,6 +219,18 @@ export default function CompanyDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <TypedConfirmDialog
+        request={statusConfirm}
+        busy={saving === "Status"}
+        onCancel={() => setPendingStatus(null)}
+        onConfirm={async () => {
+          const next = pendingStatus;
+          if (!next) return;
+          await patch({ status: next }, "Status");
+          setPendingStatus(null);
+        }}
+      />
     </div>
   );
 }

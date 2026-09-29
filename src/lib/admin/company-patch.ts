@@ -21,7 +21,8 @@ import {
   type StaffActor,
 } from "@/lib/staff-audit";
 import { setFeature } from "@/lib/enterprise-features";
-import { FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
 
 export {
   VALID_PLANS,
@@ -30,6 +31,8 @@ export {
   FEATURE_LABELS,
   validateCompanyPatch,
   statusRevokesSessions,
+  deletionSchedule,
+  type DeletionSchedule,
   type CompanyPlan,
   type CompanyStatus,
   type CompanyPatch,
@@ -59,7 +62,7 @@ export type ApplyCompanyPatchResult =
 
 /**
  * Applies the patch in one transaction with one StaffAction row per changed
- * field, and bumps `tokenVersion` on every member when the new status is
+ * field, and bumps `tokenVersion` on every anchored member when the new status is
  * SUSPENDED or CANCELLED (every live session dies at its next five-minute
  * check; the JWT callback also revokes on the workspace status itself).
  */
@@ -69,6 +72,10 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
 
   const result = await prisma.$transaction(
     async (tx) => {
+      // Row lock first: two staff members saving the same company at once
+      // are serialised, so each StaffAction row's "before" is the value the
+      // other write left, and the audit trail adds up.
+      await tx.$queryRaw`SELECT "id" FROM "Organization" WHERE "id" = ${id} FOR UPDATE`;
       const org = await tx.organization.findUnique({
         where: { id },
         select: { id: true, name: true, slug: true, plan: true, status: true, settings: true },
@@ -142,14 +149,29 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           if (self) return { refused: SELF_LOCKOUT };
         }
         await tx.organization.update({ where: { id }, data: { status: patch.status } });
+
+        // The self-service deletion schedule (cancelledAt, cancelledById,
+        // scheduledHardDeleteAt, read by /api/cron/org-hard-delete) never
+        // survives a staff status change. Leaving CANCELLED clears it, the
+        // same as /api/organizations/restore, so a stale past date can never
+        // purge a company the next time it is cancelled. Entering CANCELLED
+        // from the console schedules nothing: nothing in this console deletes
+        // a company (spec-admin-backoffice 2.2, 2.3 item 8); a workspace is
+        // deleted only by its own Owner.
+        const deletion = deletionSchedule(org.settings);
+        if (deletion) {
+          await writeOrgSettingsKeys(id, { cancelledAt: null, cancelledById: null, scheduledHardDeleteAt: null }, tx);
+        }
+
         if (statusRevokesSessions(patch.status)) {
-          // Everyone anchored here plus everyone reachable through a
-          // membership: the same bump "Sign out everywhere" uses, so every
-          // live token dies at its next check, at most five minutes away.
+          // Everyone ANCHORED here: the same bump "Sign out everywhere"
+          // uses, so every live token dies at its next check, at most five
+          // minutes away. People who only hold a membership here and work
+          // in another, healthy company are not signed out of it; if a
+          // token of theirs is acting in this company, the session check in
+          // lib/auth.ts moves it to a healthy one or revokes it.
           const bumped = await tx.user.updateMany({
-            where: {
-              OR: [{ organizationId: id }, { organizationMemberships: { some: { organizationId: id } } }],
-            },
+            where: { organizationId: id },
             data: { tokenVersion: { increment: 1 } },
           });
           signedOut = bumped.count;
@@ -164,8 +186,8 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
             targetLabel: org.name,
             summary: `Set ${org.name} from ${statusLabel(org.status)} to ${statusLabel(patch.status)}${
               statusRevokesSessions(patch.status) ? `, signing out ${signedOut} ${signedOut === 1 ? "person" : "people"}` : ""
-            }`,
-            before: { status: org.status },
+            }${deletion?.scheduledHardDeleteAt ? `, and cancelled the deletion scheduled for ${deletion.scheduledHardDeleteAt.slice(0, 10)}` : ""}`,
+            before: { status: org.status, ...(deletion ? { deletionSchedule: deletion } : {}) },
             after: { status: patch.status, signedOut },
           }),
         );
