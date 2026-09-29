@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SETTINGS_PAGE_GATES, SETTINGS_PAGE_KEYS } from "./access/settings";
 import {
+  SETTINGS_TAB_LABELS,
+  settingsTabs,
   SETTINGS_PAGES,
   SETTINGS_PAGE_LIST,
   SETTINGS_ENTRY_LIST,
@@ -98,16 +100,21 @@ describe("resolveSettingsPage", () => {
   });
 });
 
-describe("today's hrefs and the sidebar", () => {
-  it("every page renders at its canonical URL, except Workspace Security (S5)", () => {
+describe("tab labels", () => {
+  it("every registry tab has its one label, so the page and the index agree", () => {
     for (const p of SETTINGS_PAGE_LIST) {
-      if (p.key === "security") expect(settingsHrefToday(p)).toBeNull();
-      else expect(settingsHrefToday(p)).toBe(p.href);
+      for (const t of p.tabs ?? []) expect(SETTINGS_TAB_LABELS[p.key]?.[t], `${p.key}:${t}`).toBeTruthy();
     }
+    expect(settingsTabs("identity")).toEqual([{ key: "profile", label: "Profile" }, { key: "appearance", label: "Appearance defaults" }]);
   });
-  it("hides unbuilt pages from the sidebar unless asked", () => {
-    expect(settingsSidebar("workspace").map((p) => p.key)).not.toContain("security");
-    expect(settingsSidebar("workspace", { includeUnbuilt: true }).map((p) => p.key)).toContain("security");
+});
+
+describe("today's hrefs and the sidebar", () => {
+  it("every page renders at its canonical URL", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(settingsHrefToday(p)).toBe(p.href);
+  });
+  it("lists every built page in the sidebar, Workspace Security included", () => {
+    expect(settingsSidebar("workspace").map((p) => p.key)).toContain("security");
     expect(settingsSidebar("me").map((p) => p.key)).toContain("account/shortcuts");
   });
   it("filters by label, keyword, group and alias", () => {
@@ -145,11 +152,14 @@ describe("SETTINGS_REDIRECTS", () => {
     expect(settingsRedirectFor("/settings")).toBeNull();
     expect(settingsRedirectFor("/settings", "?tab=nope")).toBeNull();
   });
-  it("preserves the query, drops the matched tab and keeps the hash last", () => {
+  it("preserves the query as Next does, the target tab wins, the hash last", () => {
     const tags = settingsRedirectFor("/settings/tags")!;
     expect(settingsRedirectTarget(tags, "?q=bug")).toBe("/settings/tasks?tab=tags&q=bug");
     const themes = settingsRedirectFor("/settings", "?tab=themes")!;
     expect(settingsRedirectTarget(themes, "?tab=themes&x=1")).toBe("/account/preferences?tab=appearance&x=1");
+    // Same Location as the next.config row (Next appends the matched query).
+    const shortcuts = settingsRedirectFor("/settings", "?tab=shortcuts")!;
+    expect(settingsRedirectTarget(shortcuts, "?tab=shortcuts&x=1")).toBe("/account/shortcuts?tab=shortcuts&x=1");
     const modules = settingsRedirectFor("/settings/modules")!;
     expect(settingsRedirectTarget(modules, "?from=rail")).toBe("/settings/apps?from=rail#modules");
     // A tab already on the target wins over an incoming one of the same name.

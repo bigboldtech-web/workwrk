@@ -27,7 +27,7 @@ import { Dots } from "@/components/ui/dots";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
 import { AppearanceDefaults } from "./appearance-defaults";
 
 // Mirror the /api/settings/logo endpoint's server-side validation so we can
@@ -49,10 +49,7 @@ type IdentityState = {
 
 // Identity & culture: tabs Profile and Appearance defaults (the second is
 // the old /settings/defaults). Culture and Danger zone join with S3/S5.
-const IDENTITY_TABS: readonly SettingsTab[] = [
-  { key: "profile", label: "Profile" },
-  { key: "appearance", label: "Appearance defaults" },
-];
+const IDENTITY_TABS: readonly SettingsTab[] = settingsTabs("identity");
 
 export default function IdentitySettingsPage() {
   return (

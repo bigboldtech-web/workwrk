@@ -91,7 +91,18 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
   const { toast } = useToast();
   const confirm = useConfirm();
 
-  const visible = tags.filter((t) => showArchived || !t.archived);
+  // The search the old /settings/tags page had (name and category), kept:
+  // it matches the tag name, its description and its dimension label.
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const visible = tags.filter(
+    (t) =>
+      (showArchived || !t.archived) &&
+      (!q ||
+        t.name.toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q) ||
+        (TYPE_LABELS[t.type] ?? t.type).toLowerCase().includes(q)),
+  );
 
   // Group by type, preserving the canonical order even for empty groups
   // so admins always see every dimension as a "create here" target.
@@ -182,13 +193,23 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
             Tasks, KRAs, and OKRs.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowArchived((v) => !v)}
-        >
-          {showArchived ? "Hide archived" : "Show archived"}
-        </Button>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tags"
+            aria-label="Search tags"
+            className="h-8 w-48 rounded-md border border-line-strong bg-raised px-2 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            {showArchived ? "Hide archived" : "Show archived"}
+          </Button>
+        </div>
       </div>
 
       {TYPE_ORDER.map((type) => {
@@ -213,7 +234,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
             </CardHeader>
             <CardContent>
               {rows.length === 0 ? (
-                <p className="text-xs text-muted">No {TYPE_LABELS[type].toLowerCase()} yet.</p>
+                <p className="text-xs text-muted">{q ? "No tag here matches." : `No ${TYPE_LABELS[type].toLowerCase()} yet.`}</p>
               ) : (
                 <ul className="divide-y divide-border">
                   {rows.map((t) => (

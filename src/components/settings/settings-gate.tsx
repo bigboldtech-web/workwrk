@@ -43,6 +43,7 @@ export const LEGACY_SETTINGS_RULES: Readonly<Partial<Record<SettingsPageKey, Leg
   access: "manager-tier",
   scoring: "manager-tier",
   tasks: "admin",
+  security: "admin",
   data: "admin",
   audit: "admin",
   api: "admin",

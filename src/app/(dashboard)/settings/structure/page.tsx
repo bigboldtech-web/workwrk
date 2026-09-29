@@ -26,7 +26,7 @@ import { AdminOnly } from "@/components/access";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 import { Suspense } from "react";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
 import { DepartmentsManager } from "@/components/people/departments-manager";
 import { JobTitlesList } from "@/components/people/job-titles-list";
 import { ProfileFieldsManager } from "@/components/people/profile-fields-manager";
@@ -63,12 +63,7 @@ for (const lvl of ACCESS_LEVELS) {
   }
 }
 
-const STRUCTURE_TABS: SettingsTab[] = [
-  { key: "overview", label: "Overview" },
-  { key: "departments", label: "Departments" },
-  { key: "titles", label: "Job titles" },
-  { key: "fields", label: "Profile fields" },
-];
+const STRUCTURE_TABS: SettingsTab[] = settingsTabs("structure");
 
 export default async function StructurePage({ searchParams }: { searchParams?: Promise<{ tab?: string }> }) {
   const tab = (await searchParams)?.tab;

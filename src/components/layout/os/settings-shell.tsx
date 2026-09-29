@@ -81,6 +81,10 @@ function useLeaveDialog() {
   return { open, ask, answer };
 }
 
+
+/** Crumb for a route shown inside another page's row (its alsoActiveOn). */
+const ALSO_ACTIVE_CRUMBS: Record<string, string> = { "/imports": "Import" };
+
 export function SettingsShell({ children, door = "me" }: { children: ReactNode; door?: SettingsDoorProp }) {
   const pathname = usePathname() || "";
   const router = useRouter();
@@ -125,7 +129,11 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
 
   const crumbs = useMemo<BreadcrumbItem[]>(() => {
     const items: BreadcrumbItem[] = [];
-    const pageDoor = current?.door ?? shownDoor;
+    // Below Admin the Workspace door is never offered (sidebar-map 8a:
+    // "nobody else ever sees this sidebar"), so a Manager reading Members or
+    // an Employee on any /settings/* URL gets the My settings crumbs, whose
+    // links they can open, not two crumbs into the AdminOnly card.
+    const pageDoor = isAdmin ? (current?.door ?? shownDoor) : "me";
     if (pageDoor === "me") {
       if (firstName) items.push({ label: firstName, href: "/people/me" });
       items.push({ label: DOOR_LABELS.me, href: "/account/profile" });
@@ -133,9 +141,19 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       items.push({ label: HUB_LABELS.settings, href: "/settings" });
       items.push({ label: DOOR_LABELS.workspace, href: "/settings" });
     }
-    if (current && current.key !== "overview") items.push({ label: current.label });
+    if (current && current.key !== "overview") {
+      // A route that renders inside another page's row (Data owns /imports
+      // until S5) names itself under that page: Data > Import.
+      const extra = ALSO_ACTIVE_CRUMBS[pathname.replace(/\/+$/, "")];
+      if (extra && current.href !== pathname) {
+        items.push({ label: current.label, href: current.href });
+        items.push({ label: extra });
+      } else {
+        items.push({ label: current.label });
+      }
+    }
     return items;
-  }, [current, shownDoor, firstName]);
+  }, [current, shownDoor, firstName, isAdmin, pathname]);
 
   // Filter: rows by label, keyword, group and alias; plus the individual
   // settings (registry entries) the viewer's door lists beneath them.
@@ -233,10 +251,9 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            <div className="mb-2 mt-1 flex h-5 items-center gap-2 ps-3 pe-1">
-              <span className="text-micro uppercase tracking-[0.06em] text-ink-2">{DOOR_LABELS[shownDoor]}</span>
-              <span className="h-px flex-1 bg-line" aria-hidden />
-            </div>
+            {/* No door heading above the rows: Overview is ungrouped (8a) and
+                My settings is flat, no group labels (8b). The nav's
+                aria-label names the door for assistive tech. */}
             {visibleGroups.map((group, gi) => (
               <div key={group.label ?? `g${gi}`}>
                 {group.label ? (

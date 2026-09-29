@@ -54,7 +54,7 @@ export interface SettingsPage {
   keywords: string[];
   /** Declared, not enforced (see header). */
   gate: PageGate;
-  /** Tabs the page renders today, in order (`?tab=`). */
+  /** Tabs the page renders today, in order (`?tab=`); labels in SETTINGS_TAB_LABELS. */
   tabs?: string[];
 }
 
@@ -156,8 +156,6 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   }),
   page("workspace", "security", "Security", "/settings/security", "Shield", {
     group: "Security & data",
-    todayHref: null,
-    tabs: ["signin", "sso", "scim"],
     keywords: ["sign-in policy", "sso", "saml", "scim", "provisioning", "mfa", "sessions"],
   }),
   page("workspace", "data", "Data", "/settings/data", "Database", {
@@ -231,6 +229,27 @@ export const DOOR_LABELS: Record<SettingsDoor, string> = {
   me: "My settings",
   workspace: "Workspace settings",
 };
+
+/**
+ * The ONE place a settings tab's label is written (settings-architecture
+ * 8.2): each page's tab row and the All settings index both read it through
+ * settingsTabs(), so the two can never drift. A test asserts every
+ * registry tab has a label here.
+ */
+export const SETTINGS_TAB_LABELS: Readonly<Partial<Record<SettingsPageKey, Readonly<Record<string, string>>>>> = {
+  "account/preferences": { appearance: "Appearance" },
+  identity: { profile: "Profile", appearance: "Appearance defaults" },
+  structure: { overview: "Overview", departments: "Departments", titles: "Job titles", fields: "Profile fields" },
+  tasks: { types: "Task types", tags: "Tags" },
+  data: { export: "Export", import: "Import" },
+};
+
+/** A page's tabs as { key, label }, in the registry's order. */
+export function settingsTabs(pageKey: SettingsPageKey): { key: string; label: string }[] {
+  const p = SETTINGS_PAGES[pageKey];
+  const labels = SETTINGS_TAB_LABELS[pageKey] ?? {};
+  return (p?.tabs ?? []).map((key) => ({ key, label: labels[key] ?? key }));
+}
 
 /** The href a link should use today: canonical when it exists, else the interim. */
 export function settingsHrefToday(p: SettingsPage): string | null {
@@ -338,8 +357,13 @@ export function settingsRedirectTarget(r: SettingsRedirect, search: string = "")
   const [path, destQuery = ""] = beforeHash.split("?");
   const out = new URLSearchParams(destQuery);
   const incoming = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  // Exactly what Next does with a config redirect (the source query is
+  // appended, a key the destination already names is not): so the twin and
+  // next.config.ts answer the SAME Location for the same URL. For the
+  // query-matched shortcuts row that carries `tab=shortcuts` along
+  // (/account/shortcuts has no tabs, so it is inert); the themes row's own
+  // `tab=appearance` wins over the matched one.
   for (const [k, v] of incoming) {
-    if (r.query && k === r.query.key) continue;
     if (!out.has(k)) out.append(k, v);
   }
   const q = out.toString();

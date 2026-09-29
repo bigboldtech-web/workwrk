@@ -1,6 +1,6 @@
 "use client";
 
-/* Settings hub — category card grid.
+/* Settings hub: category card grid.
  *
  *  GET /api/settings   org profile + enabled modules + scoring weights +
  *                      security policy + usage counts.
@@ -19,7 +19,6 @@ import {
   Award,
   Shield,
   BarChart3,
-  Tag,
   FileCheck,
   Key,
   Calendar as CalendarIcon,
@@ -35,6 +34,9 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { MODULES, MODULE_SLUGS } from "@/lib/modules";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
+
+// An empty value reads as words, never a dash (the copy rules).
+const NOT_SET = "Not set";
 
 type ApiSettings = {
   organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null };
@@ -114,9 +116,9 @@ export function SettingsOverviewClient() {
           description: "Name, slug, primary domain, contact info.",
           Icon: Building2,
           fields: [
-            { label: "Name", value: org?.name ?? "—" },
-            { label: "Slug", value: org?.slug ?? "—" },
-            { label: "Domain", value: org?.domain ?? "—" },
+            { label: "Name", value: org?.name ?? NOT_SET },
+            { label: "Slug", value: org?.slug ?? NOT_SET },
+            { label: "Domain", value: org?.domain ?? NOT_SET },
           ],
         },
         {
@@ -125,9 +127,9 @@ export function SettingsOverviewClient() {
           description: "Timezone, currency, fiscal year start.",
           Icon: CalendarIcon,
           fields: [
-            { label: "Timezone", value: set.timezone ?? "—" },
-            { label: "Currency", value: set.currency ?? "—" },
-            { label: "Fiscal start", value: set.fiscalYearStart ? `Month ${set.fiscalYearStart}` : "—" },
+            { label: "Timezone", value: set.timezone ?? NOT_SET },
+            { label: "Currency", value: set.currency ?? NOT_SET },
+            { label: "Fiscal start", value: set.fiscalYearStart ? `Month ${set.fiscalYearStart}` : NOT_SET },
           ],
         },
         {
@@ -138,7 +140,7 @@ export function SettingsOverviewClient() {
           fields: [
             { label: "Plan", value: org?.plan ?? "Starter" },
             { label: "Status", value: org?.status ?? "Active" },
-            { label: "Industry", value: set.industry ?? "—" },
+            { label: "Industry", value: set.industry ?? NOT_SET },
           ],
         },
       ],
@@ -153,20 +155,13 @@ export function SettingsOverviewClient() {
           Icon: Boxes,
           fields: [
             { label: "Active", value: `${moduleCount} of ${MODULES.length} on` },
-            { label: "Team size", value: set.teamSize ?? "—" },
+            { label: "Team size", value: set.teamSize ?? NOT_SET },
           ],
         },
         {
-          href: "/settings/tasks?tab=tags",
-          title: "Tags",
-          description: "Shared taxonomy across boards, tasks, and SOPs.",
-          Icon: Tag,
-          fields: [{ label: "Manage", value: "Open" }],
-        },
-        {
-          href: "/settings/tasks?tab=types",
-          title: "Task types",
-          description: "Re-skin tasks as Milestones, Bugs, Deals & more.",
+          href: "/settings/tasks",
+          title: SETTINGS_PAGES.tasks.label,
+          description: "Task types (Milestones, Bugs, Deals and more) and the shared tags across boards, tasks and SOPs.",
           Icon: Shapes,
           fields: [{ label: "Manage", value: "Open" }],
         },
@@ -177,13 +172,8 @@ export function SettingsOverviewClient() {
           Icon: Key,
           fields: [{ label: "Manage", value: "Open" }],
         },
-        {
-          href: "/account/connections",
-          title: SETTINGS_PAGES["account/connections"].label,
-          description: "Subscribe external calendars; publish org feeds.",
-          Icon: CalendarIcon,
-          fields: [{ label: "Manage", value: "Open" }],
-        },
+        // Calendar & connections is a My settings page (the personal door);
+        // it is reached from that door's sidebar, not from this overview.
       ],
     },
     {
@@ -218,8 +208,8 @@ export function SettingsOverviewClient() {
       title: "Security & compliance",
       cards: [
         {
-          href: "/account/security",
-          title: "Password rules",
+          href: "/settings/security",
+          title: SETTINGS_PAGES.security.label,
           description: "Minimum length and character requirements.",
           Icon: Shield,
           fields: [
@@ -274,7 +264,7 @@ export function SettingsOverviewClient() {
       <div className="px-6 pb-2 pt-6">
         <h1 className="text-lg font-semibold text-zinc-900">Overview</h1>
         <p className="mt-0.5 text-sm text-zinc-500">
-          {data === null ? null : `${org?.name ?? "Workspace"} · ${moduleCount} of ${MODULES.length} modules on · plan ${org?.plan ?? "—"}`}
+          {data === null ? null : `${org?.name ?? "Workspace"} · ${moduleCount} of ${MODULES.length} modules on · plan ${org?.plan ?? NOT_SET}`}
         </p>
       </div>
 

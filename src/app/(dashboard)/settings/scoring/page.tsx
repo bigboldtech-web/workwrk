@@ -16,6 +16,7 @@
  */
 
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -57,21 +58,32 @@ export default function ScoringSettingsPage() {
   const [bands, setBands] = useState<ScoringBand[]>(DEFAULT_SCORING_BANDS);
   const [anchors, setAnchors] = useState<string[]>(DEFAULT_BEHAVIORAL_ANCHORS);
 
+  // The fetch-failure rule (settings-architecture 8.6): a failed GET renders
+  // ErrorState with Retry in place of the four editable sections, so a Save
+  // can never write the built-in defaults over the live cadences, weights,
+  // bands and anchors.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch("/api/settings", { cache: "no-store" });
-      if (res.ok) {
-        const d = await res.json();
-        const s = d.settings ?? {};
-        if (s.reviewCadences) setCadences(s.reviewCadences);
-        if (s.scoreWeights) {
-          // Keep only known metric keys; fill missing with defaults.
-          setWeights({ ...DEFAULT_SCORE_WEIGHTS, ...s.scoreWeights });
-        }
-        if (Array.isArray(s.scoringBands) && s.scoringBands.length) setBands(s.scoringBands);
-        if (Array.isArray(s.behavioralAnchors) && s.behavioralAnchors.length === 5) setAnchors(s.behavioralAnchors);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setLoadError(typeof d?.error === "string" ? d.error : `HTTP ${res.status}`);
+        return;
       }
+      const d = await res.json();
+      const s = d.settings ?? {};
+      if (s.reviewCadences) setCadences(s.reviewCadences);
+      if (s.scoreWeights) {
+        // Keep only known metric keys; fill missing with defaults.
+        setWeights({ ...DEFAULT_SCORE_WEIGHTS, ...s.scoreWeights });
+      }
+      if (Array.isArray(s.scoringBands) && s.scoringBands.length) setBands(s.scoringBands);
+      if (Array.isArray(s.behavioralAnchors) && s.behavioralAnchors.length === 5) setAnchors(s.behavioralAnchors);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Network error");
     } finally {
       setLoading(false);
     }
@@ -83,6 +95,17 @@ export default function ScoringSettingsPage() {
       <div>
         <OsPageHeader title={SETTINGS_PAGES.scoring.label} />
         <div className="px-6 py-6"><SkeletonRows rows={6} /></div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div>
+        <OsPageHeader title={SETTINGS_PAGES.scoring.label} />
+        <div className="px-6 py-6">
+          <ErrorState what="scoring settings" onRetry={() => void load()} hint={loadError} />
+        </div>
       </div>
     );
   }

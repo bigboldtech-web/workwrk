@@ -13,24 +13,13 @@ import {
   filterSettingsEntries,
   filterSettingsPages,
   settingsHrefToday,
+  settingsTabs,
   SETTINGS_ENTRY_LIST,
   SETTINGS_PAGE_LIST,
   type SettingsDoor,
 } from "@/lib/settings-registry";
 import { SettingsCard } from "@/components/settings/settings-card";
 
-const TAB_LABELS: Record<string, string> = {
-  appearance: "Appearance",
-  profile: "Profile",
-  overview: "Overview",
-  departments: "Departments",
-  titles: "Job titles",
-  fields: "Profile fields",
-  types: "Task types",
-  tags: "Tags",
-  export: "Export",
-  import: "Import",
-};
 
 export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: SettingsDoor; allowedExternalGates?: readonly ("manage_process")[] }) {
   const [query, setQuery] = useState("");
@@ -66,8 +55,8 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
                 <Link href={p.href} className="min-w-[200px] text-base font-medium text-ink hover:underline">{p.label}</Link>
                 {p.tabs && p.tabs.length > 1 ? (
                   <span className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-ink-2">
-                    {p.tabs.map((t) => (
-                      <Link key={t} href={`${p.href}?tab=${t}`} className="hover:text-ink hover:underline">{TAB_LABELS[t] ?? t}</Link>
+                    {settingsTabs(p.key).map((t) => (
+                      <Link key={t.key} href={`${p.href}?tab=${t.key}`} className="hover:text-ink hover:underline">{t.label}</Link>
                     ))}
                   </span>
                 ) : null}

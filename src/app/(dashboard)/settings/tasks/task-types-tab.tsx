@@ -71,9 +71,14 @@ export function TaskTypesTab({
   const setDefault = useCallback(async (id: string) => {
     setTypes((prev) => (prev ?? []).map((t) => ({ ...t, isDefault: t.id === id })));
     try {
-      await fetch(`/api/item-types/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ isDefault: true }) });
+      const res = await fetch(`/api/item-types/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ isDefault: true }) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(typeof d?.error === "string" ? d.error : ""); }
       toast("Default type updated");
-    } catch { toast("Couldn't update default"); void load(); }
+    } catch (e) {
+      // The optimistic swap is undone by reloading the stored list.
+      toast(e instanceof Error && e.message ? `Couldn't update default: ${e.message}` : "Couldn't update default");
+      void load();
+    }
   }, [load, toast]);
 
   const remove = useCallback(async (t: ApiType) => {

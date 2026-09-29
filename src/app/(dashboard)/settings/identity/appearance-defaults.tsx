@@ -170,10 +170,15 @@ export function AppearanceDefaults() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`status ${res.status}`);
+        if (!res.ok) {
+          // A 400 from the strict schema names the key; show it, since
+          // retrying a refused value never helps.
+          const d = await res.json().catch(() => ({}));
+          throw new Error(typeof d?.error === "string" ? d.error : "");
+        }
         toast(okMsg);
-      } catch {
-        toast("Couldn't save. Try again.");
+      } catch (e) {
+        toast(e instanceof Error && e.message ? `Couldn't save: ${e.message}` : "Couldn't save. Try again.");
         void load();
       } finally {
         setSaving(false);

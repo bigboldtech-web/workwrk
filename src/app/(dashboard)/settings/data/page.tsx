@@ -38,6 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { settingsTabs } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -144,10 +145,7 @@ function filenameFromDisposition(cd: string, fallback: string): string {
   return plain?.[1] ?? fallback;
 }
 
-const DATA_TABS: readonly SettingsTab[] = [
-  { key: "export", label: "Export" },
-  { key: "import", label: "Import" },
-];
+const DATA_TABS: readonly SettingsTab[] = settingsTabs("data");
 
 function LinkCard({ href, icon: Icon, title, desc }: { href: string; icon: LucideIcon; title: string; desc: string }) {
   return (
@@ -221,6 +219,12 @@ export default function DataCompliancePage() {
             <Section label="Import">
               {IMPORTS.map((c) => <LinkCard key={c.href} {...c} />)}
             </Section>
+
+            {/* The Marketing importer lives on Import, where its entry link
+                (LEGACY_IMPORT_HREF, /settings/data?tab=import&legacy=marketing)
+                lands; the Export tab keeps the same section for its legacy
+                CSV downloads. It renders only for a workspace holding rows. */}
+            <LegacyMarketingSection busy={busy} onExport={download} />
           </div>
         ) : (
           <>
@@ -260,7 +264,8 @@ export default function DataCompliancePage() {
 // until the import has run (spec-tools-misc section 2.7). The section
 // renders only for an org that holds such rows or has already imported
 // them, exactly as the legacy Purchase-order and Invoice exports do. It
-// is the minimal entry; Phase 8's Settings > Data > Import tab re-homes it.
+// is the minimal entry, re-homed on Settings > Data > Import (and kept on
+// Export for its legacy CSV downloads).
 //
 // Arriving with ?legacy=marketing (the /marketing resolver sends an Owner or
 // Admin here) scrolls to the row and pulses it once. For a workspace that

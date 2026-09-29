@@ -45,7 +45,7 @@ export async function POST(req: Request) {
 
     const userId = (session.user as any).id;
     const orgId = (session.user as any).organizationId;
-    const inviterLevel: string = (session.user as any).accessLevel ?? "EMPLOYEE";
+    const inviterLevel: string = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
 
     // Org setup is an Owner and Admin act (spec-account-auth "Access",
     // correction 1). This route used to check only for a session, so any

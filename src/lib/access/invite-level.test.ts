@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveInviteLevel } from "./invite-level";
+import { resolveGrantLevel, resolveInviteLevel } from "./invite-level";
 
 describe("resolveInviteLevel", () => {
   it("defaults to Employee and names an unknown level", () => {
@@ -27,7 +27,37 @@ describe("resolveInviteLevel", () => {
     expect(resolveInviteLevel("TEAM_LEAD", "MANAGER").ok).toBe(false);
     expect(resolveInviteLevel("EMPLOYEE", "EMPLOYEE").ok).toBe(true);
     expect(resolveInviteLevel("HR", "HR").ok).toBe(true);
-    expect(resolveInviteLevel("HR", "MANAGER").ok).toBe(false);
     expect(resolveInviteLevel("MANAGER", "HR").ok).toBe(false);
+  });
+  it("lets HR invite a new hire at any non-admin level, as it could before", () => {
+    for (const l of ["C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"]) {
+      expect(resolveInviteLevel("HR", l), l).toEqual({ ok: true, level: l });
+    }
+    expect(resolveInviteLevel("HR", "COMPANY_ADMIN")).toMatchObject({ ok: false, status: 403 });
+  });
+});
+
+describe("resolveGrantLevel: one rule for invite and direct create", () => {
+  it("agrees with the invite rule for admins and HR on both paths", () => {
+    for (const caller of ["COMPANY_ADMIN", "HR"]) {
+      for (const l of ["C_LEVEL", "MANAGER", "EMPLOYEE", "AGENT", "HR"]) {
+        expect(resolveGrantLevel(caller, l, "create").ok, `${caller}:${l}`).toBe(resolveGrantLevel(caller, l, "invite").ok);
+      }
+    }
+  });
+  it("direct create below HR gives Employee or Agent only (the creator picks the password)", () => {
+    expect(resolveGrantLevel("MANAGER", "MANAGER", "create").ok).toBe(false);
+    expect(resolveGrantLevel("MANAGER", "MANAGER", "invite").ok).toBe(true);
+    expect(resolveGrantLevel("MANAGER", "EMPLOYEE", "create").ok).toBe(true);
+    expect(resolveGrantLevel("MANAGER", "AGENT", "create").ok).toBe(true);
+  });
+  it("SUPER_ADMIN: only a SUPER_ADMIN creates one, nobody invites one", () => {
+    expect(resolveGrantLevel("SUPER_ADMIN", "SUPER_ADMIN", "create").ok).toBe(true);
+    expect(resolveGrantLevel("SUPER_ADMIN", "SUPER_ADMIN", "invite").ok).toBe(false);
+    expect(resolveGrantLevel("COMPANY_ADMIN", "SUPER_ADMIN", "create").ok).toBe(false);
+  });
+  it("the agent tool's worst case: a Manager asking for C_LEVEL or an Admin is refused", () => {
+    expect(resolveInviteLevel("MANAGER", "C_LEVEL")).toMatchObject({ ok: false, status: 403 });
+    expect(resolveInviteLevel("MANAGER", "COMPANY_ADMIN")).toMatchObject({ ok: false, status: 403 });
   });
 });

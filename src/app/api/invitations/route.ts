@@ -9,6 +9,7 @@ import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 
 export async function GET() {
   try {
@@ -17,7 +18,15 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const viewer = session.user as { organizationId?: string; accessLevel?: string };
+    const orgId = viewer.organizationId;
+    // The list names every invitee, their level and placement, so it is for
+    // the people who manage invitations: the manager tier, the same people
+    // Settings > Members (its one reader) admits. A Member gets a 403, not a
+    // way to enumerate pending Admin invites.
+    if (!legacyIsManagerLevel(viewer.accessLevel)) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
 
     const invitations = await prisma.invitation.findMany({
       where: { organizationId: orgId },
@@ -54,7 +63,7 @@ export async function POST(req: Request) {
     // The level an invitation may carry (src/lib/access/invite-level.ts):
     // never WorkwrK staff, an Admin only from an Admin, and otherwise at or
     // below the inviter's own rung. It used to be stored as sent.
-    const levelCheck = resolveInviteLevel((session.user as any).accessLevel, requestedLevel);
+    const levelCheck = resolveInviteLevel((session.user as { accessLevel?: string }).accessLevel, requestedLevel);
     if (!levelCheck.ok) {
       return NextResponse.json({ error: levelCheck.error }, { status: levelCheck.status });
     }

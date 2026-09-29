@@ -14,6 +14,7 @@ import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import {
   cultureSectionSchema,
@@ -65,7 +66,7 @@ export async function GET() {
 
     const settings = (org.settings as SettingsBlob | null) || {};
 
-    return NextResponse.json({
+    const body = {
       organization: {
         id: org.id,
         name: org.name,
@@ -127,7 +128,28 @@ export async function GET() {
         sops: org._count.sops,
         aiQueries: org._count.aiQueries,
       },
-    });
+    };
+
+    // Below the manager tier (Member, Agent, Guest) the body narrows to what
+    // a member's own surfaces read (settings-architecture 9.2): the org's
+    // public fields, companyProfile, modules, locale, the scoring labels a
+    // person's own review shows, the password rules summary (My settings >
+    // Security) and usage (the workspace menu). The access toggles, the
+    // process taxonomies' admin config, the org's business profile and the
+    // stored session fields stay with the doors that edit them.
+    if (!legacyIsManagerLevel((session.user as SessionUser).accessLevel)) {
+      const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, ...rest } = body.settings;
+      void _access; void _process; void _b; void _i; void _t;
+      const sec = (security ?? {}) as { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean };
+      return NextResponse.json({
+        ...body,
+        settings: {
+          ...rest,
+          security: { minPasswordLength: sec.minPasswordLength, requireUppercase: sec.requireUppercase, requireNumbers: sec.requireNumbers },
+        },
+      });
+    }
+    return NextResponse.json(body);
   } catch (error) {
     console.error("Settings GET error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -166,7 +188,18 @@ export async function PATCH(req: Request) {
       if (!canManageProcess(session)) {
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
       }
-    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
+    } else if (section === "scoring") {
+      // Scoring is the one other section a non-admin could save from its
+      // page yesterday (the manager-tier Scoring page, C_LEVEL writes), so it
+      // keeps that reach; everyone else on the tier reads it only.
+      if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel)) {
+      // general, culture, security, access: Admin only (settings-architecture
+      // 9.2; Owner for security once SETTINGS_OWNER_SPLIT is on). The pages
+      // that write them (Identity, Locale, Access) were admin-gated already,
+      // so C_LEVEL loses no reach it had from the product, only the raw API.
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 

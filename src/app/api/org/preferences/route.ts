@@ -36,7 +36,12 @@ export async function GET() {
 // Strict at every level (settings-architecture 9.3): a stray key is a 400
 // that names it, never a silent strip. lockedKeys accepts only the lockable
 // dot-paths from src/lib/preferences-locks.ts, so a lock can never be a typo
-// that silently locks nothing. densityDefault takes the three values the
+// that silently locks nothing. A key the org ALREADY stores is carried
+// through untouched even when it is not on today's list (an older per-card
+// home.cards.<key> lock): the Appearance defaults card re-sends the whole
+// stored set on every toggle, so refusing it would leave the org unable to
+// change any lock, with no way in the UI to clear the stale key. Only a NEW
+// unknown key is refused (checked in PATCH, where the stored row is known). densityDefault takes the three values the
 // personal schema takes; "comfortable" (the design system's default, and
 // what the Appearance defaults card offers) was refused before.
 const patchSchema = z.strictObject({
@@ -66,14 +71,7 @@ const patchSchema = z.strictObject({
     accent: z.string().max(40).optional(),
   }).optional(),
   densityDefault: z.enum(["compact", "cozy", "comfortable"]).optional(),
-  lockedKeys: z
-    .array(z.string().max(80))
-    .optional()
-    .superRefine((keys, ctx) => {
-      if (!keys) return;
-      const { unknown } = partitionLockedKeys(keys);
-      for (const k of unknown) ctx.addIssue({ code: "custom", message: `Not a lockable preference: ${k}` });
-    }),
+  lockedKeys: z.array(z.string().max(80)).optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -90,6 +88,16 @@ export async function PATCH(req: Request) {
     const unknownKeys = first && first.code === "unrecognized_keys" ? (first as { keys?: string[] }).keys ?? [] : [];
     const named = unknownKeys.length > 0 ? `Unknown setting: ${[where, unknownKeys.join(", ")].filter(Boolean).join(".")}` : first ? `${where || "body"}: ${first.message}` : "Invalid body";
     return NextResponse.json({ error: named, issues: parsed.error.issues }, { status: 400 });
+  }
+  if (parsed.data.lockedKeys) {
+    const { unknown } = partitionLockedKeys(parsed.data.lockedKeys);
+    if (unknown.length > 0) {
+      const stored = new Set((await getOrgPreferenceRow(c.organizationId))?.lockedKeys ?? []);
+      const fresh = unknown.filter((k) => !stored.has(k));
+      if (fresh.length > 0) {
+        return NextResponse.json({ error: `lockedKeys: Not a lockable preference: ${fresh.join(", ")}` }, { status: 400 });
+      }
+    }
   }
   const updated = await setOrgPreference(c.organizationId, parsed.data);
   // Every org write is audited with the changed keys (settings-architecture 9.1).

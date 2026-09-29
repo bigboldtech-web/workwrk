@@ -1,38 +1,21 @@
-// Which access level may a caller give a person they are creating? The one
-// rule for POST /api/users and POST /api/people/bulk-import, which both took
-// the level straight from the request, so any manager could mint a
-// COMPANY_ADMIN account (a live privilege escalation, found in the Phase 6
-// reconnaissance).
+// Which access level may a caller give a person they are creating? Used by
+// POST /api/users and POST /api/people/bulk-import, which both took the level
+// straight from the request, so any manager could mint a COMPANY_ADMIN
+// account (a live privilege escalation, found in the Phase 6 reconnaissance).
 //
-// The rule, by the smallest worst case:
-//   - An org admin (COMPANY_ADMIN, SUPER_ADMIN) may give any level except
-//     SUPER_ADMIN, which only a SUPER_ADMIN may give.
-//   - HR (the People team's level) places a new hire at any level that is
-//     not an admin level, as it could before this rule: EMPLOYEE, AGENT,
-//     TEAM_LEAD, MANAGER, DIRECTOR, VP, C_LEVEL and HR. It never mints
-//     COMPANY_ADMIN or SUPER_ADMIN, the one real escalation.
-//   - Everyone else who may create people at all gives EMPLOYEE or AGENT,
-//     the two levels that carry no management or admin right. Placing
-//     someone higher is an admin's or HR's act.
-//   - An absent level is EMPLOYEE (the column default); an unknown string is
-//     refused, never guessed.
-//
-// Pure: no imports.
+// The rule itself lives in ONE place with the invitation rule:
+// src/lib/access/invite-level.ts resolveGrantLevel (via "create"). An org
+// admin gives any level except SUPER_ADMIN (only a SUPER_ADMIN gives that);
+// HR gives any non-admin level; everyone else gives EMPLOYEE or AGENT. An
+// absent level is EMPLOYEE; an unknown string is refused, never guessed.
 
-export const ACCESS_LEVELS = [
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR",
-] as const;
-export type GrantableLevel = (typeof ACCESS_LEVELS)[number];
+import { ALL_ACCESS_LEVELS, resolveGrantLevel, type InviteAccessLevel } from "@/lib/access/invite-level";
 
-const LEVEL_SET: ReadonlySet<string> = new Set(ACCESS_LEVELS);
+export const ACCESS_LEVELS = ALL_ACCESS_LEVELS;
+export type GrantableLevel = InviteAccessLevel;
 
 /** The level to write, or null when the caller may not give it. */
 export function grantableAccessLevel(callerLevel: string | null | undefined, requested: unknown): GrantableLevel | null {
-  if (requested === undefined || requested === null || requested === "") return "EMPLOYEE";
-  if (typeof requested !== "string" || !LEVEL_SET.has(requested)) return null;
-  const level = requested as GrantableLevel;
-  if (callerLevel === "SUPER_ADMIN") return level;
-  if (callerLevel === "COMPANY_ADMIN") return level === "SUPER_ADMIN" ? null : level;
-  if (callerLevel === "HR") return level === "SUPER_ADMIN" || level === "COMPANY_ADMIN" ? null : level;
-  return level === "EMPLOYEE" || level === "AGENT" ? level : null;
+  const r = resolveGrantLevel(callerLevel, requested, "create");
+  return r.ok ? r.level : null;
 }

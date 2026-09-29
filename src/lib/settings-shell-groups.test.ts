@@ -5,13 +5,13 @@ const labels = (door: "me" | "workspace", admin: boolean) =>
   settingsShellGroups(door, admin).map((g) => ({ label: g.label ?? null, rule: !!g.ruleAbove, rows: g.rows.map((r) => r.label) }));
 
 describe("settingsShellGroups", () => {
-  it("draws the Workspace door for Owners and Admins, in the spec's order, Security held back until S5", () => {
+  it("draws the Workspace door for Owners and Admins, in the spec's order, all fifteen rows (sidebar-map 8a)", () => {
     expect(labels("workspace", true)).toEqual([
       { label: null, rule: false, rows: ["Overview"] },
       { label: "Workspace", rule: false, rows: ["Identity & culture", "Locale & work week", "Apps & modules"] },
       { label: "People", rule: false, rows: ["Members", "Structure", "Access"] },
       { label: "Work", rule: false, rows: ["Task system", "Scoring & reviews"] },
-      { label: "Security & data", rule: false, rows: ["Data", "Audit log", "API & webhooks"] },
+      { label: "Security & data", rule: false, rows: ["Security", "Data", "Audit log", "API & webhooks"] },
       { label: "Billing", rule: false, rows: ["Plan & billing"] },
       { label: null, rule: true, rows: ["All settings"] },
     ]);

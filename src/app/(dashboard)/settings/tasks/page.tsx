@@ -10,8 +10,12 @@
 
 import { useState } from "react";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SETTINGS_TAB_LABELS } from "@/lib/settings-registry";
 import { TaskTypesTab } from "./task-types-tab";
 import { TagsTab } from "./tags-tab";
+
+// Labels from the registry (the one place they are written).
+const TASK_TAB_LABEL = { types: SETTINGS_TAB_LABELS.tasks?.types ?? "types", tags: SETTINGS_TAB_LABELS.tasks?.tags ?? "tags" };
 
 export default function TaskSystemPage() {
   const [createOpen, setCreateOpen] = useState(false);
@@ -20,7 +24,7 @@ export default function TaskSystemPage() {
   const tabs: SettingsTab[] = [
     {
       key: "types",
-      label: "Task types",
+      label: TASK_TAB_LABEL.types,
       primary: {
         label: "New type",
         onClick: () => setCreateOpen(true),
@@ -28,7 +32,7 @@ export default function TaskSystemPage() {
         title: usage && usage.used >= usage.limit ? `This workspace has reached ${usage.limit} task types` : undefined,
       },
     },
-    { key: "tags", label: "Tags" },
+    { key: "tags", label: TASK_TAB_LABEL.tags },
   ];
 
   return (

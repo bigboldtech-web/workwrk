@@ -131,6 +131,12 @@ function RegisterFormInner({ mode }: { mode: "signup" | "join" }) {
           Already have an account?{" "}
           <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">Log in</Link>
         </p>
+        {/* Someone given the bare /join address (it used to fall through to
+            the self-serve form) still has a way to start their own workspace. */}
+        <p className="text-base text-slate-600">
+          Starting a new workspace?{" "}
+          <Link href="/signup" className="text-[#0073EA] hover:text-[#0056B0] font-medium">Create account</Link>
+        </p>
       </div>
     );
   }

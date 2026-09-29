@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { Check, Sun, Moon, Monitor } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { settingsTabs } from "@/lib/settings-registry";
 import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Appearance = "LIGHT" | "DARK" | "AUTO";
@@ -46,7 +47,7 @@ const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
 // Language & region and Sidebar join this list when their tabs ship
 // (spec-account-auth A4); until then the page is its one tab and draws no
 // views row.
-const PREFERENCES_TABS: readonly SettingsTab[] = [{ key: "appearance", label: "Appearance" }];
+const PREFERENCES_TABS: readonly SettingsTab[] = settingsTabs("account/preferences");
 
 export default function PreferencesPage() {
   const router = useRouter();

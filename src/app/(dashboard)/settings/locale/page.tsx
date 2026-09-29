@@ -1,6 +1,6 @@
 "use client";
 
-// Locale & finance — org-level timezone / currency / fiscal-year / default
+// Locale & work week: org-level timezone / currency / fiscal-year / default
 // language. These values are shared with the Identity & profile surface.
 // Backed by GET /api/settings (settings.{timezone,currency,fiscalYearStart,
 // language}) + PATCH { section:"general" } — both already exist; the PATCH
@@ -9,9 +9,13 @@
 // fiscalYearStart can arrive as a number (e.g. 4) OR a "MM-01" string; we
 // normalize to one of four canonical "MM-01" strings for the <select>.
 
-import { useEffect, useState } from "react";
-import { Globe, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Globe } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
+import { useSettingsSection } from "@/hooks/use-settings-section";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { ErrorState } from "@/components/ui/error-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useOsToast } from "@/components/layout/os/toast";
 import { WorkWeekCard } from "./work-week-card";
 
@@ -66,60 +70,49 @@ type LocaleState = {
 
 export default function LocaleSettingsPage() {
   const { accessLevel } = useRole();
-  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel);
+  // Admin only, the same people PATCH /api/settings { section: "general" }
+  // admits (C_LEVEL was never able to open this page; the gate is "admin").
+  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
   const { toast } = useOsToast();
 
-  const [state, setState] = useState<LocaleState | null>(null);
+  // The fetch-failure rule (settings-architecture 8.6): a failed GET renders
+  // ErrorState with Retry, never a form of built-in defaults a Save would
+  // write over the live values; the hook refuses to save until a load
+  // succeeded.
+  const section = useSettingsSection<LocaleState>("general", (body) => {
+    const s = body.settings ?? {};
+    return {
+      timezone: typeof s.timezone === "string" ? s.timezone : "UTC",
+      currency: typeof s.currency === "string" ? s.currency : "USD",
+      fiscalYearStart: normalizeFiscal(s.fiscalYearStart),
+      language: typeof s.language === "string" ? s.language : "en",
+    };
+  });
+  const [draft, setDraft] = useState<Partial<LocaleState>>({});
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const s = d?.settings ?? {};
-        setState({
-          timezone: typeof s.timezone === "string" ? s.timezone : "UTC",
-          currency: typeof s.currency === "string" ? s.currency : "USD",
-          fiscalYearStart: normalizeFiscal(s.fiscalYearStart),
-          language: typeof s.language === "string" ? s.language : "en",
-        });
-      })
-      .catch(() =>
-        setState({ timezone: "UTC", currency: "USD", fiscalYearStart: "01-01", language: "en" }),
-      );
-  }, []);
+  const state: LocaleState | null =
+    section.status === "ready" && section.data ? { ...section.data, ...draft } : null;
 
   const set = <K extends keyof LocaleState>(key: K, value: LocaleState[K]) => {
-    setState((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
   const save = async () => {
     if (!state) return;
     setSaving(true);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          section: "general",
-          data: {
-            timezone: state.timezone,
-            currency: state.currency,
-            fiscalYearStart: state.fiscalYearStart,
-            language: state.language,
-          },
-        }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d?.error ?? "Save failed");
-      }
-      toast("Locale settings saved");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
+    const r = await section.save({
+      timezone: state.timezone,
+      currency: state.currency,
+      fiscalYearStart: state.fiscalYearStart,
+      language: state.language,
+    });
+    setSaving(false);
+    if (!r.ok) {
+      toast(r.error ?? "Couldn't save. Try again.");
+      return;
     }
+    setDraft({});
+    toast("Locale settings saved");
   };
 
   const selectClass =
@@ -129,7 +122,7 @@ export default function LocaleSettingsPage() {
     <div className="px-6 pt-6">
       <header className="mb-1 flex items-center gap-2">
         <Globe className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Locale & finance</h1>
+        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">{SETTINGS_PAGES.locale.label}</h1>
       </header>
       <p className="mb-5 max-w-2xl text-base text-zinc-500">
         Default timezone, currency, fiscal year and language for your organization. Shared with
@@ -137,9 +130,16 @@ export default function LocaleSettingsPage() {
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
-      {state === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
+      {section.status === "error" ? (
+        <div className="max-w-xl rounded-xl border border-zinc-200 bg-white p-5">
+          <ErrorState what="locale settings" onRetry={section.retry} hint={section.error ?? undefined} compact />
+        </div>
+      ) : state === null ? (
+        <div className="max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5" aria-busy="true" aria-label="Locale settings">
+          <Skeleton className="h-8 w-full max-w-sm" />
+          <Skeleton className="h-8 w-full max-w-sm" />
+          <Skeleton className="h-8 w-full max-w-sm" />
+          <Skeleton className="h-8 w-full max-w-sm" />
         </div>
       ) : (
         <>
@@ -208,8 +208,7 @@ export default function LocaleSettingsPage() {
               disabled={!canEdit || saving}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-sm font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Save changes
+              {saving ? "Saving" : "Save changes"}
             </button>
           </div>
         </>
