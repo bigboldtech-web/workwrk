@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch, validateOwnerBody, VALID_FEATURES } from "./company-patch-rules";
+import { confirmMatches, createWriteLedger, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch, validateOwnerBody, VALID_FEATURES } from "./company-patch-rules";
 
 describe("validateCompanyPatch", () => {
   it("accepts a valid plan, status and feature together", () => {
@@ -111,5 +111,51 @@ describe("validateOwnerBody", () => {
     expect(validateOwnerBody({ userId: "u1", reason: "no" }).ok).toBe(false);
     expect(validateOwnerBody({ userId: "u1", reason: "x".repeat(501) }).ok).toBe(false);
     expect(validateOwnerBody(null).ok).toBe(false);
+  });
+});
+
+// The company page's stale-Retry guard (company-record.tsx patch()).
+describe("createWriteLedger", () => {
+  it("a Retry from a failed save is live until the field is written again", () => {
+    const l = createWriteLedger();
+    const failedGrowth = l.begin("plan");
+    expect(l.isLatest("plan", failedGrowth)).toBe(true);
+    // The staff member picks Enterprise, and it saves.
+    const enterprise = l.begin("plan");
+    expect(l.isLatest("plan", enterprise)).toBe(true);
+    // The old toast's Retry must now do nothing: it would put Growth back.
+    expect(l.isLatest("plan", failedGrowth)).toBe(false);
+  });
+
+  it("fields are independent: a Suspend does not retire a failed plan save", () => {
+    const l = createWriteLedger();
+    const plan = l.begin("plan");
+    l.begin("status");
+    l.begin("module:chat");
+    expect(l.isLatest("plan", plan)).toBe(true);
+  });
+
+  it("a stale status Retry cannot undo a later Suspend", () => {
+    const l = createWriteLedger();
+    const failedActive = l.begin("status");
+    const suspend = l.begin("status");
+    expect(l.isLatest("status", failedActive)).toBe(false);
+    expect(l.isLatest("status", suspend)).toBe(true);
+  });
+
+  it("retire: typing a new number in Seats kills the Retry for the old one", () => {
+    const l = createWriteLedger();
+    const failed12 = l.begin("seats");
+    l.retire("seats");
+    expect(l.isLatest("seats", failed12)).toBe(false);
+  });
+
+  it("each ledger is its own (one per company page)", () => {
+    const a = createWriteLedger();
+    const b = createWriteLedger();
+    const t = a.begin("plan");
+    b.begin("plan");
+    b.begin("plan");
+    expect(a.isLatest("plan", t)).toBe(true);
   });
 });

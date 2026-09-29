@@ -21,7 +21,7 @@
 // Below 1280 the search field narrows to 240; below 1024 the sidebar becomes
 // a 264 slide-over behind a Menu button and the breadcrumb keeps two crumbs.
 
-import { Children, useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -39,6 +39,8 @@ import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/compone
 import { SidebarRow, SidebarSectionLabel } from "@/components/layout/os/sidebar-primitives";
 import { shortcutHint, shortcuts, useShortcut, SHORTCUTS } from "@/lib/shortcuts";
 import { SESSION_EXPIRED_EVENT, isSessionExpired } from "@/lib/session-expiry";
+import { STAFF_ACCESS_REMOVED_EVENT, isStaffAccessRemoved, resetStaffAccessRemoved } from "@/lib/api-fetch";
+import { LockedPage } from "@/components/access";
 import { recordShellPath } from "@/lib/nav/entry-path";
 import { activeConsoleNav, consoleCrumbs, shippedConsoleNav, type ConsoleCrumb } from "@/lib/admin/console-nav";
 import type { ConsolePrefs } from "@/lib/admin/console-prefs";
@@ -79,6 +81,16 @@ export function AdminShell({
   // own render: it is what lets the company drawer tell a hard load of
   // /admin/companies/<id> (the full page) from a click on a row.
   recordShellPath(usePathname());
+  // The server layout renders this shell only for someone it has just found
+  // on the staff list, so a "removed" flag left by an earlier account in this
+  // tab (signed out, then back in with another through a soft navigation) is
+  // stale. Cleared during the first render, before any page's effect can
+  // fetch through apiFetch and be short-circuited by it.
+  useState(() => {
+    resetStaffAccessRemoved();
+    return null;
+  });
+  const accessRemoved = useStaffAccessRemoved();
   return (
     <LayerStackProvider>
       <OsToastProvider>
@@ -97,9 +109,13 @@ export function AdminShell({
           <ToastProvider>
             <DialogProvider>
               <div id={APP_ROOT_ID} style={{ display: "contents" }}>
-                <Frame mySettingsHref={mySettingsHref} runbookUrl={runbookUrl} drawer={drawer}>
-                  {children}
-                </Frame>
+                {accessRemoved ? (
+                  <StaffAccessRemoved email={staff.email} />
+                ) : (
+                  <Frame mySettingsHref={mySettingsHref} runbookUrl={runbookUrl} drawer={drawer}>
+                    {children}
+                  </Frame>
+                )}
               </div>
             </DialogProvider>
           </ToastProvider>
@@ -108,6 +124,59 @@ export function AdminShell({
         </ConsoleProvider>
       </OsToastProvider>
     </LayerStackProvider>
+  );
+}
+
+/** True once any /api/admin/* call has answered "not on the staff list" (api-fetch.ts). */
+function subscribeStaffAccess(onChange: () => void) {
+  window.addEventListener(STAFF_ACCESS_REMOVED_EVENT, onChange);
+  return () => window.removeEventListener(STAFF_ACCESS_REMOVED_EVENT, onChange);
+}
+function useStaffAccessRemoved(): boolean {
+  return useSyncExternalStore(subscribeStaffAccess, isStaffAccessRemoved, () => false);
+}
+
+const RELOADED_KEY = "workwrk:staff-access-removed-reload";
+const RELOAD_GUARD_MS = 30_000;
+
+/**
+ * STAFF ACCESS REMOVED WHILE THE CONSOLE IS OPEN.
+ *
+ * The layout's staff gate runs on a full render only; a soft navigation keeps
+ * this frame mounted, so a staff member removed from the list kept the whole
+ * console and every page read "Could not load... Retry", which could never
+ * succeed. The first staff-gate 403 (api-fetch.ts) swaps the frame for this
+ * page: the drawer, dialogs and pollers unmount with it. It then reloads once
+ * so the server renders its own denial, with the exact reason (removed, not
+ * verified, a duplicate address), the link back to the product and the
+ * denied-access row on Staff activity. The reload is skipped when one
+ * happened in the last 30 seconds, so a server that still let this person
+ * in can never put the tab into a reload loop; this page stays instead.
+ */
+function StaffAccessRemoved({ email }: { email: string }) {
+  useEffect(() => {
+    let reload = false;
+    try {
+      const at = Number(window.sessionStorage.getItem(RELOADED_KEY) || 0);
+      if (Date.now() - at >= RELOAD_GUARD_MS) {
+        window.sessionStorage.setItem(RELOADED_KEY, String(Date.now()));
+        reload = true;
+      }
+    } catch {
+      // No sessionStorage (blocked site data): the guard cannot be kept, so
+      // this page stays rather than risk reloading for ever.
+    }
+    if (reload) window.location.reload();
+  }, []);
+  return (
+    <div className="workwrk-os min-h-screen bg-app text-ink">
+      <LockedPage
+        glyph="shield"
+        name="This console is for WorkwrK staff"
+        sentence={`You are signed in as ${email}. This account is no longer on the WorkwrK staff list, so the console has closed.`}
+        elsewhere={{ href: "/login?callbackUrl=/admin", label: "Sign in with a different account" }}
+      />
+    </div>
   );
 }
 

@@ -18,7 +18,7 @@
 // /api/auth and /api/admin/*, so nothing here may call a product API.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "@/lib/api-fetch";
+import { apiFetch, isStaffDenial } from "@/lib/api-fetch";
 import { mergeConsolePrefs, pushRecent, type ConsolePrefs, type ConsolePrefsPatch } from "@/lib/admin/console-prefs";
 import type { RecentCompany } from "@/lib/admin/console-me";
 import type { DateFormatPrefs } from "@/lib/format/date";
@@ -124,8 +124,10 @@ export function ConsoleProvider({
           setRecents(r.data.recents);
           return;
         }
-        // 401 is the session-expired dialog's to show; anything else is ours.
-        if (r.status === 401) return;
+        // 401 is the session-expired dialog's to show, and a staff-gate 403
+        // (removed from the staff list) is the shell's: it replaces the
+        // screen, and a "Try again" here could only ever fail again.
+        if (r.status === 401 || isStaffDenial(r)) return;
         toast("Couldn't save your console settings", {
           action: { label: "Try again", onClick: () => { void attempt(); } },
         });

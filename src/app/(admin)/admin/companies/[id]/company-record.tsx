@@ -6,10 +6,12 @@
 // Same URL both ways, so Copy link always works.
 //
 // Every control autosaves with an inline "Saved" that fades after two
-// seconds; a failed save puts the control back and raises a toast with
-// Retry. There is no primary button here. Every write goes through
-// PATCH /api/admin/companies/[id] or POST .../owner, which record a
-// StaffAction row in the same transaction.
+// seconds; a failed save puts a picker or switch back (Seats keeps the typed
+// number), raises a toast with Retry and leaves "Not saved · Retry" beside
+// the control after the toast has gone. A Retry never resends a value once a
+// newer one was saved or typed. There is no primary button here. Every write
+// goes through PATCH /api/admin/companies/[id] or POST .../owner, which
+// record a StaffAction row in the same transaction.
 //
 // This page absorbs the Companies list's old quick-edit dialog: plan, status,
 // the five counts (Users as People, Tasks, KRAs, SOPs, Reviews), slug, domain and the joined date are all here (the counts
@@ -30,6 +32,7 @@ import { StatusChip, Chip } from "@/components/ui/chip";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatDate, formatDateTitle, formatRelative } from "@/lib/format/date";
 import { PLAN_OPTIONS, STATUS_OPTIONS, companyStatusColor, peopleCount, planLabel, statusLabel } from "@/lib/admin/console-labels";
+import { createWriteLedger } from "@/lib/admin/company-patch-rules";
 import { useCompanyCrumb, useConsole } from "../../../console-context";
 import { TypedConfirmDialog, type TypedConfirmRequest } from "../../../typed-confirm-dialog";
 import { AboutDialog, ConfirmDialog, InlineRetry, TEXT_LINK, BTN_SECONDARY, useCopy, useStaleRefetch, type ConfirmRequest } from "../../../console-ui";
@@ -92,7 +95,7 @@ export function CompanyRecord({
 }) {
   const router = useRouter();
   const { noteCompanyOpened, datePrefs } = useConsole();
-  const { toast } = useOsToast();
+  const { toast, dismiss } = useOsToast();
   const copy = useCopy(toast);
   const [company, setCompany] = useState<CompanyRecordData | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing" | "failed">("loading");
@@ -105,6 +108,10 @@ export function CompanyRecord({
   const [aboutOpen, setAboutOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
   const seq = useRef(0);
+  // Which save of each field is the newest, so a Retry held by an old toast
+  // or an old "Not saved" mark never resends a value over a later one
+  // (createWriteLedger).
+  const [ledger] = useState(createWriteLedger);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -142,19 +149,34 @@ export function CompanyRecord({
     noteCompanyOpened({ id: company.id, name: company.name, plan: company.plan, status: company.status });
   }, [company, noteCompanyOpened]);
 
-  const markSaved = (field: string) => {
-    setSaved((s) => ({ ...s, [field]: Date.now() }));
+  const clearNotSaved = (field: string) => {
     setNotSaved((s) => {
+      if (!(field in s)) return s;
       const n = { ...s };
       delete n[field];
       return n;
     });
+    // The failure toast goes with the inline mark: a save that later landed
+    // must not keep offering a Retry of the value it replaced.
+    dismiss(`save:${field}`);
+  };
+
+  /** The person changed the field again: the earlier failure's Retry is stale. */
+  const forgetFailure = (field: string) => {
+    ledger.retire(field);
+    clearNotSaved(field);
+  };
+
+  const markSaved = (field: string) => {
+    setSaved((s) => ({ ...s, [field]: Date.now() }));
+    clearNotSaved(field);
     window.setTimeout(() => setSaved((s) => (Date.now() - (s[field] ?? 0) >= SAVED_MS ? { ...s, [field]: 0 } : s)), SAVED_MS + 50);
   };
 
   /** One autosave. Returns true when it saved. */
   const patch = useCallback(
     async (field: string, body: Record<string, unknown>, done?: (d: { signedOut?: number }) => void): Promise<boolean> => {
+      const ticket = ledger.begin(field);
       setBusy(field);
       try {
         const res = await apiFetch<{ signedOut?: number; changed?: string[] }>(`/api/admin/companies/${encodeURIComponent(id)}`, {
@@ -173,15 +195,25 @@ export function CompanyRecord({
           return false;
         }
         if (res.status === 401) return false;
-        const retry = () => void patch(field, body, done);
+        // Only while this is still the field's newest write: once another
+        // value was saved (or typed), resending this body would undo it.
+        const retry = () => {
+          if (!ledger.isLatest(field, ticket)) {
+            dismiss(`save:${field}`);
+            return;
+          }
+          void patch(field, body, done);
+        };
         setNotSaved((s) => ({ ...s, [field]: retry }));
-        toast(res.error || "That did not save", { tone: "danger", action: { label: "Retry", onClick: retry } });
+        toast(res.error || "That did not save", { tone: "danger", key: `save:${field}`, action: { label: "Retry", onClick: retry } });
         return false;
       } finally {
         setBusy(null);
       }
     },
-    [id, load, toast],
+    // ledger never changes; markSaved only calls stable setters and dismiss.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, load, toast, dismiss],
   );
 
   if (loadState === "missing") {
@@ -281,11 +313,13 @@ export function CompanyRecord({
                   void patch("status", { status: next });
                 }}
                 onSeats={(n) => patch("seats", { seats: n })}
+                onSeatsEdited={() => forgetFailure("seats")}
               />
               <ModulesCard
                 company={company}
                 busy={busy}
                 saved={saved}
+                notSaved={notSaved}
                 onToggle={(key, label, on) => {
                   if (on) {
                     void patch(`module:${key}`, { module: key, enabled: true });
@@ -305,6 +339,7 @@ export function CompanyRecord({
                 company={company}
                 busy={busy}
                 saved={saved}
+                notSaved={notSaved}
                 onToggle={(feature, on) => void patch(`feature:${feature}`, { feature, enabled: on })}
               />
               <PeopleCard company={company} onSetOwner={() => setOwnerOpen(true)} />
@@ -532,6 +567,7 @@ function PlanCard({
   onPlan,
   onStatus,
   onSeats,
+  onSeatsEdited,
 }: {
   company: CompanyRecordData;
   busy: string | null;
@@ -541,6 +577,7 @@ function PlanCard({
   onPlan: (p: Plan) => void;
   onStatus: (s: Status) => void;
   onSeats: (n: number | null) => Promise<boolean>;
+  onSeatsEdited: () => void;
 }) {
   const sub = company.subscription;
   const limit = company.planLimits[company.plan] ?? UNLIMITED_USERS;
@@ -566,7 +603,7 @@ function PlanCard({
         <SavedMark at={saved.status} />
         <NotSavedMark retry={notSaved.status} />
       </Row>
-      <SeatsRow company={company} busy={busy} saved={saved} notSaved={notSaved} onSeats={onSeats} />
+      <SeatsRow company={company} busy={busy} saved={saved} notSaved={notSaved} onSeats={onSeats} onEdited={onSeatsEdited} />
       <Row label="Subscription">
         <span className="text-base text-ink">
           <SubscriptionLine company={company} datePrefs={datePrefs} />
@@ -627,12 +664,15 @@ function SeatsRow({
   saved,
   notSaved,
   onSeats,
+  onEdited,
 }: {
   company: CompanyRecordData;
   busy: string | null;
   saved: Record<string, number>;
   notSaved: Record<string, () => void>;
   onSeats: (n: number | null) => Promise<boolean>;
+  /** The box changed after a failed save: its Retry (for the old number) goes. */
+  onEdited: () => void;
 }) {
   const sub = company.subscription;
   const stored = sub?.seats ?? null;
@@ -658,9 +698,12 @@ function SeatsRow({
     }
     const next = n === 0 ? null : n;
     if (next === stored) return;
-    const ok = await onSeats(next);
-    // A failed save puts the box back to the value that is stored.
-    if (!ok) setText(stored == null ? "" : String(stored));
+    // A failed save KEEPS the typed number in the box, next to "Not saved ·
+    // Retry", so what Retry sends is the number on screen. (It used to put
+    // the stored value back, so the box read 8 or Unlimited while Retry
+    // quietly wrote 12.) A later load with a new stored value still resets
+    // the box through the seen/stored sync above.
+    await onSeats(next);
   };
   const using = `${peopleCount(company.people)} ${company.people === 1 ? "is" : "are"} using ${stored == null ? "unlimited" : stored} seats.`;
   return (
@@ -675,7 +718,12 @@ function SeatsRow({
       <input
         inputMode="numeric"
         value={text}
-        onChange={(e) => setText(e.target.value.replace(/[^\d]/g, ""))}
+        onChange={(e) => {
+          setText(e.target.value.replace(/[^\d]/g, ""));
+          // Typing a new number after a failure: the old Retry would send the
+          // old one, so it goes; leaving the box saves the new one.
+          if (notSaved.seats) onEdited();
+        }}
         onBlur={() => void commit()}
         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         placeholder="Unlimited"
@@ -696,6 +744,7 @@ function SwitchRow({
   disabled,
   onChange,
   savedAt,
+  retry,
   trailing,
 }: {
   title: string;
@@ -704,6 +753,8 @@ function SwitchRow({
   disabled?: boolean;
   onChange?: (v: boolean) => void;
   savedAt?: number;
+  /** A failed save's Retry: the card keeps "Not saved · Retry" after the toast goes, as Plan, Status and Seats do. */
+  retry?: () => void;
   trailing?: ReactNode;
 }) {
   return (
@@ -713,6 +764,7 @@ function SwitchRow({
         <p className="text-sm text-ink-2">{sub}</p>
       </div>
       <SavedMark at={savedAt} />
+      <NotSavedMark retry={retry} />
       {trailing ?? <Switch checked={checked} disabled={disabled} onChange={onChange} aria-label={title} />}
     </div>
   );
@@ -722,11 +774,13 @@ function ModulesCard({
   company,
   busy,
   saved,
+  notSaved,
   onToggle,
 }: {
   company: CompanyRecordData;
   busy: string | null;
   saved: Record<string, number>;
+  notSaved: Record<string, () => void>;
   onToggle: (key: string, label: string, on: boolean) => void;
 }) {
   return (
@@ -741,6 +795,7 @@ function ModulesCard({
           disabled={busy !== null}
           onChange={(v) => onToggle(m.key, m.label, v)}
           savedAt={saved[`module:${m.key}`]}
+          retry={notSaved[`module:${m.key}`]}
           trailing={
             m.available ? undefined : <span className="shrink-0 text-sm text-ink-2">Not set up on this server</span>
           }
@@ -754,11 +809,13 @@ function AddOnsCard({
   company,
   busy,
   saved,
+  notSaved,
   onToggle,
 }: {
   company: CompanyRecordData;
   busy: string | null;
   saved: Record<string, number>;
+  notSaved: Record<string, () => void>;
   onToggle: (feature: "byok" | "whiteLabel", on: boolean) => void;
 }) {
   if (company.plan !== "ENTERPRISE") {
@@ -777,6 +834,7 @@ function AddOnsCard({
         disabled={busy !== null}
         onChange={(v) => onToggle("byok", v)}
         savedAt={saved["feature:byok"]}
+        retry={notSaved["feature:byok"]}
       />
       <SwitchRow
         title="White label"
@@ -785,6 +843,7 @@ function AddOnsCard({
         disabled={busy !== null}
         onChange={(v) => onToggle("whiteLabel", v)}
         savedAt={saved["feature:whiteLabel"]}
+        retry={notSaved["feature:whiteLabel"]}
       />
     </Card>
   );

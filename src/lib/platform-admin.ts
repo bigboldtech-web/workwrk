@@ -1,5 +1,6 @@
+import { NextResponse } from "next/server";
 import { prisma } from "./prisma";
-import { jsonError } from "./api-helpers";
+import { NOT_STAFF_CODE } from "./api-fetch";
 
 /**
  * Platform-staff gate for the cross-tenant back-office (admin.workwrk.com).
@@ -153,6 +154,20 @@ export async function staffDenialReason(
 }
 
 /**
+ * The body of the staff gate's 403. The `code` is what the console's browser
+ * side recognises (api-fetch.ts, NOT_STAFF_CODE): a staff member removed
+ * while the console is open is told their access is gone instead of seeing
+ * an endless "Could not load... Retry". It says nothing a non-staff caller
+ * did not already know.
+ */
+export function staffGateRefusal() {
+  return NextResponse.json(
+    { error: "This account is not on the WorkwrK staff list", code: NOT_STAFF_CODE },
+    { status: 403 },
+  );
+}
+
+/**
  * API-route guard. Returns a 403 response when the caller isn't platform
  * staff, or `null` when they are (so the route continues).
  *
@@ -163,5 +178,5 @@ export async function requirePlatformAdminApi(
   session: SessionLike | null | undefined,
 ) {
   const ok = await isPlatformAdminSession(session);
-  return ok ? null : jsonError("Forbidden", 403);
+  return ok ? null : staffGateRefusal();
 }

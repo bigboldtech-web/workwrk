@@ -160,3 +160,41 @@ export function validateOwnerBody(body: unknown): OwnerBody {
   const confirm = typeof b.confirm === "string" ? b.confirm : "";
   return { ok: true, userId, reason, confirm };
 }
+
+/**
+ * Which save of a company field is the newest (the company page's autosave).
+ *
+ * A failed save offers Retry twice, on the toast and inline, and both hold
+ * the body that failed. Without a check, a staff member who then picked the
+ * value they really wanted (and it saved) and clicked the still showing
+ * Retry sent the OLD value again over the newer one: a failed Growth, a
+ * saved Enterprise, then Retry, left the company on Growth, and the same for
+ * status (a stale Active over a Suspend) and the module switches. Every
+ * write to a field takes a ticket from here, and a Retry runs only while its
+ * ticket is still the field's newest; editing the field again also retires
+ * the old ticket (`retire`).
+ */
+export interface WriteLedger {
+  /** A write to `field` starts: returns its ticket, which retires every earlier one. */
+  begin(field: string): number;
+  /** True while no later write to `field` (or `retire`) has happened since `ticket`. */
+  isLatest(field: string, ticket: number): boolean;
+  /** The person changed the field again without saving yet: earlier tickets are stale. */
+  retire(field: string): void;
+}
+
+export function createWriteLedger(): WriteLedger {
+  const latest = new Map<string, number>();
+  const bump = (field: string) => {
+    const n = (latest.get(field) ?? 0) + 1;
+    latest.set(field, n);
+    return n;
+  };
+  return {
+    begin: bump,
+    isLatest: (field, ticket) => (latest.get(field) ?? 0) === ticket,
+    retire: (field) => {
+      bump(field);
+    },
+  };
+}
