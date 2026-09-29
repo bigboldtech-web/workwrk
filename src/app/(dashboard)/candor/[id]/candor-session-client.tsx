@@ -234,9 +234,16 @@ export default function CandorSessionClient({ id }: { id: string }) {
   // Who can answer note already says who can run it. Editing and Delete
   // draft stay.
   const canEverLaunch = !s.scopes || candorHasAnyScope(s.scopes);
-  const primary = face === "editor"
-    ? (canEverLaunch ? { label: "Launch session", onClick: () => void move("ACTIVE") } : null)
-    : face === "respond" && !thanks ? { label: submitting ? "Sending" : "Submit anonymously", onClick: () => void submit(), busy: submitting } : null;
+  // The page's one blue action, as a kind rather than an object holding the
+  // handlers: the Launch handler reads the editor's draft ref, and a render
+  // value built around it trips the refs rule. The click picks the action.
+  const primaryKind: "launch" | "submit" | null = face === "editor"
+    ? (canEverLaunch ? "launch" : null)
+    : face === "respond" && !thanks ? "submit" : null;
+  const onPrimary = () => {
+    if (primaryKind === "launch") void move("ACTIVE");
+    else if (primaryKind === "submit") void submit();
+  };
   const more = faces.canManage ? [
     { label: "Copy link", icon: Link2, onClick: () => { void navigator.clipboard.writeText(`${window.location.origin}/candor/${s.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); } },
     ...(s.status === "ACTIVE" ? [{ label: "Close session", icon: Ban, onClick: () => void move("CLOSED") }] : []),
@@ -253,8 +260,8 @@ export default function CandorSessionClient({ id }: { id: string }) {
         title={s.title}
         back={back}
         titleSlot={<><h1 className="min-w-0 truncate text-title font-semibold text-ink">{s.title}</h1><ToneChip tone={st.tone} label={st.label} /></>}
-        actions={primary && !blockingLayerOpen ? (
-          <button type="button" onClick={primary.onClick} disabled={primary.busy} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-60">{primary.label}</button>
+        actions={primaryKind && !blockingLayerOpen ? (
+          <button type="button" onClick={onPrimary} disabled={primaryKind === "submit" && submitting} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-60">{primaryKind === "launch" ? "Launch session" : submitting ? "Sending" : "Submit anonymously"}</button>
         ) : undefined}
         more={more}
       />

@@ -196,13 +196,25 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   // with the sidebar open, where the labels took the KPI name's room).
   const paneRef = useRef<HTMLElement>(null);
   const paneWidth = useElementWidth(paneRef);
+  // The card's own width, as TableCard measures it: the pane minus its
+  // scrollbar (a classic scrollbar takes about 15px on Windows).
+  const [paneInner, setPaneInner] = useState(0);
+  useEffect(() => {
+    const el = paneRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const read = () => setPaneInner(el.clientWidth);
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const compactDecisions = paneWidth < 960;
   // Below 760 (1280 with the sidebar open) Target gives way and rides in the
   // Actual cell ("of 95 %"), so Approve and the decision stay in view without
   // sideways scrolling. The same threshold is Target's hideBelow, so the
   // column and the inline copy never both show or both hide.
   const TARGET_COLUMN_MIN = 760;
-  const targetInline = paneWidth > 0 && paneWidth < TARGET_COLUMN_MIN;
+  const targetInline = paneInner > 0 && paneInner < TARGET_COLUMN_MIN;
 
   const stored = kpiReviewsSurfacePrefs(prefs.home);
   const [localPrefs, setLocalPrefs] = useState<Partial<KpiReviewsSurfacePrefs>>({});
@@ -348,6 +360,9 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
   // on load: text typed after that is never taken away.
   useEffect(() => {
     const key = personId ? `${personId}:${period}` : null;
+    // A closed month takes no numbers, but still takes a manager's note on a
+    // submitted row (sent with Approve), so its drafts are never pruned.
+    if (!writable) return;
     if (!key || !lines || loadedFor !== key || prunedForRef.current === key) return;
     prunedForRef.current = key;
     const ids = new Set(lines.map((l) => l.kpiId));
@@ -355,7 +370,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
       const next = pruneKpiDraft(cur, (kpiId) => {
         if (!ids.has(kpiId)) return "none";
         if (takesInput(kpiId)) return "number";
-        return writable && records.get(kpiId)?.status === "SUBMITTED" ? "note" : "none";
+        return records.get(kpiId)?.status === "SUBMITTED" ? "note" : "none";
       });
       if (next !== cur) persistDraft(personId!, period, next);
       return next;
@@ -516,7 +531,10 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
         {display.showDescriptions && l.description ? <span className="truncate text-sm font-normal text-ink-2">{l.description}</span> : null}
       </span>
     ) },
-    { key: "target", label: "Target", width: "96px", numeric: true, hideBelow: TARGET_COLUMN_MIN, render: (l) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> },
+    // Left out, not hidden, below the threshold: the target rides in the
+    // Actual cell then, and a column forced on in the column settings would
+    // show it twice.
+    ...(targetInline ? [] : [{ key: "target", label: "Target", width: "96px", numeric: true, render: (l: KpiLine) => <span className="truncate whitespace-nowrap tabular-nums text-ink" title={l.target == null ? undefined : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}>{l.target == null ? "No target" : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`}</span> } as TableColumn<KpiLine>]),
     { key: "actual", label: "Actual", width: "140px", render: (l) => {
       const r = records.get(l.kpiId);
       const tgt = l.target == null ? null : `${num(l.target)}${l.unit ? ` ${l.unit}` : ""}`;

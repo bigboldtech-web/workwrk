@@ -18,6 +18,7 @@ import { canEditGoal, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import { GOAL_EDIT_REFUSED, mayEditGoal, type GoalRightsActor, type GoalRightsTarget } from "@/lib/goals/goal-rights";
 import type { Prisma } from "@/generated/prisma";
+import { getUserTagIds } from "@/lib/user-tags";
 
 export const GOAL_AUDIENCE_TYPES = ["USER", "DEPARTMENT", "ROLE", "TAG"] as const;
 export type GoalAudienceType = (typeof GOAL_AUDIENCE_TYPES)[number];
@@ -282,17 +283,24 @@ export async function canSeeGoal(
   const callerId = getUserId(session);
   if (okr.ownerId === callerId) return true;
 
-  if (okr.level === "DEPARTMENT" && okr.departmentId) {
-    const me = await prisma.user.findUnique({
-      where: { id: callerId },
-      select: { departmentId: true },
-    });
-    if (me?.departmentId === okr.departmentId) return true;
-  }
+  const me = await prisma.user.findUnique({
+    where: { id: callerId },
+    select: { departmentId: true, roleId: true },
+  });
+  if (okr.level === "DEPARTMENT" && okr.departmentId && me?.departmentId === okr.departmentId) return true;
+
+  // The caller in the goal's audience, matched on their own user row,
+  // department, role and tags whatever their status (on leave, probation,
+  // notice), with the exact fragments GET /api/okrs lists by, so a row the
+  // list shows never opens onto a 404.
+  const tagIds = await getUserTagIds(getOrgId(session), callerId);
+  const direct = await prisma.oKR.count({
+    where: { id: okr.id, OR: memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds }) },
+  });
+  if (direct > 0) return true;
 
   // Resolved at read time, dept/role audiences follow today's org chart.
   const members = await resolveGoalMembers(okr.id);
-  if (members.includes(callerId)) return true;
 
   // A manager at any tier, or anyone with people reporting to them (Phase 6:
   // "manager" is a fact about the org chart). The same rule GET /api/okrs
@@ -341,6 +349,41 @@ export function memberVisibilityOr(me: {
   if (me.roleId) or.push({ assignees: { some: { roleId: me.roleId } } });
   if (me.tagIds && me.tagIds.length > 0) or.push({ assignees: { some: { tagId: { in: me.tagIds } } } });
   return or;
+}
+
+/**
+ * The three-door goal visibility of GET /api/okrs as a WHERE fragment, for
+ * every reader that lists goals (the Goals list, Ask AI's goal search): null
+ * for an org-wide caller, who sees everything. Everyone sees Company goals,
+ * their own, their department's and the ones whose audience names them; a
+ * manager, or anyone with reports, also sees their tree's (and the manager
+ * tier the unowned ones). Pass what the caller already loaded to skip the
+ * lookups.
+ */
+export async function goalVisibilityOr(
+  session: unknown,
+  pre: { me?: { departmentId: string | null; roleId: string | null } | null; tagIds?: string[]; treeIds?: string[] } = {},
+): Promise<Prisma.OKRWhereInput[] | null> {
+  if (isOrgWideAlignment(session)) return null;
+  const orgId = getOrgId(session);
+  const callerId = getUserId(session);
+  const me = pre.me !== undefined
+    ? pre.me
+    : await prisma.user.findUnique({ where: { id: callerId }, select: { departmentId: true, roleId: true } });
+  const tagIds = pre.tagIds ?? (await getUserTagIds(orgId, callerId));
+  const treeIds = pre.treeIds ?? (await getTeamUserIds(orgId, callerId));
+  const hasTree = isManager(session) || treeIds.length > 1;
+  const visible: Prisma.OKRWhereInput[] = [{ level: "COMPANY" }, { ownerId: callerId }];
+  if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
+  visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds }));
+  if (hasTree) {
+    visible.push({ ownerId: { in: treeIds } });
+    // Unowned goals only for the manager tier (seesUnownedGoals): one
+    // report must not open every ownerless goal in the org.
+    if (seesUnownedGoals({ manager: isManager(session) })) visible.push({ ownerId: null });
+    visible.push(...(await teamAudienceVisibilityOr(treeIds)));
+  }
+  return visible;
 }
 
 /**

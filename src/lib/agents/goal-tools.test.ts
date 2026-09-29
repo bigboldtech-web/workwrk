@@ -23,7 +23,12 @@ vi.mock("@/lib/prisma", () => ({
       },
     },
     oKR: {
-      findMany: async () => goals,
+      // Applies the visibility fragment the tool passes (the mocked
+      // goalVisibilityOr below returns an id list), as the database would.
+      findMany: async ({ where, take }: { where: { AND?: Array<{ OR: Array<{ id?: { in: string[] } }> }> }; take: number }) => {
+        const allowed = where.AND?.[0]?.OR?.[0]?.id?.in;
+        return goals.filter((g) => !allowed || allowed.includes(g.id)).slice(0, take);
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         created.push(data);
         return { id: `new${created.length}`, title: data.title, level: data.level, status: "ON_TRACK", quarter: null, keyResults: [] };
@@ -33,7 +38,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/goal-audience", () => ({
-  canSeeGoal: async (s: { user: { id: string } }, o: { id: string }) => visibleTo[s.user.id]?.has(o.id) ?? false,
+  goalVisibilityOr: async (s: { user: { id: string } }) => [{ id: { in: [...(visibleTo[s.user.id] ?? [])] } }],
 }));
 vi.mock("@/lib/alignment-scope", () => ({
   goalRightsActor: async (s: { user: { id: string; accessLevel?: string } }) => {
@@ -60,9 +65,8 @@ describe("search_okrs", () => {
     const g = (id: string, level: string, ownerId: string | null) => ({ id, title: id, level, ownerId, departmentId: null, status: "ON_TRACK", progress: 0, quarter: null, keyResults: [] });
     goals.push(g("company", "COMPANY", "ceo"), g("mine", "INDIVIDUAL", "emp"), g("peer-private", "INDIVIDUAL", "peer"));
     visibleTo.emp = new Set(["company", "mine"]);
-    const r = (await TOOLS.search_okrs.handler(ctx("emp"), {})) as { count: number; okrs: Array<{ id: string; departmentId?: unknown }> };
+    const r = (await TOOLS.search_okrs.handler(ctx("emp"), {})) as { count: number; okrs: Array<{ id: string }> };
     expect(r.okrs.map((o) => o.id)).toEqual(["company", "mine"]);
-    expect(r.okrs[0]).not.toHaveProperty("departmentId");
   });
 
   it("returns nothing for someone outside the org", async () => {

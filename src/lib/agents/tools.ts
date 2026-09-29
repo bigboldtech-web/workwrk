@@ -22,7 +22,7 @@ import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
 import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
 import { legacyIsManagerLevel, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
-import { canSeeGoal } from "@/lib/goal-audience";
+import { goalVisibilityOr } from "@/lib/goal-audience";
 import { goalRightsActor } from "@/lib/alignment-scope";
 import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { persistGoalRollupChain } from "@/lib/alignment";
@@ -495,12 +495,15 @@ const searchOkrs: ToolDefinition = {
     const limit = Math.min(50, Number(input.limit ?? 20));
     const session = await callerSession(ctx);
     if (!session) return { count: 0, okrs: [] };
-    // Only goals the person could open on the Goals pages (canSeeGoal): an
-    // Individual goal is not org public, and asking the assistant must never
-    // be a way round that. Read a wider window, then keep the visible ones.
-    const window = await prisma.oKR.findMany({
+    // Only goals the person could open on the Goals pages: an Individual goal
+    // is not org public, and asking the assistant must never be a way round
+    // that. The Goals list's own visibility rule, in the query, so nothing
+    // visible is missed and nothing hidden is read.
+    const visible = await goalVisibilityOr(session);
+    const okrs = await prisma.oKR.findMany({
       where: {
         organizationId: ctx.orgId,
+        ...(visible ? { AND: [{ OR: visible }] } : {}),
         ...(input.level ? { level: toGoalLevel(input.level) } : {}),
         ...(input.status ? { status: input.status as string } : {}),
         ...(input.quarter ? { quarter: input.quarter as string } : {}),
@@ -508,19 +511,12 @@ const searchOkrs: ToolDefinition = {
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
       },
       select: {
-        id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true, departmentId: true,
+        id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true,
         keyResults: { select: { id: true, title: true, progress: true, currentValue: true, targetValue: true, unit: true } },
       },
       orderBy: [{ progress: "asc" }, { createdAt: "desc" }],
-      take: 500,
+      take: limit,
     });
-    const okrs: Array<Omit<(typeof window)[number], "departmentId">> = [];
-    for (const o of window) {
-      if (okrs.length >= limit) break;
-      if (!(await canSeeGoal(session, o))) continue;
-      const { departmentId: _dept, ...row } = o;
-      okrs.push(row);
-    }
     return { count: okrs.length, okrs };
   },
 };

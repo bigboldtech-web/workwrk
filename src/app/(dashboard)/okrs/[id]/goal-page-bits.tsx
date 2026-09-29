@@ -108,7 +108,7 @@ export function GoalChildUnlink({ childId, childTitle }: { childId: string; chil
   const unlink = async () => {
     const ok = await confirm({
       title: `Take "${childTitle}" out of this goal?`,
-      description: "It stays a goal of its own. This goal's progress stops counting it, and the change shows in both goals' activity.",
+      description: "It stays a goal of its own. This goal's progress stops counting it, and the change is recorded in the activity log under your name.",
       confirmLabel: "Take it out",
     });
     if (ok) await send();

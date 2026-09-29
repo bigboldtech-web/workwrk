@@ -70,12 +70,18 @@ export function anchorVisibleIn(anchor: AnchorBox, clips: AnchorBox[]): boolean 
   return clips.every((c) => anchor.bottom > c.top && anchor.top < c.bottom && anchor.right > c.left && anchor.left < c.right);
 }
 
-/** The boxes that clip `el`: every ancestor whose overflow is not visible. */
+/**
+ * The boxes that clip `el`: every ancestor whose overflow is not visible, up
+ * to the first position fixed one. A fixed box (the TableCard bulk bar) is
+ * placed against the viewport, so the overflow of the boxes above it never
+ * clips it or what it holds.
+ */
 function clipBoxes(el: HTMLElement): AnchorBox[] {
   const out: AnchorBox[] = [];
   for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
     const cs = getComputedStyle(n);
     if (cs.overflowX !== "visible" || cs.overflowY !== "visible") out.push(n.getBoundingClientRect());
+    if (cs.position === "fixed") break;
   }
   return out;
 }

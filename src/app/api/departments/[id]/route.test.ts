@@ -8,6 +8,7 @@
 // mocked: the test reads what the route counted, what it refused and what it
 // wrote.
 
+import { legacyTestSession } from "@/lib/access/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Dept = { id: string; current: number; subs: number };
@@ -41,7 +42,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
-  getSessionOrFail: async () => ({ error: null, session: { user: { accessLevel: "COMPANY_ADMIN" } } }),
+  getSessionOrFail: async () => ({ error: null, session: legacyTestSession("admin-1", "COMPANY_ADMIN", "org-1") }),
   getOrgId: () => "org-1",
 }));
 vi.mock("@/lib/people/department-access.server", () => ({ mayWriteDepartments: async () => true }));

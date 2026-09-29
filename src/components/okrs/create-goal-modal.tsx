@@ -183,6 +183,15 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // of today (kept readable by name and keepable even when the viewer can
   // no longer attach to it; the API only checks a changed parent).
   const parentChoices = (parents ?? []).filter((p) => attachable(p, selLevel) || p.id === goal?.parentId);
+  // A parent picked for one level (a Company goal a Department goal may go
+  // under) goes when the level changes to one it cannot take, before the
+  // save is refused for it. The goal's own current parent is kept.
+  const changeLevel = (next: GoalLevel) => {
+    setSelLevel(next);
+    if (!parents || !parentId || parentId === goal?.parentId) return;
+    const p = parents.find((x) => x.id === parentId);
+    if (p && !attachable(p, next)) setParentId(null);
+  };
   // The why, shown only when goals one level up exist but none will take
   // this one (an org with none yet needs no explanation).
   const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => attachable(p, selLevel));
@@ -269,7 +278,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
           {mayAssign ? (
             <div className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>Level</span>
-              <SegmentedControl label="Level" value={selLevel} options={LEVEL_OPTIONS} onChange={(v) => setSelLevel(v)} />
+              <SegmentedControl label="Level" value={selLevel} options={LEVEL_OPTIONS} onChange={(v) => changeLevel(v)} />
               {companyBlocked ? (
                 <span className="text-sm font-normal text-ink-2">
                   Only an Admin, the People team or the goal&apos;s owner can make a Company goal. Make yourself the owner, or ask an Admin.
