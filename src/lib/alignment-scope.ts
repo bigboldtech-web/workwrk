@@ -109,15 +109,20 @@ export async function goalRightsActor(session: unknown, chainIds?: readonly stri
   const level = sessionAccessLevel(session);
   const admin = isOrgAdminLevel(session);
   const manager = isManager(session);
-  const [peopleTeam, chain] = await Promise.all([
+  const [peopleTeam, chain, directReports] = await Promise.all([
     isGoalPeopleTeam(session, level, admin),
     !manager || admin
       ? Promise.resolve(null)
       : chainIds
         ? Promise.resolve(new Set(chainIds))
         : getTeamUserIds(getOrgId(session), callerId).then((ids) => new Set(ids)),
+    // Someone with a report manages people even below the manager tier (the
+    // link rule reads it); the tier itself already counts, so skip the query.
+    manager
+      ? Promise.resolve(0)
+      : prisma.user.count({ where: { organizationId: getOrgId(session), managerId: callerId, deletedAt: null, status: { not: "INACTIVE" } } }),
   ]);
-  return { callerId, admin, peopleTeam, manager, agent: isAgentOf(level), chain };
+  return { callerId, admin, peopleTeam, manager, agent: isAgentOf(level), chain, leadsPeople: manager || directReports > 0 };
 }
 
 /**

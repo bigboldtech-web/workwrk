@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canDeleteGoal } from "@/lib/alignment-scope";
+import { canDeleteGoal, canEditGoal } from "@/lib/alignment-scope";
 import {
   computeGoalRollups,
   enrichKeyResults,
@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           kpi: { select: KR_KPI_SELECT },
         },
       },
-      children: { select: { id: true, title: true, progress: true, level: true } },
+      children: { select: { id: true, title: true, progress: true, level: true, ownerId: true, departmentId: true } },
     },
   });
   if (!okr) return jsonError("Not found", 404);
@@ -45,6 +45,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     computeGoalRollups(orgId),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
+  // Only the goals under this one that the caller may open are named (the
+  // goal page's rule): a Company goal is read by everyone, and must not list
+  // the titles of Individual goals someone hung under it. The rest are
+  // counted, since they still move this goal's progress.
+  // A goal's editors see every goal under it: those goals move its number,
+  // so its owner must be able to see and unlink them.
+  const editor = await canEditGoal(session, okr);
+  const visibleChildren = editor ? okr.children : (await Promise.all(okr.children.map(async (c) => ((await canSeeGoal(session, c)) ? c : null))))
+    .filter((c): c is NonNullable<typeof c> => c !== null);
   return jsonSuccess({
     ...okr,
     keyResults,
@@ -54,10 +63,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // Whether THIS viewer may delete the goal, same predicate the DELETE
     // handler enforces, surfaced so the client can show/hide its affordance.
     canDelete: await canDeleteGoal(session, okr),
-    children: okr.children.map((c) => {
+    children: visibleChildren.map(({ ownerId: _o, departmentId: _d, ...c }) => {
       const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
       return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
     }),
+    hiddenChildren: okr.children.length - visibleChildren.length,
     audience: audiences.get(okr.id),
   });
 }

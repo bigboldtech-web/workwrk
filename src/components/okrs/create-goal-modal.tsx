@@ -80,10 +80,14 @@ interface CreateGoalModalProps {
   onSaved: (id?: string) => void;
 }
 
-// canAttach is the list row's canEdit flag: attaching a goal re-weights the
-// parent's progress, so POST and PATCH /api/okrs accept a new parent only
-// when the viewer may edit it (mayAttachUnderGoal in src/lib/goal-audience).
-type ParentOption = { id: string; title: string; level: GoalLevel; canAttach: boolean };
+// A parent is offered when the save will take it (mayLinkUnderGoal in
+// src/lib/goals/goal-rights.ts): the list row's canEdit, or, for a
+// Department goal under a Company goal, its canLinkTeamGoals (someone who
+// manages people lines their team's goal up under the company's).
+type ParentOption = { id: string; title: string; level: GoalLevel; canEdit: boolean; canLinkTeamGoals: boolean };
+function attachable(p: ParentOption, childLevel: GoalLevel): boolean {
+  return p.canEdit || (p.level === "COMPANY" && childLevel === "DEPARTMENT" && p.canLinkTeamGoals);
+}
 
 function toDateInput(iso?: string | null): string | null {
   return iso ? iso.slice(0, 10) : null;
@@ -125,6 +129,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   const [parentId, setParentId] = useState<string | null>(goal?.parentId ?? null);
   const [parentOpen, setParentOpen] = useState(Boolean(focusParent));
   const [parents, setParents] = useState<ParentOption[] | null>(null);
+  // The server's own Company-goal right (the People team list included),
+  // read from the same list call; null until it answers.
+  const [mayMakeCompany, setMayMakeCompany] = useState<boolean | null>(null);
   const [startDate, setStartDate] = useState<string | null>(toDateInput(goal?.startDate));
   const [endDate, setEndDate] = useState<string | null>(toDateInput(goal?.endDate));
   const [cadence, setCadence] = useState<Cadence>(
@@ -139,7 +146,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // own owner (src/lib/goals/goal-rights.ts), and POST and PATCH refuse to
   // make one the saver could not then fix. Say so before the save, not after.
   const companyBlocked = mayAssign && selLevel === "COMPANY" && goal?.level !== "COMPANY" &&
-    !legacyIsHrAdminLevel(accessLevel) && (!owner || owner.id !== myId);
+    !(mayMakeCompany ?? legacyIsHrAdminLevel(accessLevel)) && (!owner || owner.id !== myId);
 
   // Part of: goals one level up that the viewer can see (Company goals for
   // a Department goal; Company or Department goals for an Individual one).
@@ -153,18 +160,21 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     // Every page, not the first 100: in a large org a later parent must
     // still be choosable, and the current parent must still read by name.
     void (async () => {
-      const all: Array<Omit<ParentOption, "canAttach"> & { canEdit?: boolean }> = [];
+      const all: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }> = [];
+      let company: boolean | null = null;
       for (let page = 1; page <= 200; page += 1) {
         const qs = new URLSearchParams({ page: String(page), pageSize: "100", level: parentLevels.join(","), sort: "name" });
-        const r = await apiFetch<{ data: Array<Omit<ParentOption, "canAttach"> & { canEdit?: boolean }>; pagination?: { total: number } }>(`/api/okrs?${qs}`, { cache: "no-store" });
+        const r = await apiFetch<{ data: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }>; pagination?: { total: number }; mayMakeCompanyGoals?: boolean }>(`/api/okrs?${qs}`, { cache: "no-store" });
         if (!live) return;
         if (!r.ok) break;
+        if (company === null && typeof r.data.mayMakeCompanyGoals === "boolean") company = r.data.mayMakeCompanyGoals;
         all.push(...(r.data.data ?? []));
         const total = r.data.pagination?.total ?? all.length;
         if ((r.data.data ?? []).length === 0 || all.length >= total) break;
       }
       if (!live) return;
-      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level, canAttach: g.canEdit === true })));
+      setParents(all.filter((g) => g.id !== goal?.id).map((g) => ({ id: g.id, title: g.title, level: g.level, canEdit: g.canEdit === true, canLinkTeamGoals: g.canLinkTeamGoals === true })));
+      setMayMakeCompany(company);
     })();
     return () => { live = false; };
   }, [open, parentLevels, goal?.id]);
@@ -172,10 +182,10 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // Offered: the goals the save will accept, plus the goal this one is part
   // of today (kept readable by name and keepable even when the viewer can
   // no longer attach to it; the API only checks a changed parent).
-  const parentChoices = (parents ?? []).filter((p) => p.canAttach || p.id === goal?.parentId);
+  const parentChoices = (parents ?? []).filter((p) => attachable(p, selLevel) || p.id === goal?.parentId);
   // The why, shown only when goals one level up exist but none will take
   // this one (an org with none yet needs no explanation).
-  const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => p.canAttach);
+  const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => attachable(p, selLevel));
 
   const initial = useMemo(() => JSON.stringify({
     t: goal?.title ?? "", d: goal?.description ?? "", l: goal?.level ?? level, p: goal?.parentId ?? null,
@@ -301,7 +311,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
             </div>
             {noAttachable ? (
               <span className="text-sm font-normal text-ink-2">
-                Only a goal you can edit can hold this one. To link it to another goal, ask that goal&apos;s owner or your manager.
+                {selLevel === "DEPARTMENT"
+                  ? "A Department goal goes under a goal you can edit, or under a Company goal when you manage people. To link it elsewhere, ask that goal's owner or your manager."
+                  : "This goal goes under a goal you can edit. To link it to another goal, ask that goal's owner or your manager."}
               </span>
             ) : null}
           </div>

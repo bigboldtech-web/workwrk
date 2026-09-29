@@ -361,20 +361,24 @@ describe("parseBirdseyeQuery", () => {
 });
 
 describe("dates", () => {
-  const now = new Date("2026-09-24T12:00:00Z");
+  // Due days are read where the viewer is (the local day), so every instant
+  // here is built from local wall-clock parts; UTC literals would land on a
+  // different day east or west of UTC and the test would pass only in CI.
+  const local = (y: number, m: number, d: number, h: number) => new Date(y, m - 1, d, h).toISOString();
+  const now = new Date(2026, 8, 24, 12);
 
   it("speaks the product's due-chip words", () => {
-    expect(dueLabel("2026-09-24T09:00:00Z", now)).toBe("Today");
-    expect(dueLabel("2026-09-25T09:00:00Z", now)).toBe("Tomorrow");
-    expect(dueLabel("2026-10-08T09:00:00Z", now)).toBe("8 Oct");
-    expect(dueLabel("2027-01-02T09:00:00Z", now)).toBe("2 Jan 2027");
+    expect(dueLabel(local(2026, 9, 24, 9), now)).toBe("Today");
+    expect(dueLabel(local(2026, 9, 25, 9), now)).toBe("Tomorrow");
+    expect(dueLabel(local(2026, 10, 8, 9), now)).toBe("8 Oct");
+    expect(dueLabel(local(2027, 1, 2, 9), now)).toBe("2 Jan 2027");
     expect(dueLabel(null, now)).toBeNull();
   });
 
   it("calls an open task overdue once its day has passed, never a closed one", () => {
-    expect(isOverdue("2026-09-23T23:00:00Z", now, true)).toBe(true);
-    expect(isOverdue("2026-09-24T01:00:00Z", now, true)).toBe(false);
-    expect(isOverdue("2026-09-20T00:00:00Z", now, false)).toBe(false);
+    expect(isOverdue(local(2026, 9, 23, 23), now, true)).toBe(true);
+    expect(isOverdue(local(2026, 9, 24, 1), now, true)).toBe(false);
+    expect(isOverdue(local(2026, 9, 20, 0), now, false)).toBe(false);
     expect(isOverdue(null, now, true)).toBe(false);
   });
 });

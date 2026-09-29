@@ -16,7 +16,6 @@ import {
 import {
   addGoalAssignees,
   canSeeGoal,
-  mayAttachUnderGoal,
   memberVisibilityOr,
   seesUnownedGoals,
   summarizeGoalAudiences,
@@ -25,9 +24,10 @@ import {
   validateGoalAssignees,
   type GoalAudienceRef,
 } from "@/lib/goal-audience";
-import { GOAL_EDIT_REFUSED, mayDeleteGoal, mayEditGoal, type GoalRightsActor } from "@/lib/goals/goal-rights";
+import { GOAL_EDIT_REFUSED, mayDeleteGoal, mayEditGoal, mayLinkUnderGoal, mayUnlinkFromGoal, type GoalRightsActor } from "@/lib/goals/goal-rights";
 import { getUserTagIds } from "@/lib/user-tags";
 import { logActivity } from "@/lib/activity";
+import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { GoalLevel, Prisma } from "@/generated/prisma";
@@ -49,7 +49,21 @@ const COMPANY_LEVEL_REFUSED =
   "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin.";
 
 const ATTACH_REFUSED =
-  "You can only make this part of a goal you can edit. Ask that goal's owner or your manager to link it.";
+  "You can only make this part of a goal you can edit, or line a Department goal you run up under a Company goal. Ask that goal's owner or your manager to link it.";
+
+/** The parent's activity names every link and unlink, and who made it, so a
+ *  goal that moves a Company goal's progress is never a silent change. */
+function logGoalLink(kind: "linked" | "unlinked", opts: { orgId: string; actorId: string; parentId: string; childId: string; childTitle: string }) {
+  logActivity({
+    type: kind === "linked" ? "okr_child_linked" : "okr_child_unlinked",
+    actorId: opts.actorId,
+    organizationId: opts.orgId,
+    description: kind === "linked" ? `Made "${opts.childTitle}" part of this goal` : `Took "${opts.childTitle}" out of this goal`,
+    targetId: opts.parentId,
+    targetType: "okr",
+    metadata: { childId: opts.childId },
+  });
+}
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -101,6 +115,9 @@ export async function GET(req: NextRequest) {
   // new hires inherit and leavers drop out); a manager additionally sees
   // their report tree's (owned or audience-covered, plus unowned
   // objectives, which managers create); admin, exec and HR see the org.
+  // Kept for the child lists below: the same three doors, without the view
+  // filters, decide which goals under a listed goal may be named.
+  let visibilityOr: Prisma.OKRWhereInput[] | null = null;
   if (!orgWide) {
     const visible: Prisma.OKRWhereInput[] = [
       { level: "COMPANY" },
@@ -117,6 +134,7 @@ export async function GET(req: NextRequest) {
       visible.push(...(await teamAudienceVisibilityOr(treeIds)));
     }
     and.push({ OR: visible });
+    visibilityOr = visible;
   }
   if (mineOnly) {
     // My goals also carries the viewer's own department's DEPARTMENT goals:
@@ -304,10 +322,17 @@ export async function GET(req: NextRequest) {
   // Per-goal Edit and Delete gates, resolved ONCE for the whole list (one
   // chain walk, one creator query): the exact rules PATCH /api/okrs and
   // DELETE /api/okrs/[id] enforce (src/lib/goals/goal-rights.ts), so a row
-  // only offers what the API will honor. Edit is also the Part of rule
-  // (mayAttachUnderGoal), so the goal modal's picker offers only parents
-  // the save will accept.
+  // only offers what the API will honor. Edit and canLinkTeamGoals are the
+  // Part of rule (mayLinkUnderGoal), so the goal modal's picker offers only
+  // parents the save will accept.
   const rightsActor: GoalRightsActor = await goalRightsActor(session, treeIds);
+  // Which goals under the listed ones the viewer may open (one query for the
+  // page): a Company goal is listed for everyone, and its child list must
+  // not name Individual goals the viewer could not open. The rest are counted.
+  const childIds = pageOkrs.flatMap((o) => o.children.map((c) => c.id));
+  const visibleChildIds = visibilityOr && childIds.length
+    ? new Set((await prisma.oKR.findMany({ where: { organizationId: orgId, id: { in: childIds }, OR: visibilityOr }, select: { id: true } })).map((r) => r.id))
+    : null;
   const creators = await goalCreatorIds(orgId, pageIds);
   const rightsOf = (okr: { id: string; level: string; ownerId: string | null }) => ({
     level: okr.level,
@@ -324,6 +349,9 @@ export async function GET(req: NextRequest) {
       owner: okr.ownerId ? ownerById.get(okr.ownerId) ?? null : null,
       canDelete: mayDeleteGoal(rightsActor, rightsOf(okr)),
       canEdit: mayEditGoal(rightsActor, rightsOf(okr)),
+      // Whether a Department goal the viewer can edit may be made part of
+      // this one (mayLinkUnderGoal): the goal modal's Part of picker reads it.
+      canLinkTeamGoals: mayLinkUnderGoal(rightsActor, rightsOf(okr), { level: "DEPARTMENT", editable: true }),
       ...(withEffort || teamOnly ? { effort: e ? { totalHours: e.totalHours, tasksOpen: e.tasksOpen, lastActivityAt: e.lastActivityAt } : { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
       progress: a.progress,
       status: a.rollupStatus,
@@ -335,10 +363,14 @@ export async function GET(req: NextRequest) {
       // "NONE" = nothing measurable and nothing hand-set: clients show
       // "Not measured" instead of a fake 0%.
       progressSource: a.progressSource,
-      children: okr.children.map((c) => {
+      // A goal's editors see every goal under it (the ones moving its
+      // number are theirs to know about and to unlink); others see only the
+      // ones they may open.
+      children: okr.children.filter((c) => !visibleChildIds || visibleChildIds.has(c.id) || mayEditGoal(rightsActor, rightsOf(okr))).map((c) => {
         const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
         return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
       }),
+      hiddenChildren: visibleChildIds && !mayEditGoal(rightsActor, rightsOf(okr)) ? okr.children.filter((c) => !visibleChildIds.has(c.id)).length : 0,
       audience: audiences.get(okr.id) ?? { members: [], totalMembers: 0, assigneeCount: 0 },
     };
   });
@@ -371,6 +403,9 @@ export async function GET(req: NextRequest) {
     canTeam: orgWide || hasTree,
     // The owner and level fields: the tier POST and PATCH accept them from.
     mayAssignOwners: isManager(session),
+    // Whether this viewer may make a Company goal owned by someone else (the
+    // Company-goal right): the goal modal says so before a save, never after.
+    mayMakeCompanyGoals: mayEditGoal(rightsActor, { level: "COMPANY", ownerId: null, creatorId: null }),
   });
 }
 
@@ -439,9 +474,13 @@ export async function POST(req: NextRequest) {
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
     // A child re-weights its parent's stored progress, so creating a goal
-    // under one needs the right to edit that parent (mayAttachUnderGoal).
+    // under one needs the link right (mayLinkUnderGoal): the right to edit
+    // that parent, or a manager lining a Department goal up under a Company
+    // goal. The new goal is theirs to edit when they could fix it after.
     const parentCreator = (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null;
-    if (!mayAttachUnderGoal(rightsActor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator })) {
+    const newLevel = normalizeGoalLevel(level) ?? "INDIVIDUAL";
+    const childEditable = mayEditGoal(rightsActor, { level: newLevel, ownerId: effectiveOwnerId, creatorId: getUserId(session) });
+    if (!mayLinkUnderGoal(rightsActor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator }, { level: newLevel, editable: childEditable })) {
       return jsonError(ATTACH_REFUSED, 403);
     }
   }
@@ -541,18 +580,11 @@ export async function POST(req: NextRequest) {
     targetId: okr.id,
     targetType: "okr",
   });
+  if (okr.parentId) logGoalLink("linked", { orgId, actorId: getUserId(session), parentId: okr.parentId, childId: okr.id, childTitle: okr.title });
 
   // Notify owner if assigned to someone else
   if (okr.ownerId && okr.ownerId !== getUserId(session)) {
-    await prisma.notification.create({
-      data: {
-        userId: okr.ownerId,
-        type: "okr_assigned",
-        title: "You were given a goal",
-        message: okr.title,
-        link: `/okrs/${okr.id}`,
-      },
-    }).catch((err) => console.error("[OKR] Notification failed:", err));
+    await notifyGoalAssigned(okr.ownerId, okr);
 
     // Email the owner
     try {
@@ -606,17 +638,29 @@ export async function PATCH(req: NextRequest) {
   const existing = await prisma.oKR.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("OKR not found", 404);
 
-  // A goal the caller cannot see answers exactly like a missing one, so a
-  // refused edit never confirms that it exists.
-  if (!(await canSeeGoal(session, existing))) return jsonError("OKR not found", 404);
-
   // Edit gate: mayEditGoal (src/lib/goals/goal-rights.ts), the rule the
   // list's canEdit flag and the goal page read too.
   const actor = await goalRightsActor(session);
   const creatorId = (await goalCreatorIds(orgId, [id])).get(id) ?? null;
-  if (!mayEditGoal(actor, { level: existing.level, ownerId: existing.ownerId, creatorId })) {
-    return jsonError(GOAL_EDIT_REFUSED, 403);
+  const childEditable = mayEditGoal(actor, { level: existing.level, ownerId: existing.ownerId, creatorId });
+  // One narrow door for someone who cannot edit this goal: taking it out
+  // from under a parent they can edit (the Unlink on the parent's list of
+  // goals, which names every goal under it to that goal's editors). Nothing
+  // else in the body may ride along.
+  const onlyUnlink = Object.keys(rawUpdates).length === 1 && "parentId" in rawUpdates &&
+    (rawUpdates.parentId === null || rawUpdates.parentId === "") && !!existing.parentId;
+  let parentEditorUnlink = false;
+  if (!childEditable && onlyUnlink) {
+    const parent = await prisma.oKR.findFirst({ where: { id: existing.parentId!, organizationId: orgId }, select: { id: true, level: true, ownerId: true } });
+    const parentCreator = parent ? (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null : null;
+    parentEditorUnlink = mayUnlinkFromGoal(actor, parent ? { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator } : null, false);
   }
+
+  // A goal the caller cannot see answers exactly like a missing one, so a
+  // refused edit never confirms that it exists. The parent's editors are
+  // the exception: their goal's list already names it to them.
+  if (!parentEditorUnlink && !(await canSeeGoal(session, existing))) return jsonError("OKR not found", 404);
+  if (!childEditable && !parentEditorUnlink) return jsonError(GOAL_EDIT_REFUSED, 403);
 
   const updates: Record<string, unknown> = {};
   for (const key of OKR_PATCH_KEYS) {
@@ -673,13 +717,14 @@ export async function PATCH(req: NextRequest) {
     });
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
     // Attaching re-weights the parent's stored progress, so a NEW parent
-    // needs the right to edit it (mayAttachUnderGoal). The modal resends
+    // needs the link right (mayLinkUnderGoal). The modal resends
     // the unchanged parentId on every save, and keeping a parent the
     // caller can no longer edit changes nothing, so only a change is
     // checked. Clearing Part of ("") never reaches here.
     const parentCreator = (await goalCreatorIds(orgId, [parent.id])).get(parent.id) ?? null;
+    const childLevel = (typeof updates.level === "string" ? updates.level : null) ?? existing.level;
     if (updates.parentId !== existing.parentId &&
-        !mayAttachUnderGoal(actor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator })) {
+        !mayLinkUnderGoal(actor, { level: parent.level, ownerId: parent.ownerId, creatorId: parentCreator }, { level: childLevel, editable: childEditable })) {
       return jsonError(ATTACH_REFUSED, 403);
     }
     // Part of can never point below the goal itself: walk up from the new
@@ -743,6 +788,11 @@ export async function PATCH(req: NextRequest) {
   const rollup = await persistGoalRollupChain(id);
   if (existing.parentId && existing.parentId !== updated.parentId) {
     await persistGoalRollupChain(existing.parentId);
+  }
+  if (existing.parentId !== updated.parentId) {
+    const who = getUserId(session);
+    if (existing.parentId) logGoalLink("unlinked", { orgId, actorId: who, parentId: existing.parentId, childId: id, childTitle: updated.title });
+    if (updated.parentId) logGoalLink("linked", { orgId, actorId: who, parentId: updated.parentId, childId: id, childTitle: updated.title });
   }
 
   return jsonSuccess({

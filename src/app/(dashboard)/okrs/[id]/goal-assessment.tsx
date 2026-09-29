@@ -79,8 +79,11 @@ export function useGoalServerRender(okrId: string): number {
 
 const CADENCE_WORD: Record<string, string> = { WEEKLY: "weekly", BIWEEKLY: "every two weeks", MONTHLY: "monthly" };
 
-export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, onCheckIn }: {
+export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, canEdit = true, onCheckIn }: {
   okrId: string;
+  /** False for a viewer who cannot edit the goal: the next step is the
+   *  owner's to take (adding targets, fixing dates), so it is labelled so. */
+  canEdit?: boolean;
   initialVerdict: GoalVerdict;
   /** Moves whenever the server re-renders the page; a new key refetches. */
   refreshKey?: string;
@@ -148,7 +151,7 @@ export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence
           ) : null}
           <p className="m-0 flex items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink">
             <ArrowRight className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
-            <span><span className="font-medium">Next:</span> {data.recommendation}</span>
+            <span><span className="font-medium">{canEdit ? "Next:" : "Next for the owner:"}</span> {data.recommendation}</span>
           </p>
           <p className="m-0 flex items-center gap-1 text-xs text-ink-2">
             {data.source === "ai" ? <><Sparkles className="h-3 w-3" aria-hidden /> AI summary from live goal data</> : "Assessed from live goal data"}

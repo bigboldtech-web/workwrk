@@ -244,7 +244,9 @@ export async function summarizeGoalAudiences(
  * (mayEditGoal, src/lib/goals/goal-rights.ts): without this, any member
  * could drag a Company goal the whole org reads by attaching their own 1%
  * goal to it. Clearing Part of is an edit of the child only, and never
- * reaches this rule.
+ * reaches this rule. The goal routes read the wider mayLinkUnderGoal
+ * (src/lib/goals/goal-rights.ts), which adds one door to this: someone who
+ * manages people lines a Department goal up under a Company goal.
  */
 export function mayAttachUnderGoal(actor: GoalRightsActor, parent: GoalRightsTarget): boolean {
   return mayEditGoal(actor, parent);

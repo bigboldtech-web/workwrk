@@ -13,7 +13,9 @@
 //                      the Targets and Activity cards.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Link2, Unlink } from "lucide-react";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
@@ -81,8 +83,52 @@ export function CopyLinkButton({ okrId }: { okrId: string }) {
   );
 }
 
+/**
+ * Unlink on a row of "Supports this goal": this goal's editors take a goal
+ * out from under it even when they cannot edit that goal (PATCH /api/okrs
+ * allows a bare { parentId: null } through mayUnlinkFromGoal). The goal
+ * itself stays; only this goal's progress stops counting it.
+ */
+export function GoalChildUnlink({ childId, childTitle }: { childId: string; childTitle: string }) {
+  const router = useRouter();
+  const confirm = useConfirm();
+  const { toast } = useOsToast();
+  const [busy, setBusy] = useState(false);
+  const send = async (): Promise<void> => {
+    setBusy(true);
+    const r = await apiFetch("/api/okrs", { method: "PATCH", json: { id: childId, parentId: null } });
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.error || "Couldn't take it out of this goal", { tone: "danger", action: { label: "Try again", onClick: () => void send() } });
+      return;
+    }
+    toast(`Took "${childTitle}" out of this goal`);
+    router.refresh();
+  };
+  const unlink = async () => {
+    const ok = await confirm({
+      title: `Take "${childTitle}" out of this goal?`,
+      description: "It stays a goal of its own. This goal's progress stops counting it, and the change shows in both goals' activity.",
+      confirmLabel: "Take it out",
+    });
+    if (ok) await send();
+  };
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void unlink()}
+      aria-label={`Take ${childTitle} out of this goal`}
+      title="Take it out of this goal"
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50"
+    >
+      <Unlink className="h-4 w-4" aria-hidden />
+    </button>
+  );
+}
+
 /** The summary's On track? block plus the cards that need to talk to each other. */
-export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdict; cadence: string; canCheckIn: boolean }) {
+export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdict; cadence: string; canCheckIn: boolean; canEdit?: boolean }) {
   // Moves on every server render of this goal (GoalWorkCards marks it), so a
   // check-in, a target added or deleted, linked work or new dates refetch
   // the words beside the ring instead of leaving the first load's.
@@ -94,6 +140,7 @@ export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdi
       refreshKey={String(render)}
       cadence={props.cadence}
       canCheckIn={props.canCheckIn}
+      canEdit={props.canEdit}
       onCheckIn={() => document.getElementById("goal-targets-h")?.scrollIntoView({ behavior: "smooth", block: "center" })}
     />
   );

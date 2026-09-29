@@ -20,6 +20,15 @@
 // deletes. A People team member still deletes what they own, created or
 // manage like anyone else.
 //
+// Linking (Part of) is its own right, narrower than editing the parent: a
+// child re-weights its parent's progress, so a member must never move a
+// Company goal the whole org reads by hanging their own goal on it. But a
+// manager lining their team's goal up under the company's is the whole
+// point of cascading goals, so someone who manages people may link a
+// Department goal they can edit under ANY Company goal they can read. Every
+// link and unlink is written to the parent's activity, and the parent's
+// editors can unlink any child, so a bad link is visible and reversible.
+//
 // Pure and dependency free: the server gates and the vitest table read it.
 
 export interface GoalRightsActor {
@@ -32,6 +41,9 @@ export interface GoalRightsActor {
   manager: boolean;
   /** An Agent account. */
   agent: boolean;
+  /** Manages people: the manager tier, or at least one active direct
+   *  report. Read only by the link rule; absent means no. */
+  leadsPeople?: boolean;
   /** The caller's reporting chain (getTeamUserIds), or null when not loaded.
    *  Loaded for every manager-tier caller but Owner/Admin, People team included,
    *  because delete reads it even where edit is already settled. */
@@ -58,6 +70,29 @@ export function mayDeleteGoal(actor: GoalRightsActor, goal: GoalRightsTarget): b
   if (actor.agent) return false;
   if (actor.admin) return true;
   return mayEditGoal({ ...actor, peopleTeam: false }, goal);
+}
+
+/**
+ * May this actor put a goal under `parent` (Part of)? Anyone may link under
+ * a goal they can edit. Someone who manages people may also link a
+ * Department goal they can edit under a Company goal (read access is the
+ * caller's check: a Company goal is readable by everyone in the org).
+ */
+export function mayLinkUnderGoal(actor: GoalRightsActor, parent: GoalRightsTarget, child: { level: string; editable: boolean }): boolean {
+  if (mayEditGoal(actor, parent)) return true;
+  if (actor.agent || !actor.leadsPeople) return false;
+  return parent.level === "COMPANY" && child.level === "DEPARTMENT" && child.editable;
+}
+
+/**
+ * May this actor take a goal out from under its parent? Whoever may edit
+ * the child (it is the child's own field), and whoever may edit the parent
+ * (its progress is theirs to protect, so a link they did not want is theirs
+ * to undo).
+ */
+export function mayUnlinkFromGoal(actor: GoalRightsActor, parent: GoalRightsTarget | null, childEditable: boolean): boolean {
+  if (childEditable) return true;
+  return parent ? mayEditGoal(actor, parent) : false;
 }
 
 /** The one refusal copy: it names the right, never the goal or its owner. */

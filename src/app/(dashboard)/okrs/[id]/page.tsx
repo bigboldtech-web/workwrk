@@ -36,7 +36,7 @@ import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
-import { CopyLinkButton, GoalDates, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
+import { CopyLinkButton, GoalChildUnlink, GoalDates, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
 import type { TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { OsPageHeader } from "@/components/layout/os/page-header";
@@ -103,7 +103,12 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   // Part of shows only when the viewer can see the parent (never a leaked
   // title); Supports this goal lists only the children they can see.
   const parentVisible = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
-  const children = (await Promise.all(okr.children.map(async (c) => ((await canSeeGoal(sessionLike, c)) ? c : null)))).filter((c): c is NonNullable<typeof c> => c !== null);
+  const openable = await Promise.all(okr.children.map(async (c) => ({ c, open: await canSeeGoal(sessionLike, c) })));
+  // This goal's editors see every goal under it (those goals move its number,
+  // and are theirs to unlink); a goal they cannot open reads as plain text.
+  // Everyone else sees the ones they may open, and a count of the rest.
+  const children = openable.filter((x) => x.open || canEditGoal).map((x) => ({ ...x.c, open: x.open }));
+  const hiddenChildren = okr.children.length - children.length;
 
   const isOwner = okr.ownerId === viewer.id;
   const canCheckIn = canEditGoal || contributor;
@@ -181,7 +186,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
               ) : null}
             </div>
           </div>
-          <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} />
+          <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} canEdit={canEditGoal} />
         </section>
 
         {/* 2. Details */}
@@ -216,35 +221,45 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
           targets={targetRows}
           linked={<OkrLinkedWork okrId={okr.id} canEdit={canEditGoal} />}
         >
-          {children.length > 0 ? (
+          {children.length > 0 || hiddenChildren > 0 ? (
             <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-children-h">
               <h2 id="goal-children-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
-                Supports this goal <span className="text-xs font-medium text-ink-2">{children.length}</span>
+                Supports this goal <span className="text-xs font-medium text-ink-2">{children.length + hiddenChildren}</span>
               </h2>
               <ul className="m-0 mt-2 flex list-none flex-col p-0">
                 {children.map((c) => {
                   const roll = goalRollupFor(rollupCtx, c);
                   const cm = roll.source !== "NONE";
                   return (
-                    <li key={c.id} className="border-b border-line last:border-b-0">
-                      <Link href={`/okrs/${c.id}`} className="os-row flex h-9 items-center gap-3 hover:bg-hover">
-                        <span className="min-w-0 flex-1 truncate text-row text-ink">{c.title}</span>
+                    <li key={c.id} className="flex items-center gap-1 border-b border-line last:border-b-0">
+                      <ChildRow open={c.open} href={`/okrs/${c.id}`}>
+                        <span className="min-w-0 flex-1 truncate text-row text-ink" title={c.open ? undefined : "A goal you can't open. It counts toward this one."}>{c.title}</span>
                         <span className="shrink-0 text-xs text-ink-2">{LEVEL_WORD[c.level]}</span>
                         <span className="h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active" aria-hidden>
                           {cm ? <span className="block h-full rounded-full bg-brand" style={{ width: `${roll.progress}%` }} /> : null}
                         </span>
                         <span className="w-20 shrink-0 text-end text-sm tabular-nums text-ink-2">{cm ? `${roll.progress}%` : "Not measured"}</span>
-                      </Link>
+                      </ChildRow>
+                      {canEditGoal ? <GoalChildUnlink childId={c.id} childTitle={c.title} /> : null}
                     </li>
                   );
                 })}
               </ul>
+              {hiddenChildren > 0 ? (
+                <p className="m-0 mt-2 text-sm text-ink-2">{hiddenChildren === 1 ? "1 more goal you can't open also counts toward this one." : `${hiddenChildren} more goals you can't open also count toward this one.`}</p>
+              ) : null}
             </section>
           ) : null}
         </GoalWorkCards>
       </div>
     </div>
   );
+}
+
+/** A row of "Supports this goal": a link when the viewer can open that goal. */
+function ChildRow({ open, href, children }: { open: boolean; href: string; children: React.ReactNode }) {
+  const cls = "os-row flex h-9 min-w-0 flex-1 items-center gap-3";
+  return open ? <Link href={href} className={`${cls} hover:bg-hover`}>{children}</Link> : <div className={cls}>{children}</div>;
 }
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
