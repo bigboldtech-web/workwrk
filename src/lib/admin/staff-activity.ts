@@ -124,21 +124,29 @@ export function whatOf(summary: string): string {
   return summary.trim();
 }
 
+/**
+ * How a stored timestamp reads. The page passes the viewer's own date format
+ * (the one the When column uses); with none, the day alone (YYYY-MM-DD).
+ */
+export type DetailDateFormat = (iso: string) => string;
+
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T/;
+
 /** The Before and After values as plain words: plan names, status words, On and Off. */
-export function plainValue(key: string, value: unknown): string {
+export function plainValue(key: string, value: unknown, date?: DetailDateFormat): string {
   if (value === null || value === undefined || value === "") {
-    if (key === "seats") return "Unlimited";
+    if (key === "seats" || key === "codeSeats") return "Unlimited";
     return "None";
   }
   if (typeof value === "boolean") return value ? "On" : "Off";
-  if (key === "plan") return planLabel(String(value));
+  if (key === "plan" || key === "codePlan") return planLabel(String(value));
   if (key === "status") return statusLabel(String(value));
   if (key === "role") return roleWord(String(value));
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return value.slice(0, 10);
+  if (typeof value === "string" && ISO_TIMESTAMP_RE.test(value)) return date ? date(value) : value.slice(0, 10);
   if (typeof value === "object") {
     try {
       return Object.entries(value as Record<string, unknown>)
-        .map(([k, v]) => `${humanKey(k)}: ${plainValue(k, v)}`)
+        .map(([k, v]) => `${humanKey(k)}: ${plainValue(k, v, date)}`)
         .join(", ");
     } catch {
       return "";
@@ -168,10 +176,18 @@ const KEY_WORDS: Record<string, string> = {
   signedOut: "Signed out",
   movedToOtherWorkspace: "Moved to another workspace",
   inserted: "Imported",
-  attempted: "In the file",
+  // The distinct codes the import sent: a line repeated within the paste is
+  // dropped in the browser and counted apart (repeatedInPaste).
+  attempted: "Different codes",
+  repeatedInPaste: "Repeated in the paste",
   tiers: "By tier",
   refundedAt: "Refunded",
   redeemedAt: "Redeemed",
+  // A refund row describes the CODE (what it gave when it was redeemed), never
+  // the company's current plan, so its words say so.
+  codeTier: "Code tier",
+  codePlan: "Code plan",
+  codeSeats: "Code seats",
   companyName: "Company",
   companyId: "Company ID",
   userId: "Person ID",
@@ -189,23 +205,85 @@ export function humanKey(k: string): string {
 }
 
 /**
+ * A refund changes one thing, the code's refundedAt. Rows written before the
+ * refund row became symmetric stored the code's plan and seats and the
+ * redemption date only BEFORE and the company only AFTER, so See details read
+ * "Plan: Growth to None" under a title that says the plan was not changed.
+ * Here the code's facts get the code's words (Code plan, Code seats), and a
+ * key held on one side only is the same fact on both: context, not a change.
+ */
+function normaliseRefund(b: Record<string, unknown>, a: Record<string, unknown>): [Record<string, unknown>, Record<string, unknown>] {
+  const rename: Record<string, string> = { tier: "codeTier", plan: "codePlan", seats: "codeSeats" };
+  const renamed = (r: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(r).map(([k, v]) => [rename[k] ?? k, v]));
+  const nb = renamed(b);
+  const na = renamed(a);
+  for (const k of Object.keys(nb)) if (k !== "refundedAt" && !(k in na)) na[k] = nb[k];
+  for (const k of Object.keys(na)) if (k !== "refundedAt" && !(k in nb)) nb[k] = na[k];
+  return [nb, na];
+}
+
+const DETAIL_NORMALISERS: Partial<
+  Record<StaffActionKey, (b: Record<string, unknown>, a: Record<string, unknown>) => [Record<string, unknown>, Record<string, unknown>]>
+> = {
+  "admin.code.refunded": normaliseRefund,
+};
+
+/**
  * The See details rows: every key either side holds, in a stable order,
  * with the plain Before and After words. A key present only after (a new
- * fact such as "signed out 12") shows None before.
+ * fact such as "signed out 12") shows None before, except where the action's
+ * normaliser knows better (a refund: see normaliseRefund).
  */
 export function detailRows(
   before: Record<string, unknown> | null | undefined,
   after: Record<string, unknown> | null | undefined,
+  opts: { action?: string; date?: DetailDateFormat } = {},
 ): { key: string; label: string; before: string; after: string; changed: boolean }[] {
-  const b = before && typeof before === "object" ? before : {};
-  const a = after && typeof after === "object" ? after : {};
+  let b: Record<string, unknown> = before && typeof before === "object" ? before : {};
+  let a: Record<string, unknown> = after && typeof after === "object" ? after : {};
+  const normalise = isStaffActionKey(opts.action) ? DETAIL_NORMALISERS[opts.action] : undefined;
+  if (normalise) [b, a] = normalise(b, a);
   const keys: string[] = [];
   for (const k of [...Object.keys(b), ...Object.keys(a)]) if (!keys.includes(k)) keys.push(k);
   return keys.map((k) => {
-    const before = k in b ? plainValue(k, (b as Record<string, unknown>)[k]) : "None";
-    const after = k in a ? plainValue(k, (a as Record<string, unknown>)[k]) : "None";
+    const before = k in b ? plainValue(k, b[k], opts.date) : "None";
+    const after = k in a ? plainValue(k, a[k], opts.date) : "None";
     // Context (the person's name and email on an Owner grant) is the same on
     // both sides; the details dialog lists it apart so the change stands out.
     return { key: k, label: humanKey(k), before, after, changed: before !== after };
   });
+}
+
+/**
+ * The sentence for an import, in the toast and in the Staff activity row
+ * alike, so the two never give different totals for one paste. `attempted`
+ * is the distinct codes sent; `repeated` the lines the browser dropped
+ * because the same code was already higher up in the paste. The total is
+ * every code line pasted.
+ */
+export function importWords(inserted: number, attempted: number, repeated: number): {
+  total: number;
+  already: number;
+  repeated: number;
+  toast: string;
+  summary: string;
+} {
+  const rep = Number.isInteger(repeated) && repeated > 0 ? repeated : 0;
+  const already = Math.max(0, attempted - inserted);
+  const total = attempted + rep;
+  const was = (n: number) => (n === 1 ? "was" : "were");
+  const toast = [
+    `Imported ${inserted} of ${total} ${total === 1 ? "code" : "codes"}.`,
+    already > 0 ? `${already} ${was(already)} already here.` : null,
+    rep > 0 ? `${rep} ${was(rep)} repeated in the paste.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const why = [
+    already > 0 ? `${already} already existed` : null,
+    rep > 0 ? `${rep} repeated in the paste` : null,
+  ].filter(Boolean);
+  const summary = `Imported ${inserted} of ${total} AppSumo codes${why.length ? ` (${why.join(", ")})` : ""}`;
+  return { total, already, repeated: rep, toast, summary };
 }

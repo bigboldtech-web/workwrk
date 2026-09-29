@@ -46,6 +46,7 @@ import {
   type CodeListParams,
   type CodeView,
 } from "@/lib/admin/codes-list";
+import { importWords } from "@/lib/admin/staff-activity";
 import type { CodeStatus } from "@/lib/admin/search";
 import { PLAN_OPTIONS, codeStatusColor, codeStatusLabel, planLabel } from "@/lib/admin/console-labels";
 import { useConsole } from "../../console-context";
@@ -111,6 +112,10 @@ export default function AppsumoCodesPage() {
   const [menu, setMenu] = useState<{ row: CodeRow; anchor: React.RefObject<HTMLElement | null> } | null>(null);
   const [refunding, setRefunding] = useState<CodeRow | null>(null);
   const [refundBusy, setRefundBusy] = useState(false);
+  // refundBusy is state, so two clicks in one tick both saw it false and sent
+  // two refunds. The server claims the code once either way; this keeps the
+  // second request (and its duplicate toast) from leaving the browser at all.
+  const refundInFlight = useRef(false);
   const seq = useRef(0);
   const query = codesQuery(params);
 
@@ -209,11 +214,14 @@ export default function AppsumoCodesPage() {
   };
 
   const refund = async (row: CodeRow) => {
+    if (refundInFlight.current) return;
+    refundInFlight.current = true;
     setRefundBusy(true);
     const r = await apiFetch<{ company: { id: string; name: string } | null }>("/api/admin/appsumo", {
       method: "PATCH",
       json: { code: row.code, refunded: true, confirm: row.code },
     });
+    refundInFlight.current = false;
     setRefundBusy(false);
     if (!r.ok) {
       if (r.status !== 401) toast(r.error || "Couldn't mark it refunded", { tone: "danger" });
@@ -462,8 +470,9 @@ export default function AppsumoCodesPage() {
         onClose={() => setImportOpen(false)}
         onImported={(inserted, attempted, pasteDupes) => {
           setImportOpen(false);
-          const already = attempted - inserted + pasteDupes;
-          toast(`Imported ${inserted} of ${attempted + pasteDupes} codes.${already > 0 ? ` ${already} ${already === 1 ? "was" : "were"} already here.` : ""}`);
+          // The same words and total as the Staff activity row (importWords):
+          // a line repeated within the paste is its own clause, never "already here".
+          toast(importWords(inserted, attempted, pasteDupes).toast);
           void load();
         }}
       />
@@ -534,7 +543,10 @@ function ImportCodesDialog({
     }
     setBusy(true);
     setError(null);
-    const r = await apiFetch<{ inserted: number; attempted: number }>("/api/admin/appsumo", { method: "POST", json: { codes: parsed.rows } });
+    const r = await apiFetch<{ inserted: number; attempted: number }>("/api/admin/appsumo", {
+      method: "POST",
+      json: { codes: parsed.rows, repeatedInPaste: parsed.duplicatesInPaste },
+    });
     setBusy(false);
     if (r.ok) {
       setText("");

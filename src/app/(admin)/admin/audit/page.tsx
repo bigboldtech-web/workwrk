@@ -192,7 +192,8 @@ export default function StaffActivityPage() {
       `When: ${new Date(r.createdAt).toISOString()}`,
       `Who: ${r.who} (${r.email})`,
       r.company ? `Company: ${r.company.name} (${r.company.id})` : null,
-      ...detailRows(r.before, r.after).map((d) => `${d.label}: ${d.before} to ${d.after}`),
+      // The full timestamp, like the When line above it (a copy is for a ticket or a spreadsheet).
+      ...detailRows(r.before, r.after, { action: r.action, date: (iso) => new Date(iso).toISOString() }).map((d) => `${d.label}: ${d.before} to ${d.after}`),
       r.reason ? `Reason: ${r.reason}` : null,
       r.ip ? `IP: ${r.ip}` : null,
       r.hits > 1 ? `Hits: ${r.hits}` : null,
@@ -411,7 +412,8 @@ function PickerButton({ label, empty, onClick, children }: { label: string; empt
 }
 
 function DetailsDialog({ row, onClose, datePrefs }: { row: ActivityRow | null; onClose: () => void; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
-  const all = row ? detailRows(row.before, row.after) : [];
+  // Dates in the viewer's own format, the same as the When line below.
+  const all = row ? detailRows(row.before, row.after, { action: row.action, date: (iso) => formatDate(iso, datePrefs, "datetime") }) : [];
   const rowsList = all.filter((d) => d.changed);
   const context = all.filter((d) => !d.changed);
   return (

@@ -9,6 +9,7 @@ import { CODE_VIEWS, codeFilterWhere, codeGives, codeOrderBy, codeViewWhere, par
 import { CSV_MAX_ROWS, seatsAreUnlimited, toCsv } from "@/lib/admin/companies-list";
 import { planLabel } from "@/lib/staff-audit-helpers";
 import { confirmMatches } from "@/lib/admin/company-patch-rules";
+import { importWords } from "@/lib/admin/staff-activity";
 
 /**
  * /api/admin/appsumo: WorkwrK staff endpoints for AppSumo code
@@ -21,7 +22,7 @@ import { confirmMatches } from "@/lib/admin/company-patch-rules";
  *          &imported_from=&imported_to=&redeemed_from=&redeemed_to=
  *          &redeemed_by=<company id> &sort=newest|oldest|code
  *          &page=&limit= (at most 500) &format=csv (at most 5,000)
- * POST   → bulk import. Body: { codes: [{code, tier, plan, seats}] }
+ * POST   → bulk import. Body: { codes: [{code, tier, plan, seats}], repeatedInPaste? }
  * PATCH  → flip a code to refunded. Body: { code, refunded: true, notes? }
  *
  * Both writes record a StaffAction row in the same transaction. A refund
@@ -142,6 +143,13 @@ export async function POST(req: NextRequest) {
     cleaned.push({ code, tier, plan: plan as Plan, seats });
   }
 
+  // Lines the browser dropped because the same code was already higher up
+  // in the paste (parseImport). They never reach here, so without the count
+  // the Staff activity row gave a different total from the toast for the
+  // same import. Bookkeeping only: nothing is written for them.
+  const repeatedRaw = Number(body?.repeatedInPaste);
+  const repeatedInPaste = Number.isInteger(repeatedRaw) && repeatedRaw > 0 ? Math.min(repeatedRaw, 100_000) : 0;
+
   // Skip duplicates rather than 409-ing the whole batch: re-imports
   // are common when AppSumo re-sends the CSV.
   const actor = staffActorFromSession(session);
@@ -159,15 +167,13 @@ export async function POST(req: NextRequest) {
       action: "admin.codes.imported",
       actor,
       ip,
-      summary: `Imported ${result.count} of ${cleaned.length} AppSumo codes${
-        result.count < cleaned.length ? ` (${cleaned.length - result.count} already existed)` : ""
-      }`,
-      after: { inserted: result.count, attempted: cleaned.length, tiers },
+      summary: importWords(result.count, cleaned.length, repeatedInPaste).summary,
+      after: { inserted: result.count, attempted: cleaned.length, repeatedInPaste, tiers },
     });
     return result.count;
   });
 
-  return jsonSuccess({ inserted, attempted: cleaned.length });
+  return jsonSuccess({ inserted, attempted: cleaned.length, repeatedInPaste });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -210,11 +216,35 @@ export async function PATCH(req: NextRequest) {
         ? await tx.organization.findUnique({ where: { id: row.redeemedByOrg }, select: { id: true, name: true } })
         : null;
 
-      const updated = await tx.appsumoCode.update({
-        where: { code },
-        data: { refundedAt: new Date(), notes },
-        select: { refundedAt: true },
+      // A conditional claim, not a plain update: two refunds of one code at
+      // once (a double click, two tabs, two staff members) both passed the
+      // refundedAt check above, both wrote, and both logged, and the second
+      // overwrote the refund time the first row recorded. Postgres re-checks
+      // this WHERE on the row the first writer locked, so exactly one call
+      // flips it; the other finds count 0 and answers like any repeat.
+      const now = new Date();
+      const claimed = await tx.appsumoCode.updateMany({
+        where: { code, refundedAt: null, redeemedAt: { not: null } },
+        data: { refundedAt: now, notes },
       });
+      if (claimed.count === 0) {
+        const again = await tx.appsumoCode.findUnique({ where: { code }, select: { refundedAt: true } });
+        if (!again) return { status: 404 as const };
+        if (!again.refundedAt) return { status: 409 as const };
+        return { status: 200 as const, refundedAt: again.refundedAt, logged: null, company: null };
+      }
+      // Both sides carry the same facts and only refundedAt differs, so See
+      // details shows the one change. The tier, plan and seats are the
+      // CODE's (what it gave), never the company's plan, which a refund
+      // leaves alone.
+      const facts = {
+        redeemedAt: row.redeemedAt,
+        codeTier: row.tier,
+        codePlan: row.plan,
+        codeSeats: row.seats,
+        companyId: company?.id ?? null,
+        companyName: company?.name ?? null,
+      };
       const logged = await logStaffAction({
         db: tx,
         action: "admin.code.refunded",
@@ -226,10 +256,10 @@ export async function PATCH(req: NextRequest) {
         summary: `Marked AppSumo code ${code} (Tier ${row.tier}) refunded${
           company ? ` for ${company.name}; their plan was not changed` : "; the company that redeemed it no longer exists"
         }`,
-        before: { refundedAt: null, redeemedAt: row.redeemedAt, plan: row.plan, seats: row.seats },
-        after: { refundedAt: updated.refundedAt, companyId: company?.id ?? null, companyName: company?.name ?? null },
+        before: { refundedAt: null, ...facts },
+        after: { refundedAt: now, ...facts },
       });
-      return { status: 200 as const, refundedAt: updated.refundedAt, logged, company };
+      return { status: 200 as const, refundedAt: now, logged, company };
     });
 
     if (outcome.status === 404) return jsonError("Code not found", 404);
