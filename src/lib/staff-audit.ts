@@ -165,30 +165,53 @@ export async function writeTenantRow(logged: LoggedStaffAction | null | undefine
       replayStarted = true;
       await replayOwedTenantRows().catch((err) => console.error("[staff-audit] replay of owed customer rows failed:", err));
     }
-    const already = await prisma.activityLog.findFirst({
-      where: { organizationId: tenant.organizationId, metadata: { path: ["staffActionId"], equals: (logged as LoggedStaffAction).id } },
-      select: { id: true },
-    });
-    if (already) return true;
-    await prisma.activityLog.create({
-      data: {
-        type: tenant.event.type,
-        actorId: null,
-        actorType: STAFF_ACTOR_TYPE,
-        actorLabel: STAFF_ACTOR_LABEL,
-        organizationId: tenant.organizationId,
-        description: tenant.event.description,
-        targetType: "Organization",
-        targetId: tenant.organizationId,
-        severity: tenant.event.severity,
-        metadata: { staffActionId: logged?.id },
-      } as unknown as Prisma.ActivityLogUncheckedCreateInput,
-    });
+    await writeOwedRow({ staffActionId: (logged as LoggedStaffAction).id, organizationId: tenant.organizationId, event: tenant.event });
     return true;
   } catch (err) {
     console.error("[staff-audit] failed to write the customer's audit row:", err);
     return false;
   }
+}
+
+/**
+ * The one writer of a customer row for a StaffAction. The existence check and
+ * the insert run under a transaction-scoped advisory lock keyed on the
+ * StaffAction id, so a live write racing the replay (or two server processes
+ * replaying at once) never writes the same customer row twice. Returns true
+ * when it wrote the row, false when it was already there.
+ */
+async function writeOwedRow(input: {
+  staffActionId: string;
+  organizationId: string;
+  event: NonNullable<ReturnType<typeof tenantEventFor>>;
+  /** Set by the replay: the row is dated when the staff member made the change. */
+  replayedAt?: Date;
+}): Promise<boolean> {
+  const { staffActionId, organizationId, event, replayedAt } = input;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"staff-tenant:" + staffActionId}))`;
+    const exists = await tx.activityLog.findFirst({
+      where: { organizationId, metadata: { path: ["staffActionId"], equals: staffActionId } },
+      select: { id: true },
+    });
+    if (exists) return false;
+    await tx.activityLog.create({
+      data: {
+        type: event.type,
+        actorId: null,
+        actorType: STAFF_ACTOR_TYPE,
+        actorLabel: STAFF_ACTOR_LABEL,
+        organizationId,
+        description: event.description,
+        targetType: "Organization",
+        targetId: organizationId,
+        severity: event.severity,
+        metadata: replayedAt ? { staffActionId, replayed: true } : { staffActionId },
+        ...(replayedAt ? { createdAt: replayedAt } : {}),
+      } as unknown as Prisma.ActivityLogUncheckedCreateInput,
+    });
+    return true;
+  });
 }
 
 /** The actions whose tenantEventFor() can owe a customer row. */
@@ -235,27 +258,7 @@ export async function replayOwedTenantRows(opts: { batch?: number } = {}): Promi
         (r.after ?? null) as Record<string, unknown> | null,
       );
       if (!event) continue;
-      const exists = await prisma.activityLog.findFirst({
-        where: { organizationId: r.targetCompanyId, metadata: { path: ["staffActionId"], equals: r.id } },
-        select: { id: true },
-      });
-      if (exists) continue;
-      await prisma.activityLog.create({
-        data: {
-          type: event.type,
-          actorId: null,
-          actorType: STAFF_ACTOR_TYPE,
-          actorLabel: STAFF_ACTOR_LABEL,
-          organizationId: r.targetCompanyId,
-          description: event.description,
-          targetType: "Organization",
-          targetId: r.targetCompanyId,
-          severity: event.severity,
-          metadata: { staffActionId: r.id, replayed: true },
-          createdAt: r.createdAt,
-        } as unknown as Prisma.ActivityLogUncheckedCreateInput,
-      });
-      written++;
+      if (await writeOwedRow({ staffActionId: r.id, organizationId: r.targetCompanyId, event, replayedAt: r.createdAt })) written++;
     }
     const last = rows[rows.length - 1];
     cursor = { createdAt: last.createdAt, id: last.id };

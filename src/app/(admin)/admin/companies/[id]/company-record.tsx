@@ -645,7 +645,7 @@ function SeatsRow({
   if (!sub || sub.source === "none") {
     return (
       <Row label="Seats">
-        <span className="text-base text-ink-2">No subscription, so there is no seat count here. Seats come with a Stripe checkout or a redeemed code.</span>
+        <span className="text-base text-ink-2">No subscription, so there is no seat count to set. The plan&apos;s people limit above applies. Seats come with a Stripe checkout or a redeemed code.</span>
       </Row>
     );
   }

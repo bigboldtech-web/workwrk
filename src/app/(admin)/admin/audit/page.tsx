@@ -198,7 +198,7 @@ export default function StaffActivityPage() {
     { key: "who", label: "Who", title: true, width: "minmax(150px,1fr)", render: (r) => <span className={r.who === r.email ? "truncate font-normal" : "truncate"}>{r.who}</span> },
     // Email and Source give way first on a narrow card; both are in See details.
     { key: "email", label: "Email", width: "minmax(180px,1fr)", hideBelow: 1000, render: (r) => <span className="truncate text-ink-2">{r.email}</span> },
-    { key: "what", label: "What", width: "minmax(260px,2.4fr)", render: (r) => <span className="truncate" title={r.summary}>{r.summary}</span> },
+    { key: "what", label: "What", width: "minmax(200px,2.4fr)", render: (r) => <span className="truncate" title={r.summary}>{r.summary}</span> },
     {
       key: "company",
       label: "Company",

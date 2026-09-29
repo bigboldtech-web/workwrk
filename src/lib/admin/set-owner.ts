@@ -146,7 +146,7 @@ export async function setWorkspaceOwner(input: {
         targetCompanyId: companyId,
         targetLabel: org.name,
         reason,
-        summary: `Gave ${name} (${person.email}) Owner access at ${org.name}`,
+        summary: `Gave ${name} (${person.email}) Owner access at ${org.name}${keptOwners.length ? ` (kept Owner access for ${keptOwners.join(", ")})` : ""}`,
         before: { userId: person.id, name, email: person.email, role: roleHere, owners: owners.length },
         after: {
           userId: person.id,

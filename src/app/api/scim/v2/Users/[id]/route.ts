@@ -1,8 +1,8 @@
-// SCIM 2.0 Users — single resource. GET / PUT / PATCH / DELETE.
+// SCIM 2.0 Users: single resource. GET / PUT / PATCH / DELETE.
 //
 // PATCH supports the SCIM 2.0 "Operations" body (RFC 7644 §3.5.2),
 // which is what Okta sends for incremental changes. PUT is a full
-// replace — Azure AD uses it more.
+// replace; Azure AD uses it more.
 //
 // DELETE soft-deactivates by default (status = INACTIVE), not a hard
 // row drop. Real deletion is a separate hard-delete admin action; an
@@ -155,7 +155,7 @@ export async function PATCH(
       const next = value.trim().toLowerCase();
       if (next.includes("@")) data.email = next;
     }
-    // Unknown paths are silently ignored — SCIM spec allows skipping
+    // Unknown paths are silently ignored; SCIM spec allows skipping
     // unsupported attributes rather than 400-ing the whole request.
   }
 
@@ -208,7 +208,7 @@ export async function DELETE(
   });
   if (!existing) return scimError(404, "User not found");
 
-  // Soft delete — SCIM clients call this when a user is removed from
+  // Soft delete: SCIM clients call this when a user is removed from
   // the WorkWrk app on their side. Hard delete is a separate admin
   // action so we never lose audit / time-off / payroll history.
   await prisma.user.update({
