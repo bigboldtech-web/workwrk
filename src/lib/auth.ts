@@ -8,6 +8,7 @@ import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
+import { reanchorUser } from "./access/workspace-anchor";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -206,7 +207,10 @@ const providers = [
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         });
         if (alt) {
-          await prisma.user.update({ where: { id: user.id }, data: { organizationId: alt.organizationId } });
+          // The level held here stays on this workspace's membership, and
+          // the healthy one's own level applies (src/lib/workspace-anchor.ts).
+          await reanchorUser({ userId: user.id, to: { organizationId: alt.organizationId, role: alt.role } });
+          user.accessLevel = alt.role;
           // Say why they land in another company (see WorkspaceMove).
           workspaceMove = workspaceMoveStamp(org.name, org.status, alt.organization.name);
           org = alt.organization; // sign in under the healthy workspace
@@ -527,18 +531,18 @@ export const authOptions: NextAuthOptions = {
                   userId: token.id as string,
                   organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
                 },
-                select: { organizationId: true, organization: { select: { name: true } } },
+                select: { organizationId: true, role: true, organization: { select: { name: true } } },
                 orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
               });
               const moved = alt
-                ? await prisma.user
-                    .update({ where: { id: token.id as string }, data: { organizationId: alt.organizationId } })
+                ? await reanchorUser({ userId: token.id as string, to: { organizationId: alt.organizationId, role: alt.role } })
                     .then(() => true)
                     .catch(() => false)
                 : false;
               if (alt && moved) {
                 token.organizationId = alt.organizationId;
                 token.organizationName = alt.organization.name;
+                token.accessLevel = alt.role;
                 const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
                 if (move) token.workspaceMove = move;
               } else {

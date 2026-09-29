@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { reanchorUser } from "@/lib/access/workspace-anchor";
 
 /**
  * Switch the caller's current organization to one of their existing
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
 
   const membership = await prisma.organizationMembership.findUnique({
     where: { userId_organizationId: { userId, organizationId: target } },
-    select: { organization: { select: { status: true } } },
+    select: { role: true, organization: { select: { status: true } } },
   });
   if (!membership) {
     return jsonError("You are not a member of that organization", 403);
@@ -53,10 +54,11 @@ export async function POST(req: NextRequest) {
 
   const previousOrgId = getOrgId(session);
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { organizationId: target },
-  });
+  // The level the person holds in the workspace they leave is kept on its
+  // membership (so they can come back to it, as themselves), and they take
+  // the level their membership in the target holds (src/lib/workspace-anchor.ts).
+  const moved = await reanchorUser({ userId, to: { organizationId: target, role: membership.role } });
+  if (!moved) return jsonSuccess({ switched: false, organizationId: target });
 
   // Security-sensitive: org switches show up in the audit trail of
   // BOTH the leaving org (severity warning) and the entering org so

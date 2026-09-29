@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import bcrypt from "bcryptjs";
+import { legacyLevelRow } from "./access/test-fixtures";
 
 // The workspace-move notice (Phase 9 walk, group 3 finding 1). When a person
 // is moved out of a suspended or closed company into another workspace they
@@ -13,19 +14,26 @@ const db = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   orgFindUnique: vi.fn(),
   membershipFindFirst: vi.fn(),
+  membershipUpsert: vi.fn(),
 }));
 
-vi.mock("./prisma", () => ({
-  prisma: {
+vi.mock("./prisma", () => {
+  const client: Record<string, unknown> = {
     user: {
       findUnique: (...a: unknown[]) => db.userFindUnique(...a),
       findFirst: (...a: unknown[]) => db.userFindFirst(...a),
       update: (...a: unknown[]) => db.userUpdate(...a),
     },
     organization: { findUnique: (...a: unknown[]) => db.orgFindUnique(...a) },
-    organizationMembership: { findFirst: (...a: unknown[]) => db.membershipFindFirst(...a) },
-  },
-}));
+    organizationMembership: {
+      findFirst: (...a: unknown[]) => db.membershipFindFirst(...a),
+      upsert: (...a: unknown[]) => db.membershipUpsert(...a),
+    },
+  };
+  // The workspace move runs in a transaction (src/lib/access/workspace-anchor.ts).
+  client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(client);
+  return { prisma: client };
+});
 vi.mock("./activity", () => ({ logActivity: vi.fn() }));
 
 import { authOptions } from "./auth";
@@ -46,7 +54,7 @@ function account(org: { id: string; name: string; status: string }, tokenVersion
   return {
     deletedAt: null,
     status: "ACTIVE",
-    accessLevel: "COMPANY_ADMIN",
+    ...legacyLevelRow("COMPANY_ADMIN"),
     tokenVersion,
     organizationId: org.id,
     organization: { status: org.status, name: org.name },
@@ -56,6 +64,7 @@ function account(org: { id: string; name: string; status: string }, tokenVersion
 beforeEach(() => {
   for (const f of Object.values(db)) f.mockReset();
   db.userUpdate.mockResolvedValue({});
+  db.membershipUpsert.mockResolvedValue({});
 });
 
 describe("workspace move notice", () => {
@@ -92,7 +101,7 @@ describe("workspace move notice", () => {
 
   it("clears only on an ack for the same move, and the ack never revives a revoked token", async () => {
     db.userFindUnique.mockImplementation((args: { include?: unknown }) =>
-      Promise.resolve(args.include ? { tokenVersion: 0, organizationId: HOME.id, accessLevel: "COMPANY_ADMIN", organization: { name: HOME.name } } : account(HOME)),
+      Promise.resolve(args.include ? { tokenVersion: 0, organizationId: HOME.id, ...legacyLevelRow("COMPANY_ADMIN"), organization: { name: HOME.name } } : account(HOME)),
     );
     const marker = { from: "Sus Co", status: "SUSPENDED", to: "Home Co", at: 1234 };
     const base = { id: "u1", organizationId: HOME.id, organizationName: HOME.name, tokenVersion: 0, checkedAt: Date.now() };
@@ -121,7 +130,7 @@ describe("workspace move notice", () => {
       firstName: "A",
       lastName: "B",
       avatar: null,
-      accessLevel: "COMPANY_ADMIN",
+      ...legacyLevelRow("COMPANY_ADMIN"),
       tokenVersion: 0,
       passwordHash,
       mfaEnabled: false,
@@ -131,7 +140,9 @@ describe("workspace move notice", () => {
       status: "ACTIVE",
       organization: { ...SUS, settings: {} },
     });
-    db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, organization: { ...HOME, settings: {} } });
+    db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, role: "COMPANY_ADMIN", organization: { ...HOME, settings: {} } });
+    // The move reads where the person is anchored now (workspace-anchor.ts).
+    db.userFindUnique.mockResolvedValue({ organizationId: SUS.id, ...legacyLevelRow("COMPANY_ADMIN") });
     const provider = authOptions.providers[0] as unknown as {
       options: { authorize: (c: Record<string, string>, r: unknown) => Promise<Record<string, unknown>> };
     };
