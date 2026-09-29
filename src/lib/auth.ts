@@ -179,7 +179,18 @@ const providers = [
         throw new Error("This workspace is suspended. Please contact WorkwrK support.");
       }
       if (org.status === "CANCELLED") {
-        throw new Error("This workspace is scheduled for deletion. It's recoverable for 30 days — contact WorkwrK support to restore it.");
+        // Only an Owner's own deletion (Settings > Danger zone) schedules a
+        // purge, recorded as settings.scheduledHardDeleteAt. A workspace
+        // cancelled from the Staff console schedules nothing, so its members
+        // are never told their data is about to be deleted.
+        const st = (org.settings && typeof org.settings === "object" && !Array.isArray(org.settings) ? org.settings : {}) as Record<string, unknown>;
+        const purgeAt = typeof st.scheduledHardDeleteAt === "string" ? new Date(st.scheduledHardDeleteAt) : null;
+        if (purgeAt && !Number.isNaN(purgeAt.getTime())) {
+          throw new Error(
+            `This workspace is scheduled for deletion on ${purgeAt.toISOString().slice(0, 10)}. Until then it can be restored: contact WorkwrK support.`,
+          );
+        }
+        throw new Error("This workspace is closed. Please contact WorkwrK support.");
       }
 
       // Security activity: record the successful sign-in now that every check
@@ -350,6 +361,35 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
+      // Session-update path: triggered by the org-switcher calling
+      // `session.update()` after `POST /api/me/switch-org` flips the
+      // user's `organizationId`. We re-fetch so the JWT picks up the
+      // new org immediately rather than waiting for natural refresh.
+      //
+      // It runs BEFORE the revalidation below and forces it (checkedAt = 0),
+      // so the workspace just switched into gets the same health check and
+      // healthy-workspace fallback as every other token: a switch into a
+      // suspended or cancelled company never acts there, not even for the
+      // five minutes until the next check. A token that is already revoked
+      // is not refreshed: session.update() must never revive it by copying
+      // the new tokenVersion in.
+      if (trigger === "update" && token.id && token.revoked !== true) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          include: { organization: { select: { name: true } } },
+        });
+        if (fresh) {
+          token.organizationId = fresh.organizationId;
+          token.organizationName = fresh.organization.name;
+          token.accessLevel = fresh.accessLevel;
+          // Sync tokenVersion too: a self password-change bumps it and then
+          // calls session.update(), so THIS session (the one that made the
+          // change) stays valid while every OTHER session is revoked.
+          token.tokenVersion = fresh.tokenVersion;
+          token.checkedAt = 0;
+        }
+      }
+
       // Offboarding revocation. A JWT lives for weeks, so removing someone
       // would otherwise leave their live session working until it expired.
       // Re-check the account against the DB at most every 5 minutes (cheap:
@@ -438,25 +478,6 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      // Session-update path: triggered by the org-switcher calling
-      // `session.update()` after `POST /api/me/switch-org` flips the
-      // user's `organizationId`. We re-fetch so the JWT picks up the
-      // new org immediately rather than waiting for natural refresh.
-      if (trigger === "update" && token.id) {
-        const fresh = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          include: { organization: { select: { name: true } } },
-        });
-        if (fresh) {
-          token.organizationId = fresh.organizationId;
-          token.organizationName = fresh.organization.name;
-          token.accessLevel = fresh.accessLevel;
-          // Sync tokenVersion too: a self password-change bumps it and then
-          // calls session.update(), so THIS session (the one that made the
-          // change) stays valid while every OTHER session is revoked.
-          token.tokenVersion = fresh.tokenVersion;
-        }
-      }
       return token;
     },
     async session({ session, token }) {

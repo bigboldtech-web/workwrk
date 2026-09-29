@@ -319,7 +319,8 @@ function useConsoleKeys() {
 
 function Crumbs({ items }: { items: ConsoleCrumb[] }) {
   return (
-    <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
+    // overflow-hidden: at phone width a crumb never paints under the Search icon.
+    <nav aria-label="Breadcrumb" className="min-w-0 flex-1 overflow-hidden">
       <ol className="flex min-w-0 items-center gap-1 text-base">
         {items.map((c, i) => {
           const last = i === items.length - 1;
@@ -329,7 +330,8 @@ function Crumbs({ items }: { items: ConsoleCrumb[] }) {
           return (
             // Only the last crumb (a company's name) gives way: "Staff
             // console" and a page label are short by construction.
-            <li key={`${c.label}-${i}`} className={cn("flex items-center gap-1", last ? "min-w-0" : "shrink-0", hideAt(i))}>
+            // At phone width (below 640) the earlier crumbs may truncate too.
+            <li key={`${c.label}-${i}`} className={cn("flex items-center gap-1", last ? "min-w-0" : "min-w-0 shrink-0 max-sm:shrink", hideAt(i))}>
               {i > 0 ? (
                 <span className={cn("inline-block shrink-0 text-chrome-fg-2 opacity-50 rtl:rotate-180", hideAt(i - 1))} aria-hidden>
                   ›
@@ -347,7 +349,7 @@ function Crumbs({ items }: { items: ConsoleCrumb[] }) {
               ) : (
                 <Link
                   href={c.href}
-                  className="whitespace-nowrap rounded px-0.5 text-chrome-fg-2 hover:text-chrome-fg"
+                  className="min-w-0 truncate whitespace-nowrap rounded px-0.5 text-chrome-fg-2 hover:text-chrome-fg"
                   title={c.label}
                 >
                   {c.label}

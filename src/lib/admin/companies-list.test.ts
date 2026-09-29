@@ -32,6 +32,8 @@ describe("parseCompanyListParams", () => {
     expect(p.subscriptions).toEqual(["past_due"]);
     expect(p.modules).toEqual(["chat"]);
     expect(p.owners).toBe("none");
+    expect(parseCompanyListParams(sp("view=all&owners=0")).owners).toBe("none");
+    expect(parseCompanyListParams(sp("owners=1")).owners).toBeNull();
     expect(p.sort).toBe("people");
     expect(activeCompanyFilterCount(p)).toBe(5);
   });

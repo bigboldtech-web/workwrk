@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { confirmMatches } from "@/lib/admin/company-patch-rules";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
@@ -143,6 +144,10 @@ export async function DELETE(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const id = typeof body?.id === "string" ? body.id : "";
   if (!id) return jsonError("id is required");
+  // The typed confirmation is checked here too, not only in the browser: a
+  // removal can lock someone out, so a replayed or scripted call must name
+  // the email it removes (the suspend and Set Owner rule).
+  const confirm = typeof body?.confirm === "string" ? body.confirm : "";
 
   const actor = staffActorFromSession(session);
   const ip = requestIp(req);
@@ -153,6 +158,7 @@ export async function DELETE(req: NextRequest) {
       select: { id: true, email: true, name: true },
     });
     if (!target) return { status: 404 as const };
+    if (!confirmMatches(confirm, target.email)) return { status: 422 as const };
 
     // Lockout guard: never remove the last remaining staff member. The
     // whole list is locked first, so two removals of the last two rows are
@@ -176,6 +182,7 @@ export async function DELETE(req: NextRequest) {
   });
 
   if (outcome.status === 404) return jsonError("Not found", 404);
+  if (outcome.status === 422) return jsonError("Type their email to confirm the removal", 400);
   if (outcome.status === 400) return jsonError("Can't remove the last staff member", 400);
   // Every staff remove notifies everyone still on the list, the same as an add.
   notifyStaff(

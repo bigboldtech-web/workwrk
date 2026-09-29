@@ -72,7 +72,7 @@ export async function GET() {
       where: { createdAt: { gte: thirtyDaysAgo } },
     }),
 
-    // Funnel — last FUNNEL_WINDOW_DAYS only.
+    // Funnel: last FUNNEL_WINDOW_DAYS only.
     prisma.organization.count({
       where: { createdAt: { gte: funnelWindowStart } },
     }),
@@ -114,7 +114,7 @@ export async function GET() {
       },
     }),
 
-    // Cohorts — orgs grouped by signup month, last COHORT_MONTHS months.
+    // Cohorts: orgs grouped by signup month, last COHORT_MONTHS months.
     prisma.organization.findMany({
       where: { createdAt: { gte: cohortStart } },
       select: { id: true, createdAt: true, status: true },
@@ -125,7 +125,7 @@ export async function GET() {
       select: { organizationId: true, plan: true },
     }),
 
-    // Recent churn — last CHURN_LIMIT cancellations.
+    // Recent churn: last CHURN_LIMIT cancellations.
     prisma.subscription.findMany({
       where: { canceledAt: { not: null } },
       orderBy: { canceledAt: "desc" },
@@ -143,7 +143,7 @@ export async function GET() {
 
 
   // ──────────────────────────────────────────────────────────────
-  // Funnel — counts and conversion %s
+  // Funnel: counts and conversion %s
 
   const funnel = {
     signedUp: funnelSignedUp,
@@ -154,7 +154,7 @@ export async function GET() {
   };
 
   // ──────────────────────────────────────────────────────────────
-  // Cohorts — for each month in the window, count org status
+  // Cohorts: for each month in the window, count org status
 
   const payingByOrg = new Set(activeSubsByOrg.map((s) => s.organizationId));
   type CohortRow = { month: string; size: number; active: number; paying: number; churned: number };
@@ -175,7 +175,7 @@ export async function GET() {
   const cohorts = Array.from(cohortByMonth.values());
 
   // ──────────────────────────────────────────────────────────────
-  // Recent churn — flatten relation
+  // Recent churn: flatten relation
 
   const recentChurn = recentChurnRows.map((r) => ({
     orgId: r.organization.id,

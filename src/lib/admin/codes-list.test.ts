@@ -52,6 +52,10 @@ describe("codeGives", () => {
 });
 
 describe("parseImport", () => {
+  it("ignores parts after the fourth, as the old importer did", () => {
+    const r = parseImport("AAA, 2, GROWTH, 10, extra, more\n", { tier: 1, plan: "STARTER", seats: 1 });
+    expect(r).toMatchObject({ ok: true, rows: [{ code: "AAA", tier: 2, plan: "GROWTH", seats: 10 }] });
+  });
   const preset = TIER_PRESETS[0];
   it("uses the preset, skips blank and # lines, and sends a repeated code once", () => {
     const r = parseImport("# header\nAAA\n\nBBB\nAAA\n", preset);

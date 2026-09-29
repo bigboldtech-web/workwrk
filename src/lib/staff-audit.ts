@@ -24,6 +24,15 @@
 // organisation (what the routes did before) leaked that employee's identity
 // to the customer's audit page. Until the columns land the fact lives in the
 // StaffAction row, for ever, and on /admin/audit.
+//
+// Nothing owed is lost while the columns are missing. What a customer is owed
+// is derivable from the StaffAction row itself (targetCompanyId plus the pure
+// tenantEventFor(action, before, after)), and every customer row written
+// carries metadata.staffActionId. So the first writeTenantRow() in a process
+// that CAN write customer rows also runs replayOwedTenantRows() once: every
+// StaffAction that owes a customer row and has none yet gets it, dated when
+// the staff member made the change. The replay is idempotent (it skips a
+// StaffAction whose customer row exists) and bounded per batch.
 
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
@@ -129,6 +138,7 @@ export function tenantActorSupported(): boolean {
 }
 
 let heldNoticeShown = false;
+let replayStarted = false;
 
 /**
  * The customer's row, written after the staff transaction committed. Never
@@ -149,6 +159,17 @@ export async function writeTenantRow(logged: LoggedStaffAction | null | undefine
     return false;
   }
   try {
+    if (!replayStarted) {
+      // Once per process, and awaited: the replay also covers this row
+      // (its StaffAction has committed), so the check below never doubles it.
+      replayStarted = true;
+      await replayOwedTenantRows().catch((err) => console.error("[staff-audit] replay of owed customer rows failed:", err));
+    }
+    const already = await prisma.activityLog.findFirst({
+      where: { organizationId: tenant.organizationId, metadata: { path: ["staffActionId"], equals: (logged as LoggedStaffAction).id } },
+      select: { id: true },
+    });
+    if (already) return true;
     await prisma.activityLog.create({
       data: {
         type: tenant.event.type,
@@ -168,6 +189,79 @@ export async function writeTenantRow(logged: LoggedStaffAction | null | undefine
     console.error("[staff-audit] failed to write the customer's audit row:", err);
     return false;
   }
+}
+
+/** The actions whose tenantEventFor() can owe a customer row. */
+const TENANT_OWING_ACTIONS = [
+  "admin.org.plan_changed",
+  "admin.org.status_changed",
+  "admin.org.seats_changed",
+  "admin.org.feature_changed",
+  "admin.org.module_changed",
+  "admin.org.owner_set",
+] as const;
+
+/**
+ * Writes the customer rows that staff changes made while ActivityLog could
+ * not name a non-person actor still owe (see the file header). Returns null
+ * while it still cannot; otherwise how many rows it wrote. Safe to run more
+ * than once: a StaffAction that already has its customer row is skipped.
+ */
+export async function replayOwedTenantRows(opts: { batch?: number } = {}): Promise<{ written: number } | null> {
+  if (!tenantActorSupported()) return null;
+  const batch = Math.min(Math.max(opts.batch ?? 200, 1), 1000);
+  let written = 0;
+  let cursor: { createdAt: Date; id: string } | null = null;
+  for (;;) {
+    const rows: { id: string; action: string; targetCompanyId: string | null; before: unknown; after: unknown; createdAt: Date }[] =
+      await prisma.staffAction.findMany({
+        where: {
+          targetCompanyId: { not: null },
+          action: { in: [...TENANT_OWING_ACTIONS] },
+          ...(cursor
+            ? { OR: [{ createdAt: { gt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { gt: cursor.id } }] }
+            : {}),
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: batch,
+        select: { id: true, action: true, targetCompanyId: true, before: true, after: true, createdAt: true },
+      });
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      if (!r.targetCompanyId) continue;
+      const event = tenantEventFor(
+        r.action as StaffActionKey,
+        (r.before ?? null) as Record<string, unknown> | null,
+        (r.after ?? null) as Record<string, unknown> | null,
+      );
+      if (!event) continue;
+      const exists = await prisma.activityLog.findFirst({
+        where: { organizationId: r.targetCompanyId, metadata: { path: ["staffActionId"], equals: r.id } },
+        select: { id: true },
+      });
+      if (exists) continue;
+      await prisma.activityLog.create({
+        data: {
+          type: event.type,
+          actorId: null,
+          actorType: STAFF_ACTOR_TYPE,
+          actorLabel: STAFF_ACTOR_LABEL,
+          organizationId: r.targetCompanyId,
+          description: event.description,
+          targetType: "Organization",
+          targetId: r.targetCompanyId,
+          severity: event.severity,
+          metadata: { staffActionId: r.id, replayed: true },
+          createdAt: r.createdAt,
+        } as unknown as Prisma.ActivityLogUncheckedCreateInput,
+      });
+      written++;
+    }
+    const last = rows[rows.length - 1];
+    cursor = { createdAt: last.createdAt, id: last.id };
+    if (rows.length < batch) break;
+  }
+  return { written };
 }
 
 /**

@@ -71,7 +71,16 @@ export async function PUT(
   }
 
   if (Object.keys(data).length === 0) return scimError(400, "No fields to update");
-  if (auth.workspaceInactive && !isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  if (auth.workspaceInactive) {
+    // Suspended or cancelled: only a deprovision goes through. An identity
+    // provider that deprovisions with a FULL resource (name, emails and
+    // active:false) is still deprovisioning, so the rest is dropped and the
+    // deactivation lands; otherwise the fired person would come back ACTIVE
+    // the day the company is reactivated.
+    if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
+    for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  }
   if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
     if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
     // A renamed address is not a proven one: verification is per address.
@@ -153,7 +162,16 @@ export async function PATCH(
   if (Object.keys(data).length === 0) {
     return scimResponse(userToScim({ ...existing, externalId: null }));
   }
-  if (auth.workspaceInactive && !isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  if (auth.workspaceInactive) {
+    // Suspended or cancelled: only a deprovision goes through. An identity
+    // provider that deprovisions with a FULL resource (name, emails and
+    // active:false) is still deprovisioning, so the rest is dropped and the
+    // deactivation lands; otherwise the fired person would come back ACTIVE
+    // the day the company is reactivated.
+    if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
+    for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  }
   if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
     if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
     // A renamed address is not a proven one: verification is per address.

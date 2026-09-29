@@ -19,8 +19,20 @@
 // User row when this is the company they work in and on their membership row
 // for this company. Nothing else about them changes: object roles, Space and
 // List membership and Team membership are untouched. Admin scopes have no
-// column yet (org-role.ts adminScopesOf), so there is nothing to clear. Their
-// tokenVersion is bumped so the new role lands on their next request.
+// column yet (org-role.ts adminScopesOf), so there is nothing to clear.
+//
+// Their tokenVersion is NOT bumped: a bump revokes every session they have
+// (auth.ts versionMismatch), which signed the new Owner out on every device,
+// and out of their home workspace too for someone who only holds a
+// membership here. The session check already copies the stored role at most
+// five minutes on, so the role lands without throwing anyone out.
+//
+// "Never removes an Owner" includes the earliest-admin rule: a COMPANY_ADMIN
+// is an Owner only while they are the earliest-created admin (org-role.ts).
+// Promoting someone whose account is OLDER would quietly take that Owner
+// status away, so that COMPANY_ADMIN is written as Owner (SUPER_ADMIN) in the
+// same transaction. Their effective role does not change; the audit row
+// names them.
 
 import { prisma } from "@/lib/prisma";
 import { logStaffAction, writeTenantRow, type LoggedStaffAction, type StaffActor } from "@/lib/staff-audit";
@@ -69,6 +81,7 @@ export async function setWorkspaceOwner(input: {
           firstName: true,
           lastName: true,
           email: true,
+          createdAt: true,
           organizationId: true,
           accessLevel: true,
           organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true } },
@@ -87,13 +100,38 @@ export async function setWorkspaceOwner(input: {
         return { status: 409 as const, error: `${nameOf(person)} already has Owner access here` };
       }
 
+      // The Owner who holds it only as the earliest-created COMPANY_ADMIN,
+      // and would lose it to an older account becoming an admin.
+      const current = owners.length
+        ? await tx.user.findMany({
+            where: { id: { in: owners } },
+            select: {
+              id: true,
+              email: true,
+              createdAt: true,
+              organizationId: true,
+              accessLevel: true,
+              organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true } },
+            },
+          })
+        : [];
+      const keptOwners: string[] = [];
+      for (const o of current) {
+        const oAnchored = o.organizationId === companyId;
+        const oMembership = o.organizationMemberships[0] ?? null;
+        const levelHere = oAnchored ? o.accessLevel : oMembership?.role;
+        if (levelHere !== "COMPANY_ADMIN") continue;
+        const displaced =
+          person.createdAt.getTime() < o.createdAt.getTime() ||
+          (person.createdAt.getTime() === o.createdAt.getTime() && person.id.localeCompare(o.id) < 0);
+        if (!displaced) continue;
+        if (oAnchored) await tx.user.update({ where: { id: o.id }, data: { accessLevel: "SUPER_ADMIN" } });
+        if (oMembership) await tx.organizationMembership.update({ where: { id: oMembership.id }, data: { role: "SUPER_ADMIN" } });
+        keptOwners.push(o.email);
+      }
+
       if (anchored) {
-        await tx.user.update({
-          where: { id: person.id },
-          data: { accessLevel: "SUPER_ADMIN", tokenVersion: { increment: 1 } },
-        });
-      } else {
-        await tx.user.update({ where: { id: person.id }, data: { tokenVersion: { increment: 1 } } });
+        await tx.user.update({ where: { id: person.id }, data: { accessLevel: "SUPER_ADMIN" } });
       }
       if (membership) {
         await tx.organizationMembership.update({ where: { id: membership.id }, data: { role: "SUPER_ADMIN" } });
@@ -110,7 +148,14 @@ export async function setWorkspaceOwner(input: {
         reason,
         summary: `Gave ${name} (${person.email}) Owner access at ${org.name}`,
         before: { userId: person.id, name, email: person.email, role: roleHere, owners: owners.length },
-        after: { userId: person.id, name, email: person.email, role: "SUPER_ADMIN", owners: owners.length + 1 },
+        after: {
+          userId: person.id,
+          name,
+          email: person.email,
+          role: "SUPER_ADMIN",
+          owners: owners.length + 1,
+          ...(keptOwners.length ? { keptOwnerAccess: keptOwners.join(", ") } : {}),
+        },
       });
       return { status: 200 as const, person: { id: person.id, name, email: person.email }, company: org };
     },

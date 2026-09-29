@@ -11,8 +11,9 @@ import { setWorkspaceOwner, validateOwnerBody } from "@/lib/admin/set-owner";
  * to one live Member or Admin of this workspace; never removes or demotes an
  * existing Owner. `reason` is required and stored on the audit row;
  * `confirm` is the company name as the staff member typed it, checked here
- * and not only in the modal. One transaction with its StaffAction row; the
- * person's tokenVersion is bumped so the role lands on their next request.
+ * and not only in the modal. One transaction with its StaffAction row. No
+ * session is revoked: the session check picks the new role up within five
+ * minutes (lib/admin/set-owner.ts says why).
  * Platform staff only.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

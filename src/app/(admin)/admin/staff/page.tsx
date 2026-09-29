@@ -97,7 +97,7 @@ export default function StaffPage() {
 
   const remove = async (s: Staff) => {
     setRemoveBusy(true);
-    const r = await apiFetch("/api/admin/platform-staff", { method: "DELETE", json: { id: s.id } });
+    const r = await apiFetch("/api/admin/platform-staff", { method: "DELETE", json: { id: s.id, confirm: s.email } });
     setRemoveBusy(false);
     if (!r.ok) {
       if (r.status !== 401) toast(r.error || "Couldn't remove them", { tone: "danger" });
@@ -176,6 +176,7 @@ export default function StaffPage() {
           rowKey={(s) => s.id}
           highlightKey={focusId}
           skeletonRows={4}
+          rowMenuAlwaysVisible
           rowMenu={onlyOne ? undefined : (s) => (
             <RowMenuTrigger open={menu?.row.id === s.id} onOpen={(ref) => setMenu({ row: s, anchor: ref })} label={`Actions for ${s.email}`} />
           )}
@@ -186,7 +187,7 @@ export default function StaffPage() {
             from: 1,
             to: staff?.length ?? 0,
             hidePaging: true,
-            extra: onlyOne && staff ? "· You cannot remove the last staff member." : "· Anyone on this list can open the staff console and change any customer's plan.",
+            trailing: onlyOne && staff ? "You cannot remove the last staff member." : "Anyone on this list can open the staff console and change any customer's plan.",
           }}
         />
       </div>

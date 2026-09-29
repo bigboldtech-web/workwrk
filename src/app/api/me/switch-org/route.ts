@@ -6,7 +6,7 @@ import { logAuditEvent } from "@/lib/activity";
 /**
  * Switch the caller's current organization to one of their existing
  * OrganizationMembership rows. We re-anchor the user by updating
- * `User.organizationId` to the chosen org — the JWT callback in
+ * `User.organizationId` to the chosen org: the JWT callback in
  * src/lib/auth.ts will pick this up on the next token refresh (or
  * the client calling `session.update()` will force the refresh
  * immediately).
@@ -14,7 +14,7 @@ import { logAuditEvent } from "@/lib/activity";
  * Guardrails:
  * - The target org MUST be one the user already has a membership in.
  *   Cross-org probing is refused with 403.
- * - We don't bump `isPrimary` here — that's a separate concept (the
+ * - We don't bump `isPrimary` here; that is a separate concept (the
  *   "home" org) from the actively-viewed org. A future column on
  *   User (`activeOrganizationId`) could split these cleanly; for
  *   now we overload `organizationId` since nothing else uses it as
@@ -33,9 +33,22 @@ export async function POST(req: NextRequest) {
 
   const membership = await prisma.organizationMembership.findUnique({
     where: { userId_organizationId: { userId, organizationId: target } },
+    select: { organization: { select: { status: true } } },
   });
   if (!membership) {
     return jsonError("You are not a member of that organization", 403);
+  }
+  // A suspended or cancelled workspace is not one anyone can work in. The
+  // session check in lib/auth.ts would move the token straight back out;
+  // refusing here keeps User.organizationId off an unusable workspace.
+  const targetStatus = membership.organization?.status;
+  if (targetStatus === "SUSPENDED" || targetStatus === "CANCELLED") {
+    return jsonError(
+      targetStatus === "SUSPENDED"
+        ? "That workspace is suspended. Please contact WorkwrK support."
+        : "That workspace is closed. Please contact WorkwrK support.",
+      403,
+    );
   }
 
   const previousOrgId = getOrgId(session);

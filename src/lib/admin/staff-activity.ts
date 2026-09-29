@@ -196,15 +196,16 @@ export function humanKey(k: string): string {
 export function detailRows(
   before: Record<string, unknown> | null | undefined,
   after: Record<string, unknown> | null | undefined,
-): { key: string; label: string; before: string; after: string }[] {
+): { key: string; label: string; before: string; after: string; changed: boolean }[] {
   const b = before && typeof before === "object" ? before : {};
   const a = after && typeof after === "object" ? after : {};
   const keys: string[] = [];
   for (const k of [...Object.keys(b), ...Object.keys(a)]) if (!keys.includes(k)) keys.push(k);
-  return keys.map((k) => ({
-    key: k,
-    label: humanKey(k),
-    before: k in b ? plainValue(k, (b as Record<string, unknown>)[k]) : "None",
-    after: k in a ? plainValue(k, (a as Record<string, unknown>)[k]) : "None",
-  }));
+  return keys.map((k) => {
+    const before = k in b ? plainValue(k, (b as Record<string, unknown>)[k]) : "None";
+    const after = k in a ? plainValue(k, (a as Record<string, unknown>)[k]) : "None";
+    // Context (the person's name and email on an Owner grant) is the same on
+    // both sides; the details dialog lists it apart so the change stands out.
+    return { key: k, label: humanKey(k), before, after, changed: before !== after };
+  });
 }

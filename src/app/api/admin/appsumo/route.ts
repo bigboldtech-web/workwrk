@@ -8,6 +8,7 @@ import { codeStatus } from "@/lib/admin/search";
 import { CODE_VIEWS, codeFilterWhere, codeGives, codeOrderBy, codeViewWhere, parseCodeListParams } from "@/lib/admin/codes-list";
 import { CSV_MAX_ROWS, seatsAreUnlimited, toCsv } from "@/lib/admin/companies-list";
 import { planLabel } from "@/lib/staff-audit-helpers";
+import { confirmMatches } from "@/lib/admin/company-patch-rules";
 
 /**
  * /api/admin/appsumo: WorkwrK staff endpoints for AppSumo code
@@ -182,6 +183,9 @@ export async function PATCH(req: NextRequest) {
 
   if (body?.refunded === true) {
     const notes = typeof body?.notes === "string" && body.notes.trim() ? body.notes.trim() : null;
+    // Checked on the server as well as in the browser: a refund cannot be
+    // undone from the console, so a replayed call must name the code.
+    const confirm = typeof body?.confirm === "string" ? body.confirm : "";
     const actor = staffActorFromSession(session);
     const ip = requestIp(req);
 
@@ -191,6 +195,7 @@ export async function PATCH(req: NextRequest) {
         select: { code: true, tier: true, plan: true, seats: true, redeemedByOrg: true, redeemedAt: true, refundedAt: true },
       });
       if (!row) return { status: 404 as const };
+      if (!confirmMatches(confirm, row.code)) return { status: 400 as const };
       // Already refunded: nothing changes, so nothing is written or recorded.
       if (row.refundedAt) return { status: 200 as const, refundedAt: row.refundedAt, logged: null, company: null };
 
@@ -223,6 +228,7 @@ export async function PATCH(req: NextRequest) {
     });
 
     if (outcome.status === 404) return jsonError("Code not found", 404);
+    if (outcome.status === 400) return jsonError("Type the code to confirm the refund", 400);
     void writeTenantRow(outcome.logged);
     return jsonSuccess({ ok: true, refundedAt: outcome.refundedAt, company: outcome.company ?? null });
   }

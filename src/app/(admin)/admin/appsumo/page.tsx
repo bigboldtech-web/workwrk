@@ -15,7 +15,7 @@
 // "..." > Refresh.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronDown, Copy, Download, Info, KeyRound, ReceiptText, RefreshCw, Upload } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
@@ -65,6 +65,8 @@ import {
   ViewCount,
   downloadHref,
   useCopy,
+  rememberCompanyNames,
+  useListSearchKey,
   useStaleRefetch,
 } from "../../console-ui";
 
@@ -93,7 +95,7 @@ interface Payload {
 
 export default function AppsumoCodesPage() {
   const router = useRouter();
-  const spKey = useSearchParams().toString();
+  const { spKey } = useListSearchKey("/admin/appsumo");
   const params = useMemo(() => parseCodeListParams(new URLSearchParams(spKey)), [spKey]);
   const { datePrefs } = useConsole();
   const { toast } = useOsToast();
@@ -118,6 +120,7 @@ export default function AppsumoCodesPage() {
     if (mine !== seq.current) return;
     if (r.ok) {
       setFailed(false);
+      rememberCompanyNames([...r.data.codes.map((c) => c.company), r.data.redeemedBy]);
       setPayload(r.data);
       setLoadedAt(Date.now());
     } else if (r.status !== 401) setFailed(true);
@@ -185,15 +188,17 @@ export default function AppsumoCodesPage() {
   }, [byPicker, byQuery]);
 
   const activeCount = activeCodeFilterCount(params);
-  const clearAll = () => {
+  /** Every filter off, plus `extra` (the empty row's view reset) in the SAME navigation. */
+  const clearFilters = (extra: Partial<CodeListParams> = {}) => {
     setWritten("");
     setCodeText("");
     setCodeOn(false);
     setImportedOn(false);
     setRedeemedOn(false);
     setByOn(false);
-    setParams({ code: "", tiers: [], plans: [], importedFrom: null, importedTo: null, redeemedFrom: null, redeemedTo: null, redeemedBy: null });
+    setParams({ code: "", tiers: [], plans: [], importedFrom: null, importedTo: null, redeemedFrom: null, redeemedTo: null, redeemedBy: null, ...extra });
   };
+  const clearAll = () => clearFilters();
   const toggleIn = <T,>(list: T[], v: T, on: boolean): T[] => (on ? (list.includes(v) ? list : [...list, v]) : list.filter((x) => x !== v));
 
   const exportCsv = () => {
@@ -207,7 +212,7 @@ export default function AppsumoCodesPage() {
     setRefundBusy(true);
     const r = await apiFetch<{ company: { id: string; name: string } | null }>("/api/admin/appsumo", {
       method: "PATCH",
-      json: { code: row.code, refunded: true },
+      json: { code: row.code, refunded: true, confirm: row.code },
     });
     setRefundBusy(false);
     if (!r.ok) {
@@ -241,7 +246,8 @@ export default function AppsumoCodesPage() {
         </span>
       ),
     },
-    { key: "gives", label: "What it gives", width: "minmax(180px,1.2fr)", render: (r) => <span className="truncate">{r.gives}</span> },
+    // Gives way on a narrow card; column settings bring it back.
+    { key: "gives", label: "What it gives", width: "minmax(180px,1.2fr)", hideBelow: 900, render: (r) => <span className="truncate">{r.gives}</span> },
     { key: "status", label: "Status", width: "130px", render: (r) => <StatusChip color={codeStatusColor(r.status)} label={codeStatusLabel(r.status)} /> },
     {
       key: "company",
@@ -251,7 +257,8 @@ export default function AppsumoCodesPage() {
         r.company ? (
           <Link href={`/admin/companies/${r.company.id}`} className="block min-w-0 truncate text-ink hover:underline">{r.company.name}</Link>
         ) : (
-          <span className="text-ink-3">None</span>
+          // A code refunded before anyone redeemed it says so, rather than "None".
+          <span className="text-ink-3">{r.redeemedAt ? "Company deleted" : "Not redeemed"}</span>
         ),
     },
     {
@@ -274,7 +281,7 @@ export default function AppsumoCodesPage() {
   ) : (
     <span className="inline-flex items-center gap-1">
       No codes match ·
-      <button type="button" onClick={() => { clearAll(); if (params.view !== "all") setParams({ view: "all" }); }} className={TEXT_LINK}>Clear filters</button>
+      <button type="button" onClick={() => clearFilters(params.view !== "all" ? { view: "all" } : {})} className={TEXT_LINK}>Clear filters</button>
     </span>
   );
 
@@ -378,6 +385,7 @@ export default function AppsumoCodesPage() {
               columns={columns}
               rows={failed && !payload ? [] : rows}
               rowKey={(r) => r.id}
+              rowMenuAlwaysVisible
               rowMenu={(r) => <RowMenuTrigger open={menu?.row.id === r.id} onOpen={(ref) => setMenu({ row: r, anchor: ref })} label={`Actions for ${r.code}`} />}
               empty={emptyRow}
               footer={{
@@ -398,7 +406,9 @@ export default function AppsumoCodesPage() {
         <MorePortal anchorRef={menu.anchor} width={220} open onClose={() => setMenu(null)} placement="below">
           <MenuList onClick={() => setMenu(null)}>
             <MenuItem icon={Copy} label="Copy code" onClick={() => void copy(menu.row.code, "Code")} />
-            {menu.row.status === "redeemed" ? (
+            {/* An unused code can be refunded too: AppSumo refunds a buyer
+                before they redeem, and a refunded code can no longer be redeemed. */}
+            {menu.row.status !== "refunded" ? (
               <>
                 <MenuSeparator />
                 <MenuItem icon={ReceiptText} label="Mark refunded" destructive onClick={() => setRefunding(menu.row)} />
@@ -413,7 +423,9 @@ export default function AppsumoCodesPage() {
           refunding
             ? {
                 title: `Mark ${refunding.code} refunded?`,
-                body: `This is bookkeeping. ${refunding.company?.name ?? "The company that redeemed it"} keeps their plan until you change it on their company page.`,
+                body: refunding.company
+                  ? `This is bookkeeping. ${refunding.company.name} keeps their plan until you change it on their company page.`
+                  : "Nobody has redeemed it. Once it is marked refunded, it can no longer be redeemed.",
                 note: "A refund cannot be undone from this console.",
                 match: refunding.code,
                 matchLabel: "the code",

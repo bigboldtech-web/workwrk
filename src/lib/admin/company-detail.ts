@@ -17,6 +17,7 @@
 import { prisma } from "@/lib/prisma";
 import { MODULES } from "@/lib/modules";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
+import { deletionSchedule } from "@/lib/admin/company-patch-rules";
 import {
   LIVE_PERSON,
   ownerIdsOf,
@@ -169,6 +170,7 @@ export async function loadCompanyDetail(id: string) {
           sops: true,
           kras: true,
           kpis: true,
+          reviewCycles: true,
           dataTables: true,
           conversations: { where: { type: "CHANNEL", archivedAt: null } },
         },
@@ -220,6 +222,12 @@ export async function loadCompanyDetail(id: string) {
     plan: org.plan,
     status: org.status,
     createdAt: org.createdAt,
+    // The Owner's own scheduled deletion (Settings > Danger zone), so staff
+    // can see what a status change away from Cancelled would undo.
+    deletion: (() => {
+      const d = deletionSchedule(org.settings);
+      return d?.scheduledHardDeleteAt ? { scheduledFor: d.scheduledHardDeleteAt, requestedAt: d.cancelledAt } : null;
+    })(),
     // Only the two add-ons that do something. Custom domain is not sent: its
     // stored value is left in place, unread (spec 2.3 card 4).
     features: { byok: features.byok === true, whiteLabel: features.whiteLabel === true },
@@ -256,6 +264,7 @@ export async function loadCompanyDetail(id: string) {
       sops: org._count.sops,
       kras: org._count.kras,
       kpis: org._count.kpis,
+      reviews: org._count.reviewCycles,
       // A dash on the page where the module is off: the count of a switched
       // off module is not what they use.
       tables: moduleOn("tables") ? org._count.dataTables : null,

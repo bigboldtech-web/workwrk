@@ -10,9 +10,9 @@
 // pasted link restore the list exactly. Paging is by cursor, so a row
 // written while someone pages never shifts the page under them.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ChevronDown, ClipboardCopy, Download, Eye, Info, RefreshCw } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -38,7 +38,7 @@ import {
 import { STAFF_ACTIONS, type StaffActionKey } from "@/lib/staff-audit-helpers";
 import { choiceFromStored, storedFromChoice } from "@/lib/admin/console-columns";
 import { useConsole } from "../../console-context";
-import { AboutDialog, BTN_GHOST, ConsoleModal, FIELD, InlineRetry, RowMenuTrigger, TEXT_LINK, UpdatedMeta, downloadHref, useCopy, useStaleRefetch } from "../../console-ui";
+import { AboutDialog, BTN_GHOST, ConsoleModal, FIELD, InlineRetry, RowMenuTrigger, TEXT_LINK, UpdatedMeta, downloadHref, useCopy, rememberCompanyNames, useListSearchKey, useStaleRefetch } from "../../console-ui";
 
 interface ActivityRow {
   id: string;
@@ -87,7 +87,7 @@ function activityQuery(p: Partial<ActivityParams>): string {
 
 export default function StaffActivityPage() {
   const router = useRouter();
-  const spKey = useSearchParams().toString();
+  const { spKey } = useListSearchKey("/admin/audit");
   const params = useMemo(() => parseActivityParams(new URLSearchParams(spKey)), [spKey]);
   const { datePrefs, prefs, patchPrefs } = useConsole();
   const { toast } = useOsToast();
@@ -126,6 +126,7 @@ export default function StaffActivityPage() {
     if (mine !== seq.current) return;
     if (r.ok) {
       setFailed(false);
+      rememberCompanyNames([...r.data.rows.map((x) => x.company), r.data.company]);
       setPayload(r.data);
       setLoadedAt(Date.now());
     } else if (r.status !== 401) setFailed(true);
@@ -155,10 +156,12 @@ export default function StaffActivityPage() {
   }, [companyOpen, companyQuery]);
 
   const activeCount = activeActivityFilterCount(params);
-  const clearAll = () => {
+  /** Every filter off, plus `extra` (the empty row's view reset) in the SAME navigation. */
+  const clearFilters = (extra: Partial<ActivityParams> = {}) => {
     setWhenOn(false);
-    setParams({ who: null, company: null, action: null, from: null, to: null });
+    setParams({ who: null, company: null, action: null, from: null, to: null, ...extra });
   };
+  const clearAll = () => clearFilters();
   const exportCsv = () => {
     const q = new URLSearchParams(query.replace(/^\?/, ""));
     q.set("format", "csv");
@@ -193,7 +196,8 @@ export default function StaffActivityPage() {
       render: (r) => <span className="tabular-nums text-ink-2" title={formatDateTitle(r.createdAt, datePrefs)}>{formatDate(r.createdAt, datePrefs, "datetime")}</span>,
     },
     { key: "who", label: "Who", title: true, width: "minmax(150px,1fr)", render: (r) => <span className={r.who === r.email ? "truncate font-normal" : "truncate"}>{r.who}</span> },
-    { key: "email", label: "Email", width: "minmax(180px,1fr)", render: (r) => <span className="truncate text-ink-2">{r.email}</span> },
+    // Email and Source give way first on a narrow card; both are in See details.
+    { key: "email", label: "Email", width: "minmax(180px,1fr)", hideBelow: 1000, render: (r) => <span className="truncate text-ink-2">{r.email}</span> },
     { key: "what", label: "What", width: "minmax(260px,2.4fr)", render: (r) => <span className="truncate" title={r.summary}>{r.summary}</span> },
     {
       key: "company",
@@ -202,11 +206,14 @@ export default function StaffActivityPage() {
       render: (r) =>
         r.company ? (
           <Link href={`/admin/companies/${r.company.id}`} onClick={(e) => e.stopPropagation()} className="block min-w-0 truncate text-ink hover:underline">{r.company.name}</Link>
+        ) : r.action.startsWith("admin.staff.") ? (
+          // A change to the staff list is about Staff, not a company (spec 2.4 entry points).
+          <Link href="/admin/staff" onClick={(e) => e.stopPropagation()} className="block min-w-0 truncate text-ink hover:underline">Staff list</Link>
         ) : (
           <span className="text-ink-3">None</span>
         ),
     },
-    { key: "source", label: "Source", width: "110px", render: () => <span className="text-ink-2">Console</span> },
+    { key: "source", label: "Source", width: "110px", hideBelow: 1100, render: () => <span className="text-ink-2">Console</span> },
   ];
   const columnChoice = choiceFromStored(COLUMN_KEYS, prefs.audit.columns, OFF_BY_DEFAULT);
   const nothingYet = !!payload && payload.total === 0 && activeCount === 0 && params.view === "all";
@@ -317,6 +324,7 @@ export default function StaffActivityPage() {
               rows={failed && !payload ? [] : rows}
               rowKey={(r) => r.id}
               onRowClick={(r) => setDetails(r)}
+              rowMenuAlwaysVisible
               rowMenu={(r) => <RowMenuTrigger open={menu?.row.id === r.id} onOpen={(ref) => setMenu({ row: r, anchor: ref })} label="Row actions" />}
               empty={
                 failed ? (
@@ -324,7 +332,7 @@ export default function StaffActivityPage() {
                 ) : (
                   <span className="inline-flex items-center gap-1">
                     No activity matches ·
-                    <button type="button" onClick={() => { clearAll(); if (params.view !== "all") setParams({ view: "all" }); }} className={TEXT_LINK}>Clear filters</button>
+                    <button type="button" onClick={() => clearFilters(params.view !== "all" ? { view: "all" } : {})} className={TEXT_LINK}>Clear filters</button>
                   </span>
                 )
               }
@@ -366,8 +374,9 @@ export default function StaffActivityPage() {
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} title="Staff activity">
         Every change WorkwrK staff made, who made it and for which customer. A change to a customer&apos;s workspace also
         belongs in that customer&apos;s own audit log at Settings › Audit log, shown there as WorkwrK Support with no
-        individual&apos;s name; those customer rows are held until that log can name a non-person actor. Nothing here can
-        be edited or deleted.
+        individual&apos;s name. Until that log can name a non-person actor, those customer rows are not written yet;
+        each one is written, dated when the change was made, the first time it can be. Nothing here can be edited or
+        deleted.
       </AboutDialog>
     </>
   );
@@ -386,7 +395,9 @@ function PickerButton({ label, empty, onClick, children }: { label: string; empt
 }
 
 function DetailsDialog({ row, onClose, datePrefs }: { row: ActivityRow | null; onClose: () => void; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
-  const rowsList = row ? detailRows(row.before, row.after) : [];
+  const all = row ? detailRows(row.before, row.after) : [];
+  const rowsList = all.filter((d) => d.changed);
+  const context = all.filter((d) => !d.changed);
   return (
     <ConsoleModal
       open={!!row}
@@ -408,10 +419,23 @@ function DetailsDialog({ row, onClose, datePrefs }: { row: ActivityRow | null; o
               {rowsList.map((d) => (
                 <div key={d.key} className="grid grid-cols-[110px_1fr_1fr] gap-2 border-b border-line-soft px-3 py-2 text-base last:border-b-0">
                   <span className="text-ink-2">{d.label}</span>
-                  <span className="min-w-0 break-all text-ink">{d.before}</span>
-                  <span className="min-w-0 break-all text-ink">{d.after}</span>
+                  <span className="min-w-0 break-words text-ink">{d.before}</span>
+                  <span className="min-w-0 break-words text-ink">{d.after}</span>
                 </div>
               ))}
+            </div>
+          ) : null}
+          {context.length > 0 ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-medium text-ink-2">Unchanged</p>
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm text-ink-2">
+                {context.map((d) => (
+                  <Fragment key={d.key}>
+                    <dt>{d.label}</dt>
+                    <dd className="min-w-0 break-words text-ink">{d.after}</dd>
+                  </Fragment>
+                ))}
+              </dl>
             </div>
           ) : null}
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm text-ink-2">

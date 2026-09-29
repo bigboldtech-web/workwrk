@@ -16,7 +16,6 @@
 
 import "@/app/(dashboard)/tokens.css";
 import "@/app/(dashboard)/os.css";
-import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -28,6 +27,7 @@ import { getEffectivePreferences, DEFAULT_DENSITY, DEFAULT_THEME, type DensityPr
 import { loadConsoleMe, stampConsoleOpened, staffEmailOf } from "@/lib/admin/console-me";
 import { isAdminHost, productHref } from "@/lib/admin/console-nav";
 import { AdminShell } from "./admin-shell";
+import { SignedOutRedirect } from "./signed-out-redirect";
 
 /**
  * The staff member's OWN product preferences, read (never written) for the
@@ -57,7 +57,10 @@ export default async function AdminLayout({
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
   if (!session?.user) {
-    redirect("/login?callbackUrl=/admin");
+    // Back to the page asked for after sign-in, not Overview. The path is
+    // only known in the browser (a layout has no request path); the edge
+    // gate in proxy.ts does the same server side when it is on.
+    return <SignedOutRedirect />;
   }
 
   const requestHeaders = await headers();

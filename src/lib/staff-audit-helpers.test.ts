@@ -83,7 +83,7 @@ describe("tenantEventFor: the customer's sentence names WorkwrK Support, never a
       severity: "warning",
     });
     expect(tenantEventFor("admin.org.status_changed", { status: "ACTIVE" }, { status: "CANCELLED" })).toMatchObject({
-      description: "WorkwrK Support scheduled this workspace for deletion",
+      description: "WorkwrK Support closed this workspace",
       severity: "critical",
     });
     expect(tenantEventFor("admin.org.status_changed", { status: "SUSPENDED" }, { status: "ACTIVE" })?.description).toBe(

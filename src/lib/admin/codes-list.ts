@@ -183,7 +183,8 @@ export function parseImport(text: string, preset: { tier: number; plan: string; 
     let seats = preset.seats;
     // An override may name only its first parts ("code, 2" changes the tier
     // and keeps the preset's plan and seats), the same as the old importer.
-    if (parts.length > 4) return { ok: false, error: `Line ${n}: a line has at most four parts: code, tier, plan, seats.` };
+    // Parts after the fourth are ignored, as the old importer did, so a CSV
+    // export with extra trailing columns still imports.
     if (parts[1]) tier = Number(parts[1]);
     if (parts[2]) plan = parts[2].toUpperCase();
     if (parts[3]) seats = Number(parts[3]);

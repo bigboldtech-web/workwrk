@@ -30,9 +30,11 @@
 // open a tab; `onRowClick` is for surfaces that open a drawer instead. The
 // "..." trigger the caller passes in `rowMenu` is visible on hover and focus
 // and always at Compact density on touch devices (os.css `.os-tc__more`).
+// A surface whose rules forbid any hover-only affordance (the Staff console)
+// passes `rowMenuAlwaysVisible`, and the trigger shows at rest on every row.
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,6 +89,8 @@ export interface TableFooter {
   onPageSize?: (n: number) => void;
   /** Extra text after the total ("· 3.4 GB"). */
   extra?: ReactNode;
+  /** A sentence at the footer's end edge, before any paging. */
+  trailing?: ReactNode;
   /** A list that never pages (a person's KPIs): no range and no arrows. */
   hidePaging?: boolean;
 }
@@ -117,6 +121,11 @@ export interface TableCardProps<T> {
    * edge, read "Restor" and gave the whole table a sideways scroll.
    */
   rowMenuWidth?: number;
+  /**
+   * The "..." shows at rest on every row, not only on hover and focus. Opt
+   * in; the product's own tables keep the hover rule.
+   */
+  rowMenuAlwaysVisible?: boolean;
   /** Content rendered in the one empty row. */
   empty?: ReactNode;
   footer?: TableFooter;
@@ -225,6 +234,7 @@ export function TableCard<T>({
   onSort,
   rowMenu,
   rowMenuWidth = 44,
+  rowMenuAlwaysVisible = false,
   empty,
   footer,
   bulkActions,
@@ -244,6 +254,13 @@ export function TableCard<T>({
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const cardWidth = useElementWidth(cardRef);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The room the columns really get: the card less its two 1px borders and
+  // any vertical scrollbar the body scroller draws (a classic scrollbar is
+  // about 15px; an overlay one is 0). Without these the fit below believed
+  // the row had room it did not, and the pinned end cell covered the last
+  // column ("Signed up" read "Sign").
+  const gutter = useScrollGutter(scrollRef, cardWidth);
   // The columns this card is wide enough for. Unmeasured (the first frame,
   // a test) shows every column.
   // Beyond each column's own hideBelow, the droppable columns (the ones
@@ -267,8 +284,14 @@ export function TableCard<T>({
     setChoice(next); writeChoice(settingsKey, next);
   }, [settingsKey, controlled, onColumnChoiceChange]);
   const columns = useMemo(
-    () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0), choice),
-    [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice],
+    () =>
+      visibleTableColumns(
+        allColumns,
+        cardWidth,
+        (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0) + (cardWidth > 0 ? 2 + gutter : 0),
+        choice,
+      ),
+    [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice, gutter],
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
@@ -376,8 +399,8 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
-    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", className)} role="table" aria-label={ariaLabel}>
-      <div className="min-h-0 flex-1 overflow-auto">
+    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)} role="table" aria-label={ariaLabel}>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}
           <div
@@ -619,7 +642,7 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, hidePaging }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging }: TableFooter) {
   const hasRows = total > 0;
   return (
     <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
@@ -628,6 +651,7 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
       </span>
       {extra ? <span className="text-ink-2">{extra}</span> : null}
       <span className="flex-1" />
+      {trailing ? <span className="min-w-0 truncate text-ink-2">{trailing}</span> : null}
       {onPageSize && pageSize ? (
         // Shown on hover, and to the keyboard: opacity (not display:none),
         // so Tab still reaches the select and it shows while it has focus.
@@ -731,6 +755,27 @@ function ColumnSettingsPopover<T>({ anchorRef, columns, visible, choice, onChang
     </div>,
     document.body,
   );
+}
+
+/**
+ * The width of the vertical scrollbar `ref` draws (offsetWidth less
+ * clientWidth), re-read whenever the element or its content resizes. 0 for
+ * overlay scrollbars and before the first measurement.
+ */
+function useScrollGutter(ref: React.RefObject<HTMLElement | null>, cardWidth: number): number {
+  const [gutter, setGutter] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => setGutter(Math.max(0, el.offsetWidth - el.clientWidth));
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [ref, cardWidth]);
+  return gutter;
 }
 
 /** The 32px ghost "..." trigger a row menu mounts inside `rowMenu`. */

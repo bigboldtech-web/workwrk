@@ -21,7 +21,7 @@
 //   - Refresh: "..." > Refresh, plus a refetch on focus after 60 seconds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Building2, Copy, Download, ExternalLink, Info, RefreshCw, ScrollText } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -63,6 +63,8 @@ import {
   ViewCount,
   downloadHref,
   useCopy,
+  rememberCompanyNames,
+  useListSearchKey,
   useStaleRefetch,
 } from "../../console-ui";
 
@@ -94,9 +96,7 @@ const OFF_BY_DEFAULT = ["domain"];
 
 export default function CompaniesPage() {
   const router = useRouter();
-  const pathname = usePathname() || "/admin/companies";
-  const sp = useSearchParams();
-  const spKey = sp.toString();
+  const { spKey, onList } = useListSearchKey("/admin/companies");
   const params = useMemo(() => parseCompanyListParams(new URLSearchParams(spKey)), [spKey]);
   const { datePrefs, prefs, patchPrefs } = useConsole();
   const { toast } = useOsToast();
@@ -123,7 +123,6 @@ export default function CompaniesPage() {
   // The list only answers on /admin/companies itself: while the company
   // drawer is open the URL is the company's, and this page keeps showing
   // the list it had rather than refetching for a URL that is not its own.
-  const onList = pathname === "/admin/companies";
   const query = companyListQuery(params);
 
   const load = useCallback(async () => {
@@ -132,6 +131,7 @@ export default function CompaniesPage() {
     if (mine !== seq.current) return;
     if (r.ok) {
       setFailed(false);
+      rememberCompanyNames(r.data.companies);
       setPayload(r.data);
       setLoadedAt(Date.now());
     } else if (r.status !== 401) {
@@ -183,7 +183,8 @@ export default function CompaniesPage() {
   const [signedOn, setSignedOn] = useState(params.signedFrom !== null || params.signedTo !== null);
 
   const activeCount = activeCompanyFilterCount(params);
-  const clearAll = () => {
+  /** Every filter off, plus `extra` (the empty row's view reset) in the SAME navigation. */
+  const clearFilters = (extra: Partial<CompanyListParams> = {}) => {
     setWritten("");
     setSearchText("");
     setNameOn(false);
@@ -192,8 +193,10 @@ export default function CompaniesPage() {
     setParams({
       search: "", plans: [], statuses: [], subscriptions: [], modules: [], owners: null,
       peopleMin: null, peopleMax: null, signedFrom: null, signedTo: null,
+      ...extra,
     });
   };
+  const clearAll = () => clearFilters();
 
   const toggleIn = <T extends string>(list: T[], v: T, on: boolean): T[] =>
     on ? (list.includes(v) ? list : [...list, v]) : list.filter((x) => x !== v);
@@ -260,11 +263,13 @@ export default function CompaniesPage() {
         </span>
       ),
     },
-    { key: "domain", label: "Sign-in domain", width: "minmax(140px,1fr)", render: (r) => <span className={r.domain ? "truncate" : "text-ink-3"}>{r.domain ?? "None"}</span> },
+    // After Modules, Sign-in domain then Seats give way on a narrow card, so
+    // the pinned "..." never covers Signed up; both are on the company page.
+    { key: "domain", label: "Sign-in domain", width: "minmax(140px,1fr)", hideBelow: 960, render: (r) => <span className={r.domain ? "truncate" : "text-ink-3"}>{r.domain ?? "None"}</span> },
     { key: "plan", label: "Plan", width: "140px", headerFilter: planFilter, render: (r) => <Chip as="span" className="h-6 border-line bg-raised px-2 text-xs text-ink-2">{planLabel(r.plan)}</Chip> },
     { key: "status", label: "Status", width: "150px", headerFilter: statusFilter, render: (r) => <StatusChip color={companyStatusColor(r.status)} label={statusLabel(r.status)} /> },
     { key: "people", label: "People", width: "90px", numeric: true, render: (r) => new Intl.NumberFormat().format(r.people) },
-    { key: "seats", label: "Seats", width: "120px", render: (r) => <span className={r.seatsLabel === "None" ? "text-ink-3" : "tabular-nums"}>{r.seatsLabel}</span> },
+    { key: "seats", label: "Seats", width: "120px", hideBelow: 880, render: (r) => <span className={r.seatsLabel === "None" ? "text-ink-3" : "tabular-nums"}>{r.seatsLabel}</span> },
     {
       key: "modules",
       label: "Modules",
@@ -297,7 +302,7 @@ export default function CompaniesPage() {
   ) : activeCount > 0 || params.view !== "all" ? (
     <span className="inline-flex items-center gap-1">
       No companies match these filters ·
-      <button type="button" onClick={() => { clearAll(); if (params.view !== "all") setParams({ view: "all" }); }} className={TEXT_LINK}>Clear filters</button>
+      <button type="button" onClick={() => clearFilters(params.view !== "all" ? { view: "all" } : {})} className={TEXT_LINK}>Clear filters</button>
     </span>
   ) : (
     "No companies yet"
@@ -427,6 +432,7 @@ export default function CompaniesPage() {
               rows={failed && !payload ? [] : rows}
               rowKey={(r) => r.id}
               rowHref={(r) => `/admin/companies/${r.id}`}
+              rowMenuAlwaysVisible
               rowMenu={(r) => (
                 <RowMenuTrigger open={menu?.row.id === r.id} onOpen={(ref) => setMenu({ row: r, anchor: ref })} label={`Actions for ${r.name}`} />
               )}

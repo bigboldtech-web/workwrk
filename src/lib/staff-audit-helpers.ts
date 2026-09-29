@@ -136,7 +136,7 @@ export function tenantEventFor(action: StaffActionKey, before: Rec, after: Rec):
         next === "SUSPENDED"
           ? "suspended this workspace"
           : next === "CANCELLED"
-            ? "scheduled this workspace for deletion"
+            ? "closed this workspace"
             : next === "TRIAL"
               ? "moved this workspace to a trial"
               : "set this workspace to Active";

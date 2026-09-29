@@ -12,7 +12,7 @@
 // StaffAction row in the same transaction.
 //
 // This page absorbs the Companies list's old quick-edit dialog: plan, status,
-// the five counts, slug, domain and the joined date are all here (the counts
+// the five counts (Users as People, Tasks, KRAs, SOPs, Reviews), slug, domain and the joined date are all here (the counts
 // in "What they use", the slug and domain in Facts), with the confirms the
 // dialog skipped.
 
@@ -62,7 +62,9 @@ export interface CompanyRecordData {
   modules: { key: string; label: string; competesWith: string; blurb: string; on: boolean; available: boolean }[];
   people: number;
   owners: { id: string; name: string; email: string }[];
-  counts: Record<"people" | "spaces" | "lists" | "tasks" | "docs" | "sops" | "kras" | "kpis", number> & {
+  /** The Owner's own scheduled deletion, when one is set (Settings > Danger zone). */
+  deletion: { scheduledFor: string; requestedAt: string | null } | null;
+  counts: Record<"people" | "spaces" | "lists" | "tasks" | "docs" | "sops" | "kras" | "kpis" | "reviews", number> & {
     tables: number | null;
     talkChannels: number | null;
   };
@@ -234,7 +236,7 @@ export function CompanyRecord({
           See all, and the record refetches after every save and on focus. */}
 
       <div className={`os-chrome ${pad}`}>
-        <div className={`mx-auto flex w-full flex-col gap-4 ${presentation === "page" ? "max-w-[760px] pt-2" : ""}`}>
+        <div className={`flex w-full flex-col gap-4 ${presentation === "page" ? "max-w-[760px] pt-2" : ""}`}>
           {!company ? (
             <Skeletons />
           ) : (
@@ -261,8 +263,22 @@ export function CompanyRecord({
                   void patch("plan", { plan: next });
                 }}
                 onStatus={(next) => {
-                  if (next === "SUSPENDED" || next === "CANCELLED") setPendingStatus(next);
-                  else void patch("status", { status: next });
+                  if (next === "SUSPENDED" || next === "CANCELLED") {
+                    setPendingStatus(next);
+                    return;
+                  }
+                  // Leaving Cancelled clears the Owner's own scheduled
+                  // deletion (company-patch.ts), so say so before it happens.
+                  if (company.deletion) {
+                    setConfirm({
+                      title: `Set ${company.name} to ${statusLabel(next)}?`,
+                      body: `Its Owner scheduled this workspace for deletion on ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}. Setting it to ${statusLabel(next)} cancels that deletion and lets everyone sign in again. Tell the Owner if they still want it deleted.`,
+                      confirmLabel: `Set to ${statusLabel(next)}`,
+                      run: async () => { await patch("status", { status: next }); },
+                    });
+                    return;
+                  }
+                  void patch("status", { status: next });
                 }}
                 onSeats={(n) => patch("seats", { seats: n })}
               />
@@ -305,7 +321,7 @@ export function CompanyRecord({
       {company ? (
         <>
           <TypedConfirmDialog
-            request={statusConfirm(company, pendingStatus)}
+            request={statusConfirm(company, pendingStatus, datePrefs)}
             busy={busy === "status"}
             onCancel={() => setPendingStatus(null)}
             onConfirm={async () => {
@@ -353,14 +369,23 @@ export function CompanyRecord({
 }
 
 /** Says only what the build does (the write bumps tokenVersion; the session check reads the workspace status). */
-function statusConfirm(company: CompanyRecordData, next: "SUSPENDED" | "CANCELLED" | null): TypedConfirmRequest | null {
+function statusConfirm(
+  company: CompanyRecordData,
+  next: "SUSPENDED" | "CANCELLED" | null,
+  datePrefs: ReturnType<typeof useConsole>["datePrefs"],
+): TypedConfirmRequest | null {
   if (!next) return null;
+  // A staff change of status clears the Owner's own deletion schedule
+  // (company-patch.ts); the confirm says so when there is one.
+  const undoes = company.deletion
+    ? ` This also cancels the deletion its Owner scheduled for ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}.`
+    : "";
   return {
     title: next === "SUSPENDED" ? `Suspend ${company.name}?` : `Set ${company.name} to Cancelled?`,
     body:
       next === "SUSPENDED"
-        ? "Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time."
-        : "Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted: this console never deletes a company. Set it back to Active to restore it at any time.",
+        ? `Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time.${undoes}`
+        : `Nobody there can sign in, and everyone signed in now is signed out within five minutes. Members are told the workspace is closed and to contact WorkwrK support. Nothing is deleted and no deletion is scheduled: this console never deletes a company. Set it back to Active to restore it at any time.${undoes}`,
     note: "Anyone who also belongs to another WorkwrK workspace keeps working in that one.",
     match: company.name,
     matchLabel: "the company name",
@@ -527,7 +552,16 @@ function PlanCard({
         <SavedMark at={saved.plan} />
         <NotSavedMark retry={notSaved.plan} />
       </Row>
-      <Row label="Status">
+      <Row
+        label="Status"
+        hint={
+          company.deletion ? (
+            <span className="text-danger-text">
+              Its Owner scheduled this workspace for deletion on {formatDate(company.deletion.scheduledFor, datePrefs, "date")}. Any status change here cancels that deletion.
+            </span>
+          ) : undefined
+        }
+      >
         <SelectButton label="Status" value={company.status} options={STATUS_OPTIONS} onSelect={(v) => onStatus(v as Status)} disabled={busy !== null} />
         <SavedMark at={saved.status} />
         <NotSavedMark retry={notSaved.status} />
@@ -804,6 +838,7 @@ function UsageCard({ company }: { company: CompanyRecordData }) {
     ["SOPs", c.sops],
     ["KRAs", c.kras],
     ["KPIs", c.kpis],
+    ["Reviews", c.reviews],
     ["Tables", c.tables],
     ["Talk channels", c.talkChannels],
   ];

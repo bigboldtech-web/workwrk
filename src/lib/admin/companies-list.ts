@@ -134,7 +134,9 @@ export function parseCompanyListParams(sp: URLSearchParams): CompanyListParams {
     statuses: parseList(sp.get("status"), VALID_STATUSES),
     subscriptions: parseList(sp.get("subscription"), SUBSCRIPTION_FILTERS),
     modules: parseList(sp.get("modules"), MODULES.map((m) => m.appKey)),
-    owners: owners === "has" || owners === "none" ? owners : null,
+    // "0" is the spelling spec 2.1's "Needs attention" link uses
+    // (?owners=0), read as "none" so that link never opens an unfiltered list.
+    owners: owners === "has" || owners === "none" ? owners : owners === "0" ? "none" : null,
     peopleMin: parseCount(sp.get("people_min")),
     peopleMax: parseCount(sp.get("people_max")),
     signedFrom: parseDay(sp.get("signed_from")),

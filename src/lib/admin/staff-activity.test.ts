@@ -57,8 +57,12 @@ describe("plain words for before and after", () => {
   });
   it("lists every key either side holds", () => {
     expect(detailRows({ plan: "GROWTH" }, { plan: "SCALE", signedOut: 3 })).toEqual([
-      { key: "plan", label: "Plan", before: "Growth", after: "Scale" },
-      { key: "signedOut", label: "Signed out", before: "None", after: "3" },
+      { key: "plan", label: "Plan", before: "Growth", after: "Scale", changed: true },
+      { key: "signedOut", label: "Signed out", before: "None", after: "3", changed: true },
+    ]);
+    expect(detailRows({ name: "Ann", role: "MEMBER" }, { name: "Ann", role: "OWNER" }).map((r) => [r.key, r.changed])).toEqual([
+      ["name", false],
+      ["role", true],
     ]);
     expect(detailRows(null, null)).toEqual([]);
   });

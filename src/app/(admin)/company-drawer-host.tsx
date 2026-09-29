@@ -10,7 +10,10 @@
 //   the list with its URL state (view, filters, page) and its scroll intact
 //   and never refetched; otherwise it lands on Companies.
 //   Expand widens the drawer into the content area without navigating (the
-//   URL is already the company's), so the record reads as the full page.
+//   URL is already the company's) and draws the record as the full page:
+//   its title row with the back arrow, the Plan and Status chips and the
+//   page's "..." menu (Refresh, Copy company ID, Copy slug, Staff activity,
+//   About this page).
 //   Width is remembered per staff member (consolePrefs companies.drawerWidth).
 //
 // The slot keeps its last state across soft navigations to routes it does not
@@ -27,17 +30,27 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { CompanyRecord } from "./admin/companies/[id]/company-record";
 import { useConsole } from "./console-context";
+import { knownCompanyName } from "./console-ui";
 
 export function CompanyDrawerHost({ companyId }: { companyId: string }) {
   const router = useRouter();
   const pathname = usePathname() || "";
-  const { prefs, patchPrefs } = useConsole();
+  const { prefs, patchPrefs, recents } = useConsole();
   const { toast } = useOsToast();
   const path = `/admin/companies/${companyId}`;
   const here = pathname === path;
   const hardLoad = isInitialEntryPath(path);
   const [expanded, setExpanded] = useState(false);
-  const [name, setName] = useState<string | null>(null);
+  // Keyed by id: the slot stays mounted when a row swaps the company, and the
+  // header must never name the previous one.
+  const [named, setNamed] = useState<{ id: string; name: string } | null>(null);
+  const onName = useCallback(
+    (n: string) => setNamed((cur) => (cur?.id === companyId && cur.name === n ? cur : { id: companyId, name: n })),
+    [companyId],
+  );
+  // The name the list (or Search's Recent) already had, until the record loads.
+  const initialName = knownCompanyName(companyId) ?? recents.find((c) => c.id === companyId)?.name ?? null;
+  const shownName = named?.id === companyId ? named.name : initialName;
   const width = clampDrawerWidth(prefs.companies.drawerWidth);
 
   // Once per opening: a double Esc (or Esc plus a click on the dimmed list)
@@ -91,7 +104,7 @@ export function CompanyDrawerHost({ companyId }: { companyId: string }) {
       header={
         <>
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">
-            Companies › <span className="text-ink">{name ?? ""}</span>
+            Companies › <span className="text-ink">{shownName ?? "Company"}</span>
           </span>
           <button type="button" aria-label={expanded ? "Collapse" : "Expand"} title={expanded ? "Collapse" : "Expand"} onClick={() => setExpanded((v) => !v)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink max-lg:hidden">
             {expanded ? <Minimize2 className="h-4 w-4" strokeWidth={1.5} /> : <Maximize2 className="h-4 w-4" strokeWidth={1.5} />}
@@ -105,9 +118,13 @@ export function CompanyDrawerHost({ companyId }: { companyId: string }) {
         </>
       }
     >
-      <div className={expanded ? "mx-auto w-full max-w-[760px]" : undefined}>
-        <CompanyRecord key={companyId} id={companyId} presentation="drawer" onName={setName} />
-      </div>
+      <CompanyRecord
+        key={companyId}
+        id={companyId}
+        presentation={expanded ? "page" : "drawer"}
+        onName={onName}
+        initialName={initialName}
+      />
     </Drawer>
   );
 }

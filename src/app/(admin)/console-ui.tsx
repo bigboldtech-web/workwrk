@@ -8,6 +8,7 @@
 // primitives; no new visual primitive.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { RowMoreButton } from "@/components/ui/table-card";
@@ -210,6 +211,37 @@ export function InlineRetry({ text, onRetry }: { text: string; onRetry: () => vo
       <button type="button" onClick={onRetry} className={TEXT_LINK}>Retry</button>
     </span>
   );
+}
+
+/*
+ * The company names the console's lists have already shown, by id, so the
+ * company drawer opened from a row names the company in its header before
+ * its own fetch returns (spec 2.3). Module scope: it lives as long as the tab
+ * and holds only names this staff member's own lists were sent.
+ */
+const knownNames = new Map<string, string>();
+export function rememberCompanyNames(companies: readonly ({ id: string; name: string } | null | undefined)[]): void {
+  for (const c of companies) if (c?.id && c.name) knownNames.set(c.id, c.name);
+  if (knownNames.size > 2000) knownNames.clear();
+}
+export function knownCompanyName(id: string): string | null {
+  return knownNames.get(id) ?? null;
+}
+
+/**
+ * A list page's own query string. While the company drawer is open over the
+ * list (the @drawer intercept) the URL is the company's, so the list would
+ * otherwise read the company URL's search params, drop its filters and
+ * refetch unfiltered behind the drawer (spec 2.2: the list stays mounted with
+ * its filters). Off its own path, this keeps the last query the list had.
+ */
+export function useListSearchKey(listPath: string): { spKey: string; onList: boolean } {
+  const pathname = usePathname() || listPath;
+  const live = useSearchParams().toString();
+  const onList = pathname === listPath;
+  const [kept, setKept] = useState(live);
+  if (onList && kept !== live) setKept(live);
+  return { spKey: onList ? live : kept, onList };
 }
 
 /** A 32px ghost "..." for a table row, handing its own button back as the menu's anchor. */
