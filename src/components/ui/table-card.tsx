@@ -506,7 +506,10 @@ export function TableCard<T>({
               ));
               const rowClass = cn(
                 "os-tc__row group/row grid items-center border-b border-line-soft text-row text-ink last:border-b-0",
-                "hover:bg-hover focus-within:bg-hover",
+                // A highlighted row keeps its tint while focus is on it (a page
+                // moves focus there, see tabIndex below): focus-within grey would
+                // otherwise replace the very mark that says which row it is.
+                isHi && !isSel ? "hover:bg-hover" : "hover:bg-hover focus-within:bg-hover",
                 isSel ? "bg-selected hover:bg-selected-hov" : "",
                 isHi ? "bg-selected" : "",
                 // The same state as a tint the sticky "..." cell paints over
@@ -514,7 +517,9 @@ export function TableCard<T>({
                 // stacked as classes, so two hover rules never race.
                 isSel
                   ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-selected-hov)]"
-                  : cn(isHi ? "[--tc-tint:var(--os-selected)]" : "", "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]"),
+                  : isHi
+                    ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-surface-hov)]"
+                    : "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]",
               );
               const style = { gridTemplateColumns: template, height: "var(--os-row-h)" } as React.CSSProperties;
               const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -577,8 +582,18 @@ export function TableCard<T>({
                 <div
                   key={key}
                   role="row"
-                  tabIndex={onRowClick ? 0 : undefined}
-                  className={cn(rowClass, onRowClick ? "cursor-pointer" : "")}
+                  // The highlighted row is a programmatic focus target (-1: out of
+                  // the Tab order) even without onRowClick, so a page that lands a
+                  // person on it (a Search result) can move focus there and a
+                  // screen reader reads that row. Inset ring: the body clips overflow.
+                  tabIndex={onRowClick ? 0 : isHi ? -1 : undefined}
+                  className={cn(
+                    rowClass,
+                    onRowClick ? "cursor-pointer" : "",
+                    // outline-solid: outline-none zeroes the style variable that
+                    // outline-2 reads, so the ring needs its style set back.
+                    onRowClick || isHi ? "outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--os-focus)]" : "",
+                  )}
                   style={style}
                   data-key={key}
                   onClick={onRowClick ? (e) => onRowClick(row, e) : undefined}

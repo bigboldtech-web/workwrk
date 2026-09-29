@@ -421,6 +421,11 @@ export default function AppsumoCodesPage() {
                 to,
                 onPrev: params.page > 1 ? () => setParams({ page: Math.min(params.page - 1, lastPage) }, { keepPage: true }) : undefined,
                 onNext: to < total ? () => setParams({ page: params.page + 1 }, { keepPage: true }) : undefined,
+                // Nothing loaded yet (the first load, or it failed): the count is
+                // unknown, so no "Total records 0" and no "0 to 0". A failed
+                // refresh keeps the real count of the rows still shown.
+                hideTotal: !payload,
+                hidePaging: !payload,
               }}
             />
           )}

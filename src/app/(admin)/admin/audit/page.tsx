@@ -366,6 +366,11 @@ export default function StaffActivityPage() {
                       setPageIndex((i) => i + 1);
                     }
                   : undefined,
+                // Nothing loaded yet (the first load, or it failed): the count is
+                // unknown, so no "Total records 0" and no "0 to 0". A failed
+                // refresh keeps the real count of the rows still shown.
+                hideTotal: !payload,
+                hidePaging: !payload,
               }}
             />
           )}

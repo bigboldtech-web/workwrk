@@ -87,10 +87,23 @@ export default function StaffPage() {
   );
   useEffect(() => {
     if (!focusId) return;
-    const el = document.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusId)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: "center" });
-    el.focus({ preventScroll: true });
+    // Deferred past Search's close: its focus scope hands focus back to the
+    // top-bar Search button in a timeout of its own, which would otherwise
+    // land after this and take the focus off the row again. TableCard makes
+    // the highlighted row focusable (tabIndex -1) for this.
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const raf = requestAnimationFrame(() => {
+      t = setTimeout(() => {
+        const el = document.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusId)}"]`);
+        if (!el) return;
+        el.scrollIntoView({ block: "center" });
+        el.focus({ preventScroll: true });
+      }, 0);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (t) clearTimeout(t);
+    };
   }, [focusId]);
 
   const onlyOne = (staff?.length ?? 0) <= 1;
@@ -187,6 +200,10 @@ export default function StaffPage() {
             from: 1,
             to: staff?.length ?? 0,
             hidePaging: true,
+            // Until a list has loaded (the first load, or it failed) the count
+            // is unknown, so no "Total records 0". A failed refresh keeps the
+            // real count of the rows still shown.
+            hideTotal: !staff,
             trailing: onlyOne && staff ? "You cannot remove the last staff member." : "Anyone on this list can open the staff console and change any customer's plan.",
           }}
         />
