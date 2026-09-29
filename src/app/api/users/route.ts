@@ -13,6 +13,7 @@ import { orgRoleOf } from "@/lib/access/org-role";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -164,6 +165,9 @@ export async function POST(req: NextRequest) {
     where: { email, organizationId: getOrgId(session) },
   });
   if (existing) return jsonError("A user with this email already exists");
+  // The creator chooses this account's password, so it may never carry a
+  // WorkwrK staff address (platform-admin.ts).
+  if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);
 
   const passwordHash = await bcrypt.hash(password || "Welcome@123", 12);
 

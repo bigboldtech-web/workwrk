@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch } from "./company-patch-rules";
+import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch } from "./company-patch-rules";
 
 describe("validateCompanyPatch", () => {
   it("accepts a valid plan, status and feature together", () => {
@@ -60,5 +60,21 @@ describe("deletionSchedule", () => {
   });
   it("still reports a stray key so it is cleared too", () => {
     expect(deletionSchedule({ scheduledHardDeleteAt: 42 })).toEqual({ cancelledAt: null, cancelledById: null, scheduledHardDeleteAt: null });
+  });
+});
+
+describe("the server-side typed confirmation", () => {
+  it("carries confirm through validation and refuses a non-string", () => {
+    expect(validateCompanyPatch({ status: "SUSPENDED", confirm: "Acme Corp" })).toEqual({
+      ok: true,
+      patch: { status: "SUSPENDED", confirm: "Acme Corp" },
+    });
+    expect(validateCompanyPatch({ status: "SUSPENDED", confirm: 1 }).ok).toBe(false);
+  });
+  it("matches the company name ignoring case and surrounding spaces only", () => {
+    expect(confirmMatches("  acme corp ", "Acme Corp")).toBe(true);
+    expect(confirmMatches("Acme", "Acme Corp")).toBe(false);
+    expect(confirmMatches(undefined, "Acme Corp")).toBe(false);
+    expect(confirmMatches("", "")).toBe(false);
   });
 });

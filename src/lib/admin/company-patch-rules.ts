@@ -23,6 +23,13 @@ export interface CompanyPatch {
   plan?: CompanyPlan;
   status?: CompanyStatus;
   feature?: { key: EnterpriseFeature; enabled: boolean };
+  /**
+   * The company name as the staff member typed it. Required, and checked on
+   * the server, for SUSPENDED and CANCELLED: the typed confirmation is not
+   * only a dialog, so a script or a replayed request cannot sign a whole
+   * company out without it.
+   */
+  confirm?: string;
 }
 
 export type ValidatedPatch = { ok: true; patch: CompanyPatch } | { ok: false; error: string };
@@ -55,7 +62,21 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
     if (typeof b.enabled !== "boolean") return { ok: false, error: "`enabled` must be a boolean" };
     patch.feature = { key: b.feature as EnterpriseFeature, enabled: b.enabled };
   }
+  if (b.confirm !== undefined) {
+    if (typeof b.confirm !== "string") return { ok: false, error: "`confirm` must be the company name" };
+    patch.confirm = b.confirm;
+  }
   return { ok: true, patch };
+}
+
+/**
+ * Does the typed text confirm an action on `name`? Ignores case and
+ * surrounding spaces, never anything else (the same rule as the console's
+ * TypedConfirmDialog).
+ */
+export function confirmMatches(typed: string | undefined, name: string): boolean {
+  const want = name.trim().toLowerCase();
+  return want.length > 0 && (typed ?? "").trim().toLowerCase() === want;
 }
 
 /** Sign-in dies for everyone at the company on these two. */

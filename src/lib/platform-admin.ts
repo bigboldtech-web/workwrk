@@ -23,6 +23,22 @@ export async function isPlatformAdminEmail(
 }
 
 /**
+ * The words every product path that would CREATE an account (or rename one)
+ * with an address on the staff list answers with. Such an account's
+ * password or identity provider is chosen by whoever creates it, not by the
+ * owner of the mailbox, so it is refused at the door as well as at the
+ * console's gate (staffAccountPasses). A staff member joins a customer
+ * workspace by invitation, which proves the mailbox.
+ */
+export const STAFF_ADDRESS_REFUSAL =
+  "This email address is reserved and can't be used here. Invite the person instead, so they accept from their own inbox.";
+
+/** True when an account with this address may not be created or renamed to (see STAFF_ADDRESS_REFUSAL). */
+export async function isReservedStaffAddress(email: string | null | undefined): Promise<boolean> {
+  return isPlatformAdminEmail(email?.trim());
+}
+
+/**
  * LOCAL DEVELOPMENT ONLY. A fresh database has an empty PlatformAdmin table
  * and the only way onto the staff list is to be added by someone already on
  * it (POST /api/admin/platform-staff is itself staff-gated), so nobody can be
@@ -47,17 +63,93 @@ interface SessionLike {
   user?: { id?: string; email?: string | null } | null;
 }
 
-/** Resolve platform-staff status from a NextAuth session. */
+/** The account facts the staff gate decides on (a User row, read by id). */
+export interface StaffGateAccount {
+  email: string;
+  emailVerifiedAt: Date | null;
+  deletedAt: Date | null;
+  status: string;
+}
+
+/**
+ * Pure rule for "this account may open the Staff console", given that its
+ * email is on the staff list. The allow-list names an EMAIL, but User.email
+ * is unique only per company: any customer admin can create a person in
+ * their own workspace with a staff address that has no WorkwrK login yet and
+ * choose its password. So a match counts only for an account whose address
+ * was PROVEN (emailVerifiedAt, set solely by the emailed verify link, and
+ * cleared by SCIM whenever it renames the address), that is live, and whose
+ * session claim is still that address (a renamed account is refused until
+ * it signs in again, so a StaffAction row always names the real address).
+ */
+export function staffAccountPasses(account: StaffGateAccount | null, claim: string | null | undefined): boolean {
+  if (!account) return false;
+  if (account.deletedAt) return false;
+  if (account.status === "INACTIVE") return false;
+  if (!account.emailVerifiedAt) return false;
+  if (claim && claim.trim().toLowerCase() !== account.email.trim().toLowerCase()) return false;
+  return true;
+}
+
+/**
+ * Resolve platform-staff status from a NextAuth session. The decision is
+ * made on the session's USER ROW, never on the email claim alone (see
+ * staffAccountPasses for the takeover this closes).
+ */
 export async function isPlatformAdminSession(
   session: SessionLike | null | undefined,
 ): Promise<boolean> {
-  const email = session?.user?.email;
-  if (email) return isPlatformAdminEmail(email);
-  // Session had no email claim — fall back to the user row.
   const id = session?.user?.id;
   if (!id) return false;
-  const u = await prisma.user.findUnique({ where: { id }, select: { email: true } });
-  return isPlatformAdminEmail(u?.email);
+  const account = await prisma.user.findUnique({
+    where: { id },
+    select: { email: true, emailVerifiedAt: true, deletedAt: true, status: true },
+  });
+  if (!account?.email) return false;
+  if (!(await isPlatformAdminEmail(account.email))) return false;
+  if (!staffAccountPasses(account, session?.user?.email ?? null)) return false;
+  return (await otherVerifiedAccounts(id, account.email)) === 0;
+}
+
+/**
+ * Live, verified accounts OTHER than this one that carry the same address.
+ * Verification is by emailed link and the link names a row, not a mailbox
+ * owner's intent: a staff member tricked into clicking a verify mail for a
+ * look-alike account made by a customer would otherwise hand that account
+ * the console. Two verified rows for one staff address therefore open the
+ * console for neither (a lock-out another staff member resolves), never for
+ * the wrong one.
+ */
+async function otherVerifiedAccounts(id: string, email: string): Promise<number> {
+  return prisma.user.count({
+    where: {
+      id: { not: id },
+      email: { equals: email.trim(), mode: "insensitive" },
+      deletedAt: null,
+      emailVerifiedAt: { not: null },
+    },
+  });
+}
+
+/**
+ * Why a signed-in person is outside the console, for the denial copy only.
+ * "unverified" means the address IS on the staff list but this account has
+ * not proven it owns the mailbox, so the page can say how to get in.
+ */
+export async function staffDenialReason(
+  session: SessionLike | null | undefined,
+): Promise<"not_staff" | "unverified" | "duplicate"> {
+  const id = session?.user?.id;
+  if (!id) return "not_staff";
+  const account = await prisma.user.findUnique({
+    where: { id },
+    select: { email: true, emailVerifiedAt: true, deletedAt: true, status: true },
+  });
+  if (!account?.email || !(await isPlatformAdminEmail(account.email))) return "not_staff";
+  if (account.deletedAt || account.status === "INACTIVE") return "not_staff";
+  if (!account.emailVerifiedAt) return "unverified";
+  if ((await otherVerifiedAccounts(id, account.email)) > 0) return "duplicate";
+  return "not_staff";
 }
 
 /**

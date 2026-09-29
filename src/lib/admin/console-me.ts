@@ -82,7 +82,23 @@ export async function saveConsolePrefs(email: string, patch: ConsolePrefsPatch):
       SELECT "id", "consolePrefs" FROM "PlatformAdmin" WHERE "email" = ${lower} FOR UPDATE`;
     const row = locked[0];
     if (!row) return null;
-    const next = mergeConsolePrefs(readConsolePrefs(row.consolePrefs), patch);
+    // RECENT keeps only companies that exist. An id for a deleted company
+    // (a stale tab, a hand-made request) is never stored: a dangling id
+    // would hold one of the five slots for good. A missing opened company
+    // is dropped BEFORE it is pushed, so it cannot evict a real one, and
+    // anything already stored that has since been deleted is pruned here.
+    let effective = patch;
+    if (patch.openedCompany) {
+      const exists = await tx.organization.findUnique({ where: { id: patch.openedCompany }, select: { id: true } });
+      if (!exists) effective = { ...patch, openedCompany: undefined };
+    }
+    const merged = mergeConsolePrefs(readConsolePrefs(row.consolePrefs), effective);
+    const alive = merged.recent.length
+      ? new Set(
+          (await tx.organization.findMany({ where: { id: { in: merged.recent } }, select: { id: true } })).map((o) => o.id),
+        )
+      : new Set<string>();
+    const next = { ...merged, recent: merged.recent.filter((id) => alive.has(id)) };
     await tx.platformAdmin.update({
       where: { id: row.id },
       data: { consolePrefs: next as unknown as Prisma.InputJsonValue },

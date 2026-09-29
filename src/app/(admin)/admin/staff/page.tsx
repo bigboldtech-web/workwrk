@@ -2,7 +2,8 @@
 
 import { Dots } from "@/components/ui/dots";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,18 @@ export default function PlatformStaffPage() {
   // Remove waits for the person's email to be typed (a destructive staff
   // action is always typed), and says so in words when it is yourself.
   const [confirming, setConfirming] = useState<Staff | null>(null);
+  // ?focus=<email> comes from a Search STAFF row: that row is scrolled to,
+  // marked and given focus once the list has loaded, so the result lands on
+  // the person it named.
+  const focusEmail = (useSearchParams().get("focus") ?? "").trim().toLowerCase();
+  const focusRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    if (loading || !focusEmail) return;
+    const el = focusRef.current;
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.focus({ preventScroll: true });
+  }, [loading, focusEmail, staff]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,7 +163,8 @@ export default function PlatformStaffPage() {
             </Button>
           </div>
           <p className="text-sm text-ink-2 mt-2">
-            They must also have a WorkwrK login (same credentials). Email is matched
+            They also need a WorkwrK login with this address, and that address must be
+            verified: an unverified account never opens the console. Email is matched
             case-insensitively.
           </p>
         </CardContent>
@@ -169,8 +183,18 @@ export default function PlatformStaffPage() {
             <p className="text-base text-ink-2 py-4">No staff yet.</p>
           ) : (
             <ul className="divide-y divide-border">
-              {staff.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+              {staff.map((s) => {
+                const focused = !!focusEmail && s.email.toLowerCase() === focusEmail;
+                return (
+                <li
+                  key={s.id}
+                  ref={focused ? focusRef : undefined}
+                  tabIndex={focused ? -1 : undefined}
+                  aria-current={focused ? "true" : undefined}
+                  className={`flex items-center justify-between gap-3 py-2.5 outline-none ${
+                    focused ? "-mx-2 rounded-lg bg-selected px-2" : ""
+                  }`}
+                >
                   <div className="min-w-0">
                     <div className="text-base font-medium truncate">{s.email}</div>
                     {s.name ? <div className="text-sm text-ink-2 truncate">{s.name}</div> : null}
@@ -189,7 +213,8 @@ export default function PlatformStaffPage() {
                     </Button>
                   ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
           {!loading && staff.length === 1 ? (

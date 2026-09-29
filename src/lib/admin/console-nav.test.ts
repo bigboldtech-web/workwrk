@@ -64,8 +64,13 @@ describe("consoleCrumbs", () => {
     expect(labels).toEqual(["Overview", "Companies", "Analytics", "AppSumo codes", "Staff", "Staff activity"]);
     expect(consoleCrumbs("/admin/appsumo").at(-1)).toEqual({ label: "AppSumo codes" });
   });
-  it("falls back to the root crumb alone on an unknown path", () => {
-    expect(consoleCrumbs("/admin/nope")).toEqual([{ label: "Staff console" }]);
+  it("says Not found on a path no console page owns", () => {
+    const nf = [{ label: "Staff console", href: "/admin" }, { label: "Not found" }];
+    expect(consoleCrumbs("/admin/nope")).toEqual(nf);
+    // Staff activity has no page yet, so its path is a 404 too.
+    expect(consoleCrumbs("/admin/audit")).toEqual(nf);
+    expect(consoleCrumbs("/admin/companies/abc123def/extra")).toEqual(nf);
+    expect(consoleCrumbs("/admin/staff/extra")).toEqual(nf);
   });
 });
 

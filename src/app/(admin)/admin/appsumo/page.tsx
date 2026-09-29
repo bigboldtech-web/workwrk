@@ -7,6 +7,7 @@ import { useConsole } from "../../console-context";
 import { Dots } from "@/components/ui/dots";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, Upload, KeyRound, CheckCircle2, XCircle } from "lucide-react";
+import { Sparkles, Upload, KeyRound, CheckCircle2, XCircle, X } from "lucide-react";
 
 interface CodeRow {
   id: string;
@@ -42,6 +43,17 @@ export default function AdminAppsumoPage() {
   const { success: toastSuccess, error: toastError } = useToast();
   const confirm = useConfirm();
 
+  // ?code= comes from Search (a CODES row, or "See all in AppSumo codes"):
+  // exact or prefix, the same rule as Search, so the code picked there is on
+  // screen here. It is the URL's, so clearing it is a URL change too.
+  const router = useRouter();
+  const pathname = usePathname();
+  const codeQuery = (useSearchParams().get("code") ?? "").trim();
+  const [tab, setTab] = useState<"import" | "list">("list");
+  useEffect(() => {
+    if (codeQuery) setTab("list");
+  }, [codeQuery]);
+
   // Listing
   const [filter, setFilter] = useState<"all" | "unused" | "redeemed" | "refunded">("all");
   const [codes, setCodes] = useState<CodeRow[]>([]);
@@ -55,7 +67,9 @@ export default function AdminAppsumoPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch(`/api/admin/appsumo?filter=${filter}`);
+    const params = new URLSearchParams({ filter });
+    if (codeQuery) params.set("code", codeQuery);
+    const r = await fetch(`/api/admin/appsumo?${params}`);
     if (r.ok) {
       const d = await r.json();
       const data = d.data ?? d;
@@ -63,7 +77,7 @@ export default function AdminAppsumoPage() {
       setTotal(data.total || 0);
     }
     setLoading(false);
-  }, [filter]);
+  }, [filter, codeQuery]);
   useEffect(() => { load(); }, [load]);
 
   async function bulkImport() {
@@ -150,14 +164,15 @@ export default function AdminAppsumoPage() {
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Total" value={total} />
         <Stat label="On the page (unused)" value={stats.unused} />
-        <Stat label="Redeemed" value={stats.redeemed} tone="green" />
-        <Stat label="Refunded" value={stats.refunded} tone="amber" />
+        <Stat label="Redeemed" value={stats.redeemed} />
+        <Stat label="Refunded" value={stats.refunded} />
       </div>
 
-      <Tabs defaultValue="import">
+      {/* Opens on the codes (spec 2.6); Bulk import stays one tab away. */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v === "import" ? "import" : "list")}>
         <TabsList>
-          <TabsTrigger value="import">Bulk import</TabsTrigger>
           <TabsTrigger value="list">Codes</TabsTrigger>
+          <TabsTrigger value="import">Bulk import</TabsTrigger>
         </TabsList>
 
         <TabsContent value="import" className="mt-4 space-y-4">
@@ -207,7 +222,20 @@ export default function AdminAppsumoPage() {
         </TabsContent>
 
         <TabsContent value="list" className="mt-4 space-y-4">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {codeQuery && (
+              <span className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-hover pl-3 pr-1 text-sm text-ink">
+                Code: <span className="font-mono">{codeQuery}</span>
+                <button
+                  type="button"
+                  aria-label="Clear the code filter"
+                  onClick={() => router.replace(pathname, { scroll: false })}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-ink-2 hover:bg-raised hover:text-ink"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            )}
             {(["all", "unused", "redeemed", "refunded"] as const).map((f) => (
               <Button
                 key={f}
@@ -227,7 +255,9 @@ export default function AdminAppsumoPage() {
                   <Dots variant="pending" label="Loading" />
                 </div>
               ) : codes.length === 0 ? (
-                <div className="p-8 text-center text-base text-ink-2">No codes match this filter.</div>
+                <div className="p-8 text-center text-base text-ink-2">
+                  {codeQuery ? `No code starts with ${codeQuery}.` : "No codes match this filter."}
+                </div>
               ) : (
                 <table className="w-full text-base">
                   <thead className="text-micro font-mono uppercase tracking-wider text-ink-2 bg-hover">
@@ -281,12 +311,12 @@ export default function AdminAppsumoPage() {
   );
 }
 
-function Stat({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "green" | "amber" }) {
-  const color = tone === "green" ? "text-success-text" : tone === "amber" ? "text-warning-text" : "";
+// Numbers are ink, never green or amber (spec 2.1): a count is a fact.
+function Stat({ label, value }: { label: string; value: number }) {
   return (
     <Card>
       <CardContent className="p-3 text-center">
-        <p className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</p>
+        <p className="text-2xl font-semibold tabular-nums">{value}</p>
         <p className="text-xs text-ink-2">{label}</p>
       </CardContent>
     </Card>

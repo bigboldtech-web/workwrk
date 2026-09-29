@@ -1,23 +1,23 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
+import { isBillingLive } from "@/services/billing";
 
-// Founder dashboard stats. Single endpoint so the admin page only
-// makes one fetch. Adds funnel + MRR-over-time + cohort churn on top
-// of the existing aggregate metrics; queries are bounded to keep this
-// cheap until we outgrow it.
-
-const PLAN_PRICES: Record<string, number> = {
-  STARTER: 4999,
-  GROWTH: 14999,
-  SCALE: 29999,
-  ENTERPRISE: 75000,
-};
+// Staff console stats for Overview and Analytics: counts, funnel, cohorts
+// and cancellations. Queries are bounded to keep this cheap.
+//
+// NO REVENUE NUMBER is computed here. The old `mrr`, `activeRate` and
+// `mrrOverTime` multiplied a hard-coded price list by companies per plan,
+// counting trials, suspended companies and lifetime deals as monthly
+// revenue in one hard-coded currency, and "active rate" measured a status
+// flag a staff member sets. The console reports what Stripe charged, one
+// line per currency, never converted (spec-admin-backoffice 2.5, step 6);
+// until that reader ships, `revenue.source` says only whether billing is
+// connected, and the page shows no number rather than a made-up one.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FUNNEL_WINDOW_DAYS = 30;
 const COHORT_MONTHS = 6;
-const MRR_HISTORY_MONTHS = 12;
 const CHURN_LIMIT = 10;
 
 function startOfMonthUTC(d: Date): Date {
@@ -55,7 +55,6 @@ export async function GET() {
     funnelPaying,
     cohortOrgs,
     activeSubsByOrg,
-    subsHistory,
     recentChurnRows,
   ] = await Promise.all([
     prisma.organization.count(),
@@ -126,13 +125,6 @@ export async function GET() {
       select: { organizationId: true, plan: true },
     }),
 
-    // MRR history — every subscription with its lifetime window. We
-    // bucket by month in JS to avoid a per-month roundtrip.
-    prisma.subscription.findMany({
-      where: { createdAt: { gte: addMonths(startOfMonthUTC(now), -MRR_HISTORY_MONTHS) } },
-      select: { plan: true, createdAt: true, canceledAt: true, status: true },
-    }),
-
     // Recent churn — last CHURN_LIMIT cancellations.
     prisma.subscription.findMany({
       where: { canceledAt: { not: null } },
@@ -149,9 +141,6 @@ export async function GET() {
   // ──────────────────────────────────────────────────────────────
   // Aggregate values
 
-  let mrr = 0;
-  for (const group of orgsByPlan) mrr += (PLAN_PRICES[group.plan] || 0) * group._count.id;
-  const activeRate = totalOrgs > 0 ? Math.round((activeOrgs / totalOrgs) * 100) : 0;
 
   // ──────────────────────────────────────────────────────────────
   // Funnel — counts and conversion %s
@@ -186,26 +175,6 @@ export async function GET() {
   const cohorts = Array.from(cohortByMonth.values());
 
   // ──────────────────────────────────────────────────────────────
-  // MRR over time — at the end of each month, sum prices for subs
-  // that were ACTIVE at that point (created on/before, not yet canceled).
-
-  type MrrPoint = { month: string; mrr: number };
-  const mrrPoints: MrrPoint[] = [];
-  const horizonStart = addMonths(startOfMonthUTC(now), -(MRR_HISTORY_MONTHS - 1));
-  for (let i = 0; i < MRR_HISTORY_MONTHS; i++) {
-    const monthStart = addMonths(horizonStart, i);
-    const monthEnd = addMonths(monthStart, 1);
-    let monthMrr = 0;
-    for (const sub of subsHistory) {
-      if (sub.createdAt >= monthEnd) continue; // not yet started
-      if (sub.canceledAt && sub.canceledAt < monthStart) continue; // canceled before
-      // Counts past-due toward MRR — they're billed, just unhealthy.
-      monthMrr += PLAN_PRICES[sub.plan] || 0;
-    }
-    mrrPoints.push({ month: fmtMonth(monthStart), mrr: monthMrr });
-  }
-
-  // ──────────────────────────────────────────────────────────────
   // Recent churn — flatten relation
 
   const recentChurn = recentChurnRows.map((r) => ({
@@ -220,17 +189,14 @@ export async function GET() {
     totalUsers,
     activeOrgs,
     trialOrgs,
-    mrr,
-    activeRate,
-    // Companies with an ACTIVE subscription row right now: a real count,
-    // unlike mrr, which multiplies a price list (Overview no longer shows it).
+    revenue: { source: isBillingLive ? ("stripe" as const) : ("unavailable" as const) },
+    // Companies with an ACTIVE subscription row right now: a real count.
     payingOrgs: payingByOrg.size,
     newOrgsThisMonth: recentOrgs,
     newUsersThisMonth: recentUsers,
     planBreakdown: orgsByPlan.map((g) => ({ plan: g.plan, count: g._count.id })),
     funnel,
     cohorts,
-    mrrOverTime: mrrPoints,
     recentChurn,
   });
 }

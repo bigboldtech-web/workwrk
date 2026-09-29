@@ -11,20 +11,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
   Users, CreditCard, TrendingUp, RefreshCw,
-  BarChart3, ArrowDownRight, Activity, UserMinus,
+  BarChart3, ArrowDownRight, UserMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-} from "recharts";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { planLabel } from "@/lib/staff-audit-helpers";
 
 interface Stats {
   totalOrgs: number;
   totalUsers: number;
   activeOrgs: number;
   trialOrgs: number;
-  mrr: number;
-  activeRate: number;
+  /** Whether billing is connected. No revenue number is sent until the Stripe reader ships. */
+  revenue?: { source: "stripe" | "unavailable" };
   newOrgsThisMonth: number;
   newUsersThisMonth: number;
   planBreakdown: { plan: string; count: number }[];
@@ -36,7 +35,6 @@ interface Stats {
     windowDays: number;
   };
   cohorts?: { month: string; size: number; active: number; paying: number; churned: number }[];
-  mrrOverTime?: { month: string; mrr: number }[];
   recentChurn?: { orgId: string; orgName: string; plan: string; canceledAt: string | null }[];
 }
 
@@ -53,21 +51,6 @@ interface Company {
     kras: number;
   };
 }
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-const planPrices: Record<string, number> = {
-  STARTER: 4999,
-  GROWTH: 14999,
-  SCALE: 29999,
-  ENTERPRISE: 75000,
-};
 
 const planColors: Record<string, string> = {
   // Plan shares are one series: neutral steps, the one blue on the largest tier.
@@ -112,14 +95,10 @@ export default function AdminAnalyticsPage() {
     );
   }
 
-  // Revenue by plan
-  const revenueByPlan = (stats?.planBreakdown || []).map((p) => ({
-    plan: p.plan,
-    count: p.count,
-    revenue: (planPrices[p.plan] || 0) * p.count,
-  }));
-
-  const totalRevenue = revenueByPlan.reduce((sum, p) => sum + p.revenue, 0);
+  // Companies per plan: the true half of the old "Revenue by Plan" card,
+  // which multiplied a hard-coded price by this count (spec 2.5 item 7).
+  const plans = stats?.planBreakdown || [];
+  const maxPlan = Math.max(1, ...plans.map((p) => p.count));
 
   // Top companies by usage
   const topByUsers = [...companies].sort((a, b) => b._count.users - a._count.users).slice(0, 5);
@@ -145,66 +124,52 @@ export default function AdminAnalyticsPage() {
         </Button>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-ink-2 mb-1">Monthly Recurring Revenue</p>
-            <p className="text-2xl font-semibold text-success-text">{formatCurrency(stats?.mrr ?? 0)}</p>
-            <p className="text-xs text-ink-2 mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-ink-2 mb-1">Avg. Revenue Per Org</p>
-            <p className="text-2xl font-semibold text-ink-2">
-              {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "None"}
+      {/* Revenue: what Stripe charged, never a price list (spec 2.5 item 1).
+          No number is shown until that reader ships; a zero is never shown
+          in place of a missing number. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CreditCard size={16} className="text-ink-2" /> Revenue
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stats?.revenue?.source === "stripe" ? (
+            <p className="text-base text-ink-2">
+              Billing is connected. What Stripe charged is in the{" "}
+              <a
+                href="https://dashboard.stripe.com/payments"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand-deep hover:underline"
+              >
+                Stripe dashboard
+              </a>
+              , one line per currency.
             </p>
-            <p className="text-xs text-ink-2 mt-1">ARPU across all plans</p>
+          ) : (
+            <OsEmptyView compact title="Billing is not connected yet" />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Growth */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-sm text-ink-2 mb-1">Average people per company</p>
+            <p className="text-2xl font-semibold tabular-nums text-ink">{avgUsers}</p>
+            <p className="text-xs text-ink-2 mt-1">{stats?.totalUsers ?? 0} people across {stats?.totalOrgs ?? 0} companies</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-ink-2 mb-1">Avg. Users Per Org</p>
-            <p className="text-2xl font-semibold text-ink-2">{avgUsers}</p>
-            <p className="text-xs text-ink-2 mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-sm text-ink-2 mb-1">Trial Conversion Pipeline</p>
-            <p className="text-2xl font-semibold text-ink-2">{stats?.trialOrgs ?? 0}</p>
-            <p className="text-xs text-ink-2 mt-1">Organizations currently on trial</p>
+            <p className="text-sm text-ink-2 mb-1">On trial</p>
+            <p className="text-2xl font-semibold tabular-nums text-ink">{stats?.trialOrgs ?? 0}</p>
+            <p className="text-xs text-ink-2 mt-1">Companies on trial now</p>
           </CardContent>
         </Card>
       </div>
-
-      {/* MRR over time */}
-      {stats?.mrrOverTime && stats.mrrOverTime.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Activity size={16} className="text-success-text" /> MRR, last 12 months
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-56 w-full">
-              <ResponsiveContainer>
-                <LineChart data={stats.mrrOverTime} margin={{ top: 8, right: 12, bottom: 8, left: 12 }}>
-                  <CartesianGrid stroke="var(--os-line)" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--os-ink-2)" }} stroke="var(--os-line)" />
-                  <YAxis tick={{ fontSize: 11, fill: "var(--os-ink-2)" }} stroke="var(--os-line)" tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <Tooltip
-                    formatter={(v) => formatCurrency(typeof v === "number" ? v : Number(v) || 0)}
-                    contentStyle={{ background: "var(--os-surface)", border: "1px solid var(--os-line)", color: "var(--os-ink)", fontSize: 12 }}
-                  />
-                  <Line type="monotone" dataKey="mrr" stroke="var(--os-brand)" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Signup funnel */}
       {stats?.funnel && (
@@ -218,10 +183,10 @@ export default function AdminAnalyticsPage() {
             {(() => {
               const f = stats.funnel!;
               const steps = [
-                { label: "Signed up", count: f.signedUp, hint: "Org created" },
-                { label: "Completed setup", count: f.completedSetup, hint: "Finished setup wizard" },
-                { label: "Engaged", count: f.engaged, hint: "Created ≥1 SOP / KRA / Task" },
-                { label: "Paying", count: f.paying, hint: "Active subscription" },
+                { label: "Signed up", count: f.signedUp, hint: "A company was created" },
+                { label: "Finished setup", count: f.completedSetup, hint: "They completed the setup wizard" },
+                { label: "Created something", count: f.engaged, hint: "At least one SOP, KRA or task" },
+                { label: "Paying", count: f.paying, hint: "An active subscription" },
               ];
               const top = steps[0].count || 1;
               return (
@@ -254,28 +219,29 @@ export default function AdminAnalyticsPage() {
         </Card>
       )}
 
-      {/* Revenue Breakdown */}
+      {/* Plans: companies per plan, no revenue per plan (spec 2.5 item 7). */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
-            <CreditCard size={16} className="text-success-text" /> Revenue by Plan
+            <BarChart3 size={16} className="text-ink-2" /> Plans
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {revenueByPlan.length === 0 ? (
-            <p className="text-base text-ink-2">No revenue data yet.</p>
+          {plans.length === 0 ? (
+            <p className="text-base text-ink-2">Nothing to measure yet.</p>
           ) : (
-            revenueByPlan.map((p) => (
+            plans.map((p) => (
               <div key={p.plan} className="space-y-1">
                 <div className="flex items-center justify-between text-base">
                   <div className="flex items-center gap-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${planColors[p.plan] || "bg-line-strong"}`} />
-                    <span className="font-medium">{p.plan}</span>
-                    <span className="text-ink-2 text-sm">({p.count} orgs)</span>
+                    <span className="font-medium">{planLabel(p.plan)}</span>
                   </div>
-                  <span className="font-mono text-base">{formatCurrency(p.revenue)}</span>
+                  <span className="tabular-nums text-base">
+                    {p.count} {p.count === 1 ? "company" : "companies"}
+                  </span>
                 </div>
-                <Progress value={totalRevenue > 0 ? (p.revenue / totalRevenue) * 100 : 0} className="h-2" />
+                <Progress value={(p.count / maxPlan) * 100} className="h-2" />
               </div>
             ))
           )}
@@ -287,7 +253,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Users size={16} className="text-ink-2" /> Largest Organizations
+              <Users size={16} className="text-ink-2" /> Biggest workspaces
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -297,7 +263,7 @@ export default function AdminAnalyticsPage() {
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-base font-medium">{c.name}</span>
-                    <span className="text-sm text-ink-2">{c._count.users} users</span>
+                    <span className="text-sm text-ink-2">{c._count.users} {c._count.users === 1 ? "person" : "people"}</span>
                   </div>
                   <Progress value={(c._count.users / maxUsers) * 100} className="h-1.5" />
                 </div>
@@ -310,7 +276,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <BarChart3 size={16} className="text-ink-2" /> Most Active Organizations
+              <BarChart3 size={16} className="text-ink-2" /> Busiest workspaces
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -334,26 +300,18 @@ export default function AdminAnalyticsPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp size={16} className="text-ink-2" /> Growth Snapshot
+            <TrendingUp size={16} className="text-ink-2" /> Growth
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="rounded-lg bg-hover p-4 text-center">
-              <p className="text-2xl font-semibold text-ink-2">+{stats?.newOrgsThisMonth ?? 0}</p>
-              <p className="text-xs text-ink-2 mt-1">New orgs this month</p>
+              <p className="text-2xl font-semibold tabular-nums text-ink">{stats?.newOrgsThisMonth ?? 0}</p>
+              <p className="text-xs text-ink-2 mt-1">New companies in the last 30 days</p>
             </div>
             <div className="rounded-lg bg-hover p-4 text-center">
-              <p className="text-2xl font-semibold text-ink-2">+{stats?.newUsersThisMonth ?? 0}</p>
-              <p className="text-xs text-ink-2 mt-1">New users this month</p>
-            </div>
-            <div className="rounded-lg bg-hover p-4 text-center">
-              <p className="text-2xl font-semibold text-success-text">{stats?.activeRate ?? 0}%</p>
-              <p className="text-xs text-ink-2 mt-1">Active rate</p>
-            </div>
-            <div className="rounded-lg bg-hover p-4 text-center">
-              <p className="text-2xl font-semibold text-warning-text">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
-              <p className="text-xs text-ink-2 mt-1">Projected ARR</p>
+              <p className="text-2xl font-semibold tabular-nums text-ink">{stats?.newUsersThisMonth ?? 0}</p>
+              <p className="text-xs text-ink-2 mt-1">New people in the last 30 days</p>
             </div>
           </div>
         </CardContent>
@@ -387,7 +345,7 @@ export default function AdminAnalyticsPage() {
                       <tr key={c.month} className="border-t border-line">
                         <td className="py-2 font-mono text-sm">{c.month}</td>
                         <td className="py-2">{c.size}</td>
-                        <td className="py-2 text-success-text">{c.active}</td>
+                        <td className="py-2 text-ink">{c.active}</td>
                         <td className="py-2 text-ink-2">{c.paying}</td>
                         <td className="py-2 text-ink">{c.churned}</td>
                         <td className="py-2">
@@ -423,7 +381,7 @@ export default function AdminAnalyticsPage() {
                 >
                   <div className="flex items-center gap-3">
                     <span className="font-medium">{c.orgName}</span>
-                    <span className="text-sm text-ink-2">{c.plan}</span>
+                    <span className="text-sm text-ink-2">{planLabel(c.plan)}</span>
                   </div>
                   <span className="text-sm text-ink-2">
                     {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}

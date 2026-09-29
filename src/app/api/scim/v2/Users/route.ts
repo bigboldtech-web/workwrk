@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
 import { parseScimFilter, scimList, userToScim } from "@/lib/scim-mappers";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 
 // Sentinel passwordHash for SCIM-provisioned users. Not a valid
 // bcrypt shape, so any bcrypt.compare() against it returns false —
@@ -110,6 +111,9 @@ export async function POST(req: NextRequest) {
   if (existing) {
     return scimError(409, "User already exists", "uniqueness");
   }
+  // The customer's identity provider vouches for this address, not the
+  // mailbox owner, so a WorkwrK staff address is refused (platform-admin.ts).
+  if (await isReservedStaffAddress(email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
 
   // We deliberately don't set a password here — SCIM-provisioned
   // users sign in via SAML, not local auth. NextAuth's Credentials

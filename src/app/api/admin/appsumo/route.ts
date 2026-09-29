@@ -4,6 +4,7 @@ import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import type { Plan, Prisma } from "@/generated/prisma";
 import { logStaffAction, requestIp, staffActorFromSession, writeTenantRow } from "@/lib/staff-audit";
+import { boundedInt, codeSearchWhere } from "@/lib/admin/search";
 
 /**
  * /api/admin/appsumo: WorkwrK staff endpoints for AppSumo code
@@ -28,10 +29,14 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") ?? "all"; // all / unused / redeemed / refunded
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 500);
+  // Bounded and NaN-safe, the same rule as the companies list.
+  const page = boundedInt(url.searchParams.get("page"), 1, 1, 100_000);
+  const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
+  // `code`: exact or prefix, case-insensitive, the same rule as Search's
+  // CODES section, so a Search result always lands on a list that has it.
+  const codeQuery = (url.searchParams.get("code") ?? "").trim().slice(0, 100);
 
-  const where: Prisma.AppsumoCodeWhereInput = {};
+  const where: Prisma.AppsumoCodeWhereInput = codeQuery ? codeSearchWhere(codeQuery) : {};
   if (filter === "unused") where.redeemedAt = null;
   if (filter === "redeemed") {
     where.redeemedAt = { not: null };
@@ -58,6 +63,7 @@ export async function GET(req: NextRequest) {
     total,
     page,
     limit,
+    code: codeQuery || null,
     summary,
   });
 }
@@ -68,7 +74,8 @@ export async function POST(req: NextRequest) {
   const denied = await requirePlatformAdminApi(session);
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") return jsonError("Send a JSON body");
   const items = Array.isArray(body?.codes) ? body.codes : [];
   if (items.length === 0) return jsonError("Send at least one code");
   if (items.length > 5000) return jsonError("Bulk import capped at 5000 codes per call");
@@ -121,7 +128,8 @@ export async function PATCH(req: NextRequest) {
   const denied = await requirePlatformAdminApi(session);
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") return jsonError("Send a JSON body");
   const code = typeof body?.code === "string" ? body.code.trim() : "";
   if (!code) return jsonError("`code` is required");
 

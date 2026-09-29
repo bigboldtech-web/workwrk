@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword } from "@/lib/password-policy";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 
 export async function POST(req: Request) {
   try {
@@ -60,6 +61,11 @@ export async function POST(req: Request) {
         { error: "An account with this email already exists" },
         { status: 400 }
       );
+    }
+    // The registrant chooses this password before proving the mailbox, so
+    // a WorkwrK staff address is refused (platform-admin.ts).
+    if (typeof email === "string" && (await isReservedStaffAddress(email))) {
+      return NextResponse.json({ error: STAFF_ADDRESS_REFUSAL }, { status: 400 });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -123,7 +129,7 @@ export async function POST(req: Request) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Registration error:", error);
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

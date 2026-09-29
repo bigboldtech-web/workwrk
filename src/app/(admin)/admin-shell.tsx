@@ -151,6 +151,15 @@ function Frame({
   const setOverlayOpen = overlay.setOpen;
   const collapsed = prefs.sidebar.collapsed;
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  // Below 1024 the wide field is display:none and this icon is the visible
+  // trigger, so Esc hands focus back to whichever of the two is on screen.
+  const searchIconRef = useRef<HTMLButtonElement>(null);
+  const searchReturnTarget = useCallback((): HTMLElement | null => {
+    const wide = searchButtonRef.current;
+    if (wide && wide.offsetParent !== null) return wide;
+    return searchIconRef.current;
+  }, []);
+  const stack = useLayerStack();
   useNavHistoryRecorder();
   useConsoleKeys();
 
@@ -165,10 +174,32 @@ function Frame({
   }, [collapsed, patchPrefs, setOverlayOpen]);
 
   useShortcut({ ...canon["toggle-sidebar"], scope: "global", run: toggleSidebar });
-  // Cmd+K works from anywhere, a text field included; inside a drawer or a
-  // modal Radix hands the key to this listener too, and opening the overlay
-  // is a new top layer, never a stack on a closed one.
-  useShortcut({ ...canon["search"], scope: "global", run: () => setSearchOpen(!searchOpen) });
+  // Cmd+K works from anywhere, a text field included. Inside a drawer or a
+  // modal that layer closes FIRST (spec 2.8), so a result never navigates
+  // with a confirm still mounted underneath: the console's own layers go
+  // through the stack (a layer that refuses, such as a dirty form asking
+  // before it discards, keeps Search shut), and an open Radix modal gets
+  // the same Escape a person would press. Search opens on the next frame,
+  // after that modal has handed focus back.
+  const openSearchFromAnywhere = useCallback(() => {
+    if (searchOpen) {
+      setSearchOpen(false);
+      return;
+    }
+    for (let i = 0; i < 8; i++) {
+      const r = stack?.closeTopLayer() ?? "none";
+      if (r === "refused") return;
+      if (r === "none") break;
+    }
+    const modal = document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]');
+    if (modal) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      requestAnimationFrame(() => requestAnimationFrame(() => setSearchOpen(true)));
+      return;
+    }
+    setSearchOpen(true);
+  }, [searchOpen, setSearchOpen, stack]);
+  useShortcut({ ...canon["search"], scope: "global", run: openSearchFromAnywhere });
 
   return (
     <div
@@ -188,6 +219,7 @@ function Frame({
           sidebarCollapsed={collapsed}
           onSearch={() => setSearchOpen(true)}
           searchButtonRef={searchButtonRef}
+          searchIconRef={searchIconRef}
           mySettingsHref={mySettingsHref}
           runbookUrl={runbookUrl}
         />
@@ -233,7 +265,7 @@ function Frame({
         open={searchOpen}
         onOpenChange={setSearchOpen}
         recents={recents}
-        returnFocusTo={() => searchButtonRef.current}
+        returnFocusTo={searchReturnTarget}
       />
     </div>
   );
@@ -314,7 +346,7 @@ function Crumbs({ items }: { items: ConsoleCrumb[] }) {
 }
 
 function ConsoleTopBar({
-  onMenu, menuOpen, sidebarCollapsed, onSearch, searchButtonRef, mySettingsHref, runbookUrl,
+  onMenu, menuOpen, sidebarCollapsed, onSearch, searchButtonRef, searchIconRef, mySettingsHref, runbookUrl,
 }: {
   onMenu: () => void;
   menuOpen: boolean;
@@ -322,6 +354,7 @@ function ConsoleTopBar({
   sidebarCollapsed: boolean;
   onSearch: () => void;
   searchButtonRef: React.RefObject<HTMLButtonElement | null>;
+  searchIconRef: React.RefObject<HTMLButtonElement | null>;
   mySettingsHref: string | null;
   runbookUrl: string | null;
 }) {
@@ -380,7 +413,7 @@ function ConsoleTopBar({
         {/* dir="ltr": a key sequence, not prose ("⌘K", never "K⌘"). */}
         <kbd dir="ltr" className="font-sans text-xs text-chrome-fg-2">{shortcutHint("search")}</kbd>
       </button>
-      <ChromeIconButton label="Search" onClick={onSearch} className="lg:hidden">
+      <ChromeIconButton ref={searchIconRef} label="Search" onClick={onSearch} aria-haspopup="dialog" className="lg:hidden">
         <Search className="h-5 w-5" strokeWidth={1.5} />
       </ChromeIconButton>
 
@@ -459,7 +492,11 @@ function ConsoleAvatarMenu({ mySettingsHref }: { mySettingsHref: string | null }
           label="Log out"
           onClick={() => {
             setOpen(false);
-            void signOut({ callbackUrl: "/login" });
+            // Absolute, on THIS origin: a relative callbackUrl is resolved
+            // against NEXTAUTH_URL (the app host), which dropped staff on the
+            // customer /login and, after signing in, in their own product
+            // workspace. auth.ts's redirect callback allows the admin origin.
+            void signOut({ callbackUrl: `${window.location.origin}/login?callbackUrl=${encodeURIComponent("/admin")}` });
           }}
         />
       </div>
@@ -492,7 +529,10 @@ function ConsoleSidebar({
   return (
     <aside
       ref={asideRef}
-      id={SIDEBAR_ID}
+      // Only the slide-over carries the id the Menu button controls: the
+      // docked column stays mounted (hidden) below 1024, and two elements
+      // with one id made aria-controls ambiguous.
+      id={overlay ? SIDEBAR_ID : undefined}
       tabIndex={overlay ? -1 : undefined}
       role={overlay ? "dialog" : undefined}
       aria-modal={overlay ? true : undefined}

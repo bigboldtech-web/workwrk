@@ -1,6 +1,6 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { formatDate } from "@/lib/format/date";
 
@@ -8,7 +8,7 @@ import { useConsole } from "../../console-context";
 
 import { Dots } from "@/components/ui/dots";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,11 +69,33 @@ function getPlanColor(plan: string) {
 
 export default function AdminCompaniesPage() {
   const { datePrefs } = useConsole();
-  // ?search= arrives from Search (Cmd+K) "See all in Companies".
-  const initialSearch = useSearchParams().get("search") ?? "";
+  // ?search= arrives from Search (Cmd+K) "See all in Companies", and the
+  // box writes back to it, so the URL is the list's search both ways: a
+  // second "See all" while this page is open replaces the query, and
+  // browser back restores the previous one.
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlSearch = useSearchParams().get("search") ?? "";
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState(initialSearch);
+  const [search, setSearch] = useState(urlSearch);
+  // The last value this page wrote to the URL: its echo is not a new query.
+  const wroteSearch = useRef(urlSearch);
+  useEffect(() => {
+    if (urlSearch === wroteSearch.current) return;
+    wroteSearch.current = urlSearch;
+    setSearch(urlSearch);
+    setPage(1);
+  }, [urlSearch]);
+  useEffect(() => {
+    if (search === wroteSearch.current) return;
+    const t = window.setTimeout(() => {
+      wroteSearch.current = search;
+      const next = search ? `${pathname}?search=${encodeURIComponent(search)}` : pathname;
+      router.replace(next, { scroll: false });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [search, pathname, router]);
   const [filterPlan, setFilterPlan] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [page, setPage] = useState(1);

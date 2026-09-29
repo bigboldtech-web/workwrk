@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { Building2, Crown, Sparkles, Palette, Globe2, type LucideIcon } from "lucide-react";
+import { Building2, Crown, Sparkles, Palette, type LucideIcon } from "lucide-react";
+import { apiFetch } from "@/lib/api-fetch";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { BackButton } from "@/components/ui/back-button";
 import { Switch } from "@/components/ui/switch";
 import { useCompanyCrumb, useConsole } from "../../../console-context";
@@ -32,7 +34,11 @@ export default function CompanyDetailPage() {
   const { success: toastSuccess, error: toastError } = useToast();
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // "missing" is a company that does not exist (deleted, or a stale link
+  // from another tab): Retry could never help, so it gets its own end
+  // state. A 401 never lands here: apiFetch raises the shell's session
+  // dialog instead.
+  const [loadFailed, setLoadFailed] = useState<null | "missing" | "failed">(null);
   const [saving, setSaving] = useState<string | null>(null);
   // Suspended and Cancelled sign everyone out, so they wait for a typed
   // confirmation of the company name (spec-admin-backoffice 2.3 card 2).
@@ -40,14 +46,16 @@ export default function CompanyDetailPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setLoadFailed(false);
-    const r = await fetch(`/api/admin/companies/${id}`).catch(() => null);
-    if (r?.ok) {
-      const d = await r.json();
-      setCompany(d.data || d);
-    } else {
+    setLoadFailed(null);
+    const r = await apiFetch<{ data?: Company } & Partial<Company>>(`/api/admin/companies/${encodeURIComponent(id)}`);
+    if (r.ok) {
+      setCompany((r.data.data ?? r.data) as Company);
+    } else if (r.status === 404) {
+      setCompany(null);
+      setLoadFailed("missing");
+    } else if (r.status !== 401) {
       // A failure says so; it never sits as a skeleton for ever.
-      setLoadFailed(true);
+      setLoadFailed("failed");
     }
     setLoading(false);
   }, [id]);
@@ -66,29 +74,44 @@ export default function CompanyDetailPage() {
   async function patch(body: Record<string, unknown>, label: string) {
     setSaving(label);
     try {
-      const res = await fetch(`/api/admin/companies/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await apiFetch<{ signedOut?: number; data?: { signedOut?: number } }>(
+        `/api/admin/companies/${encodeURIComponent(id)}`,
+        { method: "PATCH", json: body },
+      );
       if (res.ok) {
-        const d = await res.json().catch(() => ({}));
+        const d = res.data?.data ?? res.data;
         const signedOut = typeof d?.signedOut === "number" ? d.signedOut : 0;
         toastSuccess(
           `${label} updated`,
           signedOut > 0 ? `${signedOut} ${signedOut === 1 ? "person is" : "people are"} signed out within five minutes.` : undefined,
         );
         await load();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toastError(err.error || "Failed");
+      } else if (res.status === 404) {
+        setCompany(null);
+        setLoadFailed("missing");
+      } else if (res.status !== 401) {
+        toastError(res.error || "That did not save. Try again.");
       }
     } finally {
       setSaving(null);
     }
   }
 
-  if (!company && loadFailed && !loading) {
+  if (loadFailed === "missing" && !loading) {
+    return (
+      <div className="p-6">
+        <OsEmptyView
+          title="We couldn't find that company"
+          hint="It may have been deleted by its own Owner, or the link is out of date."
+          action={{ label: "Open Companies", href: "/admin/companies" }}
+        >
+          <BackButton fallbackHref="/admin/companies" label="Companies" />
+        </OsEmptyView>
+      </div>
+    );
+  }
+
+  if (!company && loadFailed === "failed" && !loading) {
     return (
       <div className="flex items-center gap-1 p-6 text-row text-ink-2">
         <span>Could not load this company.</span>
@@ -150,7 +173,7 @@ export default function CompanyDetailPage() {
 
       {/* Quick stats */}
       <div className="grid grid-cols-5 gap-3">
-        <Stat label="Users" value={company._count.users} />
+        <Stat label="People" value={company._count.users} />
         <Stat label="SOPs" value={company._count.sops} />
         <Stat label="KRAs" value={company._count.kras} />
         <Stat label="KPIs" value={company._count.kpis} />
@@ -161,7 +184,7 @@ export default function CompanyDetailPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-lg">Plan &amp; status</CardTitle>
-          <CardDescription>Plan dictates which Enterprise features are eligible. Status controls whether the org can sign in.</CardDescription>
+          <CardDescription>The plan decides which Enterprise add-ons can be on. While the status is Suspended or Cancelled, nobody at this company can sign in.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1.5">
@@ -210,7 +233,7 @@ export default function CompanyDetailPage() {
                 <Crown size={14} className="text-ink-2" /> Enterprise add-ons
               </CardTitle>
               <CardDescription>
-                Toggleable per customer. {isEnterprise ? "This company is on Enterprise, so each switch takes effect at once." : "This company is not on Enterprise, so a switch is stored but does nothing until it is."}
+                {isEnterprise ? "This company is on Enterprise, so each switch takes effect at once." : "These can be switched only while the company is on Enterprise."}
               </CardDescription>
             </div>
           </div>
@@ -232,14 +255,10 @@ export default function CompanyDetailPage() {
             disabled={saving !== null || !isEnterprise}
             onChange={(v) => patch({ feature: "whiteLabel", enabled: v }, "White-label")}
           />
-          <FeatureRow
-            icon={Globe2}
-            title="Custom domain"
-            blurb="Routes the customer's own domain (e.g. sops.acme.com) into the app. They configure DNS; we handle middleware."
-            enabled={company.features.customDomain}
-            disabled={saving !== null || !isEnterprise}
-            onChange={(v) => patch({ feature: "customDomain", enabled: v }, "Custom domain")}
-          />
+          {/* Custom domain is not listed: nothing reads its flag (custom
+              domains are routed by CUSTOM_DOMAINS_ENABLED in proxy.ts), so a
+              switch here would promise a customer something that does not
+              happen. PATCH still accepts the key; nothing is lost. */}
           {!isEnterprise && (
             <p className="text-xs text-ink-2 pt-2 border-t border-line">
               Lift their plan to Enterprise above for these flags to activate.
@@ -255,7 +274,7 @@ export default function CompanyDetailPage() {
         onConfirm={async () => {
           const next = pendingStatus;
           if (!next) return;
-          await patch({ status: next }, "Status");
+          await patch({ status: next, confirm: company.name }, "Status");
           setPendingStatus(null);
         }}
       />

@@ -45,6 +45,8 @@ export function shippedConsoleNav(): ConsoleNavRow[] {
 /** The fixed first crumb on every console route. */
 export const CONSOLE_ROOT_LABEL = "Staff console";
 export const CONSOLE_ROOT_HREF = "/admin";
+/** The last crumb on the console's 404. */
+export const NOT_FOUND_LABEL = "Not found";
 
 function segments(path: string): string[] {
   return path.split(/[?#]/)[0].split("/").filter(Boolean);
@@ -100,11 +102,17 @@ export function consoleCrumbs(
   const root: ConsoleCrumb = { label: CONSOLE_ROOT_LABEL, href: CONSOLE_ROOT_HREF };
   const key = activeConsoleNav(pathname);
   const row = key ? CONSOLE_NAV.find((r) => r.key === key) ?? null : null;
-  if (!row) {
-    // Unknown console path: the root crumb alone, as the current page.
-    return [{ label: CONSOLE_ROOT_LABEL }];
-  }
   const path = segments(pathname ?? "");
+  // A path no console page owns (a typo, a stale link, a page not shipped
+  // yet, or anything below a company id) renders the console's own 404,
+  // (admin)/admin/not-found.tsx, and the crumb says so.
+  const known =
+    row &&
+    !NOT_YET_SHIPPED.has(row.key) &&
+    path.length <= segments(row.href).length + (row.key === "companies" ? 1 : 0);
+  if (!row || !known) {
+    return [root, { label: NOT_FOUND_LABEL }];
+  }
   if (row.key === "companies" && isCompanySegment(path[2]) && path.length === 3) {
     const name = opts.companyName?.trim();
     return [root, { label: row.label, href: row.href }, { label: name || "Company" }];

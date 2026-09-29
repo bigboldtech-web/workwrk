@@ -12,7 +12,7 @@ const TOKEN_PREFIX = "wkw_";
 const RAW_BYTES = 32;
 
 export type ScimAuthResult =
-  | { ok: true; organizationId: string; tokenId: string }
+  | { ok: true; organizationId: string; tokenId: string; workspaceInactive: boolean }
   | { ok: false; response: NextResponse };
 
 export function generateScimTokenRaw(): { raw: string; hash: string; prefix: string } {
@@ -32,7 +32,31 @@ export function hashScimToken(raw: string): string {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
-export async function authenticateScim(req: NextRequest): Promise<ScimAuthResult> {
+export interface ScimAuthOptions {
+  /**
+   * The route can DEPROVISION (deactivate a person) and will refuse every
+   * other write itself while `workspaceInactive` is true. Only the single
+   * User routes pass this: a company suspended for non-payment must still
+   * be able to remove a fired employee from its identity provider, or that
+   * person comes back ACTIVE the day the company is reactivated.
+   */
+  allowDeprovisionWhileInactive?: boolean;
+}
+
+/** True when this SCIM write only deactivates a person (active=false). */
+export function isDeprovisionOnly(data: Record<string, unknown>): boolean {
+  const keys = Object.keys(data);
+  return keys.length === 1 && keys[0] === "status" && data.status === "INACTIVE";
+}
+
+export function scimWorkspaceInactiveError(): NextResponse {
+  return scimError(
+    403,
+    "This workspace is suspended or cancelled, so it can only deactivate people. Please contact WorkwrK support.",
+  );
+}
+
+export async function authenticateScim(req: NextRequest, opts: ScimAuthOptions = {}): Promise<ScimAuthResult> {
   const auth = req.headers.get("authorization") ?? "";
   if (!auth.toLowerCase().startsWith("bearer ")) {
     return {
@@ -57,9 +81,12 @@ export async function authenticateScim(req: NextRequest): Promise<ScimAuthResult
   if (!token) return { ok: false, response: scimError(401, "Invalid token") };
   if (token.revokedAt) return { ok: false, response: scimError(401, "Token revoked") };
   // A suspended or cancelled workspace provisions nobody: suspension means
-  // nobody there can work, and the identity provider acts for them.
-  if (token.organization.status === "SUSPENDED" || token.organization.status === "CANCELLED") {
-    return { ok: false, response: scimError(403, "This workspace is suspended. Please contact WorkwrK support.") };
+  // nobody there can work, and the identity provider acts for them. It can
+  // still DEPROVISION, on the routes that opt in and check the write.
+  const workspaceInactive =
+    token.organization.status === "SUSPENDED" || token.organization.status === "CANCELLED";
+  if (workspaceInactive && !opts.allowDeprovisionWhileInactive) {
+    return { ok: false, response: scimWorkspaceInactiveError() };
   }
   if (token.expiresAt && token.expiresAt < new Date()) {
     return { ok: false, response: scimError(401, "Token expired") };
@@ -71,7 +98,7 @@ export async function authenticateScim(req: NextRequest): Promise<ScimAuthResult
     .update({ where: { id: token.id }, data: { lastUsedAt: new Date() } })
     .catch(() => {});
 
-  return { ok: true, organizationId: token.organizationId, tokenId: token.id };
+  return { ok: true, organizationId: token.organizationId, tokenId: token.id, workspaceInactive };
 }
 
 // SCIM 2.0 errors follow a specific JSON shape (RFC 7644 §3.12).

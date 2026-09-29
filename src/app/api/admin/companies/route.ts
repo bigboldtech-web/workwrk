@@ -10,16 +10,11 @@ import {
   VALID_PLANS,
   VALID_STATUSES,
 } from "@/lib/admin/company-patch";
-import { companySearchWhere } from "@/lib/admin/search";
+import { boundedInt, companySearchWhere } from "@/lib/admin/search";
 
 const LIST_REVOKE_REFUSAL =
   "Suspend or cancel a company from its company page, which asks you to type the company name first.";
 
-function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
-  const n = Number.parseInt(raw ?? "", 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
 import { requestIp, staffActorFromSession } from "@/lib/staff-audit";
 
 export async function GET(req: NextRequest) {

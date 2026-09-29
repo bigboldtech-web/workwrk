@@ -12,7 +12,9 @@ import { requestIp, staffActorFromSession } from "@/lib/staff-audit";
  * PATCH  → change the plan (body: { plan }), the status (body: { status })
  *          or one add-on (body: { feature, enabled }). Every branch runs in
  *          one transaction with its StaffAction row (src/lib/admin/company-patch.ts);
- *          SUSPENDED and CANCELLED also revoke every member's live session.
+ *          SUSPENDED and CANCELLED also need { confirm: "<company name>" },
+ *          checked here and not only in the dialog, and sign out every
+ *          member with no other healthy workspace.
  */
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,11 +38,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!org) return jsonError("Company not found", 404);
 
-  // Surface flags clearly for the console.
-  const settings = (org.settings ?? {}) as Record<string, unknown>;
+  // Only the add-on flags leave this route. The rest of Organization.settings
+  // (company profile, routing, access rules and more) is the customer's
+  // configuration: the console never shows it, so it is never sent.
+  const { settings: rawSettings, ...rest } = org;
+  const settings = (rawSettings ?? {}) as Record<string, unknown>;
   const features = (settings.features ?? {}) as Record<string, boolean>;
   return jsonSuccess({
-    ...org,
+    ...rest,
     features: {
       byok: !!features.byok,
       whiteLabel: !!features.whiteLabel,

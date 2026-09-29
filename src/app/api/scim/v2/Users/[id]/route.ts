@@ -10,8 +10,9 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
+import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
+import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 
 export async function GET(
   req: NextRequest,
@@ -41,7 +42,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -70,6 +71,12 @@ export async function PUT(
   }
 
   if (Object.keys(data).length === 0) return scimError(400, "No fields to update");
+  if (auth.workspaceInactive && !isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
+    if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
+    // A renamed address is not a proven one: verification is per address.
+    data.emailVerifiedAt = null;
+  }
 
   const updated = await prisma.user.update({
     where: { id },
@@ -91,7 +98,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -146,6 +153,12 @@ export async function PATCH(
   if (Object.keys(data).length === 0) {
     return scimResponse(userToScim({ ...existing, externalId: null }));
   }
+  if (auth.workspaceInactive && !isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
+  if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
+    if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
+    // A renamed address is not a proven one: verification is per address.
+    data.emailVerifiedAt = null;
+  }
 
   const updated = await prisma.user.update({
     where: { id },
@@ -167,7 +180,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateScim(req);
+  const auth = await authenticateScim(req, { allowDeprovisionWhileInactive: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await params;

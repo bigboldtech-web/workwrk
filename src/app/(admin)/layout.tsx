@@ -20,7 +20,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { isPlatformAdminSession } from "@/lib/platform-admin";
+import { isPlatformAdminSession, staffDenialReason } from "@/lib/platform-admin";
 import { recordDeniedAccess, requestIp } from "@/lib/staff-audit";
 import { LockedPage } from "@/components/access";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
@@ -65,12 +65,22 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     // a person who hits the wall is recorded on /admin/audit, a script
     // hammering the host bumps one row's hit count. Never throws.
     await recordDeniedAccess({ email, userId: user.id ?? null, ip: requestIp(requestHeaders) });
+    // The allow-list names an address, and only an account that has PROVEN
+    // it owns that address gets in (platform-admin.ts). A real staff member
+    // who has not verified yet is told how, not that they are not staff.
+    const reason = await staffDenialReason(session);
+    const sentence =
+      reason === "unverified"
+        ? `You are signed in as ${email}, which is on the WorkwrK staff list, but this account has not verified its email address. Verify it from My settings > Security, then open the console again.`
+        : reason === "duplicate"
+          ? `You are signed in as ${email}. More than one verified WorkwrK account uses this address, so the console opens for none of them. Ask another staff member to check the accounts.`
+          : `You are signed in as ${email}. That account is not on the WorkwrK staff list.`;
     return (
       <div className="workwrk-os min-h-screen bg-app text-ink">
         <LockedPage
           glyph="shield"
           name="This console is for WorkwrK staff"
-          sentence={`You are signed in as ${email}. That account is not on the WorkwrK staff list.`}
+          sentence={sentence}
           // Absolute on the admin host, which bounces relative paths to
           // /admin: with no NEXT_PUBLIC_APP_URL there is no back link there
           // at all rather than one that loops to this page (productHref).

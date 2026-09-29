@@ -271,6 +271,33 @@ export const authOptions: NextAuthOptions = {
   providers,
   callbacks: {
     /**
+     * next-auth's default rule plus exactly one more origin: the Staff
+     * console's (ADMIN_HOST). Without it the console's Log out resolved
+     * against NEXTAUTH_URL, the app host, and dropped staff on the customer
+     * sign-in page. Any other absolute URL still falls back to baseUrl, so
+     * this is no open redirect.
+     */
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      try {
+        const target = new URL(url);
+        if (target.origin === new URL(baseUrl).origin) return url;
+        // The proxy's comparison: port stripped, case-insensitive.
+        const adminHost = process.env.ADMIN_HOST?.trim().toLowerCase().replace(/:\d+$/, "");
+        const secureOnly = process.env.NODE_ENV === "production";
+        if (adminHost && target.hostname.toLowerCase() === adminHost) {
+          if (target.protocol === "https:" || (!secureOnly && target.protocol === "http:")) return url;
+        }
+        // Local development only: worktree servers run on their own ports
+        // while NEXTAUTH_URL names one, so a same-machine origin is the
+        // server the person is actually using. Never in production.
+        if (!secureOnly && (target.hostname === "localhost" || target.hostname === "127.0.0.1")) return url;
+      } catch {
+        // Not a URL: fall through to the app root.
+      }
+      return baseUrl;
+    },
+    /**
      * Google sign-in rule: only admit users whose email already exists
      * in the DB (via invitation or earlier credentials signup). We never
      * auto-create an organization from an SSO attempt — that's a

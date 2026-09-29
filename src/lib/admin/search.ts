@@ -41,10 +41,32 @@ export function parseSearchLimit(raw: string | null | undefined): number {
 }
 
 /**
+ * A query param as a whole number clamped to [min, max]; the fallback when
+ * absent or not a number. `page=abc` used to make a Prisma skip NaN (a 500)
+ * and `limit=-5` was echoed back as-is.
+ */
+export function boundedInt(raw: string | null | undefined, fallback: number, min: number, max: number): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * Prisma's `contains` and `startsWith` become SQL LIKE without escaping, so
+ * `%` and `_` in what a staff member typed were wildcards: "%%" matched
+ * every company and "_" in a code matched any character, breaking the
+ * exact-or-prefix promise. Backslash is Postgres's default LIKE escape.
+ */
+export function escapeLike(q: string): string {
+  return q.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
  * Companies by name, slug or sign-in domain, case-insensitive substring.
  * The one definition: GET /api/admin/companies?search= uses it too.
  */
-export function companySearchWhere(q: string): Prisma.OrganizationWhereInput {
+export function companySearchWhere(raw: string): Prisma.OrganizationWhereInput {
+  const q = escapeLike(raw);
   return {
     OR: [
       { name: { contains: q, mode: "insensitive" } },
@@ -55,7 +77,8 @@ export function companySearchWhere(q: string): Prisma.OrganizationWhereInput {
 }
 
 /** Staff by name or email, case-insensitive substring. */
-export function staffSearchWhere(q: string): Prisma.PlatformAdminWhereInput {
+export function staffSearchWhere(raw: string): Prisma.PlatformAdminWhereInput {
+  const q = escapeLike(raw);
   return {
     OR: [
       { email: { contains: q, mode: "insensitive" } },
@@ -66,7 +89,7 @@ export function staffSearchWhere(q: string): Prisma.PlatformAdminWhereInput {
 
 /** Codes by exact or prefix match, case-insensitive (a prefix includes the exact code). */
 export function codeSearchWhere(q: string): Prisma.AppsumoCodeWhereInput {
-  return { code: { startsWith: q.replace(/\s+/g, ""), mode: "insensitive" } };
+  return { code: { startsWith: escapeLike(q.replace(/\s+/g, "")), mode: "insensitive" } };
 }
 
 export type CodeStatus = "unused" | "redeemed" | "refunded";

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   SEARCH_MAX_CHARS,
+  boundedInt,
+  escapeLike,
   codeSearchWhere,
   codeSecondary,
   codeStatus,
@@ -74,5 +76,30 @@ describe("companySecondary", () => {
   it("reads plan and status in words", () => {
     expect(companySecondary("SCALE", "ACTIVE")).toBe("Scale · Active");
     expect(companySecondary("GROWTH", "SUSPENDED")).toBe("Growth · Suspended");
+  });
+});
+
+describe("escapeLike", () => {
+  it("makes % and _ literal, so they are never wildcards", () => {
+    expect(escapeLike("%%")).toBe("\\%\\%");
+    expect(escapeLike("P9_TEST")).toBe("P9\\_TEST");
+    expect(escapeLike("a\\b")).toBe("a\\\\b");
+    expect(escapeLike("acme")).toBe("acme");
+  });
+  it("is applied by every search rule", () => {
+    expect(JSON.stringify(companySearchWhere("%%"))).toContain("\\\\%\\\\%");
+    expect(JSON.stringify(staffSearchWhere("__"))).toContain("\\\\_\\\\_");
+    expect(codeSearchWhere("P9_T")).toEqual({ code: { startsWith: "P9\\_T", mode: "insensitive" } });
+  });
+});
+
+describe("boundedInt", () => {
+  it("falls back on garbage and clamps to the range", () => {
+    expect(boundedInt("abc", 1, 1, 100)).toBe(1);
+    expect(boundedInt(null, 20, 1, 100)).toBe(20);
+    expect(boundedInt("0", 1, 1, 100)).toBe(1);
+    expect(boundedInt("-5", 100, 1, 500)).toBe(1);
+    expect(boundedInt("9999", 100, 1, 500)).toBe(500);
+    expect(boundedInt("42", 1, 1, 100)).toBe(42);
   });
 });

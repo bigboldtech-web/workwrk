@@ -22,7 +22,7 @@ import {
 } from "@/lib/staff-audit";
 import { setFeature } from "@/lib/enterprise-features";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
-import { deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
+import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
 
 export {
   VALID_PLANS,
@@ -31,6 +31,7 @@ export {
   FEATURE_LABELS,
   validateCompanyPatch,
   statusRevokesSessions,
+  confirmMatches,
   deletionSchedule,
   type DeletionSchedule,
   type CompanyPlan,
@@ -62,9 +63,10 @@ export type ApplyCompanyPatchResult =
 
 /**
  * Applies the patch in one transaction with one StaffAction row per changed
- * field, and bumps `tokenVersion` on every anchored member when the new status is
- * SUSPENDED or CANCELLED (every live session dies at its next five-minute
- * check; the JWT callback also revokes on the workspace status itself).
+ * field, and bumps `tokenVersion` on every anchored member with no other
+ * healthy workspace when the new status is SUSPENDED or CANCELLED (their
+ * live sessions die at the next five-minute check). Everyone else acting in
+ * the company is moved to a healthy workspace by that same check.
  */
 export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<ApplyCompanyPatchResult> {
   const { id, patch, actor, ip } = input;
@@ -82,8 +84,32 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
       });
       if (!org) return null;
 
+      // Refusals come first, before ANY field is written: returning from
+      // this callback commits, so a refusal after the plan branch would
+      // leave the plan changed under an error response.
+      if (patch.status && patch.status !== org.status && statusRevokesSessions(patch.status)) {
+        if (!confirmMatches(patch.confirm, org.name)) {
+          return { refused: `Type the company name (${org.name}) to confirm.` };
+        }
+        if (actor.userId) {
+          // A staff member who belongs to this workspace would sign
+          // themselves out of the console and, with no healthy workspace to
+          // fall back to, could not sign back in to undo it. Refuse; another
+          // staff member does it.
+          const self = await tx.user.findFirst({
+            where: {
+              id: actor.userId,
+              OR: [{ organizationId: id }, { organizationMemberships: { some: { organizationId: id } } }],
+            },
+            select: { id: true },
+          });
+          if (self) return { refused: SELF_LOCKOUT };
+        }
+      }
+
       const changed: ("plan" | "status" | "feature")[] = [];
       let signedOut = 0;
+      let moved = 0;
       let plan: string = org.plan;
       let status: string = org.status;
 
@@ -134,20 +160,6 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
       }
 
       if (patch.status && patch.status !== org.status) {
-        if (statusRevokesSessions(patch.status) && actor.userId) {
-          // A staff member who belongs to this workspace would sign
-          // themselves out of the console and, with no healthy workspace to
-          // fall back to, could not sign back in to undo it. Refuse; another
-          // staff member does it.
-          const self = await tx.user.findFirst({
-            where: {
-              id: actor.userId,
-              OR: [{ organizationId: id }, { organizationMemberships: { some: { organizationId: id } } }],
-            },
-            select: { id: true },
-          });
-          if (self) return { refused: SELF_LOCKOUT };
-        }
         await tx.organization.update({ where: { id }, data: { status: patch.status } });
 
         // The self-service deletion schedule (cancelledAt, cancelledById,
@@ -170,11 +182,29 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           // in another, healthy company are not signed out of it; if a
           // token of theirs is acting in this company, the session check in
           // lib/auth.ts moves it to a healthy one or revokes it.
+          //
+          // Only people with NO other healthy workspace are signed out this
+          // way. An anchored member who also belongs to a healthy company is
+          // left alone here: the same check sees this company is suspended
+          // and moves their session into the healthy one. Bumping them too
+          // would revoke the token before that move could run, throwing out
+          // someone who was mostly working somewhere else.
           const bumped = await tx.user.updateMany({
-            where: { organizationId: id },
+            where: {
+              organizationId: id,
+              NOT: {
+                organizationMemberships: {
+                  some: {
+                    organizationId: { not: id },
+                    organization: { status: { notIn: ["SUSPENDED", "CANCELLED"] } },
+                  },
+                },
+              },
+            },
             data: { tokenVersion: { increment: 1 } },
           });
           signedOut = bumped.count;
+          moved = await tx.user.count({ where: { organizationId: id } }) - signedOut;
         }
         logged.push(
           await logStaffAction({
@@ -186,9 +216,9 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
             targetLabel: org.name,
             summary: `Set ${org.name} from ${statusLabel(org.status)} to ${statusLabel(patch.status)}${
               statusRevokesSessions(patch.status) ? `, signing out ${signedOut} ${signedOut === 1 ? "person" : "people"}` : ""
-            }${deletion?.scheduledHardDeleteAt ? `, and cancelled the deletion scheduled for ${deletion.scheduledHardDeleteAt.slice(0, 10)}` : ""}`,
+            }${moved > 0 ? ` (${moved} more moved to another workspace they belong to)` : ""}${deletion?.scheduledHardDeleteAt ? `, and cancelled the deletion scheduled for ${deletion.scheduledHardDeleteAt.slice(0, 10)}` : ""}`,
             before: { status: org.status, ...(deletion ? { deletionSchedule: deletion } : {}) },
-            after: { status: patch.status, signedOut },
+            after: { status: patch.status, signedOut, movedToOtherWorkspace: moved },
           }),
         );
         changed.push("status");

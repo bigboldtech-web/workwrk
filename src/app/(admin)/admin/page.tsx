@@ -10,7 +10,9 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { Building2, Users, CreditCard, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Building2, RefreshCw } from "lucide-react";
+import { planLabel } from "@/lib/staff-audit-helpers";
 import { Button } from "@/components/ui/button";
 
 interface Stats {
@@ -60,13 +62,14 @@ function getPlanBadge(plan: string) {
   };
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colors[plan] || ""}`}>
-      {plan}
+      {planLabel(plan)}
     </span>
   );
 }
 
 export default function AdminDashboard() {
   const { datePrefs } = useConsole();
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,35 +109,15 @@ export default function AdminDashboard() {
     );
   }
 
+  // Naming canon: Companies, People, Paying. No icon tiles and no green or
+  // amber numbers (spec 2.1): a count is a fact, not a status. No revenue
+  // tile and no "Active rate": the old revenue figure multiplied a
+  // hard-coded price list and the rate measured billing status, not
+  // activity. Revenue returns with the Overview rebuild, read from Stripe.
   const statCards = [
-    {
-      title: "Total Companies",
-      value: stats?.totalOrgs ?? 0,
-      change: `+${stats?.newOrgsThisMonth ?? 0} this month`,
-      icon: Building2,
-      color: "text-ink-2",
-      bg: "bg-hover",
-    },
-    {
-      title: "Total Users",
-      value: stats?.totalUsers ?? 0,
-      change: `+${stats?.newUsersThisMonth ?? 0} this month`,
-      icon: Users,
-      color: "text-ink-2",
-      bg: "bg-hover",
-    },
-    // No revenue tile and no "Active rate" here: the old revenue figure
-    // multiplied a hard-coded price list and the rate measured billing
-    // status, not activity, so neither was a fact. Revenue returns with
-    // the Overview rebuild, read from what Stripe actually charged.
-    {
-      title: "Paying",
-      value: stats?.payingOrgs ?? 0,
-      change: `${stats?.trialOrgs ?? 0} on trial`,
-      icon: CreditCard,
-      color: "text-success-text",
-      bg: "bg-hover",
-    },
+    { title: "Companies", value: stats?.totalOrgs ?? 0, change: `${stats?.newOrgsThisMonth ?? 0} new in the last 30 days` },
+    { title: "People", value: stats?.totalUsers ?? 0, change: `${stats?.newUsersThisMonth ?? 0} new in the last 30 days` },
+    { title: "Paying", value: stats?.payingOrgs ?? 0, change: `${stats?.trialOrgs ?? 0} on trial` },
   ];
 
   return (
@@ -153,14 +136,9 @@ export default function AdminDashboard() {
         {statCards.map((stat) => (
           <Card key={stat.title}>
             <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className={`rounded-lg p-2.5 ${stat.bg}`}>
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                </div>
-              </div>
-              <p className="text-2xl font-semibold">{stat.value}</p>
+              <p className="text-sm font-medium text-ink-2">{stat.title}</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">{stat.value}</p>
               <p className="text-sm text-ink-2 mt-0.5">{stat.change}</p>
-              <p className="text-sm text-ink-2 mt-1 font-medium">{stat.title}</p>
             </CardContent>
           </Card>
         ))}
@@ -196,7 +174,7 @@ export default function AdminDashboard() {
         <CardContent className="p-0">
           {companies.length === 0 ? (
             <div className="p-8 text-center text-base text-ink-2">
-              No companies registered yet. Share your registration page to get started.
+              No companies yet.
             </div>
           ) : (
             <table className="w-full">
@@ -204,20 +182,31 @@ export default function AdminDashboard() {
                 <tr className="border-b border-line">
                   <th className="text-left p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Company</th>
                   <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">People</th>
                   <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Status</th>
                   <th className="text-center p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Joined</th>
+                  <th className="text-right p-4 text-sm font-medium text-ink-2 uppercase tracking-wider">Signed up</th>
                 </tr>
               </thead>
               <tbody>
                 {companies.map((company) => (
-                  <tr key={company.id} className="border-b border-line/50 hover:bg-hover transition-colors">
+                  <tr
+                    key={company.id}
+                    // The row opens the company (spec 2.1); the name is also
+                    // a real link, so keyboard and middle-click work.
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a")) return;
+                      router.push(`/admin/companies/${company.id}`);
+                    }}
+                    className="cursor-pointer border-b border-line/50 hover:bg-hover transition-colors"
+                  >
                     <td className="p-4">
                       <div className="flex items-center gap-2">
                         <Building2 size={14} className="text-ink-2" />
                         <div>
-                          <span className="text-base font-medium">{company.name}</span>
+                          <Link href={`/admin/companies/${company.id}`} className="text-base font-medium text-ink hover:underline">
+                            {company.name}
+                          </Link>
                           <p className="text-xs text-ink-2">{company.slug}</p>
                         </div>
                       </div>
