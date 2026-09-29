@@ -95,6 +95,7 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   message: "the SSE realtime event name in api/conversations/[id]/messages",
   notification: "the SSE realtime event name in the same handler",
   kudos_given: "an ActivityLog action beside the KUDOS notification",
+  kudos_deleted: "an ActivityLog action in api/kudos/[id] (the audit of a delete)",
   okr_created: "an ActivityLog action beside okr_assigned",
   meeting_created: "an ActivityLog action beside meeting_invite",
   reviews_finalized: "an ActivityLog action beside the REVIEW notification",

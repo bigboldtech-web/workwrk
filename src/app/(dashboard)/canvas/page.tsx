@@ -42,6 +42,7 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { CANVAS_COLUMNS, readCanvasColumns, readCanvasViewType, type CanvasColumnKey } from "@/lib/docs-prefs";
 import type { CanvasSort, CanvasView } from "@/lib/canvas-list";
 import { cn } from "@/lib/utils";
+import { commonMoveDestinations, type CommonDestinations } from "@/lib/work/bulk-destinations";
 
 type Loc = { type: string; id: string; name: string; icon: string | null; color: string | null; href: string };
 type CanvasRow = {
@@ -236,6 +237,16 @@ export default function CanvasesPage() {
     toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : "Moved to Trash", failed ? { tone: "danger" } : { action: { label: "View Trash", onClick: () => router.push("/trash?type=canvas") } });
     setSelected(new Set()); dispatchCanvasesChanged(); void load();
   }
+  // THE BULK MOVE OFFERS WHAT EVERY SELECTED CANVAS'S MOVE ACCEPTS (the
+  // placement rule's P5): the intersection of each one's destinations, asked
+  // when the picker opens, "No location" included only when every canvas may
+  // leave every Space. It listed every Space the person could read.
+  const [bulkDests, setBulkDests] = useState<CommonDestinations | null>(null);
+  const toggleBulkMove = useCallback(() => {
+    setBulkMoveOpen((o) => !o);
+    setBulkDests(null);
+    void commonMoveDestinations("canvas", [...selected]).then(setBulkDests);
+  }, [selected]);
   async function bulkMove(value: string) {
     setBulkMoveOpen(false);
     const ids = [...selected];
@@ -396,8 +407,11 @@ export default function CanvasesPage() {
               bulkActions={
                 <>
                   <span className="relative">
-                    <BulkAction icon={FolderInput} label="Move to…" onClick={() => setBulkMoveOpen((o) => !o)} />
-                    <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected canvases" side="top" onSelect={(v) => void bulkMove(v)} sections={[{ options: [{ value: "none", label: "No location" }] }, { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) }]} />
+                    <BulkAction icon={FolderInput} label="Move to…" onClick={toggleBulkMove} />
+                    <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected canvases" side="top" onSelect={(v) => void bulkMove(v)} sections={[
+                      ...(bulkDests?.root ? [{ options: [{ value: "none", label: "No location" }] }] : []),
+                      { label: "Spaces", options: (bulkDests?.spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+                    ]} />
                   </span>
                   <BulkAction icon={Star} label="Add to favorites" onClick={() => void bulkFavorite()} />
                   <BulkAction icon={Trash2} label="Move to Trash" destructive onClick={() => void bulkTrash()} />

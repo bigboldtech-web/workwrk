@@ -1,14 +1,20 @@
-// People · Directory — manager door. The full "who's who" is a
-// management surface; employees land on their own career home instead
-// (the API already scopes /api/users to the caller's tree, so this gate
-// removes a broken near-empty surface, not data they could see).
+// Teams > Directory: every Member (Phase 6). Every Member lists the whole
+// org's directory cards (GET /api/users?scope=directory); people data rides
+// only for the people the viewer may read, and the record's own gate.
 
+import { Suspense } from "react";
 import PeopleDirectoryClient from "./directory-client";
-import { requireManagerPage } from "@/lib/page-gates";
+import { gatePage } from "@/lib/access/gate";
 
 export const dynamic = "force-dynamic";
 
 export default async function PeopleDirectoryPage() {
-  await requireManagerPage();
-  return <PeopleDirectoryClient />;
+  // Every Member (Phase 6, spec-teams-people section 1 Access): the Teams
+  // hub row gates it, so a Guest gets the in-shell 404 and nobody else does.
+  await gatePage("view", { type: "app", key: "teams" }, { callbackUrl: "/people" });
+  return (
+    <Suspense>
+      <PeopleDirectoryClient />
+    </Suspense>
+  );
 }

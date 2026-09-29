@@ -157,7 +157,7 @@ export default function OnboardPage() {
             Your modular <span className="text-[#0073EA]">Work OS</span>.
           </h1>
           <p className="mt-4 max-w-xl text-lg leading-relaxed text-zinc-500">
-            Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go. Add or remove any time.
+            Pick the apps that match how your team works. Every app comes with boards and templates ready to go. Add or remove any time.
           </p>
           <button type="button" onClick={() => setStep(1)} className="mt-9 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
             Get started <ArrowRight className="h-4 w-4" />
@@ -248,12 +248,12 @@ export default function OnboardPage() {
           </span>
           <h1 className="mt-4 text-[40px] font-semibold tracking-tight text-zinc-900">Your workspace is ready.</h1>
           <p className="mt-3 max-w-md text-base leading-relaxed text-zinc-500">
-            We&apos;ve pinned {selected.size} apps to your rail and pre-configured them for {deptLabel}. Sidekick is online and ready to draft work for you.
+            We&apos;ve pinned {selected.size} apps to your rail and pre-configured them for {deptLabel}. Ask AI is ready to draft work for you.
           </p>
           <div className="mt-6 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm">
             <div className="mb-2 text-base font-semibold text-zinc-900">What&apos;s set up</div>
             <ul className="space-y-1.5 text-base text-zinc-600">
-              {[`${selected.size} apps pinned to your rail`, "Core workspace (Tasks, Notes, SOPs, Goals)", "Sidekick AI assistant online", `Pre-built agents for ${deptLabel}`].map((t) => (
+              {[`${selected.size} apps pinned to your rail`, "Core workspace (Tasks, Notes, SOPs, Goals)", "Ask AI, the assistant, ready to help"].map((t) => (
                 <li key={t} className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-emerald-500" /> {t}</li>
               ))}
             </ul>

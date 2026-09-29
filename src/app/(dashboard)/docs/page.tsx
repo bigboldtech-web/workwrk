@@ -42,13 +42,13 @@ import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile
 import { PersonAvatar, PersonAvatarStack, type PersonRef } from "@/components/board-view/assignee-picker";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 import { DocRowMenuHost, useDocRowMenu, dispatchDocsChanged, type DocMenuTarget } from "@/components/docs/doc-row-menu";
-import { DocShareModal } from "@/components/docs/doc-share-modal";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { DOCS_COLUMNS, readDocsColumns, type DocsColumnKey } from "@/lib/docs-prefs";
 import type { DocsSort, DocsView } from "@/lib/docs-list";
 import { cn } from "@/lib/utils";
+import { commonMoveDestinations, type CommonDestinations } from "@/lib/work/bulk-destinations";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -272,10 +272,8 @@ export default function DocsPage() {
     window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
   }, [toast]);
 
-  /* ── row menu + share ── */
+  /* ── row menu (its host owns the Manage access dialog) ── */
   const menu = useDocRowMenu();
-  const [shareFor, setShareFor] = useState<DocRow | null>(null);
-  const shareAnchor = useRef<HTMLButtonElement | null>(null);
   const meId = boot.viewer.id;
   const toTarget = (d: DocRow): DocMenuTarget => ({
     id: d.id, title: d.title, parentId: d.parentId, entityType: d.entityType, entityId: d.entityId,
@@ -307,8 +305,12 @@ export default function DocsPage() {
   }
   async function bulkMove(value: string) {
     setBulkMoveOpen(false);
-    const ids = selectedRows.filter((r) => r.myRole !== "view").map((r) => r.id);
-    const body = value === "none" ? { entityType: null, entityId: null } : { entityType: "SPACE", entityId: value };
+    // A move needs Full access on the doc (the placement rule, P2): only the
+    // docs the viewer manages are sent; the server still checks each one.
+    const ids = selectedRows.filter((r) => r.canManage).map((r) => r.id);
+    if (ids.length === 0) { toast("You need Full access to a doc to move it"); return; }
+    // A place of its own means no parent page (the placement rule, P3).
+    const body = value === "none" ? { entityType: null, entityId: null, parentId: null } : { entityType: "SPACE", entityId: value, parentId: null };
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "PUT", json: body })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;
     toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : `Moved ${ids.length} doc${ids.length === 1 ? "" : "s"}`, failed ? { tone: "danger" } : undefined);
@@ -316,10 +318,17 @@ export default function DocsPage() {
     dispatchDocsChanged();
     void load();
   }
-  useEffect(() => {
-    if (!bulkMoveOpen || spaces !== null) return;
-    void (async () => { const s = await apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }); setSpaces(s.ok ? s.data.spaces ?? [] : []); })();
-  }, [bulkMoveOpen, spaces]);
+  // THE BULK MOVE OFFERS WHAT EVERY SELECTED DOC'S MOVE ACCEPTS (the
+  // placement rule's P5): the intersection of each managed doc's
+  // destinations, asked when the picker opens, "No location" included only
+  // when every doc may leave every place. It listed every Space the person
+  // could read, and the server refused the picks one doc at a time.
+  const [bulkDests, setBulkDests] = useState<CommonDestinations | null>(null);
+  const toggleBulkMove = useCallback(() => {
+    setBulkMoveOpen((o) => !o);
+    setBulkDests(null);
+    void commonMoveDestinations("doc", selectedRows.filter((r) => r.canManage).map((r) => r.id)).then(setBulkDests);
+  }, [selectedRows]);
 
   /* ── columns (Display) ── */
   const cols = readDocsColumns(prefs.home);
@@ -526,9 +535,12 @@ export default function DocsPage() {
               bulkActions={
                 <>
                   <span className="relative">
-                    <BulkAction icon={FolderInput} label="Move to…" onClick={() => setBulkMoveOpen((o) => !o)} />
+                    <BulkAction icon={FolderInput} label="Move to…" onClick={toggleBulkMove} />
                     <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected docs" side="top" onSelect={(v) => void bulkMove(v)}
-                      sections={[{ options: [{ value: "none", label: "No location" }] }, { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) }]} />
+                      sections={[
+                        ...(bulkDests?.root ? [{ options: [{ value: "none", label: "No location" }] }] : []),
+                        { label: "Spaces", options: (bulkDests?.spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+                      ]} />
                   </span>
                   <BulkAction icon={Star} label="Add to favorites" onClick={() => void bulkFavorite()} />
                   <BulkAction icon={Trash2} label="Move to Trash" destructive onClick={() => void bulkTrash()} />
@@ -539,24 +551,13 @@ export default function DocsPage() {
         </div>
       </div>
 
+      {/* The row menu's Manage access opens the one dialog, mounted by the
+          host; a sharing change reloads the list (its lock glyphs follow). */}
       <DocRowMenuHost
         menu={menu}
         context="table"
         onChanged={() => void load()}
-        onShare={(d) => { shareAnchor.current = (menu.state?.anchor?.current as HTMLButtonElement | null) ?? null; const row = rows?.find((r) => r.id === d.id) ?? null; setShareFor(row); }}
       />
-      {shareFor ? (
-        <DocShareModal
-          docId={shareFor.id}
-          docTitle={shareFor.title || "Untitled doc"}
-          createdById={shareFor.ownerId}
-          meId={meId}
-          open
-          onClose={() => setShareFor(null)}
-          anchorRef={shareAnchor}
-          viewerRole={shareFor.myRole}
-        />
-      ) : null}
     </>
   );
 }

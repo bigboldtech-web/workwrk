@@ -10,8 +10,8 @@ import type { Prisma } from "@/generated/prisma";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
-import { getSpaceForReader } from "@/lib/space";
-import { unscopedTableReadable } from "@/lib/table-gate";
+import { TABLE_EDIT_REFUSAL, tableRoleFor } from "@/lib/table-gate";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { decodeRowCursor, encodeRowCursor, type RowCursor } from "@/lib/table-row-cursor";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
@@ -23,14 +23,13 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
     select: { id: true, organizationId: true, spaceId: true, createdById: true },
   });
   if (!table) return null;
-  if (table.spaceId) {
-    const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
-    if (!space) return null;
-  } else if (!unscopedTableReadable(table.createdById, userId, accessLevel)) {
-    // No Space: org-wide for Members, a Guest's own only (lib/table-visibility).
-    return null;
-  }
-  return table;
+  // The one resolver's table rule (R7): a Space member edits, a Space Full
+  // holder manages, an unscoped table is org-wide for Members and a Guest's
+  // own only, and a table grant opens it on its own. A Can view role reads
+  // only (R7b): every write below asks canEdit.
+  const role = await tableRoleFor(table.id, orgId, userId, accessLevel);
+  if (!role) return null;
+  return { ...table, canEdit: roleAtLeast(role, "EDIT") };
 }
 
 // Phase 5a: keyset pagination as STREAMING TRANSPORT only. The client keeps
@@ -124,6 +123,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
+  if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const body = await req.json();
   const values = typeof body.values === "object" && body.values !== null ? body.values : {};
@@ -155,6 +155,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
+  if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const body = await req.json();
   const rowId = typeof body.id === "string" ? body.id : null;
@@ -215,6 +216,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
+  if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
   const body = await req.json();
   const rowId = typeof body.id === "string" ? body.id : null;

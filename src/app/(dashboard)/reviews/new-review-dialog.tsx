@@ -1,209 +1,195 @@
 "use client";
 
-// NewReviewCycleDialog — replaces the window.prompt() create flow.
-// Captures name + type, and auto-fills the period dates from the chosen
-// cadence (monthly → this month, quarterly → this quarter, annual → this
-// year). Dates stay editable. POSTs /api/reviews.
+// New cycle (spec-teams-performance /reviews, the 560 modal on ui/dialog):
+// a name, the type, the period (filled from the type, editable) and who it
+// covers. The People team and Admin pick Everyone, some departments or
+// named people; a manager's cycle covers the people who report to them
+// (DECIDED: a manager may run a review cycle for their chain), and launch
+// clips it to that chain whatever it says. Creating makes a Draft: nobody
+// is asked for anything until the cycle is launched.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Award, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { DateField } from "@/components/ui/date-field";
+import { PickerButton } from "@/components/dashboards/widget-registry";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { apiFetch } from "@/lib/api-fetch";
+import { CYCLE_TYPES, defaultCycleName, defaultCyclePeriod } from "@/lib/performance/review-cycle";
 
-type ReviewType = "MONTHLY_PULSE" | "QUARTERLY" | "ANNUAL" | "PROBATION" | "PIP_REVIEW";
-
-const TYPE_OPTIONS: Array<{ value: ReviewType; label: string; hint: string }> = [
-  { value: "MONTHLY_PULSE", label: "Monthly pulse", hint: "Lightweight monthly KPI + SOP check" },
-  { value: "QUARTERLY", label: "Quarterly", hint: "OKR scoring + KRA/KPI rollup + rating" },
-  { value: "ANNUAL", label: "Annual appraisal", hint: "Self + peer + calibration + 9-box" },
-  { value: "PROBATION", label: "Probation", hint: "New-hire probation review" },
-  { value: "PIP_REVIEW", label: "PIP", hint: "Performance-improvement plan" },
-];
-
-/** YYYY-MM-DD for an <input type=date>. */
-function isoDate(d: Date): string {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
-/** Period [start,end] implied by a cadence type, anchored on `now`. */
-function periodFor(type: ReviewType, now: Date): { start: string; end: string } {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  if (type === "MONTHLY_PULSE") {
-    return { start: isoDate(new Date(Date.UTC(y, m, 1))), end: isoDate(new Date(Date.UTC(y, m + 1, 0))) };
-  }
-  if (type === "QUARTERLY") {
-    const q0 = Math.floor(m / 3) * 3;
-    return { start: isoDate(new Date(Date.UTC(y, q0, 1))), end: isoDate(new Date(Date.UTC(y, q0 + 3, 0))) };
-  }
-  if (type === "ANNUAL") {
-    return { start: isoDate(new Date(Date.UTC(y, 0, 1))), end: isoDate(new Date(Date.UTC(y, 11, 31))) };
-  }
-  // PROBATION / PIP — default to a 30-day window from today.
-  return { start: isoDate(now), end: isoDate(new Date(now.getTime() + 30 * 86_400_000)) };
-}
-
-/** A sensible default name for the cadence + period. */
-function defaultName(type: ReviewType, now: Date): string {
-  const y = now.getUTCFullYear();
-  if (type === "MONTHLY_PULSE") return `${now.toLocaleString("en-US", { month: "long", timeZone: "UTC" })} ${y} pulse`;
-  if (type === "QUARTERLY") return `Q${Math.floor(now.getUTCMonth() / 3) + 1} ${y} review`;
-  if (type === "ANNUAL") return `${y} annual appraisal`;
-  if (type === "PROBATION") return "Probation review";
-  return "Performance improvement plan";
-}
+type Audience = "ALL" | "DEPARTMENTS" | "USERS";
 
 export function NewReviewCycleDialog({
   open,
   onOpenChange,
-  /** Today (passed from the page so the dialog stays render-pure). */
   now,
   onCreated,
+  orgWide,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Today (passed from the page so the dialog stays render-pure). */
   now: Date;
-  onCreated: (msg: string) => void;
+  onCreated: (cycle: { id: string; name: string }) => void;
+  /** People team or Admin: may pick any audience. */
+  orgWide: boolean;
 }) {
-  const [type, setType] = useState<ReviewType>("QUARTERLY");
-  const [name, setName] = useState("");
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const confirm = useConfirm();
+  const [type, setType] = useState("QUARTERLY");
+  const [name, setName] = useState(() => defaultCycleName("QUARTERLY", now));
   const [touchedName, setTouchedName] = useState(false);
+  const [start, setStart] = useState(() => defaultCyclePeriod("QUARTERLY", now).start);
+  const [end, setEnd] = useState(() => defaultCyclePeriod("QUARTERLY", now).end);
+  const [audience, setAudience] = useState<Audience>("ALL");
+  const [deptIds, setDeptIds] = useState<string[]>([]);
+  const [people, setPeople] = useState<PickPerson[]>([]);
+  const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-
-  const period = useMemo(() => periodFor(type, now), [type, now]);
-
-  // When the dialog opens or the type changes, re-seed name + dates
-  // (unless the user has hand-edited the name).
-  useEffect(() => {
-    if (!open) return;
-    setStart(period.start);
-    setEnd(period.end);
-    if (!touchedName) setName(defaultName(type, now));
-  }, [open, type, period.start, period.end, touchedName, now]);
+  const dirty = touchedName || audience !== "ALL" || deptIds.length > 0 || people.length > 0;
 
   useEffect(() => {
-    if (open) {
-      setTouchedName(false);
-      setError(null);
-      const t = setTimeout(() => nameRef.current?.focus(), 30);
-      return () => clearTimeout(t);
-    }
-  }, [open]);
+    if (!open || !orgWide || depts.length) return;
+    void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((r) => { if (r.ok && Array.isArray(r.data)) setDepts(r.data); });
+  }, [open, orgWide, depts.length]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onOpenChange]);
+  const pickType = (t: string) => {
+    setType(t);
+    const p = defaultCyclePeriod(t, now);
+    setStart(p.start);
+    setEnd(p.end);
+    if (!touchedName) setName(defaultCycleName(t, now));
+  };
 
-  if (!open) return null;
+  const requestClose = async () => {
+    if (busy) return;
+    if (dirty && !(await confirm({ title: "Discard this cycle?", description: "Nothing has been created yet.", confirmLabel: "Discard", destructive: true }))) return;
+    onOpenChange(false);
+  };
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed) { setError("Give the cycle a name."); return; }
-    if (new Date(start) > new Date(end)) { setError("Start date must be before end date."); return; }
+    if (!trimmed) { setError("Give the cycle a name."); nameRef.current?.focus(); return; }
+    if (!start || !end) { setError("Pick when the cycle starts and closes."); return; }
+    if (start > end) { setError("The cycle must close on or after the day it starts."); return; }
+    if (audience === "DEPARTMENTS" && !deptIds.length) { setError("Pick at least one department."); return; }
+    if (audience === "USERS" && !people.length) { setError("Pick at least one person."); return; }
     setBusy(true);
     setError(null);
-    try {
-      const res = await fetch("/api/reviews", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: trimmed,
-          type,
-          startDate: new Date(`${start}T00:00:00Z`).toISOString(),
-          endDate: new Date(`${end}T23:59:59Z`).toISOString(),
-        }),
-      });
-      if (!res.ok) {
-        setError(res.status === 403 ? "Only HR can create review cycles." : "Couldn't create the cycle.");
-        setBusy(false);
-        return;
-      }
-      onCreated("Cycle created");
-      onOpenChange(false);
-    } catch {
-      setError("Couldn't create the cycle.");
-    } finally {
-      setBusy(false);
-    }
+    const r = await apiFetch<{ id: string; name: string }>("/api/reviews", {
+      method: "POST",
+      json: {
+        name: trimmed,
+        type,
+        startDate: new Date(`${start}T00:00:00Z`).toISOString(),
+        endDate: new Date(`${end}T23:59:59Z`).toISOString(),
+        audienceType: orgWide ? audience : audience === "USERS" ? "USERS" : "ALL",
+        departmentIds: audience === "DEPARTMENTS" ? deptIds : [],
+        userIds: audience === "USERS" ? people.map((p) => p.id) : [],
+      },
+    });
+    setBusy(false);
+    if (!r.ok) { setError(r.error || "Couldn't create the cycle."); return; }
+    onCreated({ id: r.data.id, name: r.data.name });
+    onOpenChange(false);
   };
 
+  const audienceOptions = orgWide
+    ? [{ value: "ALL", label: "Everyone" }, { value: "DEPARTMENTS", label: "Departments" }, { value: "USERS", label: "Specific people" }]
+    : [{ value: "ALL", label: "Everyone who reports to me" }, { value: "USERS", label: "Specific people who report to me" }];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={() => onOpenChange(false)} aria-hidden />
-      <div role="dialog" aria-modal="true" aria-label="New review cycle" className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-zinc-200">
-        <header className="flex items-center gap-2.5 px-4 py-3 border-b border-zinc-100">
-          <span className="grid place-items-center w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600">
-            <Award className="w-4 h-4" />
-          </span>
-          <h2 className="text-base font-semibold text-zinc-900 flex-1">New review cycle</h2>
-          <button type="button" onClick={() => onOpenChange(false)} className="w-7 h-7 grid place-items-center rounded-md text-zinc-400 hover:bg-zinc-100" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
-        </header>
-
-        <div className="p-4 space-y-3">
-          <div>
-            <span className="text-sm font-medium text-zinc-600">Type</span>
-            <div className="mt-1 grid grid-cols-1 gap-1.5">
-              {TYPE_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => setType(o.value)}
-                  className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-md border text-base ${
-                    type === o.value ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 hover:bg-zinc-50"
-                  }`}
-                >
-                  <span className="font-medium text-zinc-800">{o.label}</span>
-                  <span className="text-xs text-zinc-400 truncate ml-2">{o.hint}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-600">Name</span>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) void requestClose(); }}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>New cycle</DialogTitle>
+          <DialogDescription>It starts as a draft. Nobody is asked for anything until you launch it.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => { e.preventDefault(); void submit(); }}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void submit(); } }}
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Name</span>
             <input
               ref={nameRef}
+              autoFocus
               value={name}
+              maxLength={200}
               onChange={(e) => { setName(e.target.value); setTouchedName(true); }}
-              onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-base focus:outline-none focus:border-zinc-400"
+              className="h-9 rounded-md border border-line bg-raised px-3 text-row text-ink outline-none focus-visible:border-[var(--os-focus)]"
             />
           </label>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-sm font-medium text-zinc-600">Starts</span>
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-base" />
-            </label>
-            <label className="block">
-              <span className="text-sm font-medium text-zinc-600">Ends</span>
-              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-base" />
-            </label>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Type</span>
+            <PickerButton
+              ariaLabel="Cycle type"
+              label={CYCLE_TYPES.find((t) => t.value === type)?.label ?? type}
+              selected={type}
+              sections={[{ options: CYCLE_TYPES }]}
+              onSelect={pickType}
+            />
           </div>
-
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        </div>
-
-        <footer className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-100">
-          <button type="button" onClick={() => onOpenChange(false)} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-100">Cancel</button>
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={busy || !name.trim()}
-            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-zinc-900 text-white text-base font-medium disabled:opacity-40 hover:bg-zinc-800"
-          >
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Create cycle
-          </button>
-        </footer>
-      </div>
-    </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-ink">Starts</span>
+              <DateField value={start} onChange={(v) => setStart(v ?? "")} ariaLabel="Starts" allowClear={false} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-ink">Closes</span>
+              <DateField value={end} onChange={(v) => setEnd(v ?? "")} ariaLabel="Closes" allowClear={false} align="end" />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-ink">Covers</span>
+            <PickerButton
+              ariaLabel="Who the cycle covers"
+              label={audienceOptions.find((o) => o.value === audience)?.label ?? "Everyone"}
+              selected={audience}
+              sections={[{ options: audienceOptions }]}
+              onSelect={(v) => setAudience(v as Audience)}
+            />
+            {audience === "DEPARTMENTS" ? (
+              <PickerButton
+                ariaLabel="Departments"
+                multi
+                keepOpen
+                label={deptIds.length ? depts.filter((d) => deptIds.includes(d.id)).map((d) => d.name).join(", ") : <span className="text-ink-3">Pick departments</span>}
+                selected={deptIds}
+                sections={[{ options: depts.map((d) => ({ value: d.id, label: d.name })) }]}
+                onSelect={(id) => setDeptIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))}
+                emptyLabel="No departments yet"
+                className="mt-2"
+              />
+            ) : null}
+            {audience === "USERS" ? (
+              <div className="mt-2">
+                <PeoplePickerField
+                  ariaLabel="People"
+                  multiple
+                  value={people.map((p) => p.id)}
+                  people={people}
+                  placeholder="Pick people"
+                  onChange={(_ids, picked) => setPeople(picked)}
+                />
+              </div>
+            ) : null}
+            <p className="m-0 text-xs text-ink-2">
+              {orgWide
+                ? "Launching creates a review for every active person it covers, with their manager as the reviewer."
+                : "A cycle you start covers the people who report to you, directly or through someone else."}
+            </p>
+          </div>
+          {error ? <p role="alert" className="m-0 text-sm text-danger-text">{error}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => void requestClose()} disabled={busy}>Cancel</Button>
+            <Button type="submit" disabled={busy} aria-busy={busy}>{busy ? "Creating" : "Create cycle"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

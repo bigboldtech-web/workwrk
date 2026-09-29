@@ -10,9 +10,16 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePreferences, setUserHomeKey } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
+import { nodeCtxFromSession, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeKind } from "@/lib/access/node-rules";
 
 type Pin = { kind: string; id: string };
 type PinChip = { kind: string; id: string; label: string; href: string; icon: string | null; color: string | null };
+
+/** A pin's kind as the one resolver names it. */
+const PIN_NODE_KIND: Readonly<Record<string, NodeKind>> = {
+  space: "space", board: "list", folder: "folder", table: "table", doc: "doc", whiteboard: "canvas",
+};
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -43,8 +50,19 @@ export async function GET() {
   for (const d of docs) map.set(`doc:${d.id}`, { kind: "doc", id: d.id, label: d.title || "Untitled doc", href: `/docs/${d.id}`, icon: null, color: null });
   for (const w of whiteboards) map.set(`whiteboard:${w.id}`, { kind: "whiteboard", id: w.id, label: w.name || "Canvas", href: `/canvas/${w.id}`, icon: null, color: null });
 
-  // Keep pin order; drop any that no longer resolve.
-  const chips = pins.map((p) => map.get(`${p.kind}:${p.id}`)).filter((c): c is PinChip => !!c);
+  // Only what the viewer can still open, in ONE world for every pin (the one
+  // resolver): a pin on a node they lost access to is hidden, never named.
+  const pinned = pins.filter((p) => PIN_NODE_KIND[p.kind] && map.has(`${p.kind}:${p.id}`));
+  const ctx = await nodeCtxFromSession();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const decisions = await nodeRoles(ctx, pinned.map((p) => ({ kind: PIN_NODE_KIND[p.kind], id: p.id })));
+  const opens = (p: Pin) => roleAtLeast(decisions.get(`${PIN_NODE_KIND[p.kind]}:${p.id}`)?.role ?? "none", "VIEW");
+
+  // Keep pin order; drop any that no longer resolve or cannot be opened.
+  const chips = pins
+    .filter((p) => PIN_NODE_KIND[p.kind] && opens(p))
+    .map((p) => map.get(`${p.kind}:${p.id}`))
+    .filter((c): c is PinChip => !!c);
   return NextResponse.json({ pins: chips });
 }
 

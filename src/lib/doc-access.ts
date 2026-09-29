@@ -1,88 +1,70 @@
-// Phase 37 — shared Doc visibility gate.
+// The Doc read gate, delegated to the one resolver.
 //
-// Docs anchor polymorphically to SPACE / BOARD / BOARD_ITEM / null
-// (standalone). Pre-Phase 37, only SPACE-anchored Docs were gated; a
-// BOARD_ITEM-anchored Doc on a PRIVATE board was readable + writable
-// by anyone in the org who could guess its ID. This helper closes
-// that hole by resolving the doc's anchor up to its real owner
-// (Space or Board) and asking the existing resolver.
+// Docs anchor polymorphically (SPACE, FOLDER, BOARD, BOARD_ITEM, NOTEPAD) or
+// hang under a parent page, or stand alone. Who can open one is decided by
+// src/lib/access/node-access.ts (node-rules R6): an anchored doc follows its
+// anchor, a sub-page follows its parent page (A6), a root doc is the whole
+// org's, a listing in Organization.settings.docSharing pierces reach and
+// restricted keeps only the listed people, a note is its owner's alone.
 //
-// Returns true when the viewer can see the doc OR the anchor doesn't
-// have a known gate (standalone docs, future entity types). 404-not-403:
-// callers should return "not found" on false, never "forbidden".
+// 404-not-403: callers answer "not found" on false, never "forbidden".
+//
+// Server-only.
 
 import { prisma } from "@/lib/prisma";
-import { getSpaceForReader } from "@/lib/space";
-import { getBoardForReader } from "@/lib/board";
-import { folderReadable } from "@/lib/folder";
+import {
+  canCreateDocAt as canCreateDocAtNode,
+  docRoleFor,
+  nodeCtxFromLevel,
+  type DocRoleInfo,
+  type NodeCtx,
+} from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
-interface DocAnchor {
+export type { DocRoleInfo };
+
+interface DocRef {
+  /** Required: the doc's own id (a sub-page follows its parent, which only the id finds). */
+  id: string;
   entityType: string | null;
   entityId: string | null;
+  parentId?: string | null;
+  createdById?: string | null;
+  organizationId?: string;
 }
 
-/** A board doc is readable if the viewer can read the board via the Space OR,
- *  for a folder-only grantee, via the board's parent folder — mirroring the
- *  folder fallback the central resolveBoard added. */
-async function boardReadableWithFolder(
-  boardId: string,
-  userId: string,
-  level: string,
-): Promise<boolean> {
-  if (await getBoardForReader(boardId, userId, level)) return true;
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { folderId: true },
-  });
-  if (board?.folderId) return folderReadable(board.folderId, userId, level);
-  return false;
+/**
+ * The viewer's access to one doc, or null when they cannot open it: the
+ * role (the page lock applied), and whether they can comment, change who can
+ * open it, and manage it (lock, Trash, template).
+ */
+export async function docAccess(ctx: NodeCtx, docId: string): Promise<DocRoleInfo | null> {
+  const info = await docRoleFor(ctx, docId);
+  return roleAtLeast(info.unlockedRole, "VIEW") ? info : null;
 }
 
+/** Can the viewer open this doc? The doc's own org is the world's, as before. */
 export async function docAccessible(
-  anchor: DocAnchor,
+  doc: DocRef,
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  if (!anchor.entityType || !anchor.entityId) return true;
+  const orgId =
+    doc.organizationId ??
+    (await prisma.doc.findUnique({ where: { id: doc.id }, select: { organizationId: true } }))?.organizationId;
+  if (!orgId) return false;
+  return (await docAccess(nodeCtxFromLevel(userId, orgId, accessLevel), doc.id)) !== null;
+}
 
-  const level = accessLevel ?? "EMPLOYEE";
-
-  if (anchor.entityType === "SPACE") {
-    return Boolean(await getSpaceForReader(anchor.entityId, userId, level));
-  }
-
-  if (anchor.entityType === "BOARD") {
-    return boardReadableWithFolder(anchor.entityId, userId, level);
-  }
-
-  if (anchor.entityType === "BOARD_ITEM") {
-    // Resolve the parent board, then defer to the board resolver.
-    const item = await prisma.item.findUnique({
-      where: { id: anchor.entityId },
-      select: { boardId: true },
-    });
-    if (!item) return false; // pinned to a deleted item — drop
-    return boardReadableWithFolder(item.boardId, userId, level);
-  }
-
-  if (anchor.entityType === "FOLDER") {
-    // Granular: a folder-only grantee reads their folder's docs; a PRIVATE
-    // folder's docs are hidden from space readers without a folder grant.
-    return folderReadable(anchor.entityId, userId, level);
-  }
-
-  if (anchor.entityType === "NOTEPAD") {
-    // Personal sticky note (topbar Notepad / voice capture). Owner-only,
-    // regardless of access level — these are private jottings, not org
-    // documents, so even OWNER/ADMIN gets no read-around. This one gate
-    // covers the list GET (per-row), /api/docs/[id] GET/PUT/DELETE, the
-    // POST create gate (can't mint a note anchored to someone else), and
-    // search (which also filters per-row through docAccessible).
-    return anchor.entityId === userId;
-  }
-
-  // Unknown anchor type (LEAD, future suite-specific types, etc.) —
-  // fall through. Suite-owned types should gate inside their own GETs;
-  // this helper covers only the core PPMS primitives.
-  return true;
+/**
+ * May the viewer create a doc at this anchor (and under this parent page)?
+ * The anchor must be one they reach, a note only under their own name, and a
+ * parent page one they can read in the same org, never someone else's note.
+ */
+export async function canCreateDocAt(
+  ctx: NodeCtx,
+  anchor: { entityType: string | null; entityId: string | null } | null,
+  parentId: string | null,
+): Promise<boolean> {
+  return canCreateDocAtNode(ctx, anchor, parentId);
 }

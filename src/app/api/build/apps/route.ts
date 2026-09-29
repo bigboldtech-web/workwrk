@@ -1,28 +1,34 @@
-// GET /api/build/apps — list this org's apps
-// POST /api/build/apps — save a generated app (after preview)
+// GET /api/build/apps: this org's apps.
+//   ?includeArchived=1  archived apps too (the Display menu's Show archived)
+//   ?q=                 name or description contains
+// POST /api/build/apps: save an app (after the New app modal's preview).
+// GET: Owner and Admin over the org; a Member over the org's live apps and
+// their own (the Member exception, src/lib/build/gate.ts). POST: Owner and Admin.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { buildAppScope, canManageBuildApp, requireBuild, requireBuildViewer } from "@/lib/build/gate";
 import { z } from "zod";
 
 async function ctx() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  const userId = (session.user as { id?: string }).id;
-  if (!userId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true } });
-  if (!user?.organizationId) return { error: NextResponse.json({ error: "no organization" }, { status: 400 }) };
-  return { userId: user.id, orgId: user.organizationId };
+  return requireBuild();
 }
 
-export async function GET() {
-  const c = await ctx();
+export async function GET(req: Request) {
+  const c = await requireBuildViewer();
   if ("error" in c) return c.error;
+  const sp = new URL(req.url).searchParams;
+  const includeArchived = sp.get("includeArchived") === "1";
+  const q = (sp.get("q") ?? "").trim().slice(0, 200);
 
   const apps = await prisma.app.findMany({
-    where: { organizationId: c.orgId, status: { not: "ARCHIVED" } },
+    where: {
+      ...buildAppScope(c),
+      ...(includeArchived ? {} : { status: { not: "ARCHIVED" as const } }),
+      ...(q
+        ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { description: { contains: q, mode: "insensitive" as const } }] }
+        : {}),
+    },
     select: {
       id: true,
       slug: true,
@@ -31,13 +37,23 @@ export async function GET() {
       iconKey: true,
       hue: true,
       status: true,
+      ui: true,
+      createdById: true,
       createdAt: true,
       updatedAt: true,
     },
     orderBy: { updatedAt: "desc" },
     take: 100,
   });
-  return NextResponse.json({ apps });
+  // The row count, not the rows: the list never ships every app's data.
+  return NextResponse.json({
+    // Whether New app and Generate render: POST and /generate are Owner and Admin.
+    canCreate: c.admin,
+    apps: apps.map(({ ui, createdById, ...a }) => {
+      const rows = ui && typeof ui === "object" && Array.isArray((ui as { rows?: unknown }).rows) ? ((ui as { rows: unknown[] }).rows.length) : 0;
+      return { ...a, rowCount: rows, canManage: canManageBuildApp(c, { createdById }) };
+    }),
+  });
 }
 
 const fieldSchema = z.object({

@@ -32,8 +32,29 @@ import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
 import { treeChanged } from "@/lib/work/container-events";
 
-type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null };
-type FolderRow = { id: string; name: string; icon: string | null; color: string | null };
+type FolderRow = { id: string; name: string; icon: string | null; color: string | null; parentFolderId: string | null; pickable: boolean };
+/** One Space from GET /api/move/destinations?create=list: its root is a place when `pickable`, and its Folders the ones a List may be made in. */
+type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null; pickable: boolean; folders: FolderRow[] };
+
+/** The place a new List lands by default in a Space: its root when the viewer may create there, else its first Folder they may. */
+function defaultFolder(space: SpaceRow | null | undefined, wanted: string | null | undefined): string | null {
+  if (!space) return null;
+  if (wanted && space.folders.some((f) => f.id === wanted && f.pickable)) return wanted;
+  if (space.pickable) return null;
+  return space.folders.find((f) => f.pickable)?.id ?? null;
+}
+
+/** How deep each listed Folder sits under the Space, for the indent. */
+function folderDepth(folders: FolderRow[], id: string): number {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  let d = 0;
+  let cursor = byId.get(id)?.parentFolderId ?? null;
+  while (cursor && byId.has(cursor) && d < 8) {
+    d += 1;
+    cursor = byId.get(cursor)?.parentFolderId ?? null;
+  }
+  return d;
+}
 
 export function CreateListModal() {
   const { createListOpen, closeCreateList, openTemplateCenter, createListPreselect } = useOsShell();
@@ -42,7 +63,6 @@ export function CreateListModal() {
   const [description, setDescription] = useState("");
   const [isRestricted, setIsRestricted] = useState(false);
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
-  const [folders, setFolders] = useState<FolderRow[]>([]);
   const [spaceId, setSpaceId] = useState<string>("");
   const [folderId, setFolderId] = useState<string | null>(null);
   const [menu, setMenu] = useState<"space" | "folder" | null>(null);
@@ -50,51 +70,49 @@ export function CreateListModal() {
   const [error, setError] = useState<string | null>(null);
   const loadedRef = useRef(false);
 
+  // THE PLACES THIS PERSON MAY MAKE A LIST IN (the placement rule, node-rules
+  // P1 and P5): GET /api/move/destinations?create=list asks the one create
+  // rule per place, so the pickers offer exactly what POST /api/boards
+  // accepts. They used to list every Space the person could read and each
+  // Space's Folders with no role at all: a Can view holder was offered their
+  // Spaces and refused on Create, and a Can edit grantee of one Folder inside
+  // a Space they only pass through could not pick that Folder.
   useEffect(() => {
     if (!createListOpen || loadedRef.current) return;
     loadedRef.current = true;
-    void fetch("/api/spaces", { cache: "no-store" })
+    void fetch("/api/move/destinations?create=list", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { spaces: [] }))
       .then((d) => {
-        const rows: SpaceRow[] = Array.isArray(d.spaces) ? d.spaces : [];
+        const rows: SpaceRow[] = (Array.isArray(d?.spaces) ? d.spaces : []).map((x: SpaceRow) => ({
+          ...x,
+          folders: Array.isArray(x.folders) ? x.folders : [],
+        }));
         setSpaces(rows);
         const preId = createListPreselect?.spaceId;
         const fromPreselect = preId ? rows.find((s) => s.id === preId) : null;
         const slug = typeof window !== "undefined" ? window.location.pathname.match(/\/spaces\/([^/?#]+)/)?.[1] : null;
         const fromRoute = slug ? rows.find((s) => s.slug === decodeURIComponent(slug)) : null;
-        setSpaceId(fromPreselect?.id ?? fromRoute?.id ?? rows[0]?.id ?? "");
-        setFolderId(createListPreselect?.folderId ?? null);
+        const first = fromPreselect ?? fromRoute ?? rows[0] ?? null;
+        setSpaceId(first?.id ?? "");
+        setFolderId(defaultFolder(first, createListPreselect?.folderId));
       })
       .catch(() => {});
   }, [createListOpen, createListPreselect]);
 
-  // The Folder choice, refreshed whenever the Space changes. A Space with no
-  // folders simply offers the one "Space root" row and no chevron menu.
-  useEffect(() => {
-    if (!createListOpen || !spaceId) return;
-    let alive = true;
-    void fetch(`/api/folders?spaceId=${spaceId}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!alive) return;
-        const rows: FolderRow[] = Array.isArray(d?.folders) ? d.folders : [];
-        setFolders(rows);
-      })
-      .catch(() => { if (alive) setFolders([]); });
-    return () => { alive = false; };
-  }, [createListOpen, spaceId]);
-
   const doClose = useCallback(() => {
     loadedRef.current = false;
     setListName(""); setDescription(""); setIsRestricted(false);
-    setSpaceId(""); setFolderId(null); setFolders([]);
+    setSpaceId(""); setFolderId(null);
     setError(null); setBusy(false); setMenu(null);
     closeCreateList();
   }, [closeCreateList]);
 
   const selectedSpace = spaces.find((s) => s.id === spaceId) ?? null;
+  const folders = selectedSpace?.folders ?? [];
   const selectedFolder = folders.find((f) => f.id === folderId) ?? null;
-  const canCreate = listName.trim().length > 0 && Boolean(spaceId) && !busy;
+  // A place is picked: the Space's root when it may hold the List, else one of its Folders that may.
+  const placePicked = Boolean(selectedSpace) && (folderId ? Boolean(selectedFolder?.pickable) : Boolean(selectedSpace?.pickable));
+  const canCreate = listName.trim().length > 0 && placePicked && !busy;
 
   const handleCreate = async () => {
     if (!canCreate) return;
@@ -180,7 +198,7 @@ export function CreateListModal() {
                       <span className="text-base text-ink font-medium truncate">{selectedSpace.name}</span>
                     </>
                   ) : (
-                    <span className="text-base text-ink-3">{spaces.length ? "Pick a Space" : "No Spaces available"}</span>
+                    <span className="text-base text-ink-3">{spaces.length ? "Pick a Space" : "Nowhere you can add a List"}</span>
                   )}
                 </span>
                 <ChevronDown className="w-4 h-4 text-ink-3 shrink-0" />
@@ -188,13 +206,13 @@ export function CreateListModal() {
               {menu === "space" ? (
                 <Menu>
                   {spaces.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-ink-3">No Spaces yet.</div>
+                    <div className="px-3 py-2 text-sm text-ink-3">Making a List needs Can edit on a Space or a folder.</div>
                   ) : (
                     spaces.map((s) => (
                       <MenuRow
                         key={s.id}
                         selected={s.id === spaceId}
-                        onClick={() => { setSpaceId(s.id); setFolderId(null); setMenu(null); }}
+                        onClick={() => { setSpaceId(s.id); setFolderId(defaultFolder(s, null)); setMenu(null); }}
                       >
                         <EntityTile size="sm" icon={s.icon} color={s.color} name={s.name} />
                         <span className="flex-1 text-base text-ink truncate">{s.name}</span>
@@ -221,22 +239,34 @@ export function CreateListModal() {
                       <span className="text-base text-ink truncate">{selectedFolder.name}</span>
                     </>
                   ) : (
-                    <span className="text-base text-ink-2">No folder (Space root)</span>
+                    <span className="text-base text-ink-2">{selectedSpace && !selectedSpace.pickable ? "Pick a folder" : "No folder (Space root)"}</span>
                   )}
                 </span>
                 <ChevronDown className="w-4 h-4 text-ink-3 shrink-0" />
               </button>
               {menu === "folder" ? (
                 <Menu>
-                  <MenuRow selected={folderId === null} onClick={() => { setFolderId(null); setMenu(null); }}>
-                    <FolderIcon className="w-3.5 h-3.5 text-ink-3" />
-                    <span className="flex-1 text-base text-ink-2 truncate">No folder (Space root)</span>
-                  </MenuRow>
-                  {folders.map((f) => (
-                    <MenuRow key={f.id} selected={f.id === folderId} onClick={() => { setFolderId(f.id); setMenu(null); }}>
-                      <EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />
-                      <span className="flex-1 text-base text-ink truncate">{f.name}</span>
+                  {selectedSpace?.pickable ? (
+                    <MenuRow selected={folderId === null} onClick={() => { setFolderId(null); setMenu(null); }}>
+                      <FolderIcon className="w-3.5 h-3.5 text-ink-3" />
+                      <span className="flex-1 text-base text-ink-2 truncate">No folder (Space root)</span>
                     </MenuRow>
+                  ) : null}
+                  {folders.map((f) => (
+                    f.pickable ? (
+                      <MenuRow key={f.id} selected={f.id === folderId} onClick={() => { setFolderId(f.id); setMenu(null); }}>
+                        <span style={{ width: folderDepth(folders, f.id) * 12 }} aria-hidden />
+                        <EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />
+                        <span className="flex-1 text-base text-ink truncate">{f.name}</span>
+                      </MenuRow>
+                    ) : (
+                      // A Folder on the way to one the person may add to: a header, not a place.
+                      <div key={f.id} className="w-full flex items-center gap-2 px-3 py-1.5 text-ink-3">
+                        <span style={{ width: folderDepth(folders, f.id) * 12 }} aria-hidden />
+                        <EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />
+                        <span className="flex-1 text-base truncate">{f.name}</span>
+                      </div>
+                    )
                   ))}
                 </Menu>
               ) : null}

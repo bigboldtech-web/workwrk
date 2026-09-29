@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { navPop, navPreviousIs, navPush, navReplace, type NavStack } from "@/lib/nav/nav-stack";
+import { leaveThen } from "@/lib/dirty-guard";
 
 const KEY = "workwrk:shell:nav-stack";
 const MAX = 100;
@@ -76,8 +77,11 @@ export function useNavHistory() {
   const snap = useSyncExternalStore(subscribe, read, serverSnapshot);
   const canBack = snap.idx > 0;
   const canForward = snap.idx >= 0 && snap.idx < snap.stack.length - 1;
-  const back = useCallback(() => { if (canBack) router.back(); }, [canBack, router]);
-  const forward = useCallback(() => { if (canForward) router.forward(); }, [canForward, router]);
+  // The bar's buttons are the app's, so unsaved work asks first, like
+  // BackButton. The browser's own Back cannot be stopped in the App Router;
+  // pages that hold typing keep it as a draft for that case.
+  const back = useCallback(() => { if (canBack) void leaveThen(() => router.back()); }, [canBack, router]);
+  const forward = useCallback(() => { if (canForward) void leaveThen(() => router.forward()); }, [canForward, router]);
   return { canBack, canForward, back, forward };
 }
 

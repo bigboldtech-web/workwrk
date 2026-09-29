@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { ANONYMITY_FLOOR, shuffled } from "@/lib/people/anonymity";
+import { normalizeCandorPrompts } from "@/lib/performance/candor";
 
 type Prompt = { id: string; text: string; type: string };
 type Answer = { promptId: string; value: unknown };
@@ -8,9 +11,6 @@ type Answer = { promptId: string; value: unknown };
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  // Authz: results are for managers/admins only — never a rank-and-file peer.
-  if (!isManager(session)) return jsonError("Forbidden", 403);
-
   const { id } = await params;
   const orgId = getOrgId(session);
 
@@ -20,16 +20,37 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!candor) return jsonError("Session not found", 404);
 
-  // Anonymity: we read ONLY the answers + timestamp. CandorResponse has no user
-  // column, so there is nothing here that could identify a respondent.
+  // Authz (spec-teams-performance /candor/[id] Results): the session's
+  // owner, the People team, Owner and Admin. Never another manager in the
+  // org, never a respondent.
+  const isOwner = candor.createdBy === getUserId(session);
+  if (!isOwner && !(await isPeopleTeamOrAdmin(session))) return jsonError("Forbidden", 403);
+
+  // Anonymity: we read ONLY the answers. CandorResponse has no user column,
+  // and neither its time nor its insertion order is read, so nothing here can
+  // line an answer up with who answered when (respondedAt is day-truncated
+  // for the same reason). Text answers are shuffled below; ratings aggregate.
   const responses = await prisma.candorResponse.findMany({
     where: { sessionId: id },
-    select: { answers: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
+    select: { answers: true },
   });
 
+  // The anonymity floor (DECIDED: four answers): under it, nothing but the
+  // count leaves the server, so a small team cannot be read by arithmetic.
+  if (responses.length < ANONYMITY_FLOOR) {
+    return jsonSuccess({
+      session: { id: candor.id, title: candor.title, description: candor.description, status: candor.status, launchedAt: candor.launchedAt, closedAt: candor.closedAt },
+      totalResponses: responses.length,
+      belowFloor: true,
+      floor: ANONYMITY_FLOOR,
+      results: [],
+    });
+  }
+
   // Aggregate results per prompt
-  const prompts: Prompt[] = Array.isArray(candor.prompts) ? (candor.prompts as unknown as Prompt[]) : [];
+  // The prompts' stable ids (lib/performance/candor.ts), the same ids the
+  // respond route keyed every answer to.
+  const prompts: Prompt[] = normalizeCandorPrompts(candor.prompts);
   const aggregated = prompts.map((prompt) => {
     const promptAnswers = responses
       .map((r) => {
@@ -39,6 +60,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       })
       .filter((v) => v !== undefined && v !== null && v !== "");
 
+    // The floor applies per prompt too (as surveys do): a prompt answered by
+    // fewer than four people shows its count only, never one person's
+    // rating or words on their own.
+    if (promptAnswers.length < ANONYMITY_FLOOR) {
+      return { prompt, type: prompt.type === "rating" ? "rating" : "text", hidden: true, count: promptAnswers.length, ...(prompt.type === "rating" ? { average: null, distribution: [] } : { responses: [] }) };
+    }
+
     if (prompt.type === "rating") {
       const nums = promptAnswers.map(Number).filter((n) => !isNaN(n));
       const avg = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : null;
@@ -47,12 +75,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     // Text responses (including start_stop_continue)
-    return { prompt, type: "text", responses: promptAnswers, count: promptAnswers.length };
+    // Shuffled, so the order can never be read as who answered first.
+    return { prompt, type: "text", responses: shuffled(promptAnswers), count: promptAnswers.length };
   });
 
   return jsonSuccess({
     session: { id: candor.id, title: candor.title, description: candor.description, status: candor.status, launchedAt: candor.launchedAt, closedAt: candor.closedAt },
     totalResponses: responses.length,
+    belowFloor: false,
+    floor: ANONYMITY_FLOOR,
     results: aggregated,
   });
 }

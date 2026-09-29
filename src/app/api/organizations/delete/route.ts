@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 /**
  * Schedule a tenant for deletion. Soft-delete with a 30-day grace
@@ -71,19 +72,17 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const scheduledHardDeleteAt = new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000);
 
-  const nextSettings: OrgSettingsWithDeletion = {
-    ...((org.settings as OrgSettingsWithDeletion) ?? {}),
+  const deletionKeys: Pick<OrgSettingsWithDeletion, "cancelledAt" | "cancelledById" | "scheduledHardDeleteAt"> = {
     cancelledAt: now.toISOString(),
     cancelledById: userId,
     scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString(),
   };
 
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: {
-      status: "CANCELLED",
-      settings: nextSettings as never,
-    },
+  // The status and the three deletion keys together; only those keys of the
+  // shared settings column are written, so no other writer's key is lost.
+  await prisma.$transaction(async (tx) => {
+    await tx.organization.update({ where: { id: orgId }, data: { status: "CANCELLED" } });
+    await writeOrgSettingsKeys(orgId, deletionKeys, tx);
   });
 
   logAuditEvent({

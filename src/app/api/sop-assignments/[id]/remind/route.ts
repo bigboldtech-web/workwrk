@@ -5,6 +5,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
 import { absoluteUrl } from "@/lib/app-url";
+import { addressHref } from "@/lib/nav/object-href";
 
 /**
  * POST /api/sop-assignments/[id]/remind (spec-process section 2, the People
@@ -39,7 +40,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       title: "Reminder: SOP to acknowledge",
       message: `"${assignment.sop.title}" is waiting for you${assignment.dueDate ? `, due ${assignment.dueDate.toISOString().slice(0, 10)}` : ""}.`,
       type: "sop",
-      link: `/sops/${assignment.sop.id}`,
+      // The Work door: it places the SOP under the recipient's own access.
+      link: addressHref("sop", assignment.sop.id, { scope: "work" }),
       userId: assignment.userId,
     },
   });
@@ -49,7 +51,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     dueDate: assignment.dueDate ? assignment.dueDate.toISOString().slice(0, 10) : undefined,
     // One helper for every outbound absolute link (src/lib/app-url.ts), so a
     // reminder never points at a host the recipient cannot open.
-    sopLink: absoluteUrl(`/sops/${assignment.sop.id}`),
+    sopLink: absoluteUrl(addressHref("sop", assignment.sop.id, { scope: "work" })),
   });
   try {
     await sendEmail({

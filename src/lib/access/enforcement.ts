@@ -1,4 +1,4 @@
-// ENFORCED_AT — where each action, toggle, rule and cap is actually enforced.
+// ENFORCED_AT, where each action, toggle, rule and cap is actually enforced.
 //
 // Spec 1.1 principle 7 ("nothing is decorative") and invariant 21: every
 // member of the Action union, every OrgAction, every toggle key, every rule
@@ -146,21 +146,21 @@ const OBJECT_ENFORCEMENT: Record<`object.${ObjectType}`, string> = {
   "object.sop_folder": "sop-access.ts canWriteToFolder, /api/sop-folders/[id]/access",
   "object.policy": "api/policies/[id]",
   "object.contract": "api/agreements/[id]",
-  "object.goal": "goal-audience.ts canSeeGoal, alignment-scope.ts canEditOkrOwner",
+  "object.goal": "goal-audience.ts canSeeGoal, goals/goal-rights.ts mayEditGoal and mayDeleteGoal",
   "object.kra": "api/kras/[id], access.ts resolveKra",
   "object.channel": "api/conversations/[id] (getSessionAndModule + ConversationMember)",
   "object.team": "api/teams/[id] (step 4)",
   "object.tool": "api/tools/[id] (ToolShare)",
   "object.asset": "api/assets/[id]",
-  "object.survey": "api/surveys/[id]",
+  "object.survey": "api/pulse-surveys/[id] (survey.server.ts surveyFaces)",
   "object.announcement": "api/announcements/[id]",
-  "object.review_cycle": "api/review-cycles/[id]",
-  "object.automation": "automation/hub-access.ts, api/automation/workflows/[id]",
+  "object.review_cycle": "api/reviews/[id] and its sub-routes (review-cycle.server.ts, review-cycle-access.ts)",
+  "object.automation": "automation/gate.ts, api/automation/workflows/[id]",
   "object.form": "api/forms/[id]",
   "object.template": "api/template-center/[id]",
   "object.timesheet": "api/timesheets/[id] (resolves to person)",
   "object.kudos": "api/kudos/[id]",
-  "object.candor": "api/candor/[id]",
+  "object.candor": "api/candor/[id] (candor.server.ts candorFaces)",
   "object.person": "PATCH /api/users/[id] and the people-data routes",
   "object.person_card": "GET /api/people/pick, GET /api/users",
 };
@@ -170,6 +170,11 @@ function appEnforcement(): Record<`app.${AppKey}`, string> {
   for (const key of APP_KEYS) {
     out[`app.${key}`] = `the ${key} hub or route layout, via gatePage("view", { type: "app", key: "${key}" })`;
   }
+  // The one sanctioned exception to the app-key 404 (access 5.5): /team and
+  // /team/workload render LockedPage without Request access, so they ask
+  // can() through their own gate instead of gatePage.
+  out["app.team"] = `src/app/(dashboard)/team/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "team" }) with LockedPage)`;
+  out["app.workload"] = `src/app/(dashboard)/team/workload/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "workload" }) with LockedPage)`;
   return out;
 }
 

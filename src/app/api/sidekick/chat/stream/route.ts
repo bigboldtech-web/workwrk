@@ -5,23 +5,24 @@
 // streams Claude's text deltas over Server-Sent Events so the UI can
 // render the response as it's generated.
 //
-// Wire protocol — every event is a single SSE `data:` line containing
+// Wire protocol, every event is a single SSE `data:` line containing
 // JSON. Event types:
-//   {type:"user_message",  message:{...}}     — the persisted user msg
-//   {type:"text_delta",    text:"…"}          — incremental text from Claude
-//   {type:"tool_use",      name, input}       — tool invoked by Claude
-//   {type:"tool_result",   name, isError}     — server-side result returned
-//   {type:"done",          message:{...},    — final assistant msg + usage
+//   {type:"user_message",  message:{...}}   , the persisted user msg
+//   {type:"text_delta",    text:"…"}        , incremental text from Claude
+//   {type:"tool_use",      name, input}     , tool invoked by Claude
+//   {type:"tool_result",   name, isError}   , server-side result returned
+//   {type:"done",          message:{...},  , final assistant msg + usage
 //                           tokensIn, tokensOut, finishReason}
-//   {type:"error",         message:"…"}       — fatal error mid-stream
+//   {type:"error",         message:"…"}     , fatal error mid-stream
 //
 // Prompt caching: the system prompt + tool definitions are stable
 // across turns within a session, so we put a `cache_control: ephemeral`
 // breakpoint on the last system block. Per the Anthropic API the
 // render order is tools → system → messages, so that single breakpoint
 // caches tools + system together (5-minute TTL by default; min cacheable
-// prefix on Sonnet 4.6 is 2048 tokens — easily met once tools are in).
+// prefix on Sonnet 4.6 is 2048 tokens, easily met once tools are in).
 
+import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { getServerSession } from "next-auth/next";
@@ -33,11 +34,11 @@ import { TOOLS, toolsForSession } from "@/lib/agents/tools";
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
 
-const DEFAULT_SYSTEM_PROMPT = `You are Sidekick, the AI assistant inside WorkwrK — a modular Work OS.
+const DEFAULT_SYSTEM_PROMPT = `You are Ask AI, the assistant inside WorkwrK, a people and project management workspace.
 
-You help the user with everyday work tasks across whatever products their team has installed: boards (Work), SOPs, OKRs, Meetings, Culture, CRM, ITSM, Marketing, Dev, Legal, and more.
+You help the user with everyday work: their Spaces, Lists and tasks, docs, forms and tables, SOPs, goals, KRAs and KPIs, meetings, weekly reviews and kudos. You act as the user, so you can only see and change what they can.
 
-When the user asks you to do something you can act on inside WorkwrK (create a task, log a lead, file a ticket, send kudos, etc.) and you have a tool for it, USE THE TOOL. Don't just describe what you would do — actually do it.
+When the user asks you to do something you can act on inside WorkwrK (create a task, schedule a meeting, send kudos and so on) and you have a tool for it, use the tool. Do not just describe what you would do: do it.
 
 When the user asks for advice or drafting (writing copy, brainstorming, summarizing), respond directly with markdown.
 
@@ -103,6 +104,10 @@ async function buildContextPrefix(
 }
 
 export async function POST(req: Request) {
+  // The ai app key first (access 5.2.1): Guests 404, and a hidden app or AI
+  // features turned off answer 403 app_off before anything is written.
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) {
@@ -115,7 +120,7 @@ export async function POST(req: Request) {
   if (c.status === 401) return new Response("unauthorized", { status: 401 });
   if (c.status === 404) return new Response("session not found", { status: 404 });
 
-  // 1. Persist user message + auto-title (sync — happens before stream opens).
+  // 1. Persist user message + auto-title (sync, happens before stream opens).
   const userMessage = await prisma.chatMessage.create({
     data: { sessionId: c.chat.id, role: "USER", content: parsed.data.message },
   });
@@ -154,8 +159,20 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // SAVE PATH (its own edit, no chrome change): when the client goes away
+      // mid-stream, enqueue throws. Before this guard that throw escaped from
+      // inside the catch below, so step 5 never ran: the ASSISTANT turn, and
+      // with it the log of every tool that had already run (a create_task
+      // included), was never written. Now a closed stream only stops the
+      // events; the turn is always persisted.
+      let clientGone = false;
       function send(event: object) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          clientGone = true;
+        }
       }
 
       // Ack the user message immediately so the UI can replace its optimistic
@@ -185,7 +202,7 @@ export async function POST(req: Request) {
       try {
         for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
           // SDK streaming. system is passed as a text-block array so we can
-          // attach cache_control — caches tools+system together.
+          // attach cache_control, caches tools+system together.
           const messageStream = resolved.client.messages.stream({
             model,
             max_tokens: 4096,
@@ -201,7 +218,7 @@ export async function POST(req: Request) {
           });
 
           // Forward text deltas to the client as they arrive. Tool input
-          // deltas (input_json_delta) are skipped — the full input is
+          // deltas (input_json_delta) are skipped, the full input is
           // available on the final message and is more reliable to render.
           for await (const event of messageStream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
@@ -209,7 +226,7 @@ export async function POST(req: Request) {
             }
           }
 
-          // Collect the final, fully-assembled message — this is the only
+          // Collect the final, fully-assembled message, this is the only
           // way to get tool_use blocks (which can't be partially streamed
           // and acted on safely).
           const result = await messageStream.finalMessage();
@@ -231,13 +248,13 @@ export async function POST(req: Request) {
             }
           }
           if (textBlocks.length > 0) {
-            // Replace per iteration — only the latest iteration's text counts.
+            // Replace per iteration, only the latest iteration's text counts.
             assistantText = textBlocks.join("\n\n");
           }
 
           if (toolUses.length === 0 || result.stop_reason !== "tool_use") break;
 
-          // Append the assistant tool_use turn verbatim — required by the API
+          // Append the assistant tool_use turn verbatim, required by the API
           // so the next request's messages array is well-formed.
           messages.push({
             role: "assistant",
@@ -308,7 +325,7 @@ export async function POST(req: Request) {
       } catch (err) {
         errorText = err instanceof Error ? err.message : "Claude request failed";
         if (!assistantText) {
-          assistantText = `Sorry — I hit an error reaching the model.\n\n\`${errorText}\``;
+          assistantText = `Sorry, I hit an error reaching the model.\n\n\`${errorText}\``;
         }
         send({ type: "error", message: errorText });
       }
@@ -358,7 +375,13 @@ export async function POST(req: Request) {
         error: errorText,
       });
 
-      controller.close();
+      if (!clientGone) {
+        try { controller.close(); } catch { /* already closed by the client */ }
+      }
+    },
+    cancel() {
+      // The client disconnected. start() keeps running to persist the turn;
+      // its send() calls become no-ops once enqueue throws.
     },
   });
 

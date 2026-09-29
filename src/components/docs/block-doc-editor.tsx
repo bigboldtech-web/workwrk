@@ -1,6 +1,6 @@
 "use client";
 
-/* BlockDocEditor — chrome around the BlockNote canvas for /docs/[id].
+/* BlockDocEditor, chrome around the BlockNote canvas for /docs/[id].
  *
  * Adds Notion-grade page polish on top of the block editor:
  *   - Cover gradient or image at the top of the page
@@ -9,7 +9,7 @@
  *   - Legacy `{ html }` doc detection + lossless "convert to blocks"
  *   - Sticky chrome (back, copy link, summarise, extract table)
  *
- * Doc content shape (additive — older docs without `meta` still work):
+ * Doc content shape (additive, older docs without `meta` still work):
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
  *
  * ONE EDITOR, THREE ADDRESSES. /docs/[id] (the Docs hub), and the Work
@@ -69,7 +69,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { BackButton } from "@/components/ui/back-button";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
-import { DocShareModal } from "./doc-share-modal";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { useDocTree, createChildPage } from "./doc-pages-panel";
 import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -84,6 +84,8 @@ import { registerDocTitleWriter } from "@/lib/doc-title-handoff";
 import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { DocRowMenu } from "./doc-row-menu";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -97,7 +99,7 @@ import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
-// the writer actually opens the picker — keeps the doc page light + fast.
+// the writer actually opens the picker, keeps the doc page light + fast.
 const NoteIconPicker = dynamic(
   () => import("./note-icon-picker").then((m) => m.NoteIconPicker),
   { ssr: false },
@@ -108,7 +110,7 @@ type DocMeta = {
   icon?: string;
   coverGradient?: string;
   coverUrl?: string;
-  // Notion-style page preferences (all additive — older docs default sensibly).
+  // Notion-style page preferences (all additive, older docs default sensibly).
   font?: DocFont;
   smallText?: boolean;
   fullWidth?: boolean;
@@ -119,7 +121,7 @@ type DocPayload = {
   id: string;
   title: string;
   // Content shape evolves:
-  //   v1 (legacy): { blocks: Block[] }            — custom editor
+  //   v1 (legacy): { blocks: Block[] }          , custom editor
   //   v2:          { bnDoc: PartialBlock[], blocks: Block[] (mirror), version: 2 }
   // We read both shapes and migrate v1 → v2 lazily on first save.
   content: { bnDoc?: PartialBlock[]; blocks?: Block[]; html?: string; meta?: DocMeta; comments?: CommentsByBlock; version?: number } | null;
@@ -140,6 +142,34 @@ type DraftPayload = { title: string; bnDoc: PartialBlock[] | null; blocks: Block
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
+
+// GET /api/docs/[id] hides existence: 404 for a doc the viewer holds nothing
+// on (or no doc at all), 400 for a malformed id. Both are the in-shell
+// not-found, the same as table-editor's, never "Couldn't open this doc" with
+// a Retry that reloads into the same refusal. Only a real failure (network,
+// 5xx) keeps that error and its Retry.
+export function docLoadHidden(status: number): boolean {
+  return status === 404 || status === 400;
+}
+
+// A PUT the server refused for good, as against one worth resending. 404 is
+// the route's answer once the viewer's access is gone (removed while this
+// tab was open: access ends at once, and the route never says whether the
+// doc exists); 410 is the doc archived under them. A resend gets the same
+// answer every time, so these are final, like the 403 branch, and must not
+// fall into the network retry loop that tells the person to check a
+// connection that is fine. Everything else not ok keeps that loop.
+export type DocSaveRefusal = "no-access" | "archived";
+export function docSaveRefusal(status: number): DocSaveRefusal | null {
+  if (status === 404) return "no-access";
+  if (status === 410) return "archived";
+  return null;
+}
+
+export const DOC_SAVE_REFUSAL_COPY: Record<DocSaveRefusal, string> = {
+  "no-access": "You no longer have access to this doc. Your changes are kept in this tab: copy them or ask the owner to share it again.",
+  archived: "This doc was moved to Trash, so your changes were not saved. They are kept in this tab: copy them before you leave.",
+};
 
 // Convert legacy HTML into a one-shot paragraph-per-line block array.
 function htmlToBlocks(html: string): Block[] {
@@ -178,7 +208,7 @@ function gradientCSS(key?: string): string {
 interface Props {
   docId: string;
   // "primary" (default) is the main pane. "peek" is the right pane in a
-  // split view — its chrome hides the back button + open-side-panel button
+  // split view, its chrome hides the back button + open-side-panel button
   // because the surrounding DocSplitView owns those actions.
   pane?: "primary" | "peek";
 }
@@ -195,7 +225,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const hubBack = useHubBack();
   const inWork = pane === "primary" && place?.kind === "doc" && place.id === docId;
   const selfPath = inWork && place ? place.self : canonicalHref("doc", docId);
-  // Peek picker — popover state + fetched recent docs for the picker list.
+  // Peek picker, popover state + fetched recent docs for the picker list.
   const [peekPickerOpen, setPeekPickerOpen] = useState(false);
   const [peekQuery, setPeekQuery] = useState("");
   const [peekDocs, setPeekDocs] = useState<{ id: string; title: string; updatedAt: string }[] | null>(null);
@@ -205,7 +235,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // The Work crumb's live title, once the doc has loaded (the gate's
   // placement already names it until then).
   useWorkTitle(inWork && doc ? (title || "Untitled doc") : null);
-  // bnDoc is BlockNote's native JSON — the source of truth for editing.
+  // bnDoc is BlockNote's native JSON, the source of truth for editing.
   // `blocks` is a derived mirror (LegacyBlock[]) the surrounding chrome
   // reads for the outline / word count without rewriting those components.
   const [bnDoc, setBnDoc] = useState<PartialBlock[] | null>(null);
@@ -223,10 +253,17 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // the restored content instead of holding the previous in-memory doc.
   const [restoreNonce, setRestoreNonce] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The load answered 404/400 (docLoadHidden): the in-shell not-found.
+  const [notFound, setNotFound] = useState(false);
+  // A save refused for good (docSaveRefusal) while the doc was open. The
+  // editor turns read only and keeps what was typed on screen and in the
+  // draft mirror, so the person can copy it; nothing more is sent.
+  const [lostAccess, setLostAccess] = useState<DocSaveRefusal | null>(null);
+  const lostAccessRef = useRef<DocSaveRefusal | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const [commentOpen, setCommentOpen] = useState(false);
-  // Single side-panel slot — only one of Ask/History/Comments can be
+  // Single side-panel slot, only one of Ask/History/Comments can be
   // open at a time so they never overlap or fight for focus. The
   // Comments variant carries the block id it belongs to.
   const [panel, setPanel] = useState<null | { kind: "ask" } | { kind: "history" } | { kind: "comments"; blockId: string }>(null);
@@ -239,13 +276,18 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [comments, setComments] = useState<CommentsByBlock>({});
   const [me, setMe] = useState<MeUser | null>(null);
   // Per-doc role from GET /api/docs/[id] (settings.docSharing). Missing
-  // myRole (older cached responses) defaults to "edit" — zero behavior
+  // myRole (older cached responses) defaults to "edit", zero behavior
   // change for existing docs.
-  // "comment" = a locked doc below Full access (change request A4): the
-  // content is read-only, the comment composer stays.
+  // "comment" = Can comment, or a locked doc below Full access (change
+  // request A4): the content is read-only, the comment composer stays.
   const [myRole, setMyRole] = useState<"edit" | "comment" | "view">("edit");
   const [shareOpen, setShareOpen] = useState(false);
-  const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  // From GET /api/docs/[id] too. canShare: Can edit or higher changes who can
+  // open the doc (MANAGE_BAR.doc, today's doc sharing rule); an older server
+  // omits it and it follows myRole edit. canComment: a Can view grant reads
+  // only; absent means today's behaviour, every comment door open.
+  const [canShare, setCanShare] = useState(false);
+  const [canComment, setCanComment] = useState(true);
   // Lock page (change request A4), Full access, the anchor and the owner,
   // all from GET /api/docs/[id].
   const [lock, setLock] = useState<DocLock | null>(null);
@@ -266,8 +308,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const draft = useLocalDraft<DraftPayload>("doc", docId, serverUpdatedAt);
   const draftRef = useRef(draft);
   draftRef.current = draft;
-  const { railApps, prefs, patchPrefs } = useOsShell();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const { askAiVisible, prefs, patchPrefs } = useOsShell();
+  const aiOn = askAiVisible;
   const outlineOpen = outlineOverride ?? readDocsOutline(prefs.home);
   const setOutlineOpen = useCallback((next: boolean) => {
     setOutlineOverride(next);
@@ -301,7 +343,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }, []);
 
   // Load the doc list when the peek picker opens. Lazy + once per open
-  // is plenty — a workspace's doc count is small enough to filter client-side.
+  // is plenty, a workspace's doc count is small enough to filter client-side.
   useEffect(() => {
     if (!peekPickerOpen || peekDocs !== null) return;
     let cancelled = false;
@@ -393,7 +435,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // the new value; the next PUT carries it back so the server can
   // reject (409) when another writer has moved on without us.
   const lastUpdatedAtRef = useRef<string | null>(null);
-  // Last title we told the sidebar about — so we only re-fetch the tree when the
+  // Last title we told the sidebar about, so we only re-fetch the tree when the
   // title actually changes, not on every body-autosave.
   const lastSyncedTitleRef = useRef<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -417,13 +459,20 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     (async () => {
       try {
         const res = await fetch(`/api/docs/${docId}`);
+        if (docLoadHidden(res.status)) {
+          if (!cancelled) setNotFound(true);
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
         const d: DocPayload = data.doc ?? data;
         setDoc(d);
         setTitle(d.title ?? "");
-        setMyRole(data.myRole === "view" ? "view" : data.myRole === "comment" ? "comment" : "edit");
+        const role: "edit" | "comment" | "view" = data.myRole === "view" ? "view" : data.myRole === "comment" ? "comment" : "edit";
+        setMyRole(role);
+        setCanShare(typeof data.canShare === "boolean" ? data.canShare : role === "edit");
+        setCanComment(data.canComment !== false);
         setLock(data.lock ?? null);
         setCanManage(!!data.canManage);
         setLocation(data.location ?? null);
@@ -434,7 +483,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         const c = d.content;
         setMeta((c?.meta as DocMeta) ?? {});
         // v2: native BlockNote JSON. Preferred.
-        // v1: legacy {blocks:[...]} — passed through to the canvas which
+        // v1: legacy {blocks:[...]}, passed through to the canvas which
         //     converts it transparently. The next save persists v2 shape.
         // legacy html: still shows the convert-to-blocks banner.
         if (c && Array.isArray((c as { bnDoc?: PartialBlock[] }).bnDoc)) {
@@ -456,7 +505,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         } else if (c && (c as { type?: string }).type === "doc" && Array.isArray((c as { content?: unknown[] }).content)) {
           // TipTap shape (authored by the Notepad quick-tool / new-note create).
           // Convert its paragraphs straight to legacy blocks so the canvas
-          // renders them normally (via legacyBlocksToBN) — NOT the "old
+          // renders them normally (via legacyBlocksToBN), NOT the "old
           // rich-text format / Convert to blocks" banner, which was wrongly
           // firing on every note. The next save rewrites it in v2 shape.
           const paras = ((c as { content: Array<{ content?: Array<{ text?: string }> }> }).content) ?? [];
@@ -504,7 +553,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // single persist() writer (below) so title + body can never fire two
   // concurrent PUTs that 409 each other against the same knownUpdatedAt.
   const titleRef = useRef(title);
-  // Freshly created sub-pages arrive with ?new=1 — focus + select the title
+  // Freshly created sub-pages arrive with ?new=1, focus + select the title
   // so the writer names the page instead of re-clicking Add subpage.
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const focusedNewRef = useRef(false);
@@ -535,10 +584,16 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     nextExcerpt?: string,
     attempt = 0,
   ) => {
-    // View-only members never fire PUTs — the server would 403 every
+    // View-only members never fire PUTs, the server would 403 every
     // attempt and the retry loop would burn 4 tries + a scary save toast.
     // Ref read (not a closure) so the guard is never stale.
     if (myRoleRef.current !== "edit") return;
+    // The server refused a save for good (no access any more, or archived):
+    // keep mirroring to the draft so nothing typed is lost, send nothing.
+    if (lostAccessRef.current) {
+      draftRef.current.write({ title: titleRef.current, bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta });
+      return;
+    }
     // A 409 nobody has answered yet: keep mirroring to the local draft so not
     // one keystroke is lost, but do not overwrite the version that beat us.
     // The ConflictStrip is on screen and the indicator reads unsaved, so this
@@ -616,6 +671,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         toast(err?.message ?? "You need Can edit for that. Ask the owner.", { tone: "danger" });
         return;
       }
+      const refusal = docSaveRefusal(res.status);
+      if (refusal) {
+        // Final, like 403, but with no Retry: the same PUT only ever gets the
+        // same answer, and "check your connection" would be untrue. The draft
+        // mirror was written above (attempt 0), the editor goes read only
+        // with the reason in a strip. A save queued behind this one still
+        // drains in `finally`: the guard at the top writes its newer text to
+        // the draft and sends nothing.
+        lostAccessRef.current = refusal;
+        setLostAccess(refusal);
+        setSaveStatus("error");
+        setSaveStuck(null);
+        toast(DOC_SAVE_REFUSAL_COPY[refusal], { tone: "danger" });
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => null);
       if (data?.doc?.updatedAt) { lastUpdatedAtRef.current = data.doc.updatedAt; setServerUpdatedAt(data.doc.updatedAt); }
@@ -629,7 +699,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         refreshSidebar();
       }
     } catch {
-      // Network failure or a >64KB keepalive rejection — retry with backoff
+      // Network failure or a >64KB keepalive rejection, retry with backoff
       // (dropping keepalive won't matter for in-editor autosaves) so a
       // transient failure never silently loses the edit. Mandate: never drop.
       setSaveStatus("error");
@@ -657,7 +727,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   useEffect(() => {
     if (pane !== "primary" || !doc) return;
     const iv = setInterval(async () => {
-      if (document.visibilityState !== "visible" || saveInFlightRef.current || !lastUpdatedAtRef.current) return;
+      if (document.visibilityState !== "visible" || saveInFlightRef.current || !lastUpdatedAtRef.current || lostAccessRef.current) return;
       const r = await apiFetch<{ doc?: { updatedAt?: string } }>(`/api/docs/${docId}`, { cache: "no-store" });
       if (!r.ok) return;
       const live = r.data.doc?.updatedAt;
@@ -684,12 +754,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // BN source of truth and the derived legacy mirror, then persist.
   //
   // The mirror is BN→legacy and is lossy for custom embeds (sop_card,
-  // task_card, subpage, entity_link, etc.) — BN renders those as plain
+  // task_card, subpage, entity_link, etc.), BN renders those as plain
   // paragraphs. Before persisting, we splice the originals back in by
   // matching block ids. Result: as long as the writer keeps the proxy
   // paragraph in place, the EntityLink graph keeps pointing at the
   // original embed. If they delete the proxy, the original disappears
-  // from the next save — exactly the right behavior.
+  // from the next save, exactly the right behavior.
   const handleEditorChange = useCallback((nextBnDoc: PartialBlock[], mirror: Block[], plainText: string) => {
     const enrichedMirror = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
     setBnDoc(nextBnDoc);
@@ -698,7 +768,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }, [persist, meta]);
 
   const saveBlocks = useCallback(async (next: Block[]) => {
-    // Legacy entry point — still used by convertLegacy() for the v0 html flow.
+    // Legacy entry point, still used by convertLegacy() for the v0 html flow.
     // We don't have a BN doc here; persist with bnDoc=null so the next edit
     // (which goes through the canvas) regenerates it.
     setBlocks(next);
@@ -738,7 +808,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return registerDocTitleWriter(docId, async (next) => {
       setTitle(next);
       titleRef.current = next;
-      if (myRoleRef.current !== "edit" || !canSend(conflictHoldRef.current)) return false;
+      if (myRoleRef.current !== "edit" || lostAccessRef.current || !canSend(conflictHoldRef.current)) return false;
       if (titleTimer.current) { clearTimeout(titleTimer.current); titleTimer.current = null; }
       await persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
       // A 409 inside that save raised the hold: the peer's version won, the
@@ -754,7 +824,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     setBlocks(converted);
     setLegacy(null);
     void saveBlocks(converted);
-    toast("Converted to blocks — old content preserved as paragraphs");
+    toast("Converted to blocks, old content preserved as paragraphs");
   }
 
   function copyLink() {
@@ -802,7 +872,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane, docId, aiOn]);
 
-  // Copy the whole page as Markdown — reuses the export endpoint so the
+  // Copy the whole page as Markdown, reuses the export endpoint so the
   // clipboard content matches an exported file exactly.
   async function copyContents() {
     try {
@@ -873,6 +943,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       ? { href: hubBack.fallbackHref, label: hubBack.label }
       : { href: "/docs", label: "Docs" };
 
+  if (notFound) {
+    // The primary pane is the page, so it is the in-shell 404 with its
+    // "Not found" crumb. A peek pane (DocSplitView's right side, a List's
+    // embedded doc) must not replace the crumb of the page around it, so it
+    // shows the same sentence without one; its container owns close and back.
+    return pane === "primary" ? <NotFoundView /> : <OsEmptyView title="We couldn't find that page" />;
+  }
   if (loadError) {
     return (
       <div className="os-chrome mx-auto flex max-w-md flex-col items-center gap-3 px-6 pt-16 text-center">
@@ -891,7 +968,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     );
   }
 
-  // Trashed docs never render their content — stale sub-page links used to
+  // Trashed docs never render their content, stale sub-page links used to
   // open deleted pages as if nothing happened. Offer restore or a way out.
   if (doc.archivedAt) {
     return (
@@ -970,7 +1047,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             indicator only; DocSplitView owns their header. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} /> : null}
-          <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} />
+          {/* After a final refusal there is no retry in hand, and the default
+              error word would read "Not saved, retrying": it is not. */}
+          <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} labels={lostAccess ? { error: "Not saved" } : undefined} />
         </div>
 
         <div className="bdoc__head-actions">
@@ -986,32 +1065,35 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             </button>
           ) : null}
           {pane !== "peek" ? (
-            <span ref={shareBtnRef as React.RefObject<HTMLSpanElement | null>} className="inline-flex">
-              <ShareOrRoleChip role={canManage ? "FULL" : myRole === "view" ? "VIEW" : myRole === "comment" ? "COMMENT" : "EDIT"} onOpen={() => setShareOpen(true)} />
-            </span>
+            // Share from Can edit up (a doc's sharing is Can edit's to change,
+            // MANAGE_BAR.doc); the role chip below that. Both open the one
+            // Manage access dialog, read only for the chip.
+            <ShareOrRoleChip
+              role={canManage ? "FULL" : myRole === "view" ? "VIEW" : myRole === "comment" ? "COMMENT" : "EDIT"}
+              editorsCanShare={canShare}
+              onOpen={() => setShareOpen(true)}
+            />
           ) : null}
-          <DocShareModal
-            docId={docId}
-            docTitle={title || "Untitled doc"}
-            createdById={doc.createdById ?? null}
-            meId={me?.id ?? null}
+          <ShareDialog
             open={shareOpen}
-            onClose={() => setShareOpen(false)}
-            anchorRef={shareBtnRef}
-            // The modal writes the member map only for Full access, the same
-            // rule the chip above renders (Can edit shares only under toggle
-            // 4, which no surface reads yet); everyone else gets it read-only.
-            viewerRole={canManage ? "edit" : "view"}
+            onOpenChange={setShareOpen}
+            target={{ kind: "doc", id: docId, name: title || "Untitled doc" }}
+            readOnly={!canShare}
+            // A change can move the viewer's own sharing right (they lowered
+            // themselves, with a confirm): the chip follows the server.
+            onChanged={(p) => { if (p) setCanShare(p.viewer.canManage); }}
           />
-          <button
-            type="button"
-            onClick={() => setCommentOpen(true)}
-            title="Comments (⌘⇧C)"
-            aria-label="Comments"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
-          >
-            <MessageSquare className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-          </button>
+          {canComment ? (
+            <button
+              type="button"
+              onClick={() => setCommentOpen(true)}
+              title="Comments (⌘⇧C)"
+              aria-label="Comments"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <MessageSquare className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+            </button>
+          ) : null}
           <button
             ref={moreBtnRef}
             type="button"
@@ -1120,10 +1202,18 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
       {/* Read-only (access 5.4) and the lock (change request A4): one slim
           strip under the title row instead of a silently read-only editor. */}
-      {pane !== "peek" && lock && !canManage ? (
+      {lostAccess ? (
+        // First, and in a peek pane too: it is why the editor just stopped
+        // taking keystrokes, and the only place the reason stays on screen.
+        <ReadOnlyBanner message={DOC_SAVE_REFUSAL_COPY[lostAccess]} />
+      ) : pane !== "peek" && lock && !canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byName ?? "someone"}. Ask them to unlock.`} />
       ) : pane !== "peek" && lock && canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byId === me?.id ? "you" : lock.byName ?? "someone"}. Everyone else can read and comment.`} onRequest={() => void toggleLock()} requestLabel="Unlock" />
+      ) : pane !== "peek" && myRole === "comment" ? (
+        // Can comment with no lock: the content is read only and the
+        // comment doors stay, so the strip says both halves.
+        <ReadOnlyBanner message="You can read and comment on this doc." onRequest={() => setShareOpen(true)} />
       ) : pane !== "peek" && myRole === "view" ? (
         <ReadOnlyBanner ownerName={owner?.name} onRequest={() => setShareOpen(true)} />
       ) : null}
@@ -1141,7 +1231,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           }}
         />
       ) : null}
-      {myRole === "edit" ? (
+      {myRole === "edit" && !lostAccess ? (
         <DraftRestoreStrip
           draft={draft}
           onRestore={(p) => {
@@ -1215,9 +1305,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             </button>
           )}
 
-          <button type="button" className="bdoc__add-comment" onClick={() => setCommentOpen(true)}>
-            <MessageSquare /> Add comment
-          </button>
+          {canComment ? (
+            <button type="button" className="bdoc__add-comment" onClick={() => setCommentOpen(true)}>
+              <MessageSquare /> Add comment
+            </button>
+          ) : null}
         </div>
 
         {emojiOpen && (
@@ -1243,13 +1335,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled doc"
-          readOnly={readingMode || !!meta.locked || myRole !== "edit"}
+          readOnly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
 
         {!readingMode && (
-          <PageComments docId={docId} me={me} open={commentOpen} onClose={() => setCommentOpen(false)} />
+          <PageComments docId={docId} me={me} open={commentOpen} canComment={canComment} onClose={() => setCommentOpen(false)} />
         )}
 
         {summary && (
@@ -1273,29 +1365,37 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         ) : (
           // Key by docId + reading-mode + restoreNonce so the editor
           // force-remounts on doc switch, reading-mode toggle, or version
-          // restore — never holds a stale in-memory document.
+          // restore, never holds a stale in-memory document.
           <div className="os-prose">
             <BlockNoteCanvas
               key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
               initialBnDoc={bnDoc}
               legacyBlocks={blocks}
-              readonly={readingMode || !!meta.locked || myRole !== "edit"}
+              // lostAccess is left out of the key on purpose: BlockNote takes
+              // `editable` live, and a remount could drop the last debounced
+              // keystrokes from the screen the person is about to copy.
+              readonly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
               onChange={handleEditorChange}
               docId={docId}
-              onComment={(blockId) => setPanel({ kind: "comments", blockId })}
-              onAskAI={() => setPanel({ kind: "ask" })}
+              // No comment action for a Can view grant: the canvas hides the
+              // block menu's Comment when it has no handler. canComment is set
+              // by the same load as the blocks, before this mounts.
+              onComment={canComment ? (blockId) => setPanel({ kind: "comments", blockId }) : undefined}
+              // Only with Ask AI on: the block menu's Ask AI row and the "/ai"
+              // slash item both read this.
+              onAskAI={aiOn ? () => setPanel({ kind: "ask" }) : undefined}
             />
           </div>
         )}
 
-        {/* Empty-doc hint row (ClickUp parity) — shown until the first real
+        {/* Empty-doc hint row (ClickUp parity), shown until the first real
             edit; both chips are backed (Ask panel / child-page create). It
             disappears automatically because `blocks` mirrors the canvas. */}
         {pane === "primary" && !readingMode && !meta.locked && myRole === "edit" && legacy === null && blocks !== null &&
           (blocks.length === 0 ||
             (blocks.length === 1 && blocks[0].kind === "paragraph" && !(blocks[0] as { text: string }).text.trim())) && (
           <div
-            // Just the Ask chip — the editor placeholder already says
+            // Just the Ask chip, the editor placeholder already says
             // "type / for commands" (no duplicate line), and Add subpage
             // lives in the header; keeping it here invited accidental
             // child-of-child chains on every fresh page.
@@ -1316,7 +1416,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {pane === "primary" ? (
           <SubDocsList
             rows={tree.childrenOf(docId)}
-            canEdit={myRole === "edit" && !readingMode}
+            canEdit={myRole === "edit" && !readingMode && !lostAccess}
             onNew={() => void addSubpage()}
             fmt={fmt}
             spaceSlug={place?.spaceSlug ?? null}
@@ -1329,7 +1429,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       </div>
 
       {/* Outline rail only when no slide-over panel is open and not in
-          reading mode — keeps the right edge calm. */}
+          reading mode, keeps the right edge calm. */}
       {outlineOpen && blocks && blocks.length > 0 && !readingMode && panel === null && (
         <OutlineRail blocks={blocks} onClose={() => setOutlineOpen(false)} />
       )}
@@ -1383,8 +1483,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 // ItemUpdate store as block comments (entityType="DOC_BLOCK") using the
 // reserved blockId "__page__", so it reuses /api/item-updates with no schema
 // changes. Existing comments render above an always-visible composer row that
-// mirrors Notion's avatar + input + attach/mention/send layout.
-function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser | null; open: boolean; onClose: () => void }) {
+// mirrors Notion's avatar + input + attach/mention/send layout. A Can view
+// grant reads the thread and gets no composer (canComment false).
+function PageComments({ docId, me, open, canComment = true, onClose }: { docId: string; me: MeUser | null; open: boolean; canComment?: boolean; onClose: () => void }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const [thread, setThread] = useState<Comment[]>([]);
@@ -1466,9 +1567,10 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
   }
 
   // Nothing to show until there's a comment or the writer opened the
-  // composer via the hover "Add comment" affordance.
-  const showComposer = open || thread.length > 0;
-  if (thread.length === 0 && !open) return null;
+  // composer via the hover "Add comment" affordance. A reader who cannot
+  // comment sees the thread and never the composer.
+  const showComposer = canComment && (open || thread.length > 0);
+  if (thread.length === 0 && !showComposer) return null;
 
   return (
     <div className="bdoc__pcmts">
@@ -1721,7 +1823,7 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
 
   const scrollTo = (id: string, text?: string) => {
     // data-id first; fall back to matching the heading's TEXT among rendered
-    // heading blocks — the mirror's ids can drift from the DOM after
+    // heading blocks, the mirror's ids can drift from the DOM after
     // conversions, and a stale id used to land the scroll on the wrong
     // section entirely.
     let el = document.querySelector(`[data-id="${id}"]`);
@@ -1731,14 +1833,14 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
         .find((h) => (h.textContent ?? "").trim() === target) ?? null;
     }
     if (!el) return;
-    // The clicked entry is the truth for the highlight — don't let the
+    // The clicked entry is the truth for the highlight, don't let the
     // scroll-spy flicker through intermediate sections mid-scroll.
     setActiveId(id);
     // scroll-margin keeps the heading below the sticky chrome instead of
     // vanishing under it (which read as "it jumped to the next section").
     (el as HTMLElement).style.scrollMarginTop = "96px";
     el.scrollIntoView({ behavior: "smooth", block: "start" });
-    // Smooth scrolls drift when content shifts mid-flight — verify the
+    // Smooth scrolls drift when content shifts mid-flight, verify the
     // landing once settled and correct in one instant hop if needed.
     const check = () => {
       const rect = el!.getBoundingClientRect();
@@ -1908,7 +2010,7 @@ function AskDocPanel({ docId, docTitle, onClose, quick }: {
 //
 // Backed by ItemUpdate (entityType="DOC_BLOCK", entityId="<docId>:<blockId>").
 // Every action is a real API call against /api/item-updates and
-// /api/item-updates/[id] — no more last-write-wins on in-content JSON.
+// /api/item-updates/[id], no more last-write-wins on in-content JSON.
 // `initialThread` seeds the UI from the per-doc aggregator so the panel
 // opens instantly; we then refetch the live thread to be safe.
 function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadChanged }: {

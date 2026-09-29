@@ -1,19 +1,19 @@
-// PATCH  /api/okrs/[id]/key-results/[krId] — edit a key result, including
+// PATCH  /api/okrs/[id]/key-results/[krId], edit a key result, including
 //         linking (kpiId, validated against the caller's org) or unlinking
 //         (kpiId: null) a role-level KPI gauge.
-// DELETE /api/okrs/[id]/key-results/[krId] — remove the key result.
+// DELETE /api/okrs/[id]/key-results/[krId], remove the key result.
 //
 // While a KR is linked, it is measured BY the gauge: a hand-typed
-// currentValue is ignored (derived wins — `currentValueIgnored` in the
+// currentValue is ignored (derived wins, `currentValueIgnored` in the
 // response says so) and the stored hand-typed number is left untouched,
 // so unlinking later restores exactly what the owner last typed. Nothing
 // here ever writes a KPI or KPIRecord.
 
 import { NextRequest } from "next/server";
+import { goalEditDenial } from "@/lib/goal-audience";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { canEditOkrOwner } from "@/lib/alignment-scope";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -36,7 +36,7 @@ const patchSchema = z.object({
 async function findScopedKeyResult(okrId: string, krId: string, orgId: string) {
   return prisma.keyResult.findFirst({
     where: { id: krId, okrId, okr: { organizationId: orgId } },
-    include: { okr: { select: { ownerId: true } } },
+    include: { okr: { select: { id: true, level: true, ownerId: true, departmentId: true } } },
   });
 }
 
@@ -52,11 +52,10 @@ export async function PATCH(
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
 
-  // Editing a KR is a WRITE on the objective — owner / tree-manager /
+  // Editing a KR is a WRITE on the objective, owner / tree-manager /
   // org-wide only.
-  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, kr.okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
@@ -121,15 +120,14 @@ export async function DELETE(
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
 
-  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
-    return jsonError("You can only edit your own goals or your reports' goals.", 403);
-  }
+  const denied = await goalEditDenial(session, kr.okr);
+  if (denied) return jsonError(denied.error, denied.status);
 
   await prisma.keyResult.delete({ where: { id: kr.id } });
 
   // If that was the goal's LAST key result, it is no longer measured by
   // KRs. Clear the stored rollup number so the goal reads as "no measure
-  // yet" instead of freezing at the last derived score — a goal that was
+  // yet" instead of freezing at the last derived score, a goal that was
   // at 80% must not keep showing 80% with nothing left to back it. (A goal
   // whose progress was hand-set never had KRs, so this path never touches
   // it.) persistGoalRollupChain then propagates the empty state to ancestors.

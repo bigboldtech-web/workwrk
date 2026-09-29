@@ -9,6 +9,7 @@
 //
 // Offered to the planner unit for timesheets, which navigates the same way.
 
+import { Check } from "lucide-react";
 import { ViewTab } from "@/components/ui/view-tabs";
 import type { WeekOption } from "@/lib/weeks";
 
@@ -31,13 +32,17 @@ export function WeekPills({
           onClick={() => onChange(w.key)}
           trailing={
             w.submitted ? (
-              // A dot beside the word, never instead of it: the pill still
-              // reads correctly with no colour at all.
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--os-success-solid)]"
+              // A check beside the word, never instead of it: the shape says
+              // "submitted" with no colour at all (principle 7), where the
+              // spec's plain dot relied on the green alone.
+              <Check
+                className="h-3 w-3 shrink-0 text-[var(--os-success-solid)]"
+                strokeWidth={2.5}
+                role="img"
                 aria-label="Submitted"
-                title="Submitted"
-              />
+              >
+                <title>Submitted</title>
+              </Check>
             ) : undefined
           }
         />

@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
+import { subjectRowView } from "@/lib/people/review-visibility";
+import { cleanSelfRatings, isReviewDraft, wouldBlankDraft, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
 export async function GET(
@@ -30,26 +32,32 @@ export async function GET(
 
   if (!review) return jsonError("No review found for you in this cycle", 404);
 
-  // Auto-populate KPI scores for the review period
+  // Auto-populate KPI scores for the review period: records made inside
+  // the cycle's window, the same set the save averages into kpiScore, so
+  // the number shown and the number stored can never disagree.
   const kpiRecords = await prisma.kPIRecord.findMany({
-    where: { userId, kpi: { organizationId: orgId } },
+    where: { userId, kpi: { organizationId: orgId }, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
     include: {
       kpi: { select: { name: true, unit: true, kra: { select: { id: true, name: true } } } },
     },
     orderBy: { createdAt: "desc" },
-    take: 20,
+    take: 200,
   });
 
-  // Calculate average KPI score
-  const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
-  const avgKpiScore = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
+  // The average KPI score over EVERY record in the window (the list above
+  // shows the latest 200; the mean never stops at them), so the shown and
+  // the stored score agree however many records there are.
+  const agg = await prisma.kPIRecord.aggregate({
+    where: { userId, kpi: { organizationId: orgId }, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate }, score: { not: null } },
+    _avg: { score: true },
+  });
+  const avgKpiScore = agg._avg.score != null ? Math.round(agg._avg.score) : null;
 
   // SOP compliance
   const sopRecords = await prisma.sOPCompliance.findMany({
-    where: { userId },
+    where: { userId, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
     select: { score: true },
     orderBy: { createdAt: "desc" },
-    take: 10,
   });
   const sopScores = sopRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgSopScore = sopScores.length > 0 ? Math.round(sopScores.reduce((a, b) => a + b, 0) / sopScores.length) : null;
@@ -58,13 +66,13 @@ export async function GET(
   const kraAssignments = await prisma.kRAAssignment.findMany({
     where: { userId, status: "ACTIVE" },
     include: {
-      kra: { select: { id: true, name: true, category: true } },
+      kra: { select: { id: true, name: true, category: true, weight: true } },
     },
   });
 
   // OKRs owned by the user during this cycle's window. We pull every
   // owned OKR plus the check-ins inside the cycle dates so the
-  // self-assessment auto-populates with what they actually shipped —
+  // self-assessment auto-populates with what they actually shipped,
   // they barely have to type anything to fill in the "what went well"
   // section.
   const cycleStart = review.cycle?.startDate;
@@ -90,7 +98,7 @@ export async function GET(
   });
   // Derive each goal's progress from the same org-wide rollup every other
   // surface uses (live KRs + measured children), instead of reading the
-  // stored OKR.progress column — that column goes stale whenever a linked
+  // stored OKR.progress column, that column goes stale whenever a linked
   // KPI's reading changes, so a raw read here would disagree with the
   // dashboard and the goals page for the same goal.
   const rollupCtx = await computeGoalRollups(orgId);
@@ -103,7 +111,9 @@ export async function GET(
     : Math.round(derivedOkrs.reduce((s, o) => s + (o.progress || 0), 0) / derivedOkrs.length);
 
   return jsonSuccess({
-    review,
+    // The subject's own row never carries the manager's draft, calibration
+    // or the 9-box potential (lib/people/review-visibility.ts).
+    review: subjectRowView(review, userId),
     metrics: {
       kpiRecords,
       avgKpiScore,
@@ -128,26 +138,42 @@ export async function PATCH(
 
   const review = await prisma.review.findFirst({
     where: { cycleId, subjectId: userId },
-    include: { cycle: { select: { startDate: true, endDate: true } } },
+    include: { cycle: { select: { startDate: true, endDate: true, status: true, name: true } } },
   });
 
   if (!review) return jsonError("No review found for you in this cycle", 404);
-  if (review.status !== "PENDING" && review.status !== "SELF_ASSESSMENT") {
-    return jsonError("Self-assessment already submitted");
+  // A submitted review is read only, and only an Active cycle takes writes
+  // (lib/performance/review-cycle.ts). The old route let a draft save on a
+  // SUBMITTED review put it back to "not started", which the manager and
+  // the cycle's counts then read as never written.
+  if (review.status !== "PENDING") return jsonError("Your review is already submitted", 409);
+  if (!subjectMayWrite(review.cycle.status, review.status)) {
+    return jsonError(review.cycle.status === "DRAFT" ? "This cycle has not opened yet" : "This cycle no longer takes self reviews", 409);
   }
 
-  const body = await req.json();
-  const { selfRatings, submit } = body;
+  const body = (await req.json().catch(() => null)) ?? {};
+  const submit = body.submit === true;
+  // Never overwrite a stored draft with nothing (src/lib/performance/review-cycle.ts).
+  if (!isReviewDraft(body.selfRatings)) return jsonError("Nothing to save: the review did not arrive. Your draft is unchanged.", 400);
+  const selfRatings = cleanSelfRatings(body.selfRatings);
+  if (wouldBlankDraft(review.selfRatings, selfRatings, body.allowEmpty === true)) {
+    return jsonError("Nothing to save: this would empty your written draft. Your draft is unchanged.", 400);
+  }
+  if (submit) {
+    const kras = await prisma.kRAAssignment.findMany({ where: { userId, status: "ACTIVE" }, select: { kraId: true } });
+    const gap = selfReviewGap(selfRatings, kras.map((k) => k.kraId));
+    if (gap) return jsonError(gap, 400);
+  }
   // selfRatings: { kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals} }
 
   // NOTE: the old "task completion rate" metric is gone, honestly. It
   // read the legacy (always-empty) prisma.task table, then wrote a
-  // `taskCompletionRate` column that does not exist on Review — so
+  // `taskCompletionRate` column that does not exist on Review, so
   // EVERY self-assessment save crashed with a Prisma validation error.
   // Review has no column to store it and nothing consumes it; bringing
   // it back (from the live Item model) needs a schema migration first.
 
-  // KPI score — only records made inside this cycle's window. Averaging
+  // KPI score, only records made inside this cycle's window. Averaging
   // the user's entire KPI history would score this period with last
   // year's numbers.
   const orgId = getOrgId(session);
@@ -162,28 +188,32 @@ export async function PATCH(
   const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgKpiScore = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
 
-  const updated = await prisma.review.update({
-    where: { id: review.id },
+  // Guarded on PENDING, so a submit racing an autosave cannot be undone by it.
+  const res = await prisma.review.updateMany({
+    where: { id: review.id, status: "PENDING" },
     data: {
-      selfRatings: selfRatings ?? undefined,
+      selfRatings,
       kpiScore: avgKpiScore,
-      status: submit ? "SELF_ASSESSMENT" : "PENDING",
-      ...(submit && { submittedAt: new Date() }),
+      ...(submit ? { status: "SELF_ASSESSMENT" as const, submittedAt: new Date() } : {}),
     },
   });
+  if (res.count === 0) return jsonError("Your review is already submitted", 409);
+  const updated = await prisma.review.findUniqueOrThrow({ where: { id: review.id } });
 
-  // Notify manager if submitted
-  if (submit) {
+  // Tell the reviewer (never the subject themself, when they have no manager).
+  if (submit && review.reviewerId !== userId) {
+    const me = await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+    const who = me ? `${me.firstName} ${me.lastName}`.trim() : "Someone you review";
     await prisma.notification.create({
       data: {
-        title: "Self-Assessment Submitted",
-        message: `${(session.user as { name?: string | null } | undefined)?.name || "An employee"} has submitted their self-assessment. Please complete the manager review.`,
+        title: `${who} submitted their review`,
+        message: `${review.cycle.name}: their manager review is yours to write.`,
         type: "review",
-        link: `/reviews/${cycleId}`,
+        link: `/reviews/${cycleId}?tab=team&person=${userId}`,
         userId: review.reviewerId,
       },
-    });
+    }).catch((e: unknown) => console.error("self review notification", e));
   }
 
-  return jsonSuccess(updated);
+  return jsonSuccess(subjectRowView(updated as unknown as Record<string, unknown>, userId));
 }

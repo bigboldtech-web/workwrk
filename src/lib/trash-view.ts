@@ -16,7 +16,10 @@ export type TrashTypeKey =
   | "space" | "folder" | "list" | "task"
   | "doc" | "canvas" | "table" | "form" | "file"
   | "sop" | "policy" | "contract" | "template"
-  | "meeting";
+  | "meeting"
+  // Phase 7 (spec-tools-misc 2.12): deleting a Tool, an Asset or a Build app
+  // used to be a hard delete. All three go through the one Trash now.
+  | "tool" | "asset" | "app";
 
 export interface TrashTypeDef {
   key: TrashTypeKey;
@@ -51,6 +54,9 @@ export const TRASH_TYPES: readonly TrashTypeDef[] = [
   // action items with it, so it goes through the one Trash like every other
   // container rather than out of the database.
   { key: "meeting", label: "Meeting", entityTypes: ["meeting"] },
+  { key: "tool", label: "Tool", entityTypes: ["tool"] },
+  { key: "asset", label: "Asset", entityTypes: ["asset"] },
+  { key: "app", label: "App", entityTypes: ["app"] },
 ] as const;
 
 export const TRASH_TYPE_BY_KEY: Readonly<Record<TrashTypeKey, TrashTypeDef>> =
@@ -138,13 +144,19 @@ export const TRASH_ROW_HREF: Record<TrashTypeKey, string> = {
   form: "/forms/[id]",
   template: "/templates",
   meeting: "/meetings/[id]",
+  // Neither has a page of its own: each opens its drawer on the list page.
+  tool: "/tools?tool=[id]",
+  asset: "/assets?asset=[id]",
+  // A restored app is reached by its slug, which the row does not carry, so
+  // the link lands on the list.
+  app: "/build",
   space: "/", folder: "/", list: "/", task: "/",
 };
 
 /** The href for one restored row, or "/" when the kind has no page. */
 export function trashRowHref(key: TrashTypeKey, id: string | null | undefined): string {
   const template = TRASH_ROW_HREF[key] ?? "/";
-  if (!id) return template.replace("/[id]", "").replace("?file=[id]", "");
+  if (!id) return template.replace("/[id]", "").replace(/\?[a-z]+=\[id\]$/, "");
   return template.replace("[id]", encodeURIComponent(id));
 }
 

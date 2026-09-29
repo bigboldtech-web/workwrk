@@ -22,9 +22,12 @@ import {
   listLinksFrom,
   listLinksTo,
 } from "@/lib/entity-link";
-import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
+import { canMutateLinkFromSource, linkWriteRefusalFor } from "@/lib/entity-link-authz";
 import { logActivity } from "@/lib/item-thread";
-import { visibleSpaceIds } from "@/lib/space";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeKind } from "@/lib/access/node-rules";
+import { readableFileIds } from "@/lib/file-access";
+import { LINK_NODE_KIND, LINK_TASK_TYPES, linkVisible, type LinkEndFacts } from "@/lib/entity-link-ends";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 import { filledRowCounts } from "@/lib/table-counts";
 
@@ -88,9 +91,6 @@ async function hydrate(
   }
 
   const titleByKey = new Map<string, { title: string | null; subtitle?: string | null; href?: string | null }>();
-  // Track which target → which Space it lives in. Used after hydration
-  // to drop rows whose Space the viewer can't read (Phase 22b).
-  const targetSpaceId = new Map<string, string>();
 
   await Promise.all(
     Array.from(byType.entries()).map(async ([type, ids]) => {
@@ -101,7 +101,6 @@ async function hydrate(
         });
         for (const d of docs) {
           titleByKey.set(`${type}:${d.id}`, { title: d.title, subtitle: d.excerpt, href: `/docs/${d.id}` });
-          if (d.entityType === "SPACE" && d.entityId) targetSpaceId.set(`${type}:${d.id}`, d.entityId);
         }
       } else if (type === "WHITEBOARD") {
         const wbs = await prisma.whiteboard.findMany({
@@ -110,7 +109,6 @@ async function hydrate(
         });
         for (const w of wbs) {
           titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/canvas/${w.id}` });
-          if (w.spaceId) targetSpaceId.set(`${type}:${w.id}`, w.spaceId);
         }
       } else if (type === "SOP") {
         const sops = await prisma.sOP.findMany({
@@ -137,7 +135,6 @@ async function hydrate(
         });
         for (const b of boards) {
           titleByKey.set(`${type}:${b.id}`, { title: b.name, subtitle: "Board", href: `/boards/${b.slug}` });
-          if (b.spaceId) targetSpaceId.set(`${type}:${b.id}`, b.spaceId);
         }
       } else if (type === "SPACE") {
         const spaces = await prisma.space.findMany({
@@ -146,8 +143,6 @@ async function hydrate(
         });
         for (const s of spaces) {
           titleByKey.set(`${type}:${s.id}`, { title: s.name, subtitle: "Space", href: `/spaces/${s.slug}` });
-          // Gate on the Space's own visibility.
-          targetSpaceId.set(`${type}:${s.id}`, s.id);
         }
       } else if (type === "OKR") {
         const okrs = await prisma.oKR.findMany({
@@ -185,7 +180,6 @@ async function hydrate(
             subtitle: `${f.mimeType} · ${Math.max(1, Math.round(f.size / 1024))} KB`,
             href: f.url,
           });
-          if (f.spaceId) targetSpaceId.set(`${type}:${f.id}`, f.spaceId);
         }
       } else if (type === "TABLE") {
         const tables = await prisma.dataTable.findMany({
@@ -202,26 +196,43 @@ async function hydrate(
             subtitle: t.description ?? `${rowCount} ${rowCount === 1 ? "row" : "rows"}`,
             href: `/tables/${t.id}`,
           });
-          if (t.spaceId) targetSpaceId.set(`${type}:${t.id}`, t.spaceId);
         }
       }
       // Other types pass through without hydration — the client can request more specifically if needed.
     }),
   );
 
-  // Drop links whose target lives in a Space the viewer can't read.
-  const uniqueSpaceIds = Array.from(new Set(targetSpaceId.values()));
-  const visible = uniqueSpaceIds.length > 0
-    ? await visibleSpaceIds(uniqueSpaceIds, userId, accessLevel)
-    : new Set<string>();
+  // Drop every link with an end the viewer cannot open: the SOURCE as well as
+  // the target, because a link carries the other end's type, id and its free
+  // text context, and the anchor queried by is itself an end of every row.
+  // One world from the one resolver for every node end (a doc with its parent
+  // pages and restriction, a canvas with its Folder, a Folder, a List, a
+  // Space, a table, a form), tasks through their List or their assignment,
+  // and the file read rule for files. Ends of other kinds (a SOP, a KRA, an
+  // OKR, a person) are not nodes and pass through, as before.
+  const ends = rows.flatMap((r) => [{ type: r.sourceType as string, id: r.sourceId }, { type: r.targetType as string, id: r.targetId }]);
+  const taskIds = [...new Set(ends.filter((e) => LINK_TASK_TYPES.has(e.type)).map((e) => e.id))];
+  const tasks = taskIds.length
+    ? await prisma.item.findMany({ where: { organizationId: orgId, id: { in: taskIds } }, select: { id: true, boardId: true, ownerId: true, assigneeIds: true } })
+    : [];
+  const nodeRefs = [
+    ...ends.flatMap((e) => (LINK_NODE_KIND[e.type] ? [{ kind: LINK_NODE_KIND[e.type] as NodeKind, id: e.id }] : [])),
+    ...tasks.map((t) => ({ kind: "list" as NodeKind, id: t.boardId })),
+  ];
+  const fileIds = [...new Set(ends.filter((e) => e.type === "FILE").map((e) => e.id))];
+  const [decisions, readableFiles] = await Promise.all([
+    nodeRefs.length ? nodeRoles(nodeCtxFromLevel(userId, orgId, accessLevel), nodeRefs) : Promise.resolve(new Map()),
+    fileIds.length ? readableFileIds({ ids: fileIds, viewer: { organizationId: orgId, userId, accessLevel } }) : Promise.resolve([] as string[]),
+  ]);
+  const facts: LinkEndFacts = {
+    userId,
+    nodeOpens: (kind, id) => roleAtLeast(decisions.get(`${kind}:${id}`)?.role ?? "none", "VIEW"),
+    readableFiles: new Set(readableFiles),
+    tasks: new Map(tasks.map((t) => [t.id, t])),
+  };
 
   return rows
-    .filter((r) => {
-      const key = `${r.targetType}:${r.targetId}`;
-      const spaceId = targetSpaceId.get(key);
-      if (!spaceId) return true; // unscoped target = no gate
-      return visible.has(spaceId);
-    })
+    .filter((r) => linkVisible(r, facts))
     .map((r) => ({
       id: r.id,
       sourceType: r.sourceType,
@@ -306,6 +317,14 @@ export async function POST(req: Request) {
   if (!(await canMutateLinkFromSource(session, c.organizationId, parsed.data.source))) {
     return NextResponse.json({ error: "You can't edit links on this item." }, { status: 403 });
   }
+  // The placement rule (node-rules P1): a link on a node is content added to
+  // it, so Can edit on the source and Can view on the target. It checked
+  // nothing here, and a Can view grantee attached files to tasks.
+  const refused = await linkWriteRefusalFor(c, {
+    sourceType: parsed.data.source.type, sourceId: parsed.data.source.id,
+    targetType: parsed.data.target.type, targetId: parsed.data.target.id,
+  });
+  if (refused) return NextResponse.json({ error: refused.error }, { status: refused.status });
 
   const link = await createEntityLink({
     organizationId: c.organizationId,

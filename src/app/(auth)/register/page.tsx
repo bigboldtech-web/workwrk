@@ -15,6 +15,8 @@ type Invitation = {
   email: string;
   organizationName: string;
   accessLevel: string;
+  firstName?: string | null;
+  lastName?: string | null;
 };
 
 function RegisterForm() {
@@ -41,7 +43,8 @@ function RegisterForm() {
           if (data.error) setError(data.error);
           else {
             setInvitation(data);
-            setFormData((p) => ({ ...p, email: data.email }));
+            // A People CSV import carried the names: the form starts filled.
+            setFormData((p) => ({ ...p, email: data.email, firstName: p.firstName || data.firstName || "", lastName: p.lastName || data.lastName || "" }));
           }
         })
         .catch(() => setError("Failed to load invitation"));

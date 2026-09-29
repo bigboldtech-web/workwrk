@@ -1,12 +1,16 @@
-// GET /api/okrs/[id]/effort — the AUTOMATED effort signal for a goal.
+// GET /api/okrs/[id]/effort: the AUTOMATED effort signal for a goal (the
+// Effort card): hours, tasks done and open, who is driving it and when it
+// last moved, from every piece of work linked to the goal (KRAs, Lists,
+// Spaces; src/lib/goal-effort.ts). Contributors carry their avatar.
+// Visibility mirrors the goal itself (canSeeGoal). Reads only.
 //
-// Honest, never self-reported: it derives "how much real work is moving this
-// goal" from the Tasks under the goal's linked KRAs (OKR → KRA via EntityLink).
-// Sums logged hours, counts done vs open, finds who's contributing and when it
-// last moved. If nothing's linked, it says so (nudge to link a board/KRA).
-//
-// Visibility mirrors the goal itself (canSeeGoal); no extra data leaks.
+// lastMovedAt is the card's "Last moved": the newest of task activity and a
+// target check-in, the same definition the goals list (GET /api/okrs) uses,
+// so one goal never reads "9h ago" on the list and "Never" on its own page.
+// lastActivityAt stays task-only (computeGoalEffort is shared with the
+// assess route, whose effort must not count check-ins).
 
+import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -23,7 +27,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!okr) return jsonError("Not found", 404);
   if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
-  // KRA tasks + linked-board/space item time — the join point between a goal
+  // KRA tasks + linked-board/space item time, the join point between a goal
   // and the real work moving it.
-  return jsonSuccess(await computeGoalEffort(orgId, id));
+  // Under the viewer's access: a List they cannot open never counts here.
+  const [effort, lastCheckIn] = await Promise.all([
+    computeGoalEffort(orgId, id, await viewerFromSession()),
+    // The goal's newest target check-in (the list's lastByKr, for one goal).
+    prisma.kRCheckIn.aggregate({ where: { keyResult: { okrId: id } }, _max: { createdAt: true } }),
+  ]);
+  const lastCheckInAt = lastCheckIn._max.createdAt ?? null;
+  const lastMovedAt = [effort.lastActivityAt, lastCheckInAt]
+    .reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null);
+  return jsonSuccess({ ...effort, lastCheckInAt, lastMovedAt });
 }

@@ -1,187 +1,143 @@
 "use client";
 
-// Assign / reassign / unassign an asset. Lists org people from
-// GET /api/users (already org-scoped + scope-gated server-side) and
-// PATCHes /api/assets/[id] with { assignedToId }. The server validates
-// the chosen person belongs to the caller's org before it lands.
+// Assign, reassign or unassign an asset (spec-tools-misc 2.2): a people
+// Picker over GET /api/people/pick?q= (the whole company, the way every
+// people picker reads), one primary "Assign", and a destructive ghost
+// "Unassign" when the asset is assigned. PATCHes /api/assets/[id] with
+// { assignedToId }; the server checks the person is in this org.
+//
+// With `count` (the bulk bar) it picks a person and hands the id back
+// through `onPick` instead of writing one asset itself.
 
-import { useEffect, useMemo, useState } from "react";
-import { Search, UserRound, X } from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { useEffect, useState } from "react";
+import { UserMinus } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Picker } from "@/components/ui/picker";
+import { Avatar } from "@/components/ui/avatar-stack";
+import { useOsToast } from "@/components/layout/os/toast";
+import { apiFetch } from "@/lib/api-fetch";
 import { personName, type ApiAsset } from "./types";
 
-type Person = {
-  id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  email?: string | null;
-  avatar?: string | null;
-  department?: { name?: string | null } | null;
-};
+type Person = { id: string; firstName: string | null; lastName: string | null; email: string | null; avatar?: string | null };
 
-function initials(p: Person): string {
-  const a = (p.firstName ?? "").trim();
-  const b = (p.lastName ?? "").trim();
-  return ((a[0] ?? "") + (b[0] ?? "")).toUpperCase() || (p.email?.[0] ?? "?").toUpperCase();
-}
-
-export function AssignDialog({
-  open, onOpenChange, asset, onSaved,
-}: {
+export function AssignDialog({ open, onOpenChange, asset, onSaved, count, onPick }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   asset: ApiAsset | null;
   onSaved: () => void;
+  /** Bulk mode: how many assets the pick applies to. */
+  count?: number;
+  onPick?: (userId: string | null) => void;
 }) {
-  const toast = useToast();
-  const [people, setPeople] = useState<Person[] | null>(null);
-  const [loadErr, setLoadErr] = useState(false);
+  const { toast } = useOsToast();
   const [query, setQuery] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [picked, setPicked] = useState<Person | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Reset on open, adjusted during render rather than in an effect.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) { setPicked(null); setQuery(""); setPickerOpen(true); }
+  }
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-    setPeople(null);
-    setLoadErr(false);
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/users?limit=500");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        const list: Person[] = json?.data ?? (Array.isArray(json) ? json : []);
-        if (!cancelled) setPeople(list);
-      } catch {
-        if (!cancelled) setLoadErr(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [open]);
+    const t = setTimeout(async () => {
+      setLoading(true);
+      const r = await apiFetch<{ people: Person[] }>(`/api/people/pick?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+      setLoading(false);
+      if (r.ok) setPeople(r.data.people);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, query]);
 
-  const filtered = useMemo(() => {
-    const list = people ?? [];
-    const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((p) =>
-      personName(p).toLowerCase().includes(q) ||
-      (p.email ?? "").toLowerCase().includes(q),
-    );
-  }, [people, query]);
-
-  const patchAssignee = async (assignedToId: string | null) => {
+  async function write(assignedToId: string | null) {
+    if (onPick) { onPick(assignedToId); return; }
     if (!asset) return;
-    setBusyId(assignedToId ?? "__unassign__");
-    try {
-      const res = await fetch(`/api/assets/${asset.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignedToId }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast.error(
-          "Couldn't update assignment",
-          res.status === 403 ? "You don't have permission for this." : (d?.error ?? `HTTP ${res.status}`),
-        );
-        return;
-      }
-      toast.success(assignedToId ? "Asset assigned" : "Asset unassigned");
-      onOpenChange(false);
-      onSaved();
-    } catch {
-      toast.error("Network error", "Please try again.");
-    } finally {
-      setBusyId(null);
+    setBusy(true);
+    const r = await apiFetch(`/api/assets/${asset.id}`, { method: "PATCH", json: { assignedToId } });
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.status === 403 ? "You can't assign this asset." : (r.error || "Couldn't change the assignment"), { tone: "danger" });
+      return;
     }
-  };
+    toast(assignedToId ? "Assigned" : "Unassigned");
+    onOpenChange(false);
+    onSaved();
+  }
 
   const currentId = asset?.assignedTo?.id ?? null;
+  const title = count ? `Assign ${count} ${count === 1 ? "asset" : "assets"}` : asset?.assignedTo ? "Reassign asset" : "Assign asset";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Assign asset</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {asset ? asset.name : ""}
-            {asset?.assignedTo ? ` · currently ${personName(asset.assignedTo) || "assigned"}` : ""}
+            {count ? "Pick who gets them." : asset ? `${asset.name}${asset.assignedTo ? ` · with ${personName(asset.assignedTo) || "someone"} today` : ""}` : ""}
           </DialogDescription>
         </DialogHeader>
 
+        {/* The Picker is an absolute child of the dialog (ui/dialog centres
+            with a transform, so a portal would land elsewhere), and the
+            dialog reserves the room it needs so the list is never clipped. */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-2" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search people…"
-            autoFocus
-            className="flex h-9 w-full rounded-lg border border-border bg-white dark:bg-surface-2 pl-9 pr-3 text-base text-foreground placeholder:text-muted-2 focus-visible:outline-none focus-visible:border-[color:var(--accent)] focus-visible:ring-[3px] focus-visible:ring-[color:var(--accent)]/15"
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            aria-haspopup="listbox"
+            aria-expanded={pickerOpen}
+            className="flex h-10 w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-left text-base text-ink"
+          >
+            {picked ? (
+              <>
+                <Avatar person={{ id: picked.id, firstName: picked.firstName, lastName: picked.lastName, avatar: picked.avatar }} size={24} />
+                <span className="min-w-0 flex-1 truncate">{personName(picked) || picked.email || "Someone"}</span>
+              </>
+            ) : (
+              <span className="text-ink-3">Pick a person</span>
+            )}
+          </button>
+          <Picker
+            open={pickerOpen}
+            onClose={() => setPickerOpen(false)}
+            alwaysSearch
+            onSearchChange={setQuery}
+            loading={loading}
+            searchPlaceholder="Search people"
+            ariaLabel="Assign to"
+            selected={picked?.id ?? currentId}
+            sections={[{
+              options: people.map((p) => ({
+                value: p.id,
+                label: personName(p) || p.email || "Someone",
+                description: p.email ?? undefined,
+                hint: p.id === currentId ? "Has it today" : undefined,
+                keywords: p.email ?? undefined,
+                disabled: p.id === currentId,
+              })),
+            }]}
+            onSelect={(v) => { setPicked(people.find((p) => p.id === v) ?? null); setPickerOpen(false); }}
+            className="w-full"
           />
         </div>
+        {/* Room for the list, so the dialog never clips it. */}
+        {pickerOpen ? <div className="h-[300px]" aria-hidden /> : null}
 
-        {currentId && (
-          <Button
-            variant="outline"
-            className="justify-start gap-2 h-9"
-            onClick={() => void patchAssignee(null)}
-            disabled={busyId !== null}
-          >
-            <X className="h-3.5 w-3.5" /> Unassign (mark as returned)
-          </Button>
-        )}
-
-        <div className="max-h-[46vh] overflow-y-auto -mx-1 px-1">
-          {people === null && !loadErr ? (
-            <div className="py-8 text-center text-base text-muted-2">Loading people…</div>
-          ) : loadErr ? (
-            <div className="py-8 text-center text-base text-[#E2445C]">Could not load people.</div>
-          ) : filtered.length === 0 ? (
-            <div className="py-8 text-center text-base text-muted-2">No people match.</div>
-          ) : (
-            <ul className="flex flex-col gap-0.5">
-              {filtered.map((p) => {
-                const isCurrent = p.id === currentId;
-                return (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => { if (!isCurrent) void patchAssignee(p.id); }}
-                      disabled={busyId !== null || isCurrent}
-                      className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left appearance-none bg-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60 disabled:cursor-default transition-colors"
-                    >
-                      <span className="shrink-0 h-7 w-7 rounded-full bg-[color:var(--os-brand)]/12 text-[color:var(--os-brand)] grid place-items-center text-xs font-semibold overflow-hidden">
-                        {p.avatar ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.avatar} alt="" className="h-full w-full object-cover" />
-                        ) : initials(p)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-base font-medium text-foreground">
-                          {personName(p) || p.email || "Unnamed"}
-                        </span>
-                        {(p.department?.name || p.email) && (
-                          <span className="block truncate text-xs text-muted-2">
-                            {p.department?.name || p.email}
-                          </span>
-                        )}
-                      </span>
-                      {isCurrent && (
-                        <span className="shrink-0 inline-flex items-center gap-1 text-xs text-muted-2">
-                          <UserRound className="h-3 w-3" /> current
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <DialogFooter>
+          {currentId && !count ? (
+            <button type="button" onClick={() => void write(null)} disabled={busy} className="me-auto inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-base font-medium text-danger-text hover:bg-danger-bg disabled:opacity-50">
+              <UserMinus className="h-4 w-4" aria-hidden /> Unassign
+            </button>
+          ) : null}
+          <button type="button" onClick={() => onOpenChange(false)} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
+          <button type="button" onClick={() => picked && void write(picked.id)} disabled={busy || !picked} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-50">Assign</button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

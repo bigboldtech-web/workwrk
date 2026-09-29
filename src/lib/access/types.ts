@@ -245,7 +245,17 @@ export type AppKey =
   | "talent"
   | "analytics"
   | "rollup"
-  | "integrations";
+  | "integrations"
+  // Phase 6 (spec-teams-people section 0, spec-goals section 0,
+  // spec-teams-performance section 0): the six Teams-hub pages that are
+  // routes rather than catalog entries and had no row, so by the closing
+  // rule of section 5.2.1 none of them could be gated.
+  | "team"
+  | "workload"
+  | "weekly-reviews"
+  | "kra-kpi"
+  | "alignment"
+  | "kpi-reviews";
 
 /** Workspace and personal settings page keys (spec 6.6). */
 export type SettingsPageKey =
@@ -475,6 +485,12 @@ export interface OrgFacts {
   activeModules: Set<string>;
   apps: AppsConfig;
   peopleTeamIds: string[];
+  /**
+   * settings.data.aiEnabled ("AI features for members"). Optional so every
+   * existing literal still compiles; absent reads as on. Rule 2 turns the
+   * `ai` app key off when this is false (spec-ai-automation section 1.4).
+   */
+  aiEnabled?: boolean;
 }
 
 export interface AccessFacts {

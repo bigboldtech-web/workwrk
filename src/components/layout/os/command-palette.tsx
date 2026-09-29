@@ -36,6 +36,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Activity,
   AlarmClock,
+  Bot,
+  Plug,
   Building2,
   CalendarDays,
   CheckSquare,
@@ -71,6 +73,7 @@ import {
   settingsHrefToday,
 } from "@/lib/settings-registry";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { leaveThen } from "@/lib/dirty-guard";
 import { cn } from "@/lib/utils";
 import { useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
@@ -78,7 +81,8 @@ import { useOsToast } from "./toast";
 // The palette opens over any page, so an object row opens in the section
 // the person is in at the moment they pick it (src/lib/nav/object-href.ts).
 import { objectHrefNow, sectionHrefNow } from "./use-object-href";
-import type { AppEntry } from "./apps-catalog";
+import { TEAMS_ICONS, type AppEntry } from "./apps-catalog";
+import { visibleTeamsRows } from "@/lib/nav/teams-rows";
 
 /* ─── Model ─── */
 
@@ -118,7 +122,37 @@ type Row = {
   /** Runs instead of navigating; the palette closes first. */
   action?: () => void;
   shortcut?: string;
+  /**
+   * Extra names a typed query may match, never shown. The canon labels of
+   * spec-ai-automation 1.3 ("Ask AI", "Workflows") name pages whose rows
+   * carry the hub or app label ("AI", "Automation"), and a person types
+   * what the page is called, not what the rail calls it.
+   */
+  aliases?: string[];
 };
+
+/**
+ * Search aliases by app key, for the rows appRow builds. Hidden names only:
+ * the row still reads as the catalog labels it.
+ */
+const APP_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  ai: ["Ask AI"],
+  automation: ["Workflows"],
+};
+
+/**
+ * Does a jump row answer a typed query? Substring on the label and on every
+ * alias, case-insensitive; `lq` is the already lowercased query. Exported for
+ * the test, pure on purpose.
+ */
+export function rowMatchesQuery(
+  row: Pick<Row, "label" | "aliases">,
+  lq: string,
+): boolean {
+  if (!lq) return false;
+  if (row.label.toLowerCase().includes(lq)) return true;
+  return (row.aliases ?? []).some((a) => a.toLowerCase().includes(lq));
+}
 
 type Section = {
   key: string;
@@ -256,7 +290,7 @@ function PaletteBody() {
     recentAppKeys,
     hubHref,
     launcherApps,
-    railApps,
+    askAiVisible,
     prefs,
   } = useOsShell();
   const { boot } = useBoot();
@@ -287,7 +321,7 @@ function PaletteBody() {
 
   const q = query.trim();
   const isMember = !isGuest;
-  const aiVisible = railApps.some((a) => a.key === "ai");
+  const aiVisible = askAiVisible;
   const setQuery = (v: string) => {
     setQueryState(v);
     setActive(0);
@@ -398,6 +432,7 @@ function PaletteBody() {
         secondary: a.hubKey ? HUB_LABELS[hub] : undefined,
         glyph: <Glyph icon={Icon} />,
         href: hubHref(a.key),
+        aliases: APP_SEARCH_ALIASES[a.key]?.slice(),
       };
     },
     [hubHref],
@@ -499,11 +534,37 @@ function PaletteBody() {
         { id: "j-favorites", label: "Favorites", glyph: <Glyph icon={Star} />, href: "/favorites" },
         { id: "j-activity", label: "Activity", glyph: <Glyph icon={Activity} />, href: "/activity" },
       );
+      // Two AI hub pages that are routes, not catalog apps, so the Apps list
+      // alone could not reach them (spec-ai-automation 1.3 canon labels).
+      if (aiVisible) personal.push({ id: "j-agents", label: "Agents", glyph: <Glyph icon={Bot} />, href: "/agents" });
+      personal.push({ id: "j-integrations", label: "Integrations", glyph: <Glyph icon={Plug} />, href: "/integrations" });
     }
     const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);
     const folded = launcherApps.filter((a) => !isHubKey(a.key)).map(appRow);
-    return [...personal, ...hubs, ...folded];
-  }, [launcherApps, appRow, isMember]);
+    // The Teams hub's pages that are routes, not catalog apps (Directory, My
+    // profile, Job titles, Weekly reviews, Talent (9-box), Analytics and the
+    // rest): the same rows and gates the Teams sidebar renders
+    // (src/lib/nav/teams-rows.ts), so the palette reaches exactly what the
+    // sidebar does (sidebar-map section 10; the naming canon's "command
+    // palette" use of each label). Only while the viewer holds the Teams hub,
+    // and never twice: a row already listed as a folded app keeps that one.
+    const teamsHeld = launcherApps.some((a) => a.key === "teams");
+    const taken = new Set(folded.flatMap((r) => [r.label.toLowerCase(), r.href ?? ""]));
+    const teams: Row[] = teamsHeld
+      ? visibleTeamsRows({
+          userId: viewerId,
+          orgRole: boot.viewer.orgRole,
+          isAgent: boot.viewer.isAgent,
+          hasReports: boot.viewer.hasReports,
+          peopleTeam: boot.viewer.peopleTeam,
+          candorInvited: boot.viewer.candorInvited,
+          surveyTargeted: boot.viewer.surveyTargeted,
+        })
+          .filter((r) => !taken.has(r.label.toLowerCase()) && !taken.has(r.href))
+          .map((r) => ({ id: `teams-${r.key}`, label: r.label, secondary: HUB_LABELS.teams, glyph: <Glyph icon={TEAMS_ICONS[r.icon]} />, href: r.href }))
+      : [];
+    return [...personal, ...hubs, ...teams, ...folded];
+  }, [launcherApps, appRow, isMember, aiVisible, viewerId, boot.viewer.orgRole, boot.viewer.isAgent, boot.viewer.hasReports, boot.viewer.peopleTeam, boot.viewer.candorInvited, boot.viewer.surveyTargeted]);
 
   const recentRows = useMemo<Row[]>(() => {
     const byKey = new Map(launcherApps.map((a) => [a.key, a]));
@@ -542,7 +603,7 @@ function PaletteBody() {
             label: e.label,
             secondary: e.description,
             glyph: <Glyph icon={Settings2} />,
-            action: () => router.push(e.href),
+            action: () => void leaveThen(() => router.push(e.href)),
           }))
         : [];
       return [...pageRows, ...entryRows];
@@ -634,9 +695,12 @@ function PaletteBody() {
       };
       groups[kind].push(row);
     }
-    const apps = [...jumpRows.slice(0, 3), ...launcherApps.map(appRow)].filter(
-      (r) => r.label.toLowerCase().includes(lq),
-    );
+    // Every jump row, not the first three plus the apps: jumpRows is already
+    // the personal rows followed by every launcher app, so this is the same
+    // list with no duplicates, and the rows that exist only here (Everything,
+    // Favorites, Activity, Agents, Integrations) are found by typing their
+    // name instead of answering "No results" to the label the list shows.
+    const apps = jumpRows.filter((r) => rowMatchesQuery(r, lq));
     const settings = settingsRows(q);
     const actions: Row[] = [];
     if (aiVisible && isMember)
@@ -734,8 +798,6 @@ function PaletteBody() {
     jumpRows,
     createRows,
     settingsRows,
-    launcherApps,
-    appRow,
     aiVisible,
     isMember,
     openSidekick,
@@ -755,8 +817,12 @@ function PaletteBody() {
         return;
       }
       closePalette();
-      if (row.href) router.push(sectionHrefNow(row.href));
-      else row.action?.();
+      // A jump row asks about unsaved work first (the page's own dialog,
+      // shown once the palette is out of the way); a clean page moves at once.
+      if (row.href) {
+        const href = sectionHrefNow(row.href);
+        void leaveThen(() => router.push(href));
+      } else row.action?.();
     },
     [closePalette, router],
   );
@@ -797,6 +863,10 @@ function PaletteBody() {
   }, [activeIdx]);
 
   const hint = q.length >= 2;
+  // A found app, setting or jump row is a result. Without this the line said
+  // "No results" over the very row the person typed the name of (Agents,
+  // Inbox), because it looked at the search hits alone.
+  const found = sections.some((s) => s.key !== "actions" && s.rows.length > 0);
   let runningIdx = -1;
 
   return (
@@ -895,7 +965,7 @@ function PaletteBody() {
             </button>
           </div>
         ) : null}
-        {hint && !failed && !searching && live.length === 0 ? (
+        {hint && !failed && !searching && live.length === 0 && !found ? (
           <div className="flex h-9 items-center px-4 text-sm text-ink-2">
             No results for &ldquo;{q}&rdquo;
           </div>

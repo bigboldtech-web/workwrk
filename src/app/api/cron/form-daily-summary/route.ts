@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { readFormSettings } from "@/lib/forms/settings";
 import { dailySummaryInstalled, dailySummaryMessage } from "@/lib/forms/daily-summary";
+import { addressHref } from "@/lib/nav/object-href";
+import { usersWhoCanReadResponses } from "@/lib/access/node-access";
 
 /**
  * Cron endpoint: the form builder's "Send a daily summary instead" (spec-tables-
@@ -45,14 +47,19 @@ export async function POST(req: NextRequest) {
     if (!settings.dailySummary || settings.notifyUserIds.length === 0) continue;
     const count = await prisma.formSubmission.count({ where: { formId: form.id, submittedAt: { gte: since } } });
     if (count === 0) continue;
-    const recipients = await prisma.user.findMany({
+    const inOrg = await prisma.user.findMany({
       where: { id: { in: settings.notifyUserIds }, organizationId: form.organizationId },
       select: { id: true },
     });
+    // Only people who may read the responses (the same rule their own
+    // Responses tab applies), and the Work door, placed under each reader.
+    const readers = await usersWhoCanReadResponses(form.organizationId, form.id, inOrg.map((r) => r.id));
+    const recipients = inOrg.filter((r) => readers.has(r.id));
     if (recipients.length === 0) continue;
     const { title, message } = dailySummaryMessage(form.name, count);
+    const link = `${addressHref("form", form.id, { scope: "work" })}?tab=responses`;
     await prisma.notification.createMany({
-      data: recipients.map((r) => ({ userId: r.id, type: "form.daily_summary", title, message, link: `/forms/${form.id}?tab=responses` })),
+      data: recipients.map((r) => ({ userId: r.id, type: "form.daily_summary", title, message, link })),
     });
     notified += recipients.length;
     formsSent += 1;

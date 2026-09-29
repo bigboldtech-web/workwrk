@@ -236,10 +236,56 @@ async function calcKudosBonus(userId: string): Promise<number> {
   return Math.min(Math.floor(count / 2), 5);
 }
 
+/**
+ * The composite from the inputs that exist, or null when none does. Pure.
+ *
+ * Null is not 0: a member with no KPI numbers, no reviews, no peer
+ * feedback, no SOP results, no goals and no tasks has nothing to score, and
+ * a stored 0 reads "At risk" on their record, in Talent's Fill from scores
+ * and on every dashboard, a verdict with nothing behind it (a welcome kudos
+ * to a new hire was enough to trigger that recalculation). The kudos bonus
+ * is a bonus on a measured score, not a measure of its own, so kudos alone
+ * is still no score.
+ */
+export function composeScore(
+  inputs: {
+    kpiScore: number | null;
+    managerRating: number | null;
+    peerRating: number | null;
+    selfRating: number | null;
+    sopCompliance: number | null;
+    okrScore: number | null;
+    taskScore: number | null;
+    kudosBonus: number;
+  },
+  weights: ScoreWeights
+): number | null {
+  const { kpiScore, managerRating, peerRating, selfRating, sopCompliance, okrScore, taskScore, kudosBonus } = inputs;
+  const components: { value: number; weight: number }[] = [];
+  if (kpiScore != null) components.push({ value: kpiScore, weight: weights.kpi });
+  if (managerRating != null) components.push({ value: managerRating, weight: weights.manager });
+  if (peerRating != null) components.push({ value: peerRating, weight: weights.peer });
+  if (selfRating != null) components.push({ value: selfRating, weight: weights.self });
+  if (sopCompliance != null) components.push({ value: sopCompliance, weight: weights.sopCompliance });
+  // OKR and task scores contribute as bonuses (up to 5 points each)
+  if (okrScore != null) components.push({ value: okrScore, weight: 10 });
+  if (taskScore != null) components.push({ value: taskScore, weight: 5 });
+
+  if (components.length === 0) return null;
+  const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
+  // Every weight set to 0 in Settings leaves nothing weighted: no score,
+  // rather than a NaN written to the row.
+  if (totalWeight <= 0) return null;
+  const composite = Math.round(
+    components.reduce((sum, c) => sum + (c.value * c.weight) / totalWeight, 0)
+  );
+  return Math.min(Math.max(composite + kudosBonus, 0), 100);
+}
+
 export async function calculatePerformanceScore(
   userId: string,
   organizationId: string
-): Promise<{ score: number; breakdown: ScoreBreakdown }> {
+): Promise<{ score: number | null; breakdown: ScoreBreakdown }> {
   const weights = await getOrgWeights(organizationId);
 
   const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okrScore, taskScore] =
@@ -266,28 +312,21 @@ export async function calculatePerformanceScore(
     weights,
   } as ScoreBreakdown;
 
-  const components: { value: number; weight: number }[] = [];
-  if (kpiScore != null) components.push({ value: kpiScore, weight: weights.kpi });
-  if (managerRating != null) components.push({ value: managerRating, weight: weights.manager });
-  if (peerRating != null) components.push({ value: peerRating, weight: weights.peer });
-  if (selfRating != null) components.push({ value: selfRating, weight: weights.self });
-  if (sopCompliance != null) components.push({ value: sopCompliance, weight: weights.sopCompliance });
-  // OKR and task scores contribute as bonuses (up to 5 points each)
-  if (okrScore != null) components.push({ value: okrScore, weight: 10 });
-  if (taskScore != null) components.push({ value: taskScore, weight: 5 });
-
-  let compositeScore = 0;
-  if (components.length > 0) {
-    const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
-    compositeScore = Math.round(
-      components.reduce((sum, c) => sum + (c.value * c.weight) / totalWeight, 0)
-    );
-  }
-
-  compositeScore += kudosBonus;
-  compositeScore = Math.min(Math.max(compositeScore, 0), 100);
+  const compositeScore = composeScore(
+    { kpiScore, managerRating, peerRating, selfRating, sopCompliance, okrScore, taskScore, kudosBonus },
+    weights
+  );
 
   const period = getCurrentPeriod();
+
+  if (compositeScore == null) {
+    // Nothing to score this month: no row, and a row an earlier
+    // recalculation wrote for this month goes (its inputs are gone, or it
+    // was the input-less 0 this used to write). Past months are history
+    // and stay.
+    await prisma.performanceScore.deleteMany({ where: { userId, period } });
+    return { score: null, breakdown };
+  }
 
   await prisma.performanceScore.upsert({
     where: { userId_period: { userId, period } },

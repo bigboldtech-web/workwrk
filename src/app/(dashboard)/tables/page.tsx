@@ -54,6 +54,7 @@ import { toCsvMatrix } from "@/lib/csv";
 import type { ObjectListView, TablesSort } from "@/lib/tables-forms-list";
 import { cn } from "@/lib/utils";
 import { NotFoundView } from "@/components/access/not-found-view";
+import { commonMoveDestinations, type CommonDestinations } from "@/lib/work/bulk-destinations";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -278,6 +279,17 @@ export default function TablesPage() {
   // selection holds a table the viewer may manage (its creator or an admin,
   // principle 14: a control the role cannot use is not rendered).
   const anyManageable = selectedRows.some((r) => r.canManage);
+  // THE BULK MOVE OFFERS WHAT EVERY SELECTED TABLE'S MOVE ACCEPTS (the
+  // placement rule's P5): the intersection of each one's destinations, asked
+  // when the picker opens. It listed every Space the person could read plus
+  // "No Space", and the server refused the picks one table at a time.
+  const [bulkDests, setBulkDests] = useState<CommonDestinations | null>(null);
+  const toggleBulkMove = useCallback(() => {
+    setBulkMoveOpen((o) => !o);
+    setBulkDests(null);
+    const ids = selectedRows.filter((r) => r.canManage).map((r) => r.id);
+    void commonMoveDestinations("table", ids).then(setBulkDests);
+  }, [selectedRows]);
   async function bulkFavorite() {
     const ids = [...selected];
     await Promise.allSettled(ids.map((id) => apiFetch("/api/me/favorites/tables", { method: "POST", json: { tableId: id, on: true } })));
@@ -557,9 +569,12 @@ export default function TablesPage() {
                 <>
                   {anyManageable ? (
                     <span className="relative">
-                      <BulkAction icon={FolderInput} label="Move to Space…" onClick={() => setBulkMoveOpen((o) => !o)} />
+                      <BulkAction icon={FolderInput} label="Move to Space…" onClick={toggleBulkMove} />
                       <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected tables" side="top" onSelect={(v) => void bulkMove(v)}
-                        sections={[{ options: [{ value: "none", label: "No Space" }] }, { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) }]} />
+                        sections={[
+                          ...(bulkDests?.root ? [{ options: [{ value: "none", label: "No Space" }] }] : []),
+                          { label: "Spaces", options: (bulkDests?.spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) },
+                        ]} />
                     </span>
                   ) : null}
                   {!isAgent ? <BulkAction icon={Download} label="Export as CSV" onClick={bulkExport} /> : null}

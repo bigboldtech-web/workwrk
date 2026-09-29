@@ -11,7 +11,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { getSpaceForReader } from "@/lib/space";
+import { whiteboardReadable } from "@/lib/whiteboard-gate";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
 
 const MAX_BYTES = 2_000_000;
 
@@ -35,7 +36,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, spaceId: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (existing.spaceId && !(await getSpaceForReader(existing.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE"))) {
+  if (!(await whiteboardReadable(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), existing))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

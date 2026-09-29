@@ -5,9 +5,10 @@
 // None of it can run here (Prisma, next-auth, a database), so this reads the
 // files and pins what a later edit could quietly undo:
 //
-//   * readableListsInSpace loads its facts in four org-scoped reads, reads the
-//     member tables only through relation includes, skips the folder-grant
-//     read for org admins, and decides through decideSpaceLists;
+//   * readableListsInSpace answers from the one resolver's tree (node-access
+//     spaceTree, or the tree the caller already built), reads no member table
+//     and no second predicate, and takes the columns it needs from one
+//     org-scoped read of exactly the readable Lists;
 //   * every Space.settings writer (bookmarks, the module toggle, the pin)
 //     goes through mutateSpaceSettings, which locks the row FOR UPDATE and
 //     merges over what it locked;
@@ -38,27 +39,26 @@ const SPACE = code("src/lib/space.ts");
 describe("readableListsInSpace", () => {
   const body = between(SPACE, "export async function readableListsInSpace", "\nexport ");
 
-  it("loads its facts in four parallel, org-scoped reads", () => {
-    expect(body).toMatch(/await Promise\.all\(\[/);
-    expect(body).toMatch(/prisma\.space\.findFirst\(\{\s*where: \{ id: spaceId, organizationId: viewer\.organizationId \}/);
-    expect(body).toMatch(/prisma\.folder\.findMany\(\{\s*where: \{ spaceId, organizationId: viewer\.organizationId, \.\.\.live \}/);
-    expect(body).toMatch(/prisma\.board\.findMany\(\{\s*where: \{ spaceId, organizationId: viewer\.organizationId, \.\.\.live \}/);
-    expect(body).toMatch(/orderBy: \[\{ position: "asc" \}, \{ id: "asc" \}\]/);
-    expect(body).toMatch(/orderBy: \[\{ name: "asc" \}, \{ id: "asc" \}\]/);
+  it("answers from the one resolver's tree, or the tree the caller already built", () => {
+    expect(body).toMatch(/const tree = opts\.tree !== undefined \? opts\.tree : await spaceTree\(ctx, spaceId\);/);
+    expect(body).toMatch(/if \(!tree\) return \{ lists: \[\], folderCount: 0 \};/);
   });
 
-  it("reads member rows only through relation includes", () => {
+  it("reads no member table and no second predicate", () => {
     expect(body).not.toMatch(/prisma\.(spaceMember|folderMember|boardMember)/);
-    expect(body.match(/members: \{ where: \{ userId: viewer\.userId \}, select: \{ role: true \} \}/g)?.length).toBe(2);
+    expect(body).not.toMatch(/members: \{/);
+    expect(SPACE).not.toMatch(/decideSpaceLists|accessibleFolderIds|legacyAllows/);
   });
 
-  it("skips the folder-grant read for an org admin", () => {
-    expect(body).toMatch(/isOrgAdminAccessLevel\(viewer\.accessLevel\) \? Promise\.resolve\(new Set<string>\(\)\) : accessibleFolderIds\(viewer\.userId\)/);
+  it("takes the columns from one org-scoped read of exactly the readable Lists", () => {
+    expect(body).toMatch(/prisma\.board\.findMany\(\{\s*where: \{ id: \{ in: ordered\.map\(\(o\) => o\.node\.id\) \}, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(body.match(/prisma\./g)?.length).toBe(1);
   });
 
-  it("decides through the pure predicate and answers nothing for a missing Space", () => {
-    expect(body).toMatch(/if \(!space\) return \{ lists: \[\], folderCount: 0 \};/);
-    expect(body).toMatch(/decideSpaceLists\(viewer, \{/);
+  it("walks child folders before a folder's Lists and the root Lists last, the sidebar's order", () => {
+    expect(body).toMatch(/walk\(f\.childFolders\);\s*for \(const l of f\.boards\) ordered\.push/);
+    expect(body).toMatch(/for \(const l of tree\.boards\) ordered\.push\(\{ node: l, folderId: null \}\);/);
+    expect(body).toMatch(/const folderCount = renderedCounts\(tree\)\.folders;/);
   });
 });
 
@@ -119,12 +119,22 @@ describe("the routes Bird's eye added never read the legacy signal", () => {
 });
 
 describe("every Space List listing goes through the one predicate", () => {
-  it("GET /api/boards?spaceId= and ?folderId= answer readable Lists only", () => {
+  it("GET /api/boards?all=1, ?spaceId= and ?folderId= answer readable Lists only, each over one world", () => {
     const src = code("src/app/api/boards/route.ts");
     const get = between(src, "export async function GET", "export async function POST");
-    expect(get.match(/readableListsInSpace\(/g)?.length).toBe(2);
-    expect(get).toMatch(/\(await listBoardsInSpace\(spaceId, \{ includeArchived \}\)\)\.filter\(\(b\) => readable\.has\(b\.id\)\)/);
-    expect(get).toMatch(/\.filter\(\(b\) => readable\.has\(b\.id\)\)/);
+    expect(get.match(/nodeRoleMap\(nodeCtx, "list", rows\.map\(\(b\) => b\.id\)\)/g)?.length).toBe(3);
+    expect(get.match(/\.filter\(\(b\) => roleAtLeast\(roles\.get\(b\.id\) \?\? "none", "VIEW"\)\)/g)?.length).toBe(3);
+    expect(get).not.toMatch(/readableListsInSpace\(/);
+  });
+
+  it("GET /api/boards?readable=1 decides every candidate over one world, the path door included", () => {
+    const src = code("src/app/api/boards/route.ts");
+    const fn = between(src, "async function readableLists(", "\nconst isoDate");
+    expect(fn).toMatch(/listSpacesForUser\(c\.userId, c\.organizationId, \{ accessLevel: c\.accessLevel, paths: true \}\)/);
+    expect(fn).toMatch(/const readSpaces = spaces\.filter\(\(s\) => s\.access !== "path"\);/);
+    expect(fn).toMatch(/const roles = await nodeRoleMap\(/);
+    expect(fn).toMatch(/roleAtLeast\(roles\.get\(b\.id\) \?\? "none", writable \? "EDIT" : "VIEW"\)/);
+    expect(fn).not.toMatch(/getBoardForReader\(|canContributeBoard\(/);
   });
 
   it("the Space page reads its Lists once, before the header, and no longer from the Space include", () => {
@@ -135,6 +145,7 @@ describe("every Space List listing goes through the one predicate", () => {
     expect(page).not.toMatch(/listStatusRows/);
     expect(page.indexOf("readableListsInSpace(")).toBeLessThan(page.indexOf("const header = ("));
     expect(page).toMatch(/\$\{readableLists\.length\} lists · \$\{folderCount\} folders/);
+    expect(page).toMatch(/\{ includeSchema: view === "calendar" \|\| view === "gantt", tree \},/);
   });
 
   it("returns Bird's eye before any other tab's query runs", () => {
@@ -169,14 +180,16 @@ describe("the Space pin's Unpin names the view it unpins", () => {
 describe("the Work sidebar tree names only the Lists this viewer can read", () => {
   const route = code("src/app/api/spaces/[id]/children/route.ts");
 
-  it("filters the root Lists and every folder's Lists through readableListsInSpace", () => {
-    expect(route).toMatch(/readableListsInSpace\(id, \{/);
-    expect(route).toMatch(/rootBoardsR\.value : \[\]\)\.filter\(readable\)/);
-    expect(route).toMatch(/boards: n\.boards\.filter\(readable\)\.map\(/);
-    expect(route).toMatch(/_count: \{ \.\.\.n\._count, boards: n\.boards\.filter\(readable\)\.length \}/);
+  it("is the resolver's tree and nothing else: no query, no legacy signal, no second predicate", () => {
+    expect(route).toMatch(/const tree = await spaceTree\(ctx, id\);/);
+    expect(route).toMatch(/await nodeCtxFromSession\(\)/);
+    expect(route).not.toMatch(/prisma\./);
+    expect(route).not.toMatch(/accessLevel/);
+    expect(route).not.toMatch(/readableListsInSpace|folderVisibleTo|folderAccessForSpace/);
   });
 
-  it("fails closed: a failed readable read shows no Lists", () => {
-    expect(route).toMatch(/return new Set<string>\(\);/);
+  it("fails closed: no tree is a 404, a failed read is a 500 with no rows", () => {
+    expect(route).toMatch(/if \(!tree\) return NextResponse\.json\(\{ error: "Not found" \}, \{ status: 404 \}\);/);
+    expect(route).toMatch(/status: 500/);
   });
 });

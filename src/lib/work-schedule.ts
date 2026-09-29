@@ -178,3 +178,64 @@ export function expectedWeekHours(schedule: WorkSchedule, weekStart: Date): numb
   const end = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6);
   return Math.round(workingDaysBetween(schedule, weekStart, end) * schedule.hoursPerDay * 100) / 100;
 }
+
+// ── A person's own schedule (decided addition a, Phase 6) ─────────
+// User.workSchedule overrides the org's working days and hours for one
+// person: { workdays: number[], hoursPerDay: number }, null = the org's.
+// Holidays and the zone always come from the org record, so a part-timer
+// still gets the company holidays.
+
+export interface PersonScheduleOverride {
+  workdays: Weekday[];
+  hoursPerDay: number;
+}
+
+/** Strict check of a PATCH body's workSchedule. Null clears the override. */
+export function validatePersonScheduleOverride(
+  v: unknown,
+): { ok: true; value: PersonScheduleOverride | null } | { ok: false; error: string } {
+  if (v === null) return { ok: true, value: null };
+  if (!v || typeof v !== "object" || Array.isArray(v)) return { ok: false, error: "A work schedule is { workdays, hoursPerDay }, or null for the org schedule" };
+  const r = v as Record<string, unknown>;
+  const extra = Object.keys(r).filter((k) => k !== "workdays" && k !== "hoursPerDay");
+  if (extra.length) return { ok: false, error: `Unknown work schedule field: ${extra.join(", ")}` };
+  if (!Array.isArray(r.workdays) || r.workdays.length > 7) return { ok: false, error: "Working days are a list of weekdays, 0 (Sunday) to 6" };
+  const days = new Set<number>();
+  for (const d of r.workdays) {
+    if (typeof d !== "number" || !Number.isInteger(d) || d < 0 || d > 6) return { ok: false, error: "Working days are a list of weekdays, 0 (Sunday) to 6" };
+    days.add(d);
+  }
+  const h = r.hoursPerDay;
+  if (typeof h !== "number" || !Number.isFinite(h) || h <= 0 || h > 24) return { ok: false, error: "Hours a day are more than 0 and at most 24" };
+  return { ok: true, value: { workdays: [...days].sort((a, b) => a - b) as Weekday[], hoursPerDay: Math.round(h * 100) / 100 } };
+}
+
+/** Read a stored override (anything malformed reads as no override). */
+export function readPersonScheduleOverride(v: unknown): PersonScheduleOverride | null {
+  if (v === null || v === undefined) return null;
+  const r = validatePersonScheduleOverride(v);
+  return r.ok ? r.value : null;
+}
+
+/** The schedule one person works: the org's, with their days and hours when set. */
+export function effectivePersonSchedule(org: WorkSchedule, override: unknown): WorkSchedule {
+  const o = readPersonScheduleOverride(override);
+  if (!o) return org;
+  return { ...org, workdays: o.workdays, hoursPerDay: o.hoursPerDay };
+}
+
+/** A plain week total for a schedule, holidays aside (the record's "Org default (40h)"). */
+export function nominalWeekHours(s: { workdays: readonly number[]; hoursPerDay: number }): number {
+  return Math.round(s.workdays.length * s.hoursPerDay * 100) / 100;
+}
+
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** "Mon to Fri, 8h a day", "Mon, Wed, Fri, 6h a day", "No fixed days". */
+export function describeSchedule(s: { workdays: readonly number[]; hoursPerDay: number }): string {
+  const d = [...s.workdays].sort((a, b) => a - b);
+  if (d.length === 0) return "No fixed days";
+  const contiguous = d.length > 2 && d.every((x, i) => i === 0 || x === d[i - 1] + 1);
+  const days = contiguous ? `${DAY_SHORT[d[0]]} to ${DAY_SHORT[d[d.length - 1]]}` : d.map((x) => DAY_SHORT[x]).join(", ");
+  return `${days}, ${s.hoursPerDay}h a day`;
+}

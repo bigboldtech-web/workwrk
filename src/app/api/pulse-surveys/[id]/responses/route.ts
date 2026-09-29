@@ -1,18 +1,23 @@
 import { NextRequest } from "next/server";
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, getUserId } from "@/lib/api-helpers";
+import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
+import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
+import { canManageSurvey } from "@/lib/people/survey-audience";
+import { ANONYMITY_FLOOR, meetsAnonymityFloor, shuffled } from "@/lib/people/anonymity";
 
 /**
  * Manager-only aggregate view of a pulse survey's responses.
  *
  * Query params:
- *   officeId        — narrow to respondents in this office
- *   departmentId    — narrow to respondents in this department
+ *   officeId       , narrow to respondents in this office
+ *   departmentId   , narrow to respondents in this department
  *
  * Returned shape:
- *   - `survey` — metadata including `anonymous`.
- *   - `totalResponses` — count after filters.
- *   - `questions[]` — one entry per question:
+ *   - `survey`, metadata including `anonymous`.
+ *   - `totalResponses`, count after filters.
+ *   - `questions[]`, one entry per question:
  *       · rating/nps → distribution, average, total answered, daily trend
  *       · text       → list of responses (each with respondent info when
  *         survey.anonymous === false; otherwise just the text).
@@ -20,7 +25,13 @@ import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@
  * Privacy contract:
  *   Attribution is returned only when `survey.anonymous === false`. The
  *   creator of the survey explicitly opts into attribution at create/edit
- *   time — we never back-door it.
+ *   time; we never back-door it.
+ *   An ANONYMOUS survey also keeps the four-answer floor (DECIDED, the same
+ *   one candor results keep, lib/people/anonymity.ts): below it only the
+ *   count comes back, a question answered by fewer than four people shows
+ *   only its count, text answers come back in random order with no time,
+ *   and there is no daily trend or first/last answer time, so neither the
+ *   order nor a timestamp can point at who wrote what.
  */
 
 interface Question {
@@ -35,12 +46,24 @@ interface Answer {
   value: string | number | string[];
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+interface Respondent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  office: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+}
+
+interface AnswerWithMeta {
+  value: string | number | string[];
+  createdAt: Date;
+  user: Respondent | null;
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
@@ -52,10 +75,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id, organizationId: orgId },
     select: {
       id: true, title: true, questions: true, status: true,
-      createdAt: true, closedAt: true, anonymous: true,
+      createdAt: true, closedAt: true, anonymous: true, createdById: true,
     },
   });
   if (!survey) return jsonError("Survey not found", 404);
+  // Results belong to the creator, the People team and Admin
+  // (access-model-spec 3.3 Survey); a survey with no recorded creator stays
+  // with the manager tier that could read it yesterday.
+  if (!canManageSurvey({
+    callerId: getUserId(session),
+    createdById: survey.createdById,
+    peopleTeamOrAdmin: await isPeopleTeamOrAdmin(session),
+    legacyManagerTier: isManager(session),
+  })) return jsonError("Forbidden", 403);
 
   // Build the response filter. We need to join SurveyResponse → User so
   // we can scope by office/department.
@@ -65,42 +97,55 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // "anonymous" responses become attributable). So the segment filters are
   // honored ONLY on non-anonymous surveys; on anonymous ones they are
   // ignored entirely, no matter what the caller passes.
+  //
+  // SurveyResponse has no relation to User (only userId), so the segment is
+  // resolved to user ids first and the respondents are read in a second
+  // query. The old code selected and filtered on a `user` relation that does
+  // not exist, which made every named survey's results a 500.
   const allowSegmentFilter = survey.anonymous === false;
-  const responseWhere: any = { surveyId: id };
+  const responseWhere: Prisma.SurveyResponseWhereInput = { surveyId: id };
   if (allowSegmentFilter && (officeId || departmentId)) {
-    const userFilter: any = { organizationId: orgId, deletedAt: null };
+    const userFilter: Prisma.UserWhereInput = { organizationId: orgId, deletedAt: null };
     if (officeId) userFilter.officeId = officeId;
     if (departmentId) userFilter.departmentId = departmentId;
-    responseWhere.user = userFilter;
+    const segment = await prisma.user.findMany({ where: userFilter, select: { id: true } });
+    responseWhere.userId = { in: segment.map((u) => u.id) };
   }
 
   const includeUser = survey.anonymous === false;
-  const responses = await prisma.surveyResponse.findMany({
+  const rows = await prisma.surveyResponse.findMany({
     where: responseWhere,
-    select: {
-      answers: true,
-      createdAt: true,
-      ...(includeUser
-        ? {
-            user: {
-              select: {
-                id: true, firstName: true, lastName: true,
-                office: { select: { id: true, name: true } },
-                department: { select: { id: true, name: true } },
-              },
-            },
-          }
-        : {}),
-    },
+    // userId is read only to attribute a named survey; an anonymous one never
+    // carries it past this query.
+    select: { answers: true, createdAt: true, userId: true },
     orderBy: { createdAt: "desc" },
   });
+  const respondents = includeUser && rows.length
+    ? await prisma.user.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.userId))] }, organizationId: orgId },
+        select: {
+          id: true, firstName: true, lastName: true,
+          office: { select: { id: true, name: true } },
+          department: { select: { id: true, name: true } },
+        },
+      })
+    : [];
+  const respondentById = new Map<string, Respondent>(respondents.map((u) => [u.id, u]));
+  const responses = rows.map((r) => ({
+    answers: r.answers,
+    createdAt: r.createdAt,
+    user: includeUser ? respondentById.get(r.userId) ?? null : null,
+  }));
 
-  const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as any as Question[]) : [];
+  const questions: Question[] = Array.isArray(survey.questions) ? (survey.questions as unknown as Question[]) : [];
+
+  const anonymous = survey.anonymous !== false;
+  const surveyBelowFloor = anonymous && !meetsAnonymityFloor(responses.length);
 
   const perQuestion = questions.map((q) => {
-    const valuesWithMeta: { value: string | number | string[]; createdAt: Date; user: any | null }[] = [];
+    const valuesWithMeta: AnswerWithMeta[] = [];
     for (const r of responses) {
-      const answers = Array.isArray(r.answers) ? (r.answers as any as Answer[]) : [];
+      const answers = Array.isArray(r.answers) ? (r.answers as unknown as Answer[]) : [];
       const match = answers.find((a) => a.questionId === q.id);
       const isEmpty =
         match === undefined ||
@@ -112,13 +157,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         valuesWithMeta.push({
           value: match!.value,
           createdAt: r.createdAt,
-          user: (r as any).user ?? null,
+          user: r.user,
         });
       }
     }
 
-    if (q.type === "rating") return ratingSummary(q, valuesWithMeta as any, 1, 5);
-    if (q.type === "nps") return ratingSummary(q, valuesWithMeta as any, 0, 10);
+    if (anonymous && (surveyBelowFloor || !meetsAnonymityFloor(valuesWithMeta.length))) {
+      return hiddenBelowFloor(q, valuesWithMeta.length, surveyBelowFloor);
+    }
+    if (anonymous) {
+      if (q.type === "rating") return { ...ratingSummary(q, valuesWithMeta, 1, 5), trend: [] };
+      if (q.type === "nps") return { ...ratingSummary(q, valuesWithMeta, 0, 10), trend: [] };
+    }
+    if (q.type === "rating") return ratingSummary(q, valuesWithMeta, 1, 5);
+    if (q.type === "nps") return ratingSummary(q, valuesWithMeta, 0, 10);
     if (q.type === "single_choice") return choiceSummary(q, valuesWithMeta, "single_choice", q.options || []);
     if (q.type === "multi_choice") return choiceSummary(q, valuesWithMeta, "multi_choice", q.options || []);
     if (q.type === "yes_no") return choiceSummary(q, valuesWithMeta, "yes_no", ["Yes", "No"]);
@@ -128,9 +180,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       text: q.text,
       kind: "text" as const,
       totalAnswered: valuesWithMeta.length,
-      responses: valuesWithMeta.map((v) => ({
+      responses: (anonymous ? shuffled(valuesWithMeta) : valuesWithMeta).map((v) => ({
         value: String(v.value),
-        createdAt: v.createdAt,
+        createdAt: anonymous ? null : v.createdAt,
         respondent: includeUser && v.user
           ? { id: v.user.id, name: `${v.user.firstName} ${v.user.lastName}`, office: v.user.office, department: v.user.department }
           : null,
@@ -141,9 +193,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Top-line summary the UI can render without re-computing. npsScore is
   // standard: % promoters (9-10) minus % detractors (0-6), computed over
   // the first NPS question if the survey has one.
-  const firstNps = perQuestion.find((p: any) => p.kind === "nps");
-  const npsScore = firstNps && (firstNps as any).distribution
-    ? computeNps((firstNps as any).distribution, (firstNps as any).totalAnswered)
+  const firstNps = perQuestion.find((p) => p.kind === "nps");
+  const npsScore = firstNps && "distribution" in firstNps && Array.isArray(firstNps.distribution)
+    ? computeNps(firstNps.distribution, firstNps.totalAnswered)
     : null;
 
   return jsonSuccess({
@@ -156,14 +208,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       anonymous: survey.anonymous,
     },
     totalResponses: responses.length,
+    belowFloor: surveyBelowFloor,
+    anonymityFloor: ANONYMITY_FLOOR,
     summary: {
       npsScore,           // -100..+100, or null if no NPS question
-      firstResponseAt: responses.length > 0 ? responses[responses.length - 1].createdAt : null,
-      lastResponseAt: responses.length > 0 ? responses[0].createdAt : null,
+      firstResponseAt: !anonymous && responses.length > 0 ? responses[responses.length - 1].createdAt : null,
+      lastResponseAt: !anonymous && responses.length > 0 ? responses[0].createdAt : null,
     },
     filters: { officeId: officeId || null, departmentId: departmentId || null },
     questions: perQuestion,
   });
+}
+
+/** A question an anonymous survey keeps to its count (under the floor). */
+function hiddenBelowFloor(q: Question, answered: number, surveyBelowFloor: boolean) {
+  const kind = q.type === "rating" || q.type === "nps" || q.type === "single_choice" || q.type === "multi_choice" || q.type === "yes_no" ? q.type : "text";
+  return {
+    questionId: q.id,
+    text: q.text,
+    kind,
+    // Under the survey-wide floor even the per-question count stays back:
+    // with one answer in, "1 answered" on a question says who skipped it.
+    totalAnswered: surveyBelowFloor ? 0 : answered,
+    belowFloor: true,
+    min: q.type === "nps" ? 0 : 1,
+    max: q.type === "nps" ? 10 : 5,
+    average: null,
+    distribution: [],
+    trend: [],
+    options: [],
+    responses: [],
+  };
 }
 
 function computeNps(distribution: { value: number; count: number }[], total: number): number | null {
@@ -211,7 +286,7 @@ function choiceSummary(
 
 function ratingSummary(
   q: Question,
-  valuesWithMeta: { value: string | number; createdAt: Date }[],
+  valuesWithMeta: { value: string | number | string[]; createdAt: Date }[],
   min: number,
   max: number,
 ) {
@@ -228,7 +303,7 @@ function ratingSummary(
     ? Math.round((numbers.reduce((s, { n }) => s + n, 0) / numbers.length) * 10) / 10
     : null;
 
-  // Daily trend — one bucket per calendar day that had ≥1 response. Keeps
+  // Daily trend, one bucket per calendar day that had ≥1 response. Keeps
   // output small even for long-running surveys.
   const dayKey = (d: Date) => d.toISOString().slice(0, 10);
   const byDay = new Map<string, number[]>();

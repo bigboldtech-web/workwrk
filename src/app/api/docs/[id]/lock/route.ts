@@ -16,7 +16,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
-import { isDocFull, requireDocRole } from "@/lib/doc-sharing";
+import { isDocFullFor, requireDocRole } from "@/lib/doc-sharing";
 import { readDocLock, writeDocLock } from "@/lib/doc-lock";
 
 const schema = z.object({ locked: z.boolean() });
@@ -39,7 +39,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (doc.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
-  if (!isDocFull(ctx, { createdById: doc.createdById })) {
+  if (!(await isDocFullFor(ctx, { id: doc.id }))) {
     return NextResponse.json({ error: "forbidden", message: "You need Full access to lock or unlock this doc." }, { status: 403 });
   }
 

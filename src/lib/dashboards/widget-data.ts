@@ -14,12 +14,13 @@
 // (src/lib/reports/report-server.ts), so none of them can show more than the
 // others.
 //
-// Server-only: prisma and the access engine's read-side set arithmetic (the
-// same accessibleIds call /everything already scopes itself with).
+// Server-only: prisma and the one node-access resolver (the same one-world
+// List read /everything scopes itself with).
 
 import { prisma } from "@/lib/prisma";
-import { accessibleIds } from "@/lib/access/ids";
 import type { Viewer } from "@/lib/access/types";
+import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getBoardStatuses, isDoneStatus, makeStatusLookup, PRIORITY_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
@@ -28,6 +29,12 @@ import { listReader, resolveListScope, spaceForViewer, type LinkViewer, type Lis
 import { projectRowMetadata } from "@/lib/list-metadata";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { applyWidgetFilter, distribution, ruleActive, sortListRows, statValue, type Bucket, type WidgetRow } from "./widget-math";
+import { capacityOn, computeWorkload, UNASSIGNED } from "@/lib/people/workload-count";
+import { effectivePersonSchedule, readPersonScheduleOverride, type WorkSchedule } from "@/lib/work-schedule";
+import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+import { peopleCtxForViewer, relationTo } from "@/lib/people/person-access.server";
+import { readsPeopleData } from "@/lib/people/person-fields";
+import { WORKLOAD_DEFAULTS } from "@/lib/people-prefs";
 import {
   cardVisibility,
   redactWidgetForEditor,
@@ -41,6 +48,8 @@ import {
   type StatScope,
   type Widget,
   type WidgetSource,
+  type WorkloadCountMode,
+  type WorkloadWidget,
 } from "./widgets";
 
 /** How many rows a card reads before it says it was cut. */
@@ -78,10 +87,37 @@ export type WidgetResult =
       total: number;
       truncated?: boolean;
     }
+  | {
+      kind: "workload";
+      mode: WorkloadCountMode;
+      windowDays: number;
+      /** The window's first and last day, "YYYY-MM-DD". */
+      from: string;
+      to: string;
+      people: WorkloadPersonRow[];
+      /** Open work nobody is on, in the same window. */
+      unassigned: { load: number; overdue: number; unscheduled: number } | null;
+      truncated?: boolean;
+    }
   | { kind: "notes" }
   | { kind: "hidden" }
   | { kind: "empty"; reason: "no_readable_lists" }
   | { kind: "error" };
+
+/** One person on a Workload by person card. */
+export interface WorkloadPersonRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+  /** Tasks touching the window (one per day touched) or hours, by mode. */
+  load: number;
+  capacity: number;
+  /** False when the capacity is the company schedule's, not the person's own. */
+  ownCapacity: boolean;
+  overdue: number;
+  unscheduled: number;
+}
 
 function isTaskList(b: { itemType: string; settings: unknown; archivedAt: Date | null }): boolean {
   const system = !!b.settings && typeof b.settings === "object" && (b.settings as Record<string, unknown>).system === true;
@@ -99,13 +135,16 @@ export function sourceResolver(r: WidgetReader, reader: ListReader = listReader(
   const allReadable = (): Promise<string[]> => {
     if (!everything) {
       everything = (async () => {
-        const ids = await accessibleIds(r.viewer, "list", "VIEW");
-        if (ids.readable.size === 0) return [];
+        // Every live task List of the org, through ONE world: the ones this
+        // viewer can open, and no other.
         const rows = await prisma.board.findMany({
-          where: { id: { in: [...ids.readable] }, organizationId: r.ctx.organizationId, archivedAt: null, itemType: "studio-item" },
+          where: { organizationId: r.ctx.organizationId, archivedAt: null, itemType: "studio-item" },
           select: { id: true, itemType: true, settings: true, archivedAt: true },
         });
-        return rows.filter(isTaskList).map((b) => b.id);
+        const lists = rows.filter(isTaskList);
+        if (lists.length === 0) return [];
+        const roles = await nodeRoleMap(nodeCtxFromViewer(r.viewer), "list", lists.map((b) => b.id));
+        return lists.filter((b) => roleAtLeast(roles.get(b.id) ?? "none", "VIEW")).map((b) => b.id);
       })();
     }
     return everything;
@@ -272,6 +311,15 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
       return { kind: "stat", value: statValue(kept, w.metric, w.scope, r.now), metric: w.metric, scope: w.scope, ...(truncated ? { truncated } : {}) };
     }
 
+    if (w.kind === "workload") {
+      const estimateOf = new Map(rowsRaw.map((x) => {
+        const md = (x.metadata ?? {}) as Record<string, unknown>;
+        const est = typeof md.timeEstimate === "number" && Number.isFinite(md.timeEstimate) && md.timeEstimate > 0 ? md.timeEstimate : null;
+        return [x.id, est] as const;
+      }));
+      return { ...(await workloadResult(w, kept.filter((x) => !x.done), estimateOf, r)), ...(truncated ? { truncated } : {}) };
+    }
+
     const homeOf = new Map(rowsRaw.map((x) => [x.id, x.boardId] as const));
     const statusLabel = (row: WidgetRow) => {
       const set = statusesOf.get(homeOf.get(row.id) ?? "") ?? getBoardStatuses(null);
@@ -348,4 +396,107 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
     console.error(`[dashboards] card ${w.id} failed`, err);
     return { kind: "error" };
   }
+}
+
+function ymdOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Workload by person (Phase 6 decision b): the same counting the Workload
+ * page runs (src/lib/people/workload-count.ts), over the OPEN tasks of the
+ * card's readable Lists only, for a window starting this week's Monday.
+ *
+ * WHOSE CAPACITY. A person's own weekly hours and work schedule are people
+ * data (person-fields.ts, the "placement" group): they are used only for a
+ * person the VIEWER may read people data for (self, their chain, the People
+ * team, Admin). Everyone else is measured against the company schedule and
+ * marked ownCapacity: false, so a Space reader never learns a colleague is
+ * part time from a dashboard card. Tasks mode uses the Workload default of
+ * tasks per day. Days are the server's calendar days, which is the card's
+ * resolution (a summary, not the day grid).
+ */
+async function workloadResult(
+  w: WorkloadWidget,
+  open: readonly WidgetRow[],
+  estimateOf: ReadonlyMap<string, number | null>,
+  r: WidgetReader,
+): Promise<Extract<WidgetResult, { kind: "workload" }>> {
+  const now = r.now;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const from = new Date(today);
+  from.setDate(from.getDate() - ((from.getDay() + 6) % 7));
+  const last = new Date(from.getFullYear(), from.getMonth(), from.getDate() + w.windowDays - 1);
+  const personIds = Array.from(new Set(open.flatMap((x) => [x.ownerId, ...x.assigneeIds]).filter((v): v is string => !!v)));
+
+  type Member = { id: string; firstName: string | null; lastName: string | null; avatar: string | null };
+  const members: Member[] = personIds.length
+    ? await prisma.user.findMany({ where: { id: { in: personIds }, organizationId: r.ctx.organizationId, deletedAt: null }, select: { id: true, firstName: true, lastName: true, avatar: true } })
+    : [];
+  // Capacity columns are additive (prisma/sql 2026-09-26-phase6-people.sql):
+  // absent, everyone follows the company schedule.
+  const own = new Map<string, { weekly: number | null; schedule: unknown }>();
+  try {
+    if (members.length) {
+      const rows = await prisma.user.findMany({ where: { id: { in: members.map((m) => m.id) } }, select: { id: true, weeklyCapacityHours: true, workSchedule: true } });
+      for (const x of rows) own.set(x.id, { weekly: x.weeklyCapacityHours ?? null, schedule: readPersonScheduleOverride(x.workSchedule) });
+    }
+  } catch {
+    // Columns absent for one release.
+  }
+  const orgSchedule = await readOrgWorkSchedule(r.ctx.organizationId);
+  const pctx = await peopleCtxForViewer(r.viewer);
+  const mayRead = (id: string) => readsPeopleData(relationTo(pctx, id));
+  const scheduleOf = (id: string): WorkSchedule => (mayRead(id) ? effectivePersonSchedule(orgSchedule, own.get(id)?.schedule ?? null) : orgSchedule);
+
+  const known = new Set(members.map((m) => m.id));
+  // A departed person's id on a task is not a row: the task still counts for
+  // the others on it, and as Unassigned when nobody else is.
+  const items = open.map((x) => {
+    const ownerId = x.ownerId && known.has(x.ownerId) ? x.ownerId : null;
+    const assigneeIds = x.assigneeIds.filter((a) => known.has(a));
+    return {
+      id: x.id,
+      ownerId,
+      assigneeIds,
+      startAt: x.startAt,
+      dueAt: x.dueAt,
+      estimateMinutes: estimateOf.get(x.id) ?? null,
+      shareCount: new Set([...(ownerId ? [ownerId] : []), ...assigneeIds]).size,
+    };
+  });
+  const loads = computeWorkload(items, members.map((m) => m.id), { from, days: w.windowDays, countWeekends: false, today }, scheduleOf);
+  const days = Array.from({ length: w.windowDays }, (_, i) => new Date(from.getFullYear(), from.getMonth(), from.getDate() + i));
+  const dailyTasks = WORKLOAD_DEFAULTS.dailyTasks;
+
+  const people: WorkloadPersonRow[] = members.map((m) => {
+    const l = loads.get(m.id);
+    const readable = mayRead(m.id);
+    const cap = days.reduce(
+      (s, d) => s + capacityOn({ schedule: scheduleOf(m.id), weeklyCapacityHours: readable ? own.get(m.id)?.weekly ?? null : null }, d, { mode: w.mode, dailyTasks, countWeekends: false }),
+      0,
+    );
+    return {
+      id: m.id,
+      firstName: m.firstName ?? "",
+      lastName: m.lastName ?? "",
+      avatar: m.avatar ?? null,
+      load: Math.round((w.mode === "hours" ? l?.totalHours ?? 0 : l?.totalTasks ?? 0) * 10) / 10,
+      capacity: Math.round(cap * 10) / 10,
+      ownCapacity: readable,
+      overdue: l?.overdue.length ?? 0,
+      unscheduled: l?.unscheduled.length ?? 0,
+    };
+  });
+  people.sort((a, b) => (b.capacity > 0 ? b.load / b.capacity : b.load) - (a.capacity > 0 ? a.load / a.capacity : a.load) || b.overdue - a.overdue || `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+  const un = loads.get(UNASSIGNED);
+  return {
+    kind: "workload",
+    mode: w.mode,
+    windowDays: w.windowDays,
+    from: ymdOf(from),
+    to: ymdOf(last),
+    people,
+    unassigned: un ? { load: Math.round((w.mode === "hours" ? un.totalHours : un.totalTasks) * 10) / 10, overdue: un.overdue.length, unscheduled: un.unscheduled.length } : null,
+  };
 }

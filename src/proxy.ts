@@ -142,6 +142,14 @@ function redirectToHost(req: NextRequest, host: string) {
   return NextResponse.redirect(url, 308);
 }
 
+const STATIC_PEOPLE_PAGE = /^\/people\/(me|departments|roles|skills)\/?$/;
+
+function withoutNextUrl(headers: Headers): Headers {
+  const next = new Headers(headers);
+  next.delete("next-url");
+  return next;
+}
+
 export function proxy(req: NextRequest) {
   const adminHost = process.env.ADMIN_HOST?.trim();
   const appHost = process.env.APP_HOST?.trim();
@@ -234,7 +242,20 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  const res = NextResponse.next();
+  // 3.6) The person drawer intercepts /people/:id (@drawer/(.)people/[id]),
+  //      and an interception rewrite matches on the URL alone, so a soft
+  //      navigation to the STATIC pages beside it (/people/me, departments,
+  //      roles, skills) would be drawn as a person record for the id "roles".
+  //      Dropping the Next-Url header for exactly those four paths is what
+  //      the interception rewrite keys on, so they render as the pages they
+  //      are. Nothing else is touched.
+  //      The same goes for the hop /people/me makes to /people/<me>: that
+  //      redirect is followed as a soft navigation FROM /people/me, and an
+  //      intercept there would draw the record as a drawer over an empty page.
+  const fromMyProfile = (req.headers.get("next-url") ?? "").split("?")[0] === "/people/me" && /^\/people\/[^/]+\/?$/.test(path);
+  const res = (STATIC_PEOPLE_PAGE.test(path) || fromMyProfile) && req.headers.has("next-url")
+    ? NextResponse.next({ request: { headers: withoutNextUrl(req.headers) } })
+    : NextResponse.next();
 
   // Authenticated app pages must never be cached: after logout, the browser's
   // Back button (bfcache/history) must not be able to re-show a dashboard the

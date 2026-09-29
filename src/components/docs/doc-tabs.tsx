@@ -22,6 +22,11 @@
  *
  * With nothing open the strip renders nothing at all, so /docs is clean
  * until the first doc opens.
+ *
+ * It also renders nothing for a person whose rail has no Docs hub. Such a
+ * person is moved from /docs/<id> to the doc's Work door before any editor
+ * mounts (src/components/access/canonical-hub-gate.tsx), and the strip of
+ * a hub they do not have must not flash above that move.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -29,6 +34,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { X, Plus, FileText } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { renderNoteIcon } from "./note-icon";
 
 type DocTab = { id: string; title: string; icon?: string };
@@ -57,6 +63,9 @@ export function DocTabsBar() {
   const router = useRouter();
   const pathname = usePathname();
   const hydrated = useHydrated();
+  // The same set the shell's isHubVisible reads.
+  const { railApps } = useOsShell();
+  const docsOnRail = railApps.some((a) => a.key === "docs");
   const [tabs, setTabs] = useState<DocTab[]>(loadTabs);
   const [mod] = useState(() =>
     typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Option" : "Alt",
@@ -76,9 +85,9 @@ export function DocTabsBar() {
   // instead of under it. Zero when the strip renders nothing.
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--doctabs-h", tabs.length > 0 ? "36px" : "0px");
+    root.style.setProperty("--doctabs-h", docsOnRail && tabs.length > 0 ? "36px" : "0px");
     return () => { root.style.setProperty("--doctabs-h", "0px"); };
-  }, [tabs.length]);
+  }, [docsOnRail, tabs.length]);
 
   const upsert = useCallback((t: DocTab) => {
     setTabs((prev) => {
@@ -137,6 +146,8 @@ export function DocTabsBar() {
   // Keyed off e.code so the Mac Option remapping (Option 1 gives "¡")
   // does not break matching.
   useEffect(() => {
+    // No strip, no strip shortcuts: they would jump to tabs nobody can see.
+    if (!docsOnRail) return;
     function onKey(e: KeyboardEvent) {
       if (!e.altKey || e.metaKey || e.ctrlKey) return;
       if (/^Digit[1-9]$/.test(e.code)) {
@@ -155,7 +166,7 @@ export function DocTabsBar() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tabs, activeId, router]);
+  }, [docsOnRail, tabs, activeId, router]);
 
   const [creating, setCreating] = useState(false);
   async function newDoc() {
@@ -175,8 +186,8 @@ export function DocTabsBar() {
   }
 
   // Nothing open: no strip, and nothing rendered before hydration so the
-  // server and client HTML agree.
-  if (!hydrated || tabs.length === 0) return null;
+  // server and client HTML agree. No Docs hub on the rail: no strip either.
+  if (!hydrated || !docsOnRail || tabs.length === 0) return null;
 
   return (
     <div

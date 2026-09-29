@@ -58,6 +58,9 @@ export function BootProvider({ boot, children }: { boot: BootPayload; children: 
       if (ev.type === "notif.changed") setCountsState((c) => ({ ...c, inboxUnread: ev.unread }));
       else if (ev.type === "timer.started") setTimer(ev.session);
       else if (ev.type === "timer.stopped") setTimer((t) => (t && t.id === ev.session.id ? null : t));
+      // A weekly review was decided (here or in another tab): the Weekly
+      // reviews and My team badges move, so re-read the counts.
+      else if (ev.type === "review.decided") void refreshCounts();
     };
     const onLegacyChange = () => { void refreshCounts(); };
     const onState = (e: Event) => {

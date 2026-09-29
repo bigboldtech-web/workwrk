@@ -9,7 +9,7 @@
 // on the task after, unless the patch explicitly said otherwise.
 
 import { describe, it, expect } from "vitest";
-import { applyHandoverAssignees, applyOwnerOnlyPatch } from "@/lib/board-items-shared";
+import { applyHandoverAssignees, applyOwnerOnlyPatch, groupHandoverAssignees } from "@/lib/board-items-shared";
 
 describe("applyOwnerOnlyPatch — setting an owner", () => {
   it("keeps all three assignees when the owner changes (the reported bug)", () => {
@@ -151,5 +151,45 @@ describe("applyOwnerOnlyPatch — junk ids", () => {
   it("does not carry a whitespace-only id forward as a permanent assignee", () => {
     const out = applyOwnerOnlyPatch(["a", "   ", "b"], "a", "b");
     expect(out.assigneeIds).toEqual(["b", "a"]);
+  });
+});
+
+// The route used to key groups with join(" ") and split them with a NUL byte,
+// so a two-person task came back as ONE id "recipient x". The groups now carry
+// the set itself; these cases pin the round trip the route writes.
+describe("groupHandoverAssignees, what the handover route writes", () => {
+  it("keeps every co-assignee as a separate id on a multi-assignee task", () => {
+    const groups = groupHandoverAssignees(
+      [{ id: "t1", assigneeIds: ["leaver", "x", "y"] }],
+      "leaver",
+      "recipient",
+    );
+    expect(groups).toEqual([{ assigneeIds: ["recipient", "x", "y"], ids: ["t1"] }]);
+  });
+
+  it("groups tasks that end with the same set and splits those that do not", () => {
+    const groups = groupHandoverAssignees(
+      [
+        { id: "t1", assigneeIds: ["leaver"] },
+        { id: "t2", assigneeIds: ["leaver", "x"] },
+        { id: "t3", assigneeIds: ["x", "leaver"] },
+        { id: "t4", assigneeIds: null },
+      ],
+      "leaver",
+      "recipient",
+    );
+    expect(groups).toEqual([
+      { assigneeIds: ["recipient"], ids: ["t1", "t4"] },
+      { assigneeIds: ["recipient", "x"], ids: ["t2", "t3"] },
+    ]);
+  });
+
+  it("never merges ids containing spaces into one assignee", () => {
+    const groups = groupHandoverAssignees(
+      [{ id: "t1", assigneeIds: ["leaver", "a b"] }],
+      "leaver",
+      "r",
+    );
+    expect(groups[0].assigneeIds).toEqual(["r", "a b"]);
   });
 });

@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
+import { recordSpaceInviteAccepted } from "@/lib/access/grants";
 
 // GET: Fetch invitation details by token
 export async function GET(req: NextRequest) {
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest) {
     email: invitation.email,
     organizationName: invitation.organization.name,
     accessLevel: invitation.accessLevel,
+    // What a People CSV import carried, so the form starts filled.
+    firstName: invitation.firstName ?? null,
+    lastName: invitation.lastName ?? null,
   });
 }
 
@@ -99,6 +103,8 @@ export async function POST(req: Request) {
           roleId: invitation.roleId,
           managerId: invitation.managerId,
           officeId: invitation.officeId,
+          // The phone a People CSV import carried lands on the record.
+          phone: invitation.phone ?? null,
         },
       });
 
@@ -164,15 +170,37 @@ export async function POST(req: Request) {
       // 🆕 Phase 18 — Space-targeted invite. Drop the new user into
       // the Space they were invited to with the role the admin chose.
       if (invitation.spaceId) {
+        const role = invitation.spaceRole ?? "MEMBER";
+        const before = await tx.spaceMember.findUnique({
+          where: { spaceId_userId: { spaceId: invitation.spaceId, userId: user.id } },
+          select: { role: true },
+        });
         await tx.spaceMember.upsert({
           where: { spaceId_userId: { spaceId: invitation.spaceId, userId: user.id } },
           create: {
             spaceId: invitation.spaceId,
             userId: user.id,
-            role: invitation.spaceRole ?? "MEMBER",
+            role,
           },
           update: {},
         });
+        // The grant the dialog's Email tab made, recorded as security
+        // activity in this same transaction (A7), credited to whoever sent
+        // the invitation.
+        const inviterId = await recordSpaceInviteAccepted(tx, {
+          organizationId: invitation.organizationId,
+          spaceId: invitation.spaceId,
+          invitationId: invitation.id,
+          userId: user.id,
+          role,
+          previousRole: before?.role ?? null,
+        });
+        if (inviterId && !before) {
+          await tx.spaceMember.update({
+            where: { spaceId_userId: { spaceId: invitation.spaceId, userId: user.id } },
+            data: { invitedBy: inviterId },
+          });
+        }
       }
 
       await tx.invitation.update({

@@ -5,19 +5,20 @@ import { widgetInputSchema } from "./widgets";
 const layout = { x: 0, y: 0, w: 3, h: 3 };
 
 describe("WIDGET_KIND_META", () => {
-  it("offers Stat, Chart, List and Text, in that order, with their sizes", () => {
+  it("offers Stat, Chart, List, Workload by person and Text, in that order, with their sizes", () => {
     expect(WIDGET_KIND_META.map((m) => [m.kind, m.label, m.defaultSize.w, m.defaultSize.h])).toEqual([
       ["stat", "Stat", 3, 3],
       ["chart", "Chart", 6, 6],
       ["list", "List", 6, 7],
+      ["workload", "Workload by person", 6, 7],
       ["notes", "Text", 4, 3],
     ]);
     expect(WIDGET_KIND_META.find((m) => m.kind === "stat")?.description).toBe("Count or add up tasks that match a filter");
     expect(WIDGET_KIND_META.find((m) => m.kind === "notes")?.description).toBe("A heading or a note");
   });
-  it("offers all four on both surfaces", () => {
+  it("offers the four on both surfaces, and Workload by person on a Space Overview only", () => {
     expect(kindsFor("dashboard").map((m) => m.kind)).toEqual(["stat", "chart", "list", "notes"]);
-    expect(kindsFor("space-overview").map((m) => m.kind)).toEqual(["stat", "chart", "list", "notes"]);
+    expect(kindsFor("space-overview").map((m) => m.kind)).toEqual(["stat", "chart", "list", "workload", "notes"]);
     expect(kindMeta("chart")?.label).toBe("Chart");
     expect(kindMeta("hologram")).toBeUndefined();
   });
@@ -49,5 +50,8 @@ describe("newWidgetInput", () => {
     const onDashboard = newWidgetInput("chart", { id: "w_2", layout });
     expect(onDashboard).toMatchObject({ source: { kind: "all" }, groupBy: "status", display: "bar" });
     expect(newWidgetInput("notes", { id: "w_3", layout })).toEqual({ id: "w_3", kind: "notes", title: "Text", text: "", layout });
+    expect(newWidgetInput("workload", { id: "w_4", spaceId: "S", layout })).toMatchObject({
+      kind: "workload", title: "Workload by person", source: { kind: "space", spaceId: "S" }, windowDays: 14, mode: "tasks", filter: { hideDone: true },
+    });
   });
 });

@@ -92,7 +92,10 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   action_item: k("action_item", "Action item from a meeting", "ListChecks", "primary", "tasks"),
   boundary_request: k("boundary_request", "Needs your approval", "ShieldCheck", "primary", "requests"),
   access_request: k("access_request", "Access request", "KeyRound", "primary", "requests"),
-  access_granted: k("access_granted", "Access granted", "KeyRound", "primary", "requests"),
+  // Written by src/lib/access/grants.ts when someone gives you a role on a
+  // Space, Folder, List, doc, table, canvas or form, or raises yours (never
+  // for a downgrade, a removal or a change you made yourself).
+  access_granted: k("access_granted", "Shared with you", "UserPlus", "primary", "requests"),
   access_expiring: k("access_expiring", "Access expiring", "KeyRound", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
@@ -115,6 +118,21 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   manager_reviews_due: k("manager_reviews_due", "Reviews due from you", "ClipboardCheck", "primary", "people"),
   candor_open: k("candor_open", "Candor session", "ClipboardList", "primary", "people"),
   survey_open: k("survey_open", "Survey", "ClipboardList", "primary", "people"),
+  // ── Phase 6: the KPI review loop and the weekly review decision ───
+  // spec-goals section 3 fixes the four KPI names so the writer and the
+  // Inbox agree. Two are work addressed to one person (a number to approve,
+  // a number to change) and sit in Primary; the other two tell the employee
+  // what happened and sit in Other, beside kudos. The weekly review decision
+  // (spec-teams-performance section 0, PO-1) is the employee's answer to a
+  // review they submitted, so it is Primary like the review itself.
+  kpi_submitted: k("kpi_submitted", "KPI numbers to review", "Gauge", "primary", "people"),
+  kpi_changes_requested: k("kpi_changes_requested", "KPI change requested", "Gauge", "primary", "people"),
+  kpi_approved: k("kpi_approved", "KPI numbers approved", "Gauge", "other", "people"),
+  kpi_recorded_for_you: k("kpi_recorded_for_you", "KPI numbers recorded for you", "Gauge", "other", "people"),
+  weekly_review_decided: k("weekly_review_decided", "Weekly review answered", "CalendarCheck", "primary", "people"),
+  // A nudge from /team/reviews: submit your weekly review, or decide the
+  // ones waiting for you (spec-teams-performance /team/reviews bulk bar).
+  weekly_review_reminder: k("weekly_review_reminder", "Weekly review reminder", "CalendarCheck", "primary", "people"),
   policy: k("policy", "Policy to acknowledge", "ScrollText", "primary", "announcements"),
   policy_published: k("policy_published", "Policy to acknowledge", "ScrollText", "primary", "announcements"),
   meeting_invite: k("meeting_invite", "Meeting invite", "Video", "primary", "people"),

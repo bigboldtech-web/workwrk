@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Returns the set of user IDs in `rootUserId`'s team — self + all direct and
- * indirect reports — scoped to `organizationId`. Uses a recursive CTE so the
+ * Returns the set of user IDs in `rootUserId`'s team, self + all direct and
+ * indirect reports, scoped to `organizationId`. Uses a recursive CTE so the
  * walk happens in the database (indexed on `managerId`) instead of fetching
  * every org user and walking the tree in Node. Scales to thousands of users.
  */

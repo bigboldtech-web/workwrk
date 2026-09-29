@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { normalizeEnabledModules } from "@/lib/module-keys";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { MODULE_SLUGS } from "@/lib/modules";
 import { DEFAULT_INSTALLED_SLUGS, DEPARTMENT_RECOMMENDED_PRODUCTS } from "@/lib/products/catalog";
 
@@ -62,21 +63,19 @@ export async function POST(req: Request) {
 
     const normalizedModules = normalizeEnabledModules(enabledModules);
 
-    // Update organization settings
-    await prisma.organization.update({
-      where: { id: orgId },
-      data: {
-        settings: {
-          setupCompleted: true,
-          setupCompletedAt: new Date().toISOString(),
-          businessType,
-          industry,
-          useCase,
-          teamSize,
-          enabledModules: normalizedModules,
-          ...(departmentRouter ? { departmentRouter } : {}),
-        },
-      },
+    // Update organization settings: the keys setup owns, one statement, so
+    // every other key of the shared column (doc sharing, branding, the access
+    // model, process defaults) is kept as the database holds it. A key the
+    // body leaves out is cleared, as the whole-blob write used to clear it.
+    await writeOrgSettingsKeys(orgId, {
+      setupCompleted: true,
+      setupCompletedAt: new Date().toISOString(),
+      businessType: businessType ?? null,
+      industry: industry ?? null,
+      useCase: useCase ?? null,
+      teamSize: teamSize ?? null,
+      enabledModules: normalizedModules,
+      departmentRouter: departmentRouter ? departmentRouter : null,
     });
 
     // Provision ProductInstallation rows so the new modular Work OS

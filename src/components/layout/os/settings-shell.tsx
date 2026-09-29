@@ -78,7 +78,9 @@ const DOORS: NavDoor[] = [
         items: [
           { label: "Members", icon: Users, href: "/settings/members", keywords: ["invite", "guests", "teams", "deactivate"] },
           { label: "Structure", icon: Network, href: "/settings/structure", keywords: ["departments", "job titles", "offices"] },
-          { label: "Reporting hierarchy", icon: Network, href: "/settings/hierarchy", keywords: ["manager", "reports to", "org chart"] },
+          // /settings/hierarchy 308s to the one org chart (Phase 6); the row
+          // points there directly so the takeover never bounces through it.
+          { label: "Org chart", icon: Network, href: "/organization", keywords: ["manager", "reports to", "reporting hierarchy"] },
           { label: "Access", icon: ShieldCheck, href: "/settings/permissions", keywords: ["permissions", "roles", "people team"] },
         ],
       },

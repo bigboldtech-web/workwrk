@@ -1,448 +1,449 @@
 "use client";
 
-/* Review cycles — performance review cycle administration hero list.
- * (Named "Review cycles" in all copy so it stops colliding with the
- * Teams weekly "Reviews" queue.)
- *
- *  GET   /api/reviews
- *  POST  /api/reviews             { name, type, startDate, endDate }
- *  PATCH /api/reviews             { id, status?, ... }   — never DRAFT→ACTIVE
- *  POST  /api/reviews/[id]/launch — the ONLY door out of DRAFT: creates a
- *        Review row per active employee, then flips the cycle ACTIVE.
- */
+// Review cycles (spec-teams-performance /reviews): every review round the
+// company is running, and the way to start a new one.
+//
+//   views     Active (default, includes In calibration) · Draft · Completed
+//             (and Cancelled) · All  (?view=)
+//   toolbar   Filter (search, Type, Period, Started by, Covers), Sort (Newest
+//             first, Name A to Z, Closing soonest, Least complete), the ONE
+//             blue New cycle (only for someone who may start one), "..."
+//             Display (columns), Export CSV (never an Agent), Scoring and
+//             reviews (Owner and Admin)
+//   body      a TableCard, no checkbox column (no action makes sense on
+//             several cycles at once). The row opens the cycle page; the
+//             row "..." holds the three named moves, each behind a confirm:
+//             Launch cycle, Start calibration, Cancel cycle, plus Send a
+//             reminder. Completed is only ever reached by Finalize.
+//   footer    "Total cycles N", computed by the server over every cycle the
+//             viewer may read (the old tile strip counted a capped page).
+//
+// What went: the Featured cycle hero (its Launch, ring and raw "Move to
+// {next}" PATCH are the row menu and the cycle page), the four tiles (their
+// numbers are the footer and the Progress column), the KRA/KPI and Talent
+// header links (both are Teams sidebar rows).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import {
-  Award,
-  Search,
-  Calendar as CalendarIcon,
-  CheckCircle2,
-  Play,
-  ChevronRight,
-  ArrowRight,
-  Sparkles,
-  Target,
-  Activity,
-  Users,
-  TrendingUp,
-  Rocket,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Ban, Bell, Download, ExternalLink, Link2, Play, Plus, Scale, Settings2, Trash2 } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C } from "@/components/layout/os/catalog";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { Picker } from "@/components/ui/picker";
+import { TableCard, RowMoreButton, type TableColumn } from "@/components/ui/table-card";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { PeoplePickerField, ToneChip, type PickPerson } from "@/components/people/person-bits";
+import { ReviewStepDots } from "@/components/performance/review-step-dots";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { apiFetch } from "@/lib/api-fetch";
+import { formatDate } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { CYCLE_STATUS, CYCLE_TYPES, cycleStatusOf, cycleTypeLabel, stepsPassed } from "@/lib/performance/review-cycle";
 import { NewReviewCycleDialog } from "./new-review-dialog";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { calibrationConfirmText, launchConfirmText, launchNobodyText, type LaunchPreview } from "./[id]/cycle-types";
 
-type CycleStatus = "DRAFT" | "ACTIVE" | "IN_CALIBRATION" | "COMPLETED" | "CANCELLED";
-
-type ApiCycle = {
+type CycleRow = {
   id: string;
   name: string;
   type: string;
-  status: CycleStatus;
+  status: string;
   startDate: string;
   endDate: string;
-  reviews?: { id: string; status: string }[];
-  _count?: { reviews?: number };
+  audienceType: string;
+  covers: string;
+  createdBy: { id: string; name: string } | null;
+  counts: { total: number; selfDone: number; managerDone: number; calibrated: number; completed: number };
+  canManage: boolean;
+  /** A Draft nobody has a review in, and the viewer started it or is the People team or Admin. */
+  canDelete?: boolean;
 };
-
-const STATUS_LABELS: Record<CycleStatus, string> = {
-  DRAFT: "Draft", ACTIVE: "Active", IN_CALIBRATION: "In calibration",
-  COMPLETED: "Completed", CANCELLED: "Cancelled",
+type ListResponse = { data: CycleRow[]; pagination: { total: number; page: number; limit: number; hasMore: boolean } };
+type OptionalCol = "type" | "period" | "covers" | "progress" | "by";
+const OPTIONAL_COLS: Array<{ key: OptionalCol; label: string }> = [
+  { key: "type", label: "Type" },
+  { key: "period", label: "Period" },
+  { key: "covers", label: "Covers" },
+  { key: "progress", label: "Completion" },
+  { key: "by", label: "Started by" },
+];
+const SORTS = [
+  { value: "newest", label: "Newest first" },
+  { value: "name", label: "Name A to Z" },
+  { value: "closing", label: "Closing soonest" },
+  { value: "least", label: "Least complete" },
+];
+type View = "active" | "draft" | "completed" | "all";
+const VIEW_STATUSES: Record<View, string[]> = {
+  active: ["ACTIVE", "IN_CALIBRATION"],
+  draft: ["DRAFT"],
+  completed: ["COMPLETED", "CANCELLED"],
+  all: Object.keys(CYCLE_STATUS),
 };
-const STATUS_COLORS: Record<CycleStatus, string> = {
-  DRAFT: C.blue, ACTIVE: C.orange, IN_CALIBRATION: C.teal,
-  COMPLETED: C.green, CANCELLED: C.gray,
-};
+const PAGE = 40;
 
-const TYPE_LABELS: Record<string, string> = {
-  MONTHLY_PULSE: "Monthly pulse",
-  QUARTERLY: "Quarterly",
-  ANNUAL: "Annual",
-  PROBATION: "Probation",
-  PIP_REVIEW: "PIP",
-};
-const TYPE_COLORS: Record<string, string> = {
-  MONTHLY_PULSE: C.teal, QUARTERLY: C.blue, ANNUAL: C.brown,
-  PROBATION: C.orange, PIP_REVIEW: C.red,
-};
+export default function ReviewsClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const { toast } = useOsToast();
+  const { prefs, patchPrefs } = useOsShell();
+  const { boot } = useBoot();
+  const confirm = useConfirm();
+  const datePrefs = useDatePrefs();
+  // A cycle's start and close are calendar days, stored at midnight UTC:
+  // read them as days, never shifted a day by the viewer's time zone.
+  const dayPrefs = { ...datePrefs, timezone: "UTC" };
+  const { openSettings } = useSettingsNav();
 
-const FLOW: CycleStatus[] = ["DRAFT", "ACTIVE", "IN_CALIBRATION", "COMPLETED"];
+  const viewer = boot.viewer as { id: string; orgRole?: string; isAgent?: boolean; peopleTeam?: boolean; hasReports?: boolean };
+  const orgAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
+  const orgWide = orgAdmin || viewer.peopleTeam === true;
+  const canCreate = orgWide || viewer.hasReports === true;
+  const canExport = !viewer.isAgent && viewer.orgRole !== "GUEST";
 
-function fmtPeriod(start: string, end: string): string {
-  const s = new Date(start); const e = new Date(end);
-  const sameYear = s.getFullYear() === e.getFullYear();
-  return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) })}`;
-}
-function daysUntil(iso: string): number {
-  const t = new Date(iso).getTime();
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return Math.round((t - today.getTime()) / 86_400_000);
-}
+  const rawView = sp?.get("view");
+  const view: View = rawView === "draft" || rawView === "completed" || rawView === "all" ? rawView : "active";
+  const q = sp?.get("q") ?? "";
+  const status = sp?.get("status") ?? "";
+  const type = sp?.get("type") ?? "";
+  const from = sp?.get("from") ?? "";
+  const to = sp?.get("to") ?? "";
+  const by = sp?.get("by") ?? "";
+  const audience = sp?.get("audience") ?? "";
+  const sortParam = sp?.get("sort") ?? "";
+  const sort = SORTS.some((s) => s.value === sortParam) ? sortParam : "newest";
+  const page = Math.max(1, Number(sp?.get("page") ?? "1") || 1);
+  const filters = [q, type, from, to, by, audience].filter(Boolean).length;
 
-export default function ReviewsPage() {
-  const [cycles, setCycles] = useState<ApiCycle[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Set<CycleStatus>>(new Set());
+  const stored = ((prefs.home as { teams?: { surface?: Record<string, { viewOptions?: { columns?: Record<string, boolean> } }> } } | undefined)
+    ?.teams?.surface?.reviews?.viewOptions?.columns) ?? {};
+  const [colsLocal, setColsLocal] = useState<Partial<Record<OptionalCol, boolean>>>({});
+  const cols = Object.fromEntries(OPTIONAL_COLS.map((c) => [c.key, colsLocal[c.key] ?? stored[c.key] ?? c.key !== "by"])) as Record<OptionalCol, boolean>;
+  const setCol = (k: OptionalCol, on: boolean) => {
+    setColsLocal((c) => ({ ...c, [k]: on }));
+    void patchPrefs({ home: { teams: { surface: { reviews: { viewOptions: { columns: { [k]: on } } } } } } }).then((ok) => {
+      if (!ok) toast("Couldn't save that setting", { tone: "danger" });
+    });
+  };
+
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp?.toString() ?? "");
+    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
+    if (!("page" in patch)) next.delete("page");
+    const s = next.toString();
+    router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+  }, [sp, router, pathname]);
+
+  // ── New cycle (?new=1 from the Teams "+") ───────────────────────────
   const [newOpen, setNewOpen] = useState(false);
   const [now] = useState(() => new Date());
-  // The Reviews/Teams "+" → Start review cycle routes here with ?new=1.
-  // Armed latch — disarms on fire, re-arms once router.replace strips the
-  // param (a one-shot ref left repeat "+" clicks dead and a refresh with
-  // the param still in the URL re-opened the dialog).
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const newArmed = useRef(true);
   useEffect(() => {
-    if (searchParams.get("new") !== "1") { newArmed.current = true; return; }
+    if (sp?.get("new") !== "1") { newArmed.current = true; return; }
     if (!newArmed.current) return;
     newArmed.current = false;
-    router.replace("/reviews", { scroll: false });
-    setNewOpen(true);
-  }, [searchParams, router]);
-  const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
+    setParams({ new: null });
+    if (canCreate) setTimeout(() => setNewOpen(true), 0);
+  }, [sp, canCreate, setParams]);
 
+  // ── The list ──────────────────────────────────────────────────────
+  const listQs = useMemo(() => {
+    const p = new URLSearchParams({ view, sort, page: String(page), limit: String(PAGE) });
+    for (const [k, v] of Object.entries({ q, status, type, from, to, by, audience })) if (v) p.set(k, v);
+    return p.toString();
+  }, [view, sort, page, q, status, type, from, to, by, audience]);
+  const [list, setList] = useState<ListResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/reviews?limit=100");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const list: ApiCycle[] = data?.data?.items ?? data?.data?.data ?? data?.items ?? (Array.isArray(data?.data) ? data.data : []) ?? (Array.isArray(data) ? data : []);
-      setCycles(list);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
+    const r = await apiFetch<ListResponse>(`/api/reviews?${listQs}`, { cache: "no-store" });
+    if (!r.ok) {
+      setError(r.error || "Couldn't load review cycles");
+      toast(r.error || "Couldn't load review cycles", { tone: "danger" });
+      return;
     }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("reviews");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+    setError(null);
+    setList(r.data);
+  }, [listQs, toast]);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  async function patch(id: string, body: Record<string, unknown>): Promise<boolean> {
-    try {
-      const res = await fetch("/api/reviews", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...body }),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only HR can move review cycles");
-        else {
-          const data = await res.json().catch(() => null);
-          toast(data?.error || "Couldn't update");
-        }
-        return false;
-      }
-      void load();
-      return true;
-    } catch { return false; }
-  }
+  // ── Filter state ──────────────────────────────────────────────────
+  const [filterOpen, setFilterOpen] = useState(filters > 0);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [draftQ, setDraftQ] = useState(q);
+  const [byPick, setByPick] = useState<PickPerson | null>(null);
+  const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    if (draftQ === q) return;
+    const t = setTimeout(() => setParams({ q: draftQ.trim() || null }), 250);
+    return () => clearTimeout(t);
+  }, [draftQ, q, setParams]);
+  useEffect(() => {
+    if (!filterOpen || depts.length) return;
+    void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((r) => { if (r.ok && Array.isArray(r.data)) setDepts(r.data); });
+  }, [filterOpen, depts.length]);
+  const clearFilters = () => { setDraftQ(""); setByPick(null); setParams({ q: null, type: null, from: null, to: null, by: null, audience: null, status: null }); };
+  const types = type ? type.split(",") : [];
+  const toggleType = (t: string, on: boolean) => {
+    const next = new Set(types);
+    if (on) next.add(t); else next.delete(t);
+    setParams({ type: [...next].join(",") || null });
+  };
 
-  // The only door out of DRAFT: POST /launch generates a Review row for
-  // every active employee (reviewer = their manager), notifies + emails
-  // them, and flips the cycle ACTIVE. A raw DRAFT→ACTIVE status PATCH is
-  // rejected server-side when the cycle has no reviews.
-  async function launch(id: string): Promise<boolean> {
-    try {
-      const res = await fetch(`/api/reviews/${id}/launch`, { method: "POST" });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        if (res.status === 403) toast("Only managers/HR can launch review cycles");
-        else toast(data?.error || "Couldn't launch the cycle");
-        return false;
-      }
-      toast(data?.message || "Cycle launched");
-      void load();
-      return true;
-    } catch { return false; }
-  }
+  // ── Row actions ───────────────────────────────────────────────────
+  const [menu, setMenu] = useState<{ row: CycleRow; anchor: RefObject<HTMLElement | null> } | null>(null);
+  const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  // Launch emails every person it covers and cannot be undone: the confirm
+  // names the count the launch will use (GET /launch, the same rule, and a
+  // manager's cycle clipped to their line as the launch clips it), never the
+  // raw Covers label. No count, no confirm; the POST refuses if it moved.
+  const launch = async (c: CycleRow) => {
+    const pre = await apiFetch<LaunchPreview>(`/api/reviews/${c.id}/launch`, { cache: "no-store" });
+    if (!pre.ok) { toast(pre.error || "Couldn't count who this cycle covers", { tone: "danger", action: { label: "Try again", onClick: () => void launch(c) } }); return; }
+    const description = launchConfirmText(pre.data);
+    if (!description) { toast(launchNobodyText(pre.data), { tone: "danger" }); return; }
+    const ok = await confirm({ title: `Launch ${c.name}?`, description, confirmLabel: "Launch", destructive: false });
+    if (!ok) return;
+    const r = await apiFetch<{ count: number }>(`/api/reviews/${c.id}/launch`, { method: "POST", json: { expect: pre.data.count } });
+    if (!r.ok) { toast(r.error || "Couldn't launch the cycle", { tone: "danger" }); return; }
+    toast(`Launched. ${people(r.data.count)} asked for a review.`);
+    void load();
+  };
+  const startCalibration = async (c: CycleRow) => {
+    const ok = await confirm({ title: `Start calibration for ${c.name}?`, description: calibrationConfirmText(c.counts), confirmLabel: "Start calibration", destructive: false });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews`, { method: "PATCH", json: { id: c.id, status: "IN_CALIBRATION" } });
+    if (!r.ok) { toast(r.error || "Couldn't start calibration", { tone: "danger" }); return; }
+    toast("Calibration started");
+    void load();
+  };
+  const remind = async (c: CycleRow) => {
+    const r = await apiFetch<{ notified: number }>(`/api/reviews/${c.id}/reminders`, { method: "POST", json: {} });
+    if (!r.ok) { toast(r.error || "Couldn't send reminders", { tone: "danger" }); return; }
+    toast(r.data.notified ? `Reminded ${people(r.data.notified)}` : "Nobody needed a reminder");
+  };
+  const cancel = async (c: CycleRow) => {
+    const ok = await confirm({ title: `Cancel ${c.name}?`, description: "Nothing is deleted. The cycle stops and nobody is asked for anything more.", confirmLabel: "Cancel cycle", cancelLabel: "Keep it", destructive: true });
+    if (!ok) return;
+    const r = await apiFetch(`/api/reviews/${c.id}/cancel`, { method: "POST", json: {} });
+    if (!r.ok) { toast(r.error || "Couldn't cancel the cycle", { tone: "danger" }); return; }
+    toast("Cycle cancelled");
+    void load();
+  };
+  const removeDraft = async (c: CycleRow) => {
+    const ok = await confirm({ title: `Delete ${c.name}?`, description: "It is a draft and nobody has been asked for anything, so nothing else is lost.", confirmLabel: "Delete draft", destructive: true });
+    if (!ok) return;
+    await sendDeleteDraft(c);
+  };
+  // The DELETE itself, apart from the confirm: Try again resends it at once
+  // (the person already confirmed), never asks again.
+  const sendDeleteDraft = async (c: CycleRow) => {
+    const r = await apiFetch(`/api/reviews?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
+    if (!r.ok) { toast(r.error || "Couldn't delete the draft", { tone: "danger", action: { label: "Try again", onClick: () => void sendDeleteDraft(c) } }); return; }
+    toast("Draft deleted");
+    void load();
+  };
+  const copyLink = (id: string) => {
+    void navigator.clipboard.writeText(`${window.location.origin}/reviews/${id}`)
+      .then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
+  };
 
-  // ─── Featured cycle (hero) ──────────────────────────────
-  const featured = useMemo(() => {
-    const list = cycles ?? [];
-    return list.find((c) => c.status === "ACTIVE" || c.status === "IN_CALIBRATION")
-      ?? list.find((c) => c.status === "DRAFT")
-      ?? list.slice().sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0]
-      ?? null;
-  }, [cycles]);
+  const period = (c: CycleRow) => `${formatDate(c.startDate, dayPrefs, "date")} to ${formatDate(c.endDate, dayPrefs, "date")}`;
+  const statusFilterNode = (
+    <span className="relative">
+      <button type="button" onClick={(e) => { e.stopPropagation(); setStatusOpen((v) => !v); }} className="ms-1 inline-flex h-6 items-center rounded px-1 text-xs font-medium text-ink-2 hover:bg-hover hover:text-ink" aria-haspopup="listbox">
+        {status ? cycleStatusOf(status).label : "All"} ▾
+      </button>
+      {statusOpen ? (
+        <Picker open onClose={() => setStatusOpen(false)} ariaLabel="Status" selected={status || "any"} className="absolute start-0 top-7 z-50"
+          sections={[{ options: [{ value: "any", label: "All" }, ...VIEW_STATUSES[view].map((s) => ({ value: s, label: cycleStatusOf(s).label }))] }]}
+          onSelect={(v) => { setStatusOpen(false); setParams({ status: v === "any" ? null : v }); }} />
+      ) : null}
+    </span>
+  );
 
-  const filtered = useMemo(() => {
-    let list = cycles ?? [];
-    if (featured) list = list.filter((c) => c.id !== featured.id);
-    if (statusFilter.size > 0) list = list.filter((c) => statusFilter.has(c.status));
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.type.toLowerCase().includes(q));
-    return list.slice().sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
-  }, [cycles, statusFilter, search, featured]);
+  const columns: TableColumn<CycleRow>[] = [
+    {
+      key: "name", label: "Cycle", title: true, width: "minmax(240px,2fr)", headerFilter: statusFilterNode,
+      render: (c) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate">{c.name}</span>
+          <ToneChip tone={cycleStatusOf(c.status).tone} label={cycleStatusOf(c.status).label} />
+        </span>
+      ),
+    },
+    ...(cols.type ? [{ key: "type", label: "Type", width: "150px", hideBelow: 820, render: (c: CycleRow) => <span className="truncate">{cycleTypeLabel(c.type)}</span> }] : []),
+    ...(cols.period ? [{ key: "period", label: "Period", width: "minmax(200px,1fr)", hideBelow: 980, render: (c: CycleRow) => <span className="truncate tabular-nums">{period(c)}</span> }] : []),
+    ...(cols.covers ? [{ key: "covers", label: "Covers", width: "minmax(110px,1fr)", hideBelow: 1000, render: (c: CycleRow) => <span className="truncate text-ink-2">{c.covers}</span> }] : []),
+    ...(cols.progress ? [{
+      key: "progress", label: "Progress", width: "190px", hideBelow: 700,
+      render: (c: CycleRow) => (
+        <span className="flex items-center gap-2">
+          {/* Stalled: still Active past its close date, so the step it is on is --os-danger-solid. */}
+          <ReviewStepDots passed={stepsPassed(c.status, c.counts)} stalled={c.status === "ACTIVE" && new Date(c.endDate).getTime() < Date.now()} />
+          <span className="text-sm tabular-nums text-ink-2">{c.counts.total ? `${c.counts.completed} of ${c.counts.total}` : c.status === "DRAFT" ? "Not launched" : "Nobody"}</span>
+        </span>
+      ),
+    }] : []),
+    ...(cols.by ? [{ key: "by", label: "Started by", width: "150px", hideBelow: 1200, render: (c: CycleRow) => <span className="truncate text-ink-2">{c.createdBy?.name ?? "People team"}</span> }] : []),
+    {
+      key: "closes", label: "Closes", width: "170px",
+      // A stalled cycle (Active past its close date) says so in words next to
+      // the red dot: colour never travels alone (principle 7).
+      render: (c) => c.status === "ACTIVE" && new Date(c.endDate).getTime() < Date.now()
+        ? <span className="truncate whitespace-nowrap tabular-nums text-danger-text">{`Overdue, ${formatDate(c.endDate, dayPrefs, "date")}`}</span>
+        : <span className="tabular-nums text-ink-2">{c.status === "COMPLETED" || c.status === "CANCELLED" ? `Closed ${formatDate(c.endDate, dayPrefs, "date")}` : formatDate(c.endDate, dayPrefs, "date")}</span>,
+    },
+  ];
 
-  const stats = useMemo(() => {
-    const list = cycles ?? [];
-    const byStatus: Record<CycleStatus, number> = { DRAFT: 0, ACTIVE: 0, IN_CALIBRATION: 0, COMPLETED: 0, CANCELLED: 0 };
-    for (const c of list) byStatus[c.status]++;
-    const totalReviews = list.reduce((acc, c) => acc + (c._count?.reviews ?? 0), 0);
-    const completedReviews = list.reduce((acc, c) => acc + (c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0), 0);
-    return {
-      total: list.length, byStatus,
-      activeCount: byStatus.ACTIVE + byStatus.IN_CALIBRATION,
-      totalReviews, completedReviews,
-      progress: totalReviews > 0 ? Math.round((completedReviews / totalReviews) * 100) : 0,
-    };
-  }, [cycles]);
-
-  function toggleStatus(s: CycleStatus) {
-    const next = new Set(statusFilter);
-    if (next.has(s)) next.delete(s); else next.add(s);
-    setStatusFilter(next);
-  }
+  const total = list?.pagination.total ?? 0;
+  const fromN = total ? (page - 1) * PAGE + 1 : 0;
+  const toN = Math.min(total, page * PAGE);
+  const emptyNode = filters > 0 || status ? (
+    <span className="text-row text-ink-2">No cycles match · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>
+  ) : (
+    <span className="text-row text-ink-2">
+      {view === "draft" ? "No draft cycles" : view === "completed" ? "No completed cycles yet" : view === "active" ? "No cycle is running" : "No review cycles yet"}
+      {canCreate ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={() => setNewOpen(true)}>Start the first cycle</button></> : null}
+    </span>
+  );
 
   return (
     <>
+      <Breadcrumb items={[{ label: "Review cycles" }]} />
       <OsPageHeader
         title="Review cycles"
-        actions={
-          <div className="rvw__head-actions">
-            <Link href="/kra-kpi" className="os-head__link"><Target /> KRA/KPI</Link>
-            <Link href="/talent" className="os-head__link"><Users /> Talent</Link>
-          </div>
-        }
-        primary={{ label: "New cycle", onClick: () => setNewOpen(true) }}
-      />
-
-      <div className="rvw">
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load cycles" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
-        ) : cycles === null ? (
-          <SkeletonRows />
-        ) : !featured ? (
-          <OsEmptyView
-            context="goals"
-            title="No review cycles yet"
-            hint="Plan a review cycle: pulse, quarterly, annual, probation or PIP."
-            action={{ label: "New cycle", onClick: () => setNewOpen(true) }}
-          />
-        ) : (
+        askAi
+        views={
           <>
-            <FeaturedCycle cycle={featured} onAdvance={patch} onLaunch={launch} />
-
-            <div className="rvw__kpis">
-              <KpiTile accent="var(--os-c-orange)" Icon={Activity}      label="Active"     value={`${stats.activeCount}`}                                  sub={`${stats.byStatus.IN_CALIBRATION} in calibration`} />
-              <KpiTile accent="var(--os-c-blue)"   Icon={Play}         label="Draft"      value={`${stats.byStatus.DRAFT}`}                              sub="planning stage" />
-              <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Completed"  value={`${stats.byStatus.COMPLETED}`}                          sub="historical" />
-              <KpiTile accent="var(--os-c-teal)"   Icon={Activity}     label="Progress"   value={`${stats.progress}%`}                                    sub={`${stats.completedReviews}/${stats.totalReviews} reviews`} progress={stats.progress} />
-            </div>
-
-            <div className="rvw__toolbar">
-              <div className="rvw__search">
-                <Search />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search cycle name, type…" />
-              </div>
-              <div className="rvw__chips">
-                {FLOW.map((s) => (
-                  <button key={s} type="button" className={`rvw__chip${statusFilter.has(s) ? " is-active" : ""}`} style={{ ["--chip-c" as unknown as string]: STATUS_COLORS[s] }} onClick={() => toggleStatus(s)}>
-                    <span className="rvw__chip-dot" />
-                    {STATUS_LABELS[s]}
-                    <span className="rvw__chip-count">{stats.byStatus[s]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {filtered.length === 0 ? (
-              <div className="rvw__empty">
-                <Search />
-                <div>No other cycles match.</div>
-              </div>
-            ) : (
-              <div className="rvw__list">
-                {filtered.map((c) => <CycleRow key={c.id} cycle={c} onLaunch={launch} />)}
-              </div>
-            )}
+            <ViewTab label="Active" active={view === "active"} onClick={() => setParams({ view: null, status: null })} />
+            <ViewTab label="Draft" active={view === "draft"} onClick={() => setParams({ view: "draft", status: null })} />
+            <ViewTab label="Completed" active={view === "completed"} onClick={() => setParams({ view: "completed", status: null })} />
+            <ViewTab label="All" active={view === "all"} onClick={() => setParams({ view: "all", status: null })} />
           </>
-        )}
-      </div>
-
-      <NewReviewCycleDialog
-        open={newOpen}
-        onOpenChange={setNewOpen}
-        now={now}
-        onCreated={(msg) => { toast(msg); void load(); }}
+        }
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: filters },
+          sort: { onClick: () => setSortOpen((v) => !v), label: sort === "newest" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "newest" },
+          ...(canCreate && !newOpen ? { primary: { label: "New cycle", icon: Plus, onClick: () => setNewOpen(true) } } : {}),
+          menu: [
+            ...OPTIONAL_COLS.map((c) => ({ label: `Show ${c.label}`, checked: cols[c.key], keepOpen: true, onClick: () => setCol(c.key, !cols[c.key]) })),
+            ...(canExport ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: () => { window.location.href = `/api/reviews/export.csv?${listQs}`; } }] : []),
+            ...(orgAdmin ? [{ separator: true as const }, { label: "Scoring and reviews", icon: Settings2, onClick: () => openSettings("/settings/scoring") }] : []),
+          ],
+        }}
       />
-    </>
-  );
-}
-
-function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
-  cycle: ApiCycle;
-  onAdvance: (id: string, body: Record<string, unknown>) => Promise<boolean>;
-  onLaunch: (id: string) => Promise<boolean>;
-}) {
-  const [launching, setLaunching] = useState(false);
-  const statusColor = STATUS_COLORS[c.status];
-  const typeColor = TYPE_COLORS[c.type] ?? C.gray;
-  const currentIdx = FLOW.indexOf(c.status);
-  // DRAFT never advances via a status PATCH — it launches (which creates
-  // the per-person Review rows and flips the status server-side).
-  const next = c.status === "ACTIVE" ? "IN_CALIBRATION" : c.status === "IN_CALIBRATION" ? "COMPLETED" : null;
-  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Activity : Play;
-  const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
-  const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
-  const progress = totalReviews > 0 ? Math.round((doneReviews / totalReviews) * 100) : 0;
-  const dayDelta = daysUntil(c.endDate);
-  const dayLabel = dayDelta > 0 ? `${dayDelta} days until close` : dayDelta === 0 ? "Closes today" : `Closed ${-dayDelta} days ago`;
-
-  return (
-    <section className="rvw__hero" style={{ ["--hero-c" as unknown as string]: statusColor }}>
-      <span className="rvw__hero-accent" aria-hidden="true" />
-      <div className="rvw__hero-main">
-        <div className="rvw__hero-meta">
-          <span className="rvw__hero-tag"><Sparkles /> Featured</span>
-          <span className="rvw__hero-status">
-            <StatusIcon /> {STATUS_LABELS[c.status]}
-          </span>
-          <span className="rvw__hero-type" style={{ ["--type-c" as unknown as string]: typeColor }}>
-            {TYPE_LABELS[c.type] ?? c.type.replace(/_/g, " ")}
-          </span>
-        </div>
-        <h2 className="rvw__hero-title">{c.name}</h2>
-        <div className="rvw__hero-period">
-          <CalendarIcon /> {fmtPeriod(c.startDate, c.endDate)} · {dayLabel}
-        </div>
-
-        <div className="rvw__flow">
-          {FLOW.map((s, i) => {
-            const isCurrent = s === c.status;
-            const isPast = currentIdx >= 0 && i < currentIdx;
-            const tone = isCurrent ? "current" : isPast ? "past" : "future";
-            return (
-              <span key={s} className={`rvw__flow-step rvw__flow-step--${tone}`} style={{ ["--step-c" as unknown as string]: STATUS_COLORS[s] }}>
-                <span className="rvw__flow-dot">{i + 1}</span>
-                <span>{STATUS_LABELS[s]}</span>
-              </span>
-            );
-          })}
-        </div>
-
-        <div className="rvw__hero-actions">
-          {c.status === "DRAFT" && (
-            <button
-              type="button"
-              className="rvw__hero-advance"
-              disabled={launching}
-              onClick={async () => {
-                setLaunching(true);
-                try { await onLaunch(c.id); } finally { setLaunching(false); }
-              }}
-            >
-              <Rocket /> {launching ? "Launching…" : "Launch cycle"}
-            </button>
-          )}
-          {next && (
-            <button type="button" className="rvw__hero-advance" onClick={() => onAdvance(c.id, { status: next })}>
-              <ChevronRight /> Move to {STATUS_LABELS[next]}
-            </button>
-          )}
-          <Link href={`/reviews/${c.id}`} className="rvw__hero-open">
-            Open cycle <ArrowRight />
-          </Link>
-        </div>
-      </div>
-
-      <div className="rvw__hero-side">
-        <div className="rvw__hero-progress-wrap">
-          <svg viewBox="0 0 120 120" className="rvw__hero-ring">
-            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--os-surface-1)" strokeWidth="10" />
-            <circle cx="60" cy="60" r="52" fill="none" stroke={statusColor} strokeWidth="10" strokeLinecap="round"
-              strokeDasharray={`${(progress / 100) * 326.7} 326.7`} transform="rotate(-90 60 60)" />
-          </svg>
-          <div className="rvw__hero-ring-num">{progress}<small>%</small></div>
-        </div>
-        <div className="rvw__hero-stats">
-          <div className="rvw__hero-stat">
-            <span>Total reviews</span>
-            <strong>{totalReviews}</strong>
+      <div className="relative">
+        {sortOpen ? (
+          <div className="absolute start-[110px] top-0 z-40">
+            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort cycles" selected={sort}
+              sections={[{ options: SORTS }]}
+              onSelect={(v) => { setSortOpen(false); setParams({ sort: v === "newest" ? null : v }); }} />
           </div>
-          <div className="rvw__hero-stat">
-            <span>Completed</span>
-            <strong>{doneReviews}</strong>
-          </div>
-          <div className="rvw__hero-stat">
-            <span>Remaining</span>
-            <strong>{Math.max(0, totalReviews - doneReviews)}</strong>
-          </div>
-        </div>
+        ) : null}
       </div>
-    </section>
-  );
-}
-
-function CycleRow({ cycle: c, onLaunch }: { cycle: ApiCycle; onLaunch: (id: string) => Promise<boolean> }) {
-  const [launching, setLaunching] = useState(false);
-  const statusColor = STATUS_COLORS[c.status];
-  const typeColor = TYPE_COLORS[c.type] ?? C.gray;
-  const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
-  const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
-  const progress = totalReviews > 0 ? Math.round((doneReviews / totalReviews) * 100) : 0;
-  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Activity : Play;
-
-  return (
-    <Link href={`/reviews/${c.id}`} className="rvw__row" style={{ ["--row-c" as unknown as string]: statusColor }}>
-      <span className="rvw__row-accent" aria-hidden="true" />
-      <div className="rvw__row-status">
-        <span className="rvw__row-status-icon" style={{ background: statusColor }}><StatusIcon /></span>
-        <span className="rvw__row-status-label">{STATUS_LABELS[c.status]}</span>
-      </div>
-      <div className="rvw__row-main">
-        <div className="rvw__row-head">
-          <h3 className="rvw__row-name">{c.name}</h3>
-          <span className="rvw__row-type" style={{ ["--type-c" as unknown as string]: typeColor }}>
-            {TYPE_LABELS[c.type] ?? c.type.replace(/_/g, " ")}
-          </span>
-        </div>
-        <div className="rvw__row-meta">
-          <span><CalendarIcon /> {fmtPeriod(c.startDate, c.endDate)}</span>
-          <span><TrendingUp /> {progress}% complete</span>
-          <span>{doneReviews}/{totalReviews} reviews</span>
-        </div>
-        <div className="rvw__row-bar">
-          <div className="rvw__row-bar-fill" style={{ width: `${progress}%`, background: statusColor }} />
-        </div>
-      </div>
-      {c.status === "DRAFT" && (
-        <button
-          type="button"
-          className="rvw__hero-advance"
-          disabled={launching}
-          onClick={async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setLaunching(true);
-            try { await onLaunch(c.id); } finally { setLaunching(false); }
-          }}
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="cycles"
+          activeCount={filters}
+          onClearAll={clearFilters}
+          search={{ value: draftQ, onChange: setDraftQ, placeholder: "Search cycles" }}
         >
-          <Rocket /> {launching ? "Launching…" : "Launch"}
-        </button>
-      )}
-      <ArrowRight className="rvw__row-arrow" />
-    </Link>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub, progress }: { accent: string; Icon: typeof Award; label: string; value: string; sub: string; progress?: number }) {
-  return (
-    <div className="rvw__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="rvw__kpi-accent" aria-hidden="true" />
-      <div className="rvw__kpi-row">
-        <div className="rvw__kpi-icon"><Icon /></div>
-        <div className="rvw__kpi-label">{label}</div>
+          <FilterGroup label="Type">
+            {CYCLE_TYPES.map((t) => <FilterRow key={t.value} label={t.label} checked={types.includes(t.value)} onCheckedChange={(on) => toggleType(t.value, on)} />)}
+          </FilterGroup>
+          <FilterGroup label="Period">
+            <li className="flex items-center gap-2 px-2 py-1 text-sm text-ink-2">
+              <input type="date" aria-label="From" value={from} onChange={(e) => setParams({ from: e.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-line bg-raised px-2 text-sm text-ink" />
+              <span>to</span>
+              <input type="date" aria-label="To" value={to} onChange={(e) => setParams({ to: e.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-line bg-raised px-2 text-sm text-ink" />
+            </li>
+          </FilterGroup>
+          <FilterGroup label="Started by">
+            <li className="px-1 py-1">
+              <PeoplePickerField ariaLabel="Started by" value={by ? [by] : []} people={byPick ? [byPick] : []} placeholder="Anyone"
+                onChange={(ids, picked) => { setByPick(picked[0] ?? null); setParams({ by: ids[0] ?? null }); }} />
+            </li>
+          </FilterGroup>
+          <FilterGroup label="Covers">
+            <FilterRow label="Everyone" checked={audience === "ALL"} onCheckedChange={(on) => setParams({ audience: on ? "ALL" : null })} />
+            <FilterRow label="Specific people" checked={audience === "USERS"} onCheckedChange={(on) => setParams({ audience: on ? "USERS" : null })} />
+            {depts.map((d) => <FilterRow key={d.id} label={d.name} checked={audience === d.id} onCheckedChange={(on) => setParams({ audience: on ? d.id : null })} />)}
+          </FilterGroup>
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
+          {error && !list ? (
+            <OsEmptyView variant="error" title="Couldn't load review cycles" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : (
+            <TableCard
+              ariaLabel="Review cycles"
+              columns={columns}
+              rows={list?.data ?? null}
+              rowKey={(c) => c.id}
+              rowHref={(c) => `/reviews/${c.id}`}
+              rowMenu={(c) => (
+                <RowMoreButton label={`Actions for ${c.name}`} open={menu?.row.id === c.id}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ row: c, anchor: { current: e.currentTarget } }); }} />
+              )}
+              empty={emptyNode}
+              footer={list ? {
+                total,
+                noun: "cycles",
+                from: fromN,
+                to: toN,
+                onPrev: page > 1 ? () => setParams({ page: String(page - 1) }) : undefined,
+                onNext: toN < total ? () => setParams({ page: String(page + 1) }) : undefined,
+              } : undefined}
+            />
+          )}
+        </div>
       </div>
-      <div className="rvw__kpi-value">{value}</div>
-      <div className="rvw__kpi-sub">{sub}</div>
-      {progress !== undefined && <div className="rvw__kpi-bar"><div className="rvw__kpi-bar-fill" style={{ width: `${progress}%` }} /></div>}
-    </div>
+
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={220} open placement="below" onClose={() => setMenu(null)}>
+          <MenuList aria-label="Cycle actions">
+            <MenuItem icon={ExternalLink} label="Open" onClick={() => { const id = menu.row.id; setMenu(null); router.push(`/reviews/${id}`); }} />
+            <MenuItem icon={Link2} label="Copy link" onClick={() => { const id = menu.row.id; setMenu(null); copyLink(id); }} />
+            {menu.row.canManage && menu.row.status === "DRAFT" ? (
+              <><MenuSeparator /><MenuItem icon={Play} label="Launch cycle" onClick={() => { const r = menu.row; setMenu(null); void launch(r); }} /></>
+            ) : null}
+            {menu.row.canManage && menu.row.status === "ACTIVE" ? (
+              <><MenuSeparator /><MenuItem icon={Scale} label="Start calibration" onClick={() => { const r = menu.row; setMenu(null); void startCalibration(r); }} /></>
+            ) : null}
+            {menu.row.status === "ACTIVE" || menu.row.status === "IN_CALIBRATION" ? (
+              <MenuItem icon={Bell} label="Send a reminder" onClick={() => { const r = menu.row; setMenu(null); void remind(r); }} />
+            ) : null}
+            {menu.row.canManage && !viewer.isAgent && (menu.row.status === "DRAFT" || menu.row.status === "ACTIVE") ? (
+              <><MenuSeparator /><MenuItem icon={Ban} label="Cancel cycle" destructive onClick={() => { const r = menu.row; setMenu(null); void cancel(r); }} /></>
+            ) : null}
+            {menu.row.canDelete && menu.row.status === "DRAFT" ? (
+              <MenuItem icon={Trash2} label="Delete draft" destructive onClick={() => { const r = menu.row; setMenu(null); void removeDraft(r); }} />
+            ) : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
+
+      {newOpen ? (
+        <NewReviewCycleDialog
+          open
+          now={now}
+          orgWide={orgWide}
+          onOpenChange={setNewOpen}
+          onCreated={(c) => { toast(`${c.name} created as a draft`); router.push(`/reviews/${c.id}`); }}
+        />
+      ) : null}
+    </>
   );
 }

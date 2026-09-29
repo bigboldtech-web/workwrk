@@ -20,11 +20,9 @@ const ROWS: readonly Row[] = [
   { key: "planner", label: "Planner", defaultHref: "/planner" },
   { key: "ai", label: "AI", defaultHref: "/sidekick" },
   { key: "chat", label: "Talk", defaultHref: "/tlk" },
-  // `manager`, matching the gate on the hub's own default href: /people
-  // calls requireManagerPage(). sidebar-map section 5 wants this tier gone
-  // and the Directory opened to every Member; that is a change to two page
-  // gates, not to this table, and it belongs to the Teams unit.
-  { key: "teams", label: "Teams", defaultHref: "/people", requiredAccess: "manager" },
+  // Every Member (Phase 6): /people opens to every Member, so the pill can
+  // never land on a locked page.
+  { key: "teams", label: "Teams", defaultHref: "/people" },
   { key: "docs", label: "Docs", defaultHref: "/docs" },
   { key: "tables", label: "Tables", defaultHref: "/tables" },
   { key: "library", label: "Files", defaultHref: "/files" },
@@ -34,19 +32,28 @@ const ROWS: readonly Row[] = [
   { key: "timesheets", label: "Timesheets", defaultHref: "/timesheets" },
   { key: "meetings", label: "Meetings", defaultHref: "/meetings" },
   { key: "clock", label: "Clock in/out", defaultHref: "/clock" },
-  { key: "reviews", label: "Review cycles", defaultHref: "/reviews", requiredAccess: "hr-admin" },
-  { key: "candor", label: "Candor", defaultHref: "/candor", requiredAccess: "hr-admin" },
+  // Review cycles, Candor and Surveys follow APP_RULES (reports, People
+  // team, Admin; Candor and Surveys also their respondents), which no tier
+  // can express: the palette filters them on appAudienceAllows plus the
+  // respondent facts (shell-context.tsx), like Assets.
+  { key: "reviews", label: "Review cycles", defaultHref: "/reviews" },
+  { key: "candor", label: "Candor", defaultHref: "/candor" },
   { key: "announcements", label: "Announcements", defaultHref: "/announcements" },
-  { key: "kudos", label: "Kudos", defaultHref: "/kudos", requiredAccess: "hr-admin" },
-  { key: "surveys", label: "Surveys", defaultHref: "/surveys", requiredAccess: "hr-admin" },
-  { key: "tools", label: "Tools", defaultHref: "/tools", requiredAccess: "hr-admin" },
-  { key: "assets", label: "Assets", defaultHref: "/assets", requiredAccess: "hr-admin" },
+  { key: "kudos", label: "Kudos", defaultHref: "/kudos" },
+  { key: "surveys", label: "Surveys", defaultHref: "/surveys" },
+  // Tools: every Member. Assets: anyone with reports, the People team and
+  // Admin, which no tier can express, so the row and the palette gate on
+  // appAudienceAllows (src/lib/nav/app-audience.ts) and the page on gatePage.
+  { key: "tools", label: "Tools", defaultHref: "/tools" },
+  { key: "assets", label: "Assets", defaultHref: "/assets" },
   { key: "sops", label: "SOPs", defaultHref: "/sops" },
   { key: "policies", label: "Policies", defaultHref: "/policies", requiredAccess: "hr-admin" },
   { key: "agreements", label: "Contracts", defaultHref: "/agreements", requiredAccess: "hr-admin" },
-  { key: "build", label: "Build apps", defaultHref: "/build" },
+  // APP_RULES.build is Owner and Admin.
+  { key: "build", label: "Build apps", defaultHref: "/build", requiredAccess: "org-admin" },
   { key: "store", label: "Marketplace", defaultHref: "/store" },
-  { key: "automation", label: "Automation", defaultHref: "/automation/workflows", requiredAccess: "manager" },
+  // APP_RULES.automation: every Member reads (the manager tier is retired).
+  { key: "automation", label: "Automation", defaultHref: "/automation/workflows" },
   { key: "settings", label: "Settings", defaultHref: "/settings", alwaysPinned: true },
   // No tier: the manager gate came off when /api/trash moved onto the `trash`
   // app key and per-source accessibleIds(type, FULL) in Phase 2 stage E. Guests

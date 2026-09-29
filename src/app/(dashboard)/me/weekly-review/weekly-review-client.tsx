@@ -11,7 +11,7 @@
 // (The data-integrity rule: nothing a person typed is lost because they closed
 // the tab.)
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
@@ -39,6 +39,33 @@ const STATUS_LABEL: Record<string, string> = {
   SUBMITTED: "Submitted",
   ACKNOWLEDGED: "Reviewed",
 };
+
+export interface ReviewStripState {
+  word: string;
+  tone: "neutral" | "warning";
+  /** The manager sent the week back: it is not done until it is reopened. */
+  changesRequested: boolean;
+}
+
+/**
+ * The status chip reads status AND managerStatus. A manager's Request
+ * changes and an Approve both leave status=ACKNOWLEDGED (actOnReview in
+ * src/lib/weekly-review.ts), so a chip keyed on status alone said
+ * "Reviewed" for a week the manager had sent back, and the employee who
+ * skimmed it never reopened the week.
+ */
+export function reviewStripState(
+  review: { status: string; managerStatus: string | null } | null,
+): ReviewStripState {
+  if (!review) return { word: "Not started", tone: "neutral", changesRequested: false };
+  if (review.status === "ACKNOWLEDGED" && review.managerStatus === "CHANGES_REQUESTED") {
+    return { word: "Changes requested", tone: "warning", changesRequested: true };
+  }
+  if (review.status === "ACKNOWLEDGED" && review.managerStatus === "APPROVED") {
+    return { word: "Approved", tone: "neutral", changesRequested: false };
+  }
+  return { word: STATUS_LABEL[review.status] ?? review.status, tone: "neutral", changesRequested: false };
+}
 
 export function WeeklyReviewClient({
   weekKeyValue,
@@ -71,7 +98,27 @@ export function WeeklyReviewClient({
   const [busy, setBusy] = useState<null | "submit" | "reopen">(null);
 
   const submitted = review?.status === "SUBMITTED" || review?.status === "ACKNOWLEDGED";
-  const readOnly = !editable || !review || submitted;
+  // This week is writable before any row exists: opening the page writes
+  // nothing, and the first save creates the DRAFT (POST, idempotent).
+  const readOnly = !editable || submitted;
+
+  // The row this page writes to; set once it exists (from the server, or the
+  // first save's POST) so a burst of autosaves never POSTs twice.
+  const reviewRef = useRef<WeeklyReviewDoc | null>(initialReview);
+  const creatingRef = useRef<Promise<WeeklyReviewDoc> | null>(null);
+  const ensureReview = useCallback(async (): Promise<WeeklyReviewDoc> => {
+    if (reviewRef.current) return reviewRef.current;
+    if (!creatingRef.current) {
+      creatingRef.current = (async () => {
+        const res = await apiFetch<{ review: WeeklyReviewDoc }>("/api/me/weekly-review", { method: "POST" });
+        if (!res.ok) throw new Error(res.error);
+        reviewRef.current = res.data.review;
+        setReview(res.data.review);
+        return res.data.review;
+      })().finally(() => { creatingRef.current = null; });
+    }
+    return creatingRef.current;
+  }, []);
 
   const snapshot = useMemo(
     () => ({
@@ -86,16 +133,16 @@ export function WeeklyReviewClient({
 
   const save = useCallback(
     async (value: typeof snapshot) => {
-      if (!review) return;
-      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${review.id}`, {
+      // useAutosave decides retry from the throw, so a failure must throw
+      // rather than be swallowed: "Not saved, retrying" is the honest state.
+      const current = await ensureReview();
+      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${current.id}`, {
         method: "PATCH",
         json: { ...value, action: "save" },
       });
-      // useAutosave decides retry from the throw, so a failure must throw
-      // rather than be swallowed: "Not saved, retrying" is the honest state.
       if (!res.ok) throw new Error(res.error);
     },
-    [review],
+    [ensureReview],
   );
 
   const { status, lastSavedAt } = useAutosave({
@@ -107,7 +154,7 @@ export function WeeklyReviewClient({
 
   const act = useCallback(
     async (action: "submit" | "reopen") => {
-      if (!review) return;
+      if (action === "reopen" && !review) return;
       if (action === "submit") {
         const ok = await confirm({
           title: "Submit this week's review?",
@@ -117,7 +164,15 @@ export function WeeklyReviewClient({
         if (!ok) return;
       }
       setBusy(action);
-      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${review.id}`, {
+      let current: WeeklyReviewDoc;
+      try {
+        current = await ensureReview();
+      } catch (e) {
+        setBusy(null);
+        toast("Couldn't submit", { tone: "danger", description: e instanceof Error ? e.message : undefined });
+        return;
+      }
+      const res = await apiFetch<{ review: WeeklyReviewDoc }>(`/api/me/weekly-review/${current.id}`, {
         method: "PATCH",
         json: { ...snapshot, action },
       });
@@ -126,11 +181,38 @@ export function WeeklyReviewClient({
       setReview(res.data.review);
       router.refresh();
     },
-    [review, snapshot, confirm, toast, router],
+    [review, ensureReview, snapshot, confirm, toast, router],
   );
 
   const start = parseWeekKey(weekKeyValue);
-  const statusWord = review ? STATUS_LABEL[review.status] ?? review.status : "Not started";
+  const strip = reviewStripState(review);
+  // The manager's note leads the page while the week is sent back, and
+  // while the reopened draft is being reworked (a reopen keeps the note):
+  // the request is what the person is here to answer, not a footnote under
+  // three cards they cannot edit yet.
+  const noteFirst = !!review?.managerNotes && (strip.changesRequested || review.status === "DRAFT");
+  const reopenButton = (primary: boolean) => (
+    <button
+      type="button"
+      disabled={busy !== null}
+      onClick={() => void act("reopen")}
+      className={
+        primary
+          ? "inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-4 text-base font-medium text-white disabled:opacity-60"
+          : "inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-base text-ink hover:bg-hover disabled:opacity-60"
+      }
+    >
+      {busy === "reopen" ? <Dots variant="pending" /> : null} Reopen
+    </button>
+  );
+  const managerNote = review?.managerNotes ? (
+    <Card title="Manager note">
+      <p className="whitespace-pre-wrap text-base text-ink">{review.managerNotes}</p>
+      {/* A sent back week has no Submit, so Reopen is the page's one
+          primary, and it sits beside the request it answers. */}
+      {strip.changesRequested && editable ? <div className="mt-3">{reopenButton(true)}</div> : null}
+    </Card>
+  ) : null;
 
   return (
     <>
@@ -156,14 +238,29 @@ export function WeeklyReviewClient({
       />
 
       <div className="mx-auto w-full max-w-[720px] px-6 py-4">
-        {/* The status strip: a row, not a banner. */}
-        <div className="flex h-11 items-center gap-2 text-sm">
-          <span className="inline-flex h-[22px] items-center rounded-md bg-active px-1.5 text-xs font-medium text-ink-2">{statusWord}</span>
-          {start ? <span className="text-ink-2">{weekRangeLabel(start)}</span> : null}
+        {/* The status strip: a row, not a banner. It wraps at phone width
+            instead of squeezing the chip onto two lines and cutting the
+            sent back line off mid word. */}
+        <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-sm">
+          <span
+            className={`inline-flex h-[22px] shrink-0 items-center whitespace-nowrap rounded-md px-1.5 text-xs font-medium ${
+              strip.tone === "warning" ? "bg-warning-bg text-warning-text" : "bg-active text-ink-2"
+            }`}
+          >
+            {strip.word}
+          </span>
+          {start ? <span className="whitespace-nowrap text-ink-2">{weekRangeLabel(start)}</span> : null}
           {review?.managerStatus === "PENDING" ? <span className="text-ink-2">Waiting on your manager</span> : null}
+          {strip.changesRequested ? (
+            // Only this week can reopen (weeklyEditRefusal); a past week's
+            // strip states the request without offering what it cannot do.
+            <span className="text-ink-2">
+              {editable ? "Your manager asked for changes. Reopen to edit." : "Your manager asked for changes."}
+            </span>
+          ) : null}
         </div>
 
-        {!review ? (
+        {!review && !editable ? (
           <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
             <DotsArt arrangement="stack" size={64} />
             <p className="text-base font-medium text-ink">Nothing filed for this week</p>
@@ -173,6 +270,8 @@ export function WeeklyReviewClient({
           </div>
         ) : (
           <div className="flex flex-col gap-6">
+            {noteFirst ? managerNote : null}
+
             <Card title="Your KRAs">
               {kras.length === 0 ? (
                 // No raw path in the copy: a person is told who to ask, not
@@ -275,15 +374,11 @@ export function WeeklyReviewClient({
             <Narrative title="Blockers" value={blockers} onChange={setBlockers} readOnly={readOnly} placeholder="What is stuck, or where you need help" />
             <Narrative title="Plan for next week" value={plan} onChange={setPlan} readOnly={readOnly} placeholder="What you will ship next" />
 
-            {review.managerNotes ? (
-              <Card title="Manager note">
-                <p className="whitespace-pre-wrap text-base text-ink">{review.managerNotes}</p>
-              </Card>
-            ) : null}
+            {noteFirst ? null : managerNote}
 
             {editable ? (
               <div className="flex items-center gap-2">
-                {review.status === "DRAFT" ? (
+                {!review || review.status === "DRAFT" ? (
                   <button
                     type="button"
                     disabled={busy !== null}
@@ -293,17 +388,9 @@ export function WeeklyReviewClient({
                     {busy === "submit" ? <Dots variant="pending" /> : null} Submit for review
                   </button>
                 ) : null}
-                {review.status === "SUBMITTED" ? (
-                  <button
-                    type="button"
-                    disabled={busy !== null}
-                    onClick={() => void act("reopen")}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-line px-3 text-base text-ink hover:bg-hover disabled:opacity-60"
-                  >
-                    {busy === "reopen" ? <Dots variant="pending" /> : null} Reopen
-                  </button>
-                ) : null}
-                {/* Reviewed weeks show nothing: the strip already says so. */}
+                {review?.status === "SUBMITTED" ? reopenButton(false) : null}
+                {/* A sent back week reopens from the Manager note card at the
+                    top; an approved week shows nothing: the strip says so. */}
               </div>
             ) : null}
           </div>
@@ -316,7 +403,7 @@ export function WeeklyReviewClient({
 function Card({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
   return (
     <section id={id} className="os-row scroll-mt-4 rounded-lg border border-line bg-raised p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-2">{title}</h2>
+      <h2 className="mb-3 text-base font-semibold text-ink">{title}</h2>
       {children}
     </section>
   );

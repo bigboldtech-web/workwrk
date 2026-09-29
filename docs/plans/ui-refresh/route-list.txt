@@ -18,7 +18,6 @@
 /(dashboard)/agents
 /(dashboard)/agreements
 /(dashboard)/agreements/[id]
-/(dashboard)/ai
 /(dashboard)/analytics
 /(dashboard)/announcements
 /(dashboard)/assets
@@ -30,7 +29,6 @@
 /(dashboard)/automation/usage
 /(dashboard)/automation/workflows
 /(dashboard)/automation/workflows/[id]
-/(dashboard)/autopilot
 /(dashboard)/boards/[slug]
 /(dashboard)/build
 /(dashboard)/build/[slug]
@@ -62,11 +60,7 @@
 /(dashboard)/kra-kpi/review
 /(dashboard)/kudos
 /(dashboard)/library
-/(dashboard)/marketing
-/(dashboard)/marketing/[id]
-/(dashboard)/marketing/campaigns
-/(dashboard)/marketing/content
-/(dashboard)/marketing/events
+/(dashboard)/marketing/[[...slug]]
 /(dashboard)/me/mentions
 /(dashboard)/me/weekly-review
 /(dashboard)/meetings
@@ -207,6 +201,5 @@
 /(public)/sign/[token]
 /embed/forms/[id]
 /embed/tables/[id]
-/loader-preview
 /onboard
 /setup

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { parseProcessSettings } from "@/lib/process-settings";
+import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 // GET /api/settings/process (spec-process section 2 `/sops/manage`, section
 // 4 step 7): the org's process taxonomies and acknowledgement defaults,
@@ -31,10 +32,9 @@ export async function GET() {
   const settings = (org.settings as SettingsBlob | null) || {};
   const { value, seeded } = parseProcessSettings(settings.process);
   if (seeded) {
-    // Re-read inside the write so a concurrent settings PATCH is not clobbered.
-    const fresh = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
-    const current = (fresh?.settings as SettingsBlob | null) || {};
-    await prisma.organization.update({ where: { id: orgId }, data: { settings: { ...current, process: value } } });
+    // Only the `process` key, in one statement: a concurrent settings PATCH
+    // or a doc sharing change on another key is never clobbered.
+    await writeOrgSettingsKeys(orgId, { process: value });
   }
 
   const [policyGroups, contractGroups] = await Promise.all([

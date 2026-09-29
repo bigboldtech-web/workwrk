@@ -179,7 +179,9 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   );
 
   if (!result) return { ok: false, status: 404, error: "Company not found" };
-  if ("refused" in result) return { ok: false, status: 400, error: result.refused };
+  // A string check, not just "in": the transaction's return shapes are
+  // normalised into one object type, so "in" alone does not narrow it.
+  if ("refused" in result && typeof result.refused === "string") return { ok: false, status: 400, error: result.refused };
 
   // The customer's half, after commit and best effort.
   for (const row of logged) void writeTenantRow(row);

@@ -165,6 +165,7 @@ interface FactOverrides {
   activeModules?: string[];
   apps?: AccessFacts["org"]["apps"];
   peopleTeamIds?: string[];
+  aiEnabled?: boolean;
   app?: AppKey;
   settingsPage?: SettingsPageKey;
   orgAction?: OrgAction;
@@ -183,6 +184,7 @@ function facts(o: FactOverrides = {}): AccessFacts {
       activeModules: new Set(o.activeModules ?? ["chat", "tables"]),
       apps: o.apps ?? {},
       peopleTeamIds: o.peopleTeamIds ?? [],
+      ...(o.aiEnabled === undefined ? {} : { aiEnabled: o.aiEnabled }),
     },
     now: o.now ?? NOW,
     app: o.app,
@@ -325,6 +327,19 @@ describe("rule 2: module off, before the Admin rule", () => {
   it("returns app-off when the org hid the app", () => {
     const d = decide(facts({ app: "kudos", apps: { hidden: ["kudos"] } }), "view");
     expect(d).toMatchObject({ via: "app-off", allowed: false, discoverable: true });
+  });
+
+  it("turns the ai app key off, and only that key, when AI features are off", () => {
+    // spec-ai-automation 1.4: the one line asked of rule 2.
+    const off = decide(facts({ app: "ai", aiEnabled: false }), "view");
+    expect(off).toMatchObject({ via: "app-off", allowed: false, discoverable: true });
+    expect(off.context).toEqual({ app: "ai" });
+    // An Admin is off too: it is a workspace switch, not a role.
+    expect(decide(facts({ viewer: viewer({ orgRole: "ADMIN" }), app: "ai", aiEnabled: false }), "view").via).toBe("app-off");
+    // Automations are not AI.
+    expect(decide(facts({ app: "automation", aiEnabled: false }), "view").allowed).toBe(true);
+    // Absent reads as on.
+    expect(decide(facts({ app: "ai" }), "view").allowed).toBe(true);
   });
 
   it("never floors an alwaysPinned app", () => {
@@ -2449,7 +2464,9 @@ describe("spec 5.2.1: the app rule table", () => {
   it("has a row for every app key, and the key list is the union of hubs, folded apps and the four route-only keys", () => {
     // 31 in the access spec's own table, plus `templates`, which
     // spec-spaces-lists section 1 adds as the one APP_RULES row that unit owns.
-    expect(APP_KEYS.length).toBe(34);
+    // Phase 6 adds the six Teams-hub route pages (team, workload,
+    // weekly-reviews, kra-kpi, alignment, kpi-reviews).
+    expect(APP_KEYS.length).toBe(40);
     for (const key of APP_KEYS) expect(APP_RULES[key]).toBeTruthy();
     expect(APP_RULES.templates).toEqual({ hub: "home", audience: "member", guest: "none" });
   });
@@ -2480,7 +2497,10 @@ describe("spec 5.2.1: the app rule table", () => {
   it("opens the people-ops apps to anyone with reports, the People team and admins, and nobody else", () => {
     const peopleOps = APP_KEYS.filter((k) => APP_RULES[k].audience === "reports-people-team-admin");
     expect(peopleOps).toEqual(
-      expect.arrayContaining(["reviews", "talent", "analytics", "rollup", "candor", "assets"]),
+      expect.arrayContaining([
+        "reviews", "talent", "analytics", "rollup", "candor", "assets",
+        "team", "workload", "weekly-reviews", "alignment", "kpi-reviews",
+      ]),
     );
     for (const key of peopleOps) {
       expect(decide(facts({ viewer: member, app: key }), "view").allowed).toBe(false);
@@ -2489,6 +2509,20 @@ describe("spec 5.2.1: the app rule table", () => {
         decide(facts({ viewer: peopleTeamMember, app: key, peopleTeamIds: ["u_pt"] }), "view").allowed,
       ).toBe(true);
       expect(decide(facts({ viewer: owner, app: key }), "view").allowed).toBe(true);
+    }
+  });
+
+  it("opens the KRAs & KPIs library to every Member and never to a Guest (spec-goals section 0)", () => {
+    expect(APP_RULES["kra-kpi"]).toEqual({ hub: "teams", audience: "member", guest: "none" });
+    expect(decide(facts({ viewer: member, app: "kra-kpi" }), "view").allowed).toBe(true);
+    expect(decide(facts({ viewer: guest, app: "kra-kpi" }), "view").allowed).toBe(false);
+  });
+
+  it("gives the six Phase 6 Teams route pages rows of their own, all in the Teams hub", () => {
+    for (const key of ["team", "workload", "weekly-reviews", "kra-kpi", "alignment", "kpi-reviews"] as AppKey[]) {
+      expect(APP_RULES[key].hub).toBe("teams");
+      expect(APP_RULES[key].guest).toBe("none");
+      expect(ENFORCED_AT[`app.${key}` as keyof typeof ENFORCED_AT]).toBeTruthy();
     }
   });
 

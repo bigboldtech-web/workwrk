@@ -61,6 +61,17 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // SUPER_ADMIN is the system owner — never something you invite someone in as.
 const INVITE_LEVELS = ACCESS_LEVELS.filter((l) => l.value !== "SUPER_ADMIN");
 
+// The text of one Access level option: "Employee: Standard employees".
+// The shared ACCESS_LEVELS catalog (lib/permissions) still joins some
+// descriptions with an em dash (Company Admin's "Org owner, full access"
+// reads that way there), and visible copy never shows one, so any em dash,
+// en dash or double hyphen inside a description becomes a comma here
+// rather than leaking into the picker.
+export function inviteLevelOptionText(l: { label: string; description: string }): string {
+  const description = l.description.replace(/\s*(?:\u2014|\u2013|-{2})\s*/g, ", ");
+  return `${l.label}: ${description}`;
+}
+
 export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const { toast } = useOsToast();
 
@@ -209,7 +220,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
       setEmails(failed.map((f) => f.email));
       setDraft("");
       toast(
-        `${sent} sent · ${failed.length} failed — ${failed[0].reason}`,
+        `${sent} sent · ${failed.length} failed: ${failed[0].reason}`,
       );
     }
   };
@@ -221,7 +232,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
         <DialogTitle>Invite people</DialogTitle>
         <DialogDescription>
           Teammates get an email with a link to join your workspace. Every
-          invite can carry a role — its KRAs, KPIs and SOPs attach automatically.
+          invite can carry a role: its KRAs, KPIs and SOPs attach automatically.
         </DialogDescription>
 
         {/* Emails */}
@@ -288,7 +299,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           >
             {INVITE_LEVELS.map((l) => (
               <option key={l.value} value={l.value}>
-                {l.label} — {l.description}
+                {inviteLevelOptionText(l)}
               </option>
             ))}
           </select>
@@ -354,7 +365,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         <p className="text-xs text-zinc-500">
           Pick a role above and its KRAs, KPIs and published SOPs attach
-          automatically when they join — no per-item selection needed.
+          automatically when they join. No per-item selection needed.
         </p>
 
         {/* Personal message */}

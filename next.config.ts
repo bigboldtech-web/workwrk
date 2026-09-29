@@ -84,7 +84,7 @@ const nextConfig: NextConfig = {
     turbopackFileSystemCacheForDev: process.env.WORKWRK_DEV_FS_CACHE !== "0",
   },
 
-  // Comms Hub was briefly shipped under /chat before the Room rename —
+  // Comms Hub was briefly shipped under /chat before the Room rename
   // stored notification links and bookmarks keep working.
   async redirects() {
     return [
@@ -341,18 +341,26 @@ const nextConfig: NextConfig = {
         destination: "/sops/:id?edit=1",
         permanent: true,
       },
-      // Whiteboards were renamed to Canvas — keep old links/bookmarks working.
+      // Whiteboards were renamed to Canvas, keep old links/bookmarks working.
       { source: "/whiteboards", destination: "/canvas", permanent: false },
       { source: "/whiteboards/:id", destination: "/canvas/:id", permanent: false },
       // Settings chassis (docs/plans/ui-refresh/settings-architecture.md 8.4).
       // Only the rows whose target exists today, shows the same content AND
       // admits the same people; the rest land when their target page ships
       // (the registry in src/lib/settings-registry.ts lists every alias).
-      // Deliberately NOT here yet: /settings/hierarchy -> /organization. The
-      // old page is ungated and renders for every member, while /organization
-      // sits behind requireManagerPage() and bounces non-managers to their
-      // own profile, so the redirect would change who may open the content.
-      // It ships with the access gate step.
+      // Phase 6: /settings/hierarchy -> /organization, the redirect held back
+      // until /organization stopped being manager-gated. It now opens to every
+      // Member (the `teams` app row), the same audience the old ungated page
+      // had, so the redirect changes nobody's access: one org chart, one place
+      // (spec-teams-people section 0, settings-architecture 8.4).
+      { source: "/settings/hierarchy", destination: "/organization", permanent: true },
+      // Phase 6, spec-goals section 0. /goals was a dead path the nav config
+      // referenced; it is the Goals list. The query string passes through.
+      { source: "/goals", destination: "/okrs", permanent: true },
+      // The second manager KPI workflow merged into KPI reviews: one page,
+      // person by person, month by month, where a manager both approves and
+      // records. ?period= (and any other param) passes through.
+      { source: "/kra-kpi/review", destination: "/team/kpi-reviews", permanent: true },
       // Bare /account had no page (a 404 inside the takeover).
       { source: "/account", destination: "/account/profile", permanent: true },
       //
@@ -380,6 +388,19 @@ const nextConfig: NextConfig = {
       // (register reads ?token and switches to "Join <org>").
       { source: "/signup", destination: "/register", permanent: false },
       { source: "/join", destination: "/register", permanent: false },
+      //
+      // Phase 7 (spec-ai-automation.md section 0). The two static AI mocks
+      // are deleted and their addresses land on the real surfaces. Next
+      // appends the source query to the destination, so /ai?q=... arrives at
+      // /sidekick?q=..., which the Ask AI page reads.
+      { source: "/ai", destination: "/sidekick", permanent: true },
+      { source: "/autopilot", destination: "/automation/workflows", permanent: true },
+      // The Automation hub's natural address has no page of its own.
+      { source: "/automation", destination: "/automation/workflows", permanent: true },
+      // Two sidebar links that never had a page. Chat history is the All
+      // chats view; starter prompts are on the Ask AI landing.
+      { source: "/sidekick/history", destination: "/sidekick?view=all", permanent: true },
+      { source: "/sidekick/prompts", destination: "/sidekick", permanent: true },
     ];
   },
   /* config options here */

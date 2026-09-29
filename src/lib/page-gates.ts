@@ -20,6 +20,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canSeeGoal } from "@/lib/goal-audience";
+import { gatePage } from "@/lib/access/gate";
 
 // Delegate (migration step 1): both ladders come from the engine's one copy,
 // src/lib/access/legacy-levels.ts.
@@ -64,11 +65,31 @@ export function isManagerLevel(accessLevel: string): boolean {
 }
 
 /**
+ * Is this session on the legacy manager tier (HR included)? The one reader
+ * of that signal for the Phase 6 culture and review-cycle create rules
+ * (src/lib/people/culture-gate.ts, review-cycle-access.ts), which keep the
+ * tier that could create yesterday alongside the engine's facts (reports,
+ * People team, Admin), so nobody loses a create path they had. Pass the
+ * request's session when the caller already has it; with none it reads the
+ * current one.
+ */
+export async function sessionOnLegacyManagerTier(session?: unknown): Promise<boolean> {
+  const s = (session ?? (await getServerSession(authOptions))) as
+    | { user?: { accessLevel?: string | null } }
+    | null
+    | undefined;
+  return legacyIsManagerLevel(s?.user?.accessLevel ?? null);
+}
+
+/**
  * Goals LIST gate. Any signed-in member may open /okrs; the rows themselves
  * are filtered three-door by GET /api/okrs. The page gate's job is only
  * "signed in, org resolved".
  */
 export async function requireGoalsPage(): Promise<PageSessionUser> {
+  // The one gate shape (Phase 6): the app row first (APP_RULES.goals, every
+  // Member, never a Guest), then the session the page reads.
+  await gatePage("view", { type: "app", key: "goals" }, { callbackUrl: "/okrs" });
   return requireSessionUser();
 }
 
@@ -79,6 +100,8 @@ export async function requireGoalsPage(): Promise<PageSessionUser> {
  * notFound(), never as a peek.
  */
 export async function requireGoalPage(okrId: string): Promise<PageSessionUser> {
+  // The app row first, then the object rule (canSeeGoal).
+  await gatePage("view", { type: "app", key: "goals" }, { callbackUrl: `/okrs/${okrId}` });
   const user = await requireSessionUser();
   const okr = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: user.organizationId },

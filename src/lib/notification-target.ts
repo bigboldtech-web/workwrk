@@ -20,7 +20,19 @@
 // }` with the href intact, which renders a summary card and a working Open
 // button. Nothing here guesses.
 //
-// NO IMPORTS: the API route and the client both read this.
+// EVERY OBJECT ADDRESS IS ONE OBJECT. A doc, table, canvas, form or SOP has
+// three addresses (canonical /docs/<id>, the Work door /work/docs/<id>, and
+// the Space-scoped /spaces/<slug>/docs/<id>), and every server-built link now
+// uses the Work door so each recipient is placed under their own access. The
+// three forms are read by the one parser that writes them, openedObject in
+// ../nav/object-href, so a Space-scoped doc address is the doc, never the
+// Space, and a door link is its object. /forms/<id>/respond is the public
+// responder, not the form, and stays external.
+//
+// PURE IMPORTS ONLY: ../nav/object-href (which imports ./route-hub alone), so
+// the API routes, the client and vitest all read this.
+
+import { openedObject, type ObjectKind } from "./nav/object-href";
 
 export type TargetKind =
   | "item"
@@ -29,6 +41,9 @@ export type TargetKind =
   | "folder"
   | "doc"
   | "sop"
+  | "table"
+  | "canvas"
+  | "form"
   | "okr"
   | "kra"
   | "person"
@@ -120,6 +135,10 @@ export function parseNotificationLink(link: string | null | undefined): Notifica
   const anchorIsComment = /^c-/.test(hash) || queryComment !== null;
   const anchor = queryComment ?? (/^[bc]-/.test(hash) ? hash.slice(2) : hash || null);
 
+  // The three object address forms, read by the parser that builds them.
+  const opened = openedObject(pathname);
+  if (opened) return { kind: OBJECT_TARGET[opened.kind], id: opened.id, href: path, anchor, anchorIsComment };
+
   for (const route of ROUTES_BY_LENGTH) {
     if (pathname !== route.prefix && !pathname.startsWith(`${route.prefix}/`)) continue;
     const rest = pathname.slice(route.prefix.length).replace(/^\//, "");
@@ -129,6 +148,15 @@ export function parseNotificationLink(link: string | null | undefined): Notifica
 
   return { kind: "external", id: null, href: path, anchor, anchorIsComment };
 }
+
+/** Each object kind's target kind (they share names). */
+const OBJECT_TARGET: Readonly<Record<ObjectKind, TargetKind>> = {
+  doc: "doc",
+  sop: "sop",
+  table: "table",
+  canvas: "canvas",
+  form: "form",
+};
 
 /** One query parameter out of a path, without needing a base URL. */
 function readParam(pathWithQuery: string, name: string): string | null {
@@ -196,6 +224,9 @@ export const TARGET_NOUN: Readonly<Record<TargetKind, string>> = {
   policy: "policy",
   meeting: "meeting",
   talk: "conversation",
+  table: "table",
+  canvas: "canvas",
+  form: "form",
   external: "",
   none: "",
 };

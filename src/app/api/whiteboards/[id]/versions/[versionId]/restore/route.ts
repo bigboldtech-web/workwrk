@@ -1,12 +1,14 @@
 // POST /api/whiteboards/[id]/versions/[versionId]/restore
 // Restore a whiteboard to a prior snapshot. Snapshots the CURRENT scene first
 // (force, so a restore is itself reversible), then copies the chosen snapshot's
-// scene onto the live record. Edit access is gated via the parent Space.
+// scene onto the live record. Restoring is an edit: Can edit on the canvas.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { getSpaceForReader, canEditSpace } from "@/lib/space";
+import { whiteboardReadable } from "@/lib/whiteboard-gate";
+import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { recordSnapshot, getSnapshotContent } from "@/lib/snapshots";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string; versionId: string }> }) {
@@ -19,13 +21,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     select: { id: true, spaceId: true, scene: true },
   });
   if (!wb) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (wb.spaceId) {
-    const space = await getSpaceForReader(wb.spaceId, ctx.userId, ctx.accessLevel ?? "EMPLOYEE");
-    if (!space) return NextResponse.json({ error: "not found" }, { status: 404 });
-    if (!(await canEditSpace(wb.spaceId, ctx.userId, ctx.accessLevel))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const role = await whiteboardReadable(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), wb);
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!roleAtLeast(role, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const content = await getSnapshotContent("WHITEBOARD", id, versionId);
   if (content == null) return NextResponse.json({ error: "version not found" }, { status: 404 });

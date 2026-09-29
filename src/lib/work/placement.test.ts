@@ -19,7 +19,7 @@ import {
 import { resolveHub } from "../nav/route-hub";
 
 const SPACE: SpaceFact = { id: "s1", slug: "design-team", name: "Design Team", icon: "palette", color: "#0073EA", access: "full" };
-const step = (id: string, visible = true, granted = false): FolderStep => ({ id, visible, granted });
+const step = (id: string, visible = true): FolderStep => ({ id, visible });
 
 function doc(over: Partial<DocFacts> = {}): DocFacts {
   return {
@@ -44,21 +44,24 @@ describe("treeFolderIds", () => {
     expect(treeFolderIds([step("a", false), step("b")], "full")).toEqual([]);
   });
 
-  it("stops at the depth the tree loads", () => {
-    expect(TREE_FOLDER_DEPTH).toBe(3);
-    expect(treeFolderIds([step("a"), step("b"), step("c"), step("d")], "full")).toEqual(["a", "b", "c"]);
+  it("stops at the depth the tree loads, which is every level Folders nest to", () => {
+    expect(TREE_FOLDER_DEPTH).toBe(6);
+    const seven = ["a", "b", "c", "d", "e", "f", "g"].map((id) => step(id));
+    expect(treeFolderIds(seven, "full")).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(treeFolderIds(seven.slice(0, 4), "full")).toEqual(["a", "b", "c", "d"]);
   });
 
   it("returns nothing for a path the walk could not finish", () => {
     expect(treeFolderIds([step("a"), step("b")], "full", false)).toEqual([]);
   });
 
-  it("starts a folder-only grantee's path at the nearest grant and never prunes below it", () => {
-    const path = [step("root", false), step("g", false, true), step("x", false), step("y", false)];
-    expect(treeFolderIds(path, "scoped")).toEqual(["g", "x", "y"]);
-    expect(treeFolderIds([step("g", false, true), step("x"), step("y"), step("z")], "scoped")).toEqual(["g", "x", "y"]);
-    expect(treeFolderIds([step("g1", true, true), step("g2", true, true), step("x")], "scoped")).toEqual(["g2", "x"]);
-    expect(treeFolderIds([step("a"), step("b")], "scoped")).toEqual([]);
+  it("walks a path Space exactly like a full one: a path Folder renders at its real depth", () => {
+    // The Space and "root" are path containers (visible), "g" was given.
+    const path = [step("root"), step("g"), step("x")];
+    expect(treeFolderIds(path, "path")).toEqual(treeFolderIds(path, "full"));
+    expect(treeFolderIds(path, "path")).toEqual(["root", "g", "x"]);
+    // A Folder the tree does not render stops the walk in both.
+    expect(treeFolderIds([step("root"), step("sibling", false), step("x")], "path")).toEqual(["root"]);
   });
 
   it("gives a viewer who cannot see the Space nothing", () => {
@@ -149,18 +152,48 @@ describe("assembleDocPlacement", () => {
     expect(p.trail).toEqual([{ label: "Top", href: "/work/docs/p1" }]);
   });
 
-  it("gives a folder-only grantee a Space crumb with no href, and Back lands on the granted Folder", () => {
-    const scoped: SpaceFact = { ...SPACE, access: "scoped" };
+  it("links a path Space's crumb to its path view, and Back lands on the given Folder", () => {
+    const path: SpaceFact = { ...SPACE, access: "path" };
     const p = assembleDocPlacement(doc({
-      space: scoped,
+      space: path,
       folder: { id: "g", name: "Granted" },
-      folderPath: [step("root", false), step("g", false, true)],
+      // "root" is a path container on the way to "g": the tree renders both.
+      folderPath: [step("root"), step("g")],
     }));
-    expect(p.trail[0]).toEqual({ label: "Design Team", tile: { icon: "palette", color: "#0073EA", name: "Design Team" } });
+    expect(p.trail[0]).toEqual({ label: "Design Team", href: "/spaces/design-team", tile: { icon: "palette", color: "#0073EA", name: "Design Team" } });
+    expect(p.address).toBe("/spaces/design-team/docs/d1");
     expect(p.back).toEqual({ href: "/folders/g", label: "Granted" });
     expect(p.closeHref).toBe("/folders/g");
-    expect(p.reveal).toEqual({ spaceId: "s1", folderIds: ["g"] });
-    expect(p.pill.ancestors).toEqual(["folder:g", "space:s1"]);
+    expect(p.reveal).toEqual({ spaceId: "s1", folderIds: ["root", "g"] });
+    expect(p.pill.ancestors).toEqual(["folder:g", "folder:root", "space:s1"]);
+  });
+
+  it("names a Folder only when the loader proved it readable or a path, and then links it", () => {
+    const named = assembleDocPlacement(doc({ space: SPACE, folder: { id: "f1", name: "Brand" }, folderPath: [step("f1")] }));
+    expect(named.trail[1]).toEqual({ label: "Brand", href: "/folders/f1" });
+    // A Folder the viewer neither opens nor passes through never reaches the
+    // assembler: the crumb stops at the Space.
+    const unnamed = assembleDocPlacement(doc({ space: SPACE, folder: null, folderPath: [step("f1", false)] }));
+    expect(unnamed.trail.map((c) => c.label)).toEqual(["Design Team"]);
+    expect(unnamed.back).toEqual({ href: "/spaces/design-team", label: "Design Team" });
+    expect(unnamed.reveal).toEqual({ spaceId: "s1", folderIds: [] });
+  });
+
+  it("names a List and a task only when they are readable, never a task without its List", () => {
+    const p = assembleDocPlacement(doc({ space: SPACE, folder: { id: "f1", name: "Brand" }, folderPath: [step("f1")], list: null, task: null }));
+    expect(p.trail.map((c) => c.label)).toEqual(["Design Team", "Brand"]);
+    expect(p.pill.ancestors).toEqual(["folder:f1", "space:s1"]);
+  });
+
+  it("names a sub-page's parent pages only while they stay readable, nearest first", () => {
+    // The loader walked d1 > p2 (readable) > p1 (not readable) > top (anchored):
+    // p2 alone is named, and the pill does not fall back to the anchor page.
+    const p = assembleDocPlacement(doc({ space: SPACE, parents: [{ id: "p2", title: "Chapter" }], anchorDocId: null }));
+    expect(p.trail.map((c) => [c.label, c.href])).toEqual([
+      ["Design Team", "/spaces/design-team"],
+      ["Chapter", "/spaces/design-team/docs/p2"],
+    ]);
+    expect(p.pill.ancestors).toEqual(["space:s1"]);
   });
 
   it("never sends a folder id the viewer's tree would not render", () => {
@@ -226,12 +259,25 @@ describe("assembleSpaceItemPlacement", () => {
     flat(at({ id: "f2", name: "Secret", path: [step("f1"), step("f2", false)], complete: true }));
     flat(at({ id: "f2", name: "Under secret", path: [step("f1", false), step("f2")], complete: true }));
     // Deeper than the tree loads.
-    flat(at({ id: "f4", name: "Deep", path: [step("f1"), step("f2"), step("f3"), step("f4")], complete: true }));
+    flat(at({ id: "f7", name: "Deep", path: ["f1", "f2", "f3", "f4", "f5", "f6", "f7"].map((id) => step(id)), complete: true }));
     // An ancestor walk that never reached the top.
     flat(at({ id: "f2", name: "Cut", path: [step("f2")], complete: false }));
     // No Folder, or a stale one the loader could not place in this Space.
     flat(at(null));
     flat(at(undefined));
+  });
+
+  it("nests a canvas given inside a PRIVATE Folder under that Folder, both named as paths", () => {
+    const path: SpaceFact = { ...SPACE, access: "path" };
+    const folder = { id: "pf", name: "Private", path: [step("pf")], complete: true };
+    const c = assembleSpaceItemPlacement("canvas", { id: "c1", title: "Board", space: path, folder });
+    expect(c.address).toBe("/spaces/design-team/canvas/c1");
+    expect(c.trail.map((x) => [x.label, x.href])).toEqual([
+      ["Design Team", "/spaces/design-team"],
+      ["Private", "/folders/pf"],
+    ]);
+    expect(c.reveal).toEqual({ spaceId: "s1", folderIds: ["pf"] });
+    expect(c.pill.ancestors).toEqual(["folder:pf", "space:s1"]);
   });
 
   it("never names a Folder for a canvas with no Space in Work", () => {

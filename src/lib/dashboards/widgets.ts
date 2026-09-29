@@ -6,6 +6,8 @@
 //   chart  a distribution by status, assignee, priority or a field, as a bar
 //          or a donut
 //   list   an embedded List view: the first tasks matching a filter
+//   workload  people by their open work over the next weeks, against their
+//          capacity (Phase 6 decision b, Space Overview only)
 //   notes  free text
 // A Space Overview is the same set pinned to one Space (Dashboard.spaceId).
 //
@@ -74,6 +76,8 @@ export type StatScope = "open" | "total" | "completed" | "overdue";
 export type ChartGroupBy = "status" | "assignee" | "priority" | { field: string };
 export type ChartDisplay = "bar" | "donut";
 export type ListSort = "due" | "updated" | "created" | "priority" | "title";
+export type WorkloadWindowDays = 7 | 14 | 28;
+export type WorkloadCountMode = "tasks" | "hours";
 
 interface Base {
   id: string;
@@ -96,9 +100,10 @@ interface TitleFlag {
 export type StatWidget = Base & TitleFlag & { kind: "stat"; source: WidgetSource; filter: WidgetFilter; metric: StatMetric; scope: StatScope };
 export type ChartWidget = Base & TitleFlag & { kind: "chart"; source: WidgetSource; filter: WidgetFilter; groupBy: ChartGroupBy; display: ChartDisplay };
 export type ListWidget = Base & TitleFlag & { kind: "list"; source: WidgetSource; filter: WidgetFilter; sort: ListSort; limit: number };
+export type WorkloadWidget = Base & TitleFlag & { kind: "workload"; source: WidgetSource; filter: WidgetFilter; windowDays: WorkloadWindowDays; mode: WorkloadCountMode };
 export type NotesWidget = Base & { kind: "notes"; text: string };
 export type PassthroughWidget = { id: string; kind: "passthrough"; raw: unknown; layout?: WidgetLayout };
-export type DataWidget = StatWidget | ChartWidget | ListWidget;
+export type DataWidget = StatWidget | ChartWidget | ListWidget | WorkloadWidget;
 export type Widget = DataWidget | NotesWidget | PassthroughWidget;
 /** What a reader receives for a card they may not see. */
 export type HiddenWidget = { id: string; kind: "hidden"; layout?: WidgetLayout };
@@ -201,6 +206,11 @@ function parseCurrent(o: Record<string, unknown>, id: string): Widget | null {
     const sort = typeof o.sort === "string" && SORTS.has(o.sort) ? (o.sort as ListSort) : "updated";
     return { id, kind: "list", title: parseTitle(o.title, "Tasks"), ...flag, source, filter, sort, limit: clampInt(o.limit, 1, MAX_LIST_ROWS, 10), layout };
   }
+  if (o.kind === "workload") {
+    const windowDays: WorkloadWindowDays = o.windowDays === 7 || o.windowDays === 28 ? o.windowDays : 14;
+    const mode: WorkloadCountMode = o.mode === "hours" ? "hours" : "tasks";
+    return { id, kind: "workload", title: parseTitle(o.title, "Workload by person"), ...flag, source, filter, windowDays, mode, layout };
+  }
   return null;
 }
 
@@ -249,7 +259,7 @@ export function parseWidgets(raw: unknown): Widget[] {
     seen.add(id);
     let parsed: Widget | null = null;
     if (o && !duplicate) {
-      if (typeof o.kind === "string" && ["stat", "chart", "list", "notes"].includes(o.kind)) parsed = parseCurrent(o, id);
+      if (typeof o.kind === "string" && ["stat", "chart", "list", "workload", "notes"].includes(o.kind)) parsed = parseCurrent(o, id);
       else if (typeof o.type === "string" && LEGACY_TYPES.has(o.type)) parsed = parseLegacy(o, id);
     }
     out.push(parsed ?? { id, kind: "passthrough", raw: entry, ...(o?.layout ? { layout: parseLayout(o.layout) } : {}) });
@@ -270,6 +280,7 @@ export function serializeWidgets(widgets: readonly Widget[]): unknown[] {
     const common = { id: w.id, kind: w.kind, title: w.title, ...titleFlagOf(w), source: w.source, filter: w.filter, layout: w.layout };
     if (w.kind === "stat") return { ...common, metric: w.metric, scope: w.scope };
     if (w.kind === "chart") return { ...common, groupBy: w.groupBy, display: w.display };
+    if (w.kind === "workload") return { ...common, windowDays: w.windowDays, mode: w.mode };
     return { ...common, sort: w.sort, limit: w.limit };
   });
 }
@@ -329,6 +340,17 @@ export const widgetInputSchema = z.discriminatedUnion("kind", [
     filter: filterSchema.optional(),
     sort: z.enum(["due", "updated", "created", "priority", "title"]).optional(),
     limit: z.number().int().min(1).max(MAX_LIST_ROWS).optional(),
+    layout: layoutSchema,
+  }),
+  z.object({
+    id: idSchema,
+    kind: z.literal("workload"),
+    title: titleSchema,
+    titleEdited: titleEditedSchema,
+    source: sourceSchema,
+    filter: filterSchema.optional(),
+    windowDays: z.union([z.literal(7), z.literal(14), z.literal(28)]).optional(),
+    mode: z.enum(["tasks", "hours"]).optional(),
     layout: layoutSchema,
   }),
   z.object({ id: idSchema, kind: z.literal("notes"), title: titleSchema, text: z.string().max(20000), layout: layoutSchema }),
@@ -394,6 +416,7 @@ export function resolvePassthrough(
     const common = { id: w.id, title: w.title, ...flag, source: normalizeSource(w.source), filter: normalizeFilter(w.filter), layout: { ...w.layout } };
     if (w.kind === "stat") out.push({ ...common, kind: "stat", metric: w.metric ?? { op: "count" }, scope: w.scope ?? "total" });
     else if (w.kind === "chart") out.push({ ...common, kind: "chart", groupBy: w.groupBy, display: w.display ?? "bar" });
+    else if (w.kind === "workload") out.push({ ...common, kind: "workload", windowDays: w.windowDays ?? 14, mode: w.mode ?? "tasks" });
     else out.push({ ...common, kind: "list", sort: w.sort ?? "updated", limit: w.limit ?? 10 });
   }
   return { ok: true, widgets: out };

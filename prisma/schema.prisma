@@ -118,6 +118,8 @@ model Organization {
   dashboards           Dashboard[]
   // Phase 5b: scheduled email reports of a dashboard or a saved view.
   reportSchedules      ReportSchedule[]
+  integrationRequests  IntegrationRequest[]
+  appSuggestions       AppSuggestion[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
   docs                 Doc[]
@@ -506,6 +508,22 @@ model User {
   manager       User?   @relation("ManagerReports", fields: [managerId], references: [id])
   directReports User[]  @relation("ManagerReports")
 
+  // Phase 6 (prisma/sql/2026-09-26-phase6-people.sql). All nullable, all
+  // additive; every reader treats null as "not set" and falls back.
+  //   weeklyCapacityHours: the person's own weekly hours for Workload (null =
+  //     the org schedule, WorkSchedule.hoursPerDay x workdays).
+  //   presenceStatus / presenceUntil: the avatar dot and Do not disturb
+  //     ("active" | "away" | "meeting" | "dnd" | "ooo"); null draws no dot.
+  //   workSchedule: a per-person override of the org WorkSchedule,
+  //     { workdays: number[], hoursPerDay: number }, null = the org's.
+  //   customFields: values of the org's custom profile fields, keyed by the
+  //     field key defined in Organization.settings.people.profileFields.
+  weeklyCapacityHours Float?
+  presenceStatus      String?
+  presenceUntil       DateTime?
+  workSchedule        Json?
+  customFields        Json?
+
   skills                  UserSkill[]
   certifications          Certification[]
   kraAssignments          KRAAssignment[]
@@ -693,6 +711,12 @@ model Invitation {
   roleId         String?
   managerId      String?
   officeId       String?
+  // Phase 6 (prisma/sql/2026-09-26-phase6-people.sql): the names and phone
+  // a People CSV import carried, so the invitee's form starts filled and no
+  // imported phone number is lost. Nullable; a manual invite leaves them null.
+  firstName      String?
+  lastName       String?
+  phone          String?
   // Role-definition gate (the vision's KRA/KPI/SOP entry rule):
   // an admin can't issue an invite without first picking at least one
   // KRA and one SOP for the role. These arrays carry the selection so
@@ -1062,6 +1086,10 @@ model Threshold {
   value             Float
   unit              String?
   businessHoursOnly Boolean      @default(true)
+  // Phase 6: who the escalation goes to (spec-teams-people T9). Null = the
+  // holder's manager. Nothing enforces a threshold yet; the reader is a
+  // report only (scripts/report-escalation-thresholds.ts).
+  escalatedToId     String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -1243,6 +1271,9 @@ model KPIRecord {
   managerNotes String?
   evidence     String?
   status       KPIRecordStatus @default(PENDING)
+  // Phase 6: the manager who recorded or approved this number (spec-goals
+  // section 4). Null for employee-recorded rows awaiting approval.
+  reviewedById String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
@@ -1785,6 +1816,13 @@ model ReviewCycle {
   startDate      DateTime
   endDate        DateTime
   status         CycleStatus  @default(DRAFT)
+  // Phase 6 (spec-teams-performance section 4). Who started the cycle and
+  // who it covers: ALL, DEPARTMENTS (departmentIds) or USERS (userIds, a
+  // manager's chain). A null creator reads as "People team and Admin only".
+  createdById    String?
+  audienceType   String       @default("ALL")
+  departmentIds  String[]     @default([])
+  userIds        String[]     @default([])
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   reviews        Review[]
@@ -1840,6 +1878,11 @@ model Review {
   // Calibration
   calibratedScore    Float?
   calibrationNotes   String?
+  // Phase 6: the 9-box potential (1 to 3) set in calibration, and who
+  // calibrated the row and when.
+  potential          Int?
+  calibratedById     String?
+  calibratedAt       DateTime?
 
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -2758,6 +2801,10 @@ model OKR {
   startDate      DateTime?
   endDate        DateTime?
   quarter        String? // "Q2 2026"
+  // Phase 6 (spec-goals): when a person marked the goal complete. The status
+  // column is re-derived from the targets, so completion needs its own
+  // column that nothing re-derives. Null = not marked complete.
+  completedAt    DateTime?
   // Check-in rhythm. Drives the reminder cron + the "stale" badge on
   // the personal hero. Defaults to weekly because that's what most
   // teams settle on.
@@ -2875,6 +2922,10 @@ model TalentAssessment {
   action         String? // "Promote", "Develop", "Retain", "Coach", "PIP", "Exit"
   notes          String?
   assessedBy     String
+  // Phase 6: MANUAL (placed by a person), SCORES (filled from performance
+  // scores) or CALIBRATION (from a review cycle, cycleId set).
+  source         String   @default("MANUAL")
+  cycleId        String?
   organizationId String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -2905,6 +2956,9 @@ model PulseSurvey {
   // attributed mode at create time when the context calls for it (e.g.
   // post-review pulse tied to a 1:1 follow-up).
   anonymous      Boolean          @default(true)
+  // Phase 6: the survey's creator (null for surveys that predate it; a null
+  // creator falls back to People team and Admin only).
+  createdById    String?
   organizationId String
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      SurveyResponse[]
@@ -3074,6 +3128,7 @@ model CandorSession {
   organizationId String
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      CandorResponse[]
+  respondents    CandorRespondent[]
   launchedAt     DateTime?
   closedAt       DateTime?
   createdAt      DateTime         @default(now())
@@ -3091,6 +3146,21 @@ model CandorResponse {
   createdAt DateTime      @default(now())
 
   @@index([sessionId])
+}
+
+// Phase 6: WHO has answered a candor session, never WHAT they answered.
+// CandorResponse deliberately has no user column, and this table has no
+// response column, so the two can never be joined back into an attributed
+// answer. It replaces the browser-only "already responded" flag.
+model CandorRespondent {
+  id          String        @id @default(cuid())
+  sessionId   String
+  session     CandorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  respondedAt DateTime      @default(now())
+
+  @@unique([sessionId, userId])
+  @@index([userId])
 }
 
 // ==========================================
@@ -6765,4 +6835,79 @@ model AutomationTemplate {
   updatedAt    DateTime           @updatedAt
 
   @@index([isActive, category])
+}
+
+/// Phase 7 (spec-tools-misc 2.6). One person asking for one connector, so the
+/// "Request this" count on /integrations counts people, not clicks. `key` is a
+/// connector key from src/lib/integrations/registry.ts. userId has no
+/// relation on purpose, like addedById: offboarding a person must not erase
+/// the demand they registered.
+model IntegrationRequest {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String
+  userId         String
+  note           String?      @db.Text
+  notify         Boolean      @default(true)
+  /// "Request a connector" free text: the name the person typed, kept as
+  /// typed. `key` holds only its slug (custom:hub-spot), which is what the
+  /// count groups on; without this the catalogue and Settings could only
+  /// show the slug back. Null on a catalogue request, whose name is the
+  /// registry's. Written and read through raw SQL until the client is
+  /// regenerated, so a database without the column still answers.
+  name           String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, key, userId])
+  @@index([organizationId, key])
+}
+
+/// Phase 7 (spec-tools-misc 2.5). "Suggest an app" on Marketplace: what a
+/// person wants WorkwrK to do. Read as a count by Owners and Admins. userId
+/// has no relation for the same reason as IntegrationRequest.
+model AppSuggestion {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  text           String       @db.Text
+  notify         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+/// One row per cron endpoint, stamped on every tick. The automation trigger
+/// catalog reads the "automation-schedule" row to say whether the two time
+/// triggers (a task's date arrives, every time period) are actually firing,
+/// so a workspace never sees "Active" on an automation its host never runs.
+model AutomationCronTick {
+  name       String   @id
+  lastTickAt DateTime
+}
+
+/// A person's grant on one table, canvas or form: the three node kinds that
+/// had no person-grant store. Spaces, Folders and Lists keep SpaceMember,
+/// FolderMember and BoardMember; docs keep Organization.settings.docSharing.
+/// Written only by src/lib/access/grants.ts and read only by
+/// src/lib/access/access-grant-store.ts through raw SQL, so a release that
+/// meets a database without this table answers as if nobody held a grant.
+/// objectType: "TABLE" | "WHITEBOARD" | "FORM". subjectType: "USER".
+/// role: ADMIN = Full access, MEMBER = Can edit, GUEST = Can view (OWNER unused).
+model AccessGrant {
+  id             String    @id
+  organizationId String
+  objectType     String
+  objectId       String
+  subjectType    String    @default("USER")
+  subjectId      String
+  role           SpaceRole
+  grantedById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@unique([objectType, objectId, subjectType, subjectId])
+  @@index([organizationId, subjectType, subjectId])
+  @@index([objectType, objectId])
 }

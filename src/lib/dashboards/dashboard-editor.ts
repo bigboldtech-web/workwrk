@@ -280,6 +280,7 @@ export function toWidgetInputs(widgets: readonly EditorWidget[]): WidgetInput[] 
       const groupBy = typeof w.groupBy === "object" ? { field: w.groupBy.field } : w.groupBy;
       return { id: w.id, kind: "chart", title: w.title, ...flag, source, filter, groupBy, display: w.display, layout };
     }
+    if (w.kind === "workload") return { id: w.id, kind: "workload", title: w.title, ...flag, source, filter, windowDays: w.windowDays, mode: w.mode, layout };
     return { id: w.id, kind: "list", title: w.title, ...flag, source, filter, sort: w.sort, limit: w.limit, layout };
   });
 }

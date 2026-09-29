@@ -11,6 +11,8 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
+import { addressHref } from "@/lib/nav/object-href";
+import { canSeeGoal } from "@/lib/goal-audience";
 
 const bodySchema = z.object({
   objectType: z.string().min(1).max(40),
@@ -19,7 +21,7 @@ const bodySchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | null> = {
+const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | "goal" | null> = {
   space: "space",
   board: "board",
   list: "board",
@@ -31,6 +33,12 @@ const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_fo
   sop_folder: "sop_folder",
   // A Member party on /agreements/[id] asks the contract's sender.
   contract: "contract",
+  // The Tool drawer's read-only banner (spec-tools-misc 2.1): a Can view
+  // holder asks whoever added the tool.
+  tool: "tool",
+  // The goal page's read-only banner (spec-goals /okrs/[id]): a Can view
+  // viewer asks the goal's owner for Can edit (no owner: the admins).
+  goal: "goal",
 };
 
 type RequestTarget = { ownerId: string | null; link: string | null };
@@ -59,11 +67,19 @@ async function targetFor(type: string, id: string, organizationId: string): Prom
     }
     if (model === "sop") {
       const s = await prisma.sOP.findFirst({ where, select: { createdById: true } });
-      return { ownerId: s?.createdById ?? null, link: s ? `/sops/${id}` : null };
+      return { ownerId: s?.createdById ?? null, link: s ? addressHref("sop", id, { scope: "work" }) : null };
     }
     if (model === "sop_folder") {
       const f = await prisma.sOPFolder.findFirst({ where, select: { id: true } });
       return { ownerId: null, link: f ? "/sops/manage?tab=sop-folders" : null };
+    }
+    if (model === "tool") {
+      const t = await prisma.tool.findFirst({ where, select: { addedBy: true } });
+      return { ownerId: t?.addedBy ?? null, link: t ? `/tools?tool=${id}` : null };
+    }
+    if (model === "goal") {
+      const g = await prisma.oKR.findFirst({ where, select: { ownerId: true } });
+      return { ownerId: g?.ownerId ?? null, link: g ? `/okrs/${id}` : null };
     }
     if (model === "contract") {
       const a = await prisma.agreement.findFirst({ where, select: { createdById: true } });
@@ -84,6 +100,13 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   const { objectType, objectId, role, message } = parsed.data;
 
+  // A goal is never discoverable (spec-goals section 1): only a viewer who
+  // can already see it may ask its owner, so a request never confirms that
+  // a goal id exists.
+  if (objectType === "goal") {
+    const g = await prisma.oKR.findFirst({ where: { id: objectId, organizationId: u.organizationId }, select: { id: true, level: true, ownerId: true, departmentId: true } });
+    if (!g || !(await canSeeGoal(session, g))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const { ownerId, link } = await targetFor(objectType, objectId, u.organizationId);
   const targets = ownerId && ownerId !== u.id
     ? [ownerId]

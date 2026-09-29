@@ -195,18 +195,19 @@ export function columnDisplayName(label: string | null | undefined, index: numbe
 }
 
 /** The sentence under the Goes to picker naming who can edit the form and
- *  read its responses. It describes the rule the API actually enforces
- *  (api/forms/[id] canEditForm, lib/forms/responses-server canReadResponses):
- *  with the access engine inert, every workspace Member can edit any form and
- *  read its responses, and a Guest only a form they made. The destination
- *  does not widen or narrow that, so the sentence is the same with or without
- *  one. The spec's "Editors of {destination} can edit this form" wording waits
- *  for the access engine to scope forms by destination; promising it earlier
- *  would tell an owner their questions are private when the whole workspace
- *  can change them and read the answers. */
+ *  read its responses. It describes the rule the API actually enforces (the
+ *  one resolver's R9, api/forms/[id]): a form that sends responses somewhere
+ *  inherits the role held there, so whoever can open that List or table
+ *  reads the responses, whoever can edit it edits the questions, and Full
+ *  access on it changes where the responses go (the placement rule P2);
+ *  everyone else in the workspace opens the form read-only. A form sending
+ *  nowhere yet keeps the org root's rule: every Member edits it and reads
+ *  its responses, a Guest only a form they made. The destination's name is
+ *  not repeated: a viewer who cannot open it sees it as "A private List". */
 export function audienceLine(destination?: { kind: "list" | "table"; name: string } | null): string {
-  void destination;
-  return "Every member of this workspace can edit this form and read its responses. A guest can only if they made the form.";
+  if (!destination) return "Every member of this workspace can edit this form and read its responses. A guest can only if they made the form.";
+  const noun = destination.kind === "list" ? "List" : "table";
+  return `Whoever can open the ${noun} this form sends responses to can read them, whoever can edit that ${noun} can edit this form, and Full access on it changes where the responses go. Everyone else in the workspace can open the form read-only.`;
 }
 
 /** Fields a person has not answered anywhere in the mapping and that the

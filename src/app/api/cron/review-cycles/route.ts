@@ -6,6 +6,7 @@ import {
   type CadenceKey,
 } from "@/lib/review-cadence";
 import type { AccessLevel } from "@/generated/prisma";
+import { parseAccessSettings } from "@/lib/access/settings";
 
 /**
  * Cron — auto-opens performance review cycles from each org's configured
@@ -28,6 +29,10 @@ import type { AccessLevel } from "@/generated/prisma";
  */
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
+  // Closed, not open, when the secret is missing in production.
+  if (!cronSecret && process.env.NODE_ENV === "production") {
+    return Response.json({ error: "CRON_SECRET is not set, so the cron endpoints are closed" }, { status: 503 });
+  }
   if (cronSecret) {
     const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
     const provided = header?.replace(/^Bearer\s+/i, "");
@@ -39,8 +44,11 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   // Cadences that map to a ReviewCycle (weekly is per-user, handled elsewhere).
   const CYCLE_CADENCES: Exclude<CadenceKey, "weekly">[] = ["monthly", "quarterly", "annual"];
-  // Who hears about a newly-opened cycle.
-  const NOTIFY_LEVELS: AccessLevel[] = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
+  // Who hears about a newly-opened cycle: the people who can open it and
+  // launch it, the People team and Admin. A cadence cycle has no recorded
+  // creator, so a manager could not open it and the old fan-out to every
+  // manager tier sent most of them to a 404.
+  const NOTIFY_LEVELS: AccessLevel[] = ["SUPER_ADMIN", "COMPANY_ADMIN", "HR"];
 
   const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
 
@@ -54,8 +62,10 @@ export async function POST(req: NextRequest) {
   async function managersFor(orgId: string): Promise<string[]> {
     const cached = managersByOrg.get(orgId);
     if (cached) return cached;
+    const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+    const peopleTeam = parseAccessSettings(((org?.settings ?? {}) as { access?: unknown }).access).peopleTeamUserIds;
     const rows = await prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null, accessLevel: { in: NOTIFY_LEVELS } },
+      where: { organizationId: orgId, deletedAt: null, OR: [{ accessLevel: { in: NOTIFY_LEVELS } }, { id: { in: peopleTeam } }] },
       select: { id: true },
     });
     const ids = rows.map((r) => r.id);

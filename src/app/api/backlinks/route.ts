@@ -11,7 +11,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { docAccessible } from "@/lib/doc-access";
+import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 type Kind = "doc" | "sop";
 
@@ -88,11 +89,17 @@ export async function GET(req: NextRequest) {
       : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date }>),
   ]);
 
-  // Doc hits — filter by per-row access (private notes that reference
-  // this entity stay hidden from viewers who can't read them).
+  // Doc hits, filtered by the viewer's role on each doc in ONE world (private
+  // notes, restricted docs and sub-pages under a page they cannot open stay
+  // hidden from viewers who can't read them).
+  const docRoles = await nodeRoleMap(
+    nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel),
+    "doc",
+    docs.map((d) => d.id),
+  );
   const docHits: Hit[] = [];
   for (const d of docs) {
-    if (!(await docAccessible(d, ctx.userId, ctx.accessLevel))) continue;
+    if (!roleAtLeast(docRoles.get(d.id) ?? "none", "VIEW")) continue;
     if (kind === "doc" && d.id === id) continue;
     const meta = (d.content as { meta?: { icon?: string } } | null)?.meta;
     docHits.push({

@@ -38,7 +38,7 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, filterSu
 import type { PartialBlock } from "@blocknote/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon, Film } from "lucide-react";
+import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon, Film, Sparkles } from "lucide-react";
 
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
@@ -53,7 +53,8 @@ import { videoEmbedBlockSpec, isPlayableVideoUrl, extractIframeSrc } from "./blo
 import { columnsBlockSpec } from "./blocknote-blocks/columns-block";
 import { mentionInlineSpec } from "./blocknote-blocks/mention-inline";
 import { BlockDragMenu, BlockDragMenuProvider } from "./blocknote-blocks/block-drag-menu";
-import { useWorkPlacement } from "@/components/layout/os/work-placement";
+import { currentOpenObject, useWorkPlacement } from "@/components/layout/os/work-placement";
+import { editorLinkHref } from "@/lib/nav/object-href";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
 
 // Schema = BlockNote defaults + our workspace-specific custom blocks +
@@ -208,6 +209,20 @@ function workspaceSlashItems(
   ];
 }
 
+// "/ai", "/ask": the doc's Ask AI panel from the slash menu, the same panel
+// the toolbar and the block menu open. Offered only when Ask AI is on for
+// the viewer (the parent passes onAskAI then and only then).
+function askAiSlashItem(onAskAI: () => void): DefaultReactSuggestionItem {
+  return {
+    title: "Ask AI",
+    subtext: "Summarise this doc, pull out a table, or ask about it",
+    aliases: ["ai", "ask", "ask ai", "summarize", "summarise", "assistant"],
+    group: "AI",
+    icon: <Sparkles size={18} />,
+    onItemClick: () => onAskAI(),
+  };
+}
+
 // ───────── @-mention suggestion items ─────────
 //
 // Fetches people (/api/users) and pages (/api/docs) matching the query and
@@ -349,6 +364,28 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
   const editor = useCreateBlockNote({
     schema,
     initialContent,
+    // A link mark clicked while the doc is being edited. BlockNote opens the
+    // stored href in a new tab, and the shell's SectionLinkInterceptor stays
+    // out of editable regions, so a doc, table or canvas link opened from a
+    // doc in Work used to land in the Docs or Tables hub. The same rule as a
+    // read-only doc maps it to its section form here (B1); the stored href
+    // is never changed. Read-only docs never reach this handler (BlockNote
+    // runs it only while the editor is editable).
+    links: {
+      onClick: (event) => {
+        const el = event.target instanceof Element ? event.target.closest("a[href]") : null;
+        const a = el instanceof HTMLAnchorElement ? el : null;
+        if (!a) return false;
+        const href = editorLinkHref({
+          href: a.href,
+          origin: window.location.origin,
+          pathname: window.location.pathname,
+          open: currentOpenObject(),
+        });
+        window.open(href, a.getAttribute("target") || "_blank");
+        return true;
+      },
+    },
     // Paste a video link (YouTube / Vimeo / Loom / Dadan / file) OR a full
     // <iframe …> embed snippet → drop in a playable embed. Else paste normally.
     pasteHandler: ({ event, editor: ed, defaultPasteHandler }) => {
@@ -515,6 +552,9 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
                 // and handles links, embed code, and file URLs.
                 ...getDefaultReactSlashMenuItems(editor).filter((it) => it.title !== "Video"),
                 ...workspaceSlashItems(editor, slashDocId, onPageCreated),
+                // AI inline: "/ai" opens this doc's Ask AI panel (summarise,
+                // extract a table, ask about it), only when Ask AI is on.
+                ...(onAskAI ? [askAiSlashItem(onAskAI)] : []),
               ],
               query,
             )

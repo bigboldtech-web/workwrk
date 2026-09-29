@@ -99,13 +99,13 @@ let jobSeq = 0;
 export default function FilesPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { rowVersion, prefs, patchPrefs, railApps } = useOsShell();
+  const { rowVersion, prefs, patchPrefs, askAiVisible } = useOsShell();
   const { boot } = useBoot();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const prompt = usePrompt();
   const fmt = useFormat();
-  const aiOn = railApps.some((a) => a.key === "ai");
+  const aiOn = askAiVisible;
 
   /* ── URL state ── */
   const folderId = params.get("folder");
@@ -390,7 +390,7 @@ export default function FilesPage() {
       return <span className="truncate text-ink-2">{f.folder ? `Files › ${f.folder.name}` : "Files"}</span>;
     } });
     if (cols.uploaded) out.push({ key: "uploaded", label: "Uploaded", sortable: true, width: "120px", render: (it) => <span className="tabular-nums text-ink-2" title={fmt.title(it.kind === "folder" ? it.folder.createdAt : it.file.createdAt)}>{fmt.date(it.kind === "folder" ? it.folder.createdAt : it.file.createdAt)}</span> });
-    if (cols.owner) out.push({ key: "owner", label: "Uploaded by", width: "minmax(140px,1fr)", className: "max-lg:hidden", render: (it) => it.kind === "file" && it.file.uploadedBy ? <span className="inline-flex min-w-0 items-center gap-2"><PersonAvatar person={it.file.uploadedBy} size={24} /><span className="truncate">{it.file.uploadedBy.name ?? personName(it.file.uploadedBy)}</span></span> : it.kind === "file" ? <span className="text-ink-3">Nobody</span> : null });
+    if (cols.owner) out.push({ key: "owner", label: "Uploaded by", width: "minmax(140px,1fr)", hideBelow: 700, render: (it) => it.kind === "file" && it.file.uploadedBy ? <span className="inline-flex min-w-0 items-center gap-2"><PersonAvatar person={it.file.uploadedBy} size={24} /><span className="truncate">{it.file.uploadedBy.name ?? personName(it.file.uploadedBy)}</span></span> : it.kind === "file" ? <span className="text-ink-3">Nobody</span> : null });
     return out;
   }, [cols, view, activeFolder, fmt, toggleFav]);
 

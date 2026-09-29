@@ -1,30 +1,37 @@
-// POST /api/agents/[slug]/install — install a prebuilt catalog agent
-// into the current org. Idempotent: re-install just re-enables.
+// POST /api/agents/[slug]/install, install a prebuilt catalog agent
+// into the current org. Idempotent: re-install just re-enables. A removed
+// agent that is not in the catalog (a custom one) is added back as it was:
+// its own prompt and settings, turned back on.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { requireManageApps } from "@/lib/app-gate";
 import { AGENTS_BY_SLUG } from "@/lib/agents/catalog";
+import { auditAgent } from "@/lib/agents/audit";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const userId = (session.user as { id?: string }).id;
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, organizationId: true, accessLevel: true },
-  });
-  if (!user?.organizationId) return NextResponse.json({ error: "no organization" }, { status: 400 });
-  if (user.accessLevel !== "SUPER_ADMIN" && user.accessLevel !== "COMPANY_ADMIN") {
-    return NextResponse.json({ error: "admin only" }, { status: 403 });
-  }
+  // Owner and Admin: an agent is an org-level install (access section 9,
+  // the Apps settings gate). Same audience as the admin check it replaces.
+  const gate = await requireManageApps();
+  if ("error" in gate) return gate.error;
+  const user = { id: gate.viewer.userId, organizationId: gate.viewer.organizationId };
 
   const catalog = AGENTS_BY_SLUG[slug];
-  if (!catalog) return NextResponse.json({ error: "unknown agent" }, { status: 404 });
+  if (!catalog) {
+    const removed = await prisma.agent.findFirst({
+      where: { organizationId: user.organizationId, slug, status: "ARCHIVED" },
+      select: { id: true },
+    });
+    if (!removed) return NextResponse.json({ error: "unknown agent" }, { status: 404 });
+    const agent = await prisma.agent.update({
+      where: { id: removed.id },
+      data: { status: "ENABLED" },
+      select: { id: true, slug: true, name: true, status: true },
+    });
+    await auditAgent({ organizationId: user.organizationId, actorId: user.id, agent, action: "added" });
+    return NextResponse.json({ agent });
+  }
 
   const agent = await prisma.agent.upsert({
     where: { organizationId_slug: { organizationId: user.organizationId, slug } },
@@ -52,6 +59,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
     },
     select: { id: true, slug: true, name: true, status: true },
   });
+  await auditAgent({ organizationId: user.organizationId, actorId: user.id, agent, action: "added" });
 
   return NextResponse.json({ agent });
 }

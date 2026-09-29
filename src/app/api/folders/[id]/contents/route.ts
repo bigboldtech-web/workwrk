@@ -21,8 +21,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canEditSpace } from "@/lib/space";
-import { folderVisibleTo, folderReadable } from "@/lib/folder";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { mergeListTaskCounts } from "@/lib/list-links";
 import { linkedTreeCountGroups } from "@/lib/list-links-server";
@@ -64,20 +64,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     select: { id: true, spaceId: true },
   });
   if (!folder) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  // THE FOLDER, NOT ONLY ITS SPACE. Gating on the parent Space alone handed a
-  // PRIVATE folder's Lists, Docs and Canvases (names, owners, open/done counts)
-  // to every Space reader, while /folders/[id] answered the same person with
-  // the in-shell 404. `folderReadable` is the gate the page resolves through
-  // and the one `GET /api/boards?folderId=` already uses.
-  // It subsumes the Space read this used to do on its own: folderReadable ends
-  // in "else the parent Space, unless the folder is PRIVATE".
-  if (!(await folderReadable(id, u.id, accessLevel))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const canEdit = await canEditSpace(folder.spaceId, u.id, accessLevel);
+  // THE FOLDER, NOT ONLY ITS SPACE: Can view on the Folder itself, from the
+  // one resolver the page and GET /api/boards?folderId= use. A path Folder is
+  // not a role (its page renders only the branches that lead to a grant).
+  const ctx = nodeCtxFromLevel(u.id, organizationId, accessLevel);
+  const own = (await nodeRoles(ctx, [{ kind: "folder", id }])).get(`folder:${id}`)?.role ?? "none";
+  if (!roleAtLeast(own, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Full access on the Folder manages its shelf (W2), never the Space's rights.
+  const canEdit = roleAtLeast(own, "FULL");
   const archivedWhere = showArchived ? {} : { archivedAt: null };
 
-  const [rawFolders, rawLists, docs, canvases] = await Promise.all([
+  const [rawFolders, rawLists, rawDocs, rawCanvases] = await Promise.all([
     prisma.folder.findMany({
       where: { organizationId, parentFolderId: id, ...archivedWhere },
       orderBy: [{ position: "asc" }, { name: "asc" }],
@@ -110,13 +107,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .catch(() => [] as Array<{ id: string; name: string; updatedAt: Date; ownerId: string | null }>),
   ]);
 
-  // A PRIVATE folder or List the viewer holds nothing on drops out of the
-  // aggregate, the same rule the page has always applied to its cards.
-  const isAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
-  const folders = rawFolders.filter((f) => folderVisibleTo(f, u.id!, accessLevel));
-  const lists = rawLists.filter(
-    (b) => isAdmin || canEdit || b.visibility !== "PRIVATE" || b.ownerId === u.id,
-  );
+  // Every row through ONE world: a sub-folder, List, doc or canvas the viewer
+  // cannot open is never listed, named or counted (the Private cut, restricted
+  // docs and grants all honoured, as the tree does).
+  const refs: NodeRef[] = [
+    ...rawFolders.map((f) => ({ kind: "folder" as const, id: f.id })),
+    ...rawLists.map((b) => ({ kind: "list" as const, id: b.id })),
+    ...rawDocs.map((d) => ({ kind: "doc" as const, id: d.id })),
+    ...rawCanvases.map((c) => ({ kind: "canvas" as const, id: c.id })),
+  ];
+  const roles = refs.length ? await nodeRoles(ctx, refs) : new Map();
+  const reads = (kind: string, rowId: string) => roleAtLeast(roles.get(`${kind}:${rowId}`)?.role ?? "none", "VIEW");
+  const folders = rawFolders.filter((f) => reads("folder", f.id));
+  const lists = rawLists.filter((b) => reads("list", b.id));
+  const docs = rawDocs.filter((d) => reads("doc", d.id));
+  const canvases = rawCanvases.filter((c) => reads("canvas", c.id));
 
   // Open / done per List, resolved through each List's OWN statuses (audit
   // spaces-boards High #3), not a Space-wide palette.

@@ -188,6 +188,12 @@ function sectionFor(w: Widget, result: WidgetResult): ReportSection | null {
         heading: title,
         lines: result.rows.slice(0, 10).map((r) => `${r.title}${r.statusLabel ? ` (${r.statusLabel}${r.dueAt ? `, due ${r.dueAt.slice(0, 10)}` : ""})` : r.dueAt ? ` (due ${r.dueAt.slice(0, 10)})` : ""}`),
       };
+    case "workload": {
+      const unit = result.mode === "hours" ? "h" : " tasks";
+      const lines = result.people.slice(0, 10).map((p) => `${`${p.firstName} ${p.lastName}`.trim() || "Someone"}: ${p.load}${unit} of ${p.capacity}${unit}${p.overdue ? `, ${p.overdue} overdue` : ""}`);
+      if (result.unassigned && (result.unassigned.load || result.unassigned.overdue)) lines.push(`Unassigned: ${result.unassigned.load}${unit}${result.unassigned.overdue ? `, ${result.unassigned.overdue} overdue` : ""}`);
+      return { heading: title, lines };
+    }
     case "notes":
       return w.kind === "notes" && w.text.trim() ? { heading: title, lines: [w.text.trim().slice(0, 500)] } : null;
     default:

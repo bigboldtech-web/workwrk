@@ -185,9 +185,9 @@ const STARTER_SOP_CONTENT = {
   type: "blocks",
   blocks: [
     { id: "starter-h1", kind: "h1", text: "Welcome to the team" },
-    { id: "starter-intro", kind: "paragraph", text: "This is a starter SOP auto-assigned to everyone in the org so the entry gate is satisfied. Replace the steps below with your real onboarding flow — anything from 'where to file expenses' to 'how to push code'." },
+    { id: "starter-intro", kind: "paragraph", text: "This is a starter SOP auto-assigned to everyone in the org so the entry gate is satisfied. Replace the steps below with your real onboarding flow: anything from 'where to file expenses' to 'how to push code'." },
     { id: "starter-day1", kind: "h2", text: "Day 1" },
-    { id: "starter-day1-brief", kind: "bullet", text: "Read the role brief in your Sidekick onboarding panel." },
+    { id: "starter-day1-brief", kind: "bullet", text: "Read your job title and its description on My profile." },
     { id: "starter-day1-kras", kind: "bullet", text: "Acknowledge your assigned KRAs in KRA & KPIs." },
     { id: "starter-day1-sop", kind: "bullet", text: "Complete this SOP." },
   ],

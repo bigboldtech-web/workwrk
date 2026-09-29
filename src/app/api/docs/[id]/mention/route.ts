@@ -2,6 +2,12 @@
 // doc body. Creates one Inbox notification for the mentioned user, honoring
 // their "Mentions" toggle (/settings/notifications). Best-effort by contract:
 // the mention pill already sits in the doc regardless of this call.
+//
+// The mentioned person is told only when they can open the doc themselves
+// (the one resolver decides, restricted docs and sub-pages included): a
+// notification names the doc, so it must never reach someone the doc is
+// hidden from. The link is the Work door, which places the doc under the
+// recipient's own access.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -10,6 +16,8 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { filterNotifyUsers } from "@/lib/notify-prefs";
+import { usersWhoCanRead } from "@/lib/access/node-access";
+import { addressHref } from "@/lib/nav/object-href";
 
 const bodySchema = z.object({ userId: z.string().min(1) });
 
@@ -43,6 +51,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   });
   if (!target) return NextResponse.json({ error: "unknown user" }, { status: 400 });
 
+  const readers = await usersWhoCanRead(ctx.orgId, { kind: "doc", id: doc.id }, { among: [target.id] });
+  if (!readers.has(target.id)) return NextResponse.json({ ok: true, skipped: "no_access" });
+
   const wanted = await filterNotifyUsers([target.id], "mentions");
   if (wanted.size === 0) return NextResponse.json({ ok: true, skipped: "muted" });
 
@@ -57,7 +68,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       type: "mention",
       title: doc.title || "Untitled note",
       message: `${authorName} mentioned you in a doc`,
-      link: `/docs/${doc.id}`,
+      link: addressHref("doc", doc.id, { scope: "work" }),
     },
   });
   return NextResponse.json({ ok: true });

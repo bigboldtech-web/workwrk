@@ -1,13 +1,13 @@
 // GET /api/automation/health
 //
-// Health aggregates for the hub's Health page over a ?from=&to= window
-// (default: the last 30 days). Returns run totals by status, the
+// Health aggregates for the hub's Health page over a ?days=7|30|90 window
+// or an exact ?from=&to= (default: the last 30 days). Returns run totals by status, the
 // success rate over terminal runs (SUCCESS/FAILED/PARTIAL; SKIPPED and
 // RUNNING are excluded), and failure counts by workflow severity.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveAutomationContext } from "@/lib/automation/hub-access";
+import { requireAutomation } from "@/lib/automation/gate";
 
 const DEFAULT_WINDOW_MS = 30 * 86_400_000;
 
@@ -18,7 +18,7 @@ function parseDate(raw: string | null): Date | null | "invalid" {
 }
 
 export async function GET(req: NextRequest) {
-  const ctx = await resolveAutomationContext();
+  const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
 
   const sp = req.nextUrl.searchParams;
@@ -27,8 +27,11 @@ export async function GET(req: NextRequest) {
   const toRaw = parseDate(sp.get("to"));
   if (toRaw === "invalid") return NextResponse.json({ error: "Invalid to date" }, { status: 400 });
 
+  // ?days=7|30|90 is the Health page's window pills; an exact from wins.
+  const daysRaw = Number.parseInt(sp.get("days") ?? "", 10);
+  const windowMs = [7, 30, 90].includes(daysRaw) ? daysRaw * 86_400_000 : DEFAULT_WINDOW_MS;
   const to = toRaw ?? new Date();
-  const from = fromRaw ?? new Date(to.getTime() - DEFAULT_WINDOW_MS);
+  const from = fromRaw ?? new Date(to.getTime() - windowMs);
   if (from.getTime() > to.getTime()) {
     return NextResponse.json({ error: "from must be before to" }, { status: 400 });
   }

@@ -9,6 +9,14 @@
 // All mutations hit existing routes: PATCH /api/spaces/[id] (visibility),
 // POST /api/spaces/[id]/members (add or upsert role),
 // DELETE /api/spaces/[id]/members?userId=…
+//
+// THE PIECES THE ONE MANAGE ACCESS DIALOG COMPOSES live here too, defined in
+// this file so everything a Space's sharing does stays in one place:
+// SpaceVisibilityControl (the tri-state), SpaceDepartmentAdd and
+// SpaceOfficeAdd (bulk add, one person at a time through the grants route the
+// dialog hands them, never lowering a role) and SpaceEmailInvites (the email
+// invitations with their pending list, resend and revoke). The dialog above
+// is kept, exported and working; nothing mounts it any more.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,11 +25,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Search, X, Lock, Globe, Users as UsersIcon, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2 } from "lucide-react";
+import { Search, X, Lock, Globe, Users as UsersIcon, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2, RotateCw } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
+import { panelRoleLabel, type PanelRole } from "@/lib/access/access-panel";
+import { generalErrorText } from "@/components/access/manage-access-model";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
 type SpaceRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
@@ -66,12 +76,13 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string; blurb: string; Ico
   { value: "ORG", label: "Everyone in the org", blurb: "Every member of the organisation", Icon: Globe },
 ];
 
-const ROLE_OPTIONS: { value: SpaceRole; label: string }[] = [
-  { value: "OWNER", label: "Owner" },
-  { value: "ADMIN", label: "Admin" },
-  { value: "MEMBER", label: "Member" },
-  { value: "GUEST", label: "Guest" },
-];
+/** A SpaceMember role in the product's words (panelRoleLabel), never the raw enum. */
+export const SPACE_ROLE_PANEL: Record<SpaceRole, PanelRole> = { OWNER: "OWNER", ADMIN: "FULL", MEMBER: "EDIT", GUEST: "VIEW" };
+
+const ROLE_OPTIONS: { value: SpaceRole; label: string }[] = (["OWNER", "ADMIN", "MEMBER", "GUEST"] as const).map((value) => ({
+  value,
+  label: panelRoleLabel(SPACE_ROLE_PANEL[value]),
+}));
 
 function displayName(u: UserOption): string {
   const full = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
@@ -487,7 +498,7 @@ export function ShareSpaceDialog({
           ) : null}
 
           {tab === "email" ? (
-            <EmailInvitePanel spaceId={spaceId} />
+            <SpaceEmailInvites spaceId={spaceId} />
           ) : null}
 
           {bulkResult ? (
@@ -579,7 +590,13 @@ function relTime(iso: string): string {
   return `${days}d ago`;
 }
 
-function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
+/**
+ * Invite someone to this Space by email: they get a sign-up link and join the
+ * Space at the role chosen here. Keeps its pending list with copy, resend and
+ * revoke. Its own route (/api/spaces/[id]/invitations), because an invitation
+ * is not a grant yet: the person does not exist until they sign up.
+ */
+export function SpaceEmailInvites({ spaceId }: { spaceId: string | null }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const [email, setEmail] = useState("");
@@ -644,7 +661,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast("Couldn't copy — select and copy the link manually");
+      toast("Couldn't copy. Select the link and copy it by hand.");
     }
   };
 
@@ -709,11 +726,12 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as SpaceRole)}
-          className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-zinc-400"
+          aria-label="Access for the person you invite"
+          className="h-9 px-2 rounded-md border border-line-strong bg-raised text-sm text-ink focus:outline-none focus-visible:border-brand"
         >
-          <option value="GUEST">Guest</option>
-          <option value="MEMBER">Member</option>
-          <option value="ADMIN">Admin</option>
+          {(["GUEST", "MEMBER", "ADMIN"] as const).map((r) => (
+            <option key={r} value={r}>{panelRoleLabel(SPACE_ROLE_PANEL[r])}</option>
+          ))}
         </select>
         <button
           type="button"
@@ -733,7 +751,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
       {inviteUrl ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
           <div className="text-xs text-zinc-500 mb-1.5">
-            {reused ? "Reusing an active invitation" : "Invitation sent"} — share the link if email doesn&rsquo;t arrive:
+            {reused ? "Reusing an active invitation." : "Invitation sent."} Share the link if the email doesn&rsquo;t arrive:
           </div>
           <div className="flex items-center gap-1.5">
             <code className="flex-1 min-w-0 text-xs text-zinc-700 truncate px-2 py-1 rounded bg-white border border-zinc-200">
@@ -766,7 +784,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
                   <span className="flex-1 min-w-0">
                     <span className="block text-base font-medium text-zinc-900 truncate">{inv.email}</span>
                     <span className="block text-xs text-zinc-500">
-                      {(inv.spaceRole ?? "MEMBER").toLowerCase()} · sent {relTime(inv.createdAt)}
+                      {panelRoleLabel(SPACE_ROLE_PANEL[inv.spaceRole ?? "MEMBER"])} · sent {relTime(inv.createdAt)}
                     </span>
                   </span>
                   <button
@@ -890,4 +908,330 @@ function GroupPickerList({
       })}
     </ul>
   );
+}
+
+/* ───────────── The Space pieces of the one Manage access dialog ─────────────
+ *
+ * Defined here, next to the dialog they came out of, and composed by
+ * src/components/access/general-access.tsx and manage-access-dialog.tsx. They
+ * never call the member routes: a write goes through the callback the dialog
+ * hands them (the grants route) or through the Space's own PATCH.
+ */
+
+export interface VisibilityOption<V extends string> {
+  value: V;
+  label: string;
+  blurb: string;
+  Icon: typeof Lock;
+}
+
+/** The Space tri-state in the naming canon's words. */
+export function spaceVisibilityOptions(orgName: string): VisibilityOption<Visibility>[] {
+  return [
+    { value: "PRIVATE", label: "Invite only", blurb: "Only the people listed below.", Icon: Lock },
+    { value: "WORKSPACE", label: "Space members", blurb: "The people listed below, plus Admins.", Icon: UsersIcon },
+    { value: "ORG", label: `Everyone at ${orgName}`, blurb: `Every member of ${orgName}.`, Icon: Globe },
+  ];
+}
+
+/**
+ * One row of three cards, shared by the Space and List tri-states. The
+ * selected card carries the brand border and the selected ground, and a
+ * keyboard focus ring of its own: one indicator each, never two stacked.
+ */
+export function VisibilityCards<V extends string>({
+  label, options, value, busy, onChoose,
+}: {
+  label: string;
+  options: VisibilityOption<V>[];
+  value: V;
+  busy: V | null;
+  onChoose: (next: V) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-busy={busy === opt.value || undefined}
+            onClick={() => onChoose(opt.value)}
+            className={`min-w-0 rounded-lg border p-2.5 text-start transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)] ${
+              active ? "border-brand bg-selected" : "border-line bg-raised hover:bg-hover"
+            }`}
+          >
+            {/* The label wraps rather than truncates: "Everyone at <org>"
+                is the whole point of the card, and an org name can be long. */}
+            <span className="flex items-start gap-1.5 text-base font-medium leading-snug text-ink">
+              <opt.Icon className="mt-[3px] h-3.5 w-3.5 shrink-0 text-ink-2" strokeWidth={1.75} aria-hidden />
+              <span className="min-w-0 break-words">{opt.label}</span>
+              {busy === opt.value ? <Dots variant="pending" /> : null}
+            </span>
+            <span className="mt-0.5 block text-xs leading-snug text-ink-2">{opt.blurb}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The chosen option as a sentence, for a viewer who cannot change it. */
+export function VisibilityReadout<V extends string>({ option }: { option: VisibilityOption<V> | undefined }) {
+  if (!option) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5">
+      <option.Icon className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden />
+      <span className="min-w-0">
+        <span className="block text-base font-medium text-ink">{option.label}</span>
+        <span className="block text-sm text-ink-2">{option.blurb}</span>
+      </span>
+    </div>
+  );
+}
+
+/** A failed write, said once, with a real Retry that sends the same change again. */
+export function InlineRetry({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <p role="alert" className="m-0 mt-2 flex items-start gap-1.5 text-sm text-danger-text">
+      <span className="min-w-0 flex-1">{message}</span>
+      <button type="button" onClick={onRetry} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-deep hover:underline">
+        <RotateCw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden /> Retry
+      </button>
+    </p>
+  );
+}
+
+/**
+ * Who can see a Space: Invite only, Space members or Everyone at the org,
+ * written through PATCH /api/spaces/[id]. Not optimistic: the card changes
+ * when the server agrees, and a failure keeps the choice with a Retry.
+ */
+export function SpaceVisibilityControl({
+  spaceId, value, orgName, readOnly = false, onChanged,
+}: {
+  spaceId: string;
+  value: Visibility;
+  orgName: string;
+  readOnly?: boolean;
+  onChanged?: (next: Visibility) => void;
+}) {
+  const [busy, setBusy] = useState<Visibility | null>(null);
+  const [failed, setFailed] = useState<{ message: string; next: Visibility } | null>(null);
+  const options = spaceVisibilityOptions(orgName);
+
+  const choose = async (next: Visibility) => {
+    if (next === value || busy) return;
+    setBusy(next);
+    setFailed(null);
+    try {
+      const res = await fetch(`/api/spaces/${spaceId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: next }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setFailed({ message: generalErrorText(res.status, d, "space", "Couldn't change who can see this Space."), next });
+        return;
+      }
+      onChanged?.(next);
+    } catch {
+      setFailed({ message: "Couldn't change who can see this Space. Check your connection.", next });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (readOnly) return <VisibilityReadout option={options.find((o) => o.value === value)} />;
+  return (
+    <div>
+      <VisibilityCards label="Who can see this Space" options={options} value={value} busy={busy} onChoose={(v) => void choose(v)} />
+      {failed ? <InlineRetry message={failed.message} onRetry={() => void choose(failed.next)} /> : null}
+    </div>
+  );
+}
+
+/** One person a bulk add writes, and what the dialog's grants call answered. */
+export interface BulkPerson { id: string; name: string }
+export type BulkGrant = (person: BulkPerson) => Promise<{ ok: true } | { ok: false; message: string }>;
+
+interface BulkAddProps {
+  /** The role everyone is raised to, as a word ("Can edit"). Nobody is ever lowered. */
+  roleLabel: string;
+  /** Writes one person through the grants route in raise mode. */
+  grantOne: BulkGrant;
+}
+
+type BulkRun = {
+  groupId: string;
+  groupName: string;
+  queue: BulkPerson[];
+  done: number;
+  total: number;
+  error: string | null;
+};
+
+function personLabelOf(u: { firstName?: string | null; lastName?: string | null; email?: string | null }): string {
+  return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || "Someone";
+}
+
+/**
+ * Add every person in a department or an office, ONE AFTER ANOTHER. Each
+ * write raises that person to the role and never lowers anyone who already
+ * holds more (problem 36). The first failure stops the run with the rest
+ * still queued, and Retry carries on from the person who failed, so a
+ * half-finished add is never mistaken for a finished one.
+ */
+function GroupBulkAdd({ kind, roleLabel, grantOne }: BulkAddProps & { kind: "department" | "office" }) {
+  const [groups, setGroups] = useState<GroupRow[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [run, setRun] = useState<BulkRun | null>(null);
+  const [done, setDone] = useState<{ groupName: string; added: number } | null>(null);
+  const [reload, setReload] = useState(0);
+  const noun = kind === "department" ? "departments" : "offices";
+
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => {
+      setLoadFailed(false);
+      fetch(kind === "department" ? "/api/departments" : "/api/offices", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((data: Array<{ id: string; name: string; _count?: { members?: number } }>) => {
+          if (!alive) return;
+          setGroups(Array.isArray(data) ? data.map((g) => ({ id: g.id, name: g.name, memberCount: g._count?.members ?? 0 })) : []);
+        })
+        .catch(() => { if (alive) setLoadFailed(true); });
+    }, 0);
+    return () => { alive = false; clearTimeout(t); };
+  }, [kind, reload]);
+
+  // Only people who can sign in are added: an inactive account would stop the
+  // run on a person who could never open the Space anyway.
+  const membersOf = async (g: GroupRow): Promise<BulkPerson[]> => {
+    const url = kind === "department"
+      ? `/api/users?scope=all&departmentId=${encodeURIComponent(g.id)}&limit=200`
+      : "/api/users?scope=all&limit=200";
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    const rows: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string; officeId?: string | null; office?: { id?: string } | null }> =
+      Array.isArray(data?.data) ? data.data : [];
+    return rows
+      .filter((u) => u.status !== "INACTIVE")
+      // /api/users filters by department on the server; an office is matched
+      // here, from whichever office field the payload carries.
+      .filter((u) => kind === "department" || (u.officeId ?? u.office?.id ?? null) === g.id)
+      .map((u) => ({ id: u.id, name: personLabelOf(u) }));
+  };
+
+  const drain = async (start: BulkRun) => {
+    let queue = start.queue;
+    let count = start.done;
+    setRun({ ...start, error: null });
+    while (queue.length > 0) {
+      const next = queue[0];
+      const r = await grantOne(next);
+      if (!r.ok) {
+        setRun({ ...start, queue, done: count, error: `Couldn't add ${next.name}: ${r.message} ${queue.length} not added yet.` });
+        return;
+      }
+      queue = queue.slice(1);
+      count += 1;
+      setRun({ ...start, queue, done: count, error: null });
+    }
+    setRun(null);
+    setDone({ groupName: start.groupName, added: count });
+  };
+
+  const addAll = async (g: GroupRow) => {
+    if (run) return;
+    setDone(null);
+    let people: BulkPerson[];
+    try {
+      people = await membersOf(g);
+    } catch {
+      setRun({ groupId: g.id, groupName: g.name, queue: [], done: 0, total: 0, error: `Couldn't read who is in ${g.name}.` });
+      return;
+    }
+    if (people.length === 0) {
+      setDone({ groupName: g.name, added: 0 });
+      return;
+    }
+    await drain({ groupId: g.id, groupName: g.name, queue: people, done: 0, total: people.length, error: null });
+  };
+
+  if (loadFailed) {
+    return <InlineRetry message={`Couldn't load the ${noun}.`} onRetry={() => setReload((n) => n + 1)} />;
+  }
+  if (groups === null) return <SkeletonLines lines={3} />;
+  if (groups.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-line px-4 py-5 text-center">
+        {kind === "department" ? <Building2 className="mx-auto mb-1.5 h-5 w-5 text-ink-3" aria-hidden /> : <MapPin className="mx-auto mb-1.5 h-5 w-5 text-ink-3" aria-hidden />}
+        <div className="text-sm text-ink-2">No {noun} set up yet.</div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <ul className="max-h-[220px] divide-y divide-line-soft overflow-y-auto rounded-md border border-line">
+        {groups.map((g) => {
+          const running = run?.groupId === g.id && !run.error;
+          return (
+            <li key={g.id} className="flex items-center gap-2.5 px-3 py-2">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-active">
+                {kind === "department" ? <Building2 className="h-3 w-3 text-ink-2" aria-hidden /> : <MapPin className="h-3 w-3 text-ink-2" aria-hidden />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-base font-medium text-ink">{g.name}</span>
+                <span className="block text-xs text-ink-2">{g.memberCount} {g.memberCount === 1 ? "person" : "people"}</span>
+              </span>
+              {running ? (
+                <span className="inline-flex shrink-0 items-center gap-1.5 text-sm text-ink-2" aria-live="polite">
+                  <Dots variant="pending" /> {run.done} of {run.total}
+                </span>
+              ) : g.memberCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void addAll(g)}
+                  aria-disabled={run !== null && !run.error ? true : undefined}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover"
+                  title={`Add everyone in ${g.name} at ${roleLabel}`}
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden /> Add all
+                </button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {run?.error ? (
+        <InlineRetry
+          message={run.error}
+          onRetry={() => { if (run.queue.length > 0) void drain({ ...run, error: null }); else { const g = groups.find((x) => x.id === run.groupId); setRun(null); if (g) void addAll(g); } }}
+        />
+      ) : null}
+      {done ? (
+        <p className="m-0 mt-2 text-sm text-ink-2" role="status">
+          {done.added === 0
+            ? `No one in ${done.groupName} can be added from here.`
+            : `Added ${done.added} ${done.added === 1 ? "person" : "people"} from ${done.groupName} at ${roleLabel}. Nobody who had more was lowered.`}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Everyone in a department, raised to the chosen role one person at a time. */
+export function SpaceDepartmentAdd(props: BulkAddProps) {
+  return <GroupBulkAdd kind="department" {...props} />;
+}
+
+/** Everyone in an office, raised to the chosen role one person at a time. */
+export function SpaceOfficeAdd(props: BulkAddProps) {
+  return <GroupBulkAdd kind="office" {...props} />;
 }

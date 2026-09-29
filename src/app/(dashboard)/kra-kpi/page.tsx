@@ -1,15 +1,16 @@
-// KRA / KPI — job-title-first workspace (role picker). Manager door:
-// templates are defined per job title here; an employee sees their OWN
-// inherited KRAs/KPIs with their readings on their career home.
+// Teams > KRAs & KPIs: the definitions per job title. Every Member reads
+// (the `kra-kpi` APP_RULES row, access section 9 kras.view); the create and
+// attach controls render only for the kras permissions the routes ask.
+// A person's own numbers stay on their profile (/people/me?tab=kras).
 
 import { Suspense } from "react";
 import KraKpiWorkspaceClient from "./workspace-client";
-import { requireManagerPage } from "@/lib/page-gates";
+import { gatePage } from "@/lib/access/gate";
 
 export const dynamic = "force-dynamic";
 
 export default async function KraKpiPage() {
-  await requireManagerPage();
+  await gatePage("view", { type: "app", key: "kra-kpi" }, { callbackUrl: "/kra-kpi" });
   return (
     <Suspense>
       <KraKpiWorkspaceClient />

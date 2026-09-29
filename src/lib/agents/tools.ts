@@ -1,21 +1,33 @@
-// Agent tool registry — Phase D3.
+// Agent tool registry, Phase D3.
 //
 // Each tool is exposed to Claude via the Anthropic tool calling
 // interface. When Claude wants to use a tool, the chat endpoint
 // executes the handler and feeds the result back. Tools always run
-// scoped to the calling user's org — no cross-org reads or writes.
+// scoped to the calling user's org, no cross-org reads or writes.
 //
 // Tool selection for a chat:
 //   - General Sidekick session (no agent) → CROSS_TOOLS (5 tools)
 //   - Agent-scoped session → CROSS_TOOLS ∪ the agent's catalog.tools
 //
-// We DON'T expose every WorkwrK model as a tool — only the high-value
+// We DON'T expose every WorkwrK model as a tool, only the high-value
 // "create + look up" surface the user would actually delegate. Power
 // users can drop to the UI for everything else.
 
 import { prisma } from "@/lib/prisma";
+import { addressHref } from "@/lib/nav/object-href";
+import { nodeCtxForUser, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
+import type { ToolName } from "./tool-names";
+import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
+import { legacyIsManagerLevel, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { goalVisibilityOr } from "@/lib/goal-audience";
+import { goalRightsActor } from "@/lib/alignment-scope";
+import { mayEditGoal } from "@/lib/goals/goal-rights";
+import { persistGoalRollupChain } from "@/lib/alignment";
+import { logActivity } from "@/lib/activity";
+import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 
 export interface ToolContext {
   orgId: string;
@@ -25,7 +37,7 @@ export interface ToolContext {
 export interface ToolDefinition {
   name: string;
   description: string;
-  // JSON Schema for the input — what Anthropic SDK calls input_schema.
+  // JSON Schema for the input, what Anthropic SDK calls input_schema.
   input_schema: {
     type: "object";
     properties: Record<string, unknown>;
@@ -35,6 +47,28 @@ export interface ToolDefinition {
   // result. Throw to indicate an error; the chat loop catches + sends
   // the error string back to Claude so it can react.
   handler: (ctx: ToolContext, input: Record<string, unknown>) => Promise<unknown>;
+}
+
+// ─────────────────────────────────────────────────────────
+// The caller, for the handlers that must act as the person and no further.
+// A chat runs as the signed-in person (access section 2.5), so a tool may
+// never read or write past what that person could do in the UI.
+// ─────────────────────────────────────────────────────────
+
+async function callerLevel(ctx: ToolContext): Promise<string | null> {
+  const row = await prisma.user.findFirst({
+    where: { id: ctx.userId, organizationId: ctx.orgId },
+    select: { accessLevel: true },
+  });
+  return row?.accessLevel ?? null;
+}
+
+/** The caller shaped like a session, for the shared goal rules (canSeeGoal,
+ *  goalRightsActor), so a goal tool reads and writes exactly as the person
+ *  could on the Goals pages. Null when the person is not in this org. */
+async function callerSession(ctx: ToolContext): Promise<{ user: { id: string; organizationId: string; accessLevel: string } } | null> {
+  const level = await callerLevel(ctx);
+  return level ? { user: { id: ctx.userId, organizationId: ctx.orgId, accessLevel: level } } : null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -132,7 +166,12 @@ const searchTasks: ToolDefinition = {
   // the ones create_task above had just written.
   handler: async (ctx, input) => {
     const limit = Math.min(50, Number(input.limit ?? 20));
-    const rows = await prisma.item.findMany({
+    // Only the tasks the caller could open: a List they can read, or a task
+    // they own or are assigned to. Before this the tool read every Item in
+    // the org, so a chat could list tasks from a private Space. Phase 7 did
+    // this with the older id sets inside the query; the merge keeps the one
+    // node resolver's filter below, which is the answer /api/search gives.
+    const candidates = await prisma.item.findMany({
       where: {
         organizationId: ctx.orgId,
         archivedAt: null,
@@ -142,12 +181,16 @@ const searchTasks: ToolDefinition = {
           : {}),
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
       },
-      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true },
+      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true },
       orderBy: { updatedAt: "desc" },
-      // Over-fetch only when the done filter has to be applied after the read:
-      // "done" is a status-name rule, not a column.
-      take: input.done === undefined ? limit : limit * 3,
+      // Over-fetched: the access filter and the done filter both run after
+      // the read ("done" is a status-name rule, not a column).
+      take: limit * 4,
     });
+    // A task answers only for a reader of its List, or the person it is
+    // assigned to or owned by, exactly as /api/search and the task page do.
+    const readable = await readableIds(ctx, candidates.map((r) => ({ kind: "list" as const, id: r.boardId })));
+    const rows = candidates.filter((r) => readable.has(refKey({ kind: "list", id: r.boardId })) || r.ownerId === ctx.userId || r.assigneeIds.includes(ctx.userId));
     const filtered =
       input.done === undefined
         ? rows
@@ -195,133 +238,6 @@ const sendKudos: ToolDefinition = {
       select: { id: true, message: true, companyValue: true },
     });
     return { ok: true, kudos, receiver: `${receiver.firstName ?? ""} ${receiver.lastName ?? ""}`.trim() };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// CRM (Ria's tools)
-// ─────────────────────────────────────────────────────────
-
-const createLead: ToolDefinition = {
-  name: "create_lead",
-  description: "Add a new lead to WorkwrK CRM. Use when the user mentions a new prospect or wants to log inbound interest.",
-  input_schema: {
-    type: "object",
-    properties: {
-      firstName: { type: "string" },
-      lastName: { type: "string" },
-      email: { type: "string" },
-      company: { type: "string" },
-      title: { type: "string" },
-      source: { type: "string", description: "e.g. 'website', 'referral', 'outbound', 'linkedin', 'event'" },
-      notes: { type: "string" },
-    },
-    required: ["firstName"],
-  },
-  handler: async (ctx, input) => {
-    const lead = await prisma.lead.create({
-      data: {
-        organizationId: ctx.orgId,
-        firstName: input.firstName as string,
-        lastName: (input.lastName as string) ?? null,
-        email: (input.email as string) || undefined,
-        company: (input.company as string) ?? null,
-        title: (input.title as string) ?? null,
-        source: (input.source as string) ?? null,
-        notes: (input.notes as string) ?? null,
-        ownerId: ctx.userId,
-      },
-      select: { id: true, firstName: true, lastName: true, company: true, status: true },
-    });
-    return { ok: true, lead };
-  },
-};
-
-const createOpportunity: ToolDefinition = {
-  name: "create_opportunity",
-  description: "Create a new deal in WorkwrK CRM. Defaults to the first non-Won/non-Lost pipeline stage if no stage specified.",
-  input_schema: {
-    type: "object",
-    properties: {
-      name: { type: "string", description: "Deal name (e.g. 'Acme Corp · annual contract')" },
-      accountName: { type: "string", description: "Optional account name to link. Will look up by name if it exists." },
-      amount: { type: "number", description: "Deal value in USD" },
-      expectedCloseDate: { type: "string", description: "ISO date" },
-      description: { type: "string" },
-    },
-    required: ["name"],
-  },
-  handler: async (ctx, input) => {
-    let accountId: string | undefined;
-    if (input.accountName) {
-      const account = await prisma.account.findFirst({
-        where: { organizationId: ctx.orgId, name: input.accountName as string },
-        select: { id: true },
-      });
-      accountId = account?.id;
-    }
-
-    const firstStage = await prisma.pipelineStage.findFirst({
-      where: { organizationId: ctx.orgId, isWon: false, isLost: false, archivedAt: null },
-      orderBy: { position: "asc" },
-      select: { id: true },
-    });
-
-    const opp = await prisma.opportunity.create({
-      data: {
-        organizationId: ctx.orgId,
-        name: input.name as string,
-        accountId,
-        pipelineStageId: firstStage?.id,
-        amount: input.amount as number | undefined,
-        currency: "USD",
-        expectedCloseDate: input.expectedCloseDate ? new Date(input.expectedCloseDate as string) : null,
-        description: (input.description as string) ?? null,
-        ownerId: ctx.userId,
-      },
-      select: { id: true, name: true, amount: true, pipelineStageId: true },
-    });
-    return { ok: true, opportunity: opp };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// ITSM (Aman's tools)
-// ─────────────────────────────────────────────────────────
-
-const createTicket: ToolDefinition = {
-  name: "create_ticket",
-  description: "File a new IT ticket in WorkwrK ITSM. Use when the user reports a problem or requests IT help.",
-  input_schema: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "Short summary" },
-      description: { type: "string" },
-      priority: {
-        type: "string",
-        enum: ["LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL"],
-      },
-      category: { type: "string", description: "Access | Hardware | Software | Network | Other" },
-    },
-    required: ["title"],
-  },
-  handler: async (ctx, input) => {
-    const priorityMap: Record<string, "LOW" | "NORMAL" | "HIGH" | "URGENT" | "CRITICAL"> = {
-      LOW: "LOW", NORMAL: "NORMAL", HIGH: "HIGH", URGENT: "URGENT", CRITICAL: "CRITICAL",
-    };
-    const ticket = await prisma.ticket.create({
-      data: {
-        organizationId: ctx.orgId,
-        title: input.title as string,
-        description: (input.description as string) ?? null,
-        priority: priorityMap[input.priority as string] ?? "NORMAL",
-        category: (input.category as string) ?? null,
-        source: "AGENT",
-        requesterId: ctx.userId,
-      },
-      select: { id: true, title: true, status: true, priority: true },
-    });
-    return { ok: true, ticket };
   },
 };
 
@@ -374,7 +290,7 @@ const createSprint: ToolDefinition = {
     type: "object",
     properties: {
       name: { type: "string", description: "e.g. 'Sprint 24' or 'Q1 W3'" },
-      goal: { type: "string", description: "Single sprint goal — what success looks like" },
+      goal: { type: "string", description: "Single sprint goal, what success looks like" },
       startDate: { type: "string", description: "ISO date" },
       endDate: { type: "string", description: "ISO date" },
       capacityPoints: { type: "integer", description: "Team capacity in story points" },
@@ -394,355 +310,6 @@ const createSprint: ToolDefinition = {
       select: { id: true, name: true, startDate: true, endDate: true, status: true },
     });
     return { ok: true, sprint };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// Marketing (Mira's tool)
-// ─────────────────────────────────────────────────────────
-
-const createCampaign: ToolDefinition = {
-  name: "create_campaign",
-  description: "Plan a new marketing campaign in WorkwrK Marketing.",
-  input_schema: {
-    type: "object",
-    properties: {
-      name: { type: "string" },
-      description: { type: "string" },
-      channel: { type: "string", description: "Email | Paid Search | Social | Outbound | Event | Content | Webinar" },
-      budget: { type: "number" },
-      goalMetric: { type: "string", description: "Leads | MQLs | Pipeline | Brand" },
-      goalTarget: { type: "integer" },
-    },
-    required: ["name"],
-  },
-  handler: async (ctx, input) => {
-    const campaign = await prisma.campaign.create({
-      data: {
-        organizationId: ctx.orgId,
-        name: input.name as string,
-        description: (input.description as string) ?? null,
-        channel: (input.channel as string) ?? null,
-        budget: input.budget as number | undefined,
-        goalMetric: (input.goalMetric as string) ?? null,
-        goalTarget: input.goalTarget as number | undefined,
-        ownerId: ctx.userId,
-      },
-      select: { id: true, name: true, channel: true, status: true },
-    });
-    return { ok: true, campaign };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// Helpdesk (Maya's tool)
-// ─────────────────────────────────────────────────────────
-
-const createSupportTicket: ToolDefinition = {
-  name: "create_support_ticket",
-  description: "File a new external customer support ticket in WorkwrK Helpdesk. Use when the user describes a customer issue or request.",
-  input_schema: {
-    type: "object",
-    properties: {
-      subject: { type: "string" },
-      body: { type: "string", description: "The customer's message / what they reported" },
-      customerEmail: { type: "string", description: "Customer's email — used to find-or-create their record" },
-      customerName: { type: "string" },
-      customerCompany: { type: "string" },
-      priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
-      category: { type: "string", description: "Billing | Product | Bug | Feature Request | Onboarding" },
-      slaTier: { type: "string", description: "Free | Standard | Premium | Enterprise" },
-    },
-    required: ["subject", "customerEmail"],
-  },
-  handler: async (ctx, input) => {
-    // Find-or-create customer
-    let customer = await prisma.supportCustomer.findUnique({
-      where: { organizationId_email: { organizationId: ctx.orgId, email: input.customerEmail as string } },
-    });
-    if (!customer) {
-      customer = await prisma.supportCustomer.create({
-        data: {
-          organizationId: ctx.orgId,
-          email: input.customerEmail as string,
-          name: (input.customerName as string) ?? null,
-          companyName: (input.customerCompany as string) ?? null,
-        },
-      });
-    }
-
-    const slaHours: Record<string, number> = { Free: 48, Standard: 24, Premium: 8, Enterprise: 4 };
-    const firstResponseDueAt = input.slaTier
-      ? new Date(Date.now() + (slaHours[input.slaTier as string] ?? 24) * 60 * 60 * 1000)
-      : null;
-
-    const priorityMap: Record<string, "LOW" | "NORMAL" | "HIGH" | "URGENT"> = {
-      LOW: "LOW", NORMAL: "NORMAL", HIGH: "HIGH", URGENT: "URGENT",
-    };
-
-    const ticket = await prisma.supportTicket.create({
-      data: {
-        organizationId: ctx.orgId,
-        subject: input.subject as string,
-        body: (input.body as string) ?? null,
-        customerId: customer.id,
-        channel: "PORTAL",
-        priority: priorityMap[input.priority as string] ?? "NORMAL",
-        category: (input.category as string) ?? null,
-        slaTier: (input.slaTier as string) ?? null,
-        firstResponseDueAt,
-      },
-      select: { id: true, subject: true, status: true, priority: true },
-    });
-    return { ok: true, ticket, customer: { email: customer.email, name: customer.name } };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// CRM read + update tools (D3 Phase 2)
-// ─────────────────────────────────────────────────────────
-
-const searchLeads: ToolDefinition = {
-  name: "search_leads",
-  description: "Search this org's CRM leads. Use to find an existing lead before updating, or to answer 'how many leads from referrals are still open'.",
-  input_schema: {
-    type: "object",
-    properties: {
-      status: { type: "string", enum: ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"] },
-      source: { type: "string", description: "e.g. website / referral / outbound" },
-      emailContains: { type: "string" },
-      nameContains: { type: "string", description: "Match against firstName OR lastName OR company" },
-      assignedToMe: { type: "boolean" },
-      limit: { type: "integer", description: "Max rows (default 20, max 50)" },
-    },
-  },
-  handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
-    const nameNeedle = input.nameContains as string | undefined;
-    const leads = await prisma.lead.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        ...(input.status ? { status: input.status as "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED" | "DISQUALIFIED" } : {}),
-        ...(input.source ? { source: input.source as string } : {}),
-        ...(input.emailContains ? { email: { contains: input.emailContains as string, mode: "insensitive" } } : {}),
-        ...(input.assignedToMe ? { ownerId: ctx.userId } : {}),
-        ...(nameNeedle ? {
-          OR: [
-            { firstName: { contains: nameNeedle, mode: "insensitive" } },
-            { lastName: { contains: nameNeedle, mode: "insensitive" } },
-            { company: { contains: nameNeedle, mode: "insensitive" } },
-          ],
-        } : {}),
-      },
-      select: { id: true, firstName: true, lastName: true, email: true, company: true, status: true, score: true, source: true, createdAt: true },
-      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
-      take: limit,
-    });
-    return { count: leads.length, leads };
-  },
-};
-
-const updateLeadStatus: ToolDefinition = {
-  name: "update_lead_status",
-  description: "Move a lead to a new status. Use to qualify/disqualify a lead after a call, or mark CONVERTED after handing off to a closer.",
-  input_schema: {
-    type: "object",
-    properties: {
-      leadId: { type: "string", description: "The Lead's id" },
-      status: { type: "string", enum: ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"] },
-      notes: { type: "string", description: "Optional notes appended to the lead" },
-    },
-    required: ["leadId", "status"],
-  },
-  handler: async (ctx, input) => {
-    const existing = await prisma.lead.findFirst({
-      where: { id: input.leadId as string, organizationId: ctx.orgId },
-      select: { id: true, notes: true },
-    });
-    if (!existing) return { error: "Lead not found in this org" };
-
-    const appendedNotes = input.notes
-      ? (existing.notes ? existing.notes + "\n\n" : "") + `[${new Date().toISOString().slice(0, 10)}] ${input.notes}`
-      : existing.notes;
-
-    const status = input.status as "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED" | "DISQUALIFIED";
-    const lead = await prisma.lead.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        notes: appendedNotes,
-        ...(status === "CONVERTED" ? { convertedAt: new Date() } : {}),
-      },
-      select: { id: true, firstName: true, lastName: true, status: true },
-    });
-    return { ok: true, lead };
-  },
-};
-
-const searchOpportunities: ToolDefinition = {
-  name: "search_opportunities",
-  description: "Search CRM deals, optionally filtered by stage. Use to answer 'what's in the pipeline this quarter' or to find a specific deal.",
-  input_schema: {
-    type: "object",
-    properties: {
-      stageName: { type: "string", description: "Match the pipeline stage by name (case-insensitive)" },
-      accountName: { type: "string" },
-      isOpen: { type: "boolean", description: "Only deals that aren't Won or Lost" },
-      minAmount: { type: "number" },
-      limit: { type: "integer" },
-    },
-  },
-  handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
-    const opps = await prisma.opportunity.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        ...(input.isOpen ? { closedAt: null } : {}),
-        ...(input.accountName ? { account: { name: { contains: input.accountName as string, mode: "insensitive" } } } : {}),
-        ...(input.stageName ? { pipelineStage: { name: { equals: input.stageName as string, mode: "insensitive" } } } : {}),
-        ...(input.minAmount !== undefined ? { amount: { gte: input.minAmount as number } } : {}),
-      },
-      include: {
-        account: { select: { name: true } },
-        pipelineStage: { select: { name: true, isWon: true, isLost: true } },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: limit,
-    });
-    return {
-      count: opps.length,
-      opportunities: opps.map((o) => ({
-        id: o.id, name: o.name, amount: o.amount, currency: o.currency,
-        stage: o.pipelineStage?.name, accountName: o.account?.name,
-        expectedCloseDate: o.expectedCloseDate, isWon: o.isWon,
-      })),
-    };
-  },
-};
-
-const moveOpportunityStage: ToolDefinition = {
-  name: "move_opportunity_stage",
-  description: "Move a deal to a different pipeline stage. Use to advance a deal after a positive customer signal, or close it Won/Lost. Auto-stamps closedAt + isWon on terminal stages.",
-  input_schema: {
-    type: "object",
-    properties: {
-      opportunityId: { type: "string" },
-      newStageName: { type: "string", description: "Target stage name (must exist in this org's pipeline)" },
-    },
-    required: ["opportunityId", "newStageName"],
-  },
-  handler: async (ctx, input) => {
-    const opp = await prisma.opportunity.findFirst({
-      where: { id: input.opportunityId as string, organizationId: ctx.orgId },
-    });
-    if (!opp) return { error: "Opportunity not found in this org" };
-
-    const stage = await prisma.pipelineStage.findFirst({
-      where: { organizationId: ctx.orgId, name: { equals: input.newStageName as string, mode: "insensitive" }, archivedAt: null },
-    });
-    if (!stage) return { error: `Stage "${input.newStageName}" not found. Use search_opportunities to see available stages.` };
-
-    const now = new Date();
-    let closedAt: Date | null | undefined;
-    let isWon: boolean | null | undefined;
-    if (stage.isWon) { closedAt = now; isWon = true; }
-    else if (stage.isLost) { closedAt = now; isWon = false; }
-    else if (opp.closedAt) { closedAt = null; isWon = null; }
-
-    const updated = await prisma.opportunity.update({
-      where: { id: opp.id },
-      data: {
-        pipelineStageId: stage.id,
-        ...(closedAt !== undefined ? { closedAt } : {}),
-        ...(isWon !== undefined ? { isWon } : {}),
-      },
-      select: { id: true, name: true, isWon: true, closedAt: true },
-    });
-    return { ok: true, opportunity: updated, stage: stage.name };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
-// ITSM read + update tools
-// ─────────────────────────────────────────────────────────
-
-const searchTickets: ToolDefinition = {
-  name: "search_tickets",
-  description: "Search internal IT tickets. Use to triage the queue or find a specific ticket before updating.",
-  input_schema: {
-    type: "object",
-    properties: {
-      status: { type: "string", enum: ["OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_ON_USER", "WAITING_ON_VENDOR", "RESOLVED", "CLOSED", "CANCELLED"] },
-      priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL"] },
-      category: { type: "string" },
-      titleContains: { type: "string" },
-      assignedToMe: { type: "boolean" },
-      limit: { type: "integer" },
-    },
-  },
-  handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
-    const tickets = await prisma.ticket.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        ...(input.status ? { status: input.status as "OPEN" | "TRIAGED" | "IN_PROGRESS" | "WAITING_ON_USER" | "WAITING_ON_VENDOR" | "RESOLVED" | "CLOSED" | "CANCELLED" } : {}),
-        ...(input.priority ? { priority: input.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT" | "CRITICAL" } : {}),
-        ...(input.category ? { category: input.category as string } : {}),
-        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
-        ...(input.assignedToMe ? { assigneeId: ctx.userId } : {}),
-      },
-      select: { id: true, title: true, status: true, priority: true, category: true, requesterId: true, assigneeId: true, createdAt: true, dueAt: true },
-      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-      take: limit,
-    });
-    return { count: tickets.length, tickets };
-  },
-};
-
-const updateTicketStatus: ToolDefinition = {
-  name: "update_ticket_status",
-  description: "Triage or resolve a ticket. Sets the new status and auto-stamps acknowledgedAt/resolvedAt/closedAt. Optionally records resolution notes.",
-  input_schema: {
-    type: "object",
-    properties: {
-      ticketId: { type: "string" },
-      status: { type: "string", enum: ["OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_ON_USER", "WAITING_ON_VENDOR", "RESOLVED", "CLOSED", "CANCELLED"] },
-      assigneeEmail: { type: "string", description: "Optional — reassign to a user by email" },
-      resolutionNotes: { type: "string", description: "Required-ish when status=RESOLVED. Captures how the ticket was solved." },
-    },
-    required: ["ticketId", "status"],
-  },
-  handler: async (ctx, input) => {
-    const existing = await prisma.ticket.findFirst({
-      where: { id: input.ticketId as string, organizationId: ctx.orgId },
-    });
-    if (!existing) return { error: "Ticket not found in this org" };
-
-    let assigneeId: string | undefined;
-    if (input.assigneeEmail) {
-      const u = await prisma.user.findFirst({
-        where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
-        select: { id: true },
-      });
-      if (!u) return { error: `User with email '${input.assigneeEmail}' not found in this org` };
-      assigneeId = u.id;
-    }
-
-    const now = new Date();
-    const status = input.status as "OPEN" | "TRIAGED" | "IN_PROGRESS" | "WAITING_ON_USER" | "WAITING_ON_VENDOR" | "RESOLVED" | "CLOSED" | "CANCELLED";
-    const ticket = await prisma.ticket.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        ...(assigneeId ? { assigneeId } : {}),
-        ...(input.resolutionNotes ? { resolutionNotes: input.resolutionNotes as string } : {}),
-        ...(status === "TRIAGED" && !existing.acknowledgedAt ? { acknowledgedAt: now } : {}),
-        ...(status === "RESOLVED" && !existing.resolvedAt ? { resolvedAt: now } : {}),
-        ...(status === "CLOSED" && !existing.closedAt ? { closedAt: now } : {}),
-      },
-      select: { id: true, title: true, status: true },
-    });
-    return { ok: true, ticket };
   },
 };
 
@@ -783,89 +350,8 @@ const searchContracts: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Helpdesk: apply macro to a ticket
-// ─────────────────────────────────────────────────────────
-
-const applyMacro: ToolDefinition = {
-  name: "apply_macro",
-  description: "Apply a canned-response macro to a Helpdesk ticket. Looks up the macro by slug, copies its body to the ticket's resolution context, optionally moves the ticket to RESOLVED when the macro is marked resolves=true. Records macro usage for analytics.",
-  input_schema: {
-    type: "object",
-    properties: {
-      ticketId: { type: "string", description: "The SupportTicket id" },
-      macroSlug: { type: "string", description: "The macro's slug (e.g. 'password-reset')" },
-    },
-    required: ["ticketId", "macroSlug"],
-  },
-  handler: async (ctx, input) => {
-    const ticket = await prisma.supportTicket.findFirst({
-      where: { id: input.ticketId as string, organizationId: ctx.orgId },
-    });
-    if (!ticket) return { error: "Support ticket not found in this org" };
-
-    const macro = await prisma.supportMacro.findFirst({
-      where: { organizationId: ctx.orgId, slug: input.macroSlug as string, archivedAt: null },
-    });
-    if (!macro) return { error: `Macro '${input.macroSlug}' not found` };
-
-    const now = new Date();
-    const updated = await prisma.supportTicket.update({
-      where: { id: ticket.id },
-      data: {
-        ...(macro.resolves ? { status: "RESOLVED", resolvedAt: ticket.resolvedAt ?? now } : {}),
-        ...(ticket.firstResponseAt ? {} : { firstResponseAt: now }),
-      },
-      select: { id: true, subject: true, status: true },
-    });
-
-    await prisma.supportMacro.update({
-      where: { id: macro.id },
-      data: { usageCount: { increment: 1 } },
-    });
-
-    return { ok: true, ticket: updated, macro: { slug: macro.slug, body: macro.body, resolves: macro.resolves } };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
 // Cross-product search
 // ─────────────────────────────────────────────────────────
-
-const searchKb: ToolDefinition = {
-  name: "search_kb",
-  description: "Search the KB articles (internal IT KB). Use to deflect a ticket — find an article that already answers the user's question.",
-  input_schema: {
-    type: "object",
-    properties: {
-      query: { type: "string", description: "Substring matched against title and body" },
-      category: { type: "string" },
-      onlyPublished: { type: "boolean" },
-      limit: { type: "integer" },
-    },
-    required: ["query"],
-  },
-  handler: async (ctx, input) => {
-    const limit = Math.min(20, Number(input.limit ?? 10));
-    const q = input.query as string;
-    const articles = await prisma.kbArticle.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        archivedAt: null,
-        ...(input.category ? { category: input.category as string } : {}),
-        ...(input.onlyPublished ? { publishedAt: { not: null } } : {}),
-        OR: [
-          { title: { contains: q, mode: "insensitive" } },
-          { body: { contains: q, mode: "insensitive" } },
-          { excerpt: { contains: q, mode: "insensitive" } },
-        ],
-      },
-      select: { id: true, slug: true, title: true, excerpt: true, category: true, viewCount: true, publishedAt: true },
-      orderBy: [{ viewCount: "desc" }, { updatedAt: "desc" }],
-      take: limit,
-    });
-    return { count: articles.length, articles };
-  },
-};
 
 const searchEmployees: ToolDefinition = {
   name: "search_employees",
@@ -983,7 +469,7 @@ const searchMeetings: ToolDefinition = {
 // ─────────────────────────────────────────────────────────
 
 // OKR.level is the GoalLevel enum since the goals rebuild. The model
-// may still emit legacy "TEAM" — map it to DEPARTMENT and anything
+// may still emit legacy "TEAM", map it to DEPARTMENT and anything
 // unrecognised to INDIVIDUAL, mirroring the migration's mapping.
 function toGoalLevel(v: unknown): "COMPANY" | "DEPARTMENT" | "INDIVIDUAL" {
   if (v === "TEAM") return "DEPARTMENT";
@@ -1007,9 +493,17 @@ const searchOkrs: ToolDefinition = {
   },
   handler: async (ctx, input) => {
     const limit = Math.min(50, Number(input.limit ?? 20));
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, okrs: [] };
+    // Only goals the person could open on the Goals pages: an Individual goal
+    // is not org public, and asking the assistant must never be a way round
+    // that. The Goals list's own visibility rule, in the query, so nothing
+    // visible is missed and nothing hidden is read.
+    const visible = await goalVisibilityOr(session);
     const okrs = await prisma.oKR.findMany({
       where: {
         organizationId: ctx.orgId,
+        ...(visible ? { AND: [{ OR: visible }] } : {}),
         ...(input.level ? { level: toGoalLevel(input.level) } : {}),
         ...(input.status ? { status: input.status as string } : {}),
         ...(input.quarter ? { quarter: input.quarter as string } : {}),
@@ -1079,7 +573,7 @@ const searchSops: ToolDefinition = {
 const updateContract: ToolDefinition = {
   name: "update_contract",
   description:
-    "Update a tracked contract — change status, capture renewal terms, push out an expiry date. Use this after a redline round, a signature, or a renewal decision. Auto-stamps signedAt on first SIGNED transition.",
+    "Update a tracked contract, change status, capture renewal terms, push out an expiry date. Use this after a redline round, a signature, or a renewal decision. Auto-stamps signedAt on first SIGNED transition.",
   input_schema: {
     type: "object",
     properties: {
@@ -1126,58 +620,17 @@ const updateContract: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Ticket assignment (lightweight — just reassign, no status change)
-// ─────────────────────────────────────────────────────────
-
-const assignTicket: ToolDefinition = {
-  name: "assign_ticket",
-  description:
-    "Reassign an IT ticket to a different teammate. Use when triaging — point a ticket at the right responder without changing its status. Look up the responder by email.",
-  input_schema: {
-    type: "object",
-    properties: {
-      ticketId: { type: "string" },
-      assigneeEmail: { type: "string", description: "Email of the user who should own the ticket" },
-    },
-    required: ["ticketId", "assigneeEmail"],
-  },
-  handler: async (ctx, input) => {
-    const ticket = await prisma.ticket.findFirst({
-      where: { id: input.ticketId as string, organizationId: ctx.orgId },
-    });
-    if (!ticket) return { error: "Ticket not found in this org" };
-
-    const assignee = await prisma.user.findFirst({
-      where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
-      select: { id: true, firstName: true, lastName: true, email: true },
-    });
-    if (!assignee) return { error: `User with email '${input.assigneeEmail}' not found in this org` };
-
-    const updated = await prisma.ticket.update({
-      where: { id: ticket.id },
-      data: { assigneeId: assignee.id },
-      select: { id: true, title: true, status: true, assigneeId: true },
-    });
-    return {
-      ok: true,
-      ticket: updated,
-      assignee: { id: assignee.id, name: `${assignee.firstName ?? ""} ${assignee.lastName ?? ""}`.trim(), email: assignee.email },
-    };
-  },
-};
-
-// ─────────────────────────────────────────────────────────
 // OKR create (HR / Goals)
 // ─────────────────────────────────────────────────────────
 
 const createOkr: ToolDefinition = {
   name: "create_okr",
   description:
-    "Create an OKR (objective + key results) in WorkwrK Goals. Use when the user wants to capture a goal — quarterly, individual, team, or company-wide. Key results are optional; pass them as an array if known.",
+    "Create an OKR (objective + key results) in WorkwrK Goals. Use when the user wants to capture a goal, quarterly, individual, team, or company-wide. Key results are optional; pass them as an array if known.",
   input_schema: {
     type: "object",
     properties: {
-      title: { type: "string", description: "Objective title — what the team is trying to achieve" },
+      title: { type: "string", description: "Objective title, what the team is trying to achieve" },
       description: { type: "string" },
       level: { type: "string", enum: ["COMPANY", "DEPARTMENT", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
       quarter: { type: "string", description: "e.g. 'Q2 2026'" },
@@ -1202,6 +655,18 @@ const createOkr: ToolDefinition = {
     required: ["title"],
   },
   handler: async (ctx, input) => {
+    const session = await callerSession(ctx);
+    if (!session) return { error: "You are not a member of this organization." };
+    // The same rules as POST /api/okrs: a Member makes Individual goals for
+    // themselves only; a manager may choose the owner and the level; and a
+    // Company goal needs the Company-goal right (Owner/Admin, the People team,
+    // or owning it), so nobody makes one through the assistant that they
+    // could not make, fix or remove on the Goals page.
+    const manager = legacyIsManagerLevel(session.user.accessLevel);
+    const level = toGoalLevel(input.level ?? "INDIVIDUAL");
+    if (!manager && level !== "INDIVIDUAL") {
+      return { error: "Only managers can create Company or Department goals. I can create an Individual goal for you instead." };
+    }
     let ownerId = ctx.userId;
     if (input.ownerEmail) {
       const owner = await prisma.user.findFirst({
@@ -1209,7 +674,16 @@ const createOkr: ToolDefinition = {
         select: { id: true },
       });
       if (!owner) return { error: `Owner with email '${input.ownerEmail}' not found in this org` };
+      if (!manager && owner.id !== ctx.userId) {
+        return { error: "You can only create goals you own. Ask your manager to set a goal for someone else." };
+      }
       ownerId = owner.id;
+    }
+    if (level === "COMPANY") {
+      const actor = await goalRightsActor(session);
+      if (!mayEditGoal(actor, { level: "COMPANY", ownerId, creatorId: ctx.userId })) {
+        return { error: "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin." };
+      }
     }
 
     const krs = Array.isArray(input.keyResults) ? (input.keyResults as Array<{ title: string; unit?: string; startValue?: number; targetValue: number }>) : [];
@@ -1219,7 +693,7 @@ const createOkr: ToolDefinition = {
         organizationId: ctx.orgId,
         title: input.title as string,
         description: (input.description as string) ?? null,
-        level: toGoalLevel(input.level ?? "INDIVIDUAL"),
+        level,
         quarter: (input.quarter as string) ?? null,
         startDate: input.startIsoDate ? new Date(input.startIsoDate as string) : null,
         endDate: input.endIsoDate ? new Date(input.endIsoDate as string) : null,
@@ -1236,6 +710,19 @@ const createOkr: ToolDefinition = {
       },
       select: { id: true, title: true, level: true, status: true, quarter: true, keyResults: { select: { id: true, title: true, targetValue: true, unit: true } } },
     });
+    // As POST /api/okrs does: the stored progress is honest from the first
+    // read, the creator is on record (the edit rule reads okr_created), and
+    // someone given a goal hears about it.
+    await persistGoalRollupChain(okr.id);
+    logActivity({
+      type: "okr_created",
+      actorId: ctx.userId,
+      organizationId: ctx.orgId,
+      description: `Created OKR "${okr.title}" (${level}) with Ask AI`,
+      targetId: okr.id,
+      targetType: "okr",
+    });
+    if (ownerId !== ctx.userId) await notifyGoalAssigned(ownerId, okr);
     return { ok: true, okr };
   },
 };
@@ -1247,7 +734,7 @@ const createOkr: ToolDefinition = {
 const createMeeting: ToolDefinition = {
   name: "create_meeting",
   description:
-    "Schedule a meeting in WorkwrK. Use when the user wants to capture a 1:1, standup, review, or ad-hoc. Attendees can be passed as a list of emails — unknown emails are skipped silently.",
+    "Schedule a meeting in WorkwrK. Use when the user wants to capture a 1:1, standup, review, or ad-hoc. Attendees can be passed as a list of emails, unknown emails are skipped silently.",
   input_schema: {
     type: "object",
     properties: {
@@ -1304,7 +791,7 @@ const createMeeting: ToolDefinition = {
 const createSop: ToolDefinition = {
   name: "create_sop",
   description:
-    "Create a draft Standard Operating Procedure. The SOP body is created as a stub — use the editor to flesh it out. Use this when the user describes a process and wants to capture it formally.",
+    "Create a draft Standard Operating Procedure. The SOP body is created as a stub, use the editor to flesh it out. Use this when the user describes a process and wants to capture it formally.",
   input_schema: {
     type: "object",
     properties: {
@@ -1321,7 +808,7 @@ const createSop: ToolDefinition = {
     if (!["WRITTEN", "RECORDED", "CHECKLIST"].includes(sopType)) {
       return { error: `Invalid sopType "${input.sopType}". Use WRITTEN, RECORDED, or CHECKLIST.` };
     }
-    // Empty content must match the sopType — the editors and the
+    // Empty content must match the sopType, the editors and the
     // assignment step-counter read type-specific shapes, and a bare
     // { steps: [] } renders a CHECKLIST/RECORDED SOP as broken.
     const content =
@@ -1397,7 +884,7 @@ const createKra: ToolDefinition = {
 const createKpi: ToolDefinition = {
   name: "create_kpi",
   description:
-    "Create a KPI (a measurable indicator). Optionally attach it to a parent KRA by name. Use when the user wants to measure something — revenue, NPS, defect rate, etc.",
+    "Create a KPI (a measurable indicator). Optionally attach it to a parent KRA by name. Use when the user wants to measure something, revenue, NPS, defect rate, etc.",
   input_schema: {
     type: "object",
     properties: {
@@ -1408,7 +895,7 @@ const createKpi: ToolDefinition = {
       frequency: { type: "string", enum: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"], description: "Defaults to MONTHLY" },
       targetValue: { type: "number" },
       lowerIsBetter: { type: "boolean", description: "True for cost/defect-type metrics" },
-      kraName: { type: "string", description: "Optional parent KRA — looked up by name (case-insensitive)" },
+      kraName: { type: "string", description: "Optional parent KRA, looked up by name (case-insensitive)" },
     },
     required: ["name"],
   },
@@ -1444,7 +931,7 @@ const createKpi: ToolDefinition = {
 const createWorkspaceTool: ToolDefinition = {
   name: "create_workspace",
   description:
-    "Spin up a named workspace inside a product (e.g. 'Sales Team B' inside CRM). Use this when the user asks to set up a separate team space, or when you're about to populate one — you can chain this with `create_studio_board` to seed boards into the new workspace.",
+    "Spin up a named workspace inside a product (e.g. 'Sales Team B' inside CRM). Use this when the user asks to set up a separate team space, or when you're about to populate one, you can chain this with `create_studio_board` to seed boards into the new workspace.",
   input_schema: {
     type: "object",
     properties: {
@@ -1456,6 +943,10 @@ const createWorkspaceTool: ToolDefinition = {
     required: ["product", "name"],
   },
   async handler(ctx, input) {
+    // Same rule as POST /api/workspaces: a manager or above creates one.
+    if (!legacyIsManagerLevel(await callerLevel(ctx))) {
+      return { error: "Only a manager or an admin can create a workspace. Ask one of them." };
+    }
     const { createWorkspace } = await import("@/lib/workspaces");
     const ws = await createWorkspace({
       organizationId: ctx.orgId,
@@ -1479,7 +970,7 @@ const createWorkspaceTool: ToolDefinition = {
 const invitePersonWithRole: ToolDefinition = {
   name: "invite_person_with_role",
   description:
-    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted — kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /register?token=… email flow.",
+    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /register?token=… email flow.",
   input_schema: {
     type: "object",
     properties: {
@@ -1495,6 +986,18 @@ const invitePersonWithRole: ToolDefinition = {
     required: ["email", "kraIds", "sopIds"],
   },
   async handler(ctx, input) {
+    // Same gate as POST /api/invitations (the People create permission), and
+    // the level comes from a closed list: the model's input can never mint an
+    // admin, and a person who cannot invite from the UI cannot invite here.
+    const level = await callerLevel(ctx);
+    const matrixOrg = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
+    const matrix = ((matrixOrg?.settings as { permissions?: unknown } | null)?.permissions ?? null) as Parameters<typeof checkPermission>[1];
+    if (!level || !checkPermission(level as PermAccessLevel, matrix, "people", "create")) {
+      return { error: "You can't invite people. Ask an admin to send the invitation." };
+    }
+    const requested = String(input.accessLevel ?? "EMPLOYEE").toUpperCase();
+    const INVITABLE = new Set(["EMPLOYEE", "TEAM_LEAD", "MANAGER", "DIRECTOR", "VP", "C_LEVEL", "HR", "AGENT"]);
+    const inviteLevel = requested === "COMPANY_ADMIN" && legacyIsAdminLevel(level) ? "COMPANY_ADMIN" : INVITABLE.has(requested) ? requested : "EMPLOYEE";
     const email = String(input.email ?? "").trim();
     if (!email.includes("@")) throw new Error("Valid email is required");
     const kraIds = Array.isArray(input.kraIds) ? (input.kraIds as string[]) : [];
@@ -1524,7 +1027,7 @@ const invitePersonWithRole: ToolDefinition = {
     const invitation = await prisma.invitation.create({
       data: {
         email,
-        accessLevel: ((input.accessLevel as string | undefined) ?? "EMPLOYEE") as "EMPLOYEE",
+        accessLevel: inviteLevel as "EMPLOYEE",
         token: crypto.randomBytes(32).toString("hex"),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         organizationId: ctx.orgId,
@@ -1543,7 +1046,7 @@ const invitePersonWithRole: ToolDefinition = {
       invitation: {
         id: invitation.id,
         email: invitation.email,
-        // Token is sensitive — don't echo it back in chat. The email
+        // Token is sensitive, don't echo it back in chat. The email
         // worker already includes the registration link.
         registerLink: `/register?token=…`,
       },
@@ -1552,7 +1055,7 @@ const invitePersonWithRole: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
-// Lego primitives — Forms, DataTables, Docs
+// Lego primitives, Forms, DataTables, Docs
 // ─────────────────────────────────────────────────────────
 
 const FORM_FIELD_TYPES = ["short_text", "long_text", "number", "email", "url", "date", "select", "multi_select", "checkbox"] as const;
@@ -1617,21 +1120,36 @@ const createForm: ToolDefinition = {
       },
       select: { id: true, name: true },
     });
-    return { ok: true, form: { id: form.id, name: form.name, responderUrl: `/forms/${form.id}/respond`, editorUrl: `/forms/${form.id}` } };
+    return { ok: true, form: { id: form.id, name: form.name, responderUrl: `/forms/${form.id}/respond`, editorUrl: addressHref("form", form.id, { scope: "work" }) } };
   },
 };
+
+/**
+ * The refs this person may open (Can view or higher), as refKey strings: one
+ * world through the one resolver, so the Ask AI tools never name a node the
+ * product hides from the person anywhere else.
+ */
+async function readableIds(ctx: ToolContext, refs: NodeRef[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (refs.length === 0) return out;
+  const decisions = await nodeRoles(await nodeCtxForUser(ctx.userId, ctx.orgId), refs);
+  for (const [key, d] of decisions) if (roleAtLeast(d.role, "VIEW")) out.add(key);
+  return out;
+}
 
 const listForms: ToolDefinition = {
   name: "list_forms",
   description: "List Forms in the user's org with submission counts. Use this when the user asks about existing forms or wants to find one.",
   input_schema: { type: "object", properties: {} },
   handler: async (ctx) => {
-    const forms = await prisma.formDefinition.findMany({
+    const candidates = await prisma.formDefinition.findMany({
       where: { organizationId: ctx.orgId },
       orderBy: { updatedAt: "desc" },
-      take: 50,
+      take: 200,
       select: { id: true, name: true, isPublic: true, _count: { select: { submissions: true } } },
     });
+    const readable = await readableIds(ctx, candidates.map((f) => ({ kind: "form" as const, id: f.id })));
+    const forms = candidates.filter((f) => readable.has(refKey({ kind: "form", id: f.id }))).slice(0, 50);
     return { forms: forms.map((f: typeof forms[number]) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })) };
   },
 };
@@ -1685,7 +1203,7 @@ const createDataTable: ToolDefinition = {
       },
       select: { id: true, name: true },
     });
-    return { ok: true, table: { id: table.id, name: table.name, url: `/tables/${table.id}` } };
+    return { ok: true, table: { id: table.id, name: table.name, url: addressHref("table", table.id, { scope: "work" }) } };
   },
 };
 
@@ -1694,12 +1212,15 @@ const listDataTables: ToolDefinition = {
   description: "List the Tables in the user's org with row counts.",
   input_schema: { type: "object", properties: {} },
   handler: async (ctx) => {
-    const tables = await prisma.dataTable.findMany({
+    const candidates = await prisma.dataTable.findMany({
       where: { organizationId: ctx.orgId },
       orderBy: { updatedAt: "desc" },
-      take: 50,
+      take: 200,
       select: { id: true, name: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
     });
+    // Only the tables this person can open (their Space, their own, a grant).
+    const readable = await readableIds(ctx, candidates.map((t) => ({ kind: "table" as const, id: t.id })));
+    const tables = candidates.filter((t) => readable.has(refKey({ kind: "table", id: t.id }))).slice(0, 50);
     return { tables: tables.map((t: typeof tables[number]) => ({ id: t.id, name: t.name, rowCount: t._count.rows })) };
   },
 };
@@ -1750,16 +1271,12 @@ const createDocWithBlocks: ToolDefinition = {
       },
       select: { id: true, title: true },
     });
-    return { ok: true, doc: { id: doc.id, title: doc.title, url: `/docs/${doc.id}` } };
+    return { ok: true, doc: { id: doc.id, title: doc.title, url: addressHref("doc", doc.id, { scope: "work" }) } };
   },
 };
 
 // ─────────────────────────────────────────────────────────
-// Registry — all tools by name
-// ─────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────
-// Brain knowledge tools — read-only org awareness so the
+// Brain knowledge tools, read-only org awareness so the
 // right-dock Brain panel can actually answer "who is at
 // risk on KPI compliance" / "what are my KRAs" / etc.
 // All scoped to ctx.userId or ctx.orgId; nothing crosses
@@ -1769,7 +1286,7 @@ const createDocWithBlocks: ToolDefinition = {
 const listMyKras: ToolDefinition = {
   name: "list_my_kras",
   description:
-    "List the caller's active Key Result Area assignments (KRAs) — what the user is accountable for. Returns each KRA's name, weightage, status, and the role it's tied to.",
+    "List the caller's active Key Result Area assignments (KRAs), what the user is accountable for. Returns each KRA's name, weightage, status, and the role it's tied to.",
   input_schema: {
     type: "object",
     properties: {
@@ -1890,7 +1407,7 @@ const listMySops: ToolDefinition = {
 const listMyWeeklyReviews: ToolDefinition = {
   name: "list_my_weekly_reviews",
   description:
-    "List the caller's recent weekly reviews (last 8 by default) — period, status, manager review state, and a short excerpt of highlights/blockers/plan. Use this to summarize what the user has been working on or whether they're behind on submission.",
+    "List the caller's recent weekly reviews (last 8 by default), period, status, manager review state, and a short excerpt of highlights/blockers/plan. Use this to summarize what the user has been working on or whether they're behind on submission.",
   input_schema: {
     type: "object",
     properties: {
@@ -1938,7 +1455,7 @@ const getTeamAlignmentRollup: ToolDefinition = {
     if (rollup.members.length === 0) {
       return {
         empty: true,
-        reason: "Caller has no direct or dotted-line reports — they are an IC, not a manager.",
+        reason: "Caller has no direct or dotted-line reports, they are an IC, not a manager.",
       };
     }
     // Strip avatars / heavy fields the model doesn't need.
@@ -1965,7 +1482,10 @@ const getTeamAlignmentRollup: ToolDefinition = {
   },
 };
 
-export const TOOLS: Record<string, ToolDefinition> = {
+// The registry, typed against the one name list (tool-names.ts): a missing or
+// extra entry is a compile error, which is what keeps the chat thread's verb
+// map and this table the same 28 names.
+const REGISTRY = {
   // Lego primitives
   create_form: createForm,
   list_forms: listForms,
@@ -1977,86 +1497,62 @@ export const TOOLS: Record<string, ToolDefinition> = {
   search_tasks: searchTasks,
   send_kudos: sendKudos,
   search_employees: searchEmployees,
-  search_kb: searchKb,
   search_meetings: searchMeetings,
   search_okrs: searchOkrs,
   search_sops: searchSops,
-  // CRM
-  create_lead: createLead,
-  search_leads: searchLeads,
-  update_lead_status: updateLeadStatus,
-  create_opportunity: createOpportunity,
-  search_opportunities: searchOpportunities,
-  move_opportunity_stage: moveOpportunityStage,
-  // ITSM
-  create_ticket: createTicket,
-  search_tickets: searchTickets,
-  update_ticket_status: updateTicketStatus,
-  assign_ticket: assignTicket,
-  // Legal
+  // Contracts
   create_contract: createContract,
   search_contracts: searchContracts,
   update_contract: updateContract,
-  // Dev
+  // Sprints
   create_sprint: createSprint,
-  // Marketing
-  create_campaign: createCampaign,
-  // Helpdesk
-  create_support_ticket: createSupportTicket,
-  apply_macro: applyMacro,
-  // HR / Goals
+  // Goals, meetings, SOPs, KRAs and KPIs
   create_okr: createOkr,
   create_meeting: createMeeting,
   create_sop: createSop,
   create_kra: createKra,
   create_kpi: createKpi,
-  // System-building tools — AI authors workspaces, hires
+  // System-building tools: workspaces and invitations (both role-gated in
+  // their handlers)
   create_workspace: createWorkspaceTool,
   invite_person_with_role: invitePersonWithRole,
-  // Brain knowledge tools — read-only org awareness for the right-dock
-  // panel. Every chat session can use these; manager-only ones bail
-  // gracefully when the caller has no reports.
+  // Read-only org awareness. Manager-only ones answer gracefully when the
+  // caller has no reports.
   list_my_kras: listMyKras,
   list_my_kpi_status: listMyKpiStatus,
   list_my_sops: listMySops,
   list_my_weekly_reviews: listMyWeeklyReviews,
   get_team_alignment_rollup: getTeamAlignmentRollup,
-};
+} satisfies Record<ToolName, ToolDefinition>;
+
+export const TOOLS: Record<string, ToolDefinition> = REGISTRY;
 
 // Tools every session can use, regardless of agent (or no agent).
-// Includes cross-product search so Sidekick can look stuff up.
-export const CROSS_TOOL_NAMES = [
+export const CROSS_TOOL_NAMES: ToolName[] = [
   "create_task", "search_tasks", "send_kudos", "search_employees",
-  "search_kb", "search_meetings", "search_okrs", "search_sops",
+  "search_meetings", "search_okrs", "search_sops",
   "create_meeting", "create_okr", "create_sop",
-  // System-building tools — let the AI author workspaces + hires
+  // System-building tools: workspaces and invitations
   "create_workspace", "invite_person_with_role",
-  // Lego primitives — Forms, DataTables, Docs (composable building blocks)
+  // Lego primitives: Forms, DataTables, Docs
   "create_form", "list_forms",
   "create_data_table", "list_data_tables",
   "create_doc",
-  // Brain knowledge tools (read-only org awareness)
+  // Read-only org awareness
   "list_my_kras", "list_my_kpi_status", "list_my_sops",
   "list_my_weekly_reviews", "get_team_alignment_rollup",
 ];
 
 // Tools per agent product. When a chat session is scoped to an agent,
 // the agent's productSlug determines which create-tools light up in
-// addition to the cross-product ones.
-//
-// The agent's `tools` array in the catalog (e.g. "draft-email",
-// "triage-ticket") is still rendered in the UI as example actions,
-// but the actual runtime tools come from this map — it's the most
-// reliable bridge until every catalog slug has a real handler.
-export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
-  "workwrk-crm": ["create_lead", "search_leads", "update_lead_status", "create_opportunity", "search_opportunities", "move_opportunity_stage"],
-  "workwrk-itsm": ["create_ticket", "search_tickets", "update_ticket_status", "assign_ticket"],
+// addition to the cross-product ones. The CRM, ITSM, campaigns and helpdesk
+// rows left with their tools (PPMS scope); an agent bound to one of those
+// products gets the cross-product set only.
+export const PRODUCT_TOOL_NAMES: Record<string, ToolName[]> = {
   "workwrk-contracts": ["create_contract", "search_contracts", "update_contract"],
   "workwrk-dev": ["create_sprint"],
-  "workwrk-campaigns": ["create_campaign"],
-  "workwrk-help": ["create_support_ticket", "apply_macro"],
-  // HR / Goals — KRAs and KPIs are HR-org-design primitives, surfaced
-  // via the People product's agent (Maya HR).
+  // HR / Goals: KRAs and KPIs are org-design primitives, surfaced via the
+  // People product's agent.
   "workwrk-people": ["create_kra", "create_kpi"],
   "workwrk-goals": ["create_okr"],
   "workwrk-sops": ["create_sop"],
@@ -2067,10 +1563,10 @@ export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
 //   - General Sidekick (no agent): just CROSS_TOOL_NAMES
 //   - Agent: CROSS + the agent's product's tools
 export function toolsForSession(opts: { agentProductSlug?: string | null }): ToolDefinition[] {
-  const available = new Set<string>(CROSS_TOOL_NAMES);
+  const available = new Set<ToolName>(CROSS_TOOL_NAMES);
   if (opts.agentProductSlug) {
     const productTools = PRODUCT_TOOL_NAMES[opts.agentProductSlug] ?? [];
     for (const name of productTools) available.add(name);
   }
-  return Array.from(available).map((name) => TOOLS[name]);
+  return Array.from(available).map((name) => TOOLS[name]).filter((t): t is ToolDefinition => Boolean(t));
 }

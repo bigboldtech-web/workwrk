@@ -77,6 +77,16 @@ export type ItemChangedEvent = {
 };
 
 /**
+ * A manager decided a weekly review (spec-teams-performance section 1
+ * Counts, PO-1): approved, asked for changes, or reopened it. Published to
+ * the employee and to the deciding manager, so both sidebars' Weekly reviews
+ * badge and both surfaces (the queue at /team/reviews and the Alignment
+ * board) refetch. TRIGGER-ONLY: the review id and nothing else, so the
+ * receiving tab re-reads through its own scoped endpoint.
+ */
+export type ReviewDecidedEvent = { type: "review.decided"; reviewId: string };
+
+/**
  * The same event dispatched by THIS tab about its own write (see
  * `emitItemChanged`). `local` tells the editor that caused it to ignore it;
  * `gone` tells a host list to drop the row rather than re-read it.
@@ -96,7 +106,8 @@ export type ShellRealtimeEvent =
   | AccessChangedEvent
   | PrefsChangedEvent
   | SessionIdleEvent
-  | ItemChangedEvent;
+  | ItemChangedEvent
+  | ReviewDecidedEvent;
 
 export type RealtimeEvent = LegacyRealtimeEvent | ShellRealtimeEvent;
 export type RealtimeEventName = RealtimeEvent["type"];
@@ -130,6 +141,7 @@ export const REALTIME_EVENT_NAMES: readonly RealtimeEventName[] = [
   "prefs.changed",
   "session.idle",
   "item",
+  "review.decided",
 ];
 
 const NAME_SET: ReadonlySet<string> = new Set(REALTIME_EVENT_NAMES);
@@ -257,6 +269,11 @@ export function legacyWindowEventsFor(ev: RealtimeEvent): string[] {
       return [WINDOW_EVENTS.prefsChanged];
     case "session.idle":
       return [WINDOW_EVENTS.sessionIdle];
+    case "review.decided":
+      // No legacy name: its consumers (the boot counts, the weekly queue and
+      // the Alignment board) subscribe to `workwrk:realtime` and read
+      // detail.type, the contract new consumers use.
+      return [];
     case "item":
       return [WINDOW_EVENTS.itemChanged];
   }

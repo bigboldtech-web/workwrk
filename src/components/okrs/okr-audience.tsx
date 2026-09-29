@@ -1,6 +1,6 @@
 "use client";
 
-// OkrAudience — the goal detail's audience strip: resolved-members avatar
+// OkrAudience: the goal detail's audience strip: resolved-members avatar
 // stack (+N overflow) plus, for editors, the same mixed people/departments/
 // roles picker used at create time. Edits go through
 // POST/DELETE /api/okrs/[id]/assignees; every response returns the fresh
@@ -42,7 +42,7 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
     const removed = prev.filter((e) => !nextKeys.has(key(e)));
     if (added.length === 0 && removed.length === 0) return;
 
-    setEntries(next); // optimistic — reverted if either request fails
+    setEntries(next); // optimistic, reverted if either request fails
     setError(null);
     try {
       let latest: AudienceResponse | null = null;
@@ -78,8 +78,9 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
   return (
     <div className="flex flex-wrap items-center gap-2.5">
       <MemberAvatarStack members={members} total={total} size={22} />
+      {total === 0 && !canEdit ? <span className="text-ink-2">None</span> : null}
       {total > 0 && (
-        <span className="text-sm text-zinc-500">
+        <span className="text-sm text-ink-2">
           {total} member{total === 1 ? "" : "s"}
         </span>
       )}
@@ -88,7 +89,7 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
           <GoalAudiencePicker value={entries} onChange={(next) => void apply(next)} />
         </div>
       ) : null}
-      {error && <span className="text-sm text-[#E2445C]">{error}</span>}
+      {error && <span role="alert" className="text-sm text-danger-text">{error}</span>}
     </div>
   );
 }

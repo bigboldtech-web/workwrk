@@ -64,9 +64,9 @@ export async function POST(req: NextRequest) {
   // Same spine as KRA→job title: a KPI is a gauge UNDER a result area, so
   // it cannot float on its own. (KRA → role → person is the whole chain;
   // a parentless KPI measures nothing anybody owns.) Legacy parentless
-  // rows stay readable and re-homable via PATCH — no new ones are born.
+  // rows stay readable and re-homable via PATCH, no new ones are born.
   if (!kraId || typeof kraId !== "string") {
-    return jsonError("KPI must sit under a KRA — pick the result area (kraId) it measures.");
+    return jsonError("KPI must sit under a KRA. Pick the result area (kraId) it measures.");
   }
   const parentKra = await prisma.kRA.findFirst({
     where: { id: kraId, organizationId: getOrgId(session) },
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       targetValue: targetValue != null ? Number(targetValue) : null,
       targetLabel: targetLabel ?? null,
       lowerIsBetter: lowerIsBetter === true,
-      // 🆕 Operating core — owned vs shared, formula, baseline.
+      // 🆕 Operating core, owned vs shared, formula, baseline.
       ownership: ownership === "SHARED" ? "SHARED" : "OWNED",
       // Direction of "good" (wins over lowerIsBetter when set) + north star.
       direction: direction ?? null,
@@ -140,7 +140,7 @@ export async function PATCH(req: NextRequest) {
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
       ...(targetLabel !== undefined && { targetLabel: targetLabel || null }),
       ...(lowerIsBetter !== undefined && { lowerIsBetter: lowerIsBetter === true }),
-      // Direction of "good" — null clears back to the lowerIsBetter fallback.
+      // Direction of "good", null clears back to the lowerIsBetter fallback.
       ...(direction !== undefined && { direction }),
       ...(isNorthStar !== undefined && { isNorthStar }),
       // 🆕 Operating core fields.

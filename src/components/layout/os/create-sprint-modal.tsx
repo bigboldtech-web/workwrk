@@ -19,6 +19,8 @@ import { useRouter } from "next/navigation";
 import { Dots } from "@/components/ui/dots";
 
 type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null };
+/** One Space from GET /api/move/destinations?create=list (a sprint is a List). */
+type DestSpace = SpaceRow & { pickable: boolean; folders?: Array<{ id: string; pickable: boolean }> };
 
 const DURATIONS = [
   { weeks: 1, label: "1 week" },
@@ -58,10 +60,17 @@ export function CreateSprintModal() {
   useEffect(() => {
     if (!createSprintOpen || loadedRef.current) return;
     loadedRef.current = true;
-    void fetch("/api/spaces", { cache: "no-store" })
+    // The Spaces this person may make a List in (the placement rule, node-rules
+    // P1 and P5): their root, or the Folder the sprint was opened from. The
+    // picker used to offer every Space they could read, Can view ones too.
+    void fetch("/api/move/destinations?create=list", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { spaces: [] }))
       .then((d) => {
-        const rows: SpaceRow[] = Array.isArray(d.spaces) ? d.spaces : [];
+        const preFolder = createSprintPreselect?.folderId ?? null;
+        const all: DestSpace[] = Array.isArray(d?.spaces) ? d.spaces : [];
+        const rows: SpaceRow[] = all
+          .filter((s) => s.pickable || (!!preFolder && s.id === createSprintPreselect?.spaceId && (s.folders ?? []).some((f) => f.id === preFolder && f.pickable)))
+          .map((s) => ({ id: s.id, slug: s.slug, name: s.name, icon: s.icon, color: s.color }));
         setSpaces(rows);
         const preId = createSprintPreselect?.spaceId;
         const fromPreselect = preId ? rows.find((s) => s.id === preId) : null;
@@ -123,7 +132,8 @@ export function CreateSprintModal() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           spaceId,
-          ...(createSprintPreselect?.folderId ? { folderId: createSprintPreselect.folderId } : {}),
+          // The Folder it was opened from, while its Space is the one picked (P3: a Folder settles its Space).
+          ...(createSprintPreselect?.folderId && createSprintPreselect.spaceId === spaceId ? { folderId: createSprintPreselect.folderId } : {}),
           name: "",
           sprint: { startDate, endDate },
         }),
@@ -184,7 +194,7 @@ export function CreateSprintModal() {
                       <span className="text-base text-zinc-900 font-medium truncate">{selectedSpace.name}</span>
                     </>
                   ) : (
-                    <span className="text-base text-zinc-400">{spaces.length ? "Select a Space…" : "No Spaces available"}</span>
+                    <span className="text-base text-zinc-400">{spaces.length ? "Select a Space…" : "Nowhere you can add a sprint"}</span>
                   )}
                 </span>
                 <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
@@ -192,7 +202,7 @@ export function CreateSprintModal() {
               {spaceMenuOpen ? (
                 <div className="absolute z-10 mt-1 start-0 end-0 max-h-[240px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1">
                   {spaces.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-zinc-400">No Spaces yet.</div>
+                    <div className="px-3 py-2 text-sm text-zinc-400">Making a sprint needs Can edit on a Space.</div>
                   ) : (
                     spaces.map((s) => (
                       <button

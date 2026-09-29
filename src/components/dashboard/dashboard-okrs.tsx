@@ -73,7 +73,7 @@ export function DashboardOkrs() {
             <h3 className="text-xs font-semibold text-foreground">Your Goals — {quarter}</h3>
             <Badge variant="outline" className="text-xs px-1.5 py-0">{okrs.length}</Badge>
           </div>
-          <Link href="/okrs?mine=1" className="text-xs text-[#0073EA] hover:underline flex items-center gap-1">
+          <Link href="/okrs" className="text-xs text-[#0073EA] hover:underline flex items-center gap-1">
             View all <ChevronRight size={12} />
           </Link>
         </div>
@@ -124,7 +124,7 @@ export function DashboardOkrs() {
           })}
         </div>
         {sorted.length > 5 && (
-          <Link href="/okrs?mine=1" className="block mt-2 text-center text-xs text-muted hover:text-[#0073EA] transition-colors">
+          <Link href="/okrs" className="block mt-2 text-center text-xs text-muted hover:text-[#0073EA] transition-colors">
             +{sorted.length - 5} more
           </Link>
         )}
