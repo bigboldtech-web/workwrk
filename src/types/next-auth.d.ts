@@ -12,6 +12,12 @@ declare module "next-auth" {
       lastName: string;
       avatar: string | null;
     } & DefaultSession["user"];
+    /**
+     * Present once the person was moved out of a suspended or closed company
+     * into another workspace (lib/auth.ts, WorkspaceMove): the sentence to
+     * show and the id an ack (`update({ workspaceMoveAck: at })`) must name.
+     */
+    workspaceMove?: { at: number; message: string };
   }
 
   interface User extends DefaultUser {
@@ -33,5 +39,7 @@ declare module "next-auth/jwt" {
     firstName: string;
     lastName: string;
     avatar: string | null;
+    /** The one-shot workspace-move marker (lib/auth.ts, WorkspaceMove). */
+    workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED"; to: string; at: number };
   }
 }

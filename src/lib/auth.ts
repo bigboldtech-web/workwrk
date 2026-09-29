@@ -66,6 +66,41 @@ type AuthIdentity = {
   avatar: string | null;
 };
 
+/**
+ * The one-shot marker left on a token when it is moved out of a suspended or
+ * closed company into another workspace the person belongs to. The move is
+ * right (they keep working) but silent on its own: the next page is simply
+ * another company's. The session turns the marker into one sentence that the
+ * dashboard frame and /onboard show until the person dismisses it; the
+ * dismissal is an update carrying `workspaceMoveAck: <at>`, which clears only
+ * the marker it names, so a second move that lands in between is never
+ * swallowed. The marker is not part of the tokenVersion proof and the ack
+ * never touches `revoked`: it can clear a notice and nothing else.
+ */
+type WorkspaceMove = NonNullable<import("next-auth/jwt").JWT["workspaceMove"]>;
+
+function workspaceMoveStamp(
+  fromName: string | null | undefined,
+  fromStatus: string | null | undefined,
+  toName: string | null | undefined,
+): WorkspaceMove | undefined {
+  // A company that no longer exists (status unknown) reads as closed; a
+  // healthy status is no move worth explaining.
+  if (fromStatus && fromStatus !== "SUSPENDED" && fromStatus !== "CANCELLED") return undefined;
+  return {
+    from: fromName?.trim() || "Your previous workspace",
+    status: fromStatus === "SUSPENDED" ? "SUSPENDED" : "CANCELLED",
+    to: toName?.trim() || "another workspace",
+    at: Date.now(),
+  };
+}
+
+function workspaceMoveMessage(m: WorkspaceMove): string {
+  const state = m.status === "SUSPENDED" ? "is suspended" : "is closed";
+  const owner = m.from === "Your previous workspace" ? "its Owner" : `${m.from}'s Owner`;
+  return `${m.from} ${state}, so you are now in ${m.to}. Contact ${owner} or WorkwrK support.`;
+}
+
 const googleEnabled =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
@@ -163,6 +198,7 @@ const providers = [
       // only person who could undo the deletion would otherwise be the one
       // person who can't sign in.
       let org = user.organization;
+      let workspaceMove: WorkspaceMove | undefined;
       if (org.status === "CANCELLED" || org.status === "SUSPENDED") {
         const alt = await prisma.organizationMembership.findFirst({
           where: { userId: user.id, organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } } },
@@ -171,6 +207,8 @@ const providers = [
         });
         if (alt) {
           await prisma.user.update({ where: { id: user.id }, data: { organizationId: alt.organizationId } });
+          // Say why they land in another company (see WorkspaceMove).
+          workspaceMove = workspaceMoveStamp(org.name, org.status, alt.organization.name);
           org = alt.organization; // sign in under the healthy workspace
         }
       }
@@ -217,6 +255,7 @@ const providers = [
         organizationName: org.name,
         avatar: user.avatar,
         tokenVersion: user.tokenVersion,
+        workspaceMove,
       };
     },
   }),
@@ -340,6 +379,16 @@ export const authOptions: NextAuthOptions = {
         token.lastName = u.lastName;
         token.avatar = u.avatar;
         token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
+        const move = (user as unknown as { workspaceMove?: WorkspaceMove }).workspaceMove;
+        if (move) token.workspaceMove = move;
+      }
+
+      // Dismissing the workspace-move notice. It clears only the marker the
+      // ack names (a newer move stays), and it is deliberately separate from
+      // the refresh below: it never reads or writes tokenVersion or revoked.
+      if (trigger === "update" && token.workspaceMove) {
+        const ack = (session as { workspaceMoveAck?: unknown } | null | undefined)?.workspaceMoveAck;
+        if (typeof ack === "number" && ack === token.workspaceMove.at) delete token.workspaceMove;
       }
 
       // Google flow: first-time sign-in returns only minimal identity;
@@ -454,16 +503,24 @@ export const authOptions: NextAuthOptions = {
           const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
           const actingOrgId =
             typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
-          const actingStatus =
+          const acting =
             actingOrgId === account_.organizationId
-              ? account_.organization?.status
-              : (await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true } }))?.status;
+              ? account_.organization
+              : await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true, name: true } });
+          const actingStatus = acting?.status;
+          // The name the person knew the company by: the fresh one, else the
+          // one this token was issued with.
+          const actingName = acting?.name ?? (typeof token.organizationName === "string" ? token.organizationName : null);
           if (unhealthy(actingStatus)) {
             if (actingOrgId !== account_.organizationId && !unhealthy(account_.organization?.status)) {
               // Acting in a stale workspace while the anchored one is healthy:
               // come back to the anchored one; the database already says so.
+              // This is also where a move made by a request that could not
+              // write its cookie lands on the next check, so it stamps too.
               token.organizationId = account_.organizationId;
               token.organizationName = account_.organization?.name;
+              const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
+              if (move) token.workspaceMove = move;
             } else {
               const alt = await prisma.organizationMembership.findFirst({
                 where: {
@@ -482,6 +539,8 @@ export const authOptions: NextAuthOptions = {
               if (alt && moved) {
                 token.organizationId = alt.organizationId;
                 token.organizationName = alt.organization.name;
+                const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
+                if (move) token.workspaceMove = move;
               } else {
                 // No healthy workspace, or the move did not save (the token
                 // and the database must agree on the workspace). Revoked
@@ -512,6 +571,11 @@ export const authOptions: NextAuthOptions = {
           lastName: token.lastName,
           avatar: token.avatar,
         } satisfies Partial<AuthIdentity>);
+      }
+      // Only the sentence and the marker's id reach the client; the ack
+      // sends the id back (see WorkspaceMove).
+      if (token.workspaceMove) {
+        session.workspaceMove = { at: token.workspaceMove.at, message: workspaceMoveMessage(token.workspaceMove) };
       }
       return session;
     },
